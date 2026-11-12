@@ -59,24 +59,18 @@ describe("copyCardForMotion", () => {
     expect(card.style.opacity).toBe("0.5");
   });
 
-  it("keeps the colours of an Inbox row's wait and sentence, and the first column its place gave it", () => {
-    const place = document.createElement("div");
-    place.className = "inbox-place";
-    place.style.setProperty("--row-lead", "18px");
+  it("keeps the colours of a row's wait and sentence", () => {
     const row = document.createElement("div");
-    row.className = "inbox-row";
     const wait = document.createElement("span");
     wait.dataset["level"] = "over";
     const sentence = document.createElement("span");
     sentence.dataset["tone"] = "bad";
     row.append(wait, sentence);
-    place.append(row);
-    document.body.append(place);
+    document.body.append(row);
 
     const copy = copyCardForMotion(row);
 
     expect(copy.querySelector<HTMLElement>("[data-level]")?.dataset["level"]).toBe("over");
     expect(copy.querySelector<HTMLElement>("[data-tone]")?.dataset["tone"]).toBe("bad");
-    expect(copy.style.getPropertyValue("--row-lead")).toBe("18px");
   });
 });

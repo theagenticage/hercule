@@ -134,7 +134,7 @@ const useArming = (): boolean => {
 };
 
 /**
- * Renders the move rows of a card: `hand` (the Hand to rows, or nothing), then Take it and Dismiss, or the
+ * Renders the move rows of a card: `hand` (the Hand to rows, or nothing), then Take on and Dismiss, or the
  * move to its Task, or why there are none.
  * The rows carry `data-arming` and take no pointer while the sheet is new (`useArming`).
  */
@@ -186,7 +186,7 @@ function OpenCardMoves({
           <span className="open-card-you" aria-hidden="true">
             {userMonogram}
           </span>
-          Take it
+          Take on
         </span>
         <span className="open-card-says">You do it. No agent runs.</span>
         <kbd>T</kbd>

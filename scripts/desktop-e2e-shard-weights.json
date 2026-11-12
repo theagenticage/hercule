@@ -17,7 +17,6 @@
   "e2e/desktop/fleet.test.ts": 29.9,
   "e2e/desktop/fonts.test.ts": 2.8,
   "e2e/desktop/hue-style.test.ts": 2.3,
-  "e2e/desktop/inbox.test.ts": 54,
   "e2e/desktop/intake-moves.test.ts": 14.1,
   "e2e/desktop/intake-notification.test.ts": 18,
   "e2e/desktop/intake.test.ts": 42.7,

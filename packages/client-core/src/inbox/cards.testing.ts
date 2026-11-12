@@ -1,9 +1,6 @@
 /** Test cards for the Inbox, in the invented Northwind Market world. */
 import type {
   Connection,
-  EntityHint,
-  EntityLink,
-  EntityPeer,
   EntityPlace,
   EntitySignalLine,
   Inbox,
@@ -87,52 +84,6 @@ export const buildInboxPlace = (
 });
 
 /**
- * Returns a link between two refs under the claim given: a `source` claim of
- * the invented `acme` plugin, or a `person` claim of the user.
- */
-export const buildInboxLink = (
-  fromRef: string,
-  toRef: string,
-  type: EntityLink["claim"]["type"] = "source",
-  hasPersonClaim: boolean = type === "person",
-): EntityLink => ({
-  fromRef,
-  toRef,
-  hasPersonClaim,
-  claim: type === "source" ? { type, plugin: "acme" } : { type, actor: "user" },
-});
-
-/** Returns a hint: `fromRef` mentions `toRef` in its description. */
-export const buildInboxHint = (fromRef: string, toRef: string): EntityHint => ({
-  fromRef,
-  toRef,
-  evidenceKey: "description",
-});
-
-/**
- * Returns a peer: a linked record with no card of its own, named by an
- * identifier made from its ref. `overrides` change any field, and
- * `withoutIdentifier` leaves the identifier out, as a source that has none does.
- */
-export const buildInboxPeer = (
-  ref: string,
-  overrides: Partial<EntityPeer> = {},
-  withoutIdentifier = false,
-): EntityPeer => {
-  const { identifier, ...rest } = {
-    ref,
-    kind: "acme/ticket",
-    noun: "Ticket",
-    identifier: ref.slice(ref.lastIndexOf(":") + 1).toUpperCase(),
-    title: `Peer ${ref}`,
-    yours: false,
-    restricted: false,
-    ...overrides,
-  };
-  return withoutIdentifier || identifier === undefined ? rest : { ...rest, identifier };
-};
-
-/**
  * Returns a signal line landed at `createdAt`, whose sentence is `say`. The
  * kind is the invented `acme/review-requested`. `overrides` change any field.
  */
@@ -185,10 +136,6 @@ export const buildInbox = (
   truncated: false,
   ...context,
 });
-
-/** Returns the ids of these cards, for a short comparison. */
-export const listCardIds = (cards: readonly { readonly card: InboxCard }[]): readonly string[] =>
-  cards.map((row) => row.card.id);
 
 /**
  * Returns a plugin that declares the given kinds of card, such as

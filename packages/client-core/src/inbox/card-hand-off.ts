@@ -5,9 +5,7 @@
  *
  * The colleague who has a card is a fact the controller reports on the card
  * (`InboxCard.liveWorkflows`), so a card drawn after leaving the Inbox and
- * coming back still shows who has it. A hand-off the user has just made
- * shows at once as an `InboxEdit` (see `card-moves.ts`) that puts the workflow
- * into that list before the controller answers.
+ * coming back still shows who has it.
  */
 import type {
   ActingConnection,

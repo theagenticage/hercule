@@ -60,8 +60,6 @@ const PATHS = [
   join(SCREENS, "inbox"),
   join(HERE, "inbox.tsx"),
   join(HERE, "-inbox-screen.tsx"),
-  join(HERE, "-inbox-read.ts"),
-  join(HERE, "-inbox-moves.ts"),
   join(HERE, "work.tsx"),
   join(HERE, "-work-screen.tsx"),
   join(HERE, "-work-board.ts"),
