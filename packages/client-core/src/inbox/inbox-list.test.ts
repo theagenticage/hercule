@@ -15,8 +15,9 @@ import {
 interface Row {
   readonly ref: string;
   readonly title: string;
+  readonly arrival: number;
 }
-const row = (ref: string, title = ref): Row => ({ ref, title });
+const row = (ref: string, title = ref, arrival = 0): Row => ({ ref, title, arrival });
 const rows = (...refs: string[]) => refs.map((ref) => row(ref));
 const refsOf = (state: InboxListState<Row>) => state.rows.map((r) => r.ref);
 const start = (...refs: string[]) => startInboxList("list-1", rows(...refs));
@@ -36,6 +37,22 @@ const refresh = (state: InboxListState<Row>, firstPage: Row[], found: Row[] = []
 const leaves = { leavesList: true };
 const stays = { leavesList: false };
 
+describe("undo of a revived row", () => {
+  it("promotes a handled row that came back behind N new, and makes it current", () => {
+    let state = start("a", "b", "c");
+    state = applyInboxMove(state, ["a"], leaves);
+    // The refresh confirms the server dropped a.
+    state = refresh(state, rows("b", "c"));
+    // A new ask revives a: it waits behind "N new".
+    state = refresh(state, rows("a", "b", "c"));
+    expect(state.arrivals.map((r) => r.ref)).toEqual(["a"]);
+    const undone = undoInboxMove(state, ["a"]);
+    expect(refsOf(undone)).toEqual(["a", "b", "c"]);
+    expect(undone.arrivals).toEqual([]);
+    expect(undone.current).toBe("a");
+  });
+});
+
 describe("refresh", () => {
   it("appends a thing that slid in from the next page quietly, but counts one ranking above held rows", () => {
     const refs = Array.from({ length: 300 }, (_, i) => `t${i}`);
@@ -47,6 +64,27 @@ describe("refresh", () => {
     expect(refsOf(afterE)).toHaveLength(200);
     const withNew = refresh(afterE, rows("fresh", ...refs.slice(1, 201)), [], true);
     expect(withNew.arrivals.map((r) => r.ref)).toEqual(["fresh"]);
+  });
+
+  it("counts a genuine arrival that ranks after every held row, by its arrival number", () => {
+    // 199 held asks; two new asks arrive, so the first new one is row 200 of the new first page.
+    const old = Array.from({ length: 199 }, (_, i) => row(`o${i}`, `o${i}`, i + 1));
+    const state = startInboxList("list-1", old, "cursor");
+    const fresh = [row("n1", "n1", 500), row("n2", "n2", 501)];
+    const next = refresh(state, [...old, ...fresh], [], true);
+    expect(next.arrivals.map((r) => r.ref)).toEqual(["n1", "n2"]);
+    expect(refsOf(next)).toHaveLength(199);
+  });
+
+  it("appends a slid-in row quietly only while its arrival is within the watermark", () => {
+    const held = [row("a", "a", 5), row("b", "b", 9)];
+    const state = startInboxList("list-1", held, "cursor");
+    const quiet = refresh(state, [...held, row("c", "c", 7)], [], true);
+    expect(refsOf(quiet)).toEqual(["a", "b", "c"]);
+    const shown = showInboxArrivals(refresh(state, [...held, row("d", "d", 10)], [], true));
+    expect(refsOf(shown)).toEqual(["a", "b", "d"]);
+    // After Show the watermark has moved up: a later row with arrival 10 is quiet.
+    expect(refsOf(refresh(shown, [...shown.rows, row("e", "e", 10)], [], true))).toContain("e");
   });
 
   it("counts a thing ranking last as an arrival when no next page exists", () => {

@@ -7,6 +7,13 @@ import { inboxOutlineQuery, inboxValuesQuery, pluginsQuery } from "../../../app/
 import { useQuietValue } from "../../../app/use-quiet-value";
 import { InboxSearchField, type InboxSearchHandle } from "../../../screens/inbox/inbox-search";
 
+/** The source, and the account when there is one, that the clause being typed is tied to, for the field `key`. */
+export interface SearchTie {
+  readonly key: string;
+  readonly source: string;
+  readonly connectionId?: string;
+}
+
 /** How long typing stops before the field asks for the values of the clause being typed, in milliseconds. */
 const QUIET_MS = 150;
 
@@ -25,6 +32,7 @@ export function InboxSearchPart({
   scopeTitle,
   isScopeEverything,
   search,
+  tie,
   resultsText,
   onChange,
   onWiden,
@@ -37,6 +45,8 @@ export function InboxSearchPart({
   readonly scopeTitle: string;
   readonly isScopeEverything: boolean;
   readonly search: InboxSearch;
+  /** Set when the clause being typed belongs to one source and account. Null otherwise. */
+  readonly tie: SearchTie | null;
   readonly resultsText: string;
   readonly onChange: (search: InboxSearch) => void;
   readonly onWiden: () => void;
@@ -53,7 +63,22 @@ export function InboxSearchPart({
   // Once no clause is being typed, an older ask is not read any more.
   const ask = typing === null ? null : asked;
   const values = useQuery(
-    inboxValuesQuery(client, ask === null ? undefined : { list, key: ask.key, prefix: ask.typed }),
+    inboxValuesQuery(
+      client,
+      ask === null
+        ? undefined
+        : {
+            list,
+            key: ask.key,
+            prefix: ask.typed,
+            ...(tie?.key === ask.key
+              ? {
+                  source: tie.source,
+                  ...(tie.connectionId === undefined ? {} : { connectionId: tie.connectionId }),
+                }
+              : {}),
+          },
+    ),
   );
   const suggested: InboxSearchContext["suggestedValues"] =
     ask === null || values.data === undefined
@@ -66,7 +91,18 @@ export function InboxSearchPart({
     <InboxSearchField
       ref={ref}
       search={search}
-      context={{ fields: outline.fields, suggestedValues: suggested }}
+      context={{
+        fields: outline.fields,
+        suggestedValues: suggested,
+        ...(tie === null
+          ? {}
+          : {
+              tie: {
+                source: tie.source,
+                ...(tie.connectionId === undefined ? {} : { connectionId: tie.connectionId }),
+              },
+            }),
+      }}
       scopeTitle={scopeTitle}
       scopeIsEverything={isScopeEverything}
       plugins={plugins}

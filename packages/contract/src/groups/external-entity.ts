@@ -674,6 +674,12 @@ export type InboxAsk = Schema.Schema.Type<typeof InboxAsk>;
  * - `openKinds` are the distinct kinds of every open signal, snoozed ones
  *   included: what a hand-off ends is read from it.
  * - `dismissedAt` is set only when the thing came back after a dismissal.
+ * - `arrival` is the thing's place in the controller's arrival sequence: the
+ *   number it took when it last arrived on the Inbox (new, back after a
+ *   dismissal, or began to ask). It is opaque and only ordered: a larger number
+ *   arrived later. 0 when the thing never arrived. A client that holds a list
+ *   uses it to tell a genuine arrival from a row that only slid into the first
+ *   page because another row left.
  * - `accounts` are the Connections that observe the thing.
  */
 export const InboxThing = Schema.Struct({
@@ -703,6 +709,7 @@ export const InboxThing = Schema.Struct({
   takenOn: Schema.Boolean,
   liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
   dismissedAt: Schema.optionalKey(Timestamp),
+  arrival: Schema.Int,
   /**
    * The key of this thing's offers in `InboxPage.offerSets`. Things that share
    * a kind, a target repository and an acting-account state share one set.

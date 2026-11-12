@@ -983,6 +983,30 @@ describe("suggested values", () => {
     ]);
   });
 
+  it("also suggests the known records of a facet that nothing of yours holds, with count 0", async () => {
+    const run2 = (extra: object, prefix: string) =>
+      run(({ repository }) =>
+        Effect.gen(function* () {
+          yield* seed;
+          yield* insertTeam("acme:team:pay", "Payments");
+          return (yield* repository.suggestInboxValues(environment(9), {
+            list: everything,
+            key: "team",
+            prefix,
+            ...extra,
+          })).values;
+        }),
+      );
+    expect((await run2({}, "pay")).map((value) => [value.label, value.count])).toEqual([
+      ["Payments", 0],
+    ]);
+    expect((await run2({ connectionId: ACCOUNT_A }, "pay")).map((value) => value.label)).toEqual([
+      "Payments",
+    ]);
+    // Account B does not observe the record, so it cannot offer it.
+    expect(await run2({ connectionId: ACCOUNT_B }, "pay")).toEqual([]);
+  });
+
   it("suggests enum values by their label, and the core keys", async () => {
     expect((await suggest("priority", "urg")).map((value) => [value.value, value.label])).toEqual([
       ["p1", "Urgent"],
@@ -1027,7 +1051,11 @@ describe("suggested values", () => {
         };
       }),
     );
-    expect(scoped.waiting.map((value) => value.value)).toEqual([SEARCH]);
+    // The thing that waits holds Search; Checkout is a known record that nothing in the scope holds.
+    expect(scoped.waiting.map((value) => [value.value, value.count])).toEqual([
+      [SEARCH, 1],
+      [CHECKOUT, 0],
+    ]);
     expect(scoped.many).toHaveLength(8);
     expect(scoped.other).toEqual([]);
   });
