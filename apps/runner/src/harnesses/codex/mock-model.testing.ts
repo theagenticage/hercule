@@ -1,5 +1,18 @@
-/** Runs a local Responses API fixture while Codex owns threads, tools and approvals. */
-export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
+/**
+ * Runs a local Responses API fixture while Codex owns threads, tools and approvals.
+ *
+ * - `stopScenario` grows the tree the Stop tests need and holds the root's
+ *   later calls open.
+ * - `onWaitingChange` is called each time `waitingChildren` changes, so a test
+ *   can wait for a held call without polling.
+ */
+export const startMockModel = (
+  version: "v1" | "v2",
+  {
+    stopScenario = false,
+    onWaitingChange = () => {},
+  }: { readonly stopScenario?: boolean; readonly onWaitingChange?: () => void } = {},
+) => {
   const calls = new Map<string, number>();
   const children = new Set<string>();
   const waitingChildren = new Set<string>();
@@ -126,6 +139,7 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
         (stopScenario && !child && call > (version === "v1" ? 3 : 2))
       ) {
         waitingChildren.add(threadId);
+        onWaitingChange();
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
@@ -135,6 +149,7 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
             },
             cancel() {
               waitingChildren.delete(threadId);
+              onWaitingChange();
             },
           }),
           { headers: { "content-type": "text/event-stream" } },
@@ -152,6 +167,7 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
     scheduleFollowup: (childId: string, holdResponse: boolean) => {
       heldChildId = holdResponse ? childId : undefined;
       waitingChildren.clear();
+      onWaitingChange();
       const callId = `followup-${sequence}`;
       followupSteps =
         version === "v2"

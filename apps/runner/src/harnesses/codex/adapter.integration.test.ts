@@ -47,7 +47,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, onTestFailed, onTestFinished } from "vitest";
 import { Duration, Effect, Fiber, Stream } from "effect";
 import {
   computeSubagentAfter,
@@ -446,10 +446,9 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     mkdirSync(join(home, "codex"));
     writeFileSync(join(home, "codex", "config.toml"), model.config);
     const { adapter, listSkills } = makeSkillListingAdapter();
-    const seen: Array<HarnessEvent> = [];
-    const subscriber = Effect.runFork(
-      Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-    );
+    const watch = createFixtureWatch();
+    watch.record(adapter.events);
+    const { seen } = watch;
     const ctx = buildContext(home);
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff0a";
     try {
@@ -475,16 +474,15 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
       expect(names).not.toContain("user-only");
 
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-      await waitForFixture(seen, "the command's turn", () =>
+      await watch.until("the command's turn", () =>
         seen.some((event) => event._tag === "turn.completed"),
       );
       expect(readFileSync(join(ctx.cwd!, "seen.txt"), "utf8")).toBe(`${userHome}\nReal User\n`);
     } finally {
       await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-      await Effect.runPromise(Fiber.interrupt(subscriber));
       await model.stop();
     }
-  }, 45_000);
+  });
 });
 
 /**
@@ -521,10 +519,9 @@ describe.skipIf(binary === undefined)(
       mkdirSync(join(home, "codex"));
       writeFileSync(join(home, "codex", "config.toml"), model.config);
       const { adapter, listSkills } = makeSkillListingAdapter();
-      const seen: Array<HarnessEvent> = [];
-      const subscriber = Effect.runFork(
-        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-      );
+      const watch = createFixtureWatch();
+      watch.record(adapter.events);
+      const { seen } = watch;
       const ctx = buildContext(home);
       const sessionId = "0199e0e7-0000-7000-8000-00000000ff0d";
       try {
@@ -549,17 +546,16 @@ describe.skipIf(binary === undefined)(
         expect(names, "none of the user's skills").not.toContain("user-skill");
 
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-        await waitForFixture(seen, "the command's turn", () =>
+        await watch.until("the command's turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
         expect(listWarnings(seen)).toEqual([]);
       } finally {
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Effect.runPromise(Fiber.interrupt(subscriber));
         await model.stop();
       }
-    }, 45_000);
+    });
   },
 );
 
@@ -591,23 +587,12 @@ const SESSION_SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-/** Long enough for a cold app-server to start, connect and reply to one prompt. */
-const TURN_DEADLINE = Duration.seconds(120);
-
-const waitForEvent = async (
-  seen: ReadonlyArray<HarnessEvent>,
-  tag: HarnessEvent["_tag"],
-): Promise<void> => {
-  const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
-  while (!seen.some((event) => event._tag === tag)) {
-    if (Date.now() > deadline) {
-      throw new Error(
-        `no ${tag} within ${Duration.format(TURN_DEADLINE)}: saw ${describeEvents(seen)}`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-};
+/**
+ * How long a live turn may run before vitest stops its test. Long enough for
+ * a cold app-server to start, connect and reply to one prompt over the
+ * network. It is a hang limit, not a speed check.
+ */
+const LIVE_TURN_LIMIT = Duration.seconds(120);
 
 /**
  * Lists the warnings the runner itself adds, which is what these tests are
@@ -621,7 +606,7 @@ const listWarnings = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<HarnessE
 /**
  * Lists the tags of the events seen so far, with the text of each warning, the
  * subagent each event belongs to, and the state of each completed turn, so a
- * test that misses its deadline shows what Codex reported on the way.
+ * test that hangs shows what Codex reported on the way.
  */
 const describeEvents = (seen: ReadonlyArray<HarnessEvent>): string =>
   seen
@@ -629,37 +614,108 @@ const describeEvents = (seen: ReadonlyArray<HarnessEvent>): string =>
       if (event._tag === "runtime.warning") return `runtime.warning (${event.message})`;
       const subagent = "subagentId" in event ? ` ${event.subagentId ?? "root"}` : "";
       const state = event._tag === "turn.completed" ? ` ${event.state}` : "";
-      return `${event._tag}${subagent}${state}`;
+      const usage =
+        event._tag === "session.usage.updated"
+          ? ` ${(event.usage ?? event.usageReport.counts).inputTokens} input tokens`
+          : "";
+      return `${event._tag}${subagent}${state}${usage}`;
     })
     .join(", ");
 
 /**
- * Waits until `predicate` holds, checking every 20 ms. Fails after 20 seconds
- * with `name` and the events seen so far.
+ * Returns the token counts of the latest usage report for a subagent, or for
+ * the root when `subagentId` is undefined. Returns undefined before the first
+ * report. Codex sends a turn's usage in its own notification, which can arrive
+ * after the turn's completion, so a test waits for the counts it checks.
  */
-const waitForFixture = async (
-  seen: ReadonlyArray<HarnessEvent>,
-  name: string,
-  predicate: () => boolean,
-): Promise<void> => {
-  const deadline = Date.now() + 20_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${name} deadline: ${describeEvents(seen)}`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+const readLatestUsage = (seen: ReadonlyArray<HarnessEvent>, subagentId: string | undefined) => {
+  const report = seen
+    .filter(
+      (event): event is Extract<HarnessEvent, { _tag: "session.usage.updated" }> =>
+        event._tag === "session.usage.updated" && event.subagentId === subagentId,
+    )
+    .at(-1);
+  return report && (report.usage ?? report.usageReport.counts);
 };
 
+/** What a test reads from, and waits on, while it drives a real Codex. */
+interface FixtureWatch {
+  /** The events recorded so far, in the order the adapter emitted them. */
+  readonly seen: Array<HarnessEvent>;
+  /** Starts recording an adapter's events. A test records one stream at a time. */
+  readonly record: (events: Stream.Stream<HarnessEvent>) => void;
+  /** Stops recording, and returns once the recording has stopped. */
+  readonly stopRecording: () => Promise<void>;
+  /**
+   * Checks the pending waits again. A fixture whose state a wait reads, such
+   * as the mock model or a wrapped app-server, calls this after each change;
+   * a recorded event checks them on its own.
+   */
+  readonly changed: () => void;
+  /** Returns once `holds` returns true. `what` names the wait if the test fails. */
+  readonly until: (what: string, holds: () => boolean) => Promise<void>;
+}
+
 /**
- * Subscribes to the adapter's events and returns the list they are collected
- * into. Each session needs a new subscriber, because the stream never replays
- * past events.
+ * Creates the watch for the current test, which must call it from inside its
+ * body. A wait is checked when its condition can have changed: on each
+ * recorded event and on each `changed()` call. It never polls and has no
+ * deadline of its own, so a slow machine only makes a test slower. A hang is
+ * caught by the test's own timeout. The watch then logs what each pending wait
+ * was waiting for and every event seen, and fails the waits, so the test's
+ * `finally` starts to stop its session and its mock model. Vitest does not
+ * wait for that `finally`: after a hang, the next test can start while it
+ * still runs. The recording stops when the test finishes.
  */
-const collectEvents = (): Array<HarnessEvent> => {
+const createFixtureWatch = (): FixtureWatch => {
   const seen: Array<HarnessEvent> = [];
-  Effect.runFork(
-    Stream.runForEach(codex.events, (event) => Effect.sync(() => void seen.push(event))),
-  );
-  return seen;
+  const waits = new Set<{
+    readonly what: string;
+    readonly holds: () => boolean;
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+  }>();
+  let recording: Fiber.Fiber<void> | undefined;
+  const changed = () => {
+    for (const wait of waits) {
+      if (!wait.holds()) continue;
+      waits.delete(wait);
+      wait.resolve();
+    }
+  };
+  const stopRecording = async () => {
+    if (recording === undefined) return;
+    await Effect.runPromise(Fiber.interrupt(recording));
+    recording = undefined;
+  };
+  onTestFailed(() => {
+    for (const wait of waits) {
+      const error = new Error(`still waiting for ${wait.what}; saw ${describeEvents(seen)}`);
+      console.error(error.message);
+      wait.reject(error);
+    }
+    waits.clear();
+  });
+  onTestFinished(stopRecording);
+  return {
+    seen,
+    record: (events) => {
+      recording = Effect.runFork(
+        Stream.runForEach(events, (event) =>
+          Effect.sync(() => {
+            seen.push(event);
+            changed();
+          }),
+        ),
+      );
+    },
+    stopRecording,
+    changed,
+    until: (what, holds) =>
+      holds()
+        ? Promise.resolve()
+        : new Promise((resolve, reject) => void waits.add({ what, holds, resolve, reject })),
+  };
 };
 
 const STRUCTURED = "0199e0e7-0000-7000-8000-00000000ff05";
@@ -672,7 +728,9 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     outputSchema: OutputSchema,
     text: string,
   ): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
-    const seen = collectEvents();
+    const watch = createFixtureWatch();
+    watch.record(codex.events);
+    const { seen } = watch;
     await Effect.runPromise(
       codex.startSession(
         sessionId,
@@ -680,10 +738,17 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
         buildContext(createHomeWithLogin()),
       ),
     );
-    await Effect.runPromise(codex.sendInput(sessionId, { text }));
-    await waitForEvent(seen, "turn.completed");
-    await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
-    await waitForEvent(seen, "session.exited");
+    try {
+      await Effect.runPromise(codex.sendInput(sessionId, { text }));
+      await watch.until("the turn's end", () =>
+        seen.some((event) => event._tag === "turn.completed"),
+      );
+    } finally {
+      await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
+    }
+    await watch.until("the session's exit", () =>
+      seen.some((event) => event._tag === "session.exited"),
+    );
     return seen.find(
       (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",
@@ -701,7 +766,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
       const answer = completed.structuredResult as { outcome: "ok"; value: { verdict?: unknown } };
       expect(answer.value.verdict).toBe("accept");
     },
-    Duration.toMillis(TURN_DEADLINE) * 2,
+    Duration.toMillis(LIVE_TURN_LIMIT) * 2,
   );
 
   it(
@@ -716,7 +781,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
       expect(failure.reason).not.toBe("");
       expect(await Effect.runPromise(codex.listSessions)).toEqual([]);
     },
-    Duration.toMillis(TURN_DEADLINE) * 2,
+    Duration.toMillis(LIVE_TURN_LIMIT) * 2,
   );
 });
 
@@ -760,12 +825,9 @@ describe.skipIf(binary === undefined)(
             };
           },
         });
-        const seen: Array<HarnessEvent> = [];
-        const subscriber = Effect.runFork(
-          Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-        );
-        const waitUntil = (predicate: () => boolean) =>
-          waitForFixture(seen, "Codex fixture", predicate);
+        const watch = createFixtureWatch();
+        watch.record(adapter.events);
+        const { seen } = watch;
         const childCompletions = () =>
           seen.filter(
             (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
@@ -808,9 +870,12 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.sendInput(sessionId, { text: "Establish root history." }),
           );
-          await waitUntil(() => seen.some((event) => event._tag === "turn.completed"));
+          await watch.until("the first root turn", () =>
+            seen.some((event) => event._tag === "turn.completed"),
+          );
           await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
-          await waitUntil(
+          await watch.until(
+            "both approvals and the second root turn",
             () =>
               approvals().length === 2 &&
               seen.filter(
@@ -870,7 +935,7 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
           );
-          await waitUntil(() => childCompletions().length === 1);
+          await watch.until("the second child's turn", () => childCompletions().length === 1);
           expect(childCompletions()[0]!.subagentId).toBe(second!.subagentId);
           expect(
             seen.some(
@@ -881,7 +946,15 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, first!.request.requestId, "allow"),
           );
-          await waitUntil(() => childCompletions().length === 2);
+          await watch.until(
+            "the first child's turn and every thread's final usage",
+            () =>
+              childCompletions().length === 2 &&
+              [...model.children].every(
+                (childId) => readLatestUsage(seen, childId)?.inputTokens === 600,
+              ) &&
+              readLatestUsage(seen, undefined)?.inputTokens === (version === "v1" ? 2_500 : 2_400),
+          );
           const usage = seen.filter((event) => event._tag === "session.usage.updated");
           const children = usage.filter((event) => event.subagentId !== undefined);
           expect(new Set(children.map((event) => event.subagentId)).size).toBe(2);
@@ -901,11 +974,9 @@ describe.skipIf(binary === undefined)(
           });
         } finally {
           await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-          await Effect.runPromise(Fiber.interrupt(subscriber));
           await model.stop();
         }
       },
-      45_000,
     );
 
     it("runs each command when the gate cannot write its mark, and warns nobody", async () => {
@@ -916,10 +987,9 @@ describe.skipIf(binary === undefined)(
       mkdirSync(join(home, "codex"));
       writeFileSync(join(home, "codex", "config.toml"), model.config);
       const adapter = makeCodexAdapter({ run: runProcess, appServer: spawnAppServer });
-      const seen: Array<HarnessEvent> = [];
-      const subscriber = Effect.runFork(
-        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-      );
+      const watch = createFixtureWatch();
+      watch.record(adapter.events);
+      const { seen } = watch;
       const sessionId = "0199e0e7-0000-7000-8000-00000000ff77";
       try {
         await Effect.runPromise(
@@ -943,14 +1013,13 @@ describe.skipIf(binary === undefined)(
           ),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish root history." }));
-        await waitForFixture(seen, "first turn", () =>
+        await watch.until("first turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
         // Each child's command asks for approval only after the gate's hook
         // ran, so an approval shows that the hook let the command through.
-        await waitForFixture(
-          seen,
+        await watch.until(
           "children ask approval",
           () =>
             seen.filter(
@@ -963,10 +1032,9 @@ describe.skipIf(binary === undefined)(
         expect(listWarnings(seen)).toEqual([]);
       } finally {
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Effect.runPromise(Fiber.interrupt(subscriber));
         await model.stop();
       }
-    }, 45_000);
+    });
   },
 );
 
@@ -981,264 +1049,257 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
     ["v2", "selective"],
     ["v1", "discovering-subtree"],
     ["v2", "discovering-subtree"],
-  ] as const)(
-    "%s stops %s work while preserving unrelated work",
-    async (version, target) => {
-      const model = startMockModel(version, true);
-      const home = createScratchDir("native-stop");
-      mkdirSync(join(home, "codex"));
-      // V2 exposes delegation tools to subagents only for a V2 model preset.
-      // A small local catalog makes that capability explicit for the fixture.
-      const catalog = join(home, "codex", "model-catalog.json");
-      if (version === "v2")
-        writeFileSync(
-          catalog,
-          JSON.stringify({
-            models: [
-              {
-                slug: "gpt-5.4",
-                display_name: "Local fixture",
-                description: "Local model fixture",
-                supported_reasoning_levels: [],
-                shell_type: "unified_exec",
-                visibility: "list",
-                supported_in_api: true,
-                priority: 0,
-                support_verbosity: false,
-                truncation_policy: { mode: "tokens", limit: 10000 },
-                experimental_supported_tools: [],
-                base_instructions: "Complete the isolated fixture task.",
-                multi_agent_version: "v2",
-              },
-            ],
-          }),
-        );
+  ] as const)("%s stops %s work while preserving unrelated work", async (version, target) => {
+    const watch = createFixtureWatch();
+    const model = startMockModel(version, {
+      stopScenario: true,
+      onWaitingChange: watch.changed,
+    });
+    const home = createScratchDir("native-stop");
+    mkdirSync(join(home, "codex"));
+    // V2 exposes delegation tools to subagents only for a V2 model preset.
+    // A small local catalog makes that capability explicit for the fixture.
+    const catalog = join(home, "codex", "model-catalog.json");
+    if (version === "v2")
       writeFileSync(
-        join(home, "codex", "config.toml"),
-        `${version === "v2" ? `model_catalog_json = ${JSON.stringify(catalog)}\n` : ""}${model.config}`,
-      );
-      const delayed = createLines();
-      let heldMetadata: { line: string; id: string; parentId: string } | undefined;
-      // Codex can send the descendant's approval request before or after the
-      // answer to the read of its metadata, so both are recorded on their own.
-      const approvalThreadIds = new Set<string>();
-      const adapter = makeCodexAdapter({
-        appServer:
-          target !== "discovering-subtree"
-            ? spawnAppServer
-            : (command, env) => {
-                const child = spawnAppServer(command, env);
-                const reads = new Set<string | number>();
-                let rootId: string | undefined;
-                void (async () => {
-                  try {
-                    for await (const line of child.stdout) {
-                      const frame = JSON.parse(line) as {
-                        id?: string | number;
-                        method?: string;
-                        params?: { threadId?: string };
-                        result?: { thread?: { id: string; parentThreadId?: string | null } };
-                      };
-                      const thread = frame.result?.thread;
-                      rootId ??= thread?.id;
-                      if (
-                        frame.id !== undefined &&
-                        reads.has(frame.id) &&
-                        thread?.parentThreadId != null &&
-                        thread.parentThreadId !== rootId
-                      ) {
-                        heldMetadata = { line, id: thread.id, parentId: thread.parentThreadId };
-                        continue;
-                      }
-                      if (
-                        frame.method === "item/commandExecution/requestApproval" &&
-                        frame.params?.threadId !== undefined
-                      )
-                        approvalThreadIds.add(frame.params.threadId);
-                      delayed.push(line);
-                    }
-                  } finally {
-                    delayed.end();
-                  }
-                })();
-                return {
-                  ...child,
-                  stdout: delayed.iterable,
-                  write: (line) => {
-                    const frame = JSON.parse(line) as { id?: string | number; method?: string };
-                    if (frame.method === "thread/read" && frame.id !== undefined)
-                      reads.add(frame.id);
-                    child.write(line);
-                  },
-                };
-              },
-        run: runProcess,
-      });
-      const seen: Array<HarnessEvent> = [];
-      const subscriber = Effect.runFork(
-        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-      );
-      const sessionId = "0199e0e7-0000-7000-8000-00000000ff10";
-      const waitUntil = (predicate: () => boolean) =>
-        waitForFixture(seen, "Codex Stop fixture", predicate);
-      try {
-        await Effect.runPromise(
-          adapter.startSession(
-            sessionId,
-            { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+        catalog,
+        JSON.stringify({
+          models: [
             {
-              ...buildContext(home),
-              env: {
-                PATH: process.env["PATH"] ?? "",
-                HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
-              },
+              slug: "gpt-5.4",
+              display_name: "Local fixture",
+              description: "Local model fixture",
+              supported_reasoning_levels: [],
+              shell_type: "unified_exec",
+              visibility: "list",
+              supported_in_api: true,
+              priority: 0,
+              support_verbosity: false,
+              truncation_policy: { mode: "tokens", limit: 10000 },
+              experimental_supported_tools: [],
+              base_instructions: "Complete the isolated fixture task.",
+              multi_agent_version: "v2",
             },
+          ],
+        }),
+      );
+    writeFileSync(
+      join(home, "codex", "config.toml"),
+      `${version === "v2" ? `model_catalog_json = ${JSON.stringify(catalog)}\n` : ""}${model.config}`,
+    );
+    const delayed = createLines();
+    let heldMetadata: { line: string; id: string; parentId: string } | undefined;
+    // Codex can send the descendant's approval request before or after the
+    // answer to the read of its metadata, so both are recorded on their own.
+    const approvalThreadIds = new Set<string>();
+    const adapter = makeCodexAdapter({
+      appServer:
+        target !== "discovering-subtree"
+          ? spawnAppServer
+          : (command, env) => {
+              const child = spawnAppServer(command, env);
+              const reads = new Set<string | number>();
+              let rootId: string | undefined;
+              void (async () => {
+                try {
+                  for await (const line of child.stdout) {
+                    const frame = JSON.parse(line) as {
+                      id?: string | number;
+                      method?: string;
+                      params?: { threadId?: string };
+                      result?: { thread?: { id: string; parentThreadId?: string | null } };
+                    };
+                    const thread = frame.result?.thread;
+                    rootId ??= thread?.id;
+                    if (
+                      frame.id !== undefined &&
+                      reads.has(frame.id) &&
+                      thread?.parentThreadId != null &&
+                      thread.parentThreadId !== rootId
+                    ) {
+                      heldMetadata = { line, id: thread.id, parentId: thread.parentThreadId };
+                      watch.changed();
+                      continue;
+                    }
+                    if (
+                      frame.method === "item/commandExecution/requestApproval" &&
+                      frame.params?.threadId !== undefined
+                    ) {
+                      approvalThreadIds.add(frame.params.threadId);
+                      watch.changed();
+                    }
+                    delayed.push(line);
+                  }
+                } finally {
+                  delayed.end();
+                }
+              })();
+              return {
+                ...child,
+                stdout: delayed.iterable,
+                write: (line) => {
+                  const frame = JSON.parse(line) as { id?: string | number; method?: string };
+                  if (frame.method === "thread/read" && frame.id !== undefined) reads.add(frame.id);
+                  child.write(line);
+                },
+              };
+            },
+      run: runProcess,
+    });
+    watch.record(adapter.events);
+    const { seen } = watch;
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff10";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          {
+            ...buildContext(home),
+            env: {
+              PATH: process.env["PATH"] ?? "",
+              HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
+            },
+          },
+        ),
+      );
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
+      await watch.until("the first root turn", () =>
+        seen.some((event) => event._tag === "turn.completed" && event.subagentId === undefined),
+      );
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn the tree." }));
+      await watch.until(
+        "the tree's approvals and the held root call",
+        () =>
+          (target === "discovering-subtree"
+            ? heldMetadata !== undefined &&
+              approvalThreadIds.has(heldMetadata.id) &&
+              seen.filter((event) => event._tag === "request.opened").length === 2
+            : seen.filter((event) => event._tag === "request.opened").length === 3) &&
+          model.waitingChildren.size === 1,
+      );
+      const introduced = seen.filter((event) => event._tag === "subagent.started");
+      const descendant =
+        target === "discovering-subtree"
+          ? { subagentId: heldMetadata!.id, parentSubagentId: heldMetadata!.parentId }
+          : introduced.find((event) => event.parentSubagentId !== undefined)!;
+      expect(descendant).toBeDefined();
+      const branch = introduced.find((event) => event.subagentId === descendant.parentSubagentId)!;
+      const sibling = introduced.find(
+        (event) => event.parentSubagentId === undefined && event.subagentId !== branch.subagentId,
+      )!;
+      const subtree = target === "subtree" || target === "discovering-subtree";
+      const stoppedIds =
+        target === "whole"
+          ? introduced.map((event) => event.subagentId)
+          : subtree
+            ? [branch.subagentId, descendant.subagentId]
+            : [descendant.subagentId];
+      await Effect.runPromise(
+        adapter.interrupt(
+          sessionId,
+          target === "whole" ? undefined : subtree ? branch.subagentId : descendant.subagentId,
+        ),
+      );
+      if (target === "discovering-subtree") {
+        await watch.until("the branch's interrupted turn", () =>
+          seen.some(
+            (event) =>
+              event._tag === "turn.completed" &&
+              event.subagentId === branch.subagentId &&
+              event.state === "interrupted",
           ),
         );
-        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-        await waitUntil(() =>
-          seen.some((event) => event._tag === "turn.completed" && event.subagentId === undefined),
-        );
-        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn the tree." }));
-        await waitUntil(
-          () =>
-            (target === "discovering-subtree"
-              ? heldMetadata !== undefined &&
-                approvalThreadIds.has(heldMetadata.id) &&
-                seen.filter((event) => event._tag === "request.opened").length === 2
-              : seen.filter((event) => event._tag === "request.opened").length === 3) &&
-            model.waitingChildren.size === 1,
-        );
-        const introduced = seen.filter((event) => event._tag === "subagent.started");
-        const descendant =
-          target === "discovering-subtree"
-            ? { subagentId: heldMetadata!.id, parentSubagentId: heldMetadata!.parentId }
-            : introduced.find((event) => event.parentSubagentId !== undefined)!;
-        expect(descendant).toBeDefined();
-        const branch = introduced.find(
-          (event) => event.subagentId === descendant.parentSubagentId,
-        )!;
-        const sibling = introduced.find(
-          (event) => event.parentSubagentId === undefined && event.subagentId !== branch.subagentId,
-        )!;
-        const subtree = target === "subtree" || target === "discovering-subtree";
-        const stoppedIds =
-          target === "whole"
-            ? introduced.map((event) => event.subagentId)
-            : subtree
-              ? [branch.subagentId, descendant.subagentId]
-              : [descendant.subagentId];
-        await Effect.runPromise(
-          adapter.interrupt(
-            sessionId,
-            target === "whole" ? undefined : subtree ? branch.subagentId : descendant.subagentId,
+        expect(
+          seen.filter(
+            (event) =>
+              event._tag === "subagent.started" && event.subagentId === descendant.subagentId,
           ),
-        );
-        if (target === "discovering-subtree") {
-          await waitUntil(() =>
-            seen.some(
-              (event) =>
-                event._tag === "turn.completed" &&
-                event.subagentId === branch.subagentId &&
-                event.state === "interrupted",
-            ),
-          );
-          expect(
-            seen.filter(
-              (event) =>
-                event._tag === "subagent.started" && event.subagentId === descendant.subagentId,
-            ),
-          ).toEqual([]);
-          delayed.push(heldMetadata!.line);
-        }
-        await waitUntil(() =>
-          stoppedIds.every((id) =>
-            seen.some(
-              (event) =>
-                event._tag === "turn.completed" &&
-                event.subagentId === id &&
-                event.state === "interrupted",
-            ),
+        ).toEqual([]);
+        delayed.push(heldMetadata!.line);
+      }
+      await watch.until("the stopped subagents' interrupted turns", () =>
+        stoppedIds.every((id) =>
+          seen.some(
+            (event) =>
+              event._tag === "turn.completed" &&
+              event.subagentId === id &&
+              event.state === "interrupted",
           ),
-        );
-        for (const request of seen
+        ),
+      );
+      for (const request of seen
+        .filter((event) => event._tag === "request.opened")
+        .filter((event) => stoppedIds.includes(event.subagentId!))) {
+        expect(
+          seen.some(
+            (event) =>
+              event._tag === "request.resolved" &&
+              event.requestId === request.request.requestId &&
+              "decision" in event &&
+              event.decision === "cancel",
+          ),
+        ).toBe(true);
+      }
+      if (target === "discovering-subtree") {
+        const request = seen
           .filter((event) => event._tag === "request.opened")
-          .filter((event) => stoppedIds.includes(event.subagentId!))) {
-          expect(
-            seen.some(
-              (event) =>
-                event._tag === "request.resolved" &&
-                event.requestId === request.request.requestId &&
-                "decision" in event &&
-                event.decision === "cancel",
-            ),
-          ).toBe(true);
-        }
-        if (target === "discovering-subtree") {
-          const request = seen
-            .filter((event) => event._tag === "request.opened")
-            .find((event) => event.subagentId === descendant.subagentId)!;
-          expect(request).toBeDefined();
-          const completions = seen.filter(
+          .find((event) => event.subagentId === descendant.subagentId)!;
+        expect(request).toBeDefined();
+        const completions = seen.filter(
+          (event) => event._tag === "turn.completed" && event.subagentId === descendant.subagentId,
+        ).length;
+        await Effect.runPromise(
+          adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
+        );
+        expect(
+          seen.filter(
             (event) =>
               event._tag === "turn.completed" && event.subagentId === descendant.subagentId,
-          ).length;
-          await Effect.runPromise(
-            adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
-          );
-          expect(
-            seen.filter(
-              (event) =>
-                event._tag === "turn.completed" && event.subagentId === descendant.subagentId,
-            ),
-          ).toHaveLength(completions);
-        }
-        if (target === "whole") {
-          await waitUntil(() =>
-            seen.some(
-              (event) =>
-                event._tag === "turn.completed" &&
-                event.subagentId === undefined &&
-                event.state === "interrupted",
-            ),
-          );
-        } else {
-          expect(
-            seen.filter(
-              (event) => event._tag === "turn.completed" && event.subagentId === sibling.subagentId,
-            ),
-          ).toEqual([]);
-          expect(
-            seen.filter(
-              (event) => event._tag === "turn.completed" && event.subagentId === undefined,
-            ),
-          ).toHaveLength(1);
-          const request = seen.find(
-            (event) => event._tag === "request.opened" && event.subagentId === sibling.subagentId,
-          )!;
-          if (request._tag !== "request.opened")
-            throw new Error("the sibling did not ask for approval");
-          await Effect.runPromise(
-            adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
-          );
-          await waitUntil(() =>
-            seen.some(
-              (event) =>
-                event._tag === "turn.completed" &&
-                event.subagentId === sibling.subagentId &&
-                event.state === "completed",
-            ),
-          );
-        }
-        expect(await Effect.runPromise(adapter.listSessions)).toHaveLength(1);
-      } finally {
-        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Effect.runPromise(Fiber.interrupt(subscriber));
-        await model.stop();
+          ),
+        ).toHaveLength(completions);
       }
-    },
-    45_000,
-  );
+      if (target === "whole") {
+        await watch.until("the root's interrupted turn", () =>
+          seen.some(
+            (event) =>
+              event._tag === "turn.completed" &&
+              event.subagentId === undefined &&
+              event.state === "interrupted",
+          ),
+        );
+      } else {
+        expect(
+          seen.filter(
+            (event) => event._tag === "turn.completed" && event.subagentId === sibling.subagentId,
+          ),
+        ).toEqual([]);
+        expect(
+          seen.filter((event) => event._tag === "turn.completed" && event.subagentId === undefined),
+        ).toHaveLength(1);
+        const request = seen.find(
+          (event) => event._tag === "request.opened" && event.subagentId === sibling.subagentId,
+        )!;
+        if (request._tag !== "request.opened")
+          throw new Error("the sibling did not ask for approval");
+        await Effect.runPromise(
+          adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
+        );
+        await watch.until("the sibling's completed turn", () =>
+          seen.some(
+            (event) =>
+              event._tag === "turn.completed" &&
+              event.subagentId === sibling.subagentId &&
+              event.state === "completed",
+          ),
+        );
+      }
+      expect(await Effect.runPromise(adapter.listSessions)).toHaveLength(1);
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+      await model.stop();
+    }
+  });
 });
 
 /**
@@ -1259,10 +1320,9 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
       `model_catalog_json = ${JSON.stringify(catalog)}\n${model.config}`,
     );
     const adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
-    const seen: Array<HarnessEvent> = [];
-    const subscriber = Effect.runFork(
-      Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-    );
+    const watch = createFixtureWatch();
+    watch.record(adapter.events);
+    const { seen } = watch;
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff11";
     const completedTurns = () => seen.filter((event) => event._tag === "turn.completed").length;
     try {
@@ -1277,7 +1337,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
         ),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Ask me something." }));
-      await waitForFixture(seen, "the asking turn", () => completedTurns() === 1);
+      await watch.until("the asking turn", () => completedTurns() === 1);
 
       const opened = seen.filter((event) => event._tag === "request.opened");
       expect(opened).toHaveLength(1);
@@ -1316,7 +1376,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
           { model: "gpt-5.4", options: {} },
         ),
       );
-      await waitForFixture(seen, "the answering turn", () => completedTurns() === 2);
+      await watch.until("the answering turn", () => completedTurns() === 2);
 
       expect(seen.filter((event) => event._tag === "request.resolved")).toMatchObject([
         { requestId: request.requestId, answers: { Question: "Beta" } },
@@ -1344,10 +1404,9 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
       );
     } finally {
       await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-      await Effect.runPromise(Fiber.interrupt(subscriber));
       await model.stop();
     }
-  }, 45_000);
+  });
 });
 
 const NO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -1359,172 +1418,165 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     ["v2", true],
     ["v1", false],
     ["v2", false],
-  ] as const)(
-    "%s counts only new calls with saved report=%s",
-    async (version, saveReport) => {
-      const model = startMockModel(version);
-      const home = createScratchDir("usage-resume");
-      mkdirSync(join(home, "codex"));
-      writeFileSync(join(home, "codex", "config.toml"), model.config);
-      const context: HarnessRunnerContext = {
-        ...buildContext(home),
-        env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
-      };
-      const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
-      const spec: SessionSpec = {
-        ...SESSION_SPEC,
-        modelSelection: { model: "gpt-5.4", options: {} },
-      };
-      // `stopSession` returns as soon as it has signalled the app-server, not
-      // when the process is gone. Codex lets only one process write a thread,
-      // so resuming the thread while the old process is still ending fails
-      // with "already has an active writer". A real restart has no old
-      // process, so the test waits for each one to exit before it resumes.
-      const spawned: Array<AppServerChild> = [];
-      const spawnTracked: AppServerSpawn = (command, env) => {
-        const child = spawnAppServer(command, env);
-        spawned.push(child);
-        return child;
-      };
-      let adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
-      const seen: Array<HarnessEvent> = [];
-      const subscribe = () =>
-        Effect.runFork(
-          Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
-        );
-      let subscriber = subscribe();
-      const waitUntil = (predicate: () => boolean) =>
-        waitForFixture(seen, "Codex resume fixture", predicate);
-      const childCompletions = () =>
-        seen.filter(
-          (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
-            event._tag === "turn.completed" && event.subagentId !== undefined,
-        );
-      const rootCompletions = () =>
-        seen.filter((event) => event._tag === "turn.completed" && event.subagentId === undefined);
-      try {
-        const binding = await Effect.runPromise(adapter.startSession(sessionId, spec, context));
-        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-        await waitUntil(() => rootCompletions().length === 1);
-        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn children." }));
-        await waitUntil(() => seen.filter((event) => event._tag === "request.opened").length === 2);
-        for (const event of seen.filter((event) => event._tag === "request.opened")) {
-          await Effect.runPromise(
-            adapter.respondToApprovalRequest(sessionId, event.request.requestId, "allow"),
-          );
-        }
-        await waitUntil(() => childCompletions().length === 2 && rootCompletions().length === 2);
-        const carried = seen
-          .filter((event) => event._tag === "subagent.started")
-          .map((event) => {
-            const report = seen
-              .filter(
-                (usage) =>
-                  usage._tag === "session.usage.updated" && usage.subagentId === event.subagentId,
-              )
-              .at(-1);
-            expect(
-              report?._tag === "session.usage.updated" ? report.usage?.inputTokens : undefined,
-            ).toBe(600);
-            expect(report?.raw).toBeDefined();
-            return {
-              subagentId: event.subagentId,
-              ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
-              ...(saveReport ? { lastUsageReport: report!.raw! } : {}),
-            };
-          });
-        const childId = carried[0]!.subagentId;
-        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Promise.all(spawned.map((child) => child.exited));
-        await Effect.runPromise(Fiber.interrupt(subscriber));
-        seen.length = 0;
-        adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
-        subscriber = subscribe();
+  ] as const)("%s counts only new calls with saved report=%s", async (version, saveReport) => {
+    const watch = createFixtureWatch();
+    const model = startMockModel(version, { onWaitingChange: watch.changed });
+    const home = createScratchDir("usage-resume");
+    mkdirSync(join(home, "codex"));
+    writeFileSync(join(home, "codex", "config.toml"), model.config);
+    const context: HarnessRunnerContext = {
+      ...buildContext(home),
+      env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+    };
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
+    const spec: SessionSpec = {
+      ...SESSION_SPEC,
+      modelSelection: { model: "gpt-5.4", options: {} },
+    };
+    // `stopSession` returns as soon as it has signalled the app-server, not
+    // when the process is gone. Codex lets only one process write a thread,
+    // so resuming the thread while the old process is still ending fails
+    // with "already has an active writer". A real restart has no old
+    // process, so the test waits for each one to exit before it resumes.
+    const spawned: Array<AppServerChild> = [];
+    const spawnTracked: AppServerSpawn = (command, env) => {
+      const child = spawnAppServer(command, env);
+      spawned.push(child);
+      return child;
+    };
+    let adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
+    watch.record(adapter.events);
+    const { seen } = watch;
+    const childCompletions = () =>
+      seen.filter(
+        (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
+          event._tag === "turn.completed" && event.subagentId !== undefined,
+      );
+    const rootCompletions = () =>
+      seen.filter((event) => event._tag === "turn.completed" && event.subagentId === undefined);
+    try {
+      const binding = await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
+      await watch.until("the first root turn", () => rootCompletions().length === 1);
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn children." }));
+      await watch.until(
+        "both children's approvals",
+        () => seen.filter((event) => event._tag === "request.opened").length === 2,
+      );
+      for (const event of seen.filter((event) => event._tag === "request.opened")) {
         await Effect.runPromise(
-          adapter.startSession(
-            sessionId,
-            {
-              ...spec,
-              continue: {
-                nativeSessionId: binding.nativeSessionId,
-                mode: "resume",
-                subagents: carried,
-              },
-            },
-            context,
-          ),
+          adapter.respondToApprovalRequest(sessionId, event.request.requestId, "allow"),
         );
-        model.scheduleFollowup(childId, true);
-        await Effect.runPromise(
-          adapter.sendInput(sessionId, { text: "Continue the known child." }),
-        );
-        await waitUntil(() => model.waitingChildren.has(childId) && rootCompletions().length === 1);
-        await Effect.runPromise(adapter.interrupt(sessionId, childId));
-        /** The counts of the child's latest usage report, or undefined before the first one. */
-        const latestChildUsage = () => {
+      }
+      await watch.until(
+        "both children's and the second root turn, and each child's usage",
+        () =>
+          childCompletions().length === 2 &&
+          rootCompletions().length === 2 &&
+          seen
+            .filter((event) => event._tag === "subagent.started")
+            .every((event) => readLatestUsage(seen, event.subagentId)?.inputTokens === 600),
+      );
+      const carried = seen
+        .filter((event) => event._tag === "subagent.started")
+        .map((event) => {
           const report = seen
             .filter(
-              (event): event is Extract<HarnessEvent, { _tag: "session.usage.updated" }> =>
-                event._tag === "session.usage.updated" && event.subagentId === childId,
+              (usage) =>
+                usage._tag === "session.usage.updated" && usage.subagentId === event.subagentId,
             )
             .at(-1);
-          return report && (report.usage ?? report.usageReport.counts);
-        };
-        /** Returns the child's usage report for the native turn `turnId`, or undefined before one arrives. */
-        const findChildUsageReport = (turnId: string) =>
-          seen.find(
-            (event) =>
-              event._tag === "session.usage.updated" &&
-              event.subagentId === childId &&
-              (event.raw?.payload as { turnId?: string } | undefined)?.turnId === turnId,
-          );
-        await waitUntil(() => childCompletions().length === 1);
-        expect(childCompletions()[0]!.state).toBe("interrupted");
-        // Codex does not always report usage for a turn it interrupted: on a
-        // loaded machine the app-server sometimes sends no report at all, and
-        // no amount of waiting brings one. So this requires no report, only
-        // that a report, if one came, adds nothing: the child's earlier calls
-        // must not be counted again.
-        expect(latestChildUsage() ?? NO_USAGE).toEqual(NO_USAGE);
-        model.scheduleFollowup(childId, false);
-        await Effect.runPromise(
-          adapter.sendInput(sessionId, { text: "Continue the child to completion." }),
+          expect(
+            report?._tag === "session.usage.updated" ? report.usage?.inputTokens : undefined,
+          ).toBe(600);
+          expect(report?.raw).toBeDefined();
+          return {
+            subagentId: event.subagentId,
+            ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
+            ...(saveReport ? { lastUsageReport: report!.raw! } : {}),
+          };
+        });
+      const childId = carried[0]!.subagentId;
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+      await Promise.all(spawned.map((child) => child.exited));
+      await watch.stopRecording();
+      seen.length = 0;
+      adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
+      watch.record(adapter.events);
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          {
+            ...spec,
+            continue: {
+              nativeSessionId: binding.nativeSessionId,
+              mode: "resume",
+              subagents: carried,
+            },
+          },
+          context,
+        ),
+      );
+      model.scheduleFollowup(childId, true);
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Continue the known child." }));
+      await watch.until(
+        "the held child call and the root turn",
+        () => model.waitingChildren.has(childId) && rootCompletions().length === 1,
+      );
+      await Effect.runPromise(adapter.interrupt(sessionId, childId));
+      /** Returns the child's usage report for the native turn `turnId`, or undefined before one arrives. */
+      const findChildUsageReport = (turnId: string) =>
+        seen.find(
+          (event) =>
+            event._tag === "session.usage.updated" &&
+            event.subagentId === childId &&
+            (event.raw?.payload as { turnId?: string } | undefined)?.turnId === turnId,
         );
-        // Codex reports a turn's usage in its own notification, which may
-        // arrive after the turn's completion, so the test waits for both.
-        await waitUntil(
-          () =>
-            childCompletions().length === 2 &&
-            findChildUsageReport(childCompletions()[1]!.turnId) !== undefined,
-        );
-        // Without a saved report, the adapter learns a V1 child's earlier
-        // total only from a usage report sent after the restart: Codex
-        // replays none for a V1 child forked from a turn that had not ended.
-        // When Codex also sent no report for the interrupted turn, the
-        // completed turn's report is the first one, so it becomes the
-        // baseline and counts nothing rather than counting old calls again.
-        const baselineKnown =
-          saveReport ||
-          version === "v2" ||
-          findChildUsageReport(childCompletions()[0]!.turnId) !== undefined;
-        expect(latestChildUsage()).toEqual(
-          baselineKnown
-            ? { inputTokens: 300, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }
-            : NO_USAGE,
-        );
-        const introducedIds = seen
-          .filter((event) => event._tag === "subagent.started")
-          .map((event) => event.subagentId);
-        expect(introducedIds.every((id) => carried.some((known) => known.subagentId === id))).toBe(
-          true,
-        );
-        expect(new Set(introducedIds).size).toBe(introducedIds.length);
-      } finally {
-        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
-        await Effect.runPromise(Fiber.interrupt(subscriber));
-        await model.stop();
-      }
-    },
-    45_000,
-  );
+      await watch.until("the child's interrupted turn", () => childCompletions().length === 1);
+      expect(childCompletions()[0]!.state).toBe("interrupted");
+      // Codex does not always report usage for a turn it interrupted: on a
+      // loaded machine the app-server sometimes sends no report at all, and
+      // no amount of waiting brings one. So this requires no report, only
+      // that a report, if one came, adds nothing: the child's earlier calls
+      // must not be counted again.
+      expect(readLatestUsage(seen, childId) ?? NO_USAGE).toEqual(NO_USAGE);
+      model.scheduleFollowup(childId, false);
+      await Effect.runPromise(
+        adapter.sendInput(sessionId, { text: "Continue the child to completion." }),
+      );
+      // Codex reports a turn's usage in its own notification, which may
+      // arrive after the turn's completion, so the test waits for both.
+      await watch.until(
+        "the child's completed turn and its usage",
+        () =>
+          childCompletions().length === 2 &&
+          findChildUsageReport(childCompletions()[1]!.turnId) !== undefined,
+      );
+      // Without a saved report, the adapter learns a V1 child's earlier
+      // total only from a usage report sent after the restart: Codex
+      // replays none for a V1 child forked from a turn that had not ended.
+      // When Codex also sent no report for the interrupted turn, the
+      // completed turn's report is the first one, so it becomes the
+      // baseline and counts nothing rather than counting old calls again.
+      const baselineKnown =
+        saveReport ||
+        version === "v2" ||
+        findChildUsageReport(childCompletions()[0]!.turnId) !== undefined;
+      expect(readLatestUsage(seen, childId)).toEqual(
+        baselineKnown
+          ? { inputTokens: 300, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }
+          : NO_USAGE,
+      );
+      const introducedIds = seen
+        .filter((event) => event._tag === "subagent.started")
+        .map((event) => event.subagentId);
+      expect(introducedIds.every((id) => carried.some((known) => known.subagentId === id))).toBe(
+        true,
+      );
+      expect(new Set(introducedIds).size).toBe(introducedIds.length);
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+      await model.stop();
+    }
+  });
 });
