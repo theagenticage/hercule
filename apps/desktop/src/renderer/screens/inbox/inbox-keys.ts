@@ -5,9 +5,9 @@
  * screen's one key listener can stay a switch over the action.
  *
  * Single keys act only while the focus is in the list, the pane or the empty
- * state's heading, or on the page itself when nothing has the focus (WCAG
- * 2.1.4: speech input and a stray key never act on a row nobody is looking
- * at). `/` and `?` reach from anywhere outside a field, the digits from the
+ * state's heading, or on the page itself when nothing has the focus (the WCAG
+ * rule on single-key shortcuts: speech input and a stray key never act on a
+ * row nobody is looking at). `/` and `?` reach from anywhere outside a field, the digits from the
  * rail, and Esc brings the focus back to the list.
  */
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
