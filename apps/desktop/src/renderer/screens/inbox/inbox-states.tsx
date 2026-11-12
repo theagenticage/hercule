@@ -123,7 +123,14 @@ const SUNRISE_RAYS = Array.from({ length: 9 }, (_, index) => {
 /**
  * The sunrise, drawn from the drawing's own geometry: nine dashed rays fan
  * from a point on the horizon, and Hercule's head comes up over it. It is one
- * drawing at two sizes. Everything is `aria-hidden`; the words beside it say
+ * drawing at two sizes.
+ *
+ * It is not the `Sunrise` of `screens/desk/sunrise.tsx`, on purpose. That one
+ * fans 31 solid rays out of a ring around the head, with a gap before the
+ * face, and sizes the face from the width. This one has 9 dashed rays that
+ * start at the horizon's middle, a fixed 168 by 90 box and a 40px head.
+ * Those are two different pictures, and the signed-off drawing asks for this
+ * one in the Inbox. Everything is `aria-hidden`; the words beside it say
  * what it means.
  */
 function Sunrise(): JSX.Element {

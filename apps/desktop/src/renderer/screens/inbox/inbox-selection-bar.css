@@ -18,6 +18,8 @@
     inset 0 0 0 1px var(--rim),
     var(--shadow-3);
   white-space: nowrap;
+  /* `translate` is its own property, so the sink and the rise below (`transform`) leave it alone. */
+  translate: -50% 0;
   -webkit-app-region: no-drag;
   /* Out: it sinks and fades over --m-quick, and takes neither the pointer nor the focus (the
      component also makes it inert). */

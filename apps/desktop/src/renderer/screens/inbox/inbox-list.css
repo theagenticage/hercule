@@ -35,6 +35,7 @@
   display: inline-grid;
   place-items: center;
   margin-right: -2px;
+  color: oklch(var(--mark-l) 0 0);
 }
 .ib-head-account {
   color: var(--muted);
@@ -80,9 +81,22 @@
     inset 0 0 0 1px var(--glass-rim),
     var(--glass-shadow);
   color: var(--ink);
-  font-size: var(--t-12);
+  font-size: var(--t-13);
   white-space: nowrap;
   transition: background var(--m-quick);
+}
+.ib-narrow:hover {
+  background: var(--glass-fill-raised);
+}
+.ib-narrow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* While its menu is open the button keeps its glass and gains a ring, as every toolbar control does. */
+.ib-narrow[aria-expanded="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 26%, transparent),
+    var(--glass-shadow);
 }
 .ib-narrow b {
   font-weight: var(--w-medium);
@@ -306,6 +320,8 @@
 .ib-mark {
   display: grid;
   place-items: center;
+  /* A plugin that declares no colour draws at the theme's mark lightness, as the rail does. */
+  color: oklch(var(--mark-l) 0 0);
   transition: opacity var(--m-quick) var(--m-ease);
 }
 .ib-row-l1,

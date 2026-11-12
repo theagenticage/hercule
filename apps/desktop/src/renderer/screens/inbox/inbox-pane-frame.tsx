@@ -100,6 +100,8 @@ export function InboxPaneFrame({
   };
 
   const hasMenu = onOpenAtSource !== undefined || !isStacked;
+  // While the first read of the list is out, the pane holds only its still shapes and no head.
+  const hasHead = head !== null || isStacked;
 
   return (
     <>
@@ -112,74 +114,76 @@ export function InboxPaneFrame({
         inert={!isShown || (isStacked && !isOpen)}
         onKeyDown={closeOnEscape}
       >
-        <header className="ib-pane-head">
-          {isStacked && (
-            <button type="button" className="pill-btn ib-pane-back" onClick={onClose}>
-              <ChevronLeftIcon size={12} />
-              List
-            </button>
-          )}
-          <div className="ib-pane-from">{head}</div>
-          {hasMenu && (
-            <>
-              <button
-                {...menu.triggerProps}
-                type="button"
-                className="icon-btn ib-pane-more"
-                aria-label="More"
-                title="More"
-              >
-                <MoreIcon size={16} />
+        {hasHead && (
+          <header className="ib-pane-head">
+            {isStacked && (
+              <button type="button" className="pill-btn ib-pane-back" onClick={onClose}>
+                <ChevronLeftIcon size={12} />
+                List
               </button>
-              <ToolMenu menuProps={menu.menuProps} label="The pane" edge="button-end">
-                {onOpenAtSource !== undefined && (
-                  <MenuAction
-                    itemProps={menu.buildItemProps("open-at-source")}
-                    name="Open at its source"
-                    shortcut="O"
-                    onPick={() => {
-                      menu.close();
-                      onOpenAtSource();
-                    }}
-                  />
-                )}
-                {onOpenAtSource !== undefined && !isStacked && <MenuLine />}
-                {!isStacked && (
-                  <>
-                    <MenuHeading>Pane width</MenuHeading>
-                    {MENU_WIDTHS.map((choice) => {
-                      const isTooWide = choice.width > widestWidth;
-                      const isChosen = choice.width === width;
-                      const itemProps = menu.buildItemProps(`width-${String(choice.width)}`, {
-                        disabled: isTooWide,
-                        checked: isChosen,
-                      });
-                      return (
-                        <button
-                          key={choice.width}
-                          {...itemProps}
-                          type="button"
-                          className={joinClassNames("menu-pick", itemProps.className)}
-                          title={isTooWide ? "The window is too narrow for it" : undefined}
-                          onClick={() => {
-                            if (isTooWide) return;
-                            menu.close();
-                            drawWidth(choice.width);
-                            onWidthChange(choice.width);
-                          }}
-                        >
-                          <span>{choice.name}</span>
-                          <small>{choice.width}px</small>
-                          {isChosen && <CheckIcon size={14} />}
-                        </button>
-                      );
-                    })}
-                  </>
-                )}
-              </ToolMenu>
-            </>
-          )}
-        </header>
+            )}
+            <div className="ib-pane-from">{head}</div>
+            {hasMenu && (
+              <>
+                <button
+                  {...menu.triggerProps}
+                  type="button"
+                  className="icon-btn ib-pane-more"
+                  aria-label="More"
+                  title="More"
+                >
+                  <MoreIcon size={16} />
+                </button>
+                <ToolMenu menuProps={menu.menuProps} label="The pane" edge="button-end">
+                  {onOpenAtSource !== undefined && (
+                    <MenuAction
+                      itemProps={menu.buildItemProps("open-at-source")}
+                      name="Open at its source"
+                      shortcut="O"
+                      onPick={() => {
+                        menu.close();
+                        onOpenAtSource();
+                      }}
+                    />
+                  )}
+                  {onOpenAtSource !== undefined && !isStacked && <MenuLine />}
+                  {!isStacked && (
+                    <>
+                      <MenuHeading>Pane width</MenuHeading>
+                      {MENU_WIDTHS.map((choice) => {
+                        const isTooWide = choice.width > widestWidth;
+                        const isChosen = choice.width === width;
+                        const itemProps = menu.buildItemProps(`width-${String(choice.width)}`, {
+                          disabled: isTooWide,
+                          checked: isChosen,
+                        });
+                        return (
+                          <button
+                            key={choice.width}
+                            {...itemProps}
+                            type="button"
+                            className={joinClassNames("menu-pick", itemProps.className)}
+                            title={isTooWide ? "The window is too narrow for it" : undefined}
+                            onClick={() => {
+                              if (isTooWide) return;
+                              menu.close();
+                              drawWidth(choice.width);
+                              onWidthChange(choice.width);
+                            }}
+                          >
+                            <span>{choice.name}</span>
+                            <small>{choice.width}px</small>
+                            {isChosen && <CheckIcon size={14} />}
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
+                </ToolMenu>
+              </>
+            )}
+          </header>
+        )}
         <div className="ib-pane-body">{children}</div>
       </aside>
     </>

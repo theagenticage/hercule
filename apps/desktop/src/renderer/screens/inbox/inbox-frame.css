@@ -154,6 +154,8 @@
   max-width: 220px;
 }
 .ib.is-rail-folded .ib-bar > .tool b {
+  /* The scope's name is plain text in the drawing; the tool's medium weight is for a verb. */
+  font-weight: var(--w-regular);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -174,11 +176,17 @@
   inset: auto;
   width: 260px;
   max-height: calc(100vh - 80px);
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   padding: 8px 6px 12px;
   overflow-y: auto;
   position-area: block-end span-inline-end;
   background: var(--glass-fill-raised);
+}
+/* The rail's own padding, edge and scrolling belong to the column; the popover supplies them. */
+.pop.ib-scope-menu .ib-rail {
+  padding: 0;
+  overflow: visible;
+  border-right: 0;
 }
 
 /* ---- Under 1032px of window (760px of room): the pane lies over the list ---- */
