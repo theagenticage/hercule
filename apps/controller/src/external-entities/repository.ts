@@ -1663,7 +1663,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the things on the Inbox that have no live Task, for the sheet
-     * that lists suggestions: the eligible entities of `ELIGIBLE_ENTITIES_SQL`
+     * that lists suggestions: the eligible entities of `buildEligibleEntities`
      * that no live Task links. Oldest first by
      * `(firstObservedAt, id)`, at most `limit`. When `contextRef` is given,
      * only the things below it are considered, at any depth of current

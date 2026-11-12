@@ -415,12 +415,35 @@ describe("the order and the pages of a list", () => {
     expect(result.newestSecond.things).toHaveLength(5);
     expect(result.newestSecond.nextCursor).toBeUndefined();
     expect(result.newestSecond.facets).toBeUndefined();
+    expect(result.newestSecond.total).toBeUndefined();
     const all = [...result.newestFirst.things, ...result.newestSecond.things].map((t) => t.ref);
     expect(new Set(all).size).toBe(205);
     for (const exit of [result.wrong, result.garbage, result.both]) {
       expect(exit._tag).toBe("Failure");
     }
     expect(JSON.stringify(result.wrong)).toContain("does not belong");
+  });
+
+  it("reads a refs request for those things only, in the list's order, with no total", async () => {
+    const result = await run(({ repository }) =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", updated: 10 });
+        const b = yield* insertTicket({ key: "b", updated: 30 });
+        yield* insertTicket({ key: "c", updated: 20 });
+        yield* raise(a, REVIEW, 2);
+        const refs = yield* list(repository, 5, { refs: [a, b, "acme:ticket:missing"] });
+        const first = yield* list(repository, 5);
+        return { refs, first };
+      }),
+    );
+    expect(result.refs.things.map((thing) => thing.ref)).toEqual([
+      "acme:ticket:b",
+      "acme:ticket:a",
+    ]);
+    expect(result.refs.things[1]!.askCount).toBe(1);
+    expect(result.refs.total).toBeUndefined();
+    expect(result.refs.facets).toBeUndefined();
+    expect(result.first.total).toBe(3);
   });
 
   it("pages the waiting order across the two groups", async () => {
