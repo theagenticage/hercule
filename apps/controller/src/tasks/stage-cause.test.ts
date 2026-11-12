@@ -1,7 +1,7 @@
 /** Tests the words of a stage cause: one row for each lifecycle change and each fallback. */
 import { describe, expect, it } from "vitest";
-import { MAX_STAGE_CAUSE_TEXT, type EntityLifecycle } from "@hercule/contract";
-import { describeStageCause, type StageCauseThing } from "./stage-cause";
+import { MAX_STAGE_CAUSE_TEXT, type EntityLifecycle, type TaskStage } from "@hercule/contract";
+import { describeStageCause, describeStageReport, type StageCauseThing } from "./stage-cause";
 
 const pullRequest = (overrides: Partial<StageCauseThing> = {}): StageCauseThing => ({
   noun: "Pull request",
@@ -86,5 +86,30 @@ describe("describeStageCause", () => {
     });
     expect(text.length).toBeLessThanOrEqual(MAX_STAGE_CAUSE_TEXT);
     expect(text.endsWith("…")).toBe(true);
+  });
+});
+
+describe("describeStageReport", () => {
+  it.each<[TaskStage, string]>([
+    ["exploring", "Exploring"],
+    ["planned", "Planned"],
+    ["building", "Building"],
+    ["in-review", "In review"],
+    ["landed", "Landed"],
+  ])("names the stage %s as %s", (stage, word) => {
+    expect(describeStageReport("Pricing research", stage)).toBe(
+      `\u201cPricing research\u201d says ${word}`,
+    );
+  });
+
+  it("titles a blank session as an untitled thread", () => {
+    expect(describeStageReport("  ", "building")).toBe("\u201cUntitled thread\u201d says Building");
+  });
+
+  it("cuts only the title, so a 300-character title still ends with the stage", () => {
+    const text = describeStageReport("word ".repeat(60).trim(), "in-review");
+    expect(text.length).toBeLessThanOrEqual(MAX_STAGE_CAUSE_TEXT);
+    expect(text.startsWith("\u201cword word")).toBe(true);
+    expect(text.endsWith("…\u201d says In review")).toBe(true);
   });
 });

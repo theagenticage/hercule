@@ -1507,10 +1507,10 @@ Work's motion is the drawing's `MOTION.md`, and rule 2 of [Rules](#rules) names 
 *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* A shipped workflow moves a card when a Fact arrives, such as a pull request merging ([./09-tasks.md](./09-tasks.md#facts-and-the-fence)). The user sees it as a push of the Task and a read of the board. The motion is the drawing's `MOTION.md` §A card moving by itself, on the `self` spring. The desktop learns a card's old and new cell by comparing two reads of the board: `listCardMoves(previous, next)` in `@hercule/client-core/work` returns the moves, and the same function feeds [the morning replay](#the-morning-replay).
 
 - **It waits for a still hand.** Not while the pointer rests within 120px of the card, however long it has been still, because a parked pointer means someone is reading. Not while the pointer moves within 280px of it. Not during a drag. Never longer than 8 seconds after the Fact. A card the user is hovering is never sorted away.
-- **The cause lands first.** A small label rises onto the card on `hand` and holds for 760 ms. Its words are the card's `stageCause` text ("Pull request #6221 merged": the noun is the one the kind stores, so GitHub says "Pull request" where the drawing says "PR"). A move with no `stageCause` shows no label. A move by a Fact always has one, because a Fact write that changes the stage sets the cause, so this is a move by something else.
+- **The cause lands first.** A small label rises onto the card on `hand` and holds for 760 ms. Its words are the card's `stageCause` text ("Pull request #6221 merged": the noun is the one the kind stores, so GitHub says "Pull request" where the drawing says "PR"). A move with no `stageCause` shows no label. A move by a Fact always has one, because a Fact write that changes the stage sets the cause, so this is a move by something else. *(Amended 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113).)* A move by a Thread's stage report has a cause too, and the label draws it exactly as a Fact's, with the cause's `text`: "“Pricing research” says Planned" ([./09-tasks.md](./09-tasks.md#stage-reports)). So a report's move is no longer a move by something else.
 - **The card crosses on `self`,** about one second, to the end of its new cell. Heading for Landed, which is only words, it fades out on the way and goes into the "N landed" line. A card rising into the row it left passes over what stands behind the next card's top edge, never under it. Nothing already on the board reshuffles.
 - **The dent stays.** Its old place stays open for 1.5 seconds. After that it stays open while the pointer rests in its lane, for 60 seconds at most, and closes when the hand is out of the lane.
-- The stage counts roll over, and a quiet line in the toolbar says what happened.
+- The stage counts roll over, and a quiet line in the toolbar says what happened. For a report it uses the same cause text.
 - **A card with no place on screen** (past what its cell shows, or under something folded): only its bead and the counts change, and the toolbar's line says so.
 - **`⌘Z` never undoes a Fact.** A Fact is not an act of the user. The user's answer to a card that moved is to drag it back, and a drag holds ([./09-tasks.md](./09-tasks.md#the-fence)). The desktop sends `stage` in a move only when the card changes column, so a reorder inside a column does not move the fence.
 - **A hidden window plays nothing.** Every held change (a Task arriving, a failed run, a Fact) waits for a still hand only while the window is shown. The board catches up when the window shows ([What Work reads and writes](#what-work-reads-and-writes)), and the morning replay covers what it missed.
@@ -6235,6 +6235,30 @@ How it was measured:
 
 - **What a state icon costs on the wire:** GitHub's six icons are 235 to 676 characters of path data each, copied into the status of each thing that has one. A thing with no icon costs nothing.
 - **Not measured:** memory, launch time and idle wakeups in the packaged app. The change adds no process, timer, listener or read.
+
+**The lead's stage report and its cause on the card, issue #1113,** measured 2026-11-12 with `pnpm build:desktop:unpacked` and `scripts/check-bundle-budget.ts`, on `main` at `27cedf729` and on the branch, back to back on one Linux machine (ADR 0051). The cost was stated before the change was built: no process, no timer, no new read or push, and no work while idle or per streamed token. The change is one more kind of cause on the label the card already draws (`stageCause`), so it adds a union member and a branch in the text, not a new render path.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 511.9 kB to 512.1 kB: 0.2 kB more, in 28 chunks both times. Over the guide as before |
+| Every JavaScript and CSS file in `out/renderer`, each gzip and summed | - | 1,458,284 to 1,458,633 bytes: 349 more |
+| Main's startup file, minified | 170 kB | 170.5 kB both times (174,548 bytes both times). Over the budget as before |
+| Processes | none added | none added |
+| Work while idle | none added | none added |
+| Work per streamed token | unchanged | unchanged |
+
+- **`perf -- --work-only`, 2026-11-12, Linux (16 cores) in the desktop container, `main` at `27cedf729` then the branch, back to back, one pair.** A second pair failed before it ran, when the Electron download timed out, so each number is one run, and the first launch of "before" ran at load 44 against 1.2 for "after". Judged before against after only (ADR 0051). Counts are equal; memory and time are within the noise between runs:
+
+| Launch | Processes | PSS summed, before to after | PSS renderer, before to after | Idle visible renderer | Idle hidden renderer |
+|---|---|---|---|---|---|
+| A thread open | 4 and 4 | 427 to 432 MB | 104 to 103 MB | 2.0 switches/s both | 1.0 both |
+| Work by Project, 300 Tasks | 4 and 4 | 445 to 446 MB | 124 to 126 MB | 2.0 both | 1.0 both |
+| Work by repository, 300 Tasks | 4 and 4 | 441 to 447 MB | 118 to 121 MB | 2.0 both | 1.0 both |
+| Work by Project, 1000 Tasks | 4 and 4 | 454 to 464 MB | 134 to 136 MB | 2.0 both | 1.0 both |
+
+  - **Work per streamed token** (4 agents streaming, window visible): renderer main thread 14.8 to 14.9 ms a second, renderer CPU 38 to 37 ms a second. The change adds no read or push: the reads and pushes of every step are the same, apart from one more board read in the new-Thread step of "after" (3 against 2). The cause was a second Task announcement: the lead was set after `task.created`, which announced the Task again. The fix sets the lead when the Task is made, so one announcement remains. The perf run was not repeated after the fix.
+  - **The page loaded again:** renderer main thread 286.9 to 264.0 ms. **10 s of quiet:** 2.1 to 1.9 ms in the first launch, no reads or pushes in either.
+  - **Verdict:** no process, no idle timer or wakeup, no change per streamed token, memory within run-to-run noise (up to 10 MB summed at 1000 Tasks, with the same spread between launches of one build). The budgets the change touched are met as before.
 
 ## Slices
 

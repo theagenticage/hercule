@@ -27,21 +27,27 @@ const readSnapshotCard = (value: unknown): BoardSnapshot["cards"][number] | unde
   if (projectId !== undefined && typeof projectId !== "string") return undefined;
   if (stageCause !== undefined) {
     if (!isRecord(stageCause)) return undefined;
-    const { factId, ref, text } = stageCause;
+    const { kind, factId, ref, sessionId, stageRevision, text } = stageCause;
+    if (typeof text !== "string") return undefined;
+    const base = { id, stage, ...(projectId === undefined ? {} : { projectId }) };
+    if (kind === "report") {
+      // A report cause stored without a revision cannot be told from the next one: drop the snapshot.
+      if (typeof sessionId !== "string" || !Number.isInteger(stageRevision)) return undefined;
+      return {
+        ...base,
+        stageCause: { kind, sessionId, stageRevision: stageRevision as number, text },
+      };
+    }
+    // A snapshot written before reports existed has no `kind`; its causes are all facts.
     if (
+      (kind !== undefined && kind !== "fact") ||
       typeof factId !== "number" ||
       !Number.isInteger(factId) ||
-      typeof ref !== "string" ||
-      typeof text !== "string"
+      typeof ref !== "string"
     ) {
       return undefined;
     }
-    return {
-      id,
-      stage,
-      ...(projectId === undefined ? {} : { projectId }),
-      stageCause: { factId, ref, text },
-    };
+    return { ...base, stageCause: { kind: "fact", factId, ref, text } };
   }
   return { id, stage, ...(projectId === undefined ? {} : { projectId }) };
 };

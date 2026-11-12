@@ -20,7 +20,12 @@ const SNAPSHOT: BoardSnapshot = {
     {
       id: "b",
       stage: "landed",
-      stageCause: { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" },
+      stageCause: {
+        kind: "fact",
+        factId: 4,
+        ref: "github:pull-request:6221",
+        text: "Pull request #6221 merged",
+      },
     },
   ],
   isTruncated: false,
@@ -83,6 +88,65 @@ describe("the saved board snapshot", () => {
     ["a cause that is not an object", { id: "a", stage: "landed", stageCause: "merged" }],
   ])("reads the whole snapshot as none for %s, so no card shows as new by mistake", (_, card) => {
     store({ cards: [SNAPSHOT.cards[0], card], isTruncated: false });
+
+    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
+  });
+
+  it("reads a cause stored without a kind, written before reports existed, as a fact", () => {
+    store({
+      cards: [
+        {
+          id: "b",
+          stage: "landed",
+          stageCause: { factId: 4, ref: "github:pull-request:6221", text: "merged" },
+        },
+      ],
+      isTruncated: false,
+    });
+
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([
+      {
+        id: "b",
+        stage: "landed",
+        stageCause: { kind: "fact", factId: 4, ref: "github:pull-request:6221", text: "merged" },
+      },
+    ]);
+  });
+
+  it("reads and keeps a cause that is a report", () => {
+    const report = {
+      kind: "report",
+      sessionId: "s1",
+      stageRevision: 3,
+      text: "“Pricing research” says Planned",
+    };
+    store({ cards: [{ id: "b", stage: "planned", stageCause: report }], isTruncated: false });
+
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([
+      { id: "b", stage: "planned", stageCause: report },
+    ]);
+  });
+
+  it("reads the whole snapshot as none for a report with no stage revision", () => {
+    store({
+      cards: [
+        {
+          id: "b",
+          stage: "planned",
+          stageCause: { kind: "report", sessionId: "s1", text: "says Planned" },
+        },
+      ],
+      isTruncated: false,
+    });
+
+    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
+  });
+
+  it("reads the whole snapshot as none for a report with no session", () => {
+    store({
+      cards: [{ id: "b", stage: "planned", stageCause: { kind: "report", text: "says Planned" } }],
+      isTruncated: false,
+    });
 
     expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
   });

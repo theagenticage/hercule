@@ -2,7 +2,7 @@
  * The words of a card's stage cause: why the card sits in its stage when a
  * fact about a linked thing placed it, such as "Pull request #6221 merged".
  */
-import { MAX_STAGE_CAUSE_TEXT, type EntityLifecycle } from "@hercule/contract";
+import { MAX_STAGE_CAUSE_TEXT, type EntityLifecycle, type TaskStage } from "@hercule/contract";
 import { cutTextAtWord } from "../text";
 
 /** What is stored about the thing a fact is about. */
@@ -66,4 +66,38 @@ export const describeStageCause = (fact: StageCauseFact): string => {
       ? UNKNOWN_THING
       : [thing.noun, thing.identifier].filter((word) => word !== null && word !== "").join(" ");
   return cutTextAtWord(`${subject} ${chooseVerb(fact)}`, MAX_STAGE_CAUSE_TEXT);
+};
+
+/** The name of each stage as the user reads it on the board. */
+const STAGE_WORDS: Readonly<Record<TaskStage, string>> = {
+  exploring: "Exploring",
+  planned: "Planned",
+  building: "Building",
+  "in-review": "In review",
+  landed: "Landed",
+  done: "Done",
+  dropped: "Dropped",
+};
+
+/** Returns the name of a stage as the user reads it on the board, such as "In review". */
+export const describeStage = (stage: TaskStage): string => STAGE_WORDS[stage];
+
+/**
+ * The title of a Thread that has none. The Task made for such a Thread gets
+ * the same words, because a Task's title has at least one character.
+ */
+export const UNTITLED_THREAD_TITLE = "Untitled thread";
+
+/**
+ * Returns the sentence that says why a Stage Report moved a card, such as
+ * "\u201cPricing research\u201d says Planned". `stage` is the card's current stage,
+ * which a Stage Report placed. A blank `sessionTitle` reads "Untitled
+ * thread". Only the title is cut (at a word), so the whole text fits
+ * `MAX_STAGE_CAUSE_TEXT` and always ends with the stage.
+ */
+export const describeStageReport = (sessionTitle: string, stage: TaskStage): string => {
+  const title = sessionTitle.trim() === "" ? UNTITLED_THREAD_TITLE : sessionTitle.trim();
+  const suffix = `\u201d says ${describeStage(stage)}`;
+  const room = MAX_STAGE_CAUSE_TEXT - suffix.length - 1; // 1 for the opening quote
+  return `\u201c${cutTextAtWord(title, room)}${suffix}`;
 };

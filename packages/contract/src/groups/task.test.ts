@@ -10,6 +10,7 @@ import {
   TaskEntityLinkInput,
   TaskFilter,
   TaskMoveInput,
+  TaskStageReportInput,
   TaskUpdateCall,
   TaskUpdateInput,
   BOARD_STAGES,
@@ -210,5 +211,29 @@ describe("the input of linking a thing by hand", () => {
     const paths = Object.values(task.endpoints).map((endpoint) => endpoint.path);
     expect(paths).toContain("/tasks/:id/entities/link");
     expect(paths).toContain("/tasks/:id/entities/unlink");
+  });
+});
+
+describe("the input of task.reportStage", () => {
+  it("accepts each of the five board stages", () => {
+    for (const stage of BOARD_STAGES) {
+      expect(decodeOutcome(TaskStageReportInput, { stage })).toBe("Success");
+    }
+  });
+
+  it("refuses done, saying it is the user's sign-off and what to report instead", () => {
+    const exit = Effect.runSyncExit(
+      Schema.decodeUnknownEffect(TaskStageReportInput)({ stage: "done" }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("Done is the user's sign-off. Report landed");
+  });
+
+  it("refuses dropped, saying it is the user's decision", () => {
+    const exit = Effect.runSyncExit(
+      Schema.decodeUnknownEffect(TaskStageReportInput)({ stage: "dropped" }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("Drop is the user's decision");
   });
 });

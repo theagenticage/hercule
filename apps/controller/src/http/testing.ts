@@ -455,6 +455,7 @@ export type LiveSessionsServices =
   | DiscussionInputs
   | DiscussionService
   | SessionService
+  | TaskService
   | PluginHost
   | PromotionState
   | TextGeneration

@@ -76,6 +76,14 @@ describe("the operations an answer may run", () => {
     ]);
   });
 
+  // A stage report only means something from an agent session, so no answer
+  // may run it.
+  it("do not include task.reportStage", () => {
+    expect(ANSWER_OPERATIONS).not.toContain("task.reportStage");
+    const exit = check("task.reportStage", { stage: "planned" });
+    expect(readIssues(exit).map((issue) => issue.path)).toEqual([[...PATH, "op"]]);
+  });
+
   // An answer runs as the user, without checking the producer's grants, so it
   // must never reach credentials, secrets, the infrastructure, permissions or
   // the management of Connections.

@@ -29,6 +29,7 @@ interface Task {
   labels: string[];
   projectId?: string;         // at most one Project (./02)
   initiativeId?: string;      // at most one Initiative (./02), Initiatives below
+  leadSessionId: string | null; // the Thread that speaks for the Task, or null; see Stage reports
   provenance: ProvenanceEntry[];  // entries are never edited or removed; a merge can move them between Tasks
   createdAt: string;
   updatedAt: string;
@@ -49,6 +50,7 @@ interface Task {
 | `labels` | string[] | Bare strings, flat namespace. See [Labels](#labels). |
 | `projectId` | id? | Optional link to one Project. |
 | `initiativeId` | id? | *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036).)* Optional link to one [Initiative](#initiatives). A Task has at most one. |
+| `leadSessionId` | id \| null | *(Added 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](../adr/0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md).)* The Thread that leads the Task and may report its stage, or `null`. The `task.created` event of a Task made for a Thread by the join rule carries that Thread. A filed Task carries `null`, and is announced again (`task.updated`) when the first Thread that joins it becomes its lead. See [Stage reports](#stage-reports). |
 | `provenance` | ProvenanceEntry[] | Entries are never edited or removed. See [Provenance](#provenance-and-external-refs). |
 | `createdAt`, `updatedAt` | timestamp | Maintained by the core. |
 | `stageChangedAt` | timestamp | Maintained by the core. Set on create and updated only when `stage` changes. |
@@ -69,7 +71,7 @@ Ids are UUIDv7 like every Hercule-owned entity; format, storage and the short fo
 | `planned` | decided and not started. A Task someone files starts here | `open` |
 | `building` | being built | `in-progress` |
 | `in-review` | built and waiting for review | `in-progress` |
-| `landed` | merged or shipped and not yet closed | `in-progress` |
+| `landed` | finished from the agents' side, waiting for the user to sign it off. A merged pull request lands a card ([The shipped workflows](#the-shipped-workflows)), and so can the lead's report ([Stage reports](#stage-reports)) | `in-progress` |
 | `done` | finished. An end | `done` |
 | `dropped` | decided against. An end | `cancelled` |
 
@@ -86,6 +88,7 @@ Rules:
   - a handoff from a card, which decides the stage every time ([A handoff from a card](#a-handoff-from-a-card));
 
   Nothing else raises it: not a title or label edit, not a move inside a cell with no `stage`, not a run or Thread joining. *(Added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035).)* Nor does a stage that a workflow run writes from a Fact (`task.update` with a `stageFactId`, by an actor `run:<id>`): that is not a person or an agent deciding, and a card moved by the shipped `card-in-review` workflow a moment after a handoff would otherwise make the handoff's Undo refuse. A user or a session that passes a `stageFactId` is held to the same fence, but it is deciding, so its write raises `stage_revision` like any other. It is not part of the contract, so no client reads it.
+- **`lead_session_id`** and **`stage_cause_session_id`** *(Added 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](../adr/0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md).)* are two more columns on the row. The first is the Task's lead, the second the lead whose report placed the current stage. The table `task_stage_reports` holds one row per Task: the lead's last claim (`session_id`, `stage`, `reported_at`). See [Stage reports](#stage-reports).
 - **`stage_fact_fence`** and **`stage_cause_fact_id`** *(added 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035))* are two columns on the row. The fence is the highest [Fact](#facts-and-the-fence) id already accounted for on this Task, 0 at the start. The cause is the Fact that placed the current stage, or null. Neither is part of the contract: the card reads the cause as `stageCause` ([The cause of a move](#the-cause-of-a-move)).
 - A stage names a position and nothing more. What it means for the work, and which fact moves a Task into it, is for workflows, as "done means the PR is merged" is below.
 
@@ -317,7 +320,7 @@ The same write clears the cause, even when the stage is the same. A merge also c
 | A completed link unreadable, then readable with the same lifecycle | Its own Fact, and the card lands |
 | The last open link unlinked | Its own Fact, and the card lands |
 
-Agents use the same `task.update`. A session that passes `stageFactId` is held to the same checks, and one that passes none is making a stage decision of its own. The agent report tool is later, and will have this check to use.
+Agents use the same `task.update`. A session that passes `stageFactId` is held to the same checks, and one that passes none is making a stage decision of its own. The agent report tool is built as [Stage reports](#stage-reports), which is weaker than this check: a report never beats a Fact.
 
 ### The cause of a move
 
@@ -328,9 +331,11 @@ Agents use the same `task.update`. A session that passes `stageFactId` is held t
 - a legacy `status` write, only when it changes the stage;
 - a merge.
 
+*(Added 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](../adr/0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md).)* The cause may instead be a stage report, in `stage_cause_session_id` ([Stage reports](#stage-reports)). A Fact write whose stage the Task already holds takes the cause over from a report: the Fact becomes the cause and the report's is cleared. Every stage write that clears the Fact cause also clears the report cause.
+
 Unlinking the cause's ref keeps the cause: the card still moved because of that Fact, and the unlink only voids it for later runs.
 
-`WorkCard` carries `stageCause`, an optional `{ factId, ref, text }`, present when the cause is set. `factId` lets a client tell one cause from another. `text` is built in the read from the cause Fact's **own** `lifecycle`, never the entity's latest one, so a pull request reopened later does not change why the card moved. It reads "<Noun> <identifier> <verb>", with the noun the entity kind's stored noun. So GitHub reads "Pull request #6221 merged". The verb follows the Fact:
+`WorkCard` carries `stageCause`, an optional cause, present when one is set. *(Amended 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113).)* It is a union: `{ kind: "fact", factId, ref, text }` as described here, or `{ kind: "report", sessionId, stageRevision, text }` ([Stage reports](#stage-reports)). `factId` lets a client tell one cause from another. `text` is built in the read from the cause Fact's **own** `lifecycle`, never the entity's latest one, so a pull request reopened later does not change why the card moved. It reads "<Noun> <identifier> <verb>", with the noun the entity kind's stored noun. So GitHub reads "Pull request #6221 merged". The verb follows the Fact:
 
 | The Fact's `lifecycle` | Verb |
 |---|---|
@@ -435,6 +440,57 @@ steps:
 ### Merging with Facts
 
 A merge ([Merging Tasks](#merging-tasks)) repoints the source's Facts and suppressions to the survivor, and sets the survivor's fence to the highest Fact id in the table, so a Fact pending from before the merge never overwrites the survivor's stage: merging is a person's act. It clears the survivor's cause. It writes no new Fact. When one Task links a ref and the other suppresses it, the link wins and the suppression is dropped, because merging brings links together.
+
+## Stage reports
+
+*(Added 2026-11-12, [#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](../adr/0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md).)* Facts see only pull requests and tickets, so they never move a card through Exploring, Planned or Building, and never for work that is not code. A Task's lead can say where its Task stands. A report is the weakest way to move a card.
+
+### The lead
+
+A Task's lead is the Thread that speaks for it. It is stored on the Task (`lead_session_id`) so that a fork and a move can pass it on.
+
+- When the join rule makes a new Task for a Thread, that Thread leads it from the Task's first write, so `task.created` carries the lead and nothing is announced again.
+- A Task made with no session (filed, Take, Add, a handoff) gets as lead the first Thread that joins it.
+- A fork of the lead (`hercule session continue`) becomes the lead.
+- When the lead leaves the Task (`session.moveToTask`), the oldest Thread still on the Task becomes the lead, or none. "Oldest" counts every Thread, an archived or Done one too.
+- A merge keeps the survivor's lead. A survivor with none takes the source's.
+- **Only a Thread can lead.** A session of kind `agent` or `run` is a helper. A Task worked only by runs has no lead, and its stage comes from its handoff, from Facts and from the user. So a review workflow's steps never move a card to In review.
+- The user cannot choose the lead.
+
+The lead, and only the lead, is told about reporting. The text is built per session at start, with the coordination text and with or without a checkout, so helpers never see it. pi receives it as well: its adapter joins the coordination text into its instructions.
+
+### The operation
+
+`task.reportStage` (`hercule task report --stage <stage>`, grant `task.update`; [./11](./11-public-api-and-agent-surface.md#task)) takes one field, `stage`, one of `exploring`, `planned`, `building`, `in-review`, `landed`. It takes no Task id: the Task is the calling session's. `done` and `dropped` fail `validation`, because Done is the user's sign-off and Drop is the user's decision.
+
+It fails `invalid_state`, with a message that says what to do instead, when the caller is not a session, the session is on no Task, or the session is not the Task's lead (the message names the lead). These refusals write no audit entry.
+
+Otherwise, in one transaction, it stores the stage as the Task's claim in `task_stage_reports` (replacing the previous one) and decides the outcome. The first rule that matches wins:
+
+| Case | Outcome | The card |
+|---|---|---|
+| The Task is at `done` or `dropped` | `finished` | stays |
+| The stage equals the stored claim, whoever made it | `repeat` | stays |
+| A Fact placed the current stage (`stage_cause_fact_id` is set), that Fact is not voided, and something linked is still open | `fact` | stays |
+| `landed`, and something linked is still open (the count `card-landed` uses) | `open-links` | stays |
+| The Task already has the stage | `already` | stays |
+| Anything else | `moved` | moves |
+
+- **A repeat is checked per Task.** A new lead (a fork, a hand-over) repeating the old lead's claim is a repeat too. So a repeat never undoes a drag, while a different claim can still move a dragged card, as a new Fact can.
+- **Rules run in this order.** A Landed report on a Task whose stage a Fact placed answers `fact`, not `open-links`.
+- **A stale Fact does not hold the card.** The `fact` outcome applies only while the Fact still stands: it is not voided (the user unlinked its thing) and something linked is still open. A pull request opens and the card goes to In review; while that pull request is open, the card stays in review. If the pull request is closed without merging, or unlinked, nothing holds the card there any more, and no other linked work is still open, the lead's report moves it. Linked work is counted once per report.
+- **A `moved` report is not a person's write.** The fence is left alone, so the next Fact still applies. `stage_cause_fact_id` is cleared and `stage_cause_session_id` is set to the lead. `stage_revision` rises, as for any decision by an agent. The card goes last in its new cell. One `task.updated` is emitted, stamped `session:<id>`.
+- **Every accepted report is audited.** One entry `task.stageReported` per report that passes the caller checks, with one of the six outcomes, whatever it was ([./08](./08-events-and-connections.md)).
+- The call answers with the outcome and one line the agent can act on, such as "Kept at In review: pull request #12 is still open, and facts outrank reports." A kept report is not an error.
+
+### What changes for other stage writes
+
+- Every other stage write (a drag, `task.update`, `task.move`, a Fact, a handoff, a merge) clears `stage_cause_session_id`.
+- A Fact that agrees with a reported stage takes over the cause ([The cause of a move](#the-cause-of-a-move)). It does not announce the Task, because nothing a client draws changes until the next move. A client that reads the board later sees the Fact's words.
+- A merge keeps the survivor's own last claim in `task_stage_reports`. A survivor with no claim takes the source's, the same rule as for the lead.
+- An agent's plain `task.update --stage` is unchanged. It counts like a drag, because an agent may be doing what the user told it. The lead is told to use `task report` for its own Task.
+
+The card reads a report's cause as `stageCause` with `kind: "report"`, `sessionId`, `stageRevision` (the Task's stage revision when the report placed the stage, which identifies the report move for clients) and `text`, such as "“Pricing research” says Planned" ([./11](./11-public-api-and-agent-surface.md#task)).
 
 ## Threads and their Tasks
 
@@ -813,6 +869,7 @@ Task operations are ordinary public-API operations defined in the service layer 
 | `hercule task create` | creates a task; emits `task.created` |
 | `hercule task update <id>` | changes any writable field, adds/removes labels, appends provenance; emits one `task.updated`. `--stage-fact <id>` is for workflows: it names the Fact the stage change acts on, and the fence refuses it when the Fact is at or below the Task's fence ([The fence](#the-fence)) |
 | `hercule task board` | every unfinished Task as a card for Work ([The board](#the-board)); needs `task.read`, `session.read` and `run.read` |
+| `hercule task report --stage <stage>` | the lead Thread reports the stage of its own Task ([Stage reports](#stage-reports)); the weakest way to move a card; grant `task.update`; refused for any caller that does not lead a Task |
 | `hercule task move <id>` | moves a Task to a stage, a project or a place in its cell; grant `task.update`; emits one `task.updated` |
 | `hercule task details <id>` | one Task with everything its details pane draws: the card, its summary, up to 10 Threads with their open questions, its runs and what the newest produced; needs `task.read`, `session.query` and `run.query` |
 | `hercule task link <id> --ref <ref>` | links an outside thing to a Task by hand, and clears a suppression of it ([Links by hand and suppressions](#links-by-hand-and-suppressions)); grant `task.update` |

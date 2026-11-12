@@ -6,6 +6,9 @@ Date: 2026-11-07
 
 Accepted by [Work overview: the design and its tickets (#1026)](https://github.com/theagenticage/hercule/issues/1026), built by [#1031](https://github.com/theagenticage/hercule/issues/1031). Uses [ADR 0041](./0041-text-generation-is-one-model-call-on-a-runner.md) for the model call and keeps [ADR 0052](./0052-tasks-have-a-stage-and-threads-join-them.md) true: the core still never moves a Task's stage on its own.
 
+**Amended 2026-11-12 ([#1113](https://github.com/theagenticage/hercule/issues/1113), [ADR 0057](./0057-a-tasks-lead-reports-its-stage-and-a-report-is-the-weakest-way-to-move-a-card.md)):** the last consequence, "no path to the Task row", holds for anything a model writes about a Task in the background. It does not rule out a stage report: the Thread that leads a Task may report its stage, through the same rules as every other writer, and a report is the weakest of them.
+
+
 ## Context
 
 A card on Work shows a line that says what the Task is about and where it stands, such as "Three designs, depots worried." The Task row holds a title and a description the user wrote, and a Thread's transcript holds the real story, so the line has to be written by something that reads the work. A small model can do that after each turn, at a cost the user pays out of their subscription.

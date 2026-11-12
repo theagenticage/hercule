@@ -327,6 +327,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),
       )
+      .handle("reportStage", ({ payload }) => withApiErrors(tasks.reportStage(payload)))
       .handle("linkEntity", ({ params, payload }) =>
         withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
       )
@@ -940,6 +941,12 @@ const WorkflowDomainLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
 
 /**
+ * Dispatch with the Task service it reads a lead's Task title from. A layer is
+ * built once, so this shares the Task service with every other group.
+ */
+const DispatchWithTasksLayer = DispatchLayer.pipe(Layer.provide(TaskServiceWithPortsLayer));
+
+/**
  * The run service with the services it is built from.
  *
  * - The run service reads workflows and calls the task service from its
@@ -962,7 +969,9 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
-      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+      Layer.provide(
+        Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchWithTasksLayer)),
+      ),
     ),
   ),
   Layer.provide(LiveTopicsLayer),
@@ -1192,7 +1201,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
-    Layer.provideMerge(DispatchLayer),
+    Layer.provideMerge(DispatchWithTasksLayer),
   ),
   ProvisioningLayer,
   SessionSkillsLayer,

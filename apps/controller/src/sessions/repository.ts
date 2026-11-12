@@ -1710,6 +1710,23 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Returns the title of each listed session, keyed by session id. An id
+     * with no session has no entry. The ids reach SQLite as one JSON text, so
+     * the statement is the same for one id and for a thousand.
+     */
+    listTitles: (
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      Effect.gen(function* () {
+        if (sessionIds.length === 0) return new Map<string, string>();
+        const hexIds = JSON.stringify(sessionIds.map((id) => id.replaceAll("-", "")));
+        const rows = yield* sql<{ readonly id: Uint8Array; readonly title: string }>`
+          SELECT id, title FROM sessions
+          WHERE id IN (SELECT unhex(value) FROM json_each(${hexIds}))`;
+        return new Map(rows.map((row) => [uuidToString(row.id), row.title] as const));
+      }),
+
+    /**
      * Returns up to `limit` of this runner's oldest queued sessions, with what
      * the start frame needs: the exact spec each was queued with, and its
      * account and harness. `after` continues an earlier batch from where it

@@ -99,6 +99,15 @@ const countTasks = async (arranged: Arranged): Promise<readonly [number, number]
   return [row!.n, (await arranged.harness.platformEvents("task.created")).length];
 };
 
+/** Returns the id of the session that leads the Task, or null when none does. */
+const readLead = async (arranged: Arranged, taskId: string): Promise<string | null> => {
+  const response = await send("GET", arranged.harness.base, `/api/v1/tasks/${taskId}`, {
+    token: arranged.token,
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { leadSessionId: string | null }).leadSessionId;
+};
+
 /** Reports an event of a session; the runner numbers a session's events from 1. */
 const report = (arranged: Arranged, sessionId: string, seq: number, event: object): void =>
   reportEvent(arranged.wire, seq, {
@@ -183,6 +192,8 @@ describe("the Task of a workflow run's step sessions", () => {
       // The first step's session takes the run's live Task.
       const implement = await runStep(arranged, runId, "implement");
       expect((await readSession(arranged, implement)).taskId).toBe(taskId);
+      // A step's session is an Agent's, so it never leads the run's Task.
+      expect(await readLead(arranged, taskId)).toBeNull();
 
       // The Task is finished before the second step opens its session.
       const finished = await send("PATCH", base, `/api/v1/tasks/${taskId}`, {
@@ -227,6 +238,7 @@ describe("the Task of a workflow run's step sessions", () => {
       expect(reopened.status, await reopened.clone().text()).toBe(200);
       const adopted = await fork();
       expect((await readSession(arranged, adopted.id)).taskId).toBe(taskId);
+      expect(await readLead(arranged, taskId)).toBeNull();
       expect(await countTasks(arranged)).toEqual(before);
     });
   });

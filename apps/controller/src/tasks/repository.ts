@@ -63,7 +63,7 @@ import {
   type SortColumn,
 } from "../db";
 import { chooseRankBetween, spreadBoardRanks } from "./board-rank";
-import type { StageDecision } from "./stage-decision";
+import type { StageCause, StageDecision } from "./stage-decision";
 
 /**
  * The filter of a listing. A task matches a field if it has any of the
@@ -195,6 +195,10 @@ export interface BoardTask {
   readonly failedRunId: string | undefined;
   /** The fact that placed the Task's stage, or `undefined` when a person or an agent did. */
   readonly stageCauseFactId: number | undefined;
+  /** The Stage Report that placed the Task's stage, as its session, or `undefined` when none did. */
+  readonly stageCauseSessionId: string | undefined;
+  /** How many stage decisions have been made on the Task (`stage_revision`). */
+  readonly stageRevision: number;
   /** What the Task's summary says, or `undefined` while it has no written summary. */
   readonly summary: TaskSummary | undefined;
 }
@@ -214,6 +218,12 @@ export interface NewTask {
   /** The Initiative the Task starts on. The caller has checked that it exists and is open. */
   readonly initiativeId?: string;
   readonly provenance: ReadonlyArray<ProvenanceInput>;
+  /**
+   * The Thread that leads the Task from its first write, when the Task is made
+   * for that Thread. There is no foreign key, so the Thread's row may be
+   * written after the Task's, in the same transaction. Absent means no lead.
+   */
+  readonly leadSessionId?: string;
   /**
    * True when the Task is linked to its refs only because the user added them
    * to Work from nothing that concerned them (`task_entity_links.following`).
@@ -310,6 +320,7 @@ interface TaskRow {
   readonly labels: string;
   readonly project_id: Uint8Array | null;
   readonly initiative_id: Uint8Array | null;
+  readonly lead_session_id: Uint8Array | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly status_changed_at: string;
@@ -330,7 +341,7 @@ interface ProvenanceRow {
 
 const COLUMNS =
   "tasks.id, tasks.title, tasks.description, tasks.status, tasks.stage, tasks.priority, tasks.labels, " +
-  "tasks.project_id, tasks.initiative_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
+  "tasks.project_id, tasks.initiative_id, tasks.lead_session_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, " +
   "tasks.stage_changed_at, tasks.deleted_at";
 
 /**
@@ -517,7 +528,7 @@ const readBoardSummary = (row: BoardSummaryColumns): TaskSummary | undefined =>
  */
 const BOARD_TASK_COLUMNS =
   "t.id, t.title, t.stage, t.priority, p.id AS project_id, t.initiative_id, t.board_rank, " +
-  "t.created_at, t.stage_changed_at, t.failed_run_id, t.stage_cause_fact_id, " +
+  "t.created_at, t.stage_changed_at, t.failed_run_id, t.stage_cause_fact_id, t.stage_cause_session_id, t.stage_revision, " +
   BOARD_SUMMARY_COLUMNS;
 
 interface BoardTaskRow extends BoardSummaryColumns {
@@ -532,6 +543,8 @@ interface BoardTaskRow extends BoardSummaryColumns {
   readonly stage_changed_at: string;
   readonly failed_run_id: Uint8Array | null;
   readonly stage_cause_fact_id: number | null;
+  readonly stage_cause_session_id: Uint8Array | null;
+  readonly stage_revision: number;
 }
 
 /**
@@ -545,6 +558,7 @@ interface TaskWithCardRow extends Omit<BoardTaskRow, "stage"> {
   readonly description: string;
   readonly status: string;
   readonly labels: string;
+  readonly lead_session_id: Uint8Array | null;
   readonly updated_at: string;
   readonly status_changed_at: string;
   readonly task_project_id: Uint8Array | null;
@@ -563,6 +577,9 @@ const readBoardTaskRow = (row: BoardTaskRow): BoardTask => ({
   stageChangedAt: row.stage_changed_at,
   failedRunId: row.failed_run_id === null ? undefined : uuidToString(row.failed_run_id),
   stageCauseFactId: row.stage_cause_fact_id ?? undefined,
+  stageCauseSessionId:
+    row.stage_cause_session_id === null ? undefined : uuidToString(row.stage_cause_session_id),
+  stageRevision: row.stage_revision,
   summary: readBoardSummary(row),
 });
 
@@ -729,6 +746,8 @@ const make = Effect.gen(function* () {
                 ...(row.initiative_id === null
                   ? {}
                   : { initiativeId: uuidToString(row.initiative_id) }),
+                leadSessionId:
+                  row.lead_session_id === null ? null : uuidToString(row.lead_session_id),
                 provenance: byTask.get(id) ?? [],
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
@@ -744,12 +763,18 @@ const make = Effect.gen(function* () {
    * Builds the assignments of a stage decision that do not write the stage:
    * the stage revision, which moves for a decision that kept the stage too
    * (that is how a handoff's Undo sees that one was made), the fence and the
-   * cause.
+   * cause. A cause is a fact or a Stage Report, never both, so writing one
+   * clears the other and `null` clears both.
    */
   const buildStageDecisionSets = (decision: StageDecision) => [
     ...(decision.raisesStageRevision ? [sql`stage_revision = stage_revision + 1`] : []),
-    sql`stage_fact_fence = ${decision.fence}`,
-    ...(decision.cause === undefined ? [] : [sql`stage_cause_fact_id = ${decision.cause}`]),
+    ...(decision.fence === undefined ? [] : [sql`stage_fact_fence = ${decision.fence}`]),
+    ...(decision.cause === undefined
+      ? []
+      : [
+          sql`stage_cause_fact_id = ${decision.cause?.kind === "fact" ? decision.cause.factId : null}`,
+          sql`stage_cause_session_id = ${decision.cause?.kind === "report" ? uuidFromString(decision.cause.sessionId) : null}`,
+        ]),
   ];
 
   /**
@@ -1325,7 +1350,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const rows = yield* sql<TaskWithCardRow>`
-          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}, t.description, t.status, t.labels,
+          SELECT ${sql.literal(BOARD_TASK_COLUMNS)}, t.lead_session_id, t.description, t.status, t.labels,
                  t.updated_at, t.status_changed_at, t.project_id AS task_project_id
           FROM tasks t
           LEFT JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
@@ -1344,6 +1369,7 @@ const make = Effect.gen(function* () {
             labels: row.labels,
             project_id: row.task_project_id,
             initiative_id: row.initiative_id,
+            lead_session_id: row.lead_session_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
             status_changed_at: row.status_changed_at,
@@ -1670,6 +1696,75 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns what placed the Task's stage, or `null` when a person, the
+     * status or nothing did. Taken as it is, never followed to a survivor.
+     */
+    readStageCause: (id: string): Effect.Effect<StageCause | null, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly stage_cause_fact_id: number | null;
+          readonly stage_cause_session_id: Uint8Array | null;
+        }>`SELECT stage_cause_fact_id, stage_cause_session_id FROM tasks
+           WHERE id = ${uuidFromString(id)}`,
+        (rows) => {
+          const row = rows[0];
+          if (row?.stage_cause_fact_id != null) {
+            return { kind: "fact", factId: row.stage_cause_fact_id } as const;
+          }
+          if (row?.stage_cause_session_id != null) {
+            return { kind: "report", sessionId: uuidToString(row.stage_cause_session_id) } as const;
+          }
+          return null;
+        },
+      ),
+
+    /**
+     * Returns the stage of the Task's stored Stage Report claim, or none when
+     * the Task has never been reported.
+     */
+    readStageClaim: (taskId: string): Effect.Effect<Option.Option<TaskStage>, SqlError> =>
+      Effect.map(
+        sql<{ readonly stage: TaskStage }>`
+          SELECT stage FROM task_stage_reports WHERE task_id = ${uuidFromString(taskId)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.stage),
+      ),
+
+    /** Stores the claim of a Stage Report as the Task's only one, replacing the previous. */
+    writeStageClaim: (
+      taskId: string,
+      sessionId: string,
+      stage: TaskStage,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO task_stage_reports (task_id, session_id, stage, reported_at)
+        VALUES (${uuidFromString(taskId)}, ${uuidFromString(sessionId)}, ${stage}, ${at})
+        ON CONFLICT (task_id) DO UPDATE SET session_id = excluded.session_id,
+                                            stage = excluded.stage,
+                                            reported_at = excluded.reported_at`),
+
+    /**
+     * Returns the id of the Task a session is on, or none when the session is
+     * on no Task or has no row. The id is taken as stored: a merged Task is
+     * not followed to its survivor.
+     */
+    readSessionTaskId: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array | null }>`
+          SELECT task_id FROM sessions WHERE id = ${uuidFromString(sessionId)}`,
+        (rows) =>
+          rows[0]?.task_id == null ? Option.none() : Option.some(uuidToString(rows[0].task_id)),
+      ),
+
+    /** Returns the title of a session, or none when it has no row. */
+    readSessionTitle: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly title: string }>`
+          SELECT title FROM sessions WHERE id = ${uuidFromString(sessionId)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.title),
+      ),
+
+    /**
      * Returns the Task's fence, the highest fact id its stage already accounts
      * for. Taken as it is, never followed to a survivor. Dies on an id that
      * has no Task: the caller has read the Task.
@@ -1825,13 +1920,14 @@ const make = Effect.gen(function* () {
         });
         yield* sql`
           INSERT INTO tasks
-            (id, title, description, status, stage, priority, labels, project_id, initiative_id,
+            (id, title, description, status, stage, priority, labels, project_id, initiative_id, lead_session_id,
              created_at, updated_at, status_changed_at, stage_changed_at, board_rank)
           VALUES
             (${id}, ${task.title}, ${task.description}, ${task.status}, ${task.stage}, ${task.priority},
              ${JSON.stringify(task.labels)},
              ${task.projectId === undefined ? null : uuidFromString(task.projectId)},
              ${task.initiativeId === undefined ? null : uuidFromString(task.initiativeId)},
+             ${task.leadSessionId === undefined ? null : uuidFromString(task.leadSessionId)},
              ${task.at}, ${task.at}, ${task.at}, ${task.at}, ${boardRank})
         `;
         yield* insertProvenance(id, task.provenance, task.at, task.actor);
@@ -1848,6 +1944,7 @@ const make = Effect.gen(function* () {
           stage: task.stage,
           priority: task.priority,
           labels: task.labels,
+          leadSessionId: task.leadSessionId ?? null,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
           ...(task.initiativeId === undefined ? {} : { initiativeId: task.initiativeId }),
           provenance: task.provenance.map((entry) => ({

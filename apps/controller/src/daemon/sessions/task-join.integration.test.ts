@@ -334,7 +334,11 @@ const expectOutcome = async (arranged: Arranged, outcome: Outcome): Promise<void
     const created = await arranged.harness.platformEvents("task.created");
     expect(created).toHaveLength(before.createdEvents + 1);
     const last = created.at(-1)!;
-    expect((last.payload as { task: { id: string } }).task.id).toBe(stored.taskId);
+    const createdTask = (last.payload as { task: { id: string; leadSessionId: string | null } })
+      .task;
+    expect(createdTask.id).toBe(stored.taskId);
+    // The Thread the Task was made for leads it from the start, spawn or reopen alike.
+    expect(createdTask.leadSessionId).toBe(outcome.session.id);
     expect(last.actor).toBe(expected.actor);
   }
   if (outcome.workspaceTasks !== undefined) {
@@ -1169,6 +1173,219 @@ describe("the failure a Task shows, when a Thread joins it", () => {
       expect(await readFailure(arranged, taskId)).toEqual({
         failedRunId: FAILED_RUN_ID.replaceAll("-", ""),
         failureRevision: revision,
+      });
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* The lead of a Task                                                        */
+/* ------------------------------------------------------------------------ */
+
+const readLead = async (arranged: Arranged, taskId: string): Promise<string | null> =>
+  (await readTask(arranged, taskId)).leadSessionId;
+
+/** Moves a Thread to another Task, or to a new one when `taskId` is undefined, as the user. */
+const moveThread = async (arranged: Arranged, id: string, taskId?: string): Promise<void> => {
+  await readOk(
+    await post(
+      arranged.harness.base,
+      `/api/v1/sessions/${id}/move-to-task`,
+      taskId === undefined ? {} : { taskId },
+      arranged.token,
+    ),
+  );
+};
+
+/** Stores a stage report for a Task, as a lead's report will, so a merge has a claim to move. */
+const insertStageReport = (arranged: Arranged, taskId: string, sessionId: string, stage: string) =>
+  runWrite(
+    arranged,
+    arranged.harness.sql`
+      INSERT INTO task_stage_reports (task_id, session_id, stage, reported_at)
+      VALUES (unhex(${compact(taskId)}), unhex(${compact(sessionId)}), ${stage}, ${"2026-11-01T00:00:00.000Z"})`,
+  );
+
+/** Lists the Tasks that hold a stage report, without dashes. */
+const listReportedTasks = async (arranged: Arranged): Promise<ReadonlyArray<string>> =>
+  (
+    await runSql(
+      arranged.harness.sql<{
+        readonly id: string;
+      }>`SELECT lower(hex(task_id)) AS id FROM task_stage_reports`,
+    )
+  ).map((row) => row.id);
+
+const mergeTask = async (arranged: Arranged, sourceId: string, intoTaskId: string) =>
+  readOk(
+    await post(
+      arranged.harness.base,
+      `/api/v1/tasks/${sourceId}/merge`,
+      { intoTaskId },
+      arranged.token,
+    ),
+  );
+
+describe("the lead of a Task", () => {
+  it("is the Thread a new Task was made for, and stays so when a second Thread joins", async () => {
+    await withFleet(async (arranged) => {
+      const first = await spawnOk(arranged);
+      expect(await readLead(arranged, first.taskId!)).toBe(first.id);
+      await spawnOk(arranged, { taskId: first.taskId });
+      expect(await readLead(arranged, first.taskId!)).toBe(first.id);
+    });
+  });
+
+  it("is announced once with the Task a new Thread makes: task.created carries the lead and no task.updated follows", async () => {
+    await withFleet(async (arranged) => {
+      const first = await spawnOk(arranged);
+      const taskId = first.taskId!;
+      const created = (await arranged.harness.platformEvents("task.created")).filter(
+        (event) => (event.payload as { task: Task }).task.id === taskId,
+      );
+      expect(created).toHaveLength(1);
+      expect((created[0]!.payload as { task: Task }).task.leadSessionId).toBe(first.id);
+      const updated = (await arranged.harness.platformEvents("task.updated")).filter(
+        (event) => (event.payload as { task: Task }).task.id === taskId,
+      );
+      expect(updated).toEqual([]);
+    });
+  });
+
+  it("is the first Thread to join a Task that was filed with no session", async () => {
+    await withFleet(async (arranged) => {
+      const filed = await createTask(arranged, "Filed work");
+      expect(await readLead(arranged, filed.id)).toBeNull();
+      const first = await spawnOk(arranged, { taskId: filed.id });
+      const second = await spawnOk(arranged, { taskId: filed.id });
+      expect(second.taskId).toBe(filed.id);
+      expect(await readLead(arranged, filed.id)).toBe(first.id);
+    });
+  });
+
+  it("passes to a fork that continues the lead on the same Task", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await spawnAndEnd(arranged);
+      const fork = await forkSession(arranged, parent.id);
+      expect(fork.taskId).toBe(parent.taskId);
+      expect(await readLead(arranged, parent.taskId!)).toBe(fork.id);
+    });
+  });
+
+  it("does not pass to a fork of a Thread that is not the lead", async () => {
+    await withFleet(async (arranged) => {
+      const lead = await spawnOk(arranged);
+      const other = await spawnAndEnd(arranged, { taskId: lead.taskId });
+      const fork = await forkSession(arranged, other.id);
+      expect(fork.taskId).toBe(lead.taskId);
+      expect(await readLead(arranged, lead.taskId!)).toBe(lead.id);
+    });
+  });
+
+  it("does not pass to a fork that the join rule puts on another Task", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await spawnAndEnd(arranged);
+      await finishTask(arranged, parent.taskId!);
+      const fork = await forkSession(arranged, parent.id);
+      expect(fork.taskId).not.toBe(parent.taskId);
+      expect(await readLead(arranged, parent.taskId!)).toBe(parent.id);
+      expect(await readLead(arranged, fork.taskId!)).toBe(fork.id);
+    });
+  });
+
+  it("does not pass to a Thread that a lead spawned", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await startCaller(arranged);
+      const child = await spawnOk(arranged, {}, caller.token);
+      expect(child.taskId).toBe(caller.session.taskId);
+      expect(await readLead(arranged, child.taskId!)).toBe(caller.session.id);
+    });
+  });
+
+  it("is never a session of an Agent", async () => {
+    await withFleet(async (arranged) => {
+      const filed = await createTask(arranged, "Filed work");
+      const agentId = await createAgentId(arranged);
+      await spawnOk(arranged, { agentId, taskId: filed.id });
+      expect(await readLead(arranged, filed.id)).toBeNull();
+      const thread = await spawnOk(arranged, { taskId: filed.id });
+      expect(await readLead(arranged, filed.id)).toBe(thread.id);
+    });
+  });
+
+  it("passes to the oldest Thread left when the lead is moved away, or to nobody", async () => {
+    await withFleet(async (arranged) => {
+      const lead = await spawnOk(arranged);
+      const second = await spawnOk(arranged, { taskId: lead.taskId });
+      await spawnOk(arranged, { taskId: lead.taskId });
+      const destination = await createTask(arranged, "Elsewhere");
+
+      await moveThread(arranged, lead.id, destination.id);
+      expect(await readLead(arranged, lead.taskId!)).toBe(second.id);
+      expect(await readLead(arranged, destination.id)).toBe(lead.id);
+
+      // Moving the lead of the destination Task to a new Task leaves it with no lead.
+      await moveThread(arranged, lead.id);
+      expect(await readLead(arranged, destination.id)).toBeNull();
+      await moveThread(arranged, second.id, destination.id);
+      expect(await readLead(arranged, destination.id)).toBe(second.id);
+    });
+  });
+
+  it("is nobody once the only Thread of a Task is moved away", async () => {
+    await withFleet(async (arranged) => {
+      const only = await spawnOk(arranged);
+      const destination = await createTask(arranged, "Elsewhere");
+      await moveThread(arranged, only.id, destination.id);
+      expect(await readLead(arranged, only.taskId!)).toBeNull();
+    });
+  });
+
+  it("passes to the oldest Thread left when the lead is taken off Done into another Task", async () => {
+    await withFleet(async (arranged) => {
+      const lead = await spawnIdle(arranged);
+      const second = await spawnOk(arranged, { taskId: lead.taskId });
+      await markDone(arranged, lead.id);
+      await finishTask(arranged, lead.taskId!);
+
+      await reopenThread(arranged, lead.id);
+
+      const reopened = await readSession(arranged, lead.id);
+      expect(reopened.taskId).not.toBe(lead.taskId);
+      expect(await readLead(arranged, lead.taskId!)).toBe(second.id);
+      expect(await readLead(arranged, reopened.taskId!)).toBe(lead.id);
+    });
+  });
+
+  describe("in a merge", () => {
+    it("stays the survivor's, and its stage report stays too", async () => {
+      await withFleet(async (arranged) => {
+        const survivor = await spawnOk(arranged);
+        const source = await spawnOk(arranged);
+        await insertStageReport(arranged, survivor.taskId!, survivor.id, "planned");
+        await insertStageReport(arranged, source.taskId!, source.id, "building");
+
+        await mergeTask(arranged, source.taskId!, survivor.taskId!);
+
+        expect(await readLead(arranged, survivor.taskId!)).toBe(survivor.id);
+        expect(await listReportedTasks(arranged)).toEqual([compact(survivor.taskId!)]);
+        const [claim] = await runSql(
+          arranged.harness.sql<{ readonly stage: string }>`SELECT stage FROM task_stage_reports`,
+        );
+        expect(claim!.stage).toBe("planned");
+      });
+    });
+
+    it("comes from the source when the survivor has none, with the source's stage report", async () => {
+      await withFleet(async (arranged) => {
+        const survivor = await createTask(arranged, "Filed work");
+        const source = await spawnOk(arranged);
+        await insertStageReport(arranged, source.taskId!, source.id, "building");
+
+        await mergeTask(arranged, source.taskId!, survivor.id);
+
+        expect(await readLead(arranged, survivor.id)).toBe(source.id);
+        expect(await listReportedTasks(arranged)).toEqual([compact(survivor.id)]);
       });
     });
   });

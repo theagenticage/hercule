@@ -580,6 +580,12 @@ describe("session.spawn", () => {
         // call named one.
         modelSelection: { model: "clever", options: {} },
         accessMode: "approval-required",
+        // A new Thread leads its own Task, so it is told how to report the
+        // Task's stage. The sessions domain cannot import the text from the
+        // controller daemon, so the test checks its opening words.
+        coordination: expect.stringMatching(
+          /^This thread leads the Task \u201Chello\u201D on /,
+        ) as unknown,
         // Neither settings key is set, so the spec has the default timeouts.
         timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
       });
@@ -598,7 +604,10 @@ describe("session.spawn", () => {
         ),
       );
 
-      expect(row?.spec).toBe(JSON.stringify(start.spec));
+      // The coordination text is built at every start and never stored.
+      const { coordination, ...started } = start.spec;
+      expect(coordination).toContain("This thread leads the Task");
+      expect(row?.spec).toBe(JSON.stringify(started));
     });
   });
 
@@ -3528,8 +3537,11 @@ describe("session.update", () => {
         ),
       );
       // The change is stored on the session row, never in the spec the runner
-      // was started with.
-      expect(row?.spec).toBe(JSON.stringify(start.spec));
+      // was started with. The coordination text is built at every start and
+      // never stored.
+      const { coordination, ...started } = start.spec;
+      expect(coordination).toContain("This thread leads the Task");
+      expect(row?.spec).toBe(JSON.stringify(started));
     });
   });
 

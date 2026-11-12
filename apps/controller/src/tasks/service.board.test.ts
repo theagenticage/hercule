@@ -224,6 +224,7 @@ describe("the place of a Task in its cell", () => {
         const tasks = yield* TaskService;
         yield* createInCell("existing", "exploring");
         yield* tasks.joinSession({
+          sessionId: Bun.randomUUIDv7(),
           requestedTaskId: undefined,
           callerTaskId: undefined,
           workspaceId: null,
@@ -467,6 +468,7 @@ describe("the failure a Task shows", () => {
           // The Task is made by the user; only the Thread is started by the actor under test.
           yield* tasks
             .joinSession({
+              sessionId: Bun.randomUUIDv7(),
               requestedTaskId: task.id,
               callerTaskId: undefined,
               workspaceId: null,

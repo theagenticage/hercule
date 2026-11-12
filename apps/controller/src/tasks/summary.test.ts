@@ -121,6 +121,7 @@ describe("what marks a Task dirty", () => {
   const joinAs = (sessionKind: "thread" | "agent", requestedTaskId: string) =>
     Effect.flatMap(TaskService, (tasks) =>
       tasks.joinSession({
+        sessionId: Bun.randomUUIDv7(),
         requestedTaskId,
         callerTaskId: undefined,
         workspaceId: null,
@@ -148,6 +149,7 @@ describe("what marks a Task dirty", () => {
       (id: string) =>
         Effect.flatMap(TaskService, (tasks) =>
           tasks.rejoinThread({
+            sessionId: Bun.randomUUIDv7(),
             currentTaskId: id,
             workspaceId: null,
             title: "A Thread",

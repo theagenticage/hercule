@@ -162,13 +162,16 @@ export const SessionSpec = Schema.Struct({
    */
   memory: Schema.optionalKey(Schema.String),
   /**
-   * The paragraph that tells the agent how to work beside other agent
-   * sessions on the same repositories: Discussions, the Wiki, and the
-   * repositories checked out in its workspace (spec 19 section 7.1). The
+   * The text that tells the agent how to work beside other agent sessions
+   * on the same repositories: Discussions, the Wiki, and the repositories
+   * checked out in its workspace (spec 19 section 7.1). The thread that
+   * leads an open Task also gets a paragraph first, on how to report the
+   * Task's stage, with or without a checkout. The
    * controller builds it again at every start, a resume or a fork included,
    * so it is never stored and is absent from the session's stored spec. The
-   * adapter puts it right before `memory`. Absent when the session has no
-   * repository checked out, or holds no grant the paragraph is about. A
+   * adapter puts it right before `memory`. Absent when the session leads no
+   * open Task and has no repository checked out or no grant the checkout
+   * paragraph is about. A
    * runner that does not know this field ignores it.
    */
   coordination: Schema.optionalKey(Schema.String),

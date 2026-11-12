@@ -80,7 +80,7 @@ describe("the cause of a card's stage", () => {
         };
       }),
     );
-    const expected = { factId: 1, ref: pr(6221), text: "Pull request #6221 merged" };
+    const expected = { kind: "fact", factId: 1, ref: pr(6221), text: "Pull request #6221 merged" };
     expect(board).toEqual(expected);
     expect(detail).toEqual(expected);
   });
@@ -126,7 +126,7 @@ describe("the cause of a card's stage", () => {
         return yield* readBoardCause(task.id);
       }),
     );
-    expect(cause?.factId).toBe(1);
+    expect(cause).toMatchObject({ kind: "fact", factId: 1 });
   });
 
   it("stays after the thing is unlinked, because it is the history of why the card is there", async () => {
@@ -142,7 +142,12 @@ describe("the cause of a card's stage", () => {
         return yield* readBoardCause(task.id);
       }),
     );
-    expect(cause).toEqual({ factId: 1, ref: pr(6221), text: "Pull request #6221 merged" });
+    expect(cause).toEqual({
+      kind: "fact",
+      factId: 1,
+      ref: pr(6221),
+      text: "Pull request #6221 merged",
+    });
   });
 
   it("names a thing whose record is gone", async () => {

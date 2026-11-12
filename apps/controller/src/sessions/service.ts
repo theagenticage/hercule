@@ -960,13 +960,22 @@ const make = Effect.gen(function* () {
       // Read after the reopen wrote its row, so the Thread certainly exists.
       const thread = Option.getOrThrow(yield* sessions.one(sessionId));
       const taskId = yield* tasks.rejoinThread({
+        sessionId,
         currentTaskId: thread.taskId ?? undefined,
         workspaceId: thread.workspaceId,
         title: thread.title,
         projectId: thread.projectId ?? undefined,
         actor,
       });
-      if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
+      if (taskId !== thread.taskId) {
+        yield* sessions.setTaskId(sessionId, taskId);
+        yield* tasks.settleLeadAfterMove({
+          sessionId,
+          fromTaskId: thread.taskId ?? undefined,
+          toTaskId: taskId,
+          continuedFromSessionId: undefined,
+        });
+      }
       yield* audit.append({
         kind: "session.reopened",
         actor,
@@ -2044,6 +2053,12 @@ const make = Effect.gen(function* () {
             if (toTaskId !== fromTaskId) {
               // `setTaskId` announces the cards of both Tasks.
               yield* sessions.setTaskId(id, toTaskId);
+              yield* tasks.settleLeadAfterMove({
+                sessionId: id,
+                fromTaskId,
+                toTaskId,
+                continuedFromSessionId: undefined,
+              });
               if (fromTaskId !== undefined) yield* tasks.markSummaryDirty(fromTaskId);
               yield* tasks.markSummaryDirty(toTaskId);
               yield* audit.append({
@@ -2448,6 +2463,7 @@ const make = Effect.gen(function* () {
                 requestedTaskId: open.taskSource.requestedTaskId,
                 callerTaskId: open.taskSource.callerTaskId,
                 workspaceId: open.spec.workspaceId,
+                sessionId: open.id,
                 // A session with no Agent is a Thread. This matches the
                 // `kind` column the database derives, because a session
                 // placed here answers no conversation and runs no step.
@@ -2492,6 +2508,18 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        // After the insert, because the lead rules read the session's kind and
+        // Task from its row. Only a fork made by `session.continue` can take
+        // over its parent's lead, and a spawned child never does.
+        if (taskId !== undefined) {
+          yield* tasks.settleLeadAfterMove({
+            sessionId: open.id,
+            fromTaskId: undefined,
+            toTaskId: taskId,
+            continuedFromSessionId:
+              open.kind === "session.continued" ? open.parentSessionId : undefined,
+          });
+        }
         if (open.spec.workspaceId !== null)
           yield* workspaces.retainForThread(open.id, open.spec.workspaceId);
         // The prompt is stored as an ordinary input, waiting with the
