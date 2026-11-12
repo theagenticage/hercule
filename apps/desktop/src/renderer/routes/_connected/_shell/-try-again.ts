@@ -146,26 +146,27 @@ export const useTryAgain = (
       const words = describeTryAgain(title);
       callbacks.sayWithUndo(`${words}.`, {
         words,
-        undo: async () => {
-          try {
-            const answer = await client.task.undoTryAgain({
+        undo: () =>
+          client.task
+            .undoTryAgain({
               params: { id: taskId },
               payload: { runId: started.runId },
-            });
-            const result = describeTryAgainUndo(answer);
-            if (result.kind === "stayed") throw new Error(result.reason);
-            if (scope.isCurrent()) callbacks.onUndone(taskId);
-            return undefined;
-          } finally {
-            // The failure is back, or the Task stays as it is: either way the
-            // run is no longer one to wait for.
-            releaseRequest(queryClient, request);
-            if (scope.isCurrent()) {
-              invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
-              invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
-            }
-          }
-        },
+            })
+            .then((answer) => {
+              const result = describeTryAgainUndo(answer);
+              if (result.kind === "stayed") throw new Error(result.reason);
+              if (scope.isCurrent()) callbacks.onUndone(taskId);
+              return undefined;
+            })
+            .finally(() => {
+              // The failure is back, or the Task stays as it is: either way the
+              // run is no longer one to wait for.
+              releaseRequest(queryClient, request);
+              if (scope.isCurrent()) {
+                invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+                invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
+              }
+            }),
       });
       callbacks.onStarted(taskId);
     },

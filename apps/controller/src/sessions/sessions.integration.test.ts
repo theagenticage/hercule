@@ -1535,7 +1535,13 @@ describe("a runner that leaves", () => {
       // The reports before the exit keep the controller busy, so the close is
       // read while the exit is still queued. An exit dropped there would
       // leave the session `busy` until the runner reconnects.
-      for (let report = 0; report < 300; report++) {
+      //
+      // 50 reports are enough: the controller reads all of them, the exit and
+      // the close before it handles the first (measured: 51 frames still
+      // queued when the close is read). More only slow the test, and on a
+      // loaded machine the controller gives up on frames still queued five
+      // seconds after the close, which 300 reports could exceed.
+      for (let report = 0; report < 50; report++) {
         arranged.wire.send({ _tag: "factsReport", facts: FACTS });
       }
       reportExited(arranged.wire, session.id, 2);

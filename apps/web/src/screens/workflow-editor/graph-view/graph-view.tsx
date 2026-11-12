@@ -523,6 +523,13 @@ function DrawingPlacement({
 const measureNoCardSlots = (): number => 0;
 
 /**
+ * Tailwind classes for the pane: it fills its box and dims the drawing
+ * while the graph on screen is stale. Kept as a module constant, outside the
+ * component, because the React Compiler cannot compile a `String.raw` template.
+ */
+const STALE_VIEWPORT_CLASS = String.raw`relative h-full w-full data-stale:[&_.react-flow\_\_viewport]:opacity-50`;
+
+/**
  * Renders a graph: a workflow's, or a run's plan with the run's progress on
  * it. Every node is drawn by `Card`, every edge in the style that
  * `decideEdgeStyle` returns for it, with the badge `describeEdgeBadge`
@@ -681,10 +688,7 @@ export function GraphView<
               ),
             }
       }
-      className={cn(
-        String.raw`relative h-full w-full data-stale:[&_.react-flow\_\_viewport]:opacity-50`,
-        className,
-      )}
+      className={cn(STALE_VIEWPORT_CLASS, className)}
     >
       <ArrowMarkers base={markerBase} colours={drawing.colours} />
       <ReactFlow

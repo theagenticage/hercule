@@ -3951,6 +3951,14 @@ These are starting budgets. The first performance pass measures the real thread 
 
 **Judged on Linux, before against after.** Memory and time on Linux have no budget. A change is compared with the same tree without it, on the same machine and setup, back to back in the same container image, with the host's load recorded. The tolerance is about 5 MB of PSS summed and 3 MB for the renderer. A time needs repeats, because one launch can be several hundred milliseconds off (see the table).
 
+*(Added 2026-11-12, [#1108](https://github.com/theagenticage/hercule/issues/1108).)* **When the machine is too busy for reliable timings,** a Linux reading of memory or time cannot be compared before against after, because the host's load moves it more than the change does. Then the record of the change holds:
+
+- the bundle bytes, which do not depend on load, measured with `bun run scripts/compare-bundle.ts`;
+- a written cost review of the change: processes, work while idle, work per streamed token and memory, reasoned from the code;
+- each memory and time row that was not measured, named as not measured, with the reason.
+
+A cost review is a statement of what the code does, never a measurement, and the record never presents it as one. The counts that do not depend on load (process count, idle timers, work per streamed token) are still judged by the end-to-end suite and CI.
+
 **A change is measured on the platform its author has.** A Linux author is not blocked by a Mac budget, and a Mac author is not blocked by a Linux reading. The record of the change in [Measured](#measured) names the platform.
 
 **What the readings are called on Linux:**
@@ -4059,6 +4067,35 @@ These rules keep the budgets:
 
 **Verify in the first performance pass:** whether Chromium's `--double-buffer-compositing` switch is worth it. The switch keeps two window-sized frame buffers instead of three, which saves about 20 MB in the GPU process while frames come, as they do whenever a caret blinks ([Baseline](#baseline)). It can also drop frames. The app takes the switch only if a turn streaming at full speed while the transcript scrolls drops no more frames with it than without it.
 
+### The counts check
+
+*(Added 2026-11-12, [#1144](https://github.com/theagenticage/hercule/issues/1144).)* **The counts check measures what a desktop change costs in counts, in under a minute.** The full perf run (the perf script below, with the packaged app and the compiled controller, twice each side) takes close to an hour, mostly waiting. What caught the regressions of the new Inbox ([#1122](https://github.com/theagenticage/hercule/issues/1122)) were counts: reads per action, elements restyled per key (three `:has()` rules restyled 920 elements on every J), bundle bytes, rows re-rendered. Counts do not depend on how busy the machine is, so they need no quiet machine, no repeats and no "before" build: the baseline is committed.
+
+`pnpm --filter @hercule/desktop perf:counts` (on a Linux machine without Chromium's libraries, `perf:counts:container`) runs three parts at once and compares every count with `apps/desktop/perf-counts.baseline.json`:
+
+- **Bundle.** The desktop build, then the bytes of the renderer (raw and gzipped), the renderer's first screen gzipped, main, main's startup files and preload, counted by the bundle budget check's own functions. `compare-bundle.ts` stays for the bytes of each chunk.
+- **Controller reads.** The Work board's and the Inbox's speed tests in their counts mode (`PERF_COUNTS_FILE`): each read runs once, no time is asserted, and the statements and reply bytes of each read are recorded. Their seeds are deterministic.
+- **Screens.** A page (`specimens/perf-counts.html`) boots the real app as `main.tsx` does, with the real router, loaders, live connection, writes and invalidations, over a fake controller played inside the page: `fetch` and the WebSocket are the test stubs of `@hercule/client-core/testing`, and nothing is seeded into the cache. It holds 300 Inbox things or 300 Tasks in 10 Projects. One Playwright Chromium drives each screen step by step:
+  - the Inbox: open, open a card, click the first row, J ×50 with the pane following, E, Cmd+Z, a push about a thing it holds, a push with a new arrival, and Show;
+  - Work: open, focus the first card, J ×10, Shift+Right, and a push that renames a card.
+
+  For each step it counts the requests the app sent, the elements Chromium restyled (summed over the step's style recalculations, from a trace), the components React rendered and those of the row or card component alone, and the elements in the document. After the screen opens and has been quiet for a second, it counts what would keep the page working while idle: running intervals, timeouts within a second and later, and pending animation frames. Every step checks that it did what it is named for, and has settled only when no read or write runs, no animation frame or finite animation is pending, and two frames pass with no new request. A request the fake controller does not answer fails the check.
+
+  Renders are counted through the hook React DevTools uses, in the development build that Vite serves, which applies the React Compiler as the release build does. The page renders without `StrictMode`, which would double every count, and stops the clock, so no age label changes and no read goes stale during a step.
+
+**The baseline is the budget.** A count higher than the baseline fails the check. A count is compared exactly, with two exceptions that vary a little between runs, most on a busy machine: the elements restyled in a step may grow by 10 % of the baseline, and at least 25 elements, because the number of style recalculations in a step's frames varies; and the components rendered in a step may grow by 5 %, and at least 5 renders, because React commits the answers that arrive in one task together, and how the answers fall into tasks varies. A real regression grows them many times over. A key missing on either side fails too. A change that costs more on purpose re-writes the baseline with `--write-baseline` and gives the reason in its pull request. CI runs the check in the `desktop-counts` job, on the same Chromium as `ui-metrics`.
+
+Measured on 2026-11-12 on Linux (the desktop container, a 16-core host at a load of about 20): the whole check took 22 to 23 s, the build, the speed tests and the browser each in parallel, and 40 s while the full test suite ran beside it. Runs in a row gave the same counts, apart from a few renders and restyles within the tolerances above. Three regressions planted together on the Inbox were each caught on J ×50: a `:has()` rule on the current row (110,693 elements restyled against 15,810), a prop that changes on every render of the list (2,632 row renders against 136), and a second read per thing in the pane (98 requests against 49).
+
+**The full run is still needed** for what no count shows, on the platform its author has (see [Platforms](#platforms)):
+
+- a change to the process model, main, preload or the IPC contract;
+- a change to streaming, the transcript, or anything drawn per frame (animation, glass, faces);
+- memory, launch time, frame times and wakeups, which the counts check does not measure;
+- once per map, after its last slice, and before a release, to calibrate the counts against the real app.
+
+**Adding a screen** takes a world in `perf-counts.tsx` (its records and the handlers that answer its reads and writes) and a plan in `scripts/perf-counts-screens.ts` (what the page shows once open, its row component, and its steps).
+
 ### Measuring
 
 - **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* It runs on macOS and on Linux. Run it in the container on a headless Linux machine. On Linux it reads the numbers named under [Platforms](#platforms), and shows a Mac budget without judging it. Everything below describes a Mac run unless it says Linux.
@@ -4074,7 +4111,9 @@ These rules keep the budgets:
   - ~~**Long tasks** come from a `PerformanceObserver` in the renderer.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **Long tasks** come from a Chromium trace of a turn streaming into the fixture thread, recorded over the page's DevTools connection. A long task is a task on the renderer's main thread that runs over 50 ms: the page cannot react to input until it ends. The trace needs no measuring code in the app. Tracing costs the renderer a little time of its own, so the tasks err long.
 - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office is measured with the Office's own fleet,** because a scratch controller has no 16 working threads to seat. Its measurement opens the Office with the reference fleet in the repository's Electron, and reads each process's CPU and wakeups from `app.getAppMetrics()`, frames from the page, and draw calls from three.js.
   - **CPU is a share of one core:** the growth of `cumulativeCPUUsage`, in seconds, divided by the seconds sampled. `percentCPUUsage` cannot be used for this: on macOS, Electron divides it by the number of logical CPUs, so on the reference machine's 16 it reads one sixteenth of a share of one core.
+- *(Added 2026-11-12, [#1108](https://github.com/theagenticage/hercule/issues/1108).)* **Bundle bytes, before and after,** come from `bun run scripts/compare-bundle.ts [--base <ref>]`, which defaults to `origin/main`. It builds the desktop bundle (`pnpm --filter @hercule/desktop build`) at the merge-base of HEAD and the base in a throwaway worktree, and again in the working tree with its uncommitted changes. It prints one table per layer (main, preload, renderer: total and gzipped bytes, with the renderer's first screen and main's startup files as the budget check counts them, through its own functions) and one table of the chunks whose minified bytes changed, matched by name without the content hash. It compares raw bytes because a content hash has a fixed length: a chunk's raw size changes only when its code does, while its gzip size also moves when an import's hash changes. Names that collide after the hash is stripped are summed into one marked row.
 - **CI checks what does not depend on the machine:**
+  - *(Added 2026-11-12, [#1144](https://github.com/theagenticage/hercule/issues/1144).)* every count of [the counts check](#the-counts-check), against its baseline, in the `desktop-counts` job.
   - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
   - ~~the process count. A new process fails the test, because it changes the process model, which a slice must justify.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* The process count is checked by the end-to-end suite, which ~~runs on a developer's Mac, not in CI~~ runs on the author's platform and in CI on Linux *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017))* (see [Testing](#testing)). A new process fails that test, because it changes the process model, which a slice must justify.
   - ~~no long tasks while streaming the fixture, once slice 5 streams. While the budgets are guides, it only reports.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* CI does not count long tasks. How long a task runs depends on the machine: a task that runs 40 ms on the reference machine can run 80 ms on a slower one.

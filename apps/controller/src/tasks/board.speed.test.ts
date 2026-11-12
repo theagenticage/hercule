@@ -63,6 +63,7 @@ import {
 import { TaskTrackingRunsLayer } from "../daemon/runs";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabaseWriter } from "../db/testing";
+import { isCountingOnly, recordSpeedCount } from "../db/speed-counts.testing";
 import { runMigrations } from "../db/migrate";
 import { migrations } from "../db/migrations";
 import { AuditLog, PlatformEventsLayer } from "../events";
@@ -77,18 +78,18 @@ import { TaskDetails, TaskDetailsLayer } from "./detail";
 import { TaskService, TaskServiceLayer } from "./index";
 import { USER } from "./testing";
 
-/** Set to "1" by `pnpm test:speed`. */
-const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
+/** Set to "1" by `pnpm test:speed`. The counts check runs them too (see `isCountingOnly`). */
+const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1" || isCountingOnly;
 
 /** How often each call is timed after it has warmed up. */
-const RUNS = 25;
-const WARM_UP_RUNS = 5;
+const RUNS = isCountingOnly ? 1 : 25;
+const WARM_UP_RUNS = isCountingOnly ? 0 : 5;
 
 /**
  * The most time any timed call may take, in milliseconds. It is an order of
  * magnitude, not a target: the targets are printed beside the numbers.
  */
-const CEILING_MS = 250;
+const CEILING_MS = isCountingOnly ? Infinity : 250;
 
 const AT = "2026-11-01T10:00:00.000Z";
 const TURN_ENDED = "2026-11-01T12:00:00.000Z";
@@ -346,6 +347,11 @@ const formatMs = (ms: number | undefined) => (ms === undefined ? "-" : `${ms.toF
 
 afterAll(() => {
   if (report.length === 0) return;
+  for (const row of report) {
+    if (row.statements !== undefined)
+      recordSpeedCount(`board/${row.name.trim()}/statements`, row.statements);
+    if (row.bytes !== undefined) recordSpeedCount(`board/${row.name.trim()}/bytes`, row.bytes);
+  }
   const header = ["case", "median", "p95", "stmts", "bytes", "B/card", "target", "within"];
   const rows = report.map((row) => [
     row.name,

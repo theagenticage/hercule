@@ -68,6 +68,8 @@ export interface TextFragment {
    * from them is only an estimate.
    */
   readonly partlyCovered: boolean;
+  /** A short, stable name for reports: the element that draws the text, as a CSS path with the start of its text. */
+  readonly element: string;
 }
 
 /** The theme tokens a metric compares with, resolved to sRGB in the page's top-level theme. */
@@ -96,6 +98,11 @@ export interface DisciplineFacts {
   readonly offTokenRadii: ReadonlyArray<string>;
   /** Every non-zero computed padding, margin and gap value of a visible element, in px, repeats kept. */
   readonly spacingValues: ReadonlyArray<number>;
+  /** The elements that have a value of `spacingValues` off the 4px grid, in document order, with those values as "property value" text. */
+  readonly offGridSpacing: ReadonlyArray<{
+    readonly element: string;
+    readonly values: ReadonlyArray<string>;
+  }>;
   /**
    * How many text samples the page draws in a fixed size on purpose, whose
    * font sizes are left out of `fontSizes` and `offScaleFontSizes`: the four
@@ -111,6 +118,16 @@ export interface DisciplineFacts {
    * not a piece.
    */
   readonly pieceTextFragments: number;
+  /**
+   * For each distinct value above, the first element in document order that has it, named as in
+   * `TextFragment.element`. The keys are the values as text: `15` for a font size, `8px` for a radius.
+   * A font size or weight is the one of a text line, so its element is the one that draws the text.
+   */
+  readonly examples: {
+    readonly fontSizes: Readonly<Record<string, string>>;
+    readonly fontWeights: Readonly<Record<string, string>>;
+    readonly radii: Readonly<Record<string, string>>;
+  };
 }
 
 /** An element a user can click or focus. */
@@ -124,6 +141,8 @@ export interface ProbeTarget {
   readonly inlineInProse: boolean;
   /** Whether its box is fully inside the window. */
   readonly inWindow: boolean;
+  /** A short, stable name for reports: the element as a CSS path with the start of its text. */
+  readonly element: string;
 }
 
 /** What happened when `focusTarget` focused an element. */
@@ -144,6 +163,14 @@ export interface ClippingFacts {
   readonly clippedCharacters: number;
   /** Pairs of fragments of different sources whose visible boxes overlap by more than 2 square px. Pseudo-element strings are left out. */
   readonly overlappingPairs: number;
+  /** The fragments that lose characters, each with how many (more than 0), in document order. */
+  readonly clippedTexts: ReadonlyArray<{ readonly element: string; readonly characters: number }>;
+  /** The overlapping pairs, each with the area they share in square px. The elements are named as in `TextFragment.element`. */
+  readonly overlaps: ReadonlyArray<{
+    readonly first: string;
+    readonly second: string;
+    readonly area: number;
+  }>;
 }
 
 /** The measure of the transcript's prose. */
@@ -152,6 +179,12 @@ export interface ProseFacts {
   readonly lines: number;
   /** Mean characters per full line, or null when there are none. */
   readonly meanCharactersPerLine: number | null;
+  /** The paragraphs that have full lines, in document order, each with its mean characters per full line. The elements are named as in `TextFragment.element`. */
+  readonly paragraphs: ReadonlyArray<{
+    readonly element: string;
+    readonly lines: number;
+    readonly meanCharactersPerLine: number;
+  }>;
 }
 
 /**

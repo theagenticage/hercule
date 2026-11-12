@@ -37,6 +37,17 @@ export interface MetricDefinition {
   readonly ratchetCap?: (context: { readonly dark: boolean }) => number;
 }
 
+/** One thing behind a metric's value, for a report that says what made a number worse. */
+export interface MetricElement {
+  /** A stable name a person can find: a CSS path with the start of the text, a token pair, a stylesheet declaration or a glyph pair. */
+  readonly element: string;
+  /** What it adds to the metric's value, in the metric's own unit: clipped characters, its Lc, its size in px (`formatContribution` names the exception, the count of off-grid values of `spacing.onGrid`). Lists are sorted worst first. */
+  readonly contribution: number;
+}
+
+/** Metric keys, in the form `METRICS` and the run's keys use, to the elements behind each. A key with no elements is absent. */
+export type MetricElements = Readonly<Record<string, ReadonlyArray<MetricElement>>>;
+
 /** Two values closer than this are equal: it absorbs floating point noise at a tolerance boundary. */
 const EPSILON = 1e-9;
 
@@ -224,28 +235,43 @@ function readContext(key: string): { readonly dark: boolean } {
 }
 
 /**
- * Returns the part of the baseline that a run of `themes` is compared with:
- * the keys of those themes, and the `run/...` keys if and only if `themes`
- * includes `RUN_WIDE_THEME`. A key of another known theme is dropped, so a
- * run that measures only some themes does not report the others as missing.
- * Fails when a key is not a metric key, or names a theme that does not exist:
- * no shard would measure such a key, so dropping it would let it vanish from
+ * Returns the part of the baseline that a run of `themes` and `screens` is
+ * expected to measure. The rule follows what `measurePage` measures:
+ * - `<theme>/<screen>/...`: when the theme and the screen are both selected;
+ * - `<theme>/tokens/...`: when the theme is selected and so is the first screen
+ *   of `UI_SCREENS`, the only page that measures a theme's tokens;
+ * - `run/...`: when `RUN_WIDE_THEME` and that first screen are both selected.
+ *
+ * It depends only on the selection, never on what the run produced, so a
+ * measurement that is genuinely missing still shows up as missing. Fails when
+ * a key is not a metric key, or names a theme or screen that does not exist:
+ * no run would measure such a key, so dropping it would let it vanish from
  * every comparison unseen.
  */
-export function selectBaselineForThemes(
+export function selectBaselineForRun(
   baseline: Readonly<Record<string, number>>,
   themes: ReadonlyArray<string>,
+  screens: ReadonlyArray<string>,
 ): Record<string, number> {
-  const includesRunWide = themes.includes(RUN_WIDE_THEME);
+  const firstScreen = UI_SCREENS[0]?.name ?? "";
+  const measuresFirstScreen = screens.includes(firstScreen);
   return Object.fromEntries(
     Object.entries(baseline).filter(([key]) => {
-      const { theme } = parseKey(key);
+      const { theme, screen } = parseKey(key);
       if (theme !== null && !ALL_THEMES.includes(theme)) {
         throw new Error(
           `The baseline holds ${key}, of a theme that does not exist. Write the baseline again from a full run.`,
         );
       }
-      return theme === null ? includesRunWide : themes.includes(theme);
+      if (theme === null) return themes.includes(RUN_WIDE_THEME) && measuresFirstScreen;
+      if (!themes.includes(theme)) return false;
+      if (screen === TOKENS_SCREEN) return measuresFirstScreen;
+      if (!UI_SCREENS.some(({ name }) => name === screen)) {
+        throw new Error(
+          `The baseline holds ${key}, of a screen that does not exist. Write the baseline again from a full run.`,
+        );
+      }
+      return screens.includes(screen ?? "");
     }),
   );
 }
@@ -430,22 +456,55 @@ function renderTable(
   return [renderRow(header), divider, ...rows.map(renderRow)].join("\n");
 }
 
+/**
+ * Returns an element's contribution rounded for display, in the unit of the
+ * contribution. It is the metric's own unit except for `spacing.onGrid`, whose
+ * value is a share and whose contribution is a count of off-grid values.
+ */
+function formatContribution(metric: string, contribution: number): string {
+  if (metric === "spacing.onGrid") {
+    return `${String(contribution)} off-grid ${contribution === 1 ? "value" : "values"}`;
+  }
+  return formatValue(metric, contribution);
+}
+
 /** The mark that follows a displayed value that misses its target. */
 const MISSED_MARK = " ✗";
 
-/** Returns the lines that list changed keys, with their values rounded for display. */
-function renderChanges(changes: ReadonlyArray<RatchetChange>): string[] {
-  return changes.map(({ key, baseline, current }) => {
+/** How many elements the report lists under a worse key. The rest are in `ELEMENTS_FILE`. */
+const REPORTED_ELEMENT_COUNT = 5;
+
+/** Where a run writes every key's elements, as the report names it. */
+export const ELEMENTS_FILE = "out/ui-metrics/elements.json";
+
+/**
+ * Returns the lines that list changed keys, with their values rounded for
+ * display. Under each key that has elements, it lists the first five with
+ * their contribution (the list is sorted worst first), and how many more there are.
+ */
+function renderChanges(
+  changes: ReadonlyArray<RatchetChange>,
+  elements: MetricElements = {},
+): string[] {
+  return changes.flatMap(({ key, baseline, current }) => {
     const metric = readMetricName(key);
-    return `- \`${key}\`: ${formatValue(metric, baseline)} -> ${formatValue(metric, current)}`;
+    const list = elements[key] ?? [];
+    const rest = list.length - REPORTED_ELEMENT_COUNT;
+    return [
+      `- \`${key}\`: ${formatValue(metric, baseline)} -> ${formatValue(metric, current)}`,
+      ...list
+        .slice(0, REPORTED_ELEMENT_COUNT)
+        .map((each) => `  - ${each.element}: ${formatContribution(metric, each.contribution)}`),
+      ...(rest > 0 ? [`  - and ${String(rest)} more (${ELEMENTS_FILE})`] : []),
+    ];
   });
 }
 
 /** Returns the section of the report about the comparison with the baseline. */
-function renderRatchet(ratchet: RatchetResult): string[] {
+function renderRatchet(ratchet: RatchetResult, elements: MetricElements): string[] {
   const lines = [`## Ratchet: ${ratchet.passed ? "passed" : "FAILED"}`];
   const sections: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
-    ["Worse than the baseline", renderChanges(ratchet.worse)],
+    ["Worse than the baseline", renderChanges(ratchet.worse, elements)],
     [
       "In the baseline, missing from this run",
       ratchet.missingFromCurrent.map((key) => `- \`${key}\``),
@@ -508,12 +567,15 @@ function listColumns(grid: Grid): Set<string> {
  * the targets, then per theme a table of its screens (one row per metric, one
  * column per screen), a table of every theme's tokens, and a table of the
  * run's own values. Values are rounded for display, and a value that misses
- * its target is marked with "✗". Fails when a key's metric is not in `METRICS`.
+ * its target is marked with "✗". Under each worse key the report lists the
+ * first elements behind its value, from `elements`. Fails when a key's metric
+ * is not in `METRICS`.
  */
 export function formatReport(
   current: Readonly<Record<string, number>>,
   ratchet: RatchetResult,
   targets: ReadonlyArray<TargetResult>,
+  elements: MetricElements = {},
 ): string {
   const metByKey = new Map(targets.map((target) => [target.key, target.met]));
   const missed = targets.filter((target) => !target.met).length;
@@ -538,7 +600,7 @@ export function formatReport(
   }
 
   const lines = [
-    ...renderRatchet(ratchet),
+    ...renderRatchet(ratchet, elements),
     "",
     `## Targets: ${targets.length - missed} of ${targets.length} met`,
   ];

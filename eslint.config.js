@@ -3,6 +3,8 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import prettier from "eslint-config-prettier/flat";
+import css from "@eslint/css";
+import { transitionProperties } from "./apps/desktop/scripts/eslint-transition-rule.ts";
 
 /** Imports banned everywhere, each one encoding a spec or ADR rule. */
 const bannedEverywhere = [
@@ -274,6 +276,9 @@ const markupSyntax = [
 ].map((selector) => ({ selector, message: markupMessage }));
 const desktopRendererSyntax = [viteGlobSyntax, viteAssetUrlSyntax, ...specimensCalls];
 
+/** Every file ESLint reads as JavaScript or TypeScript, as opposed to the CSS it also lints. */
+const scriptFiles = ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"];
+
 export default tseslint.config(
   {
     // The generated files are build output that happens to be TypeScript.
@@ -300,12 +305,20 @@ export default tseslint.config(
       "/hercule",
     ],
   },
-  js.configs.recommended,
-  // The rules that need type information run in oxlint (.oxlintrc.json),
-  // which runs them many times faster than ESLint, so ESLint builds no
-  // TypeScript program.
-  tseslint.configs.recommended,
   {
+    // The script rules below must not reach the stylesheets, which are parsed
+    // as CSS (see the `**/*.css` block near the end).
+    files: scriptFiles,
+    extends: [
+      js.configs.recommended,
+      // The rules that need type information run in oxlint (.oxlintrc.json),
+      // which runs them many times faster than ESLint, so ESLint builds no
+      // TypeScript program.
+      tseslint.configs.recommended,
+    ],
+  },
+  {
+    files: scriptFiles,
     rules: {
       "no-restricted-imports": [
         "error",
@@ -342,10 +355,16 @@ export default tseslint.config(
     },
     extends: [reactHooks.configs.flat["recommended-latest"]],
     rules: {
-      // Spec 14: the compiler-aware react-hooks rules are CI-blocking.
+      // Spec 14: the compiler-aware react-hooks rules are CI-blocking. `todo`,
+      // `invariant` and `syntax` report every function the React Compiler
+      // cannot compile, which `recommended-latest` leaves off; without them a
+      // bailout is silent and the function ships unmemoized.
       "react-hooks/exhaustive-deps": "error",
       "react-hooks/incompatible-library": "error",
       "react-hooks/unsupported-syntax": "error",
+      "react-hooks/todo": "error",
+      "react-hooks/invariant": "error",
+      "react-hooks/syntax": "error",
       "no-restricted-imports": browserImports(),
       "no-restricted-syntax": browserSyntax(),
     },
@@ -545,6 +564,15 @@ export default tseslint.config(
         { paths: bannedEverywhere, patterns: editorLibraryPatterns },
       ],
     },
+  },
+  {
+    // The renderer's stylesheets are linted with one rule of our own, which
+    // refuses a transition of a layout property (spec 17 §Performance, rule 2).
+    // `@eslint/css`'s own rules are off: none of them is part of this project.
+    files: ["apps/desktop/src/renderer/**/*.css"],
+    language: "css/css",
+    plugins: { css, desktop: { rules: { "transition-properties": transitionProperties } } },
+    rules: { "desktop/transition-properties": "error" },
   },
   {
     files: ["**/*.js"],

@@ -42,30 +42,31 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { mintUuid, uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { isCountingOnly, recordSpeedCount } from "../db/speed-counts.testing";
 import { taskRepository } from "../tasks";
 import { claimRepository } from "./claims";
 import type { ActiveEntityKind } from "./entity-records";
 import type { InboxEnvironment } from "./inbox-query";
 import { inbox } from "./inbox.testing";
 
-/** Set to "1" by `pnpm test:speed`. */
-const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
+/** Set to "1" by `pnpm test:speed`. The counts check runs them too (see `isCountingOnly`). */
+const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1" || isCountingOnly;
 
 /** The target of spec 17 for a page at 300 things, in milliseconds. */
-const PAGE_TARGET_MS = 20;
+const PAGE_TARGET_MS = isCountingOnly ? Infinity : 20;
 
 /** The most time a page may take at 1,000 and 2,400 things, in milliseconds. */
-const LARGE_PAGE_CEILING_MS = 100;
+const LARGE_PAGE_CEILING_MS = isCountingOnly ? Infinity : 100;
 
 /** The most time the counts may take, in milliseconds. */
-const COUNTS_CEILING_MS = 150;
+const COUNTS_CEILING_MS = isCountingOnly ? Infinity : 150;
 
 /** The most time one walk up may take, in milliseconds. */
-const ANCESTORS_CEILING_MS = 200;
+const ANCESTORS_CEILING_MS = isCountingOnly ? Infinity : 200;
 
 /** How often each read is timed after it has warmed up. */
-const RUNS = 25;
-const WARM_UP_RUNS = 5;
+const RUNS = isCountingOnly ? 1 : 25;
+const WARM_UP_RUNS = isCountingOnly ? 0 : 5;
 
 /** The plugin the walk up part-of seeds its Connection for. */
 const PLUGIN = "acme";
@@ -278,7 +279,7 @@ const seed = (things: number) =>
         json_object('type', 'event', 'eventId', 1, 'connectionId', 'x',
                     'threadRef', json_extract(value, '$.ref')),
         json_extract(value, '$.kind') || ' on ' || json_extract(value, '$.ref'),
-        'Asker ' || (abs(random()) % 9), 'acme/web', 'normal', '[]', '[]', '{}', 'open',
+        'Asker ' || (key % 9), 'acme/web', 'normal', '[]', '[]', '{}', 'open',
         json_extract(value, '$.at'), unhex(replace(json_extract(value, '$.connection'), '-', '')),
         json_extract(value, '$.ref')
       FROM json_each(${JSON.stringify(signalRows)})`;
@@ -559,6 +560,13 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
       const result = await runSizeOnce(size);
       bySize.set(size, result);
       for (const one of result.cases) printCase(size, one);
+      // The counts check keeps the counts at 300 things; the test below checks that they hold at every size.
+      if (size === SIZES[0]) {
+        for (const one of result.cases) {
+          recordSpeedCount(`inbox/${one.name}/statements`, one.statements);
+          recordSpeedCount(`inbox/${one.name}/bytes`, one.bytes);
+        }
+      }
       process.stderr.write(
         `        waits ${String(result.waitingTotal)} of ${String(result.newestTotal)}, ${String(result.facets)} facets on the first page\n` +
           `        bytes of a row by field: ${result.fieldBytes.map(([field, bytes]) => `${field} ${String(bytes)}`).join(", ")}\n`,

@@ -317,6 +317,27 @@ export function parseThemeList(text: string): string[] {
   return names;
 }
 
+/**
+ * Parses the value of `--screens`, a comma-separated list of screen names, and
+ * returns the names in the order given. Fails when the list is empty, names a
+ * screen twice, or names a screen that is not in `UI_SCREENS`; the message
+ * lists the valid names.
+ */
+export function parseScreenList(text: string): string[] {
+  const valid = UI_SCREENS.map((screen) => screen.name);
+  const names = text.split(",").map((name) => name.trim());
+  const unknown = names.filter((name) => !valid.includes(name));
+  if (unknown.length > 0) {
+    const shown = unknown.map((name) => `"${name}"`).join(", ");
+    throw new Error(`Unknown screen ${shown} in --screens. The screens are ${valid.join(", ")}.`);
+  }
+  const repeated = names.find((name, index) => names.indexOf(name) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`The screen "${repeated}" appears twice in --screens.`);
+  }
+  return names;
+}
+
 /** Returns whether `theme` is a dark theme, which a Mac in dark appearance shows. */
 export function isDarkTheme(theme: string): boolean {
   return (NIGHT_THEMES as ReadonlyArray<string>).includes(theme);

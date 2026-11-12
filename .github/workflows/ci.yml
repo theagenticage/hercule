@@ -391,6 +391,73 @@ jobs:
           path: apps/desktop/out/ui-metrics
           retention-days: 7
 
+  # The desktop counts check (spec 17 §Performance › The counts check):
+  # `perf:counts` builds the desktop bundle, runs the Work board's and the
+  # Inbox's speed tests in their counts mode, and drives the Inbox and Work in
+  # Chromium on a fake controller, all at once, then fails when a count is
+  # worse than `apps/desktop/perf-counts.baseline.json`. Counts do not depend
+  # on the machine, so it runs on the same Linux runner as `ui-metrics`, with
+  # the same Chromium the container records the baseline with. It took 23 s
+  # on 2026-11-12 in the container; its budget is 5 minutes.
+  #
+  # It runs only when something it counts can have changed: the desktop app,
+  # the controller (whose reads the speed tests count), the shared packages,
+  # the bundle measure and the toolchain. On `main` it always runs.
+  desktop-counts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the counts check applies
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/|apps/controller/src/|packages/|scripts/(check-bundle-budget|compare-bundle)\.ts$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The counts check applies, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the counts check reads changed, so it is skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      - name: Read the Playwright version
+        if: steps.changes.outputs.run == 'true'
+        id: playwright
+        run: echo "version=$(grep -m1 -oE '^  playwright@[0-9.]+' pnpm-lock.yaml | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm --filter @hercule/desktop perf:counts
+
+      # The log shows the report. `counts.json` is what `--write-baseline`
+      # would write, and the logs hold the build's and the speed tests' output.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-counts
+          path: apps/desktop/out/perf-counts
+          retention-days: 7
+
   # The Android app's check (spec 18, Testing). It runs on every change, like
   # every other job: the path filter at the top applies to the whole
   # workflow, not to single jobs.
