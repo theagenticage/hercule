@@ -1861,7 +1861,7 @@ The first saved query, and the one the sidebar counts. A thing is in it while it
 - Take on removes the thing from the query. An ask raised after the take-on brings it back.
 - A hand-off ends the asks its workflow answers. The rest stay, and the row says who has the rest.
 - A dismissal is undone by a newer ask, and the row says it came back. Asks open at the dismissal, a new concern, or a signal that asks nothing do not bring it back.
-- "Review requests" is `signal is review-requested`, with no clause about who has the thing.
+- "Review requests" is `signal is [review-requested, team-review-requested]` *(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)*: a review asked of the user or of one of their teams. The list is "any of these". There is no clause about who has the thing.
 
 The list orders it "Longest waiting first": things with an ask by their oldest ask, oldest first, then the rest by the latest change.
 
@@ -6377,7 +6377,7 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 **After the fixes.** Later commits on the #1122 branch fixed the three misses. They were not measured back to back against the old screen again, so every number below is read against the "After" column above, not against "Before".
 
 - **Repeated reads on reload** (`d162d8678`): pushes that name the same read are gathered into one read per key, and every read starts after the pushes it covers. Counted by tests: 5 first pushes on reload give 1 read per key (was 5); one change pushed on two topics gives 1 read (was 2). A reload now reads each Inbox key about twice: the open read, plus one re-read after the subscriptions' first pushes, kept so no change between the two is lost. The old screen read 3 lists and 3 counts. The longest-read times were not measured again.
-- **Bundle** (`d162d8678`, `b792d23d0`): the Inbox chunk is 57,295 B gzipped, under the old screen's 58,348 B. To fit, five cold, static parts and three pane parts are compiled without React Compiler memoization (`"use no memo"`). They do not re-render on hot paths.
+- **Bundle** (`d162d8678`, `b792d23d0`, then reverted): the Inbox chunk was 57,295 B gzipped, under the old screen's 58,348 B, but only because eight cold parts were compiled without React Compiler memoization (`"use no memo"`). Rogier asked for memoization everywhere, so the directives are gone and the chunk is back to 60,579 B (53,020 B of JavaScript and 7,559 B of CSS), 2,231 B over. The cost of the compiler's cache in the Inbox is about 3.4 kB gzipped. Sharing the move requests' mutation code saved 81 B; the CSS has no unused class, no unused keyframe and little repeated text, and the rest of the chunk is code the screen runs.
 - **Walking with J, dismiss and undo** (`b792d23d0`; Linux container, `perf --inbox-only`, load 0.4 to 1.2): three `:has()` rules restyled the whole page (920 elements) on every J. They are removed, the rows are memoized, and the pane keeps the previous detail drawn until the next read arrives.
 
 | Step | Before the fix | After the fix |
@@ -6392,7 +6392,7 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 **Verdicts after the fixes:**
 
 - **Processes, idle, per streamed token, page read, rows drawn: met,** as above.
-- **Bundle, the Inbox chunk no bigger than the old one: met.** 57,295 B against 58,348 B.
+- **Bundle, the Inbox chunk no bigger than the old one: missed by 2,231 bytes** (60,579 against 58,348 B, 3.8% more), with React Compiler memoization on in every file. Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"): the bytes buy no needless re-renders in any Inbox part.
 - **Reload reads: met on the number of requests, not shown on time.** A reload reads each key about twice, against 3 on the old screen. The longest read was not measured again.
 - **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"); [#1143](https://github.com/theagenticage/hercule/issues/1143) closes it.
 

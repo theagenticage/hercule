@@ -60,6 +60,24 @@ import type { InboxListRow, InboxListSnapshot, InboxListVisit } from "./-inbox-v
 /** The key every Inbox move runs under, so one move waits for the one before it. */
 const INBOX_MOVES_KEY = ["inbox-moves"];
 
+/**
+ * Returns a mutation that sends one move (or one reversal) with `send`, in the
+ * line every Inbox move waits in. It fails before sending when the account in
+ * `scope` is no longer signed in.
+ */
+const useMoveRequest = <Variables, Result>(
+  scope: AccountScope,
+  send: (variables: Variables) => Promise<Result>,
+) =>
+  useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: (variables: Variables) => {
+      requireSignedIn(scope);
+      return send(variables);
+    },
+  });
+
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
 
 /** What `useInboxMoves` returns. */
@@ -153,26 +171,15 @@ export const useInboxMoves = ({
     putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
   }));
 
-  const dismissRequest = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (ids: readonly string[]) => {
-      requireSignedIn(scope);
-      return client.externalEntity.dismiss({ payload: { ids: [...ids] } });
-    },
-  });
-  const takeOnRequest = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (id: string) => {
-      requireSignedIn(scope);
-      return client.externalEntity.takeOn({ params: { id } });
-    },
-  });
-  const handOffRequest = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: ({
+  const dismissRequest = useMoveRequest(scope, (ids: readonly string[]) =>
+    client.externalEntity.dismiss({ payload: { ids: [...ids] } }),
+  );
+  const takeOnRequest = useMoveRequest(scope, (id: string) =>
+    client.externalEntity.takeOn({ params: { id } }),
+  );
+  const handOffRequest = useMoveRequest(
+    scope,
+    ({
       id,
       workflowId,
       connectionId,
@@ -180,23 +187,16 @@ export const useInboxMoves = ({
       readonly id: string;
       readonly workflowId: string;
       readonly connectionId: string | undefined;
-    }) => {
-      requireSignedIn(scope);
-      return client.externalEntity.handOff({
+    }) =>
+      client.externalEntity.handOff({
         params: { id },
         payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
-      });
-    },
-  });
+      }),
+  );
   // The reversals wait in the same line as the moves, so none overtakes another.
-  const reverseMove = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (reverse: () => Promise<UndoAnswer | undefined>) => {
-      requireSignedIn(scope);
-      return reverse();
-    },
-  });
+  const reverseMove = useMoveRequest(scope, (reverse: () => Promise<UndoAnswer | undefined>) =>
+    reverse(),
+  );
 
   /** Returns the things a move is for, in list order: see `InboxVisit.targets`. */
   const readTargets = (hoveredRef: string | undefined): InboxListRow[] => {

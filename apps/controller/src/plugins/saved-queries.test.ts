@@ -85,6 +85,16 @@ describe("decodeSavedQueries", () => {
     ]);
   });
 
+  it("qualifies every word of a list of values", async () => {
+    const [saved] = await decode([
+      buildQuery([{ key: "signal", op: "is", value: ["asked", "asked"] }]),
+    ]);
+
+    expect(saved).toMatchObject({
+      clauses: [{ key: "signal", op: "is", value: ["acme/asked", "acme/asked"] }],
+    });
+  });
+
   it.each([
     {
       name: "a signal word the plugin does not declare",
@@ -120,6 +130,31 @@ describe("decodeSavedQueries", () => {
       name: "a number on a boolean key",
       clause: { key: "flag", op: "is", value: 3 },
       message: '"3" is not yes or no',
+    },
+    {
+      name: "one unknown word in a list of signal words",
+      clause: { key: "signal", op: "is", value: ["asked", "ghost"] },
+      message: 'names "ghost", which the plugin does not declare as a signal kind',
+    },
+    {
+      name: "a bad value in a list",
+      clause: { key: "size", op: "is", value: [1, "big"] },
+      message: '"big" is not a number',
+    },
+    {
+      name: "a list with over",
+      clause: { key: "size", op: "over", value: [1, 2] },
+      message: 'size takes a list of values only with "is", not "over"',
+    },
+    {
+      name: "an empty list",
+      clause: { key: "signal", op: "is", value: [] },
+      message: "invalid",
+    },
+    {
+      name: "a list of nine values",
+      clause: { key: "signal", op: "is", value: Array.from({ length: 9 }, () => "asked") },
+      message: "invalid",
     },
     {
       name: "a source",

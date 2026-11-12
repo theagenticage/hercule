@@ -53,7 +53,8 @@ const eventSource: EventSourceContribution = {
       word: "review-requests",
       name: "Review requests",
       order: "waiting",
-      clauses: [{ key: "signal", op: "is", value: "review-requested" }],
+      // A review asked of the user or of one of the user's teams.
+      clauses: [{ key: "signal", op: "is", value: ["review-requested", "team-review-requested"] }],
     },
   ],
   entityLookup: githubEntityLookup,

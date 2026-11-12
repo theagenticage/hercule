@@ -227,7 +227,7 @@ describe("what the github plugin registers", () => {
     }
   });
 
-  it("declares the review requests saved query on its own review-request signal kind", async () => {
+  it("declares the review requests saved query on both review-request signal kinds, one asked of the user and one of a team", async () => {
     const source = (await collectContributions(github)).sources[0]!;
 
     expect(source.savedQueries).toEqual([
@@ -235,10 +235,14 @@ describe("what the github plugin registers", () => {
         word: "review-requests",
         name: "Review requests",
         order: "waiting",
-        clauses: [{ key: "signal", op: "is", value: "review-requested" }],
+        clauses: [
+          { key: "signal", op: "is", value: ["review-requested", "team-review-requested"] },
+        ],
       },
     ]);
-    expect(source.signalKinds?.map((kind) => kind.word)).toContain("review-requested");
+    const words = source.signalKinds?.map((kind) => kind.word);
+    expect(words).toContain("review-requested");
+    expect(words).toContain("team-review-requested");
   });
 
   it("says in every signal kind what one is called and whether it asks something of the user", async () => {

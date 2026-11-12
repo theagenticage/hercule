@@ -10,6 +10,7 @@
  */
 import { Schema } from "effect";
 import { ContributionWord } from "./contributions";
+import { MAX_CLAUSE_VALUES } from "./clause-grammar";
 import { MAX_ENTITY_FIELD_TEXT_LENGTH, type EntityFieldType } from "./entities";
 import { buildBoundedString } from "./limits";
 import { PluginId } from "./manifest";
@@ -72,18 +73,31 @@ export const MAX_INBOX_CLAUSE_KEY_LENGTH = 64;
  * - `is` compares equal: text, a person or an enum value without regard to
  *   case, or a boolean. `over` and `under` compare a number, an amount, or a
  *   duration in seconds (`age` fields and `waiting`).
+ * - `value` of an `is` clause may be a list of up to `MAX_CLAUSE_VALUES`
+ *   values, which means "any of these": `signal is [a, b]` holds for a thing
+ *   with an open signal of kind `a` or of kind `b`. A list with `over` or
+ *   `under` is refused where the clause is compiled. The CLI and the search
+ *   field never produce a list.
  * - `source` and `connectionId` tie the clause to one source or one account.
  *   A clause that has neither holds across every source.
  */
+const InboxClauseValue = Schema.Union([
+  // As long as a stored field value, because a clause on a facet sends the
+  // stored value (a record's ref) as it is.
+  buildBoundedString(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+  Schema.Finite,
+  Schema.Boolean,
+]);
+
 export const InboxClause = Schema.Struct({
   key: buildBoundedString(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
   op: Schema.Literals(["is", "over", "under"]),
-  // As long as a stored field value, because a clause on a facet sends the
-  // stored value (a record's ref) as it is.
   value: Schema.Union([
-    buildBoundedString(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
-    Schema.Finite,
-    Schema.Boolean,
+    InboxClauseValue,
+    Schema.Array(InboxClauseValue).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_CLAUSE_VALUES),
+    ),
   ]),
   source: Schema.optionalKey(PluginId),
   // A Connection's id. The schema is the loose bound the plugin API can say:
