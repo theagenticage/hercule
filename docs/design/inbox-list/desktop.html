@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+<head>
+<meta charset="utf-8">
+<title>Inbox</title>
+<script src="../shared/page.js"></script>
+<link rel="stylesheet" href="vendor/app.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/frame.css">
+<link rel="stylesheet" href="css/rail.css">
+<link rel="stylesheet" href="css/list.css">
+<link rel="stylesheet" href="css/pane.css">
+<link rel="stylesheet" href="css/menus.css">
+<link rel="stylesheet" href="css/dialog.css">
+<link rel="stylesheet" href="css/states.css">
+</head>
+<body>
+<div id="root"><div class="app" data-sidebar="open" data-sidebar-box="open"><div class="drag-strip"></div><div class="side-slot" style="--sidebar-w: 272px;"><aside id="side"></aside></div>
+<main class="main" id="main">
+  <div class="ib" id="ib">
+    <div class="ib-bar">
+      <nav class="pill ib-pill" aria-label="Inbox views"><span class="ptab is-on" aria-current="page">Inbox</span><a class="ptab" href="#intake">Intake</a></nav>
+      <button type="button" class="tool ib-scope" id="scope-btn" aria-haspopup="menu" aria-expanded="false"><span>Someone waits on me</span></button>
+      <div class="sx" id="sx" role="search">
+        <span class="sx-ic"></span>
+        <span class="sx-chips" id="sx-chips"></span>
+        <input id="sx-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search, or type a field: team:, from:, waiting:>2d" aria-label="Search the Inbox" aria-controls="sx-menu" aria-autocomplete="list">
+        <kbd class="sx-kbd">/</kbd>
+      </div>
+      <div class="ib-end">
+        <span class="ib-offline" id="offline" role="status" hidden></span>
+        <button type="button" class="icon-btn ib-help" data-help title="Keys (?)" aria-label="Show the keys" aria-expanded="false">?</button>
+      </div>
+    </div>
+    <nav class="ib-rail" id="rail" aria-label="Saved queries, Triage and Browse"></nav>
+    <section class="ib-list" aria-label="Things">
+      <div class="lh" id="list-head"></div>
+      <div class="ib-failing" id="failing" role="status" hidden></div>
+      <div class="ib-scroll" id="list-scroll">
+        <button type="button" class="newbar" id="newbar" hidden><span data-new-n>3 new</span><span class="newbar-show">Show<kbd>.</kbd></span></button>
+        <div class="rows" id="rows" role="listbox" aria-label="Things" aria-multiselectable="true" tabindex="0"></div>
+        <div class="empty" id="empty" hidden></div>
+      </div>
+      <div class="selbar" id="selbar" role="toolbar" aria-label="Selection" hidden></div>
+    </section>
+    <div class="edge" id="edge" role="separator" aria-orientation="vertical" aria-label="Resize the pane" aria-valuemin="360" aria-valuemax="640" aria-valuenow="420" tabindex="0"></div>
+    <aside class="ib-pane" id="pane" aria-label="Detail"></aside>
+    <div class="undo-line" id="undo" role="status" inert></div>
+    <section class="keys-sheet" id="keys" role="dialog" aria-label="Keys" hidden></section>
+  </div>
+</main>
+</div></div>
+<div class="flights" id="flight" aria-hidden="true"></div>
+<div class="hand-menu" id="handmenu" role="menu" aria-label="Hand to" hidden></div>
+<div class="linkto pop" id="linkto" role="dialog" aria-label="Link to" hidden></div>
+<div class="pop popover-menu menu--tool narrow-menu" id="narrow" role="menu" aria-label="Narrow" hidden></div>
+<div class="sx-menu pop" id="sx-menu" role="listbox" aria-label="Search suggestions" hidden></div>
+<nav class="pop scope-pop" id="scope-pop" aria-label="Saved queries, Triage and Browse" hidden></nav>
+<div class="scrim" id="scrim" hidden></div>
+<div class="pop glass-dialog td" id="dialog" role="dialog" aria-modal="true" aria-label="Start a thread" hidden></div>
+<script src="vendor/faces.js"></script>
+<script src="vendor/motion.js"></script>
+<script src="vendor/motion-extras.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/kinds.js"></script>
+<script src="js/world.js"></script>
+<script src="js/model.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/app.js"></script>
+<script src="js/rail.js"></script>
+<script src="js/list.js"></script>
+<script src="js/pane.js"></script>
+<script src="js/parts.js"></script>
+<script src="js/bar.js"></script>
+<script src="js/menus.js"></script>
+<script src="js/moves.js"></script>
+<script src="js/dialog.js"></script>
+<script src="js/drag.js"></script>
+<script src="js/keys.js"></script>
+<script src="js/scenes.js"></script>
+<script>
+  Bar.start();
+  App.boot();
+  Rail.start(App.el.rail); List.start(App.el.list); Pane.start(App.el.pane); Dialog.start(); Drag.start(App.el.list); Keys.start(); Edge.start();
+  document.getElementById("newbar").addEventListener("click", Moves.showNew);
+  document.querySelector(".sx-ic").innerHTML = Draw.icon("search", 14);
+  Scenes.after(new URLSearchParams(location.search).get("scene"));
+</script>
+</body>
+</html>

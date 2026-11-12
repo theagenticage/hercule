@@ -1,0 +1,280 @@
+/* States: empty, the sunrise, loading, offline, a failing source, and widths under 1100px. */
+.empty {
+  display: grid;
+  place-items: center;
+  min-height: calc(100% - 48px);
+  padding: 32px 24px 96px;
+}
+.empty[hidden] {
+  display: none;
+}
+.em {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 340px;
+  text-align: center;
+}
+.em-title {
+  margin: 8px 0 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.em-line {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 20px;
+}
+.em-line code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+  color: var(--ink);
+  font-size: var(--t-12);
+}
+.em--zero .em-title {
+  font-size: var(--t-20);
+}
+
+/* The sunrise: Hercule's head comes up over a brass horizon, and the rays draw outward. */
+.em-sun {
+  position: relative;
+  width: 168px;
+  height: 90px;
+  overflow: hidden;
+}
+.em-sun--small {
+  transform: scale(0.8);
+  margin: -8px 0 -10px;
+}
+.sun {
+  position: absolute;
+  inset: 0;
+}
+.sun-line {
+  stroke: var(--brass);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  animation: sun-line 700ms var(--m-ease) both;
+}
+.sun-rays line {
+  stroke: color-mix(in oklab, var(--brass) 70%, transparent);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-dasharray: 2 4;
+  animation: sun-ray 520ms var(--m-ease) both;
+  animation-delay: calc(420ms + var(--i) * 26ms);
+}
+.sun-head {
+  position: absolute;
+  left: 50%;
+  bottom: 9px;
+  translate: -50% 0;
+  clip-path: inset(-20px -20px 0 -20px);
+  animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+@keyframes sun-line {
+  from {
+    stroke-dasharray: 0 120;
+    stroke-dashoffset: -60;
+  }
+  to {
+    stroke-dasharray: 120 0;
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes sun-ray {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sun-rise {
+  from {
+    transform: translateY(40px);
+  }
+}
+.em-sun ~ .em-title,
+.em-sun ~ .em-line {
+  animation: em-words 400ms var(--m-ease) 900ms both;
+}
+@keyframes em-words {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sun-line,
+  .sun-rays line,
+  .sun-head,
+  .em-sun ~ .em-title,
+  .em-sun ~ .em-line {
+    animation: none;
+  }
+}
+:root[data-motion="reduced"] .sun-line,
+:root[data-motion="reduced"] .sun-rays line,
+:root[data-motion="reduced"] .sun-head,
+:root[data-motion="reduced"] .em-sun ~ * {
+  animation: none;
+}
+
+/* Loading: the rows' shapes, still. Nothing pulses, so a slow read costs no frames. */
+.skel {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  grid-template-rows: var(--line-18) var(--line-16);
+  column-gap: var(--row-gap);
+  row-gap: 2px;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+}
+.skel i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.skel i:nth-child(1) {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+.skel i:nth-child(4) {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  justify-self: center;
+}
+.skel i:nth-child(5) {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.skel-n {
+  display: inline-block;
+  width: 16px;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.pn-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+}
+.pn-skel i {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+
+/* Offline: one line in the bar, saying what you see and that moves wait. */
+.ib-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ib-offline[hidden] {
+  display: none;
+}
+.ib-offline::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+html[data-offline] .pn-foot .btn,
+html[data-offline] .sig-answers .btn {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* A failing source: one line naming it, over the list, and a mark on its row in Browse. */
+.ib-failing {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 var(--list-pad) 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--fail-tint);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.ib-failing[hidden] {
+  display: none;
+}
+.ib-failing .ic {
+  flex: none;
+  margin-top: 1px;
+  color: var(--fail-ink);
+}
+.ib-failing b {
+  font-weight: var(--w-medium);
+}
+.ib-failing a {
+  margin-left: auto;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---- Widths under 1100px: the rail folds into a menu in the bar, and the pane narrows ---- */
+.ib-scope,
+.scope-pop {
+  display: none;
+}
+@media (max-width: 1099px) {
+  .ib {
+    grid-template-columns: 0 minmax(0, 1fr) 0 clamp(320px, 42%, var(--pane-w));
+  }
+  .ib-bar {
+    display: flex;
+    gap: 8px;
+    padding: 0 14px;
+  }
+  .ib-pill {
+    margin-left: 0;
+  }
+  .ib-scope {
+    display: inline-flex;
+    max-width: 220px;
+  }
+  .ib-scope span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ib-bar .sx {
+    flex: 1;
+    margin: 0;
+  }
+  .ib-end {
+    padding-right: 0;
+  }
+  .ib-rail {
+    display: none;
+  }
+  .scope-pop:not([hidden]) {
+    position: fixed;
+    z-index: 60;
+    display: block;
+    width: 260px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    padding: 8px 6px 12px;
+    background: var(--glass-fill-raised);
+  }
+}

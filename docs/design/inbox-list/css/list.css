@@ -1,0 +1,614 @@
+/* The list. Dense, because it is for scanning: 52px rows of two lines. The left column holds the
+   two coloured shapes (the source's mark over the status glyph), the right column the wait over
+   where it lives. The title is the only medium weight; everything else steps back. */
+
+/* ---- The head: what the list is, how many, in what order, and Narrow ---- */
+.lh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 48px;
+  padding: 0 calc(var(--list-pad) + var(--row-pad-x)) 0 calc(var(--list-pad) + var(--row-pad-x));
+}
+.lh {
+  container: lh / inline-size;
+}
+.lh-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lh-title .mk {
+  margin-right: -2px;
+}
+.lh-acct {
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+@container lh (max-width: 400px) {
+  .lh-order {
+    display: none;
+  }
+}
+.lh-title h2 {
+  margin: 0;
+  overflow: hidden;
+  font: var(--type-lane);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lh-n {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.lh-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+.lh-order {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lh-narrow {
+  height: 28px;
+}
+
+/* ---- Rows ---- */
+.rows {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--list-pad) 96px;
+  outline: none;
+}
+.row {
+  position: relative;
+  display: grid;
+  flex: none;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: var(--line-18) var(--line-16);
+  column-gap: var(--row-gap);
+  row-gap: 2px;
+  align-content: center;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border-radius: var(--row-r);
+  cursor: default;
+  user-select: none;
+  outline: none;
+}
+.row:hover {
+  background: var(--hover);
+}
+.row.is-current {
+  background: var(--selected);
+}
+.rows:focus-visible .row.is-current,
+.row.is-current:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.row-lead {
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.row-l1,
+.row-l2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.row-l1 {
+  grid-row: 1;
+  grid-column: 2;
+  height: var(--line-18);
+}
+.row-l2 {
+  grid-row: 2;
+  grid-column: 2;
+  height: var(--line-16);
+}
+.row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font: var(--type-card);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row-time {
+  flex: none;
+  font-size: var(--t-12);
+  line-height: var(--line-18);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row-glyph {
+  grid-row: 2;
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.row-why {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--type-summary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row-why .who {
+  color: var(--ink);
+  font-weight: var(--w-regular);
+}
+.row-where {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 6px;
+  max-width: 46%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font: var(--type-summary);
+  white-space: nowrap;
+}
+.row-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-id {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.more {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--selected);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What does not ask anything steps back: its title is ink, its sentence faint. */
+.row.is-quiet .row-why {
+  color: var(--faint);
+}
+
+/* The wait: ink and weight only, measured against the patience of the ask. */
+.wait--fresh,
+.wait--recent {
+  color: var(--faint);
+}
+.wait--due {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.wait--over {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.row-time--held {
+  display: inline-grid;
+  place-items: center;
+  height: 18px;
+}
+
+/* Status glyphs: the source's hue, or quiet ink, or the app's green and tomato. */
+.gl {
+  display: inline-grid;
+  place-items: center;
+}
+.gl svg {
+  display: block;
+}
+.gl--source {
+  color: var(--muted);
+}
+.gl--quiet {
+  color: var(--faint);
+}
+.gl--good {
+  color: var(--ok);
+}
+.gl--bad {
+  color: var(--fail-ink);
+}
+.gl--none {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- Selecting: the mark makes way for a tick under the pointer, and stays a tick once picked ---- */
+.row-tick {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  background: var(--raised);
+  color: transparent;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.row-lead:hover .row-tick,
+.row.is-picked .row-tick,
+.rows.is-selecting .row:hover .row-tick {
+  opacity: 1;
+}
+.row-lead:hover .mk,
+.row.is-picked .row-lead .mk {
+  opacity: 0;
+}
+.row-tick.is-on {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--bg);
+}
+.row.is-picked:not(.is-current) {
+  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+}
+
+/* ---- Groups: things linked to each other, by a source or a person ---- */
+.row-fold {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: -2px;
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform var(--m-base) var(--spring-hand, var(--m-ease)), background var(--dur-1);
+}
+.row-fold:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.row--group.is-open .row-fold {
+  transform: rotate(90deg);
+}
+.row-n {
+  margin-left: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.row-glyph--link {
+  color: var(--faint);
+}
+.row-marks {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+.row-where--group {
+  align-items: center;
+}
+.row-where--group .row-marks {
+  margin-right: 2px;
+}
+.row--group.is-open {
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+/* The members hang from the group's chevron on a hairline. */
+.row--member {
+  padding-left: calc(var(--row-pad-x) + 28px);
+  border-radius: 4px;
+}
+.row--member:last-of-type,
+.row--member.is-last {
+  border-bottom-left-radius: var(--row-r);
+  border-bottom-right-radius: var(--row-r);
+}
+.row--member::before,
+.row--more::before,
+.row--group.is-open::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--row-pad-x) + 7.5px);
+  width: 1px;
+  background: var(--line);
+}
+.row--member::before,
+.row--more::before {
+  top: 0;
+  bottom: 0;
+}
+.row--member.is-last::before {
+  bottom: 50%;
+}
+.row--member.is-last::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--row-pad-x) + 7.5px);
+  top: calc(50% - 6px);
+  width: 10px;
+  height: 6px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+}
+.row--member.is-last::before {
+  bottom: calc(50% + 0px);
+  top: 0;
+  height: calc(50% - 6px);
+}
+.row--group.is-open::after {
+  top: calc(50% + 10px);
+  bottom: 0;
+}
+.row--member.is-outside .row-title {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.row--member.is-outside .row-why,
+.row--member.is-outside .row-time {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.row--more {
+  grid-template-rows: auto;
+  height: 32px;
+  padding-left: calc(var(--row-pad-x) + 28px);
+  border-radius: 4px var(--row-r) var(--row-r) 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  cursor: pointer;
+}
+.row--more::before {
+  bottom: 50%;
+}
+.row-more-in {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.row--more:hover {
+  color: var(--ink);
+}
+
+/* ---- Triage: Proposals and the links Hercule suggests, at the top, in the triage accent ---- */
+.row-lead--face {
+  overflow: visible;
+}
+.row-lead--face .face,
+.row-lead--face svg {
+  display: block;
+}
+.tri-word {
+  margin-right: 8px;
+  color: var(--triage-ink);
+  font-weight: var(--w-bold);
+}
+.row--triage .row-marks {
+  margin-right: 6px;
+}
+.row--triage .row-why .mk {
+  display: inline-grid;
+  margin: 0 3px 0 4px;
+  vertical-align: -2px;
+}
+.row-ref {
+  color: var(--ink);
+}
+.row--triage.is-last-triage {
+  margin-bottom: 9px;
+}
+.row--triage.is-last-triage::after {
+  content: "";
+  position: absolute;
+  left: var(--row-pad-x);
+  right: var(--row-pad-x);
+  bottom: -5px;
+  height: 1px;
+  background: var(--divider);
+}
+
+/* ---- Carrying and dropping ---- */
+.row.is-lifted {
+  opacity: 0.32;
+}
+.row.is-drop {
+  background: color-mix(in oklab, var(--focus) 10%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+html.is-carrying,
+html.is-carrying * {
+  cursor: grabbing !important;
+}
+
+/* ---- Arrivals: a row that just came in keeps a faint wash for a moment ---- */
+.row.is-fresh {
+  animation: row-fresh 1600ms var(--m-ease) both;
+}
+@keyframes row-fresh {
+  0%,
+  30% {
+    background: color-mix(in oklab, var(--you) 16%, transparent);
+  }
+}
+
+/* ---- The "N new" bar: arrivals wait behind it ---- */
+.newbar {
+  position: sticky;
+  top: 4px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin: 0 auto 6px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.newbar[hidden] {
+  display: none;
+}
+.newbar:hover {
+  background: color-mix(in oklab, var(--ink) 4%, var(--glass-fill-raised));
+}
+.newbar [data-new-n]::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 7px 1px 0;
+  border-radius: 50%;
+  background: var(--you);
+}
+.newbar-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---- The selection bar ---- */
+.selbar {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  padding: 0 6px 0 14px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  white-space: nowrap;
+  translate: -50% 0;
+  max-width: calc(100% - 24px);
+}
+.selbar[hidden] {
+  display: none;
+}
+.sb-n {
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.sb-n b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.sb-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-btn);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.sb-act:hover {
+  background: var(--hover);
+}
+.sb-act[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+.sb-act[aria-disabled="true"]:hover {
+  background: none;
+}
+.sb-act kbd {
+  margin-left: 1px;
+}
+.sb-line {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--divider);
+}
+.sb-clear {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+/* ---- Rolling words, for a hand-off's sentence ---- */
+.row-why.is-rolling {
+  overflow: hidden;
+}
+.roll {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: top;
+  animation: roll-up 300ms var(--spring-hand, var(--m-ease)) both;
+}
+.roll-a,
+.roll-b {
+  display: block;
+  height: var(--line-16);
+}
+@keyframes roll-up {
+  to {
+    transform: translateY(calc(-1 * var(--line-16)));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .roll {
+    animation: none;
+    transform: translateY(calc(-1 * var(--line-16)));
+  }
+}
+
+/* More triage than fits: the top of "Someone waits on me" keeps three, and a row leads to the rest. */
+.row--tmore {
+  grid-template-rows: auto;
+  height: 32px;
+  color: var(--triage-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  cursor: pointer;
+}
+.row--tmore .row-more-in {
+  padding-left: 28px;
+}

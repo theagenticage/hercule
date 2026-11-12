@@ -1,0 +1,45 @@
+/* What the Inbox list adds to the app's tokens (vendor/app.css). Every value sits on the app's
+   scales: the 4px space grid, the type tokens, the three weights, the radii and the springs.
+   Colour on this page carries meaning only: a source's hue on its mark and its status glyphs,
+   project health in Browse, and the triage accent. Every surface stays neutral. */
+:root,
+[data-theme] {
+  /* The three columns. The pane is the user's to resize, from 360 to 640. */
+  --rail-w: 240px;
+  --pane-w: 420px;
+  --bar-h: 56px;
+
+  /* A row is two lines, 18 and 16, with 2 between and 8 above and below: 52px. Text size steps
+     add to each line, so a larger setting never clips a row. */
+  --row-h: calc(52px + 2 * var(--text-size-step));
+  --row-pad-x: 12px;
+  --row-r: 10px;
+  --row-gap: 12px; /* lead column to text */
+  --list-pad: 12px; /* list edge to a row's box */
+
+  /* The knock-out inside a filled glyph (a check, a cross): the ground the row sits on. */
+  --glyph-knock: var(--bg);
+
+  /* The triage accent: marigold, the app's colour for what is addressed to you. */
+  --triage-ink: var(--you-ink);
+
+  /* Project health in Browse. At risk takes the attention ink, never the colour kept for the person. */
+  --health-on: var(--ok);
+  --health-risk: var(--attention-ink);
+  --health-off: var(--fail-ink);
+
+  /* The pane: the reading surface, a step off the list's ground. */
+  --pane-fill: var(--surface);
+  --section-fill: var(--raised);
+}
+
+/* A source's hue, drawn at the theme's mark lightness and strength, as plugin marks already are. A
+   custom property resolves on the element that declares it, so the colour is declared on each
+   element that carries --src-h, never on the root. Status glyphs sit a touch quieter than marks,
+   so a row's two coloured shapes never compete. */
+.mk.mk--hue {
+  color: oklch(var(--mark-l) var(--mark-c) var(--src-h));
+}
+.gl--source[style*="--src-h"] {
+  color: oklch(var(--mark-l) calc(var(--mark-c) * 0.86) var(--src-h));
+}

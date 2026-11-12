@@ -1,0 +1,349 @@
+/* The page's frame: the bar over three columns. The bar is a subgrid of the columns, so the pill sits
+   over the rail, the search over the list, and the keys button over the pane. */
+.ib {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) 0 var(--pane-w);
+  grid-template-rows: var(--bar-h) minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  background: var(--bg);
+}
+.ib.is-resizing,
+.ib.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* ---- The bar ---- */
+.ib-bar {
+  position: relative;
+  z-index: 20;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  height: var(--bar-h);
+}
+.ib-pill {
+  justify-self: start;
+  margin-left: 14px;
+}
+.ib-pill .ptab {
+  padding: 0 10px;
+  text-decoration: none;
+}
+.ib-end {
+  grid-column: 4;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-right: 14px;
+}
+.ib-help {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ib-help[aria-expanded="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---- The search: one field over the list's column, with its clauses as tokens ---- */
+.sx {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 0 var(--list-pad);
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+  color: var(--faint);
+  transition: box-shadow var(--m-quick) var(--m-ease);
+}
+.sx.is-focus {
+  box-shadow: inset 0 0 0 1px var(--composer-line), inset 0 1px 0 var(--glass-edge), 0 0 0 3px color-mix(in oklab, var(--focus) 22%, transparent), var(--glass-shadow);
+  color: var(--muted);
+}
+.sx-ic {
+  display: inline-grid;
+  flex: none;
+}
+.sx input {
+  flex: 1;
+  min-width: 80px;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+}
+.sx input::placeholder {
+  color: var(--faint);
+}
+.sx-kbd {
+  flex: none;
+}
+.sx.is-focus .sx-kbd,
+.sx.has-chips .sx-kbd {
+  display: none;
+}
+.sx-chips {
+  display: contents;
+}
+.sx-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 2px 0 7px;
+  border-radius: var(--r-xs);
+  background: var(--selected);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.sx-chip b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.sx-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--faint);
+}
+.sx-chip button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.sx-menu {
+  position: fixed;
+  z-index: 60;
+  padding: 6px;
+  background: var(--glass-fill-raised);
+}
+.sx-menu[hidden] {
+  display: none;
+}
+.sx-h {
+  margin: 4px 8px 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.sx-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-align: left;
+}
+.sx-item.is-active {
+  background: var(--hover);
+  color: var(--ink);
+}
+.sx-key {
+  display: inline-grid;
+  color: var(--faint);
+}
+.sx-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.sx-label code {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.sx-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.sx-n {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.sx-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 8px 8px 2px;
+  border-top: 1px solid var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.sx-foot kbd + kbd {
+  margin-left: -2px;
+}
+.sx-foot kbd:not(:first-child) {
+  margin-left: 8px;
+}
+.sx-foot kbd + kbd:not(:first-child) {
+  margin-left: 2px;
+}
+
+/* ---- The columns ---- */
+.ib-rail {
+  grid-row: 2;
+  grid-column: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 10px 32px 14px;
+  border-right: 1px solid var(--divider);
+  scrollbar-width: thin;
+}
+.ib-list {
+  position: relative;
+  grid-row: 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.ib-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.ib-pane {
+  position: relative;
+  grid-row: 2;
+  grid-column: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--divider);
+  background: var(--pane-fill);
+}
+
+/* The pane's edge: 9px to grab, a 1px line to see. It lights on hover and while dragged. */
+.edge {
+  position: relative;
+  z-index: 5;
+  grid-row: 2;
+  grid-column: 3;
+  width: 9px;
+  margin-left: -4px;
+  cursor: col-resize;
+  outline: none;
+}
+.edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--m-quick) var(--m-ease), box-shadow var(--m-quick) var(--m-ease);
+}
+.edge:hover::after,
+.ib.is-resizing .edge::after {
+  background: var(--line);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--line) 50%, transparent);
+}
+.edge:focus-visible::after {
+  background: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+/* The flight layer: copies of rows on their way somewhere, above the page and under menus. */
+.flights {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+.flights > .row {
+  background: var(--bg);
+}
+.flights > .row.is-flying,
+.flights > .row.is-carried {
+  background: var(--stock);
+  box-shadow: var(--h-carry);
+}
+.flights > .row.is-carried.is-over {
+  box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry);
+}
+/* A mark flying to Work in the sidebar (Motion.fly). */
+body > .flight {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 70;
+  display: inline-grid;
+  pointer-events: none;
+}
+
+/* ---- The undo line, the keys sheet ---- */
+.ib .undo-line {
+  --undo-line-x: calc(var(--rail-w) / 2 - var(--pane-w) / 2);
+}
+.undo-text {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.undo-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.undo-line-button kbd {
+  margin-left: 2px;
+}
+.ib .keys-sheet {
+  top: 54px;
+  right: 14px;
+  width: 320px;
+}
+.keys-sheet dl > div {
+  grid-template-columns: 92px 1fr;
+}
+.keys-sheet dt kbd + kbd {
+  margin-left: 2px;
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--scrim);
+}

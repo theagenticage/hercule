@@ -1,0 +1,430 @@
+/* N: the app's glass dialog around the real composer. It looks like a thread before it is one: the
+   Task's name as the header, the things as chips in the composer, the starters above it, and the
+   reason for every default under it. */
+.td {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  top: 12vh;
+  display: flex;
+  flex-direction: column;
+  width: 680px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 12vh - 24px);
+  margin: 0;
+  overflow: hidden;
+  translate: -50% 0;
+  background: var(--glass-fill-raised);
+}
+.td[hidden] {
+  display: none;
+}
+.td-head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 12px 20px;
+}
+.td-face {
+  display: grid;
+  place-items: center;
+}
+.td-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.td-title {
+  width: 100%;
+  margin: 0;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--r-xs);
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  line-height: 20px;
+  text-overflow: ellipsis;
+}
+.td-title:hover {
+  background: var(--hover);
+}
+.td-title:focus {
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.td-title--fixed {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.td-title--fixed:hover {
+  background: none;
+}
+.td-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.td-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+}
+
+.td-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.td-starter {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1), color var(--dur-1), box-shadow var(--dur-1);
+}
+.td-starter:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.td-starter[aria-checked="true"] {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--bg);
+}
+
+/* The composer, as the new-thread screen draws it. */
+.td-composer {
+  margin: 0;
+}
+.td-composer .composer-card {
+  padding-top: 10px;
+}
+.td-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 2px;
+}
+.td-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  height: 26px;
+  padding: 0 3px 0 8px;
+  border-radius: var(--r-xs);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.td-chip b {
+  flex: none;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.td-chip-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.td-chip button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--faint);
+}
+.td-chip button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.td-text {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-14);
+  line-height: 22px;
+}
+.pick.is-off {
+  color: var(--faint);
+}
+.lip-pick--ask {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.td-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 18px;
+}
+.td-why .ic {
+  flex: none;
+  margin-top: 1px;
+  color: var(--faint);
+}
+.td-why b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.td-pop {
+  position: absolute;
+  z-index: 3;
+  width: 340px;
+  padding: 8px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+}
+.td-pop[hidden] {
+  display: none;
+}
+.td-pop-h {
+  margin: 2px 6px 2px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.td-pop-why {
+  margin: 0 6px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.td-pop .menu-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.td-pop .menu-pick:hover {
+  background: var(--hover);
+}
+.td-pop .menu-pick small {
+  flex: 1;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The transcript's first moments ---- */
+.td-live-body {
+  gap: 20px;
+  padding-top: 8px;
+}
+.td-msg--you {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 88%;
+}
+.td-msg--you .td-msg-text {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-14);
+  line-height: 22px;
+}
+.td-msg--you time {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.td-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.td-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--stock);
+  box-shadow: var(--h-rest);
+}
+.td-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.td-card-top b {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.td-card-title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font: var(--type-card);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.td-card-st {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.td-live {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--m-slow) var(--m-ease);
+}
+.td-live.is-ticked {
+  animation: tick-up 260ms var(--m-ease) both;
+}
+@keyframes tick-up {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+}
+.td-ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.td-ctx:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.td-ctx span {
+  color: var(--faint);
+}
+.td-ctx .ic {
+  transition: transform var(--m-base) var(--m-ease);
+}
+.td-ctx[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.td-ctx-body {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-size: var(--t-11);
+  line-height: 17px;
+  white-space: pre-wrap;
+}
+.td-msg--agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.td-agent-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.td-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 28px;
+  list-style: none;
+}
+.td-tools li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.td-tools code {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-size: var(--t-12);
+}
+.td-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+}
+.td-ok .ic {
+  color: var(--ok);
+}
+.td-stream {
+  min-height: 22px;
+  margin: 0;
+  padding-left: 28px;
+  color: var(--ink);
+  font-size: var(--t-14);
+  line-height: 22px;
+}
+.td-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 12px 20px;
+  border-top: 1px solid var(--divider);
+}
+.td-foot-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
