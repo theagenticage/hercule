@@ -328,7 +328,7 @@ One for the app, outside #1119: the hand-off menu's account picker (`screens/inb
 
 ## The critic rounds
 
-Each round reviewed a frozen copy under `/tmp` with four critics working apart: a visual designer, a motion designer who filmed every flow at real speed, an interaction designer who drove it with the keyboard and counted keystrokes, and an accessibility reviewer who measured contrast in all six themes and read the accessibility tree.
+Each round reviewed a frozen copy under `/tmp` with critics working apart. Rounds one and two had four: a visual designer, a motion designer who filmed every flow at real speed, an interaction designer who drove it with the keyboard and counted keystrokes, and an accessibility reviewer who measured contrast in all six themes and read the accessibility tree. Round three joined interaction and accessibility; from round four on there were two, visual with motion, and interaction with accessibility.
 
 **Round one** found 95 issues. What changed because of it:
 
