@@ -182,16 +182,6 @@ export function InboxListPart({
 
   return (
     <>
-      {counts.failing.map((source) => (
-        <InboxFailingSource
-          key={source.source}
-          sourceName={namePlugin(source.source, plugins)}
-          sinceLabel={formatInboxClock(source.since)}
-          onOpenConnections={() => {
-            void navigate({ to: "/settings/connections" });
-          }}
-        />
-      ))}
       <InboxListHead
         title={isSearching ? "Search" : scopeTitle}
         mark={browseValue?.source}
@@ -207,6 +197,16 @@ export function InboxListPart({
           setNarrowAnchor((open) => (open === null ? anchor : null));
         }}
       />
+      {counts.failing.map((source) => (
+        <InboxFailingSource
+          key={source.source}
+          sourceName={namePlugin(source.source, plugins)}
+          sinceLabel={formatInboxClock(source.since)}
+          onOpenConnections={() => {
+            void navigate({ to: "/settings/connections" });
+          }}
+        />
+      ))}
       {narrowAnchor === null ? null : (
         <InboxNarrowMenu
           facets={narrowFacets}

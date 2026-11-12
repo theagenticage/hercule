@@ -77,7 +77,7 @@ describe("InboxFrame layout", () => {
     renderFrame();
     reportWidth(1400);
 
-    expect(screen.getByRole("navigation", { name: "Saved queries and Browse" })).toBeTruthy();
+    expect(document.getElementById("inbox-rail")?.textContent).toContain("Mine");
     expect(document.getElementById("inbox-scope-button")).toBeNull();
   });
 

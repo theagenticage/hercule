@@ -18,7 +18,7 @@ import { InboxFrame } from "../../../screens/inbox/inbox-frame";
 import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
 import type { RailEntry, RailFacetScope } from "../../../screens/inbox/inbox-rail";
 import type { InboxSearchHandle } from "../../../screens/inbox/inbox-search";
-import { InboxOfflinePill } from "../../../screens/inbox/inbox-states";
+import { InboxOfflinePill, InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import { useInboxPaneWidth } from "../../../screens/inbox/use-inbox-pane-width";
 import { useHeldInboxList } from "./-inbox-held-list";
 import { InboxListPart } from "./-inbox-list-part";
@@ -173,7 +173,11 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
         )
       }
       pane={
-        currentThing === undefined ? null : (
+        currentThing === undefined ? (
+          held.status === "loading" ? (
+            <InboxPaneSkeleton />
+          ) : null
+        ) : (
           <InboxPanePart
             key={currentThing.id}
             client={client}
@@ -195,7 +199,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           <InboxOfflinePill sinceLabel={formatInboxClock(offlineSince)} />
         )
       }
-      isPaneShown={currentThing !== undefined}
+      isPaneShown={currentThing !== undefined || held.status === "loading"}
       isPaneOpen={isPaneOpen}
       paneWidth={paneWidth}
       onPaneWidthChange={setPaneWidth}

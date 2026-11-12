@@ -175,7 +175,7 @@ export function InboxNarrowMenu({
       popover="manual"
       role="menu"
       aria-label="Narrow what the list holds"
-      className="ib-narrow"
+      className="ib-narrow-menu"
       onKeyDown={handleKeyDown}
     >
       {opened === null ? (

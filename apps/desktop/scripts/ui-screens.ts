@@ -247,6 +247,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
   },
   {
+    name: "inbox",
+    path: "inbox.html",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",

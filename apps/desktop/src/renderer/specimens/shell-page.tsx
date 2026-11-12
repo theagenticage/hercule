@@ -64,6 +64,7 @@ import type {
   EventWithFacts,
   HandoffLeg,
   Harness,
+  InboxQuery,
   IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
@@ -229,6 +230,7 @@ import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
 import { createCleanupSession } from "./fleet-cleanup-fixture";
 import type { FleetRecords } from "./fleet-fixture";
+import type { InboxRecords } from "./inbox-fixture";
 import type { WorkRecords } from "./work-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
@@ -475,6 +477,7 @@ interface OpenScreens {
   readonly workflows?: WorkflowsRecords;
   readonly fleet?: FleetRecords;
   readonly work?: WorkRecords;
+  readonly inbox?: InboxRecords;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
@@ -528,6 +531,15 @@ const SILENT_LIVE: Live = {
   subscribe: () => () => undefined,
   onStatus: () => () => undefined,
   serverVersion: null,
+};
+
+/** The live connection of a page that shows the app offline: it reports the connection as lost the moment something listens. */
+const OFFLINE_LIVE: Live = {
+  ...SILENT_LIVE,
+  onStatus: (listener) => {
+    listener("disconnected");
+    return () => undefined;
+  },
 };
 
 /**
@@ -638,6 +650,7 @@ const seedQueryCache = (
     workflows,
     fleet,
     work,
+    inbox,
     run,
     discussions,
     wiki,
@@ -895,14 +908,17 @@ const seedQueryCache = (
     anyFailure: records.hasFailedRun ?? false,
   });
   // The sidebar's Inbox row reads the counts on every screen: no one waits on the user.
-  queryClient.setQueryData(inboxCountQuery(client).queryKey, {
-    savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 0 }],
-    sources: [],
-    pins: [],
-    fields: [],
-    failing: [],
-    newestArrival: 0,
-  });
+  queryClient.setQueryData(
+    inboxCountQuery(client).queryKey,
+    inbox?.counts ?? {
+      savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 0 }],
+      sources: [],
+      pins: [],
+      fields: [],
+      failing: [],
+      newestArrival: 0,
+    },
+  );
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
     queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
@@ -1091,6 +1107,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  live: Live = SILENT_LIVE,
 ) => {
   const rootRoute = createRootRoute();
   const accountScopes = createAccountScopes({
@@ -1109,7 +1126,7 @@ const buildRouter = (
       controller: {
         url: CONTROLLER_URL,
         client,
-        live: SILENT_LIVE,
+        live,
         pendingSubmissions,
         accountScopes,
       },
@@ -1202,6 +1219,9 @@ const buildRouter = (
     id: "/inbox",
     path: "/inbox",
     getParentRoute: () => shellRoute,
+    // The real loader starts the list's first read through the route context's query client.
+    // The screen reads the fake controller itself.
+    loader: undefined,
   } as never);
   const fleetRoute = FleetRoute.update({
     id: "/fleet/",
@@ -1342,6 +1362,9 @@ const findFleetDrawnSelector = (path: string): string => {
     : ".machine-page .machine-activity-row";
 };
 
+/** The selector of what the Inbox draws last: a row or an empty state, unless the fixture names another part. */
+const INBOX_DRAWN_SELECTOR = ".ib-row, .ib-empty";
+
 /** The selector of what the Work board draws last: a card, which the lanes draw after the first render. */
 const WORK_DRAWN_SELECTOR = ".board-lanes .desk-card";
 
@@ -1388,7 +1411,8 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     .getQueryCache()
     .findAll({ fetchStatus: "fetching" })
     .filter((query) => !keptReadingHashes.has(query.queryHash));
-  if (reads.length > 0) {
+  // The Inbox reads its pages and its open thing from the fixture's fake controller, which answers at once.
+  if (reads.length > 0 && screens.inbox === undefined) {
     throw new Error(
       `The page read ${reads.map((query) => JSON.stringify(query.queryKey)).join(", ")} ` +
         "again. The specimen's query cache must hold every record it reads.",
@@ -1545,12 +1569,34 @@ async function mountShellSpecimen(
       : answerMove === undefined
         ? refuseRequest
         : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init));
+  const inbox = screens.inbox;
+  const fetchWithInbox: FetchLike =
+    inbox === undefined
+      ? fetchRecords
+      : async (url, init) => {
+          // The Inbox reads its pages, the values of a field and the pane's thing from the fake controller.
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/query")) {
+            // The body may arrive as a stream, so it is read the way the controller reads it.
+            const query = JSON.parse(await new Request(url, init).text()) as InboxQuery;
+            const answer = inbox.answer(query);
+            return answer === "never" ? new Promise(() => undefined) : answerJson(answer);
+          }
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
+            return answerJson({ values: [] });
+          }
+          const detail = inbox.details.get(url.slice(url.lastIndexOf("/") + 1));
+          return (init?.method ?? "GET") === "GET" &&
+            url.includes("/api/v1/external-entities/") &&
+            detail !== undefined
+            ? answerJson(detail)
+            : fetchRecords(url, init);
+        };
   const cleanupAnswers = screens.fleet?.cleanupAnswers;
   const cleanupSession =
     cleanupAnswers === undefined ? undefined : createCleanupSession(cleanupAnswers);
   const client = createClient({
     baseUrl: CONTROLLER_URL,
-    fetch: (url, init) => cleanupSession?.answer(url, init) ?? fetchRecords(url, init),
+    fetch: (url, init) => cleanupSession?.answer(url, init) ?? fetchWithInbox(url, init),
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
@@ -1571,6 +1617,7 @@ async function mountShellSpecimen(
     pendingSubmissions,
     path,
     screens.thread?.session.id,
+    screens.inbox?.isOffline === true ? OFFLINE_LIVE : SILENT_LIVE,
   );
   await router.load();
 
@@ -1593,6 +1640,9 @@ async function mountShellSpecimen(
   }
   if (screens.fleet !== undefined) await waitForElement(findFleetDrawnSelector(path));
   if (screens.work !== undefined) await waitForElement(WORK_DRAWN_SELECTOR);
+  if (screens.inbox !== undefined) {
+    await waitForElement(screens.inbox.drawn ?? INBOX_DRAWN_SELECTOR);
+  }
   if (screens.discussions !== undefined) {
     await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
   }
@@ -1845,6 +1895,29 @@ export async function mountWorkSpecimen(
     [],
     openTaskId === undefined ? undefined : `/work?task=${openTaskId}`,
   );
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Inbox open: the main pane shows the app's real Inbox screen, over
+ * the fake controller `inbox` holds. `inbox.windowWidth` is written to
+ * `data-window-width` on the page, for the capture script to size the window
+ * to, and `inbox.paneWidth` is the width stored for the pane. Returns once a row, an empty state or the
+ * loading shapes are in the document. Fails when the page has no `#root`, or
+ * tries to read a record the fixture does not hold.
+ */
+export async function mountInboxSpecimen(
+  records: SidebarRecords,
+  inbox: InboxRecords,
+): Promise<void> {
+  if (inbox.paneWidth !== undefined) {
+    localStorage.setItem("hercule.inbox.pane-width", String(inbox.paneWidth));
+  }
+  // The shell is as wide as the window (`100vw`), so the capture script sizes the window.
+  if (inbox.windowWidth !== undefined) {
+    document.documentElement.dataset.windowWidth = String(inbox.windowWidth);
+  }
+  await mountShellSpecimen(records, "/inbox", { inbox });
 }
 
 /**

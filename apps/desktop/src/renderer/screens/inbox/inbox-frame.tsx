@@ -157,7 +157,7 @@ export function InboxFrame({
 }): JSX.Element {
   const frameRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLElement>(null);
-  const scopeMenuRef = useRef<HTMLElement>(null);
+  const scopeMenuRef = useRef<HTMLDivElement>(null);
   // Unmeasured, the frame counts as wide, so the first frame of a real window never flashes the folded layout.
   const [frameWidth, setFrameWidth] = useState(Number.POSITIVE_INFINITY);
   const [isScopeMenuOpen, setIsScopeMenuOpen] = useState(false);
@@ -228,7 +228,7 @@ export function InboxFrame({
     frameRef.current?.style.setProperty("--pane-w", `${String(width)}px`);
   };
 
-  const focusCurrentRailEntry = (event: ToggleEvent<HTMLElement>): void => {
+  const focusCurrentRailEntry = (event: ToggleEvent<HTMLDivElement>): void => {
     const isOpening = event.newState === "open";
     setIsScopeMenuOpen(isOpening);
     if (!isOpening) return;
@@ -240,7 +240,6 @@ export function InboxFrame({
     target?.focus({ preventScroll: true });
   };
 
-  const railLabel = "Saved queries and Browse";
   // The pane's width is the user's while it stands beside the list. Stacked, the stylesheet
   // gives it the whole list.
   const style = isStacked
@@ -282,16 +281,15 @@ export function InboxFrame({
               popoverTarget="inbox-scope-menu"
               aria-expanded={isScopeMenuOpen}
             />
-            <nav
+            <div
               ref={scopeMenuRef}
               id="inbox-scope-menu"
               popover="auto"
               className="pop ib-scope-menu"
-              aria-label={railLabel}
               onToggle={focusCurrentRailEntry}
             >
               {rail}
-            </nav>
+            </div>
           </>
         )}
         <div id={INBOX_REGION_IDS.search} className="ib-search">
@@ -310,9 +308,9 @@ export function InboxFrame({
         </div>
       </div>
       {!isRailFolded && (
-        <nav id={INBOX_REGION_IDS.rail} className="ib-rail" aria-label={railLabel}>
+        <div id={INBOX_REGION_IDS.rail} className="ib-rail-slot">
           {rail}
-        </nav>
+        </div>
       )}
       <section
         id={INBOX_REGION_IDS.list}

@@ -257,12 +257,9 @@ describe("the Inbox screen", () => {
     await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
 
     await userEvent.click(
-      within(screen.getByRole("navigation", { name: "Saved queries and Browse" })).getByRole(
-        "button",
-        {
-          name: /Mine/,
-        },
-      ),
+      within(screen.getByRole("navigation", { name: "Inbox lists" })).getByRole("button", {
+        name: /Mine/,
+      }),
     );
 
     await screen.findByRole("heading", { name: "Mine" });
