@@ -1,7 +1,205 @@
-/* The Inbox's page: the desk colour under the toolbar row that floats over its top. */
-.inbox-frame {
+/* The Inbox's page: a grid of the rail, the list and the pane, with the bar as a subgrid over the
+   three columns, so the pill sits over the rail, the search over the list and the keys button over
+   the pane. The columns are the rail, the list, the pane's edge (0 wide) and the pane.
+
+   The frame's own custom properties are the Inbox's screen tokens: every part drawn inside it reads
+   them. Each value sits on the app's scales (the 4px grid, the type tokens, the radii). */
+.ib {
+  /* The three columns. The pane is the user's to resize, from 360 to 640. */
+  --rail-w: 240px;
+  --pane-w: 420px;
+  --bar-h: 56px;
+
+  /* A row is two lines, 18 and 16, with 2 between and 8 above and below: 52px. Text size steps add
+     to each line, so a larger setting never clips a row. */
+  --row-h: calc(52px + 2 * var(--text-size-step));
+  --row-pad-x: 12px;
+  --row-r: 10px;
+  --row-gap: 12px; /* lead column to text */
+  --list-pad: 12px; /* list edge to a row's box */
+
+  /* The knock-out inside a filled glyph (a check, a cross): the ground the row sits on. */
+  --glyph-knock: var(--bg);
+
+  /* Project health in Browse. At risk has a hue of its own, between tomato and marigold, so it is
+     never read as either. */
+  --health-on: var(--ok);
+  --health-risk: oklch(0.56 0.15 48);
+  --health-off: var(--fail-ink);
+
+  /* The pane: the reading surface, a step off the list's ground. */
+  --pane-fill: var(--surface);
+  --section-fill: var(--raised);
+
   position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) 0 var(--pane-w);
+  grid-template-rows: var(--bar-h) minmax(0, 1fr);
   flex: 1;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
-  background: var(--desk);
+  background: var(--bg);
+}
+/* The dark themes need a lighter at-risk colour. */
+[data-theme="orient-express"] .ib,
+[data-theme="dark"] .ib,
+[data-theme="nile"] .ib,
+[data-theme="end-house"] .ib,
+[data-theme="blue-train"] .ib {
+  --health-risk: oklch(0.78 0.13 50);
+}
+/* Reduced motion stops the Inbox's own transitions: every part reads these durations. */
+@media (prefers-reduced-motion: reduce) {
+  .ib {
+    --m-quick: 0ms;
+    --m-base: 0ms;
+    --m-slow: 0ms;
+    --m-long: 0ms;
+  }
+}
+
+/* ---- The bar ---- */
+.ib-bar {
+  position: relative;
+  z-index: 20;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  height: var(--bar-h);
+}
+/* The bar floats in the window's top 52px, which drags the window: its controls take the pointer
+   and the gaps between them stay part of the drag strip. */
+.ib-pill,
+.ib-bar > .tool,
+.ib-search > *,
+.ib-end > * {
+  -webkit-app-region: no-drag;
+}
+/* The page's name for assistive technology: the pill's own tab shows it. */
+.ib-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ib-pill {
+  justify-self: start;
+  margin-left: 14px;
+}
+.ib-search {
+  display: grid;
+  grid-column: 2;
+  align-items: center;
+  min-width: 0;
+}
+.ib-end {
+  grid-column: 4;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-right: 14px;
+}
+.ib-bar .icon-pill {
+  font-weight: var(--w-medium);
+}
+.ib-bar .icon-pill[aria-expanded="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ---- The columns ---- */
+.ib-rail {
+  grid-row: 2;
+  grid-column: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 9px 10px 32px 14px;
+  border-right: 1px solid var(--divider);
+  scrollbar-width: thin;
+}
+.ib-list {
+  position: relative;
+  grid-row: 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---- Under 1058px of room: the rail is a menu in the bar, so the list keeps 400px ---- */
+.ib.is-rail-folded {
+  --rail-w: 0px;
+  grid-template-columns: 0 minmax(0, 1fr) 0 var(--pane-w);
+}
+.ib.is-rail-folded .ib-bar {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px;
+}
+.ib.is-rail-folded .ib-pill {
+  margin-left: 0;
+}
+.ib.is-rail-folded .ib-bar > .tool {
+  flex: none;
+  max-width: 220px;
+}
+.ib.is-rail-folded .ib-bar > .tool b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ib.is-rail-folded .ib-search {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+.ib.is-rail-folded .ib-search > * {
+  margin: 0;
+}
+.ib.is-rail-folded .ib-end {
+  padding-right: 0;
+}
+/* The same rail, in a popover under the scope button. It is in the top layer, so no glass above it
+   in the page clips it or blurs behind it twice. */
+.pop.ib-scope-menu {
+  inset: auto;
+  width: 260px;
+  max-height: calc(100vh - 80px);
+  margin: 8px 0 0;
+  padding: 8px 6px 12px;
+  overflow-y: auto;
+  position-area: block-end span-inline-end;
+  background: var(--glass-fill-raised);
+}
+
+/* ---- Under 1032px of window (760px of room): the pane lies over the list ---- */
+.ib.is-stacked {
+  --pane-w: 0px;
+  grid-template-columns: 0 minmax(0, 1fr) 0 0;
+  /* The slid-out pane waits just beyond the frame's edge. */
+  overflow: clip;
+}
+
+/* ---- Under 900px of window (628px of room): the pill gives way; Intake stays in the sidebar ---- */
+.ib.is-pill-gone .ib-pill {
+  display: none;
+}
+.ib.is-pill-gone .ib-bar > .tool {
+  max-width: 180px;
+}
+
+/* ---- Nothing current: the pane has faded, and the list takes its room. The columns stay as they
+   are, so the bar keeps its search over the list and ? at the end. ---- */
+.ib.is-paneless .ib-list {
+  grid-column: 2 / -1;
+}
+.ib.is-paneless .ib-pane,
+.ib.is-paneless .ib-edge {
+  display: none;
 }

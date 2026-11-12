@@ -618,7 +618,7 @@ describe("the Work screen's keys", () => {
     });
     await user.click(await screen.findByRole("link", { name: /^Inbox/ }));
     await waitFor(() => {
-      expect(document.querySelector(".inbox-frame")).not.toBeNull();
+      expect(document.querySelector(".ib")).not.toBeNull();
     });
 
     // The click leaves focus on the sidebar row, which is not the page.
