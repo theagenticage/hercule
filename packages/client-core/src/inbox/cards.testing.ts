@@ -1,7 +1,14 @@
-/** Test cards and Inbox things, in the invented Northwind Market world. */
+/**
+ * Test cards and Inbox things, in the invented Northwind Market world, and a
+ * fake controller's Inbox (`FakeInbox`) that answers the Inbox's reads from them.
+ */
 import type {
   Connection,
   EntityPlace,
+  ExternalEntityDetail,
+  InboxFirstPage,
+  InboxQuery,
+  InboxReply,
   EntityRecord,
   EntitySignalLine,
   InboxAsk,
@@ -249,3 +256,102 @@ export const buildSourceConnection = (
   updatedAt: "2026-10-01T00:00:00.000Z",
   ...overrides,
 });
+
+/** Builds the detail the Inbox's pane reads for `thing`: a compact card with no signals, links or offers. */
+export const buildFakeInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
+  id: thing.id,
+  ref: thing.ref,
+  kind: thing.kind,
+  noun: thing.noun,
+  card: "compact",
+  pace: "fast",
+  patience: thing.patience,
+  identifier: thing.identifier,
+  title: thing.title,
+  url: thing.url,
+  lifecycle: "open",
+  yours: false,
+  facts: [],
+  concerns: [],
+  access: "ok",
+  observedAt: thing.observedAt,
+  stale: false,
+  sourceUpdatedAt: thing.sourceUpdatedAt,
+  firstObservedAt: thing.observedAt,
+  ancestors: [],
+  contextComplete: true,
+  kindAvailable: true,
+  fields: [],
+  face: null,
+  places: [],
+  edges: [],
+  links: [],
+  hints: [],
+  conflicts: [],
+  signals: [],
+  openCount: 0,
+  signalCount: 0,
+  timeline: [],
+  peers: [],
+  offers: [],
+  actingConnections: [],
+});
+
+/** What the fake controller holds for the Inbox: the things of each saved query, in order, the rail's outline, and the arrival the sidebar's count reports. */
+export interface FakeInbox {
+  lists: Record<string, InboxThing[]>;
+  outline: InboxOutline;
+  /** The sidebar's `newestArrival`. */
+  newestArrival: number;
+  /** The most things one page holds. */
+  pageSize: number;
+  /** The workflows each `offerSetId` of the things offers. */
+  offerSets: Record<string, WorkflowOffer[]>;
+}
+
+/**
+ * Returns the controller's answer to one `queryInbox` from `inbox`, in the
+ * mode the query asks: the first page, the next page after a cursor, a
+ * refresh of the first page with the held rows, or the held rows alone.
+ */
+export const answerFakeInboxQuery = (inbox: FakeInbox, query: InboxQuery): InboxReply => {
+  const name = "savedQuery" in query.list ? query.list.savedQuery : "browse";
+  let things = inbox.lists[name] ?? [];
+  // The fake narrows by any clause value found in a title, which is all the tests need of a filter.
+  const values = (query.clauses ?? []).map((clause) => String(clause.value).toLowerCase());
+  things = things.filter((thing) =>
+    values.every((value) => thing.title.toLowerCase().includes(value)),
+  );
+  const { offerSets } = inbox;
+  const heldThings = (refs: readonly string[]): InboxThing[] =>
+    things.filter((thing) => refs.includes(thing.ref));
+  if (query.mode === "rows") {
+    return { mode: "rows", things: heldThings(query.held), offerSets };
+  }
+  const from = query.mode === "next" ? Number(query.after) : 0;
+  const page = things.slice(from, from + inbox.pageSize);
+  const next = from + inbox.pageSize;
+  const nextCursor = next < things.length ? { nextCursor: String(next) } : {};
+  if (query.mode === "next") {
+    return { mode: "next", things: page, ...nextCursor, offerSets };
+  }
+  const first: InboxFirstPage = {
+    mode: "first",
+    things: page,
+    total: things.length,
+    order: name === "waits" ? "waiting" : "newest",
+    facets: [],
+    ...nextCursor,
+    offerSets,
+  };
+  if (query.mode === "first") return first;
+  const onFirstPage = new Set(page.map((thing) => thing.ref));
+  return {
+    mode: "refresh",
+    first,
+    held: {
+      things: heldThings(query.held).filter((thing) => !onFirstPage.has(thing.ref)),
+      offerSets,
+    },
+  };
+};

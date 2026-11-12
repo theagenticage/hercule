@@ -263,7 +263,7 @@ const listBuiltFiles = (folder: string, prefix = ""): string[] =>
  * `--route` files `build:desktop:bundle` passes it. Throws when a file or the
  * manifest it needs is missing, so when the build did not run.
  */
-const measureBuild = (tree: string): BuildSizes => {
+export const measureBuild = (tree: string): BuildSizes => {
   const out = join(tree, "apps/desktop/out");
   const files = Object.fromEntries(
     LAYERS.map((layer) => [
