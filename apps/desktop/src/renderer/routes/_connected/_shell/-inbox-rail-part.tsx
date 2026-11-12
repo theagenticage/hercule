@@ -1,20 +1,17 @@
 import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
-import {
-  describeInboxRail,
-  type InboxScope,
-  type InboxScopeValue,
-} from "@hercule/client-core/inbox";
+import { describeInboxRail, type InboxScope } from "@hercule/client-core/inbox";
+import type { InboxBrowseValue } from "@hercule/contract";
 import { InboxRail, type RailFacetScope } from "../../../screens/inbox/inbox-rail";
 import { inboxOutlineQuery, pluginsQuery, settingsQuery } from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { useInboxClock } from "./-inbox-clock";
 
-type Pin = InboxScopeValue;
+type Pin = InboxBrowseValue;
 type FoldedSource = { source: string; connectionId?: string };
 
-const isSameValue = (a: InboxScopeValue, b: InboxScopeValue): boolean =>
+const isSameValue = (a: InboxBrowseValue, b: InboxBrowseValue): boolean =>
   a.source === b.source &&
   a.connectionId === b.connectionId &&
   a.key === b.key &&

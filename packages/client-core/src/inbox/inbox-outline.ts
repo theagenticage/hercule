@@ -5,21 +5,18 @@
  *
  * The scope is what the list is on: a saved query, or one Browse value.
  */
-import type { EntityStatus, InboxOutline } from "@hercule/contract";
+import {
+  CORE_SAVED_QUERY_IDS,
+  type EntityStatus,
+  type InboxBrowseValue,
+  type InboxOutline,
+} from "@hercule/contract";
 import { namePlugin, type PluginName } from "../intake";
-
-/** A Browse value: one value of one Facet, of one source, in one account when the source has several. */
-export interface InboxScopeValue {
-  readonly source: string;
-  readonly connectionId?: string;
-  readonly key: string;
-  readonly value: string;
-}
 
 /** What the Inbox list is on: a saved query, or a Browse value. */
 export type InboxScope =
   | { readonly kind: "saved-query"; readonly id: string }
-  | { readonly kind: "value"; readonly value: InboxScopeValue };
+  | { readonly kind: "value"; readonly value: InboxBrowseValue };
 
 /** The icons of the core's saved queries. A plugin's saved query draws its plugin's mark instead. */
 export type RailIconName = "clock" | "user" | "eye" | "agent" | "intake";
@@ -34,7 +31,7 @@ export interface RailSavedQuery {
   readonly shortcut?: string;
 }
 
-export interface RailPin extends InboxScopeValue {
+export interface RailPin extends InboxBrowseValue {
   readonly label: string;
   readonly count: number;
   /** The account's label, given only when the pin's source has several accounts. */
@@ -90,11 +87,11 @@ export interface InboxRailContent {
 
 /** The icons of the core's saved queries, by their ids. Any other saved query draws its plugin's mark. */
 const CORE_ICONS: Readonly<Record<string, RailIconName>> = {
-  waits: "clock",
-  mine: "user",
-  updates: "eye",
-  "with-hercule": "agent",
-  everything: "intake",
+  [CORE_SAVED_QUERY_IDS.waits]: "clock",
+  [CORE_SAVED_QUERY_IDS.mine]: "user",
+  [CORE_SAVED_QUERY_IDS.updates]: "eye",
+  [CORE_SAVED_QUERY_IDS.held]: "agent",
+  [CORE_SAVED_QUERY_IDS.everything]: "intake",
 };
 
 /** How many saved queries have a digit key: 1 to 7. */

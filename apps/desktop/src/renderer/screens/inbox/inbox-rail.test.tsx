@@ -2,12 +2,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  InboxScopeValue,
-  RailFacet,
-  RailFacetValue,
-  RailSource,
-} from "@hercule/client-core/inbox";
+import type { InboxBrowseValue } from "@hercule/contract";
+import type { RailFacet, RailFacetValue, RailSource } from "@hercule/client-core/inbox";
 import { InboxRail, type InboxRailProps } from "./inbox-rail";
 
 const VALUES: ReadonlyArray<RailFacetValue> = Array.from({ length: 8 }, (_, index) => ({
@@ -126,7 +122,7 @@ describe("InboxRail", () => {
 
   it("pins a value with its star and with P", async () => {
     const { onTogglePin } = renderRail();
-    const team1: InboxScopeValue = { source: "linear", key: "team", value: "team-1" };
+    const team1: InboxBrowseValue = { source: "linear", key: "team", value: "team-1" };
     await userEvent.click(screen.getByRole("button", { name: "Pin Team 1" }));
     expect(onTogglePin).toHaveBeenLastCalledWith(team1);
     screen.getByRole("button", { name: /^Team 3/ }).focus();

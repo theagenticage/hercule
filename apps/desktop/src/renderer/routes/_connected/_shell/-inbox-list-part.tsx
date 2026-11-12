@@ -19,7 +19,12 @@ import {
   listCardOffers,
   type InboxScope,
 } from "@hercule/client-core/inbox";
-import type { InboxClause, InboxOrder, InboxThing } from "@hercule/contract";
+import {
+  CORE_SAVED_QUERY_IDS,
+  type InboxClause,
+  type InboxOrder,
+  type InboxThing,
+} from "@hercule/contract";
 import { inboxOutlineQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxList, type InboxListHandle } from "../../../screens/inbox/inbox-list";
 import { InboxListHead } from "../../../screens/inbox/inbox-list-head";
@@ -208,7 +213,7 @@ export function InboxListPart({
           kind: "nobody-waits",
           updatesCount: decision.updatesCount,
           onOpenUpdates: () => {
-            onOpenScope({ kind: "saved-query", id: "updates" });
+            onOpenScope({ kind: "saved-query", id: CORE_SAVED_QUERY_IDS.updates });
           },
         };
       case "nothing-in-list":

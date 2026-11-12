@@ -156,7 +156,20 @@ const resolveList = (
           ...(query.source === undefined ? {} : { source: query.source }),
         }),
       )
-    : Effect.succeed({ clauses: [list.browse], order: "waiting" });
+    : Effect.succeed({
+        clauses: [
+          {
+            key: list.browse.key,
+            op: "is",
+            value: list.browse.value,
+            source: list.browse.source,
+            ...(list.browse.connectionId === undefined
+              ? {}
+              : { connectionId: list.browse.connectionId }),
+          },
+        ],
+        order: "waiting",
+      });
 
 /** Fails with `Validation` naming `path` and `message`. */
 const failValidation = (path: ReadonlyArray<string>, message: string) =>

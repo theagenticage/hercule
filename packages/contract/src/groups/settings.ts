@@ -18,11 +18,7 @@
  *
  * The schema itself rejects unknown keys; `closedStruct` explains why.
  */
-import {
-  MAX_ENTITY_FIELD_TEXT_LENGTH,
-  MAX_INBOX_CLAUSE_KEY_LENGTH,
-  PluginId,
-} from "@hercule/plugin-host";
+import { PluginId } from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -30,8 +26,9 @@ import { AccessMode, MAX_FACT_LENGTH } from "@hercule/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
-import { atMost, bounded, Timezone } from "../strings";
+import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
+import { InboxBrowseValue } from "./external-entity";
 import { MuteKey } from "./notification";
 import { SpawnBound } from "./workflow-definition";
 
@@ -236,14 +233,7 @@ export const SETTING_VALUES = {
      * pinned: the value of the field `key` in `source`, optionally in one
      * account. The label is not stored, because the rail reads it live.
      */
-    "inbox.pins": atMost(
-      Schema.Struct({
-        ...InboxRailSource,
-        key: bounded(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
-        value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
-      }),
-      MAX_INBOX_RAIL_ENTRIES,
-    ),
+    "inbox.pins": atMost(InboxBrowseValue, MAX_INBOX_RAIL_ENTRIES),
     /**
      * The sources, or accounts of a source, whose Browse section the user
      * folded on the Inbox's rail. Empty, or unset, means every source is

@@ -19,6 +19,7 @@ import {
   MAX_ENTITY_FACTS,
   MAX_ENTITY_FIELD_TEXT_LENGTH,
   MAX_ENTITY_KIND_FIELDS,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
   InboxClause as PluginInboxClause,
   PluginId,
   splitClauseWord,
@@ -543,14 +544,43 @@ export const MAX_INBOX_ACCOUNTS = 32;
 const MAX_INBOX_RAIL_ROWS = 500;
 
 /**
+ * The ids of the core's saved queries, the ones that exist whatever plugins
+ * are loaded. A plugin's saved query has a qualified id (`github/review-requests`).
+ */
+export const CORE_SAVED_QUERY_IDS = {
+  waits: "waits",
+  mine: "mine",
+  updates: "updates",
+  held: "with-hercule",
+  everything: "everything",
+} as const;
+
+export type CoreSavedQueryId = (typeof CORE_SAVED_QUERY_IDS)[keyof typeof CORE_SAVED_QUERY_IDS];
+
+/**
+ * One value of one Facet, of one source, in one account when the source has
+ * several: what Browse lists, what the user pins, and what a list or a search
+ * tie names. `key` is the field's key and `value` the stored value (a record's
+ * ref for a facet of records).
+ */
+export const InboxBrowseValue = Schema.Struct({
+  source: PluginId,
+  connectionId: Schema.optionalKey(Id),
+  key: bounded(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
+  value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+});
+
+export type InboxBrowseValue = Schema.Schema.Type<typeof InboxBrowseValue>;
+
+/**
  * Which list the Inbox reads: a saved query by its id (`waits`,
- * `github/review-requests`), or Browse, one clause the rail sends.
+ * `github/review-requests`), or Browse, one value of one Facet.
  *
  * The CLI types the saved query's id as one word, for `--list`.
  */
 const InboxListValue = Schema.Union([
   Schema.Struct({ savedQuery: bounded(1, MAX_SAVED_QUERY_ID_LENGTH) }),
-  Schema.Struct({ browse: InboxClause }),
+  Schema.Struct({ browse: InboxBrowseValue }),
 ]);
 
 export const InboxList = markShorthand(
@@ -836,10 +866,7 @@ export const InboxOutline = Schema.Struct({
   /** Each pin with its current label and count. A value that no longer exists keeps its stored text as label, with count 0. */
   pins: atMost(
     Schema.Struct({
-      source: PluginId,
-      connectionId: Schema.optionalKey(Id),
-      key: bounded(1, 64),
-      value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+      ...InboxBrowseValue.fields,
       label: bounded(1, 512),
       count: Schema.Int,
     }),

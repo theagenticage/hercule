@@ -25,6 +25,7 @@ import type {
   InboxThing,
   PluginDetail,
 } from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import { buildInboxAsk, buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK, TIDEWATCH_PLUGIN } from "./plugins-fixture";
@@ -305,11 +306,11 @@ const ALL_THINGS: ReadonlyArray<InboxThing> = ITEMS.map((item) => item.thing);
 
 /** The saved queries, with the same words the controller's core list has. */
 const SAVED_QUERIES: InboxOutline["savedQueries"] = [
-  { id: "waits", name: "Someone waits on me", order: "waiting", count: 6 },
-  { id: "mine", name: "Mine", order: "newest", count: 2 },
-  { id: "updates", name: "Updates", order: "newest", count: 3 },
-  { id: "with-hercule", name: "With Hercule", order: "newest", count: 1 },
-  { id: "everything", name: "Everything", order: "newest", count: ITEMS.length },
+  { id: CORE_SAVED_QUERY_IDS.waits, name: "Someone waits on me", order: "waiting", count: 6 },
+  { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", count: 2 },
+  { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", count: 3 },
+  { id: CORE_SAVED_QUERY_IDS.held, name: "With Hercule", order: "newest", count: 1 },
+  { id: CORE_SAVED_QUERY_IDS.everything, name: "Everything", order: "newest", count: ITEMS.length },
   {
     id: "github/review-requests",
     name: "Review requests",
@@ -412,13 +413,15 @@ const passes = (item: Item, clause: NonNullable<InboxQuery["clauses"]>[number]):
 /** Returns the fixture's items in `list`, as the controller picks them before a search narrows them. */
 const pickItems = (list: InboxQuery["list"]): ReadonlyArray<Item> => {
   if ("savedQuery" in list) {
-    return list.savedQuery === "everything"
+    return list.savedQuery === CORE_SAVED_QUERY_IDS.everything
       ? ITEMS
       : list.savedQuery === "github/review-requests"
         ? ITEMS.filter((item) => item.thing.askKinds.includes(REVIEW))
         : ITEMS.filter((item) => item.lists.includes(list.savedQuery));
   }
-  return ITEMS.filter((item) => passes(item, list.browse));
+  return ITEMS.filter((item) =>
+    passes(item, { key: list.browse.key, op: "is", value: list.browse.value }),
+  );
 };
 
 /** Plays the controller's `queryInbox` over the fixture's things. */
@@ -429,7 +432,9 @@ export const answerInboxQuery = (query: InboxQuery): InboxPage => {
   const words = (query.text ?? "").trim().toLowerCase();
   if (words !== "") items = items.filter((item) => item.thing.title.toLowerCase().includes(words));
   const isWaiting =
-    "browse" in list || list.savedQuery === "waits" || list.savedQuery === "github/review-requests";
+    "browse" in list ||
+    list.savedQuery === CORE_SAVED_QUERY_IDS.waits ||
+    list.savedQuery === "github/review-requests";
   const ordered = isWaiting
     ? items.toSorted((a, b) =>
         (a.thing.waitingSince ?? "9").localeCompare(b.thing.waitingSince ?? "9"),
@@ -612,13 +617,13 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     records: {
       ...BASE,
       answer: (query) =>
-        "savedQuery" in query.list && query.list.savedQuery === "waits"
+        "savedQuery" in query.list && query.list.savedQuery === CORE_SAVED_QUERY_IDS.waits
           ? NO_THINGS
           : answerInboxQuery(query),
       outline: {
         ...BASE.outline,
         savedQueries: SAVED_QUERIES.map((query) =>
-          query.id === "waits" ? { ...query, count: 0 } : query,
+          query.id === CORE_SAVED_QUERY_IDS.waits ? { ...query, count: 0 } : query,
         ),
       },
     },

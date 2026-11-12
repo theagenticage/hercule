@@ -377,7 +377,7 @@ describe("the order and the pages of a list", () => {
         yield* raise(b, REVIEW, 9);
         return {
           waiting: yield* list(repository, 50, {
-            list: { browse: { key: "source", op: "is", value: "acme" } },
+            list: { browse: { source: "acme", key: "source", value: "acme" } },
           }),
           newest: yield* list(repository, 50),
         };
@@ -461,7 +461,9 @@ describe("the order and the pages of a list", () => {
           });
           if (index < 120) yield* raise(ref, REVIEW, index + 1);
         }
-        const browse = { list: { browse: { key: "source", op: "is", value: "acme" } } } as const;
+        const browse = {
+          list: { browse: { source: "acme", key: "source", value: "acme" } },
+        } as const;
         const first = yield* list(repository, 400, browse);
         const second = yield* list(repository, 400, { ...browse, cursor: first.nextCursor! });
         return { first, second };

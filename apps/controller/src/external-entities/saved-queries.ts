@@ -8,7 +8,7 @@
  * (`github/review-requests`).
  */
 import * as Effect from "effect/Effect";
-import { createValidationError, type Validation } from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS, createValidationError, type Validation } from "@hercule/contract";
 import type { RegisteredSavedQuery } from "../plugins";
 
 /**
@@ -19,19 +19,19 @@ import type { RegisteredSavedQuery } from "../plugins";
  */
 export const CORE_SAVED_QUERIES: ReadonlyArray<RegisteredSavedQuery> = [
   {
-    id: "waits",
+    id: CORE_SAVED_QUERY_IDS.waits,
     name: "Someone waits on me",
     order: "waiting",
     clauses: [{ key: "asks", op: "is", value: true }],
   },
   {
-    id: "mine",
+    id: CORE_SAVED_QUERY_IDS.mine,
     name: "Mine",
     order: "newest",
     clauses: [{ key: "mine", op: "is", value: true }],
   },
   {
-    id: "updates",
+    id: CORE_SAVED_QUERY_IDS.updates,
     name: "Updates",
     order: "newest",
     clauses: [
@@ -40,12 +40,12 @@ export const CORE_SAVED_QUERIES: ReadonlyArray<RegisteredSavedQuery> = [
     ],
   },
   {
-    id: "with-hercule",
+    id: CORE_SAVED_QUERY_IDS.held,
     name: "With Hercule",
     order: "newest",
     clauses: [{ key: "held", op: "is", value: true }],
   },
-  { id: "everything", name: "Everything", order: "newest", clauses: [] },
+  { id: CORE_SAVED_QUERY_IDS.everything, name: "Everything", order: "newest", clauses: [] },
 ];
 
 /**

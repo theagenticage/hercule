@@ -10,6 +10,7 @@ import {
   DURATION_UNIT_SECONDS,
   interpretClauseValue,
   splitSearchValue,
+  type InboxBrowseValue,
   type InboxClause,
   type InboxOutline,
 } from "@hercule/contract";
@@ -36,7 +37,7 @@ export interface InboxSearchContext {
    * `connectionId` is set. It is how "N more" on a Browse facet keeps the
    * facet's source and account in the search it starts.
    */
-  tie?: { readonly source: string; readonly connectionId?: string };
+  tie?: Pick<InboxBrowseValue, "source" | "connectionId">;
 }
 
 /** The state of the search field. Only the transitions below build one. */

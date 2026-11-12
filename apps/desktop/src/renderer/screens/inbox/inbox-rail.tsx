@@ -1,8 +1,8 @@
 import { useState, type JSX, type KeyboardEvent } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
+import type { InboxBrowseValue } from "@hercule/contract";
 import type {
   InboxScope,
-  InboxScopeValue,
   RailAccount,
   RailFacet,
   RailFacetValue,
@@ -42,7 +42,7 @@ export interface InboxRailProps {
   readonly onPick: (entry: InboxScope) => void;
   readonly onToggleFold: (source: string) => void;
   /** Pins the value, or unpins it when it is pinned. */
-  readonly onTogglePin: (value: InboxScopeValue) => void;
+  readonly onTogglePin: (value: InboxBrowseValue) => void;
   readonly onSearchMore: (facet: RailFacetScope) => void;
 }
 
@@ -55,13 +55,13 @@ const HEALTH_WORDS: Readonly<Record<RailHealth, string>> = {
   "off-track": "Off track",
 };
 
-const valueKey = (value: InboxScopeValue): string =>
+const valueKey = (value: InboxBrowseValue): string =>
   JSON.stringify([value.source, value.connectionId ?? null, value.key, value.value]);
 
 const facetKey = (source: string, facet: RailFacet): string =>
   JSON.stringify([source, facet.connectionId ?? null, facet.key]);
 
-const isCurrentValue = (current: InboxScope | null, value: InboxScopeValue): boolean =>
+const isCurrentValue = (current: InboxScope | null, value: InboxBrowseValue): boolean =>
   current?.kind === "value" && valueKey(current.value) === valueKey(value);
 
 /** Returns the facets of `source` that belong under `account`, or all of them when it has no account level. */
@@ -123,7 +123,7 @@ function listStopCandidates(
   return candidates;
 }
 
-const valueOf = (source: string, facet: RailFacet, item: RailFacetValue): InboxScopeValue => ({
+const valueOf = (source: string, facet: RailFacet, item: RailFacetValue): InboxBrowseValue => ({
   source,
   key: facet.key,
   value: item.value,
@@ -224,7 +224,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
     },
   });
 
-  const star = (value: InboxScopeValue, name: string, id: string): JSX.Element => {
+  const star = (value: InboxBrowseValue, name: string, id: string): JSX.Element => {
     const isPinned = pins.some((pin) => valueKey(pin) === valueKey(value));
     return (
       <button
@@ -244,7 +244,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
     );
   };
 
-  const valueRow = (value: InboxScopeValue, label: string, item: RailFacetValue): JSX.Element => {
+  const valueRow = (value: InboxBrowseValue, label: string, item: RailFacetValue): JSX.Element => {
     const id = `value:${valueKey(value)}`;
     const isOn = isCurrentValue(current, value);
     const isEmpty = item.count === 0 && !loading;

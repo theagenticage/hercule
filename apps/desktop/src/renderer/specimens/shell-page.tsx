@@ -90,6 +90,7 @@ import type {
   Workspace,
   YourWorkTask,
 } from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import {
   createClient,
   type FetchLike,
@@ -910,7 +911,9 @@ const seedQueryCache = (
     anyFailure: records.hasFailedRun ?? false,
   });
   // The sidebar's Inbox row reads its small counts on every screen: no one waits on the user.
-  const waiting = inbox?.outline.savedQueries.find((query) => query.id === "waits")?.count ?? 0;
+  const waiting =
+    inbox?.outline.savedQueries.find((query) => query.id === CORE_SAVED_QUERY_IDS.waits)?.count ??
+    0;
   queryClient.setQueryData(inboxCountQuery(client).queryKey, { waiting, newestArrival: 0 });
   // The Inbox screen reads its outline once, and the route's loader waits for it.
   if (inbox !== undefined)

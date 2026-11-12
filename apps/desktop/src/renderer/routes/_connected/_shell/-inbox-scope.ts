@@ -8,35 +8,28 @@ import type { InboxScope, InboxSearch } from "@hercule/client-core/inbox";
 
 /** What of the search narrows the list: its clauses and its free text, not what is half typed. */
 export type InboxNarrowing = Pick<InboxSearch, "clauses" | "text">;
-import { MAX_INBOX_TEXT_LENGTH, type InboxList, type InboxQuery } from "@hercule/contract";
+import {
+  CORE_SAVED_QUERY_IDS,
+  MAX_INBOX_TEXT_LENGTH,
+  type InboxList,
+  type InboxQuery,
+} from "@hercule/contract";
 
 /** The id of the saved query the Inbox opens on: the things someone waits on the user for. */
-export const DEFAULT_INBOX_QUERY_ID = "waits";
+export const DEFAULT_INBOX_QUERY_ID = CORE_SAVED_QUERY_IDS.waits;
 
 /** The scope the Inbox opens on. */
 export const DEFAULT_INBOX_SCOPE: InboxScope = { kind: "saved-query", id: DEFAULT_INBOX_QUERY_ID };
 
 /** The id of the saved query that holds everything, which the search widens to. */
-export const EVERYTHING_QUERY_ID = "everything";
+export const EVERYTHING_QUERY_ID = CORE_SAVED_QUERY_IDS.everything;
 
 /** The scope a search widens to. */
 export const EVERYTHING_INBOX_SCOPE: InboxScope = { kind: "saved-query", id: EVERYTHING_QUERY_ID };
 
 /** Returns the list a scope reads: a saved query by its id, or the one clause a Browse value sends. */
 export const buildInboxList = (scope: InboxScope): InboxList =>
-  scope.kind === "saved-query"
-    ? { savedQuery: scope.id }
-    : {
-        browse: {
-          key: scope.value.key,
-          op: "is",
-          value: scope.value.value,
-          source: scope.value.source,
-          ...(scope.value.connectionId === undefined
-            ? {}
-            : { connectionId: scope.value.connectionId }),
-        },
-      };
+  scope.kind === "saved-query" ? { savedQuery: scope.id } : { browse: scope.value };
 
 /** Returns the first-page query of a scope and the search over it. */
 export const buildInboxQuery = (scope: InboxScope, search: InboxNarrowing): InboxQuery => ({

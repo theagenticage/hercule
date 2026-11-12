@@ -2,7 +2,7 @@
  * Which empty state the Inbox shows when its list holds nothing. The desktop
  * draws each case; this module only decides which one applies.
  */
-import type { InboxOutline } from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS, type InboxOutline } from "@hercule/contract";
 
 /** What decides the empty state. */
 export interface InboxEmptyFacts {
@@ -33,9 +33,9 @@ export const decideInboxEmpty = ({
   counts,
 }: InboxEmptyFacts): InboxEmptyCase => {
   if (isSearching) return { kind: "nothing-matches" };
-  if (savedQueryId !== "waits") return { kind: "nothing-in-list" };
+  if (savedQueryId !== CORE_SAVED_QUERY_IDS.waits) return { kind: "nothing-in-list" };
   const countOf = (id: string): number =>
     counts.savedQueries.find((query) => query.id === id)?.count ?? 0;
-  if (countOf("everything") === 0) return { kind: "all-clear" };
-  return { kind: "nobody-waits", updatesCount: countOf("updates") };
+  if (countOf(CORE_SAVED_QUERY_IDS.everything) === 0) return { kind: "all-clear" };
+  return { kind: "nobody-waits", updatesCount: countOf(CORE_SAVED_QUERY_IDS.updates) };
 };
