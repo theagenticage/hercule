@@ -42,16 +42,11 @@ describe("CardFace", () => {
 describe("the typed clause word of `entity list --clause`", () => {
   const decodeWord = readShorthandDecoder(InboxQuery.fields.clauses)!;
 
-  it("turns a unit into seconds only for over and under", () => {
-    expect(decodeWord("waiting>2d")).toEqual({ key: "waiting", op: "over", value: 172_800 });
-    expect(decodeWord("age<90m")).toEqual({ key: "age", op: "under", value: 5_400 });
-    // A team named 2d is a team, not a duration.
+  it("keeps the value as the raw text, for the controller to read for the field's type", () => {
+    expect(decodeWord("waiting>2d")).toEqual({ key: "waiting", op: "over", value: "2d" });
     expect(decodeWord("team=2d")).toEqual({ key: "team", op: "is", value: "2d" });
-  });
-
-  it("reads true, false and plain numbers", () => {
-    expect(decodeWord("asks=true")).toEqual({ key: "asks", op: "is", value: true });
-    expect(decodeWord("size>1000")).toEqual({ key: "size", op: "over", value: 1000 });
+    expect(decodeWord("asks=true")).toEqual({ key: "asks", op: "is", value: "true" });
+    expect(decodeWord("size>1000")).toEqual({ key: "size", op: "over", value: "1000" });
   });
 
   it("refuses a word that is not a clause, with what to write", () => {

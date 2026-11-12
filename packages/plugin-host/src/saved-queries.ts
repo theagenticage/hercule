@@ -14,36 +14,6 @@ import { MAX_ENTITY_FIELD_TEXT_LENGTH, type EntityFieldType } from "./entities";
 import { buildBoundedString } from "./limits";
 import { PluginId } from "./manifest";
 
-/** The operators of a clause (see `InboxClause`). */
-export type InboxClauseOperator = "is" | "over" | "under";
-
-/**
- * Returns the operators a clause on a field of `type` takes, and the type of
- * the value it carries. `is` compares for equality; `over` and `under`
- * compare a number, an amount, or a duration in seconds (`age` fields and
- * `waiting`).
- */
-export const describeClauseForFieldType = (
-  type: EntityFieldType,
-): {
-  readonly operators: ReadonlyArray<InboxClauseOperator>;
-  readonly value: "string" | "number" | "boolean";
-} => {
-  switch (type) {
-    case "text":
-    case "person":
-    case "enum":
-      return { operators: ["is"], value: "string" };
-    case "bool":
-      return { operators: ["is"], value: "boolean" };
-    case "number":
-    case "money":
-      return { operators: ["is", "over", "under"], value: "number" };
-    case "age":
-      return { operators: ["over", "under"], value: "number" };
-  }
-};
-
 /**
  * The Inbox's own query fields, in the order the search lists them. Every
  * source answers them, so a plugin cannot declare an entity field with one of

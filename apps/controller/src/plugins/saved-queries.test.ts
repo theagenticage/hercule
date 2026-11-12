@@ -104,22 +104,22 @@ describe("decodeSavedQueries", () => {
     {
       name: "over on a text field",
       clause: { key: "team", op: "over", value: 3 },
-      message: 'uses "over", but that key takes "is"',
+      message: 'team takes "is", not "over"',
     },
     {
       name: "is on a duration",
       clause: { key: "waiting", op: "is", value: 3 },
-      message: 'uses "is", but that key takes "over" or "under"',
+      message: 'waiting takes "over" or "under", not "is"',
     },
     {
       name: "a text value on a number field",
       clause: { key: "size", op: "over", value: "big" },
-      message: "has a value that is not a number",
+      message: '"big" is not a number',
     },
     {
-      name: "a text value on a boolean key",
-      clause: { key: "flag", op: "is", value: "yes" },
-      message: "has a value that is not a boolean",
+      name: "a number on a boolean key",
+      clause: { key: "flag", op: "is", value: 3 },
+      message: '"3" is not yes or no',
     },
     {
       name: "a source",

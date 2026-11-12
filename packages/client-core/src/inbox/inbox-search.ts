@@ -6,7 +6,13 @@
  * The list's scope (the saved query or Browse place being searched) is not part of this module:
  * nothing here can remove it.
  */
-import type { InboxClause, InboxOutline } from "@hercule/contract";
+import {
+  DURATION_UNIT_SECONDS,
+  interpretClauseValue,
+  splitSearchValue,
+  type InboxClause,
+  type InboxOutline,
+} from "@hercule/contract";
 
 /** One field of the `InboxOutline.fields` reply: one per (source, key); core fields have no source. */
 export type InboxField = InboxOutline["fields"][number];
@@ -59,14 +65,12 @@ export interface InboxSuggestionMenu {
 
 export const EMPTY_INBOX_SEARCH: InboxSearch = { clauses: [], input: "", text: "", open: null };
 
-const SECONDS_PER_UNIT: Record<string, number> = { m: 60, h: 3600, d: 86_400, w: 604_800 };
 const NUMBER_HINTS = [">100", ">1000", ">10000"];
 const AGE_HINTS = [">4h", ">1d", ">2d", ">1w"];
 const BOOL_VALUES: SuggestedValue[] = [
   { value: "yes", count: 0 },
   { value: "no", count: 0 },
 ];
-const THRESHOLD = { number: /^([<>])(\d+(?:\.\d+)?)$/, age: /^([<>])(\d+)([mhdw])$/ };
 const GROUPED = new Intl.NumberFormat("en-US");
 
 /**
@@ -212,53 +216,46 @@ function valuesOf(context: InboxSearchContext, key: string): readonly SuggestedV
     : (context.suggestedValues[key] ?? []);
 }
 
-/** Checks that a typed value needs no completion: a whole threshold, or a value the field holds. */
+/**
+ * Returns the clause for a typed value on a field, or undefined when the value
+ * is not valid for it. A threshold (`>1000`, `<2d`) is only read on a number,
+ * money or age field; on every other field the typed text is the value.
+ */
+function readTypedClause(field: InboxField, typed: string): InboxClause | undefined {
+  const value = typed.trim();
+  if (!value) return undefined;
+  const { op, raw } =
+    isNumeric(field.type) || field.type === "age"
+      ? splitSearchValue(value)
+      : { op: "is" as const, raw: value };
+  const reading = interpretClauseValue(field.key, field.type, op, raw);
+  return reading.ok ? { key: field.key, op, value: reading.value } : undefined;
+}
+
+/** Checks that a typed value needs no completion: a whole threshold or number, or a value the field holds. */
 function isWholeValue(
   field: InboxField,
   typed: string,
   values: readonly SuggestedValue[],
 ): boolean {
-  if (field.type === "age") return THRESHOLD.age.test(typed);
-  if (isNumeric(field.type)) return THRESHOLD.number.test(typed);
+  if (field.type === "age" || isNumeric(field.type))
+    return readTypedClause(field, typed) !== undefined;
   const lower = typed.toLowerCase();
   return values.some((v) => v.value.toLowerCase() === lower);
 }
 
 /**
  * Returns the clause for a typed value, or undefined when the value is not valid for the field:
- * a threshold on a number or age field, yes or no on a bool field, anything else on the others.
+ * a threshold or number on a number or age field, a yes or no on a bool field, anything else on
+ * the others.
  */
 function buildClause(
   field: InboxField,
   typed: string,
   tie: InboxSearchContext["tie"],
 ): InboxClause | undefined {
-  const clause = buildUntiedClause(field, typed);
+  const clause = readTypedClause(field, typed);
   return clause === undefined || tie === undefined ? clause : { ...clause, ...tie };
-}
-
-function buildUntiedClause(field: InboxField, typed: string): InboxClause | undefined {
-  const value = typed.trim();
-  if (!value) return undefined;
-  const key = field.key;
-  if (field.type === "bool") {
-    const lower = value.toLowerCase();
-    return lower === "yes" || lower === "no"
-      ? { key, op: "is", value: lower === "yes" }
-      : undefined;
-  }
-  if (field.type === "age") {
-    const m = THRESHOLD.age.exec(value);
-    if (!m) return undefined;
-    const seconds = Number(m[2]) * SECONDS_PER_UNIT[m[3]!]!;
-    return { key, op: m[1] === ">" ? "over" : "under", value: seconds };
-  }
-  if (isNumeric(field.type)) {
-    const m = THRESHOLD.number.exec(value);
-    if (!m) return undefined;
-    return { key, op: m[1] === ">" ? "over" : "under", value: Number(m[2]) };
-  }
-  return { key, op: "is", value };
 }
 
 /**
@@ -357,7 +354,7 @@ function listValueSuggestions(
 
   if (isNumeric(field.type) || field.type === "age") {
     const age = field.type === "age";
-    const whole = (age ? THRESHOLD.age : THRESHOLD.number).test(typed);
+    const whole = /^[<>]/.test(typed) && isWholeValue(field, typed, []);
     const hints = (age ? AGE_HINTS : NUMBER_HINTS).filter(
       (h) => h !== typed && h.startsWith(typed),
     );
@@ -387,7 +384,7 @@ function describeThreshold(field: InboxField, threshold: string): string {
 /** Returns seconds as the largest whole unit: 172800 is `2d`, 5400 is `90m`. */
 function formatDuration(seconds: number): string {
   for (const unit of ["w", "d", "h", "m"] as const) {
-    const size = SECONDS_PER_UNIT[unit]!;
+    const size = DURATION_UNIT_SECONDS[unit];
     if (seconds >= size && seconds % size === 0) return `${seconds / size}${unit}`;
   }
   return `${seconds}s`;

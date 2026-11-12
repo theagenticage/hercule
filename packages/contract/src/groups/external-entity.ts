@@ -21,6 +21,7 @@ import {
   MAX_ENTITY_KIND_FIELDS,
   InboxClause as PluginInboxClause,
   PluginId,
+  splitClauseWord,
 } from "@hercule/plugin-host";
 import { Schema, SchemaGetter } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
@@ -573,30 +574,13 @@ export type InboxOrder = Schema.Schema.Type<typeof InboxOrder>;
 
 /**
  * Parses one typed clause, `key=value` (is), `key>value` (over) or
- * `key<value` (under). A value of `true` or `false` is a boolean and a plain
- * number is a number. With `>` or `<`, a number with a unit (`2d`, `90m`,
- * `3h`, `1w`, `30s`) is that many seconds. With `=` it stays text, because
- * `team=2d` names a team and no duration is compared for equality. Anything
- * else is text.
+ * `key<value` (under). The value stays the raw text: it is the controller that
+ * reads it for the type of the field the key names (the clause value grammar
+ * of plugin-host), so `team=2d` names a team and `waiting>2d` is a duration.
  */
 const parseClauseWord = (word: string): InboxClause | undefined => {
-  const match = /^([A-Za-z0-9_-]+)([=><])(.+)$/.exec(word);
-  if (match === null) return undefined;
-  const [, key, sign, text] = match as unknown as [string, string, string, string];
-  const op = sign === "=" ? "is" : sign === ">" ? "over" : "under";
-  const unit = op === "is" ? null : /^(\d+(?:\.\d+)?)([smhdw])$/.exec(text);
-  const seconds = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 } as const;
-  const value: string | number | boolean =
-    text === "true"
-      ? true
-      : text === "false"
-        ? false
-        : unit !== null
-          ? Number(unit[1]) * seconds[unit[2] as keyof typeof seconds]
-          : /^-?\d+(?:\.\d+)?$/.test(text)
-            ? Number(text)
-            : text;
-  return { key: key, op, value };
+  const raw = splitClauseWord(word);
+  return raw === undefined ? undefined : { key: raw.key, op: raw.op, value: raw.raw };
 };
 
 /** The one-word form of a clause: what `--clause` takes. */

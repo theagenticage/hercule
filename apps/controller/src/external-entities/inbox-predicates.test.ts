@@ -116,10 +116,7 @@ describe("compileInboxFilter", () => {
     expect(compiled.sql).toContain("o.access = 'ok'");
   });
 
-  it("matches nothing for an operator or value that does not fit the field's type", () => {
-    expect(compile({ clauses: [{ key: "team", op: "over", value: 3, source: "other" }] }).sql).toBe(
-      "0",
-    );
+  it("matches nothing for a value that does not fit the field's type", () => {
     expect(compile({ clauses: [{ key: "size", op: "is", value: true, source: "acme" }] }).sql).toBe(
       "0",
     );
@@ -130,8 +127,11 @@ describe("compileInboxFilter", () => {
       'no source declares a field "colour"',
     );
     expect(problem({ clauses: [{ key: "asks", op: "over", value: 1 }] })).toContain(
-      'takes "is" with true or false',
+      'asks takes "is", not "over"',
     );
+    expect(
+      problem({ clauses: [{ key: "team", op: "over", value: 3, source: "other" }] }),
+    ).toContain('team takes "is", not "over"');
     expect(problem({ clauses: [{ key: "waiting", op: "is", value: 5 }] })).toContain("over");
   });
 

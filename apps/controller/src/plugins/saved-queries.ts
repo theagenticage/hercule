@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema";
 import {
   CORE_INBOX_FIELD_KEYS,
   CORE_INBOX_FIELDS,
-  describeClauseForFieldType,
+  interpretClauseValue,
   MAX_SAVED_QUERIES_PER_PLUGIN,
   PluginError,
   SavedQuery,
@@ -61,16 +61,11 @@ const findClauseProblem = (
   }
   const type: EntityFieldType | undefined =
     CORE_INBOX_FIELDS.find((field) => field.key === clause.key)?.type ?? fieldTypes.get(clause.key);
-  const shape = type === undefined ? undefined : describeClauseForFieldType(type);
-  if (shape === undefined) {
+  if (type === undefined) {
     return `the clause key "${clause.key}" is neither one of the Inbox's own keys (${CORE_INBOX_FIELD_KEYS.join(", ")}) nor a field the plugin declares. Use one of those keys.`;
   }
-  if (!shape.operators.includes(clause.op)) {
-    return `the clause on "${clause.key}" uses "${clause.op}", but that key takes ${shape.operators.map((op) => `"${op}"`).join(" or ")}. Change the operator.`;
-  }
-  if (typeof clause.value !== shape.value) {
-    return `the clause on "${clause.key}" has a value that is not a ${shape.value}. Write a ${shape.value} value.`;
-  }
+  const reading = interpretClauseValue(clause.key, type, clause.op, clause.value);
+  if (!reading.ok) return `the clause on "${clause.key}" is wrong: ${reading.reason}`;
   if (clause.key === "kind" || clause.key === "signal") {
     const qualified = `${pluginId}/${String(clause.value)}`;
     const isSignal = clause.key === "signal";

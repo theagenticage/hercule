@@ -67,7 +67,14 @@ export {
 // The describe line's parts belong to the plugin API, because a plugin action
 // declares its own describe line. The contract passes them on under the same
 // name.
-export { DescribeLinePart } from "@hercule/plugin-host";
+export {
+  DescribeLinePart,
+  DURATION_UNIT_SECONDS,
+  interpretClauseValue,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+} from "@hercule/plugin-host";
 
 export {
   CLI,

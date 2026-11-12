@@ -16,6 +16,9 @@
  */
 import {
   CORE_INBOX_FIELD_KEYS,
+  CORE_INBOX_FIELDS,
+  interpretClauseValue,
+  type ClauseInterpretation,
   type EntityFieldType,
   type InboxClause,
 } from "@hercule/plugin-host";
@@ -126,17 +129,6 @@ export const READABLE_RECORD_SQL = `EXISTS (SELECT 1 FROM external_entity_observ
 export const escapeLike = (word: string): string =>
   word.replace(/[\\%_]/g, (match) => `\\${match}`);
 
-/** Reads a clause value as text, or undefined for a boolean. */
-const parseClauseText = (value: InboxClause["value"]): string | undefined =>
-  typeof value === "boolean" ? undefined : String(value);
-
-/** Reads a clause value as a finite number, or undefined. */
-const parseClauseNumber = (value: InboxClause["value"]): number | undefined => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-  if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) return Number(value);
-  return undefined;
-};
-
 /** Returns an ISO time `seconds` before `now`, or undefined when that is not a time. */
 const computeTimeBefore = (now: string, seconds: number): string | undefined => {
   const moment = new Date(Date.parse(now) - seconds * 1000);
@@ -144,12 +136,10 @@ const computeTimeBefore = (now: string, seconds: number): string | undefined => 
 };
 
 /** Compiles `is` on a boolean core key: true needs the condition to hold, false that it does not. */
-const compileBoolean = (clause: InboxClause, condition: string): CompiledSql | string => {
-  if (clause.op !== "is" || typeof clause.value !== "boolean") {
-    return `${clause.key} takes "is" with true or false, such as ${clause.key}=true`;
-  }
-  return { sql: clause.value ? condition : `NOT (${condition})`, params: [] };
-};
+const compileBoolean = (value: boolean, condition: string): CompiledSql => ({
+  sql: value ? condition : `NOT (${condition})`,
+  params: [],
+});
 
 /** Compiles a clause on a core key, or returns the sentence that says why it cannot be. */
 const compileCoreClause = (
@@ -157,51 +147,37 @@ const compileCoreClause = (
   now: string,
   signalKinds: InboxFilterInput["signalKinds"],
 ): CompiledSql | string => {
-  const text = parseClauseText(clause.value);
-  const needsIs = (): string | undefined =>
-    clause.op === "is" && text !== undefined
-      ? undefined
-      : `${clause.key} takes "is" with a word, such as ${clause.key}=value`;
+  const type = CORE_INBOX_FIELDS.find((field) => field.key === clause.key)?.type;
+  if (type === undefined) return `${clause.key} is not a core field`;
+  const reading = interpretClauseValue(clause.key, type, clause.op, clause.value);
+  if (!reading.ok) return reading.reason;
+  const value = reading.value;
   switch (clause.key) {
-    case "source": {
-      return (
-        needsIs() ?? { sql: `${buildSourceOfKindSql("e")} = ? COLLATE NOCASE`, params: [text!] }
-      );
-    }
-    case "kind": {
-      return (
-        needsIs() ?? {
-          sql: `(e.kind = ? OR e.noun = ? COLLATE NOCASE OR substr(e.kind, instr(e.kind, '/') + 1) = ? COLLATE NOCASE)`,
-          params: [text!, text!, text!],
-        }
-      );
-    }
+    case "source":
+      return { sql: `${buildSourceOfKindSql("e")} = ? COLLATE NOCASE`, params: [String(value)] };
+    case "kind":
+      return {
+        sql: `(e.kind = ? OR e.noun = ? COLLATE NOCASE OR substr(e.kind, instr(e.kind, '/') + 1) = ? COLLATE NOCASE)`,
+        params: [String(value), String(value), String(value)],
+      };
     case "account": {
-      const problem = needsIs();
-      if (problem !== undefined) return problem;
-      const byId = UUID_TEXT.test(text!);
+      const text = String(value);
+      const byId = UUID_TEXT.test(text);
       return {
         sql: `EXISTS (SELECT 1 FROM external_entity_observations o JOIN connections c ON c.id = o.connection_id
           WHERE o.ref = e.ref AND ${OBSERVING_SQL}
             AND (${byId ? "c.id = ? OR " : ""}c.label = ? COLLATE NOCASE))`,
-        params: byId ? [uuidFromString(text!), text!] : [text!],
+        params: byId ? [uuidFromString(text), text] : [text],
       };
     }
-    case "from": {
-      const problem = needsIs();
-      if (problem !== undefined) return problem;
+    case "from":
       return {
         sql: `(EXISTS (SELECT 1 FROM asks a WHERE a.ref = e.ref AND a.asker = ? COLLATE NOCASE)
           OR (e.ask_count IS NULL AND json_extract(e.person, '$.name') = ? COLLATE NOCASE))`,
-        params: [text!, text!],
+        params: [String(value), String(value)],
       };
-    }
     case "waiting": {
-      const seconds = parseClauseNumber(clause.value);
-      if (clause.op === "is" || seconds === undefined) {
-        return `waiting takes "over" or "under" with a duration in seconds, such as waiting>2d`;
-      }
-      const cutoff = computeTimeBefore(now, seconds);
+      const cutoff = computeTimeBefore(now, Number(value));
       if (cutoff === undefined) return `waiting ${String(clause.value)} is too long ago`;
       // The wait is the oldest open ask's, so waiting over N seconds means it began before the cutoff.
       return {
@@ -213,18 +189,17 @@ const compileCoreClause = (
       };
     }
     case "asks":
-      return compileBoolean(clause, "e.ask_count IS NOT NULL");
+      return compileBoolean(value as boolean, "e.ask_count IS NOT NULL");
     case "held":
-      return compileBoolean(clause, "e.task_id IS NOT NULL");
+      return compileBoolean(value as boolean, "e.task_id IS NOT NULL");
     case "mine":
       return compileBoolean(
-        clause,
+        value as boolean,
         "EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = e.ref AND o.owned_by_you = 1)",
       );
     case "signal": {
-      const problem = needsIs();
-      if (problem !== undefined) return problem;
-      const lowered = text!.toLowerCase();
+      const text = String(value);
+      const lowered = text.toLowerCase();
       const namedByNoun = signalKinds
         .filter((entry) => entry.noun.toLowerCase() === lowered)
         .map((entry) => entry.kind);
@@ -232,7 +207,7 @@ const compileCoreClause = (
         sql: `EXISTS (SELECT 1 FROM live_signals s WHERE s.ref = e.ref
           AND (s.kind = ? OR substr(s.kind, instr(s.kind, '/') + 1) = ? COLLATE NOCASE
                OR s.kind IN (SELECT value FROM json_each(?))))`,
-        params: [text!, text!, JSON.stringify(namedByNoun)],
+        params: [text, text, JSON.stringify(namedByNoun)],
       };
     }
     default:
@@ -244,22 +219,31 @@ const compileCoreClause = (
 const buildFieldRowSql = (condition: string): string =>
   `EXISTS (SELECT 1 FROM external_entity_fields f WHERE f.ref = e.ref AND f.key = ? AND ${condition})`;
 
+/** Why a clause cannot hold for one declared field: its operator is wrong, or its value does not fit. */
+interface FieldRefusal {
+  readonly refusal: Extract<ClauseInterpretation, { ok: false }>;
+}
+
 /**
- * Compiles a clause on one declared field to its condition, or returns
- * undefined when the clause cannot hold for a field of this type (an operator
- * or a value that does not fit it).
+ * Compiles a clause on one declared field to its condition. Returns a refusal
+ * when the clause cannot hold for a field of this type: the operator is not
+ * one the type takes, or the value does not fit the type. Returns undefined
+ * when the clause is well formed but nothing can match, such as an enum value
+ * the field does not declare.
  */
 const compileFieldCondition = (
   clause: InboxClause,
   field: DeclaredInboxField,
   now: string,
-): CompiledSql | undefined => {
+): CompiledSql | FieldRefusal | undefined => {
   const key = clause.key;
+  const reading = interpretClauseValue(key, field.type, clause.op, clause.value);
+  if (!reading.ok) return { refusal: reading };
+  const value = reading.value;
   switch (field.type) {
     case "text":
     case "person": {
-      const text = parseClauseText(clause.value);
-      if (clause.op !== "is" || text === undefined) return undefined;
+      const text = String(value);
       if (field.contextKind === undefined) {
         return {
           sql: buildFieldRowSql("f.text_value IS NOT NULL AND f.text_value = ? COLLATE NOCASE"),
@@ -280,8 +264,7 @@ const compileFieldCondition = (
       };
     }
     case "enum": {
-      const text = parseClauseText(clause.value)?.toLowerCase();
-      if (clause.op !== "is" || text === undefined) return undefined;
+      const text = String(value).toLowerCase();
       const matching = (field.enumValues ?? [])
         .filter((entry) => entry.value.toLowerCase() === text || entry.label.toLowerCase() === text)
         .map((entry) => entry.value);
@@ -295,20 +278,16 @@ const compileFieldCondition = (
     }
     case "number":
     case "money": {
-      const number = parseClauseNumber(clause.value);
-      if (number === undefined) return undefined;
       const comparison = clause.op === "is" ? "=" : clause.op === "over" ? ">" : "<";
       return {
         sql: buildFieldRowSql(`f.number_value IS NOT NULL AND f.number_value ${comparison} ?`),
-        params: [key, number],
+        params: [key, Number(value)],
       };
     }
     case "age": {
       // The row holds when the age began, in epoch milliseconds. An age over
       // N seconds began before `now - N`.
-      const seconds = parseClauseNumber(clause.value);
-      if (clause.op === "is" || seconds === undefined) return undefined;
-      const cutoff = Date.parse(now) - seconds * 1000;
+      const cutoff = Date.parse(now) - Number(value) * 1000;
       if (!Number.isFinite(cutoff)) return undefined;
       return {
         sql: buildFieldRowSql(
@@ -317,13 +296,11 @@ const compileFieldCondition = (
         params: [key, cutoff],
       };
     }
-    case "bool": {
-      if (clause.op !== "is" || typeof clause.value !== "boolean") return undefined;
+    case "bool":
       return {
         sql: buildFieldRowSql("f.number_value IS NOT NULL AND f.number_value = ?"),
-        params: [key, clause.value ? 1 : 0],
+        params: [key, value === true ? 1 : 0],
       };
-    }
   }
 };
 
@@ -361,9 +338,14 @@ const compileDeclaredClause = (
     groups.set(signature, group);
   }
   const alternatives: Array<CompiledSql> = [];
+  const refusals: Array<FieldRefusal["refusal"]> = [];
   for (const { field, kinds } of groups.values()) {
     const condition = compileFieldCondition(clause, field, now);
     if (condition === undefined) continue;
+    if ("refusal" in condition) {
+      refusals.push(condition.refusal);
+      continue;
+    }
     alternatives.push({
       // The unary plus keeps SQLite from walking the kind index for this
       // condition: the field rows are the selective part, and the kind index
@@ -372,6 +354,10 @@ const compileDeclaredClause = (
       params: [JSON.stringify(kinds.sort()), ...condition.params],
     });
   }
+  // A value that does not fit the type of one source does not match there. An
+  // operator that no declaration of the key takes is a mistake, and refused.
+  const wrongOperator = refusals.find((refusal) => refusal.cause === "operator");
+  if (alternatives.length === 0 && wrongOperator !== undefined) return wrongOperator.reason;
   return alternatives.length === 0 ? NO_MATCH : join("OR", alternatives);
 };
 

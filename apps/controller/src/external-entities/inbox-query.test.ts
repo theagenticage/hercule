@@ -665,9 +665,12 @@ describe("the clauses of a query", () => {
     expect(await query({ key: "flaky", op: "is", value: true })).toEqual(["a"]);
     expect(await query({ key: "flaky", op: "is", value: false })).toEqual(["b"]);
     expect(await query({ key: "owner", op: "is", value: "MEI" })).toEqual(["a"]);
-    // An operator that does not fit the type matches nothing.
-    expect(await query({ key: "owner", op: "over", value: 3 })).toEqual([]);
+    // A value that does not fit the type matches nothing on that source.
     expect(await query({ key: "size", op: "is", value: "big" })).toEqual([]);
+    // The raw words of the CLI are read for the field's type.
+    expect(await query({ key: "size", op: "over", value: "10" })).toEqual(["b"]);
+    expect(await query({ key: "flaky", op: "is", value: "no" })).toEqual(["b"]);
+    expect(await query({ key: "opened", op: "over", value: "4d" })).toEqual(["a"]);
   });
 
   it("matches a facet of records by its ref or by the record's title", async () => {

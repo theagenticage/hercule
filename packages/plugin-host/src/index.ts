@@ -144,15 +144,25 @@ export {
 export {
   CORE_INBOX_FIELD_KEYS,
   CORE_INBOX_FIELDS,
-  describeClauseForFieldType,
   InboxClause,
   MAX_INBOX_CLAUSE_KEY_LENGTH,
   MAX_SAVED_QUERIES_PER_PLUGIN,
   MAX_SAVED_QUERY_CLAUSES,
   SavedQuery,
   type CoreInboxFieldKey,
-  type InboxClauseOperator,
 } from "./saved-queries";
+
+export {
+  CLAUSE_OPERATORS_BY_TYPE,
+  DURATION_UNIT_SECONDS,
+  interpretClauseValue,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+  type ClauseValue,
+  type InboxClauseOperator,
+  type RawClause,
+} from "./clause-grammar";
 
 export {
   AccountKind,
