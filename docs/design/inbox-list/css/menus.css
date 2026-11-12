@@ -190,3 +190,12 @@
 .pane-menu .menu-pick .ic {
   flex: none;
 }
+.lt-id {
+  line-height: 16px;
+}
+.lt-title {
+  line-height: 18px;
+}
+.pane-menu .menu-pick[aria-disabled="true"] {
+  color: var(--faint);
+}

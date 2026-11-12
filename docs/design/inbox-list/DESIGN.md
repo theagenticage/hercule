@@ -136,7 +136,7 @@ Top to bottom, each part only when it has something:
 6. **The plugin's blocks**: text, messages, change, checks, fields, trend and code, at most eight. A type the app does not know draws "This part can't be shown here."
 7. **Linked**: what it is linked to, each with who claims it ("Linear reports this", "You linked this") and, for a person's link, Unlink on hover.
 8. **What happened**: the timeline, newest first.
-9. **The footer**: the core's moves, each with its key. Thread (N), Take on (T), the hand-off (H: the workflow's face, and from 460px its name), then Link (L) and Dismiss (E) as icon buttons at the end. Under 400px each move is an icon, with its name and key in the tooltip. The words are the selection bar's words. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
+9. **The footer**: the core's moves, each with its key. Thread (N), Take on (T), the hand-off (H: the workflow's face, and from 460px its name), then Link (L) and Dismiss (E) as icon buttons at the end. Under 400px each move is an icon, with its name and key in the tooltip. The selection's pane uses the same words. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
 
 The pane of a group lists its members (each walks to the member), then how they are linked, each pair with its claim. Its footer has Start a thread on all, Take on, Link and Dismiss. It has no hand-off (decision 14), and H says why in the undo line.
 
@@ -203,13 +203,14 @@ N opens the app's glass dialog around the real composer of the new-thread screen
 | All clear | The full sunrise: Hercule's head comes up over the brass horizon. Drawn once |
 | Nothing matches | What was searched, and "Clear the search Esc" |
 | Offline | One quiet pill in the bar: "Offline since 09:12 · 2 moves wait to be sent". Moves still work and wait in the outbox, so nothing dims, and each undo line says it waits |
-| A selection of two or more | The pane shows the selection: what is in it, and Link, Start a thread, Take on, Dismiss |
+| A selection | The pane shows the selection (two or more, or one that is not the current row): what is in it, and Link, Thread, Take on, Dismiss. A small bar at the foot of the list counts it and clears it |
 | Under 900px, or 200% zoom | The pane lies over the whole width of the list: ↩ or a click slides it in, Esc or "List" slides it out, and the focus goes back to the row |
 | A source that can't be read | A line over the list naming it and what it means, with a way to Connections, and a mark on its row in Browse |
 | N new | A glass pill at the top of the list: a marigold dot, "3 new", "Show ." It holds back what arrived until you ask |
 | Light day | Five things; the list is short, nothing else changes |
 | 2,400 things | The same page; counts in grouped tabular figures; Browse lists five values and "34 more"; triage keeps three at the top |
-| Under 1100px | The rail is a menu in the bar; the pane narrows; footer keys hide under 400px |
+| Under 1330px | The rail is a menu in the bar ("Someone waits on me ▾") that opens with the focus on the current entry; the list keeps at least 400px; under a 400px pane each move is an icon |
+| Nothing current | Empty lists, all clear, nothing matching: the pane steps aside and the list takes the room |
 
 ## Colour
 
@@ -287,6 +288,10 @@ Each is a choice the map left open, made for the best design. Each can be turned
 32. **A group that just came under the keys** takes its own, fresh E: an E within 0.6s of the move says the group is there and does nothing.
 33. **Answers already sent** say so on ⌘Z: "Already sent to GitHub, so it can't be taken back here."
 34. **Arrivals** wait in a pill in the list head, beside the count, where they cover nothing.
+35. **The selection bar only counts and clears.** The moves of a selection are in the pane's footer, in the same words; two toolbars with the same moves were one too many, and the bar spilled out of a 400px list.
+36. **H moves the current row on at once**, as T does; the hand-off chain plays on the row it left, so a quick E acts on the next thing, never on the one just handed.
+37. **Answering keeps the place**: after an answer, the row after it in the old order is current, even when the thing moves elsewhere because another ask stays open.
+38. **Offline, answers wait** in the outbox and are not "sent" after eight seconds; ⌘Z can always take them back while they wait.
 
 ## Proposed changes to #1119
 
@@ -313,6 +318,8 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **Musts fixed**: unfolding a group showed words over words (now a drawer); a reorder after a hand-off could carry the current row off screen; under 900px and at 200% zoom the pane opened 1px wide; a dropped card read as a rejection (the target lifted over it, the green ring rode home, it landed 4px off); the list had no minimum width; the hand-off face was cut in half; the search's ↩ ignored the highlighted value; the pane could act on a selected thing it was not showing; ⌘Z could "un-send" an answer already sent; focus stayed on a stale row, so keys acted on another; closed groups reported "expanded"; menus acted on their first item wherever the focus was; single keys still acted from the sidebar.
 - **Should-fixes taken**: ↩ answers the ask the list is about; only the current ask is filled; `[` `]` keep the focus; ⌘A and X pick what the list shows; the next current row comes from the old order; the scope menu, Tab and Esc behave in every menu and sheet; the rail folds at 1330px; identifiers in the dialog and Link to… lose their spaced hyphens; lines on the 4px grid; the link suggestion names its pair.
 
+**Round three** found the long tail, almost all of it under 1330px or with the list at its 400px minimum: the undo line placed for a rail that was folded away, the pane's width capped at 42% so the edge and the ⋯ menu did nothing, the selection bar spilling out, search tokens cut mid-letter and pushing ? off the bar, the stacked pane leaving a strip of cut rows; and a few keyboard dead ends: the scope menu could not be used by keyboard, the keys sheet let the focus hide under it, a range anchor survived a change of list, and focus fell to the page after a dialog or the selection bar closed. Two real bugs: accepting a suggested link wrote no link, and the current row could end off screen when a group re-sorted. All fixed, each with a check in `tools/check.mjs`.
+
 ## Tried and dropped
 
 - **Count and title in one cell.** A group's "14 things" sat after its label and was the first thing cut. It moved to the right of the second line, with the marks.
@@ -322,6 +329,8 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **"Hand-off takes one thing"** as a note in a group's footer. It wrapped to three lines and explained a refusal nobody had asked for.
 - **Eleven triage rows at the top** under the extreme load. Capped at three.
 - **"Named after PAY-88, its most lasting thing"** under a group's title. It explained the rule, not the group.
+- **A selection bar with every move.** It repeated the pane's footer and spilled out of a narrow list. It counts and clears now.
+- **A pane capped at 42% under 1330px.** The edge and the ⋯ menu stopped working. The only rule now is that the list keeps 400px.
 - **New members fading in over the rows below.** Unfolding now opens like a drawer.
 - **The "N new" pill floating over the first row.** It covered the current row's title; it sits in the list head.
 - **A selection of one keeping the current row's pane.** The footer acted on the selection while the pane showed another thing.

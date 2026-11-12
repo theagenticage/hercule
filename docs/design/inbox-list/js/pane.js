@@ -69,9 +69,9 @@ window.Pane = (function () {
   }
   // In a narrow pane each move keeps its icon and its name moves to the tooltip, rather than being cut.
   var MOVE_ICONS = { thread: "compose", take: "tasks", accept: "check", link: "link", dismiss: "close" };
-  function move(id, label, key, extra) {
+  function move(id, label, key, extra, keepWords) {
     var words = label.replace(/<[^>]+>/g, "");
-    var ic = MOVE_ICONS[id] ? '<span class="pn-move-ic">' + D.icon(MOVE_ICONS[id], 14) + "</span>" : "";
+    var ic = MOVE_ICONS[id] && !keepWords ? '<span class="pn-move-ic">' + D.icon(MOVE_ICONS[id], 14) + "</span>" : "";
     return '<button type="button" class="btn btn--sm pn-move' + (ic ? " has-ic" : "") + (extra || "") + '" data-move="' + id + '" aria-keyshortcuts="' + key + '" title="' + D.esc(words + " (" + key + ")") + '">' + ic + '<span class="pn-move-l">' + label + "</span>" + kbd(key) + "</button>";
   }
 
@@ -99,7 +99,7 @@ window.Pane = (function () {
     else if (t.fields.from) meta.push("<span>From " + D.esc(t.fields.from) + "</span>");
     if (t.fields.events != null) meta.push("<span>" + D.num(t.fields.events) + " events · " + D.num(t.fields.users) + " users</span>");
     if (accounts.length > 1) meta.push('<span title="The account it is seen through">in ' + D.esc(t.account) + "</span>");
-    html += '<p class="pn-meta">' + meta.join('<i class="sep">·</i>') + "</p>";
+    html += '<p class="pn-meta">' + meta.join("") + "</p>";
     if (t.held) html += '<p class="pn-held">' + (t.held.by === "you" ? D.you(20) : D.face(t.held.by, "working", 22)) + "<span><b>" + (t.held.by === "you" ? "Your Task" : D.esc(t.held.by) + " has it") + "</b>" + D.esc(t.held.task) + '</span><button type="button" class="btn btn--sm" data-move="goto">Go to the Task' + kbd("G") + "</button></p>";
     if (sigs.length) html += '<div class="sigs">' + sigs.map(function (s) { return signalSection(t, s, s.id === openId); }).join("") + "</div>";
     html += '<div class="bks">' + t.blocks.slice(0, 8).map(block).join("") + "</div>";
@@ -153,7 +153,7 @@ window.Pane = (function () {
     var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.face(x.by, "idle", 16) + "<span>Proposal from " + D.esc(x.by) + " · " + D.ago(x.at) + ' ago</span></p></header><h2 class="pn-title">' + D.esc(x.title) + '</h2><blockquote class="pn-why">' + D.esc(x.why) + "</blockquote>";
     html += '<section class="pn-sec pn-sec--first"><h3 class="pn-h">' + "From " + r.things.length + " things</h3>" + memberRows(r.things) + "</section>";
     html += '<section class="pn-sec"><h3 class="pn-h">' + 'The Task it makes</h3><p class="pn-task"><b>' + D.esc(x.title) + "</b><span>In the backlog of Payments · nobody on it until you start it</span></p></section></div>";
-    html += footer(move("accept", "Accept", "T", " btn--answer") + move("thread", "Accept with a thread", "N") + '<span class="spacer"></span>' + move("dismiss", "Dismiss", "E", " btn--quiet"));
+    html += footer(move("accept", "Accept", "T", " btn--answer", true) + move("thread", "Accept with a thread", "N", "", true) + '<span class="spacer"></span>' + move("dismiss", "Dismiss", "E", " btn--quiet", true));
     return html;
   }
 
@@ -162,7 +162,7 @@ window.Pane = (function () {
     var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.face("Hercule", "idle", 16) + "<span>Hercule suggests a link · " + D.ago(x.at) + ' ago</span></p></header><h2 class="pn-title">Do these belong together?</h2><blockquote class="pn-why">' + D.esc(x.why) + "</blockquote>";
     html += '<section class="pn-sec pn-sec--first pn-pair">' + memberRows(r.things) + "</section>";
     html += '<p class="pn-fine">Linking makes them one group in your Inbox. Neither source is told. Not related keeps them apart, and Hercule won\'t suggest this pair again.</p></div>';
-    html += footer(move("link", "Link them", "L", " btn--answer") + '<span class="spacer"></span>' + move("dismiss", "Not related", "E", " btn--quiet"));
+    html += footer(move("link", "Link them", "L", " btn--answer", true) + '<span class="spacer"></span>' + move("dismiss", "Not related", "E", " btn--quiet", true));
     return html;
   }
 

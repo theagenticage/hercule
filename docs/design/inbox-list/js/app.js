@@ -106,6 +106,7 @@ window.App = (function () {
     if (state.focus !== before && state.focusHint != null) state.movedAt = performance.now();
     state.focusHint = null;
     state.focusAfter = null;
+    el.ib.classList.toggle("is-paneless", !state.focus && !state.selection.size && !state.loading);
     Rail.draw(el.rail, state);
     List.draw(el.list, el.listHead, state, opts);
     Pane.draw(el.pane, state, opts);
@@ -117,9 +118,11 @@ window.App = (function () {
     if (!Dialog.isOpen() && cur) {
       var now = document.activeElement;
       if ((was === "list" && now !== cur) || (was === "pane" && (now === document.body || !now || !now.isConnected))) cur.focus({ preventScroll: true });
-      // The current row is never left out of sight.
-      var box = el.list.parentElement.getBoundingClientRect(), r = cur.getBoundingClientRect();
-      if (r.top < box.top || r.bottom > box.bottom) cur.scrollIntoView({ block: "nearest" });
+      // The current row is never left out of sight. Its place is measured where it will rest, not where
+      // a move's motion still holds it, and the list scrolls by the least distance.
+      var scroller = el.list.parentElement, box = scroller.getBoundingClientRect(), r = Motion.layoutRect(cur);
+      if (r.top < box.top + 4) scroller.scrollTop += r.top - box.top - 4;
+      else if (r.top + r.height > box.bottom - 28) scroller.scrollTop += r.top + r.height - box.bottom + 28;
     }
   }
 
@@ -135,14 +138,22 @@ window.App = (function () {
     return r.things || [];
   }
 
-  /** Sets the pane's width: 360 to 640, and never so wide that the list gets less than 400px. */
+  /**
+   * Sets the pane's width: 360 to 640, and never so wide that the list gets less than 400px. The width
+   * asked for is kept, so the pane grows back to it when the window grows.
+   */
+  var asked = 420;
   function setPaneWidth(w) {
+    if (w != null) asked = w;
     var main = el.ib.getBoundingClientRect().width || innerWidth - 272;
     var rail = matchMedia("(max-width: 1329px)").matches ? 0 : 240;
     var max = Math.max(360, Math.min(640, main - rail - 400));
-    state.paneW = Math.round(Math.max(360, Math.min(max, w)));
+    state.paneW = Math.round(Math.max(360, Math.min(max, asked)));
     el.ib.style.setProperty("--pane-w", state.paneW + "px");
+    var edge = document.getElementById("edge");
+    if (edge) { edge.setAttribute("aria-valuenow", state.paneW); edge.setAttribute("aria-valuemax", max); }
   }
+  window.addEventListener("resize", function () { setPaneWidth(); });
 
   // Under 900px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
   var stacked = matchMedia("(max-width: 899px)");

@@ -48,7 +48,8 @@ window.Menus = (function () {
   function setActive(i) {
     if (!open) return;
     open.active = i;
-    open.el.querySelectorAll("[data-hand-row]").forEach(function (b, j) { b.classList.toggle("is-active", j === i); });
+    // The pointer and the focus are one place, so ↩ picks the row under the pointer.
+    open.el.querySelectorAll("[data-hand-row]").forEach(function (b, j) { b.classList.toggle("is-active", j === i); if (j === i) b.focus({ preventScroll: true }); });
   }
 
   /** Opens Link to…: a search over the Inbox for the thing to link this one to. */
@@ -149,8 +150,11 @@ window.Menus = (function () {
     var src = r && r.thing ? Kinds.SOURCES[Model.sourceOf(r.thing)] : null;
     var w = App.state.paneW;
     var widths = [["Narrow", 360], ["Default", 420], ["Wide", 560]];
+    // The check sits on the width the pane really has; a width the window cannot give is not offered.
+    var room = Math.max(360, Math.min(640, App.el.ib.getBoundingClientRect().width - (matchMedia("(max-width: 1329px)").matches ? 0 : 240) - 400));
     el.innerHTML = (src ? '<button type="button" role="menuitem" tabindex="-1" class="menu-pick" data-pm="open">' + D.icon("external", 14) + "<span>" + D.esc(src.open) + '</span><kbd aria-hidden="true">O</kbd></button><i class="menu-line"></i>' : "") +
-      '<p class="menu-h">Pane width</p>' + widths.map(function (x) { return '<button type="button" role="menuitemradio" tabindex="-1" aria-checked="' + (w === x[1]) + '" class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join("");
+      '<p class="menu-h">Pane width</p>' + widths.map(function (x) { var off = x[1] > room;
+        return '<button type="button" role="menuitemradio" tabindex="-1" aria-checked="' + (w === x[1]) + '"' + (off ? ' aria-disabled="true" title="The window is too narrow for it"' : "") + ' class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join("");
     el.hidden = false;
     place(el, button);
     button.setAttribute("aria-expanded", "true");
@@ -160,7 +164,7 @@ window.Menus = (function () {
     el.onclick = function (e) {
       var o = e.target.closest("[data-pm]"), pw = e.target.closest("[data-pm-w]");
       if (o) { close(); Moves.say("Opening it at its source…"); }
-      if (pw) { close(); App.setPaneWidth(+pw.dataset.pmW); document.getElementById("edge").setAttribute("aria-valuenow", App.state.paneW); }
+      if (pw && pw.getAttribute("aria-disabled") !== "true") { close(); App.setPaneWidth(+pw.dataset.pmW); }
     };
   }
 

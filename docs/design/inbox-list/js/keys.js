@@ -36,7 +36,7 @@ window.Keys = (function () {
     if (show) {
       el.querySelector("h2").focus({ preventScroll: true });
       // The sheet closes when the focus leaves it, so nothing focused ever hides under it.
-      el.onfocusout = function (e) { if (!el.contains(e.relatedTarget)) sheet(false); };
+      if (!el._watch) { el._watch = true; el.addEventListener("focusout", function (e) { if (!el.hidden && !el.contains(e.relatedTarget)) sheet(false); }); }
     }
     else if (sheetBack && sheetBack.isConnected) sheetBack.focus({ preventScroll: true });
   }
@@ -113,10 +113,13 @@ window.Keys = (function () {
   /** Shows the rest of a large group, with the first newly shown member current. */
   function showMore(r) {
     var st = App.state;
-    var shown = st.rows.filter(function (x) { return x.type === "member" && x.group === r.group; }).length;
+    var lead = r.group.lead.id;
+    var mine = function (x) { return x.type === "member" && x.group.lead.id === lead; };
+    var shown = st.rows.filter(mine).length;
     st.showAll.add(r.groupKey);
+    st.focus = "g:" + lead;
     App.render({ flip: true });
-    var members = st.rows.filter(function (x) { return x.type === "member" && x.group === r.group; });
+    var members = st.rows.filter(mine);
     if (members[shown]) App.focusRow(members[shown].key, { keyboard: true });
   }
 
@@ -131,7 +134,11 @@ window.Keys = (function () {
 
   /** F6 and ⇧F6 move between the page's regions: the search, the rail, the list and the pane. */
   function cycle(back) {
-    var spots = [document.getElementById("sx-input"), document.querySelector("#rail [tabindex='0']"), App.el.list.querySelector("[tabindex='0']") || App.el.list, document.querySelector("#pane .pn-title") || document.querySelector("#pane button")];
+    Menus.close();
+    Bar.closeNarrow();
+    // When the rail is folded away, its place in the cycle is the scope button.
+    var railStop = matchMedia("(max-width: 1329px)").matches ? document.getElementById("scope-btn") : document.querySelector("#rail [tabindex='0']");
+    var spots = [document.getElementById("sx-input"), railStop, App.el.list.querySelector("[tabindex='0']") || App.el.list, document.querySelector("#pane .pn-title") || document.querySelector("#pane button")];
     spots = spots.filter(Boolean);
     var at = spots.findIndex(function (x) { return x.contains(document.activeElement) || (x === App.el.list.querySelector("[tabindex='0']") && App.el.list.contains(document.activeElement)) || (x.closest && x.closest("#pane") && document.getElementById("pane").contains(document.activeElement)) || (x.closest && x.closest("#rail") && document.getElementById("rail").contains(document.activeElement)); });
     var next = spots[(at + (back ? -1 : 1) + spots.length) % spots.length];

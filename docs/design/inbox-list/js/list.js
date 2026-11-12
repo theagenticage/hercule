@@ -215,7 +215,8 @@ window.List = (function () {
     node.classList.add("is-entering");
     var done = function () { b.clear(); node.classList.remove("is-entering"); };
     if (how === "return") { b.set({ x: 28 }); b.to({ x: 0 }, "travel", { done: done }); fade(0, 140); }
-    else if (how === "arrive") { b.set({ y: -20 }); b.to({ y: 0 }, "travel", { delay: 220 + i * 40, done: done }); fade(220 + i * 40, 160); }
+    else if (how === "grow") { b.set({ s: 0.985 }); b.to({ s: 1 }, "hand", { done: done }); fade(0, 140); }
+    else if (how === "arrive") { b.set({ y: -20 }); b.to({ y: 0 }, "travel", { delay: i * 40, done: done }); fade(i * 40, 160); }
     else { b.set({ s: 0.985 }); b.to({ s: 1 }, "hand", { done: done }); fade(0, 120); }
   }
 
@@ -232,8 +233,11 @@ window.List = (function () {
     if (Motion.isReduced()) { land(); return; }
     var toLead = target.querySelector(".row-lead"), fromLead = ghost.querySelector(".row-lead");
     var indent = toLead && fromLead ? toLead.offsetLeft - fromLead.offsetLeft : 0;
-    // The copy loses its new row's indent from its width, so its columns land on the row's columns.
-    ghost.style.width = target.offsetWidth - indent + "px";
+    // The copy's width rides the flight's spring to its new row's width less the indent, so its columns
+    // land on the row's columns with no jump.
+    var w0 = ghost.offsetWidth, w1 = target.offsetWidth - indent;
+    if (w0 !== w1 && !Motion.isReduced()) Motion.value(w0, function (w) { ghost.style.width = w + "px"; }).to(w1, "travel");
+    else ghost.style.width = w1 + "px";
     if (!quiet) {
       ghost.classList.add("is-flying");
       ghost.animate([{ boxShadow: "none" }, { boxShadow: getComputedStyle(ghost).boxShadow }], { duration: 160, easing: "cubic-bezier(.2,.8,.2,1)" });
@@ -302,8 +306,8 @@ window.List = (function () {
       var keptNew = s.rows.map(function (r) { return r.key; }).filter(function (k) { return oldKeys.has(k); });
       var crossing = !Motion.isReduced() && (!!opts.link || keptOld.join("|") !== keptNew.join("|"));
       host.classList.toggle("is-crossing", crossing);
-      clearTimeout(host._crossing);
-      if (crossing) host._crossing = setTimeout(function () { host.classList.remove("is-crossing"); }, 520);
+      cancelAnimationFrame(host._crossing);
+      var puckY0 = document.getElementById("puck").style.transform;
       // The rows after a leaving row wait for it to fade, unless rows are still moving from the last move.
       var busy = olds.some(function (n) { return n.classList.contains("is-moving"); });
       var waits = ghosts.some(function (x) { return !x.flies; }) && !opts.link && !busy;
@@ -316,6 +320,13 @@ window.List = (function () {
       });
       // The card in the hand stays on top of everything else in flight.
       if (opts.carried && opts.carried.ghost.isConnected) flightLayer().appendChild(opts.carried.ghost);
+      if (crossing) {
+        // The highlight stays put when the current row ends where it already is; the crossing ends when
+        // the last row comes to rest.
+        var curNode = host.querySelector('[data-key="' + s.focus + '"]');
+        host.classList.toggle("keeps-puck", !!curNode && puckY0 === "translateY(" + (host.offsetTop + curNode.offsetTop) + "px)");
+        (function watch() { host._crossing = requestAnimationFrame(function () { if (host.querySelector(".row.is-moving")) watch(); else host.classList.remove("is-crossing", "keeps-puck"); }); })();
+      }
       var how = opts.enter || (opts.link ? "link" : "unfold");
       added.forEach(function (n, i) { enter(n, how, i); });
       host.classList.toggle("is-drawer", how === "unfold" && added.length > 0);
@@ -351,7 +362,8 @@ window.List = (function () {
       if (act) { e.stopPropagation(); App.focusRow(key); Moves.run(act.dataset.rowAct, act); return; }
       var st = App.state;
       if (e.shiftKey && (row.thing || row.type === "group")) {
-        Keys.selectRange(st.anchor || st.focus || key, key);
+        var from = st.anchor && st.rows.some(function (x) { return x.key === st.anchor; }) ? st.anchor : st.focus || key;
+        Keys.selectRange(from, key);
         st.focus = key;
         App.render({});
         return;

@@ -90,6 +90,18 @@
   document.getElementById("list-head").addEventListener("click", function (e) { if (e.target.closest("[data-newbar]")) Moves.showNew(); });
   document.querySelector(".sx-ic").innerHTML = Draw.icon("search", 14);
   Scenes.after(new URLSearchParams(location.search).get("scene"));
+  // One rule for focus: when the focused control goes away (a bar that hides, a dialog that closes, a
+  // button redrawn), the current row takes the focus, so the keys keep working and Tab starts nearby.
+  document.addEventListener("focusout", function (e) {
+    if (e.relatedTarget) return;
+    var gone = e.target;
+    requestAnimationFrame(function () {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      if (Dialog.isOpen() || Menus.isOpen() || gone.isConnected && gone.offsetParent && !gone.closest("[hidden]")) return;
+      var cur = App.el.list.querySelector('[data-key="' + App.state.focus + '"]');
+      if (cur) cur.focus({ preventScroll: true });
+    });
+  });
   // The story page's buttons send a frame a move to show.
   window.addEventListener("message", function (e) {
     var m = e.data || {};

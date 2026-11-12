@@ -60,6 +60,7 @@
 /* ---- The search: one field over the list's column, with its clauses as tokens ---- */
 .sx {
   position: relative;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -114,7 +115,8 @@
 }
 .sx-chip {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 48px;
   align-items: center;
   gap: 4px;
   height: 24px;
@@ -249,9 +251,10 @@
 .ib-scroll {
   position: relative;
   flex: 1;
-  /* The last rows fade into the foot, under the floating undo line and selection bar. */
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
+  /* The last rows fade into the foot; deeper while the undo line or the selection bar floats there. */
+  --fade: 28px;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--fade)), transparent);
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -409,4 +412,12 @@ body > .flight {
   content: "";
   position: absolute;
   inset: -3px;
+}
+.ib:has(.undo-line.is-on) .ib-scroll,
+.ib:has(#selbar:not([hidden])) .ib-scroll {
+  --fade: 72px;
+}
+.sx-more {
+  flex: none;
+  color: var(--muted);
 }

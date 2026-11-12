@@ -326,6 +326,73 @@ for (const s of ["pr", "accounts", "selection", "reply", "proposal"]) {
   await p.close();
 }
 
+// ---- Round-three regressions ----
+{
+  const p = await open("theme=whitehaven&scene=suggestion");
+  const before = await p.evaluate(() => Model.links().length);
+  await p.focus('[data-key="t:link-6251"]');
+  await key(p, "l");
+  await settle(p);
+  await expect(p, "accepting a suggested link writes the link", (b) => Model.links().length === b + 1 && !!Model.groupOf("pr-6251"), before);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=group-member");
+  await p.focus('[data-key="m:shop-142:pr-6244"]');
+  await key(p, "t");
+  await settle(p, 900);
+  await expect(p, "after a move the current row is in view", () => { const el = document.querySelector('[data-key="' + App.state.focus + '"]'); const r = el.getBoundingClientRect(), box = document.getElementById("list-scroll").getBoundingClientRect(); return r.top >= box.top - 1 && r.bottom <= box.bottom + 1; });
+  await p.close();
+}
+
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "?");
+  await p.keyboard.press("Shift+Tab");
+  await settle(p, 200);
+  await expect(p, "the keys sheet closes when the focus leaves it", () => document.getElementById("keys").hidden);
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "5");
+  await p.keyboard.press("Shift+J");
+  await expect(p, "⇧J after changing lists selects two rows, not a stale range", () => { const i = App.state.rows.findIndex((r) => r.key === App.state.focus); return App.state.selection.size === new Set([...Keys.idsOf(App.state.rows[i - 1]), ...Keys.idsOf(App.state.rows[i])]).size; });
+  await key(p, "Escape");
+  await key(p, "/");
+  await p.keyboard.type("events:>10");
+  await settle(p, 150);
+  await key(p, "Enter");
+  await expect(p, "a threshold typed in full is kept as typed", () => App.state.search.clauses.some((c) => c.value === ">10"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=large");
+  await p.evaluate(() => App.focusRow("x:pay-88", { keyboard: true }));
+  await key(p, "Enter");
+  await settle(p, 500);
+  await expect(p, "Show N more makes the first newly shown member current", () => App.currentRow() && App.currentRow().type === "member" && App.currentRow().group.lead.id === "pay-88");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=sentry");
+  await p.focus('[data-key="r:sn-21c"]');
+  await key(p, "h");
+  await expect(p, "after H the next row is current at once", () => App.state.focus !== "r:sn-21c");
+  await p.close();
+}
+{
+  const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p = await ctx3.newPage();
+  p.on("pageerror", (e) => fail(`1280: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven");
+  await p.waitForSelector("html[data-ready]");
+  await p.focus("#scope-btn");
+  await key(p, "Enter");
+  await expect(p, "the scope menu puts the focus in it", () => document.getElementById("scope-pop").contains(document.activeElement));
+  await key(p, "ArrowDown");
+  await key(p, "Enter");
+  await expect(p, "↓ and ↩ pick the next entry", () => App.state.scope.saved === "mine");
+  await ctx3.close();
+}
+
 // ---- Round-two regressions ----
 {
   const p = await open("theme=whitehaven");

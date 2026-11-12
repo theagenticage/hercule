@@ -14,6 +14,7 @@ window.Moves = (function () {
   function holdPlace() {
     var rows = s().rows;
     var i = rows.findIndex(function (r) { return r.key === s().focus; });
+    s().anchor = null;
     s().focusHint = i;
     s().focusAfter = rows.slice(i + 1).map(function (r) { return r.key; }).concat(rows.slice(0, i).reverse().map(function (r) { return r.key; }));
   }
@@ -38,6 +39,7 @@ window.Moves = (function () {
   function setScope(scope) {
     var st = s();
     st.scope = scope;
+    st.anchor = null;
     st.search = { text: "", clauses: [] };
     st.focus = null;
     st.selection.clear();
@@ -104,7 +106,7 @@ window.Moves = (function () {
     push({
       say: "Took it on: a Task on Work, " + quote(title),
       action: { label: "Go to the Task", key: "G", task: title },
-      undo: function () { things.forEach(function (t) { delete t.held; }); redraw({ enter: "return" }); },
+      undo: function () { Flights.cancel(); things.forEach(function (t) { delete t.held; }); redraw({ enter: "grow" }); },
       undone: "The Task is gone, and nothing had started.",
     });
   }
@@ -137,9 +139,16 @@ window.Moves = (function () {
     var c = document.querySelector("[data-inbox-count]");
     if (c) c.textContent = Model.countSaved("waits");
     var key0 = App.state.focus;
-    // The place is taken again when the chain ends, from the rows as they are then.
-    var holdPlace0 = function () { if (App.state.focus === key0) holdPlace(); };
-    var finish = function () { if (!cancelled) { holdPlace0(); redraw({ leave: "taken", keepPlace: true }); } };
+    var after0 = App.state.focusAfter || [];
+    var next0 = after0.find(function (k) { return k !== key0 && App.state.rows.some(function (x) { return x.key === k; }); });
+    App.state.focusHint = null;
+    App.state.focusAfter = null;
+    if (next0 && key0 && key0.indexOf(t.id) >= 0) {
+      App.state.focus = next0;
+      List.markFocus(App.el.list, App.state, { keyboard: App.el.list.contains(document.activeElement) });
+      Pane.draw(App.el.pane, App.state, {});
+    }
+    var finish = function () { if (!cancelled) redraw({ leave: "taken" }); };
     var chain = row ? Flights.handChain(row, t, offer.w.name, finish) : (finish(), null);
     push({
       say: "Handed " + quote(t.title) + " to " + offer.w.name,
@@ -217,8 +226,9 @@ window.Moves = (function () {
     var x = r.item;
     holdPlace();
     Model.gone.add(x.id);
-    var ok = link(x.things.map(function (t) { return t.id; }), "suggestion");
-    if (!ok) redraw({});
+    // The row's things are the records themselves; the suggestion keeps their ids.
+    var ok = link(r.things.map(function (t) { return t.id; }), "suggestion");
+    if (!ok) { Model.gone.delete(x.id); redraw({}); say("These are linked already."); }
   }
   function notRelated(r) {
     var x = r.item;
@@ -269,7 +279,7 @@ window.Moves = (function () {
   function settle(f, words, external) {
     holdPlace();
     f.s.done = true;
-    redraw({ leave: "dismiss" });
+    redraw({ leave: "dismiss", keepPlace: true });
     var entry = {
       say: words,
       note: external ? "Sends in 8s" : null,
@@ -278,7 +288,7 @@ window.Moves = (function () {
     };
     push(entry);
     // After the undo line's eight seconds the answer is sent, and from then on ⌘Z says so instead.
-    if (external) setTimeout(function () { entry.sent = Kinds.SOURCES[Model.sourceOf(f.t)].name; }, 8000);
+    if (external) setTimeout(function () { if (!s().offline) entry.sent = Kinds.SOURCES[Model.sourceOf(f.t)].name; }, 8000);
   }
   function markDone(sigId) {
     var f = findSignal(sigId);

@@ -824,10 +824,13 @@
   font-weight: var(--w-regular);
 }
 .pc-pair {
-  display: block;
+  display: flex;
+  gap: 5px;
 }
-.pc-pair > * {
-  vertical-align: -2px;
+.pc-pair > span:not(.mk):not(.pc-dash) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pc li .pl-claim {
   min-width: 0;
@@ -837,4 +840,21 @@
 }
 .reply textarea {
   resize: none;
+}
+/* The meta line's dots belong to the item after them, so a wrap never leaves one dangling. */
+.pn-meta > span + span::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--faint);
+}
+.pn-meta > .gl + span::before {
+  content: none;
+}
+.pl-id,
+.bk-checks,
+.hand-acct {
+  line-height: 16px;
+}
+.pl-title {
+  line-height: 18px;
 }

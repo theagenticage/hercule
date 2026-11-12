@@ -17,7 +17,11 @@ window.Bar = (function () {
       var key = tokenField(m[1].toLowerCase()), f = K.FIELDS[key], typed = m[2].toLowerCase();
       if (f.type === "number" || f.type === "duration") {
         var hints = f.type === "number" ? [">100", ">1000", ">10000"] : [">4h", ">1d", ">2d", ">1w"];
-        return hints.filter(function (h) { return h.indexOf(typed) === 0 || !typed; }).map(function (h) {
+        // A threshold typed in full comes first, as typed, so ↩ never swaps it for a longer one.
+        var typedOk = f.type === "number" ? /^[<>]\d+$/.test(typed) : /^[<>]\d+[mhdw]$/.test(typed);
+        var list = hints.filter(function (h) { return (h.indexOf(typed) === 0 || !typed) && h !== typed; });
+        if (typedOk) list.unshift(typed);
+        return list.map(function (h) {
           var n = pool.filter(function (t) { return Model.matchClause(t, { key: key, value: h }); }).length;
           return { kind: "value", key: key, value: h, n: n, label: f.token + ":" + h, hint: f.type === "duration" ? "waiting longer than " + h.slice(1) : "more than " + D.num(h.slice(1)) };
         });
@@ -130,6 +134,11 @@ window.Bar = (function () {
       return '<span class="sx-chip">' + (c.source ? D.mark(c.source, 12) : "") + "<span>" + D.esc(f.token) + ":</span><b>" + D.esc(c.value) + '</b><button type="button" data-unchip="' + i + '" aria-label="Remove ' + D.esc(f.token + ":" + c.value) + '">' + D.icon("close", 10) + "</button></span>";
     }).join("");
     field.classList.toggle("has-chips", st.search.clauses.length > 0);
+    // Tokens that do not fit fold, oldest first, into a +N token, so none is cut mid-letter.
+    var all = Array.prototype.slice.call(chips.querySelectorAll(".sx-chip:not(.sx-chip--scope)"));
+    var hidden = 0;
+    while (all.length - hidden > 1 && chips.scrollWidth > chips.clientWidth + 1) { all[hidden].hidden = true; hidden++; }
+    if (hidden) { all[hidden].insertAdjacentHTML("beforebegin", '<span class="sx-chip sx-more" title="' + D.esc(all.slice(0, hidden).map(function (c) { return c.textContent; }).join(", ")) + '">+' + hidden + "</span>"); }
     // The long hint only where it fits; a narrow field says less rather than cutting a word.
     input.placeholder = st.search.clauses.length ? "" : field.offsetWidth > 420 ? "Search, or type a field: team:, from:, waiting:>2d" : field.offsetWidth > 260 ? "Search, or type team:, from:" : "Search";
   }
@@ -138,7 +147,11 @@ window.Bar = (function () {
     drawChips();
     var off = document.getElementById("offline");
     off.hidden = !st.offline;
-    if (st.offline) off.textContent = "Offline since 09:12 · " + (st.outbox ? st.outbox + (st.outbox === 1 ? " move waits" : " moves wait") + " to be sent" : "moves wait until you’re back");
+    if (st.offline) {
+      var words = "Offline · 09:12" + (st.outbox ? " · " + st.outbox + " waiting" : "");
+      if (off.textContent !== words) off.textContent = words;
+      off.title = "Offline since 09:12. " + (st.outbox ? st.outbox + (st.outbox === 1 ? " move waits" : " moves wait") + " to be sent." : "Moves wait until you’re back.");
+    }
     document.documentElement.toggleAttribute("data-offline", !!st.offline);
     var scope = document.getElementById("scope-btn");
     if (scope) scope.querySelector("span").textContent = st.search.text || st.search.clauses.length ? "Search" : App.scopeTitle();
@@ -166,7 +179,7 @@ window.Bar = (function () {
   function narrow(button) {
     var pop = document.getElementById("narrow");
     if (!pop.hidden) { closeNarrow(); return; }
-    pop.onfocusout = function (e) { if (!pop.contains(e.relatedTarget) && e.relatedTarget) closeNarrow(); };
+    if (!pop._watch) { pop._watch = true; pop.addEventListener("focusout", function (e) { if (e.relatedTarget && !pop.contains(e.relatedTarget)) closeNarrow(); }); }
     var st = App.state;
     var things = Model.find(st.scope.triage ? { saved: "all" } : st.scope, st.search);
     var bySource = {};
@@ -270,6 +283,8 @@ window.Bar = (function () {
       if (open) { Rail.draw(scopePop, App.state); var r = scopeBtn.getBoundingClientRect(); scopePop.style.left = r.left + "px"; scopePop.style.top = r.bottom + 6 + "px"; }
       scopePop.hidden = !open;
       scopeBtn.setAttribute("aria-expanded", String(open));
+      // Open, the focus goes to the current entry, so the arrows move inside the menu at once.
+      if (open) { var first = scopePop.querySelector(".rl-row.is-on") || scopePop.querySelector(".rl-row"); if (first) { first.tabIndex = 0; first.focus(); } }
     });
     scopePop.addEventListener("click", function (e) { if (e.target.closest("[data-scope]")) { scopePop.hidden = true; scopeBtn.setAttribute("aria-expanded", "false"); } });
     document.addEventListener("pointerdown", function (e) {

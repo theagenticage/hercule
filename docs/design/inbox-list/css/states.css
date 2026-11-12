@@ -1,4 +1,4 @@
-/* States: empty, the sunrise, loading, offline, a failing source, and widths under 1100px. */
+/* States: empty, the sunrise, loading, offline, a failing source, and widths under 1330px and 900px. */
 .empty {
   display: grid;
   place-items: center;
@@ -37,6 +37,14 @@
 }
 .em--zero .em-title {
   font-size: var(--t-20);
+  line-height: 28px;
+}
+.em-link {
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
 }
 
 /* The sunrise: Hercule's head comes up over a brass horizon, and the rays draw outward. */
@@ -228,14 +236,15 @@
   font-weight: var(--w-medium);
 }
 
-/* ---- Widths under 1100px: the rail folds into a menu in the bar, and the pane narrows ---- */
+/* ---- Widths under 1330px: the rail folds into a menu in the bar, so the list keeps 400px ---- */
 .ib-scope,
 .scope-pop {
   display: none;
 }
 @media (max-width: 1329px) {
   .ib {
-    grid-template-columns: 0 minmax(0, 1fr) 0 clamp(320px, 42%, var(--pane-w));
+    --rail-w: 0px;
+    grid-template-columns: 0 minmax(0, 1fr) 0 var(--pane-w);
   }
   .ib-bar {
     display: flex;
@@ -255,7 +264,8 @@
     white-space: nowrap;
   }
   .ib-bar .sx {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 140px;
     margin: 0;
   }
   .ib-end {
@@ -288,6 +298,9 @@
   .ib {
     grid-template-columns: 0 minmax(0, 1fr) 0 0;
   }
+  .ib {
+    --pane-w: 0px;
+  }
   .ib-pane {
     position: absolute;
     z-index: 25;
@@ -296,7 +309,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(420px, 100%);
+    width: 100%;
     box-shadow: var(--shadow-3);
     translate: 100% 0;
     visibility: hidden;
@@ -326,4 +339,12 @@
     --undo-line-x: 0px;
     max-width: calc(100% - 24px);
   }
+}
+/* With nothing current there is nothing to read: the pane steps aside and the list takes the room. */
+.ib.is-paneless {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) 0 0;
+}
+.ib.is-paneless .ib-pane,
+.ib.is-paneless .edge {
+  display: none;
 }

@@ -94,7 +94,7 @@ window.Dialog = (function () {
 
   function liveCard(t) {
     var w = D.statusWord(t);
-    return '<div class="td-card">' + '<p class="td-card-top">' + D.mark(Model.sourceOf(t), 14) + "<span>" + D.esc(K.SOURCES[Model.sourceOf(t)].name + " · " + D.noun(t)) + "</span>" + (D.identifier(t) ? "<b>" + D.esc(D.identifier(t)) + "</b>" : "") + '</p><p class="td-card-title">' + D.esc(t.title) + '</p><p class="td-card-st">' + (w ? D.glyph(t, 12) + "<span>" + D.esc(w) + "</span>" + '<i class="td-sep">·</i>' : "") + (t.fields.events != null ? '<span class="td-live" data-live-events>' + D.num(t.fields.events) + " events</span>" : "<span>" + D.esc(D.place(t)) + "</span>") + "</p></div>";
+    return '<div class="td-card">' + '<p class="td-card-top">' + D.mark(Model.sourceOf(t), 14) + "<span>" + D.esc(K.SOURCES[Model.sourceOf(t)].name + " · " + D.noun(t)) + "</span>" + (D.identifier(t) ? "<b>" + D.esc(D.identifier(t)) + "</b>" : "") + '</p><p class="td-card-title">' + D.esc(t.title) + '</p><p class="td-card-st">' + (w ? D.glyph(t, 12) + "<span>" + D.esc(w) + "</span>" : "") + (t.fields.events != null ? '<span class="td-live" data-live-events>' + D.num(t.fields.events) + " events</span>" : "<span>" + D.esc(D.place(t)) + "</span>") + "</p></div>";
   }
 
   function drawTranscript() {
@@ -141,7 +141,7 @@ window.Dialog = (function () {
       if (gen !== st.gen) return;
       var ev = el.querySelector("[data-live-events]");
       if (ev) { ev.textContent = D.num(first.fields.events + 7) + " events"; ev.classList.add("is-ticked"); }
-    }, reduced ? 0 : 2400);
+    }, 2400);
   }
 
   function why(button) {

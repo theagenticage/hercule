@@ -14,7 +14,8 @@
         (opts.undo ? '<button type="button" class="undo-line-button" data-undo aria-keyshortcuts="Meta+Z">' + D.icon("undo", 14) + 'Undo<kbd aria-hidden="true">⌘Z</kbd></button>' : "");
       el.classList.add("is-on");
       el.removeAttribute("inert");
-      Announce.say(text + (opts.note ? ". " + opts.note : "") + (opts.undo ? ". Command Z undoes it." : ""));
+      var spoken = [text, opts.note, opts.undo ? "Command Z undoes it" : ""].filter(Boolean).map(function (x) { return x.replace(/[.\s]+$/, ""); }).join(". ") + ".";
+      Announce.say(spoken);
       clearTimeout(timer);
       timer = setTimeout(hide, opts.undo ? 8000 : 5000);
     }
@@ -69,17 +70,14 @@
         if (!el.hidden && !el.dataset.leaving) {
           if (Motion.isReduced()) { el.hidden = true; return; }
           el.dataset.leaving = "1";
-          el.animate([{ transform: "none", clipPath: "inset(0 round 12px)" }, { transform: "translateY(4px) scale(.97)", clipPath: "inset(40% 30% round 12px)" }], { duration: 140, easing: "ease-in" }).finished.then(function () { el.hidden = true; delete el.dataset.leaving; });
+          el.animate([{ transform: "none", clipPath: "inset(0 round 12px)" }, { transform: "translateY(4px) scale(.97)", clipPath: "inset(40% 30% round 12px)" }], { duration: 140, easing: "ease-in" }).finished.then(function () { el.hidden = true; delete el.dataset.leaving; }).catch(function () {});
         }
         return;
       }
       if (el.dataset.leaving) { delete el.dataset.leaving; el.getAnimations().forEach(function (a) { a.cancel(); }); }
       var wasHidden = el.hidden;
+      // The moves of a selection are in the pane's footer, so the bar only counts and clears.
       el.innerHTML = '<span class="sb-n"><b>' + n + "</b> selected</span>" +
-        '<button type="button" class="sb-act" data-move="link"' + (n < 2 ? ' aria-disabled="true" title="Select one more to link"' : ' title="Link them"') + ">Link<kbd>L</kbd></button>" +
-        '<button type="button" class="sb-act" data-move="thread" title="Start a thread on all ' + n + '">Thread<kbd>N</kbd></button>' +
-        '<button type="button" class="sb-act" data-move="take" title="Take them on: one Task">Take on<kbd>T</kbd></button>' +
-        '<button type="button" class="sb-act" data-move="dismiss" title="Dismiss all ' + n + '">Dismiss<kbd>E</kbd></button>' +
         '<i class="sb-line"></i><button type="button" class="icon-btn sb-clear" data-clear title="Clear the selection (Esc)" aria-label="Clear the selection">' + D.icon("close", 14) + "</button>";
       el.hidden = false;
       if (wasHidden && !Motion.isReduced()) {
@@ -119,12 +117,13 @@
         return;
       }
       var title = App.scopeTitle();
-      var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in Updates ") + "<kbd>3</kbd>." : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
+      var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in ") + '<button type="button" class="link em-link" data-go-updates title="Updates (3)">Updates</button>.' : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
       el.innerHTML = '<div class="em"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
     }
     document.addEventListener("click", function (e) {
       if (e.target.closest("[data-clear-search]")) Bar.clear(true);
       if (e.target.closest("[data-widen-search]")) Bar.widen();
+      if (e.target.closest("[data-go-updates]")) Moves.setScope({ saved: "updates" });
     });
     return { draw: draw };
   })();
@@ -144,7 +143,19 @@
         var t = things[i] || things[0];
         var from = m.getBoundingClientRect();
         var html = m.outerHTML;
-        setTimeout(function () { Motion.fly(html, from, target).then(function () { receive(to); }); }, i * 60);
+        setTimeout(function () {
+          var p = Motion.fly(html, from, target);
+          var mine = document.querySelector("body > .flight:last-of-type");
+          p.then(function () { if (!mine || !mine.dataset.cancelled) receive(to); });
+        }, i * 60);
+      });
+    }
+    /** Stops every mark in flight where it is: it fades in 120ms and Work receives nothing. */
+    function cancel() {
+      document.querySelectorAll("body > .flight").forEach(function (f) {
+        f.dataset.cancelled = "1";
+        f.getAnimations().forEach(function (a) { a.pause(); });
+        f.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: "forwards" }).finished.then(function () { f.remove(); });
       });
     }
     function receive(to) {
@@ -158,13 +169,7 @@
      */
     function handChain(row, t, who, finish) {
       var stopped = false;
-      var handle = {
-        cancel: function () {
-          stopped = true;
-          // Undo inside the chain: the mark in flight fades where it is, and Work receives nothing.
-          document.querySelectorAll("body > .flight").forEach(function (f) { f.getAnimations().forEach(function (a) { a.pause(); }); f.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: "forwards" }).finished.then(function () { f.remove(); }); });
-        },
-      };
+      var handle = { cancel: function () { stopped = true; cancel(); } };
       if (Motion.isReduced()) { finish(); return handle; }
       var slot = row.querySelector(".row-time");
       var why = row.querySelector(".row-why");
@@ -186,7 +191,7 @@
       }, 170);
       return handle;
     }
-    return { toWork: toWork, handChain: handChain };
+    return { toWork: toWork, handChain: handChain, cancel: cancel };
   })();
 
   // ---- The reply box of an answer with a field, inside its signal's section ----

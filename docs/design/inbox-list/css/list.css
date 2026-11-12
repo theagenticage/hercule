@@ -136,10 +136,10 @@
 }
 /* When rows cross each other (a link, a new order), a moving row carries the list's ground under its
    fill, and the current row carries its own fill while the puck waits. */
-.rows.is-crossing .row.is-current {
+.rows.is-crossing:not(.keeps-puck) .row.is-current {
   --row-fill: var(--selected);
 }
-.ib-scroll:has(.rows.is-crossing) .puck {
+.ib-scroll:has(.rows.is-crossing:not(.keeps-puck)) .puck {
   opacity: 0;
 }
 .rows.is-crossing .row.is-moving {
@@ -762,9 +762,23 @@ html.is-carrying .row-acts,
   z-index: 2;
   background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
 }
-/* While rows cross, the current row keeps its edge, and the keyboard ring rides on it. */
-.rows.is-crossing .row.is-current {
-  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--ink) 60%, transparent);
+/* While rows cross, the current row carries its fill and the puck's own short edge, above the others. */
+.rows.is-crossing:not(.keeps-puck) .row.is-current {
+  z-index: 3;
+  background:
+    linear-gradient(color-mix(in oklab, var(--ink) 60%, transparent), color-mix(in oklab, var(--ink) 60%, transparent)) 3px 50% / 2px calc(100% - 28px) no-repeat,
+    linear-gradient(var(--row-fill), var(--row-fill)),
+    var(--bg);
+}
+.rows.is-crossing.keeps-puck .row.is-current {
+  --row-fill: transparent;
+  background: transparent;
+}
+.ib-scroll:has(.rows.is-crossing.keeps-puck) .puck {
+  opacity: 1;
+}
+.row.is-moving .row-acts {
+  display: none;
 }
 /* The keyboard's ring is drawn on the puck, so ring and fill are always one place. */
 .ib-scroll:has(.rows .row.is-current:focus-visible) .puck {
@@ -789,6 +803,7 @@ html.is-carrying .row-acts,
 }
 .row--more .row-more-in {
   padding-left: 0;
+  margin-left: -6px;
 }
 .row--more .ic {
   width: 16px;

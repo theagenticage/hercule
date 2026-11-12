@@ -322,8 +322,10 @@
   font-variant-numeric: tabular-nums;
   transition: color var(--m-slow) var(--m-ease);
 }
-.td-live.is-ticked {
-  animation: tick-up 260ms var(--m-ease) both;
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="reduced"]) .td-live.is-ticked {
+    animation: tick-up 260ms var(--m-ease) both;
+  }
 }
 @keyframes tick-up {
   from {

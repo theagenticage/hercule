@@ -70,6 +70,7 @@
 }
 /* A saved query's key, shown under the pointer and on focus, over its count. */
 .rl-key {
+  color: var(--muted);
   position: absolute;
   right: 6px;
   top: 50%;
