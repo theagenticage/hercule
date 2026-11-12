@@ -6383,7 +6383,7 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 **Verdicts after the fixes:**
 
 - **Processes, idle, per streamed token, page read, rows drawn: met,** as above.
-- **Bundle, the Inbox chunk no bigger than the old one: missed by 2,231 bytes** (60,579 against 58,348 B, 3.8% more), with React Compiler memoization on in every file. Waiting for Rogier's decision on a small exception.
+- **Bundle, the Inbox chunk no bigger than the old one: missed by 2,231 bytes** (60,579 against 58,348 B, 3.8% more), with React Compiler memoization on in every file. Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"): the bytes buy no needless re-renders in any Inbox part.
 - **Reload reads: met on the number of requests, not shown on time.** A reload reads each key about twice, against 3 on the old screen. The longest read was not measured again.
 - **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"); [#1143](https://github.com/theagenticage/hercule/issues/1143) closes it.
 
