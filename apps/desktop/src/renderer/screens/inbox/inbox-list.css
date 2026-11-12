@@ -1,0 +1,544 @@
+/* The Inbox list: its head, its rows, and the puck under the current row. From the
+   drawing's `css/list.css`. Dense, because it is for scanning: 52px rows of two lines.
+   The left column holds the two coloured shapes (the plugin's mark over the status
+   shape), the right column the wait over where the thing lives. The title is the only
+   medium weight; everything else steps back. */
+
+/* The list's sizes (`--row-h`, `--row-pad-x`, `--row-r`, `--row-gap`, `--list-pad`) and its
+   ground (`--list-ground`, the colour rows that move carry, so they cover what they pass) are
+   the Inbox frame's tokens, defined once on `.ib`. */
+
+/* ---- The head: what the list is, how many, in what order, and Narrow ---- */
+.ib-head {
+  container: ib-head / inline-size;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 calc(var(--list-pad) + var(--row-pad-x));
+}
+.ib-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ib-head-title h2 {
+  margin: 0;
+  font: var(--type-lane);
+  overflow-wrap: anywhere;
+}
+.ib-head-mark {
+  display: inline-grid;
+  place-items: center;
+  margin-right: -2px;
+  color: oklch(var(--mark-l) 0 0);
+}
+.ib-head-account {
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ib-head-count {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ib-head-count,
+.ib-head-order {
+  line-height: var(--line-16);
+}
+.ib-head-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+.ib-head-order {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+@container ib-head (max-width: 400px) {
+  .ib-head-order {
+    display: none;
+  }
+}
+.ib-narrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    var(--glass-shadow);
+  color: var(--ink);
+  font-size: var(--t-13);
+  white-space: nowrap;
+  transition: background var(--m-quick);
+}
+.ib-narrow:hover {
+  background: var(--glass-fill-raised);
+}
+.ib-narrow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* While its menu is open the button keeps its glass and gains a ring, as every toolbar control does. */
+.ib-narrow[aria-expanded="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 26%, transparent),
+    var(--glass-shadow);
+}
+.ib-narrow b {
+  font-weight: var(--w-medium);
+}
+.ib-narrow .ic {
+  color: var(--faint);
+}
+
+/* ---- The "N new" pill: in the head, beside the count; it covers no row and moves none ---- */
+.ib-newbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    var(--shadow-1);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.ib-newbar:hover {
+  background: color-mix(in oklab, var(--ink) 4%, var(--raised));
+}
+.ib-newbar-count::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 7px 1px 0;
+  border-radius: 50%;
+  background: var(--you);
+}
+.ib-newbar-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--selected);
+  color: var(--ink);
+}
+.ib-newbar kbd {
+  min-width: 18px;
+  color: var(--muted);
+  font-weight: var(--w-bold);
+  text-align: center;
+}
+@keyframes ib-newbar-grow {
+  from {
+    transform: scale(0.6);
+  }
+}
+@keyframes ib-newbar-words {
+  from {
+    opacity: 0;
+  }
+}
+/* Solid from the first frame, it grows from its centre; the words fade in over 80ms. */
+@media (prefers-reduced-motion: no-preference) {
+  .ib-newbar {
+    animation: ib-newbar-grow 200ms var(--m-ease) both;
+  }
+  .ib-newbar-count,
+  .ib-newbar-show {
+    animation: ib-newbar-words 80ms ease-out both;
+  }
+}
+
+/* ---- The list: a scroll with a fade at its foot ---- */
+.ib-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ib-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ib-lines {
+  padding: 0 var(--list-pad);
+}
+.ib-fade {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(to bottom, transparent, var(--list-ground));
+  pointer-events: none;
+}
+
+/* ---- Rows ---- */
+.ib-rows {
+  position: relative;
+  container: ib-rows / inline-size;
+  /* Its own stacking context, so the puck (z-index -1) lies under the rows but over the list. */
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.ib-row {
+  --ib-fill: transparent;
+  --ib-solid: var(--list-ground);
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: none;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: var(--line-18) var(--line-16);
+  column-gap: var(--row-gap);
+  row-gap: 2px;
+  align-content: center;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border-radius: var(--row-r);
+  background: var(--ib-fill);
+  cursor: default;
+  user-select: none;
+  outline: none;
+}
+.ib-row:hover {
+  --ib-fill: var(--hover);
+  --ib-solid: color-mix(in oklab, var(--ink) 5%, var(--list-ground));
+}
+/* The current row's fill is the puck under the list: it stays where it is while rows move into it. */
+.ib-row.is-current {
+  --ib-fill: transparent;
+  --ib-solid: color-mix(in oklab, var(--ink) 7%, var(--list-ground));
+}
+.ib-puck {
+  position: absolute;
+  /* Under everything in the rows, whatever its place in the markup. */
+  z-index: -1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--row-h);
+  border-radius: var(--row-r);
+  background: var(--selected);
+  pointer-events: none;
+}
+.ib-puck[hidden] {
+  display: none;
+}
+/* The current row's edge: a short, straight bar, so the row is told by shape as well as by fill. */
+.ib-puck::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 60%, transparent);
+}
+/* The keyboard's ring is drawn on the puck, so ring and fill are always one place. The puck follows
+   the rows in the markup so a sibling selector finds it: a `:has()` on the scroll area would make
+   the browser check every row again each time the focus moves. */
+.ib-row.is-current:focus-visible ~ .ib-puck {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+/* A row that is moving carries the list's ground under its fill, so it covers what it passes
+   (the copies of rows that left, the puck). A moving current row carries the puck's edge too. */
+.ib-row.is-moving {
+  z-index: 2;
+  background: linear-gradient(var(--ib-fill), var(--ib-fill)), var(--list-ground);
+}
+.ib-row.is-moving.is-current {
+  z-index: 3;
+  background:
+    linear-gradient(
+        color-mix(in oklab, var(--ink) 60%, transparent),
+        color-mix(in oklab, var(--ink) 60%, transparent)
+      )
+      3px 50% / 2px calc(100% - 28px) no-repeat,
+    linear-gradient(var(--selected), var(--selected)),
+    var(--list-ground);
+}
+/* A row that came back lies under the list, like a drawer's members: the moving rows pass over it. */
+.ib-row.is-under {
+  z-index: 0;
+}
+.ib-row.is-moving .ib-row-acts {
+  display: none;
+}
+
+/* Copies of rows that left lie under the list, so the rows closing up pass over them. */
+.ib-leaving {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+.ib-leaving-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
+.ib-leaving-row .ib-row {
+  background: transparent;
+}
+
+.ib-row-lead {
+  position: relative;
+  grid-row: 1;
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.ib-mark {
+  display: grid;
+  place-items: center;
+  /* A plugin that declares no colour draws at the theme's mark lightness, as the rail does. */
+  color: oklch(var(--mark-l) 0 0);
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.ib-row-l1,
+.ib-row-l2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ib-row-l1 {
+  grid-row: 1;
+  grid-column: 2;
+  height: var(--line-18);
+}
+.ib-row-l2 {
+  grid-row: 2;
+  grid-column: 2;
+  height: var(--line-16);
+}
+.ib-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font: var(--type-card);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ib-row-time {
+  flex: none;
+  font-size: var(--t-12);
+  line-height: var(--line-18);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ib-row-time--held {
+  display: inline-grid;
+  place-items: center;
+  height: 18px;
+}
+.ib-row-glyph {
+  grid-row: 2;
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.ib-row-glyph > span {
+  display: grid;
+  place-items: center;
+}
+.ib-row-why {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--type-summary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ib-who {
+  color: var(--ink);
+  font-weight: var(--w-regular);
+}
+/* What does not ask anything steps back: its title is ink, its sentence faint. */
+.ib-row.is-quiet .ib-row-why {
+  color: var(--faint);
+}
+.ib-aside {
+  color: var(--faint);
+}
+.ib-more {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--selected);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+/* Where the thing lives: at most 46% of the line; the place is cut first, the identifier never shrinks. */
+.ib-row-where {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 6px;
+  max-width: 46%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font: var(--type-summary);
+  white-space: nowrap;
+}
+.ib-row-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ib-row-id {
+  flex: none;
+}
+/* A narrow list leaves the place to the pane rather than cutting it to a stub. */
+@container ib-rows (max-width: 440px) {
+  .ib-row-place {
+    display: none;
+  }
+}
+
+/* The wait: ink and weight only, measured against the patience of the ask. */
+.ib-wait--fresh,
+.ib-wait--recent {
+  color: var(--faint);
+}
+.ib-wait--due {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ib-wait--over {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* ---- Selecting: the mark makes way for a tick under the pointer, and stays a tick once picked ---- */
+.ib-row-tick {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+/* The tick's hit area reaches 24 by 24 around the 16px box. */
+.ib-row-tick::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.ib-row-lead:hover .ib-row-tick,
+.ib-row-tick:focus-visible,
+.ib-row.is-picked .ib-row-tick {
+  opacity: 1;
+}
+.ib-row-lead:hover .ib-mark,
+.ib-row.is-picked .ib-mark {
+  opacity: 0;
+}
+.ib-row-tick.is-on {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--bg);
+}
+
+/* ---- Moves under the pointer: over the row's right end, on its own ground, so nothing reads through ---- */
+.ib-row-acts {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 28px;
+  background: linear-gradient(to right, transparent, var(--ib-solid) 24px);
+  opacity: 0;
+  translate: 0 -50%;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.ib-row:hover .ib-row-acts,
+.ib-row-acts:focus-within {
+  opacity: 1;
+}
+.ib-row-act {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+}
+.ib-row-act:hover {
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+.ib-row-act:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.ib-row-act:active {
+  background: color-mix(in oklab, var(--ink) 12%, transparent);
+}
+/* The hand-off among a row's buttons says who gets the thing, in words. */
+.ib-row-act--named {
+  display: inline-flex;
+  gap: 6px;
+  width: auto;
+  padding: 0 8px 0 5px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.ib-row-faces {
+  display: inline-flex;
+}
+.ib-row-faces > * + * {
+  margin-left: -4px;
+}

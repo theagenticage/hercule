@@ -4,22 +4,8 @@
  * shaped the slots when the entity was observed, so a new plugin draws with no
  * code here.
  */
-import type {
-  EntityFact,
-  EntityReason,
-  EntityRecord,
-  EntitySignalLine,
-  EntityStatus,
-  InboxCard,
-} from "@hercule/contract";
+import type { EntityFact, EntityReason, EntityRecord, EntityStatus } from "@hercule/contract";
 import { readEntityPluginId, formatTargetDate } from "../desk/entity-words";
-import { readSignalWord } from "../intake";
-
-/**
- * A record that may also say what the signals on it are: an Inbox card does,
- * the record `externalEntity.read` returns does not.
- */
-export type CardRecord = EntityRecord & { readonly signals?: InboxCard["signals"] };
 
 /** A fact in words. A client makes the plural of a count and the sign of a delta, with a real minus sign. */
 export type CardFact =
@@ -32,8 +18,12 @@ export type CardFact =
   | { readonly form: "bars"; readonly text: string; readonly level: number }
   | { readonly form: "count" | "word" | "date" | "money"; readonly text: string };
 
-/** What a card draws, slot by slot. A slot with nothing to say is absent. */
-export interface CardFace {
+/**
+ * What the open card draws, slot by slot. A slot with nothing to say is absent. It is not the
+ * `CardFace` of a row of the Inbox (`@hercule/contract`), which holds the field values a kind
+ * declares for its row.
+ */
+export interface OpenCardFace {
   /** The plugin whose mark the card shows. */
   readonly pluginId: string;
   /** The word for one, such as "Pull request", for a screen reader. */
@@ -75,67 +65,28 @@ const describeFact = (fact: EntityFact): CardFact => {
 };
 
 /**
- * Returns the signal a card's sentence is drawn from, or `undefined` when the
- * sentence comes from the observation or there is none. It is the latest open
- * signal, except on a row of lasting work that has had only the signal of its
- * own concern, such as a ticket that was assigned to the user: that says
- * nothing, because the row's place and status already say it.
- *
- * This relies on a convention: a concern is the word of the signal kind it
- * raises, so the concern `assigned` raises the signal kind `acme/assigned`.
- * Nothing else links a concern to its signal on the card.
+ * Returns the sentence of a card: the observation's reason. On a request, the
+ * usual one (a plain tone) needs only the person's name, because the column's
+ * title already says what requests are. Anything with a tone, or with no
+ * person to name, keeps its full sentence.
  */
-export const readSentenceSignal = (card: CardRecord): EntitySignalLine | undefined => {
-  const latest = card.signals?.latest;
-  if (latest === undefined) return undefined;
-  const hasOnlyItsConcern =
-    card.card === "rich" &&
-    card.signals?.openCount === 1 &&
-    card.concerns.some((concern) => concern === readSignalWord(latest.kind));
-  return hasOnlyItsConcern ? undefined : latest;
-};
-
-/**
- * Returns the sentence of a card: the latest signal's, else the observation's
- * reason. On a request, the usual one (a plain tone) needs only the person's
- * name, because the column's title already says what requests are. Anything
- * with a tone, or with no person to name, keeps its full sentence.
- */
-const decideSentence = (card: CardRecord): CardFace["sentence"] => {
-  const latest = card.signals?.latest;
-  if (latest !== undefined && readSentenceSignal(card) === undefined) return undefined;
-  const reason = latest?.say ?? card.reason;
+const decideSentence = (card: EntityRecord): OpenCardFace["sentence"] => {
+  const reason = card.reason;
   if (reason === undefined) return undefined;
-  const person = latest?.asker ?? card.person?.name;
+  const person = card.person?.name;
   if (card.card === "compact" && reason.tone === "plain" && person !== undefined) {
     return { text: person, tone: "plain" };
   }
   return { text: reason.say, tone: reason.tone };
 };
 
-/**
- * Returns what an asking part says first, in full: the latest signal's
- * sentence ("Ines asked for your review"), else the observation's reason. It
- * keeps its tone on the user's own work. On someone else's, the tone stays in
- * the status shape beside the title, so the sentence draws plain. Returns
- * `undefined` when the card has no sentence at all.
- *
- * The drawing also draws a second sentence after this one, what happened last.
- * A card holds only its latest signal's sentence, so there is one.
- */
-export const decideAskingSentence = (card: CardRecord): CardFace["sentence"] => {
-  const reason = card.signals?.latest?.say ?? card.reason;
-  if (reason === undefined) return undefined;
-  return { text: reason.say, tone: card.yours ? reason.tone : "plain" };
-};
-
-const decideWhose = (card: CardRecord): string | undefined => {
+const decideWhose = (card: EntityRecord): string | undefined => {
   if (card.card === "compact") return card.yours ? "yours" : undefined;
   return card.person === undefined || card.yours ? undefined : `${card.person.name}'s`;
 };
 
 /** Returns what the generic card draws for `card`. */
-export const decideCardFace = (card: CardRecord): CardFace => {
+export const decideOpenCardFace = (card: EntityRecord): OpenCardFace => {
   const status =
     card.status !== undefined && (card.card === "rich" || card.status.norm !== true)
       ? card.status

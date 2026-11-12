@@ -1,620 +1,940 @@
-/**
- * Tests the visit of the Inbox page over sequences of reads: what is drawn
- * whole, what waits as an arrival, what stays where it lies, the Group by
- * menu, and what the user's own move emptied.
- */
-import { SHOW_ALL } from "./requests-view";
-import type { Inbox, InboxCard } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
-  buildInbox,
-  buildInboxCard,
-  buildInboxLink,
-  buildInboxPlace,
-  buildRequestCard,
-  buildSignalLine,
-  listCardIds,
-} from "./cards.testing";
-import { planLink, planUnlink } from "./card-links";
-import {
-  advanceInboxVisit,
-  advanceLanding,
-  advanceLinkGesture,
-  START_OF_VISIT,
+  createInboxVisit,
+  type FirstPage,
+  type InboxReader,
   type InboxVisit,
-  type LandingStep,
-  type LinkGestureStep,
-  type VisitStep,
+  type MoveReceipt,
+  type NextPage,
 } from "./inbox-visit";
-import { HOME_GROUPING, STATUS_GROUPING } from "./inbox-place";
-import type { InboxView } from "./lay-out";
-import { hasPlacedCards } from "./visit-placement";
 
-const VIEW: InboxView = {
-  grouping: HOME_GROUPING,
-  filter: {},
-  requestsGrouping: "none",
-  requestsShow: SHOW_ALL,
-  requestsSort: "oldest",
-};
+interface Row {
+  readonly ref: string;
+  readonly title: string;
+  readonly arrival: number;
+}
+const row = (ref: string, title = ref, arrival = 0): Row => ({ ref, title, arrival });
+const rows = (...refs: string[]) => refs.map((ref) => row(ref));
 
-const PRICING = "acme:project:pricing";
-const BETA = "acme:project:beta";
-const places = [buildInboxPlace(PRICING, "Pricing"), buildInboxPlace(BETA, "Beta")];
+/** One read the visit made, answered by the test when it chooses to. */
+interface Call {
+  readonly kind: "first" | "next" | "refresh" | "rows";
+  readonly query: string;
+  readonly after?: string;
+  readonly held?: readonly string[];
+  readonly signal: AbortSignal;
+  answered: boolean;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+}
 
-const ticket = (
-  id: string,
-  ancestors: readonly string[] = [],
-  overrides: Partial<InboxCard> = {},
-) =>
-  buildInboxCard(id, { ancestors, firstObservedAt: `2026-11-0${id}T09:00:00.000Z`, ...overrides });
-
-const request = (id: string, overrides: Partial<InboxCard> = {}) =>
-  buildRequestCard(id, { firstObservedAt: `2026-11-0${id}T09:00:00.000Z`, ...overrides });
-
-const inboxOf = (cards: readonly InboxCard[]): Inbox => buildInbox(cards, { places });
-
-/** Plays reads in turn through one visit, as the screen does: each read is a fresh reply unless said otherwise. */
-const startVisit = () => {
-  let history = START_OF_VISIT;
-  let released: ReadonlySet<string> = new Set();
-  return {
-    /** Reads `received` and returns what the visit draws for it. */
-    read: (received: Inbox | undefined, step: Partial<VisitStep> = {}): InboxVisit => {
-      const next = advanceInboxVisit(history, {
-        received,
-        view: VIEW,
-        released,
-        isFresh: true,
-        hasUserMove: false,
-        isMotionReduced: () => false,
-        ...step,
-      });
-      history = next.history;
-      return next.visit;
-    },
-    /** Follows a Link or Unlink of the user, as the page does when the user makes one and the controller answers. */
-    gesture: (step: LinkGestureStep) => {
-      history = advanceLinkGesture(history, step);
-    },
-    /** Returns the placement the visit holds now. */
-    readPlacement: () => history.placement,
-    /** Lets the arrivals `ids` in, as the caller does once the hand is still. */
-    release: (...ids: string[]) => {
-      released = new Set([...released, ...ids]);
-    },
-  };
-};
-
-const surfaceRows = (visit: InboxVisit) =>
-  visit.layout!.ongoing.surfaces.map((surface) => [surface.head.id, listCardIds(surface.rows)]);
-const requestIds = (visit: InboxVisit) =>
-  visit.layout!.requests.groups.flatMap((group) => listCardIds(group.rows));
-
-describe("advanceInboxVisit: arrivals", () => {
-  it("draws nothing before the first read ends", () => {
-    const visit = startVisit().read(undefined);
-    expect(visit.inbox).toBeUndefined();
-    expect(visit.layout).toBeUndefined();
-    expect(visit.heldArrivals).toEqual([]);
-    expect(visit.groupings.map((grouping) => grouping.id)).toEqual([HOME_GROUPING]);
-  });
-
-  it("draws the first fresh reply whole, even when it is empty", () => {
-    const first = startVisit();
-    expect(first.read(inboxOf([ticket("1", [PRICING]), ticket("2", [BETA])])).heldArrivals).toEqual(
-      [],
-    );
-    // The first reply was empty, so everything after it is an arrival.
-    const empty = startVisit();
-    empty.read(inboxOf([]));
-    expect(empty.read(inboxOf([ticket("1", [PRICING])])).heldArrivals).toEqual(["1"]);
-  });
-
-  it("never lets a copy kept from an earlier visit seed the visit", () => {
-    const visit = startVisit();
-    const placeholder = visit.read(inboxOf([ticket("1", [PRICING])]), { isFresh: false });
-    expect(placeholder.heldArrivals).toEqual([]);
-    // The visit's own reply names other cards; none of them is an arrival, and card 1 left it.
-    const own = visit.read(inboxOf([ticket("2", [BETA]), ticket("3", [BETA])]));
-    expect(own.heldArrivals).toEqual([]);
-    expect(surfaceRows(own)).toEqual([[BETA, ["2", "3"]]]);
-  });
-
-  it("holds an arrival back mid-visit, and lets it in at the end of its list once it is released", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([ticket("2", [PRICING]), ticket("3", [PRICING])]));
-    // Card 1 is the oldest, but it arrives last.
-    const arriving = inboxOf([
-      ticket("1", [PRICING]),
-      ticket("2", [PRICING]),
-      ticket("3", [PRICING]),
-    ]);
-    const held = visit.read(arriving);
-    expect(held.heldArrivals).toEqual(["1"]);
-    expect(held.inbox!.cards.map((card) => card.id)).toEqual(["2", "3"]);
-    expect(surfaceRows(held)).toEqual([[PRICING, ["2", "3"]]]);
-
-    visit.release("1");
-    const released = visit.read(arriving);
-    expect(released.heldArrivals).toEqual([]);
-    expect(surfaceRows(released)).toEqual([[PRICING, ["2", "3", "1"]]]);
-  });
-
-  it("shows the words of a held read at once, and holds only the new card", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([request("1")]));
-    const reread = visit.read(inboxOf([request("1", { title: "Review, reworded" }), request("2")]));
-    expect(reread.heldArrivals).toEqual(["2"]);
-    expect(reread.layout!.requests.groups[0]?.rows[0]?.card.title).toBe("Review, reworded");
-  });
-
-  it("brings a dismissed card back to its row, and it is no arrival", () => {
-    const visit = startVisit();
-    const all = [ticket("1", [PRICING]), ticket("2", [PRICING]), ticket("3", [PRICING])];
-    visit.read(inboxOf(all));
-    const dismissed = visit.read(inboxOf([all[0]!, all[2]!]), { hasUserMove: true });
-    expect(surfaceRows(dismissed)).toEqual([[PRICING, ["1", "3"]]]);
-    const restored = visit.read(inboxOf(all));
-    expect(restored.heldArrivals).toEqual([]);
-    expect(surfaceRows(restored)).toEqual([[PRICING, ["1", "2", "3"]]]);
-  });
-
-  it("keeps a card in its column once it gets a Task", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([request("1")]));
-    const taken = visit.read(
-      inboxOf([request("1", { side: "with-someone-else", taskId: "task-1" })]),
-    );
-    expect(requestIds(taken)).toEqual(["1"]);
-    expect(taken.heldArrivals).toEqual([]);
-  });
-});
-
-describe("advanceInboxVisit: the history", () => {
-  it("returns the history it was given when the read is the one it already holds", () => {
-    const inbox = inboxOf([ticket("1", [PRICING])]);
-    const step = {
-      received: inbox,
-      view: VIEW,
-      released: new Set<string>(),
-      isFresh: true,
-      hasUserMove: false,
-      isMotionReduced: () => false,
-    };
-    const first = advanceInboxVisit(START_OF_VISIT, step);
-    expect(advanceInboxVisit(first.history, step).history).toBe(first.history);
-  });
-
-  it("keeps the placement and the bundles when a read only rewords a card", () => {
-    const first = advanceInboxVisit(START_OF_VISIT, {
-      received: inboxOf([ticket("1", [PRICING])]),
-      view: VIEW,
-      released: new Set(),
-      isFresh: true,
-      hasUserMove: false,
-      isMotionReduced: () => false,
-    });
-    const again = advanceInboxVisit(first.history, {
-      received: inboxOf([ticket("1", [PRICING], { title: "Reworded" })]),
-      view: VIEW,
-      released: new Set(),
-      isFresh: true,
-      hasUserMove: false,
-      isMotionReduced: () => false,
-    });
-    expect(again.history.placement).toBe(first.history.placement);
-    expect(again.history.bundles).toBe(first.history.bundles);
-  });
-
-  it("leaves no trace of a copy kept from an earlier visit", () => {
-    const placeholder = advanceInboxVisit(START_OF_VISIT, {
-      received: inboxOf([ticket("1", [PRICING])]),
-      view: VIEW,
-      released: new Set(),
-      isFresh: false,
-      hasUserMove: false,
-      isMotionReduced: () => false,
-    });
-    expect(hasPlacedCards(placeholder.history.placement)).toBe(false);
-    expect(placeholder.visit.layout?.ongoing.surfaces).toHaveLength(1);
-  });
-});
-
-describe("advanceInboxVisit: Group by", () => {
-  const cards = [ticket("2", [PRICING]), ticket("3", [BETA])];
-
-  it("places the surfaces again when the user groups differently, and keeps the order of the rows", () => {
-    const visit = startVisit();
-    visit.read(inboxOf(cards));
-    // Card 1 is the oldest, but it joined last and lies last.
-    const arriving = inboxOf([ticket("1", [PRICING]), ...cards]);
-    visit.read(arriving);
-    visit.release("1");
-    expect(surfaceRows(visit.read(arriving))).toEqual([
-      [BETA, ["3"]],
-      [PRICING, ["2", "1"]],
-    ]);
-
-    const byStatus = visit.read(arriving, { view: { ...VIEW, grouping: STATUS_GROUPING } });
-    expect(byStatus.layout!.grouping).toBe(STATUS_GROUPING);
-    expect(byStatus.layout!.ongoing.surfaces.map((surface) => listCardIds(surface.rows))).toEqual([
-      ["2", "3", "1"],
-    ]);
-  });
-
-  it("keeps a row in the menu for a grouping the replies stop offering, under its name", () => {
-    const grouped = { ...VIEW, grouping: "acme/project" };
-    const visit = startVisit();
-    const before = visit.read(inboxOf(cards), { view: grouped });
-    expect(before.groupings.map((grouping) => grouping.id)).toEqual([
-      HOME_GROUPING,
-      "acme/project",
-      STATUS_GROUPING,
-    ]);
-
-    // A reparenting removed the last project from the replies.
-    const after = visit.read(inboxOf([ticket("2"), ticket("3")]), { view: grouped });
-    expect(after.layout!.grouping).toBe("acme/project");
-    expect(after.groupings).toContainEqual({ id: "acme/project", name: "Acme project" });
-    expect(surfaceRows(after)).toEqual([
-      [BETA, ["3"]],
-      [PRICING, ["2"]],
-    ]);
-  });
-
-  it("drops that row at the next visit, which looks for the choice again", () => {
-    const grouped = { ...VIEW, grouping: "acme/project" };
-    const visit = startVisit();
-    const after = visit.read(inboxOf([ticket("2"), ticket("3")]), { view: grouped });
-    expect(after.layout!.grouping).toBe(HOME_GROUPING);
-    expect(after.groupings.map((grouping) => grouping.id)).toEqual([
-      HOME_GROUPING,
-      STATUS_GROUPING,
-    ]);
-  });
-});
-
-describe("advanceInboxVisit: what the user's own move emptied", () => {
-  it("marks the Requests column emptied by the user's dismissal, until a card comes back", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([ticket("1", [PRICING]), request("2")]));
-    const dismissed = visit.read(inboxOf([ticket("1", [PRICING])]), { hasUserMove: true });
-    expect(dismissed.emptiedByMove).toEqual({ everything: false, requests: true });
-    // The controller answers: no move is pending any more, and the column is still the user's doing.
-    expect(visit.read(inboxOf([ticket("1", [PRICING])])).emptiedByMove.requests).toBe(true);
-    // Undo puts the request back; later the column empties by itself.
-    expect(visit.read(inboxOf([ticket("1", [PRICING]), request("2")])).emptiedByMove.requests).toBe(
-      false,
-    );
-    expect(visit.read(inboxOf([ticket("1", [PRICING])])).emptiedByMove.requests).toBe(false);
-  });
-
-  it("marks the whole page emptied when the user dismisses the last card", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([request("1")]));
-    const dismissed = visit.read(inboxOf([]), { hasUserMove: true });
-    expect(dismissed.emptiedByMove).toEqual({ everything: true, requests: true });
-  });
-
-  it("does not mark a column that something else emptied, or one that was empty already", () => {
-    const visit = startVisit();
-    visit.read(inboxOf([ticket("1", [PRICING]), ticket("2", [PRICING])]));
-    // The user dismisses a card while Requests is empty already.
-    const dismissed = visit.read(inboxOf([ticket("1", [PRICING])]), { hasUserMove: true });
-    expect(dismissed.emptiedByMove).toEqual({ everything: false, requests: false });
-    // A read, not the user, takes the last card.
-    expect(visit.read(inboxOf([])).emptiedByMove).toEqual({ everything: false, requests: false });
-  });
-
-  it.each([
-    ["the Show choice", { requestsShow: { kind: "mine" } }],
-    ["a page filter", { filter: { whose: ["mine"] } }],
-  ] as const)(
-    "does not mark a column that %s hides, not even once the hidden request is gone",
-    (_, hiding) => {
-      const visit = startVisit();
-      visit.read(inboxOf([ticket("1", [PRICING]), request("2")]));
-      const hidden = visit.read(inboxOf([ticket("1", [PRICING]), request("2")]), {
-        hasUserMove: true,
-        view: { ...VIEW, ...hiding },
-      });
-      expect(hidden.layout!.requests.isEmpty).toBe(true);
-      expect(hidden.emptiedByMove.requests).toBe(false);
-      // The hidden request goes away by itself, with the same choice still on.
-      const gone = visit.read(inboxOf([ticket("1", [PRICING])]), { view: { ...VIEW, ...hiding } });
-      expect(gone.emptiedByMove.requests).toBe(false);
-    },
-  );
-
-  it("does not mark a page that opens empty", () => {
-    expect(startVisit().read(inboxOf([])).emptiedByMove).toEqual({
-      everything: false,
-      requests: false,
-    });
-  });
-});
-
-describe("advanceLinkGesture: where a card rides", () => {
-  const A = buildInboxCard("a", { firstObservedAt: "2026-11-01T09:00:00.000Z" });
-  const B = buildInboxCard("b", { firstObservedAt: "2026-11-02T09:00:00.000Z" });
-  const X = request("3");
-  const alone = inboxOf([A, B, X]);
-  const ridingOn = (lead: InboxCard) => inboxOf([A, B, { ...X, ridesOn: lead.ref }]);
-  const link = (
-    visit: ReturnType<typeof startVisit>,
-    inbox: Inbox,
-    lead: InboxCard,
-    gesture: number,
-  ) => {
-    const plan = planLink(inbox, X.ref, lead.ref);
-    visit.gesture({ _tag: "start", gesture, move: plan.ridingMove! });
-  };
-  /** The ids of the cards drawn riding on each lead. */
-  const riders = (visit: InboxVisit) =>
-    Object.fromEntries(
-      [A, B].map((lead) => [
-        lead.id,
-        visit
-          .layout!.ongoing.surfaces.flatMap((surface) => surface.rows)
-          .find((row) => row.card.id === lead.id && row.alsoIn === undefined)!
-          .bundle.riders.map((card) => card.id),
-      ]),
-    );
-
-  it("puts a request on the lead the user links it to, though a later read says it rides on another", () => {
-    const visit = startVisit();
-    visit.read(alone);
-    // The read says X rides on B, but the visit keeps drawing it alone.
-    const later = ridingOn(B);
-    expect(riders(visit.read(later))).toEqual({ a: [], b: [] });
-    link(visit, later, A, 1);
-    expect(riders(visit.read(later, { hasUserMove: true }))).toEqual({ a: ["3"], b: [] });
-    visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
-    expect(riders(visit.read(later))).toEqual({ a: ["3"], b: [] });
-  });
-
-  it("plays a later Link again when an earlier one is refused, so the card ends on the later lead", () => {
-    const visit = startVisit();
-    visit.read(alone);
-    link(visit, alone, A, 1);
-    link(visit, alone, B, 2);
-    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
-    visit.gesture({ _tag: "refuse", gesture: 1 });
-    expect(riders(visit.read(alone))).toEqual({ a: [], b: ["3"] });
-    visit.gesture({ _tag: "settle", gesture: 2, remaining: undefined });
-    expect(riders(visit.read(alone))).toEqual({ a: [], b: ["3"] });
-  });
-
-  it("keeps the first lead when both Links are accepted", () => {
-    const visit = startVisit();
-    visit.read(alone);
-    link(visit, alone, A, 1);
-    link(visit, alone, B, 2);
-    visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
-    visit.gesture({ _tag: "settle", gesture: 2, remaining: undefined });
-    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
-  });
-
-  describe("an Unlink", () => {
-    const person = buildInboxLink(X.ref, A.ref, "person");
-    const linked = buildInbox([A, B, { ...X, ridesOn: A.ref }], { links: [person], places });
-    const unlink = (visit: ReturnType<typeof startVisit>) => {
-      const plan = planUnlink(linked, X.ref, A.ref, visit.readPlacement());
-      visit.gesture({ _tag: "start", gesture: 1, move: plan!.ridingMove! });
-    };
-
-    it("takes the card off its lead while it waits, and lets it stand alone once nothing joins the pair", () => {
-      const visit = startVisit();
-      visit.read(linked);
-      unlink(visit);
-      expect(riders(visit.read(linked))).toEqual({ a: [], b: [] });
-      visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
-      expect(riders(visit.read(linked))).toEqual({ a: [], b: [] });
-    });
-
-    it("keeps the card on its lead when the answer says a source still reports the link", () => {
-      const visit = startVisit();
-      visit.read(linked);
-      unlink(visit);
-      visit.gesture({ _tag: "settle", gesture: 1, remaining: "source" });
-      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
-    });
-
-    it("puts the card back on its lead when the Unlink is refused", () => {
-      const visit = startVisit();
-      visit.read(linked);
-      unlink(visit);
-      visit.gesture({ _tag: "refuse", gesture: 1 });
-      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
-    });
-
-    it("is undone by a Link, a gesture of its own, planned over the place the visit holds", () => {
-      const visit = startVisit();
-      visit.read(linked);
-      unlink(visit);
-      visit.gesture({ _tag: "settle", gesture: 1, remaining: undefined });
-      link(visit, linked, A, 2);
-      expect(riders(visit.read(linked))).toEqual({ a: ["3"], b: [] });
-    });
-  });
-
-  it("returns the history it was given for a gesture that has no move waiting", () => {
-    const visit = startVisit();
-    visit.read(alone);
-    const before = visit.readPlacement();
-    visit.gesture({ _tag: "settle", gesture: 9, remaining: undefined });
-    visit.gesture({ _tag: "refuse", gesture: 9 });
-    expect(visit.readPlacement()).toBe(before);
-  });
-
-  it("still shows a move made while a copy from an earlier visit stands in, and keeps it for the visit's own reply", () => {
-    const visit = startVisit();
-    visit.read(alone, { isFresh: false });
-    link(visit, alone, A, 1);
-    expect(riders(visit.read(alone, { isFresh: false }))).toEqual({ a: ["3"], b: [] });
-    expect(riders(visit.read(alone))).toEqual({ a: ["3"], b: [] });
-  });
-});
-
-describe("advanceInboxVisit: a signal landing on a card", () => {
-  const saying = (n: number, say: string) => ({
-    signals: { openCount: 1, kinds: [], latest: buildSignalLine(`s${String(n)}`, say) },
-  });
-  const read = (n: number, say: string, others: readonly InboxCard[] = []) =>
-    inboxOf([ticket("1", [PRICING], saying(n, say)), ...others]);
-  const wordsOf = (visit: InboxVisit, id: string) =>
-    visit.inbox!.cards.find((card) => card.id === id)!.signals.latest?.say.say;
-
-  /** Starts a visit that has read `first`, and keeps the history, so steps can be applied to it. */
-  const startLanding = (isReduced = false) => {
-    let history = START_OF_VISIT;
-    let asked = 0;
-    const draw = (received: Inbox | undefined, step: Partial<VisitStep> = {}): InboxVisit => {
-      const next = advanceInboxVisit(history, {
-        received,
-        view: VIEW,
-        released: new Set(),
-        isFresh: true,
-        hasUserMove: false,
-        isMotionReduced: () => {
-          asked += 1;
-          return isReduced;
+/** A reader whose reads wait until the test answers them, so the test controls their order. */
+function fakeReader() {
+  const calls: Call[] = [];
+  const make = <T>(
+    kind: Call["kind"],
+    query: string,
+    signal: AbortSignal,
+    extra: { after?: string; held?: readonly string[] } = {},
+  ): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const call: Call = {
+        kind,
+        query,
+        ...extra,
+        signal,
+        answered: false,
+        resolve: (value) => {
+          call.answered = true;
+          resolve(value as T);
         },
-        ...step,
-      });
-      history = next.history;
-      return next.visit;
-    };
-    return {
-      draw,
-      step: (step: LandingStep) => {
-        const next = advanceLanding(history, step);
-        history = next.history;
-        return next.released;
-      },
-      /** Draws the page again from what the visit remembers, as the screen does after a step. */
-      redraw: (received: Inbox) => draw(received),
-      countAsks: () => asked,
-    };
-  };
-
-  it("lands nothing on the first read of the visit", () => {
-    const visit = startLanding();
-    const first = visit.draw(read(1, "Tessa commented"));
-    expect(first.landing).toBeUndefined();
-    expect(first.freshIds.size).toBe(0);
-    expect(visit.countAsks()).toBe(0);
-  });
-
-  it("lands nothing on a copy kept from an earlier visit, and it is no read of this visit", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"), { isFresh: false });
-    const own = visit.draw(read(2, "Omar commented"));
-    expect(own.landing).toBeUndefined();
-    expect(wordsOf(own, "1")).toBe("Omar commented");
-  });
-
-  it("holds the card as it was and asks the screen to play the landing, until the drop has landed", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"));
-    const landed = visit.draw(read(2, "Omar commented"));
-    expect(landed.landing).toEqual({
-      number: 1,
-      isReduced: false,
-      cards: [{ id: "1", tone: "plain" }],
+        reject: (error: Error) => {
+          call.answered = true;
+          reject(error);
+        },
+      };
+      calls.push(call);
     });
-    expect(wordsOf(landed, "1")).toBe("Tessa commented");
-    // The card is not fresh while its drop falls, and the screen reader hears nothing yet.
-    expect(landed.freshIds.size).toBe(0);
-    expect(landed.announcement).toBe("");
+  const reader: InboxReader<Row, string> = {
+    readFirst: (query, signal) => make<FirstPage<Row>>("first", query, signal),
+    readNext: (query, after, signal) => make<NextPage<Row>>("next", query, signal, { after }),
+    refresh: (query, held, signal) =>
+      make<{ firstPage: FirstPage<Row>; heldRows: readonly Row[] }>("refresh", query, signal, {
+        held,
+      }),
+    readRows: (query, held, signal) => make<readonly Row[]>("rows", query, signal, { held }),
+  };
+  return {
+    reader,
+    calls,
+    /** The newest read of `kind` that nobody answered yet. */
+    open: (kind: Call["kind"]): Call => {
+      const call = calls.findLast((c) => c.kind === kind && !c.answered);
+      if (call === undefined) throw new Error(`no open ${kind} read`);
+      return call;
+    },
+    count: (kind: Call["kind"]) => calls.filter((c) => c.kind === kind).length,
+  };
+}
+type Fake = ReturnType<typeof fakeReader>;
 
-    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual(["1"]);
-    const after = visit.redraw(read(2, "Omar commented"));
-    expect(wordsOf(after, "1")).toBe("Omar commented");
-    expect([...after.freshIds]).toEqual(["1"]);
-    expect(after.announcement).toBe("Ticket ACME-1: Omar commented");
-    // The same landing, not a new one.
-    expect(after.landing).toBe(landed.landing);
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+const firstPage = (items: Row[], more = false): FirstPage<Row> => ({
+  rows: items,
+  nextCursor: more ? "cursor" : undefined,
+  total: items.length,
+  order: "waiting",
+});
+
+async function answerFirst(fake: Fake, items: Row[], more = false): Promise<void> {
+  fake.open("first").resolve(firstPage(items, more));
+  await settle();
+}
+
+/** Answers the open refresh as the controller would: the first page, and the held rows still in. */
+async function answerRefresh(
+  fake: Fake,
+  items: Row[],
+  { stillIn = [], more = false }: { stillIn?: Row[]; more?: boolean } = {},
+): Promise<void> {
+  fake.open("refresh").resolve({ firstPage: firstPage(items, more), heldRows: stillIn });
+  await settle();
+}
+
+async function opened(items: Row[], more = false) {
+  const fake = fakeReader();
+  const visit = createInboxVisit(fake.reader);
+  visit.open("list-1");
+  await answerFirst(fake, items, more);
+  return { fake, visit };
+}
+
+const refsOf = (visit: InboxVisit<Row, string>) => visit.getSnapshot().rows.map((r) => r.ref);
+
+/** Confirms a move the way the screen does when the controller answers. */
+const confirmed = (visit: InboxVisit<Row, string>, receipt: MoveReceipt<Row>) => {
+  visit.confirmMove(receipt);
+  return receipt;
+};
+
+describe("opening a list", () => {
+  it("is loading until the first page arrives, then ready with the first row current", async () => {
+    const fake = fakeReader();
+    const visit = createInboxVisit(fake.reader);
+    expect(visit.getSnapshot().status).toBe("loading");
+    visit.open("list-1");
+    expect(visit.getSnapshot().status).toBe("loading");
+    await answerFirst(fake, rows("a", "b"));
+    const snapshot = visit.getSnapshot();
+    expect(snapshot.status).toBe("ready");
+    expect(snapshot.query).toBe("list-1");
+    expect(snapshot.rows.map((r) => r.ref)).toEqual(["a", "b"]);
+    expect(snapshot.current).toBe("a");
+    expect(snapshot.total).toBe(2);
+    expect(snapshot.order).toBe("waiting");
   });
 
-  it("asks for no landing again for a read that brings the same signal", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"));
-    const landed = visit.draw(read(2, "Omar commented"));
-    visit.step({ _tag: "dropLanded", landing: 1 });
-    const again = visit.draw(read(2, "Omar commented", [ticket("2", [PRICING])]));
-    expect(again.landing).toBe(landed.landing);
-    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
+  it("keeps the previous list on screen until the next list's first page arrives", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    visit.open("list-2");
+    expect(visit.getSnapshot().status).toBe("ready");
+    expect(visit.getSnapshot().query).toBe("list-1");
+    expect(refsOf(visit)).toEqual(["a", "b"]);
+    await answerFirst(fake, rows("x"));
+    expect(visit.getSnapshot().query).toBe("list-2");
+    expect(refsOf(visit)).toEqual(["x"]);
   });
 
-  it("draws the new words at once under Reduce motion, and holds nothing", () => {
-    const visit = startLanding(true);
-    visit.draw(read(1, "Tessa commented"));
-    const landed = visit.draw(read(2, "Omar commented"));
-    expect(landed.landing).toMatchObject({ number: 1, isReduced: true });
-    expect(wordsOf(landed, "1")).toBe("Omar commented");
-    expect([...landed.freshIds]).toEqual(["1"]);
-    expect(landed.announcement).toBe("Ticket ACME-1: Omar commented");
-    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
+  it("ignores the first page of a list the user has left since", async () => {
+    const fake = fakeReader();
+    const visit = createInboxVisit(fake.reader);
+    visit.open("list-1");
+    const stale = fake.open("first");
+    visit.open("list-2");
+    expect(stale.signal.aborted).toBe(true);
+    stale.resolve(firstPage(rows("old")));
+    await settle();
+    expect(visit.getSnapshot().status).toBe("loading");
+    await answerFirst(fake, rows("new"));
+    expect(refsOf(visit)).toEqual(["new"]);
   });
 
-  it("asks about Reduce motion once for each landing, and not for a read that lands nothing", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"));
-    visit.draw(read(1, "Tessa commented", [ticket("2", [PRICING])]));
-    expect(visit.countAsks()).toBe(0);
-    visit.draw(read(2, "Omar commented"));
-    expect(visit.countAsks()).toBe(1);
+  it("never lets a row read of the list left behind change the list that replaced it", async () => {
+    const { fake, visit } = await opened(rows("x"));
+    visit.pushArrived();
+    visit.open("list-2");
+    // The old list is still shown while the new one opens, so its viewport can start a read.
+    visit.viewportChanged(0, 0);
+    expect(fake.count("rows")).toBe(1);
+    fake.open("first").resolve(firstPage(rows("x")));
+    await settle();
+    expect(fake.open("rows").signal.aborted).toBe(true);
+    fake.open("rows").resolve([]);
+    await settle();
+    expect(visit.getSnapshot().query).toBe("list-2");
+    expect(refsOf(visit)).toEqual(["x"]);
   });
 
-  it("keeps the first words a card was held with when a second signal lands, and passes the hold on", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"));
-    visit.draw(read(2, "Omar commented"));
-    const second = visit.draw(read(3, "Ines commented"));
-    expect(second.landing?.number).toBe(2);
-    expect(wordsOf(second, "1")).toBe("Tessa commented");
-    // The first drop lands, but the second landing took the card over, so nothing is released.
-    expect(visit.step({ _tag: "dropLanded", landing: 1 })).toEqual([]);
-    expect(wordsOf(visit.redraw(read(3, "Ines commented")), "1")).toBe("Tessa commented");
-    expect(visit.step({ _tag: "dropLanded", landing: 2 })).toEqual(["1"]);
-    const after = visit.redraw(read(3, "Ines commented"));
-    expect(wordsOf(after, "1")).toBe("Ines commented");
-    expect(after.announcement).toBe("Ticket ACME-1: Ines commented");
+  it("fails when the first page cannot be read, and reads again when opened again", async () => {
+    const fake = fakeReader();
+    const visit = createInboxVisit(fake.reader);
+    visit.open("list-1");
+    fake.open("first").reject(new Error("offline"));
+    await settle();
+    expect(visit.getSnapshot().status).toBe("failed");
+    expect(visit.getSnapshot().error).toEqual(new Error("offline"));
+    visit.open("list-1");
+    expect(visit.getSnapshot().status).toBe("loading");
+    await answerFirst(fake, rows("a"));
+    expect(visit.getSnapshot().status).toBe("ready");
   });
 
-  it("holds only the cards a signal landed on, and keeps the order of the page", () => {
-    const visit = startLanding();
-    const quiet = ticket("2", [PRICING]);
-    visit.draw(read(1, "Tessa commented", [quiet]));
-    const landed = visit.draw(read(2, "Omar commented", [quiet]));
-    expect(landed.inbox!.cards.map((card) => card.id)).toEqual(["1", "2"]);
-    expect(landed.inbox!.cards[1]).toBe(quiet);
+  it("starts the first page again for a push that arrives during its read", async () => {
+    const fake = fakeReader();
+    const visit = createInboxVisit(fake.reader);
+    visit.open("list-1");
+    const before = fake.open("first");
+    visit.pushArrived();
+    expect(before.signal.aborted).toBe(true);
+    expect(fake.count("first")).toBe(2);
+    before.resolve(firstPage(rows("stale")));
+    await settle();
+    expect(visit.getSnapshot().status).toBe("loading");
+    await answerFirst(fake, rows("fresh"));
+    expect(refsOf(visit)).toEqual(["fresh"]);
   });
 
-  it("clears the new mark when the user reaches the card, and only then", () => {
-    const visit = startLanding();
-    visit.draw(read(1, "Tessa commented"));
-    visit.draw(read(2, "Omar commented"));
-    visit.step({ _tag: "dropLanded", landing: 1 });
-    expect([...visit.redraw(read(2, "Omar commented")).freshIds]).toEqual(["1"]);
-    expect(visit.step({ _tag: "cardReached", id: "9" })).toEqual([]);
-    expect([...visit.redraw(read(2, "Omar commented")).freshIds]).toEqual(["1"]);
-    visit.step({ _tag: "cardReached", id: "1" });
-    expect(visit.redraw(read(2, "Omar commented")).freshIds.size).toBe(0);
+  it("closing cancels every read", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    visit.pushArrived();
+    visit.viewportChanged(0, 0);
+    visit.close();
+    expect(fake.open("refresh").signal.aborted).toBe(true);
+    expect(fake.open("next").signal.aborted).toBe(true);
+  });
+});
+
+describe("the snapshot", () => {
+  it("is the same object until something changes, and tells subscribers when it does", async () => {
+    const { visit } = await opened(rows("a", "b"));
+    const first = visit.getSnapshot();
+    expect(visit.getSnapshot()).toBe(first);
+    let told = 0;
+    const stop = visit.subscribe(() => (told += 1));
+    visit.select({ kind: "clear" });
+    expect(told).toBe(1);
+    visit.step(1);
+    expect(told).toBe(2);
+    expect(visit.getSnapshot()).not.toBe(first);
+    stop();
+    visit.step(1);
+    expect(told).toBe(2);
   });
 
-  it("returns the history it was given for a step that changes nothing", () => {
-    const history = advanceInboxVisit(START_OF_VISIT, {
-      received: read(1, "Tessa commented"),
-      view: VIEW,
-      released: new Set(),
-      isFresh: true,
-      hasUserMove: false,
-      isMotionReduced: () => false,
-    }).history;
-    expect(advanceLanding(history, { _tag: "dropLanded", landing: 1 }).history).toBe(history);
-    expect(advanceLanding(history, { _tag: "cardReached", id: "1" }).history).toBe(history);
+  it("does not change for a selection change that changes nothing", async () => {
+    const { visit } = await opened(rows("a"));
+    const before = visit.getSnapshot();
+    visit.select({ kind: "toggle", ref: "ghost" });
+    expect(visit.getSnapshot()).toBe(before);
+  });
+});
+
+describe("a refresh", () => {
+  it("asks about the held rows and applies one reply: in place, no re-sorting", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    visit.pushArrived();
+    expect(fake.open("refresh").held).toEqual(["a", "b", "c"]);
+    await answerRefresh(fake, [row("c"), row("b", "new title"), row("a")]);
+    expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+    expect(visit.getSnapshot().rows[1]!.title).toBe("new title");
+    expect(visit.getSnapshot().arrivals).toBe(0);
+  });
+
+  it("keeps the row objects and the snapshot when a refresh brings equal copies", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    const before = visit.getSnapshot();
+    let notified = 0;
+    visit.subscribe(() => (notified += 1));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a"), row("b"), row("c")]);
+    expect(visit.getSnapshot()).toBe(before);
+    expect(notified).toBe(0);
+  });
+
+  it("gives a new object only to the rows whose content changed", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    const [a, b, c] = visit.getSnapshot().rows;
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a"), row("b", "new title"), row("c")]);
+    const after = visit.getSnapshot().rows;
+    expect(after[0]).toBe(a);
+    expect(after[1]).not.toBe(b);
+    expect(after[1]!.title).toBe("new title");
+    expect(after[2]).toBe(c);
+  });
+
+  it("drops a held row that is in neither part of the reply, and updates one that is in the second", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c", "d"));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a")], { stillIn: [row("c", "read by ref")] });
+    expect(refsOf(visit)).toEqual(["a", "c"]);
+    expect(visit.getSnapshot().rows[1]!.title).toBe("read by ref");
+    expect(visit.getSnapshot().lastChange).toEqual({ kind: "left", refs: ["b", "d"] });
+  });
+
+  it("settles the current row when it leaves", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    visit.step(1);
+    visit.pushArrived();
+    await answerRefresh(fake, rows("a", "c"));
+    expect(visit.getSnapshot().current).toBe("c");
+  });
+
+  it("holds back a first-page row that is not held and counts it", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("n", "a", "b"));
+    expect(refsOf(visit)).toEqual(["a", "b"]);
+    expect(visit.getSnapshot().arrivals).toBe(1);
+  });
+
+  it("applies nothing when the read fails, so a row missing from a failed read is not taken for one that left", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    const before = visit.getSnapshot();
+    visit.pushArrived();
+    fake.open("refresh").reject(new Error("down"));
+    await settle();
+    expect(visit.getSnapshot()).toBe(before);
+    expect(visit.getSnapshot().status).toBe("ready");
+  });
+
+  it("is overtaken by a push during the read: the old reply is ignored and a new read starts", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    visit.pushArrived();
+    const old = fake.open("refresh");
+    visit.pushArrived();
+    expect(old.signal.aborted).toBe(true);
+    expect(fake.count("refresh")).toBe(2);
+    old.resolve({ firstPage: firstPage(rows("a")), heldRows: [] });
+    await settle();
+    expect(refsOf(visit)).toEqual(["a", "b"]);
+    await answerRefresh(fake, rows("a", "b"));
+    expect(refsOf(visit)).toEqual(["a", "b"]);
+  });
+
+  it("applies the new reply when a push arrives after the read finished", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("a"));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a", "again")]);
+    expect(visit.getSnapshot().rows[0]!.title).toBe("again");
+  });
+
+  it("updates the total, the order and the facets from the first page", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.pushArrived();
+    fake.open("refresh").resolve({
+      firstPage: { ...firstPage(rows("a")), total: 42, order: "newest" },
+      heldRows: [],
+    });
+    await settle();
+    expect(visit.getSnapshot().total).toBe(42);
+    expect(visit.getSnapshot().order).toBe("newest");
+  });
+});
+
+describe("the arrival watermark", () => {
+  it("appends a thing that slid in from the next page quietly, but counts one ranking above held rows", async () => {
+    const refs = Array.from({ length: 300 }, (_, i) => `t${i}`);
+    const { fake, visit } = await opened(rows(...refs.slice(0, 200)), true);
+    const receipt = visit.move("dismissed", ["t0"]);
+    visit.confirmMove(receipt);
+    visit.pushArrived();
+    await answerRefresh(fake, rows(...refs.slice(1, 201)), { more: true });
+    expect(visit.getSnapshot().arrivals).toBe(0);
+    expect(refsOf(visit).at(-1)).toBe("t200");
+    expect(refsOf(visit)).toHaveLength(200);
+    visit.pushArrived();
+    await answerRefresh(fake, rows("fresh", ...refs.slice(1, 201)), { more: true });
+    expect(visit.getSnapshot().arrivals).toBe(1);
+  });
+
+  it("counts a genuine arrival that ranks after every held row, by its arrival number", async () => {
+    const old = Array.from({ length: 199 }, (_, i) => row(`o${i}`, `o${i}`, i + 1));
+    const { fake, visit } = await opened(old, true);
+    visit.pushArrived();
+    await answerRefresh(fake, [...old, row("n1", "n1", 500), row("n2", "n2", 501)], {
+      more: true,
+    });
+    expect(visit.getSnapshot().arrivals).toBe(2);
+    expect(refsOf(visit)).toHaveLength(199);
+  });
+
+  it("appends a slid-in row quietly only while its arrival is within the watermark, and Show raises it", async () => {
+    const held = [row("a", "a", 5), row("b", "b", 9)];
+    const { fake, visit } = await opened(held, true);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("c", "c", 7)], { more: true });
+    expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("c", "c", 7), row("d", "d", 10)], { more: true });
+    expect(visit.getSnapshot().arrivals).toBe(1);
+    visit.show();
+    await answerRefresh(fake, [...held, row("c", "c", 7), row("d", "d", 10)], { more: true });
+    expect(refsOf(visit)).toEqual(["a", "b", "c", "d"]);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("c", "c", 7), row("d", "d", 10), row("e", "e", 10)], {
+      more: true,
+    });
+    expect(refsOf(visit)).toContain("e");
+    expect(visit.getSnapshot().arrivals).toBe(0);
+  });
+
+  it("counts a thing ranking last as an arrival when no next page exists", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("a", "b", "z"));
+    expect(visit.getSnapshot().arrivals).toBe(1);
+  });
+});
+
+describe("Show", () => {
+  it("re-reads the first page first, then places arrivals where it ranks them and makes the first new row current", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("n1", "a", "b", "c"));
+    visit.show();
+    expect(visit.getSnapshot().arrivals).toBe(1);
+    expect(fake.count("refresh")).toBe(2);
+    await answerRefresh(fake, rows("n1", "a", "n2", "b", "c"));
+    expect(refsOf(visit)).toEqual(["n1", "a", "n2", "b", "c"]);
+    expect(visit.getSnapshot().arrivals).toBe(0);
+    expect(visit.getSnapshot().current).toBe("n1");
+    expect(visit.getSnapshot().lastChange).toEqual({ kind: "arrived", refs: ["n1", "n2"] });
+  });
+
+  it("chains arrivals that rank next to each other", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("a", "n1", "n2"));
+    visit.show();
+    await answerRefresh(fake, rows("a", "n1", "n2"));
+    expect(refsOf(visit)).toEqual(["a", "n1", "n2"]);
+    expect(visit.getSnapshot().current).toBe("n1");
+  });
+
+  it("changes nothing and reads nothing when nothing waits", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.show();
+    expect(fake.count("refresh")).toBe(0);
+  });
+
+  it("takes in the arrivals already held when the read fails", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("n", "a"));
+    visit.show();
+    fake.open("refresh").reject(new Error("down"));
+    await settle();
+    expect(refsOf(visit)).toEqual(["n", "a"]);
+  });
+
+  it("still takes arrivals in when a push overtakes the read it waits for", async () => {
+    const { fake, visit } = await opened(rows("a"));
+    visit.pushArrived();
+    await answerRefresh(fake, rows("n", "a"));
+    visit.show();
+    visit.pushArrived();
+    await answerRefresh(fake, rows("n", "a", "m"));
+    expect(refsOf(visit)).toEqual(["n", "a", "m"]);
+    expect(visit.getSnapshot().arrivals).toBe(0);
+  });
+});
+
+describe("the next page", () => {
+  it("is read near the end, once, and appended without the rows already held", async () => {
+    const { fake, visit } = await opened(rows("a", "b"), true);
+    visit.viewportChanged(0, 1);
+    visit.viewportChanged(0, 1);
+    expect(fake.count("next")).toBe(1);
+    expect(fake.open("next").after).toBe("cursor");
+    fake.open("next").resolve({ rows: rows("b", "c"), nextCursor: "c2" });
+    await settle();
+    expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+    visit.viewportChanged(0, 2);
+    expect(fake.open("next").after).toBe("c2");
+  });
+
+  it("is not read far from the end, nor when no page follows", async () => {
+    const refs = Array.from({ length: 100 }, (_, i) => `t${i}`);
+    const far = await opened(rows(...refs), true);
+    far.visit.viewportChanged(0, 10);
+    expect(far.fake.count("next")).toBe(0);
+    const last = await opened(rows("a"));
+    last.visit.viewportChanged(0, 0);
+    expect(last.fake.count("next")).toBe(0);
+  });
+
+  it("keeps the frontier through a refresh", async () => {
+    const { fake, visit } = await opened(rows("a", "b"), true);
+    visit.pushArrived();
+    await answerRefresh(fake, rows("a", "b"), { more: true });
+    visit.viewportChanged(0, 1);
+    expect(fake.open("next").after).toBe("cursor");
+  });
+
+  it("is not cancelled by a push, and its rows are read afresh later", async () => {
+    const { fake, visit } = await opened(rows("a", "b"), true);
+    visit.viewportChanged(0, 1);
+    const next = fake.open("next");
+    visit.pushArrived();
+    expect(next.signal.aborted).toBe(false);
+    next.resolve({ rows: rows("c") });
+    await settle();
+    expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+  });
+
+  it("is ignored when the user switched to another list meanwhile", async () => {
+    const { fake, visit } = await opened(rows("a", "b"), true);
+    visit.viewportChanged(0, 1);
+    const next = fake.open("next");
+    visit.open("list-2");
+    expect(next.signal.aborted).toBe(true);
+    next.resolve({ rows: rows("late") });
+    await settle();
+    expect(refsOf(visit)).toEqual(["a", "b"]);
+    await answerFirst(fake, rows("x"));
+    expect(refsOf(visit)).toEqual(["x"]);
+  });
+
+  it("lets a failed page be read again the next time the end is near", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    visit.viewportChanged(0, 0);
+    fake.open("next").reject(new Error("down"));
+    await settle();
+    visit.viewportChanged(0, 0);
+    expect(fake.count("next")).toBe(2);
+  });
+});
+
+describe("freshness against the pushes", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+
+  it("asks a refresh about at most 400 held rows around the viewport", async () => {
+    const { fake, visit } = await opened(rows(...many(1000)));
+    visit.viewportChanged(700, 720);
+    visit.pushArrived();
+    const held = fake.open("refresh").held!;
+    expect(held).toHaveLength(400);
+    expect(held).toContain("t700");
+    expect(held).toContain("t720");
+    expect(held).not.toContain("t0");
+    expect(held).not.toContain("t999");
+  });
+
+  it("leaves rows far off-screen as they were, and re-reads them when they scroll into view", async () => {
+    const { fake, visit } = await opened(rows(...many(1000)));
+    visit.pushArrived();
+    // The window is the top 400: t900 is not asked about and keeps its old copy.
+    await answerRefresh(fake, [row("t0", "t0 new")], {
+      stillIn: rows(...many(400).slice(1)),
+    });
+    expect(visit.getSnapshot().rows[900]!.title).toBe("t900");
+    expect(fake.count("rows")).toBe(0);
+    visit.viewportChanged(895, 910);
+    const read = fake.open("rows");
+    expect(read.held).toContain("t900");
+    expect(read.held).not.toContain("t0");
+    read.resolve(read.held!.map((ref) => (ref === "t900" ? row(ref, "t900 new") : row(ref))));
+    await settle();
+    expect(visit.getSnapshot().rows[900]!.title).toBe("t900 new");
+    // Fresh now: scrolling there again reads nothing.
+    visit.viewportChanged(896, 911);
+    expect(fake.count("rows")).toBe(1);
+  });
+
+  it("drops a row that left the list while it was off-screen when it is re-read", async () => {
+    const { fake, visit } = await opened(rows(...many(1000)));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("t0")], { stillIn: rows(...many(400).slice(1)) });
+    visit.viewportChanged(895, 910);
+    const read = fake.open("rows");
+    read.resolve(rows(...read.held!.filter((ref) => ref !== "t900")));
+    await settle();
+    expect(refsOf(visit)).not.toContain("t900");
+    expect(visit.getSnapshot().lastChange).toEqual({ kind: "left", refs: ["t900"] });
+  });
+
+  it("does not read rows a refresh in flight already covers", async () => {
+    const { fake, visit } = await opened(rows(...many(10)));
+    visit.pushArrived();
+    visit.viewportChanged(0, 5);
+    expect(fake.count("rows")).toBe(0);
+  });
+
+  it("cancels a row read when a push arrives, and covers its rows by the new refresh", async () => {
+    const { fake, visit } = await opened(rows(...many(1000)));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("t0")], { stillIn: rows(...many(400).slice(1)) });
+    visit.viewportChanged(895, 910);
+    const read = fake.open("rows");
+    visit.pushArrived();
+    expect(read.signal.aborted).toBe(true);
+    read.resolve([row("t900", "stale answer")]);
+    await settle();
+    expect(visit.getSnapshot().rows[900]!.title).toBe("t900");
+  });
+});
+
+describe("moves", () => {
+  it("dismissing removes the rows at once and makes the next row current", async () => {
+    const { visit } = await opened(rows("a", "b", "c"));
+    visit.move("dismissed", ["a"]);
+    expect(refsOf(visit)).toEqual(["b", "c"]);
+    expect(visit.getSnapshot().current).toBe("b");
+    expect(visit.getSnapshot().lastChange).toEqual({ kind: "dismissed", refs: ["a"] });
+  });
+
+  it("skips next rows that leave too, in the old order", async () => {
+    const { visit } = await opened(rows("a", "b", "c", "d"));
+    visit.step(1);
+    visit.move("dismissed", ["b", "c"]);
+    expect(visit.getSnapshot().current).toBe("d");
+  });
+
+  it("falls back to the previous row after the last one, and to none when empty, which says so", async () => {
+    const { visit } = await opened(rows("a", "b"));
+    visit.step(1);
+    visit.move("dismissed", ["b"]);
+    expect(visit.getSnapshot().current).toBe("a");
+    visit.move("dismissed", ["a"]);
+    expect(visit.getSnapshot().current).toBeNull();
+    expect(visit.getSnapshot().lastChange).toEqual({ kind: "emptied-by-move", refs: ["a"] });
+  });
+
+  it("prunes the selection to the displayed rows", async () => {
+    const { visit } = await opened(rows("a", "b", "c"));
+    visit.select({ kind: "all" });
+    visit.move("dismissed", ["b"]);
+    expect([...visit.getSnapshot().selection]).toEqual(["a", "c"]);
+  });
+
+  it("ignores refs the list does not hold", async () => {
+    const { visit } = await opened(rows("a"));
+    const receipt = visit.move("dismissed", ["ghost"]);
+    expect(receipt.refs).toEqual([]);
+    expect(refsOf(visit)).toEqual(["a"]);
+  });
+
+  describe("a dismissal that is still on its way", () => {
+    it("is not undone by a refresh that still has the row", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      visit.move("dismissed", ["a"]);
+      visit.pushArrived();
+      await answerRefresh(fake, rows("a", "b"));
+      expect(refsOf(visit)).toEqual(["b"]);
+      expect(visit.getSnapshot().arrivals).toBe(0);
+    });
+
+    it("is not confirmed by a read issued before the controller confirmed the move", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = visit.move("dismissed", ["a"]);
+      visit.pushArrived();
+      const early = fake.open("refresh");
+      visit.confirmMove(receipt);
+      // The early read was issued before the confirmation. It ran against a controller that may
+      // not have dropped "a" yet. A push cancelled it; its late answer is ignored.
+      early.resolve({ firstPage: firstPage(rows("a", "b")), heldRows: [] });
+      await settle();
+      expect(refsOf(visit)).toEqual(["b"]);
+      expect(visit.getSnapshot().arrivals).toBe(0);
+    });
+
+    it("asks about the hidden row too, and lets a row that came back wait behind N new", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.pushArrived();
+      expect(fake.open("refresh").held).toContain("a");
+      await answerRefresh(fake, rows("b"));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("a", "b"));
+      expect(refsOf(visit)).toEqual(["b"]);
+      expect(visit.getSnapshot().arrivals).toBe(1);
+    });
+
+    it("keeps a row hidden that sits on a later page, and lets the next page carry it once it came back", async () => {
+      const { fake, visit } = await opened(rows("a", "b"), true);
+      confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b"), { more: true });
+      visit.viewportChanged(0, 0);
+      fake.open("next").resolve({ rows: rows("a", "c") });
+      await settle();
+      expect(refsOf(visit)).toEqual(["b", "a", "c"]);
+    });
+
+    it("does not let a next page bring the row back before the dismissal was confirmed", async () => {
+      const { fake, visit } = await opened(rows("a", "b"), true);
+      visit.move("dismissed", ["a"]);
+      visit.viewportChanged(0, 0);
+      fake.open("next").resolve({ rows: rows("a", "c") });
+      await settle();
+      expect(refsOf(visit)).toEqual(["b", "c"]);
+    });
+  });
+
+  describe("a failed move", () => {
+    it("puts the rows back at their old places and makes the first current", async () => {
+      const { visit } = await opened(rows("a", "b", "c", "d"));
+      const receipt = visit.move("dismissed", ["b", "c"]);
+      visit.failMove(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b", "c", "d"]);
+      expect(visit.getSnapshot().current).toBe("b");
+      expect(visit.getSnapshot().lastChange).toEqual({ kind: "restored", refs: ["b", "c"] });
+    });
+  });
+
+  describe("undo", () => {
+    it("restores rows at their old index and makes the first current, even after a refresh", async () => {
+      const { fake, visit } = await opened(rows("a", "b", "c", "d"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["b", "c"]));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("a", "d"));
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b", "c", "d"]);
+      expect(visit.getSnapshot().current).toBe("b");
+    });
+
+    it("is not undone by a refresh that was read before the undo", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.pushArrived();
+      const early = fake.open("refresh");
+      visit.undo(receipt);
+      early.resolve({ firstPage: firstPage(rows("b")), heldRows: [] });
+      await settle();
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+      visit.pushArrived();
+      await answerRefresh(fake, rows("a", "b"));
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+    });
+
+    it("lets a read issued after the undo take the row out again if the controller has it gone", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.undo(receipt);
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b"));
+      expect(refsOf(visit)).toEqual(["b"]);
+    });
+
+    it("puts back a taken-on row that a refresh dropped, current", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = visit.move("taken", ["a"]);
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b"));
+      expect(refsOf(visit)).toEqual(["b"]);
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+      expect(visit.getSnapshot().current).toBe("a");
+    });
+
+    it("promotes a row that came back behind N new before Show, never duplicating it", async () => {
+      const { fake, visit } = await opened(rows("a", "b", "c"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b", "c"));
+      visit.pushArrived();
+      await answerRefresh(fake, [row("a", "a again"), ...rows("b", "c")]);
+      expect(visit.getSnapshot().arrivals).toBe(1);
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+      expect(visit.getSnapshot().rows[0]!.title).toBe("a again");
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(visit.getSnapshot().current).toBe("a");
+    });
+
+    it("never duplicates a row that came back as an arrival and was shown", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b"));
+      visit.pushArrived();
+      await answerRefresh(fake, rows("a", "b"));
+      visit.show();
+      await answerRefresh(fake, rows("a", "b"));
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+    });
+
+    it("restores the row when the user comes back to the same list and undoes there", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.open("list-2");
+      await answerFirst(fake, rows("x"));
+      visit.open("list-1");
+      await answerFirst(fake, rows("b"));
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+      expect(visit.getSnapshot().current).toBe("a");
+      expect(visit.getSnapshot().lastChange).toEqual({ kind: "restored", refs: ["a"] });
+    });
+
+    it("does nothing for a receipt of another visit", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = visit.move("dismissed", ["a"]);
+      visit.open("list-2");
+      await answerFirst(fake, rows("x", "y"));
+      const before = visit.getSnapshot();
+      visit.undo(receipt);
+      visit.failMove(receipt);
+      expect(visit.getSnapshot()).toBe(before);
+    });
+  });
+
+  describe("own moves on a list of more than 200", () => {
+    it("never counts the rows that slide into the first page as arrivals while moves are pending and after", async () => {
+      const refs = Array.from({ length: 450 }, (_, i) => `t${i}`);
+      const { fake, visit } = await opened(rows(...refs.slice(0, 200)), true);
+      const receipt = visit.move("dismissed", refs.slice(0, 30));
+      visit.confirmMove(receipt);
+      visit.pushArrived();
+      await answerRefresh(fake, rows(...refs.slice(30, 230)), { more: true });
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(refsOf(visit)).toEqual(refs.slice(30, 230));
+      // The dismissed rows are gone for good: a later refresh need not hide anything.
+      visit.pushArrived();
+      expect(fake.open("refresh").held).not.toContain("t0");
+    });
+  });
+
+  describe("a move that leaves the rows on the list (take on, hand-off)", () => {
+    it("keeps the row, moves current on, prunes the selection", async () => {
+      const { visit } = await opened(rows("a", "b", "c"));
+      visit.select({ kind: "toggle", ref: "a" });
+      visit.move("taken", ["a"]);
+      expect(refsOf(visit)).toEqual(["a", "b", "c"]);
+      expect(visit.getSnapshot().current).toBe("b");
+      expect(visit.getSnapshot().selection.size).toBe(0);
+      expect(visit.getSnapshot().anchor).toBeNull();
+      expect(visit.getSnapshot().lastChange).toEqual({ kind: "taken", refs: ["a"] });
+    });
+
+    it("updates the row in place on the next refresh, or drops it", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      visit.move("taken", ["a"]);
+      visit.pushArrived();
+      await answerRefresh(fake, [row("a", "still asks"), row("b")]);
+      expect(visit.getSnapshot().rows[0]!.title).toBe("still asks");
+      visit.pushArrived();
+      await answerRefresh(fake, rows("b"));
+      expect(refsOf(visit)).toEqual(["b"]);
+    });
+
+    it("keeps current when every row was handled", async () => {
+      const { visit } = await opened(rows("a"));
+      visit.move("taken", ["a"]);
+      expect(visit.getSnapshot().current).toBe("a");
+    });
+
+    it("draws a handed row as its hand-off copy until a read brings a new copy", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      visit.move("taken", ["a"], (r) => ({ ...r, title: "with a workflow" }));
+      expect(visit.getSnapshot().rows[0]!.title).toBe("with a workflow");
+      expect(visit.getSnapshot().rows[1]!.title).toBe("b");
+      visit.pushArrived();
+      await answerRefresh(fake, [row("a", "new copy"), row("b")]);
+      expect(visit.getSnapshot().rows[0]!.title).toBe("new copy");
+    });
+
+    it("puts a handed row back when the hand-off fails or is taken back", async () => {
+      const { visit } = await opened(rows("a", "b"));
+      const show = (r: Row): Row => ({ ...r, title: "with a workflow" });
+      visit.failMove(visit.move("taken", ["a"], show));
+      expect(visit.getSnapshot().rows[0]!.title).toBe("a");
+      visit.undo(visit.move("taken", ["a"], show));
+      expect(visit.getSnapshot().rows[0]!.title).toBe("a");
+      expect(visit.getSnapshot().current).toBe("a");
+    });
+  });
+});
+
+describe("selection and current row", () => {
+  it("toggles a row and makes it the anchor", async () => {
+    const { visit } = await opened(rows("a", "b"));
+    visit.select({ kind: "toggle", ref: "b" });
+    expect([...visit.getSnapshot().selection]).toEqual(["b"]);
+    expect(visit.getSnapshot().anchor).toBe("b");
+    visit.select({ kind: "toggle", ref: "b" });
+    expect(visit.getSnapshot().selection.size).toBe(0);
+  });
+
+  it("extends a range with shift-J and shrinks it with shift-K, and a plain step forgets the anchor", async () => {
+    const { visit } = await opened(rows("a", "b", "c", "d"));
+    visit.step(1, true);
+    visit.step(1, true);
+    expect([...visit.getSnapshot().selection]).toEqual(["a", "b", "c"]);
+    visit.step(-1, true);
+    expect([...visit.getSnapshot().selection]).toEqual(["a", "b"]);
+    visit.step(1);
+    expect(visit.getSnapshot().anchor).toBeNull();
+  });
+
+  it("stays on the end row for a step past either end", async () => {
+    const { visit } = await opened(rows("a", "b"));
+    visit.step(-1);
+    expect(visit.getSnapshot().current).toBe("a");
+    visit.step(1);
+    visit.step(1);
+    expect(visit.getSnapshot().current).toBe("b");
+  });
+
+  it("selects a range by shift-click from the anchor", async () => {
+    const { visit } = await opened(rows("a", "b", "c", "d"));
+    visit.select({ kind: "toggle", ref: "d" });
+    visit.select({ kind: "extendTo", ref: "b" });
+    expect([...visit.getSnapshot().selection].sort()).toEqual(["b", "c", "d"]);
+  });
+
+  it("focuses a row on a click, selects every row and clears on Esc", async () => {
+    const { visit } = await opened(rows("a", "b", "c"));
+    visit.select({ kind: "focus", ref: "c" });
+    expect(visit.getSnapshot().current).toBe("c");
+    visit.select({ kind: "all" });
+    expect(visit.getSnapshot().selection.size).toBe(3);
+    visit.select({ kind: "clear" });
+    expect(visit.getSnapshot().selection.size).toBe(0);
+  });
+
+  it("forgets the anchor when its row leaves", async () => {
+    const { visit } = await opened(rows("a", "b"));
+    visit.select({ kind: "toggle", ref: "b" });
+    visit.move("dismissed", ["b"]);
+    expect(visit.getSnapshot().anchor).toBeNull();
+  });
+});
+
+describe("what a move acts on", () => {
+  it("from the keyboard: the current row, or the selection when there is one", async () => {
+    const { visit } = await opened(rows("a", "b", "c"));
+    expect(visit.targets()).toEqual(["a"]);
+    visit.select({ kind: "toggle", ref: "c" });
+    visit.select({ kind: "toggle", ref: "a" });
+    expect(visit.targets()).toEqual(["a", "c"]);
+  });
+
+  it("from a hover button: that row, unless it is selected, then the selection", async () => {
+    const { visit } = await opened(rows("a", "b", "c"));
+    visit.select({ kind: "toggle", ref: "a" });
+    visit.select({ kind: "toggle", ref: "b" });
+    expect(visit.targets("c")).toEqual(["c"]);
+    expect(visit.targets("b")).toEqual(["a", "b"]);
+  });
+
+  it("is empty for an empty list", async () => {
+    const { visit } = await opened([]);
+    expect(visit.targets()).toEqual([]);
   });
 });

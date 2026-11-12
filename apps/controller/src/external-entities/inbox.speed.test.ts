@@ -1,7 +1,8 @@
 /**
  * Times the Inbox's reads against a database arranged as production arranges
  * one, counts the statements they send, and prints the numbers. Run it with
- * `pnpm test:speed`.
+ * `pnpm test:speed`, or on its own with
+ * `RUN_SPEED_TESTS=1 pnpm test:node apps/controller/src/external-entities/inbox.speed.test.ts`.
  *
  * It is opt-in, and not part of `pnpm test` or CI, because time depends on the
  * machine. The database is the test database every controller test uses: a
@@ -9,88 +10,55 @@
  * reader (ADR 0004, amendment of 2026-10-18), not SQLite's in-memory mode. It
  * is seeded with a migrated schema and no statistics, as a controller starts.
  *
- * It times the real statements, through the real services, against the
- * targets of spec 17 §What the Inbox costs:
+ * It drives the four Inbox reads, at 300, 1,000 and 2,400
+ * things:
  *
- * - `externalEntity.queryInbox`, the whole read, at 10, 300 and 1,000 cards,
- *   with and without an open signal on every card, and with and without
- *   handoff offers. The offers come from two workflows for each kind, some
- *   with a workspace on one of three repositories, and two accounts, one of
- *   which cannot act on every seventh card. A case prints the median, the
- *   95th percentile, the statements sent, and the bytes of the encoded reply
- *   in all and for each card;
- * - `externalEntity.countInbox` and `task.readAttention`, the two small reads
- *   the shell sends on every screen;
- * - `signal.query` on the To do view, once with the real `SignalEntities`
- *   port and once with a port that reads nothing, so the difference is the
- *   statements the entities of the signals cost;
- * - the query plan of every statement the Inbox read sends at 300 cards. A
- *   `SCAN` of one of the big tables is printed, so a read that walks every row
- *   shows up;
- * - `readAncestors`, the walk up `part-of` that the Inbox and the board share,
- *   over a hierarchy shaped like a Linear workspace (five levels with ten
- *   children each, 11,111 things) and over a chain twenty levels deep.
+ * - `queryInbox`: the first page of "Someone waits on me" (order waiting) and
+ *   of "Everything" (order newest), a `rows` read of 200 held things, a
+ *   `refresh` that holds 400, and the page after the first. A page prints its median and 95th percentile, the
+ *   statements sent and the bytes of the encoded reply;
+ * - `suggestInboxValues`: the values of a facet field and of the core key
+ *   `from`;
+ * - `readInboxOutline`: the rail's outline with every source open, and with
+ *   every source folded, timed apart because it skips the facets;
+ * - `countInbox`: the sidebar's small read, which every screen makes.
  *
- * The cards are issues of a Linear-like kind, two thirds of them, under ten
- * projects under two teams; and pull requests of a GitHub-like kind, the
- * other third, each linked to the issue two cards on and landing in one of three
- * repositories. Every tenth card has a live Task, and every twentieth a
- * running run on it.
+ * Every statement's query plan is checked: a `SCAN` of one of the big tables
+ * is printed, so a read that walks every row shows up. Reads that must walk
+ * the eligible things once (the counts, the facets) show the scans they make.
+ *
+ * The things are tickets of an `acme` plugin (a facet of team records, an
+ * enum, a number, an age) and issues of a `beta` plugin, over six accounts.
+ * Every second thing has an open ask, every fifth an open signal that asks
+ * nothing, every tenth is dismissed (half of those with an ask raised after),
+ * and every tenth has a live Task.
  *
  * What it guards is an order of magnitude: the ceilings are far above what
- * the reads take, and the statement counts must not follow the cards.
+ * the reads take, and the statement counts must not follow the things.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { Inbox, InboxCounts, SignalPage, TaskAttention } from "@hercule/contract";
-import {
-  HOST_API,
-  registerConnectionType,
-  registerEventSource,
-  type EntityKindDeclaration,
-  type Plugin,
-} from "@hercule/plugin-host";
-import { CurrentActor } from "../actor";
-import { FakeBoundOperationsLayer } from "../bound-actions/testing";
-import { connectionRepository } from "../connections";
-import { SignalEntitiesLayer } from "../daemon/ingest";
-import { TaskServicePortsLayer } from "../daemon/tasks";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { mintUuid, uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { AuditLogLayer, PlatformEventsLayer } from "../events";
-import { NotifierLayer } from "../notifications";
-import { EntityLookups, PluginHost } from "../plugins";
-import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins/testing";
-import { signalRepository } from "../signals/repository";
-import {
-  SignalClaimsLayer,
-  type SignalEntities,
-  SignalService,
-  SignalServiceLayer,
-} from "../signals";
-import { buildSignalEntitiesDouble } from "../signals/signal-entities.testing";
-import { TaskService, TaskServiceLayer } from "../tasks";
+import { taskRepository } from "../tasks";
 import { claimRepository } from "./claims";
-import { externalEntityRepository, type ObservedEntity } from "./repository";
-import { ExternalEntityService, ExternalEntityServiceLayer } from "./service";
-import { renderEntitySlots, type FullEntityObservation } from "./slots";
+import type { ActiveEntityKind } from "./entity-records";
+import type { InboxEnvironment } from "./inbox-query";
+import { inbox } from "./inbox.testing";
 
 /** Set to "1" by `pnpm test:speed`. */
 const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
 
-/** The target of spec 17 for the Inbox read at 300 cards, in milliseconds. */
-const INBOX_TARGET_MS = 20;
+/** The target of spec 17 for a page at 300 things, in milliseconds. */
+const PAGE_TARGET_MS = 20;
 
-/** The most time the Inbox read may take at 300 cards before the test fails, in milliseconds. */
-const INBOX_CEILING_MS = 100;
+/** The most time a page may take at 1,000 and 2,400 things, in milliseconds. */
+const LARGE_PAGE_CEILING_MS = 100;
 
-/** The most time the Inbox read may take at 1,000 cards before the test fails, in milliseconds. */
-const LARGE_INBOX_CEILING_MS = 300;
-
-/** The most time a shell read (the counts, the attention) may take, in milliseconds. */
-const SHELL_READ_CEILING_MS = 50;
+/** The most time the counts may take, in milliseconds. */
+const COUNTS_CEILING_MS = 150;
 
 /** The most time one walk up may take, in milliseconds. */
 const ANCESTORS_CEILING_MS = 200;
@@ -99,13 +67,18 @@ const ANCESTORS_CEILING_MS = 200;
 const RUNS = 25;
 const WARM_UP_RUNS = 5;
 
+/** The plugin the walk up part-of seeds its Connection for. */
+const PLUGIN = "acme";
+
 const AT = "2026-11-01T09:00:00.000Z";
+const NOW = "2026-11-02T09:00:00.000Z";
 
 /** The tables a `SCAN` of which follows the size of the database rather than the page. */
 const BIG_TABLES = [
   "external_entities",
   "external_entity_observations",
   "external_entity_relation_claims",
+  "external_entity_fields",
   "signals",
   "tasks",
   "task_entity_links",
@@ -113,427 +86,220 @@ const BIG_TABLES = [
   "sessions",
 ];
 
-/** The repositories the pull requests land in, as canonical remotes. */
-const REMOTES = ["github.com/acme/web", "github.com/acme/api", "github.com/acme/mobile"];
-
-/** An issue, modelled on the Linear plugin's: a rich, slow card with a person, facts and reasons. */
-const ISSUE_KIND: EntityKindDeclaration = {
-  word: "issue",
-  noun: "Issue",
-  refPrefix: "acme:issue:",
-  card: "rich",
-  pace: "slow",
-  patience: 336,
-  identifier: "{key}",
-  person: "assignee",
-  owner: "assignee",
-  home: "project",
-  status: {
-    backlog: { shape: "dashed", tone: "quiet", word: "Backlog", stage: "exploring" },
-    todo: { shape: "ring", tone: "quiet", word: "Todo", stage: "planned" },
-    started: { shape: "half", tone: "active", word: "In Progress", stage: "building" },
-  },
-  facts: [
-    { field: "priority", form: "bars" },
-    { field: "milestone", form: "word" },
-  ],
-  reasons: {
-    assigned: { say: "Assigned to you", tone: "plain" },
-    mention: { say: "{person} mentioned you", tone: "plain" },
-  },
-};
-
-/** A pull request, modelled on the GitHub plugin's: a compact, fast card in a repository. */
-const PULL_KIND: EntityKindDeclaration = {
-  word: "pull",
-  noun: "Pull request",
-  refPrefix: "acme:pull:",
-  card: "compact",
-  pace: "fast",
-  patience: 24,
-  identifier: "{key}",
-  person: "author",
-  owner: "author",
-  status: {
-    open: { shape: "ring", tone: "active", word: "Open", stage: "in-review" },
-    draft: { shape: "dashed", tone: "quiet", word: "Draft", stage: "building" },
-  },
-  facts: [],
-  reasons: {
-    "review-requested": { say: "{person} asked for your review", tone: "plain" },
-  },
-};
-
-/** Builds a place kind: no card, no clock, groupable with a caption. */
-const buildPlaceKind = (word: string, noun: string, caption: string): EntityKindDeclaration => ({
-  word,
-  noun,
-  refPrefix: `acme:${word}:`,
-  pace: "context",
-  patience: 0,
-  identifier: "{key}",
-  person: null,
-  owner: null,
-  groupable: { caption },
-  status: null,
-  facts: [],
-  reasons: {},
-});
-
-const PLUGIN = "acme";
-const SIGNAL_KIND = `${PLUGIN}/review-requested`;
-
-/** An invented tracker plugin with issues, pull requests, projects and teams. */
-const trackerPlugin: Plugin = {
-  manifest: {
-    id: PLUGIN,
-    displayName: "Acme",
-    hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "entities"],
-    configSchema: Schema.Struct({}),
-  },
-  register: (host) =>
-    Effect.andThen(
-      registerConnectionType(host, {
-        type: "acme",
-        displayName: "Acme",
-        setup: [],
-        validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
-      }),
-      registerEventSource(host, {
-        id: "acme",
-        connectionType: "acme/acme",
-        feeds: IDLE_FEEDS,
-        entityKinds: [
-          ISSUE_KIND,
-          PULL_KIND,
-          buildPlaceKind("project", "Project", "Acme project"),
-          buildPlaceKind("team", "Team", "Acme team"),
-        ],
-        kinds: {
-          "acme.thing.done": {
-            description: "Something was done.",
-            schema: Schema.Struct({ title: Schema.String }),
-            availableToTriage: true,
-          },
-        },
-        open: IDLE_INGEST_OPEN,
-      }),
-    ),
-  activate: () => Effect.succeed(Effect.void),
-};
-
-/** Lookups that reach no source: the reads timed here never call them. */
-const IDLE_LOOKUPS: EntityLookups["Service"] = {
-  recognize: () => Effect.succeed([]),
-  listLinkSources: () => Effect.succeed([PLUGIN]),
-  search: () => Effect.succeed({ observations: [], incomplete: false, outcome: "results" }),
-  resolve: () => Effect.succeed({ missing: "unknown" }),
-};
-
-const layer = ExternalEntityServiceLayer.pipe(
-  Layer.provideMerge(Layer.succeed(EntityLookups)(IDLE_LOOKUPS)),
-  Layer.provideMerge(
-    TaskServiceLayer.pipe(
-      Layer.provideMerge(NotifierLayer),
-      Layer.provideMerge(TaskServicePortsLayer),
-      Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
-    ),
-  ),
-  Layer.provideMerge(buildPluginStack()),
+const ACME_ACCOUNTS = Array.from(
+  { length: 4 },
+  (_, n) => `0190c000-0000-7000-8000-00000000a${n}00`,
 );
+const BETA_ACCOUNTS = Array.from(
+  { length: 2 },
+  (_, n) => `0190c000-0000-7000-8000-00000000b${n}00`,
+);
+const TEAMS = 60;
 
-/**
- * Builds the signal service over the outer database and plugin host, with
- * `entities` as its `SignalEntities` port.
- */
-const buildSignalServiceLayer = (
-  entities: Layer.Layer<SignalEntities, never, SqlClient.SqlClient>,
-) =>
-  SignalServiceLayer.pipe(
-    Layer.provide(Layer.mergeAll(FakeBoundOperationsLayer, SignalClaimsLayer, entities)),
-  );
-
-const issueRef = (n: number) => `acme:issue:${String(n)}`;
-const pullRef = (n: number) => `acme:pull:${String(n)}`;
-const projectRef = (n: number) => `acme:project:${String(n)}`;
-const teamRef = (n: number) => `acme:team:${String(n)}`;
-
-/** The ref of card `n`: every third card is a pull request, the rest are issues. */
-const cardRef = (n: number) => (n % 3 === 0 ? pullRef(n) : issueRef(n));
-
-/** What a case seeds besides its cards. */
-interface Arrangement {
-  readonly cards: number;
-  /** One open signal on every card. */
-  readonly signals: boolean;
-  /** Workflows that take each kind, and a second account. */
-  readonly offers: boolean;
-  /** History that is not on the Inbox: partial records, things a card mentions but nobody follows. */
-  readonly partialRecords?: number;
-  /** History that is not on the Inbox: done Tasks that each link a ref of their own. */
-  readonly doneTaskLinks?: number;
-}
-
-/** Builds the observation of card `n`, as a Connection reports it. */
-const buildCardObservation = (n: number): FullEntityObservation => {
-  const sourceUpdatedAt = new Date(Date.parse(AT) + n * 60_000).toISOString();
-  if (n % 3 === 0) {
-    return {
-      kind: "pull",
-      ref: pullRef(n),
-      title: `Make the checkout page remember the last payment method (${String(n)})`,
-      url: `https://code.example/acme/pull/${String(n)}`,
-      lifecycle: "open",
-      status: n % 2 === 0 ? "open" : "draft",
-      fields: { key: `#${String(n)}`, author: "Dana Whitfield" },
-      concerns: ["review-requested"],
-      repository: { target: { remote: REMOTES[Math.floor(n / 3) % REMOTES.length]! } },
-      relations: { complete: true, partOf: [], linked: [issueRef(n + 2)] },
-      sourceUpdatedAt,
-    };
-  }
-  return {
-    kind: "issue",
-    ref: issueRef(n),
-    title: `Refunds over 500 euros need a second approval before they go out (${String(n)})`,
-    url: `https://tracker.example/acme/issue/${String(n)}`,
-    lifecycle: "open",
-    status: ["backlog", "todo", "started"][n % 3]!,
-    fields: {
-      key: `ACME-${String(n)}`,
-      assignee: "Rogier Pennink",
-      priority: (n % 3) + 1,
-      milestone: "Beta",
+const TICKET: ActiveEntityKind = {
+  kind: "acme/ticket",
+  noun: "Ticket",
+  refPrefix: "acme:ticket:",
+  fields: [
+    { key: "team", label: "Team", type: "text", facet: { plural: "Teams", values: "acme/team" } },
+    {
+      key: "priority",
+      label: "Priority",
+      type: "enum",
+      values: [
+        { value: "p1", label: "Urgent" },
+        { value: "p2", label: "Normal" },
+        { value: "p3", label: "Low" },
+      ],
     },
-    concerns: ["assigned"],
-    relations: { complete: true, partOf: [projectRef(n % 10)], linked: [] },
-    sourceUpdatedAt,
-  };
+    { key: "size", label: "Size", type: "number" },
+    { key: "opened", label: "Opened", type: "age" },
+  ],
+  face: { place: "team", fact: "size" },
 };
 
-/** Builds the observations of the ten projects, each under one of two teams, and of the teams. */
-const buildPlaceObservations = (): ReadonlyArray<FullEntityObservation> => [
-  ...Array.from({ length: 10 }, (_, n) => ({
-    kind: "project",
-    ref: projectRef(n),
-    title: `Northwind Market project ${String(n)}`,
-    fields: { key: `P${String(n)}` },
-    concerns: [],
-    relations: { complete: true, partOf: [teamRef(n % 2)], linked: [] },
-    sourceUpdatedAt: AT,
-  })),
-  ...Array.from({ length: 2 }, (_, n) => ({
-    kind: "team",
-    ref: teamRef(n),
-    title: `Team ${String(n)}`,
-    fields: { key: `T${String(n)}` },
-    concerns: [],
-    sourceUpdatedAt: AT,
-  })),
-];
+const ISSUE: ActiveEntityKind = {
+  kind: "beta/issue",
+  noun: "Issue",
+  refPrefix: "beta:issue:",
+  fields: [
+    { key: "owner", label: "Owner", type: "person", facet: { plural: "Owners" } },
+    {
+      key: "priority",
+      label: "Priority",
+      type: "enum",
+      values: [
+        { value: "p1", label: "Urgent" },
+        { value: "p2", label: "Normal" },
+      ],
+    },
+  ],
+};
+
+const ENVIRONMENT: InboxEnvironment = {
+  now: NOW,
+  activePluginIds: ["acme", "beta"],
+  activeEntityKinds: [TICKET, ISSUE],
+  kindSources: [],
+  signalKinds: [
+    { kind: "acme/review", noun: "review request", asks: true },
+    { kind: "acme/note", noun: "note", asks: false },
+    { kind: "beta/ask", noun: "question", asks: true },
+  ],
+  savedQueries: [],
+  askingKinds: ["acme/review", "beta/ask"],
+};
+
+const OPEN_RAIL = { pins: [], browseFolded: [] } as const;
+const FOLDED_RAIL = {
+  pins: [],
+  browseFolded: [{ source: "acme" }, { source: "beta" }],
+} as const;
+
+const ticketRef = (n: number) => `acme:ticket:${String(n)}`;
+const issueRef = (n: number) => `beta:issue:${String(n)}`;
+
+/** Every third thing is an issue of `beta`, the rest are tickets of `acme`. */
+const thingRef = (n: number) => (n % 3 === 0 ? issueRef(n) : ticketRef(n));
+
+const minutesAfter = (minutes: number) => new Date(Date.parse(AT) + minutes * 60_000).toISOString();
 
 /**
- * Seeds a case: the plugin, one account (two with offers), the cards and the
- * places through `reconcile` as a poll stores them, a live Task on every
- * tenth card with a running run on every twentieth, and, as asked, an open
- * signal on every card and the workflows and repositories of the offers.
+ * Seeds `things` things as production would hold them, in a few bulk
+ * statements: plugins, accounts, team records, the things with their
+ * observations and fields, signals, dismissals and live Tasks.
  */
-const seed = (arrangement: Arrangement) =>
+const seed = (things: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const host = yield* PluginHost;
-    yield* host.boot([trackerPlugin]);
-    const connections = yield* connectionRepository;
-    const entities = yield* externalEntityRepository;
-    const signals = yield* signalRepository;
-    const declarations = yield* host.listEntityKinds(PLUGIN);
-
-    const insertAccount = (accountId: string) =>
-      Effect.map(
-        inTransaction(
-          connections.insert({
-            pluginId: PLUGIN,
-            type: "acme/acme",
-            label: accountId,
-            displayName: accountId,
-            accountId,
-            labels: [],
-            config: {},
-            at: AT,
-          }),
-        ),
-        (inserted) => inserted.id,
-      );
-
-    const render = (observation: FullEntityObservation) =>
-      Effect.map(
-        renderEntitySlots(
-          declarations.find((candidate) => candidate.word === `${PLUGIN}/${observation.kind}`)!,
-          observation,
-        ),
-        (slots): ObservedEntity => ({
-          kind: `${PLUGIN}/${observation.kind}`,
-          observation,
-          slots,
-          fieldRows: [],
-        }),
-      );
-
-    /** Stores what one Connection reports, one `reconcile` for each kind, as a poll does. */
-    const report = (connectionId: string, observations: ReadonlyArray<FullEntityObservation>) =>
-      Effect.gen(function* () {
-        const observed = yield* Effect.forEach(observations, render);
-        const byKind = new Map<string, Array<ObservedEntity>>();
-        for (const entity of observed) {
-          byKind.set(entity.kind, [...(byKind.get(entity.kind) ?? []), entity]);
-        }
-        for (const [kind, group] of byKind) {
-          yield* inTransaction(
-            entities.reconcile({
-              connectionId,
-              kind,
-              complete: false,
-              observed: group,
-              actor: `plugin:${PLUGIN}`,
-              environment: { now: AT, activePluginIds: [PLUGIN] },
-            }),
-          );
-        }
-      });
-
-    const cardNumbers = Array.from({ length: arrangement.cards }, (_, n) => n + 1);
-    const first = yield* insertAccount("acme-1");
-    yield* report(first, [...buildPlaceObservations(), ...cardNumbers.map(buildCardObservation)]);
-    if (arrangement.offers) {
-      // A second account reads every other card, and no account can act on
-      // every seventh card, so cards differ in their acting-account state.
-      const second = yield* insertAccount("acme-2");
-      yield* report(second, cardNumbers.filter((n) => n % 2 === 0).map(buildCardObservation));
-      yield* inTransaction(sql`
-        UPDATE external_entity_observations SET access = 'inaccessible'
-        WHERE ref IN (SELECT value FROM json_each(${JSON.stringify(
-          cardNumbers.filter((n) => n % 7 === 0).map(cardRef),
-        )}))`);
+    for (const plugin of ["acme", "beta"]) {
+      yield* sql`INSERT INTO plugins (id, enabled, config, created_at, updated_at)
+        VALUES (${plugin}, 1, '{}', ${AT}, ${AT})`;
     }
+    const accounts = [
+      ...ACME_ACCOUNTS.map((id, n) => ["acme", id, `acme-${String(n)}`] as const),
+      ...BETA_ACCOUNTS.map((id, n) => ["beta", id, `beta-${String(n)}`] as const),
+    ];
+    for (const [plugin, id, label] of accounts) {
+      yield* sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id,
+          status, labels, config, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${plugin}, ${`${plugin}/account`}, ${label}, ${label},
+          ${label}, 'connected', '[]', '{}', ${AT}, ${AT})`;
+    }
+    const teams = Array.from({ length: TEAMS }, (_, n) => n);
+    yield* sql`
+      INSERT INTO external_entities
+        (id, ref, kind, noun, pace, completeness, title, status, first_observed_at, updated_at)
+      SELECT randomblob(16), 'acme:team:' || value, 'acme/team', 'Team', 'context', 'full',
+        'Team ' || value, '{"shape":"dot","tone":"good","label":"On track"}', ${AT}, ${AT}
+      FROM json_each(${JSON.stringify(teams)})`;
+    yield* sql`
+      INSERT INTO external_entity_observations (ref, connection_id, access)
+      SELECT 'acme:team:' || value, ${uuidFromString(ACME_ACCOUNTS[0]!)}, 'ok'
+      FROM json_each(${JSON.stringify(teams)})`;
 
-    yield* inTransaction(
-      Effect.gen(function* () {
-        const resourceIds = REMOTES.map(() => uuidToString(mintUuid()));
-        const workflowIds = [mintUuid(), mintUuid(), mintUuid(), mintUuid()];
-        if (arrangement.offers) {
-          for (const [index, remote] of REMOTES.entries()) {
-            yield* sql`
-              INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include,
-                                     created_at, updated_at)
-              VALUES (${uuidFromString(resourceIds[index]!)}, 'repo', ${`https://${remote}.git`}, ${remote}, 1,
-                      ${AT}, ${AT})`;
-          }
-          // Two workflows for each kind: one with no workspace, and one that
-          // works in a repository, so a pull request in another one cannot use it.
-          const definitions = [
-            { name: "Plan the issue", kinds: [`${PLUGIN}/issue`], workspace: undefined },
-            { name: "Fix the issue", kinds: [`${PLUGIN}/issue`], resource: 1 },
-            { name: "Review the pull request", kinds: [`${PLUGIN}/pull`], resource: undefined },
-            { name: "Fix the web pull request", kinds: [`${PLUGIN}/pull`], resource: 0 },
-          ];
-          for (const [index, definition] of definitions.entries()) {
-            const workspace =
-              definition.resource === undefined
-                ? {}
-                : {
-                    workspace: {
-                      kind: "ephemeral",
-                      checkouts: [{ resourceId: resourceIds[definition.resource]! }],
-                    },
-                  };
-            yield* sql`
-              INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
-              VALUES (${workflowIds[index]!}, 'name: x', ${JSON.stringify({
-                name: definition.name,
-                inputs: [
-                  { name: "item", entity: { kinds: definition.kinds }, required: true },
-                  {
-                    name: "account",
-                    connection: { type: `${PLUGIN}/acme` },
-                    required: true,
-                  },
-                ],
-                ...workspace,
-                steps: [{ id: "work", kind: "agent", prompt: "Do the work" }],
-              })}, 1, ${AT}, ${AT})`;
-          }
-        }
+    const numbers = Array.from({ length: things }, (_, n) => n + 1);
+    const rows = numbers.map((n) => {
+      const issue = n % 3 === 0;
+      return {
+        ref: thingRef(n),
+        kind: issue ? "beta/issue" : "acme/ticket",
+        noun: issue ? "Issue" : "Ticket",
+        n,
+        updated: minutesAfter(n),
+        // Every tenth thing is dismissed, a day before the asks below are raised.
+        dismissed: n % 10 === 0 ? minutesAfter(n) : null,
+        person: JSON.stringify({ name: `Person ${String(n % 17)}` }),
+        accounts: (issue ? BETA_ACCOUNTS : ACME_ACCOUNTS)
+          .filter((_, index) => index === n % 2 || (n % 7 === 0 && index === 3))
+          .map((id) => uuidFromString(id))
+          .map((bytes) => Buffer.from(bytes).toString("hex")),
+        fields: issue
+          ? [
+              ["owner", `Owner ${String(n % 23)}`, null],
+              ["priority", `p${String((n % 2) + 1)}`, null],
+            ]
+          : [
+              ["team", `acme:team:${String(n % TEAMS)}`, null],
+              ["priority", `p${String((n % 3) + 1)}`, null],
+              ["size", null, n % 40],
+              ["opened", null, Date.parse(AT) - (n % 30) * 86_400_000],
+            ],
+      };
+    });
+    yield* sql`
+      INSERT INTO external_entities
+        (id, ref, kind, noun, card, pace, patience, completeness, identifier, title, url,
+         lifecycle, person, source_updated_at, first_observed_at, updated_at, dismissed_at)
+      SELECT randomblob(16), json_extract(value, '$.ref'), json_extract(value, '$.kind'),
+        json_extract(value, '$.noun'), 'compact', 'fast', 24, 'full',
+        'T-' || json_extract(value, '$.n'),
+        'Make the checkout page remember the last payment method (' || json_extract(value, '$.n') || ')',
+        'https://acme.example/' || json_extract(value, '$.n'), 'open',
+        json_extract(value, '$.person'), json_extract(value, '$.updated'), ${AT}, ${AT},
+        json_extract(value, '$.dismissed')
+      FROM json_each(${JSON.stringify(rows)})`;
+    yield* sql`
+      INSERT INTO external_entity_observations (ref, connection_id, concerns, owned_by_you, access)
+      SELECT json_extract(r.value, '$.ref'), unhex(a.value), '["assigned"]',
+        json_extract(r.value, '$.n') % 5 = 0, 'ok'
+      FROM json_each(${JSON.stringify(rows)}) r, json_each(r.value, '$.accounts') a`;
+    yield* sql`
+      INSERT INTO external_entity_fields (ref, key, text_value, number_value)
+      SELECT json_extract(r.value, '$.ref'), json_extract(f.value, '$[0]'),
+        json_extract(f.value, '$[1]'), json_extract(f.value, '$[2]')
+      FROM json_each(${JSON.stringify(rows)}) r, json_each(r.value, '$.fields') f`;
 
-        // A live Task on every tenth card, and a running run on every twentieth.
-        for (const n of cardNumbers.filter((card) => card % 10 === 0)) {
-          const taskId = mintUuid();
-          yield* sql`
-            INSERT INTO tasks (id, title, description, status, stage, priority, labels, created_at,
-                               updated_at, status_changed_at, stage_changed_at)
-            VALUES (${taskId}, ${`Task for card ${String(n)}`}, '', 'in-progress', 'building',
-                    'normal', '[]', ${AT}, ${AT}, ${AT}, ${AT})`;
-          yield* sql`
-            INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
-            VALUES (${taskId}, ${cardRef(n)}, ${AT}, 'user', 1)`;
-          if (n % 20 === 0) {
-            yield* sql`
-              INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at,
-                                started_at, task_id)
-              VALUES (${mintUuid()}, ${workflowIds[0]!}, '{"name":"Plan the issue","steps":[]}',
-                      '{}', '{"kind":"manual","actor":"user"}', 'running', ${AT}, ${AT}, ${taskId})`;
-          }
-        }
+    // Every second thing asks, every fifth holds a signal that asks nothing.
+    // Dismissed things get their ask a minute after the dismissal, half of
+    // them, so half of the dismissed things come back.
+    const signalRows = numbers.flatMap((n) => {
+      const asked = n % 2 === 0 || n % 10 === 0;
+      const signals: Array<{ ref: string; kind: string; at: string; connection: string }> = [];
+      const connection = (n % 3 === 0 ? BETA_ACCOUNTS : ACME_ACCOUNTS)[0]!;
+      if (asked && (n % 10 !== 0 || n % 20 === 0)) {
+        signals.push({
+          ref: thingRef(n),
+          kind: n % 3 === 0 ? "beta/ask" : "acme/review",
+          at: minutesAfter(n + 1),
+          connection,
+        });
+      }
+      if (n % 5 === 0) {
+        signals.push({ ref: thingRef(n), kind: "acme/note", at: minutesAfter(n), connection });
+      }
+      return signals;
+    });
+    yield* sql`
+      INSERT INTO signals
+        (id, kind, origin, title, asker, place, priority, blocks, actions, match, status,
+         created_at, connection_id, thread_ref)
+      SELECT randomblob(16), json_extract(value, '$.kind'),
+        json_object('type', 'event', 'eventId', 1, 'connectionId', 'x',
+                    'threadRef', json_extract(value, '$.ref')),
+        json_extract(value, '$.kind') || ' on ' || json_extract(value, '$.ref'),
+        'Asker ' || (abs(random()) % 9), 'acme/web', 'normal', '[]', '[]', '{}', 'open',
+        json_extract(value, '$.at'), unhex(replace(json_extract(value, '$.connection'), '-', '')),
+        json_extract(value, '$.ref')
+      FROM json_each(${JSON.stringify(signalRows)})`;
 
-        const { partialRecords = 0, doneTaskLinks = 0 } = arrangement;
-        if (partialRecords > 0) {
-          yield* sql`
-            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${partialRecords})
-            INSERT INTO external_entities (id, ref, kind, noun, completeness, title,
-                                           first_observed_at, updated_at)
-            SELECT randomblob(16), 'acme:issue:old-' || i, ${`${PLUGIN}/issue`}, 'Issue',
-                   'partial', 'Old issue ' || i, ${AT}, ${AT}
-            FROM n`;
-        }
-        if (doneTaskLinks > 0) {
-          yield* sql`
-            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${doneTaskLinks})
-            INSERT INTO tasks (id, title, description, status, stage, priority, labels, created_at,
-                               updated_at, status_changed_at, stage_changed_at)
-            SELECT unhex(printf('%08x000070008000%012x', i, 0)), 'Done ' || i, '', 'done', 'done',
-                   'normal', '[]', ${AT}, ${AT}, ${AT}, ${AT}
-            FROM n`;
-          yield* sql`
-            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${doneTaskLinks})
-            INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following)
-            SELECT unhex(printf('%08x000070008000%012x', i, 0)), 'acme:issue:done-' || i, ${AT},
-                   'user', 0
-            FROM n`;
-        }
-
-        if (arrangement.signals) {
-          for (const n of cardNumbers) {
-            yield* signals.insert(
-              {
-                id: uuidToString(mintUuid()),
-                kind: SIGNAL_KIND,
-                origin: { type: "event", eventId: n, connectionId: first, threadRef: cardRef(n) },
-                title: `Dana Whitfield asked for your review on card ${String(n)}`,
-                place: "acme/web",
-                priority: "normal",
-                blocks: [],
-                actions: [],
-                match: {},
-                status: "open",
-                createdAt: new Date(Date.parse(AT) + n * 1000).toISOString(),
-              },
-              [],
-            );
-          }
-        }
-      }),
-    );
-  });
+    const tasks = yield* taskRepository;
+    for (let n = 7; n <= things; n += 10) {
+      yield* tasks.insert({
+        title: `Work on ${thingRef(n)}`,
+        description: "",
+        status: "open",
+        stage: "planned",
+        priority: "normal",
+        labels: [],
+        projectId: undefined,
+        provenance: [{ ref: thingRef(n) }],
+        at: minutesAfter(n + 2),
+        actor: "user",
+      });
+    }
+    return things;
+  }).pipe(inTransaction);
 
 /** The median and the 95th percentile of a timed read, in milliseconds. */
 interface Timing {
@@ -643,182 +409,190 @@ const findBigScans = (statements: ReadonlyArray<readonly [string, ReadonlyArray<
 /** Returns the length of `value` as UTF-8 JSON, in bytes. */
 const measureBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));
 
-/**
- * Returns the fields of the cards that take the most bytes, with the bytes
- * each takes on an average card (its key and value), largest first.
- */
-const measureFieldBytes = (
-  cards: ReadonlyArray<Readonly<Record<string, unknown>>>,
-  count: number,
-): ReadonlyArray<string> => {
-  const totals = new Map<string, number>();
-  for (const card of cards) {
-    for (const [key, value] of Object.entries(card)) {
-      totals.set(key, (totals.get(key) ?? 0) + measureBytes({ [key]: value }) - 2);
-    }
-  }
-  return [...totals]
-    .toSorted(([, left], [, right]) => right - left)
-    .slice(0, count)
-    .map(([key, total]) => `${key} ${String(Math.round(total / cards.length))}`);
-};
-
 const format = (ms: number) => ms.toFixed(2).padStart(7);
 
-const CASES: ReadonlyArray<readonly [string, Arrangement]> = [
-  ["10 cards", { cards: 10, signals: false, offers: false }],
-  ["300 cards", { cards: 300, signals: false, offers: false }],
-  ["300 cards, 300 open signals", { cards: 300, signals: true, offers: false }],
-  ["10 cards, signals, offers", { cards: 10, signals: true, offers: true }],
-  ["300 cards, signals, offers", { cards: 300, signals: true, offers: true }],
-  ["1,000 cards, signals, offers", { cards: 1000, signals: true, offers: true }],
-  [
-    "300 cards, signals, offers, 20,000 partial records",
-    { cards: 300, signals: true, offers: true, partialRecords: 20_000 },
-  ],
-  [
-    "300 cards, signals, offers, 20,000 links of done Tasks",
-    { cards: 300, signals: true, offers: true, doneTaskLinks: 20_000 },
-  ],
-];
+/** What one timed read reports. */
+interface Case {
+  readonly name: string;
+  readonly timing: Timing;
+  readonly statements: number;
+  readonly scans: ReadonlyArray<string>;
+  readonly bytes: number;
+  readonly returned: number;
+}
 
-/** Shortens a statement to its first words, to name it in a printed list. */
-const summarizeStatement = (text: string): string =>
-  text.replaceAll(/\s+/g, " ").trim().slice(0, 100);
-
-/** The statements each case sent, shortened, by case name, so a larger case can be compared with a smaller one. */
-const statementsByCase = new Map<string, ReadonlyArray<string>>();
-
-/** Returns the entries of `larger` that `smaller` does not have, each as often as it is missing. */
-const listExtraStatements = (
-  larger: ReadonlyArray<string>,
-  smaller: ReadonlyArray<string>,
-): ReadonlyArray<string> => {
-  const left = [...smaller];
-  return larger.filter((text) => {
-    const index = left.indexOf(text);
-    if (index === -1) return true;
-    left.splice(index, 1);
-    return false;
+/** Times `read` and captures its statements and their plans once. */
+const runCase = <A>(
+  name: string,
+  read: Effect.Effect<A, unknown, SqlClient.SqlClient>,
+  summarize: (value: A) => number,
+) =>
+  Effect.gen(function* () {
+    const { value, statements } = yield* captureStatements(read);
+    return {
+      name,
+      timing: yield* measure(read),
+      statements: statements.length,
+      scans: yield* findBigScans(statements),
+      bytes: measureBytes(value),
+      returned: summarize(value),
+    } satisfies Case;
   });
-};
+
+const printCase = (size: number, result: Case) =>
+  process.stderr.write(
+    `${String(size).padStart(5)} things  ${result.name.padEnd(30)} ${format(result.timing.median)} ms ` +
+      `${format(result.timing.p95)} ms  ${String(result.statements).padStart(2)} statements  ` +
+      `${String(result.bytes).padStart(8)} bytes  ${String(result.returned)} returned` +
+      // A row's weight is what the list pays per thing held.
+      (result.name.startsWith("page") ||
+      result.name.startsWith("rows") ||
+      result.name.startsWith("refresh")
+        ? `  ${String(Math.round(result.bytes / Math.max(1, result.returned)))} B/row\n`
+        : "\n") +
+      // The base of every read (live Tasks, signals, concerns) scans its tables
+      // once; each distinct scan is listed once, at the largest size only.
+      (size === SIZES.at(-1)
+        ? [...new Set(result.scans.map((scan) => scan.split("   <- ")[0]!))]
+            .map((scan) => `        SCAN of a big table: ${scan}\n`)
+            .join("")
+        : ""),
+  );
+
+const SIZES = [300, 1000, 2400] as const;
+
+/** Runs every read at `size` things and returns the cases. */
+const runSize = (size: number) =>
+  Effect.gen(function* () {
+    yield* seed(size);
+    const waits = { list: { savedQuery: "waits" } } as const;
+    const everything = { list: { savedQuery: "everything" } } as const;
+    const firstWaiting = yield* inbox.readFirstPage(ENVIRONMENT, waits);
+    const firstNewest = yield* inbox.readFirstPage(ENVIRONMENT, everything);
+    const refs = firstNewest.things.map((thing) => thing.ref);
+    const cases: Array<Case> = [];
+    const pages = (page: { readonly things: ReadonlyArray<unknown> }) => page.things.length;
+    cases.push(
+      yield* runCase("page: waits (waiting)", inbox.readFirstPage(ENVIRONMENT, waits), pages),
+      yield* runCase(
+        "page: everything (newest)",
+        inbox.readFirstPage(ENVIRONMENT, everything),
+        pages,
+      ),
+      yield* runCase(
+        "page: narrowed by clauses+text",
+        inbox.readFirstPage(ENVIRONMENT, {
+          ...everything,
+          clauses: [
+            { key: "priority", op: "is", value: "normal" },
+            { key: "size", op: "over", value: 10 },
+            { key: "opened", op: "over", value: 86_400 },
+          ],
+          text: "checkout payment",
+        }),
+        pages,
+      ),
+      yield* runCase(
+        "rows read (200 held)",
+        inbox.readRows(ENVIRONMENT, everything, refs.slice(0, 200)),
+        pages,
+      ),
+      // A refresh is a first page and the held rows beyond it, at one moment.
+      yield* runCase(
+        "refresh (400 held)",
+        inbox.readRefresh(ENVIRONMENT, everything, refs.slice(0, 400)),
+        (reply) => reply.first.things.length + reply.held.things.length,
+      ),
+      yield* runCase(
+        "suggest: team",
+        inbox.suggestInboxValues(ENVIRONMENT, { ...everything, key: "team", prefix: "Te" }),
+        (reply) => reply.values.length,
+      ),
+      yield* runCase(
+        "suggest: from",
+        inbox.suggestInboxValues(ENVIRONMENT, { ...everything, key: "from", prefix: "" }),
+        (reply) => reply.values.length,
+      ),
+      yield* runCase(
+        "outline: rail open",
+        inbox.readInboxOutline(ENVIRONMENT, OPEN_RAIL),
+        (counts) => counts.sources.length,
+      ),
+      yield* runCase(
+        "outline: all folded",
+        inbox.readInboxOutline(ENVIRONMENT, FOLDED_RAIL),
+        (counts) => counts.sources.length,
+      ),
+      yield* runCase("counts: sidebar", inbox.countInbox(ENVIRONMENT), (counts) => counts.waiting),
+    );
+    if (firstNewest.nextCursor !== undefined) {
+      cases.push(
+        yield* runCase(
+          "page: the second one",
+          inbox.readNextPage(ENVIRONMENT, everything, firstNewest.nextCursor),
+          pages,
+        ),
+      );
+    }
+    const fieldBytes = Object.entries(firstWaiting.things[0] ?? {})
+      .map(([field, value]) => [field, measureBytes(value) + field.length + 4] as const)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    return {
+      cases,
+      fieldBytes,
+      waitingTotal: firstWaiting.total,
+      newestTotal: firstNewest.total,
+      facets: firstNewest.facets?.length ?? 0,
+    };
+  }).pipe(Effect.provide(TestDatabase));
 
 describe.runIf(SPEED_TESTS_ENABLED)("the Inbox's reads", () => {
-  it.each(CASES)("with %s", async (name, arrangement) => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* seed(arrangement);
-        const service = yield* ExternalEntityService;
-        const tasks = yield* TaskService;
-        const { value: inbox, statements } = yield* captureStatements(service.queryInbox());
-        const encoded = Schema.encodeSync(Inbox)(inbox);
-        const counted = yield* captureStatements(service.countInbox());
-        const attention = yield* captureStatements(tasks.readAttention());
-        Schema.encodeSync(InboxCounts)(counted.value);
-        Schema.encodeSync(TaskAttention)(attention.value);
-        const signalQuery =
-          arrangement.signals && arrangement.cards === 300
-            ? yield* Effect.gen(function* () {
-                const signals = yield* SignalService;
-                const page = yield* captureStatements(signals.query({}));
-                return {
-                  statements: page.statements.length,
-                  items: page.value.items.length,
-                  withEntity: page.value.items.filter((item) => item.entity !== undefined).length,
-                  bytes: measureBytes(Schema.encodeSync(SignalPage)(page.value)),
-                  timing: yield* measure(signals.query({})),
-                };
-              }).pipe(Effect.provide(buildSignalServiceLayer(SignalEntitiesLayer)))
-            : undefined;
-        const signalQueryWithoutEntities =
-          signalQuery === undefined
-            ? undefined
-            : yield* Effect.gen(function* () {
-                const signals = yield* SignalService;
-                const page = yield* captureStatements(signals.query({}));
-                return { statements: page.statements.length };
-              }).pipe(Effect.provide(buildSignalServiceLayer(buildSignalEntitiesDouble().layer)));
-        return {
-          cards: inbox.cards.length,
-          offerSets: Object.keys(inbox.offerSets).length,
-          places: inbox.places.length,
-          truncated: inbox.truncated,
-          statements: statements.length,
-          statementTexts: statements.map(([text]) => summarizeStatement(text)),
-          bytes: measureBytes(encoded),
-          cardBytes: measureBytes(encoded.cards),
-          fieldBytes: measureFieldBytes(encoded.cards, 8),
-          scans: arrangement.cards === 300 ? yield* findBigScans(statements) : [],
-          countScans: arrangement.cards === 300 ? yield* findBigScans(counted.statements) : [],
-          queryInbox: yield* measure(service.queryInbox()),
-          countInbox: {
-            statements: counted.statements.length,
-            ...(yield* measure(service.countInbox())),
-          },
-          readAttention: {
-            statements: attention.statements.length,
-            ...(yield* measure(tasks.readAttention())),
-          },
-          signalQuery,
-          signalQueryWithoutEntities,
-        };
-      }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)),
+  it("sends a constant number of statements and stays fast at 300, 1,000 and 2,400 things", async () => {
+    process.stderr.write(
+      `\nthe Inbox's reads, median and p95 of ${String(RUNS)}:\n` +
+        "  size          read                              median        p95\n",
     );
-
-    statementsByCase.set(name, result.statementTexts);
-    // The case of 10 cards with the same arrangement, when it ran before this
-    // one; a case run on its own has nothing to compare with.
-    const smaller =
-      statementsByCase.get(arrangement.offers ? "10 cards, signals, offers" : "10 cards") ??
-      result.statementTexts;
-    const lines = [
-      `${name}: ${String(result.cards)} cards, ${String(result.places)} places, ` +
-        `${String(result.offerSets)} offer sets, truncated ${String(result.truncated)}, median and p95 of ${String(RUNS)}`,
-      `  externalEntity.queryInbox  ${format(result.queryInbox.median)} ms ${format(result.queryInbox.p95)} ms ` +
-        `${String(result.statements).padStart(3)} statements ${String(result.bytes).padStart(8)} B ` +
-        `${String(Math.round(result.bytes / Math.max(result.cards, 1))).padStart(5)} B/card ` +
-        `(the cards alone ${String(Math.round(result.cardBytes / Math.max(result.cards, 1)))} B/card)`,
-      `  bytes of a card by field: ${result.fieldBytes.join(", ")}`,
-      `  externalEntity.countInbox  ${format(result.countInbox.median)} ms ${format(result.countInbox.p95)} ms ` +
-        `${String(result.countInbox.statements).padStart(3)} statements`,
-      `  task.readAttention         ${format(result.readAttention.median)} ms ${format(result.readAttention.p95)} ms ` +
-        `${String(result.readAttention.statements).padStart(3)} statements`,
-      ...(result.signalQuery === undefined
-        ? []
-        : [
-            `  signal.query (To do)       ${format(result.signalQuery.timing.median)} ms ${format(result.signalQuery.timing.p95)} ms ` +
-              `${String(result.signalQuery.statements).padStart(3)} statements ` +
-              `(${String(result.signalQueryWithoutEntities!.statements)} without SignalEntities), ` +
-              `${String(result.signalQuery.items)} signals, ${String(result.signalQuery.withEntity)} with an entity, ` +
-              `${String(result.signalQuery.bytes)} B`,
-          ]),
-      ...result.scans.map((scan) => `  queryInbox scans: ${scan}`),
-      ...result.countScans.map((scan) => `  countInbox scans: ${scan}`),
-      ...listExtraStatements(result.statementTexts, smaller).map(
-        (text) => `  more than at 10 cards: ${text}`,
-      ),
-      ...listExtraStatements(smaller, result.statementTexts).map(
-        (text) => `  fewer than at 10 cards: ${text}`,
-      ),
-    ];
-    process.stderr.write(lines.join("\n") + "\n");
-
-    expect(result.cards).toBe(arrangement.cards);
-    if (!arrangement.signals || arrangement.offers) {
-      expect(result.statements).toBe(smaller.length);
+    const runSizeOnce = (size: number) => Effect.runPromise(runSize(size));
+    const bySize = new Map<number, Awaited<ReturnType<typeof runSizeOnce>>>();
+    for (const size of SIZES) {
+      const result = await runSizeOnce(size);
+      bySize.set(size, result);
+      for (const one of result.cases) printCase(size, one);
+      process.stderr.write(
+        `        waits ${String(result.waitingTotal)} of ${String(result.newestTotal)}, ${String(result.facets)} facets on the first page\n` +
+          `        bytes of a row by field: ${result.fieldBytes.map(([field, bytes]) => `${field} ${String(bytes)}`).join(", ")}\n`,
+      );
     }
-    if (arrangement.cards === 300) {
-      expect(result.queryInbox.median).toBeLessThan(INBOX_CEILING_MS);
-      if (result.queryInbox.median >= INBOX_TARGET_MS) {
-        process.stderr.write(`  MISSES the target of ${String(INBOX_TARGET_MS)} ms\n`);
+
+    const small = bySize.get(300)!;
+    for (const size of SIZES) {
+      const result = bySize.get(size)!;
+      // The statements of a read never follow the number of things.
+      for (const one of result.cases) {
+        const same = small.cases.find((other) => other.name === one.name);
+        if (same !== undefined)
+          expect(one.statements, `${one.name} at ${String(size)}`).toBe(same.statements);
+      }
+      // A page is bounded whatever the Inbox holds.
+      for (const one of result.cases.filter((c) => c.name.startsWith("page"))) {
+        expect(one.returned).toBeLessThanOrEqual(200);
+        expect(one.bytes).toBeLessThan(200 * 4_000 + 100_000);
+      }
+      for (const name of ["outline: rail open", "outline: all folded", "counts: sidebar"]) {
+        const timed = result.cases.find((c) => c.name === name)!;
+        expect(timed.timing.median, `${name} at ${String(size)}`).toBeLessThan(COUNTS_CEILING_MS);
+      }
+      for (const one of result.cases.filter(
+        (c) =>
+          c.name.startsWith("page") || c.name.startsWith("rows") || c.name.startsWith("refresh"),
+      )) {
+        expect(one.timing.median, `${one.name} at ${String(size)}`).toBeLessThan(
+          size === 300 ? PAGE_TARGET_MS : LARGE_PAGE_CEILING_MS,
+        );
       }
     }
-    if (arrangement.cards === 1000) {
-      expect(result.queryInbox.median).toBeLessThan(LARGE_INBOX_CEILING_MS);
-    }
-    expect(result.countInbox.median).toBeLessThan(SHELL_READ_CEILING_MS);
-    expect(result.readAttention.median).toBeLessThan(SHELL_READ_CEILING_MS);
-  });
+  }, 300_000);
 });
 
 /**

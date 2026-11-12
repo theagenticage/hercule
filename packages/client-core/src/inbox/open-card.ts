@@ -6,13 +6,13 @@
  */
 import type { EntityReason, EntityRecord } from "@hercule/contract";
 import { readAncestorRows, type AncestorRow, type RelationGraph } from "../desk/relation-rows";
-import { decideCardFace, type CardFace } from "./card-face";
+import { decideOpenCardFace, type OpenCardFace } from "./card-face";
 import { describeCardTrust, describeCardWait, type CardWait } from "./card-wait";
 
 /**
  * Which moves the open card offers:
  *
- * - `free`: Take it and Dismiss.
+ * - `free`: Take on and Dismiss.
  * - `task`: the card has a Task, so its only move is to see that Task.
  * - `off`: the card's plugin is not active, so no move can run. `reason` says
  *   why, in words for the card.
@@ -24,7 +24,7 @@ export type OpenCardMoves =
 
 /** What the open card draws. */
 export interface OpenCardWords {
-  readonly face: CardFace;
+  readonly face: OpenCardFace;
   /** The small line under the title: the noun, the identifier, who it is about, and `yours`. */
   readonly meta: readonly string[];
   /** Why the card is on the Inbox, in full: a request's sentence is not cut down to the person's name here. */
@@ -59,7 +59,7 @@ export const decideOpenCard = (
   kindAvailable: boolean,
   now: Date,
 ): OpenCardWords => {
-  const face = decideCardFace(record);
+  const face = decideOpenCardFace(record);
   return {
     face,
     meta: [

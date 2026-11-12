@@ -143,6 +143,8 @@ const buildDeskPlugin = (mode: DeskMode): Plugin => ({
             word: "asked",
             label: "Question for you",
             description: "Someone asked you a question on Desk.",
+            noun: "question",
+            asks: true,
             from: ["desk.asked"],
             rule: 'has(event.payload.state) && event.payload.state == "ignored" ? "no" : (event.payload.toYou ? "yes" : "undecided")',
             guidance: "Raise it when the question needs the user's answer.",

@@ -1,336 +1,501 @@
 /**
- * The Inbox page for the length of a visit. Nothing on the page moves unless
- * the user moves it, so what the screen draws is not the latest read but what
- * the visit lets through: `advanceInboxVisit` takes each read in turn and
- * returns the page to draw, with the cards that wait, the Group by menu and
- * what the user's own move emptied.
+ * The Inbox visit: the whole life of one list the user looks at, kept so that
+ * it holds still. A row never moves under the user's eyes; what the controller
+ * changes meanwhile waits behind "N new" until the user takes it in.
  *
- * - The visit's own first reply is drawn whole. From then on, a card the visit
- *   has not drawn is an arrival: it is held back until the caller releases it
- *   (the caller waits for a still hand), and it joins the end of its list.
- * - A card the user dismissed and put back is not an arrival. The visit drew
- *   it before, and it lies where it did.
- * - Where cards lie is held by `placeInboxCards`: a read changes the words on
- *   the page, never the place of a card the user has seen.
- * - What rides on what is held there too. The user's own Link and Unlink are
- *   the one thing that moves it. Each is a gesture the visit follows from
- *   its start to the controller's answer (`advanceLinkGesture`), so the visit
- *   is the only place that knows where a card rides.
- * - A signal that lands on a card is the visit's too (`recordLandedSignals`).
- *   When a fresh read brings a card a newer latest signal, the visit draws the
- *   card with its old words, tells the screen to play the landing
- *   (`InboxVisit.landing`), and draws the new words when the screen reports
- *   that the drop has landed. The card is fresh until the user reaches it
- *   (`advanceLanding`).
+ * The visit owns:
+ * - the rows, the arrivals, the current row, the selection and the anchor;
+ * - every read, through the `InboxReader` port, with its order: an older
+ *   read's answer never applies, a push during a read cancels it and reads
+ *   again so no change is missed, a next page continues from the frontier;
+ * - the moves the user makes, which show at once and stay in force until the
+ *   controller's answer and a later read agree (see `move`);
+ * - the freshness of each row against the pushes, so a refresh re-reads only
+ *   the first page and the rows around the viewport, and the rest are re-read
+ *   when they scroll back into view.
+ *
+ * It is framework-free: `subscribe` and `getSnapshot` fit React's
+ * `useSyncExternalStore`, and the snapshot only changes when something did.
+ * It draws nothing and times nothing: `lastChange` says what happened in
+ * words (dismissed, restored, arrived) and the screen picks the motion.
  */
-import type { EntityUnlinkResult, Inbox } from "@hercule/contract";
 import { replaceEqualDeep } from "@tanstack/query-core";
-import type { CardBundle } from "./card-bundles";
+import type { InboxFacet, InboxOrder } from "@hercule/contract";
 import {
-  keepHeldGrouping,
-  listInboxGroupings,
-  PLACE_GROUPING,
-  type InboxGrouping,
-} from "./groupings";
-import { layOutInbox, type InboxLayout, type InboxView } from "./lay-out";
-import {
-  listShownFreshIds,
-  NO_LANDINGS,
-  reachLandedCard,
-  recordLandedSignals,
-  releaseLandedCards,
-  showHeldCards,
-  type SignalLanding,
-  type SignalLandings,
-} from "./landed-signals";
-import {
-  hasPlacedCards,
-  NO_PLACEMENT,
-  refuseRidingMove,
-  settleRidingMove,
-  startRidingMove,
-  type RidingMove,
-  type VisitPlacement,
-} from "./visit-placement";
+  HELD_WINDOW,
+  applyMove,
+  applyNextPage,
+  applyRefresh,
+  applyRowsRead,
+  applySelectionChange,
+  applyUndo,
+  confirmHidden,
+  listMoveTargets,
+  moveCurrent,
+  pickWindow,
+  startVisit,
+  takeArrivals,
+  type FirstPage,
+  type InboxVisitRow,
+  type MoveReceipt,
+  type NextPage,
+  type ReadTicket,
+  type SelectionChange,
+  type VisitState,
+} from "./inbox-visit-state";
 
-/** Whether a column shows cards, and when it shows none, whether the user's own move took the last one. */
-type Emptiness = "filled" | "empty" | "emptied by move";
+export type { FirstPage, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
 
 /**
- * What the visit remembers between two reads. Start from `START_OF_VISIT`, and
- * pass back the `history` that `advanceInboxVisit` returns.
+ * How the visit reads. `Query` is opaque to the visit (the scope and search
+ * of a list); the adapter maps it to the controller's request. Every read
+ * takes an `AbortSignal` the visit aborts when the answer is no longer wanted.
+ * `readFirst` and `refresh` carry the list's size, order and facets; the
+ * replies of the others carry rows only.
  */
-export interface VisitHistory {
+export interface InboxReader<Row extends InboxVisitRow, Query> {
+  /** Reads the first page of the list. */
+  readFirst(query: Query, signal: AbortSignal): Promise<FirstPage<Row>>;
+  /** Reads the page after the cursor `after`. */
+  readNext(query: Query, after: string, signal: AbortSignal): Promise<NextPage<Row>>;
   /**
-   * Where the cards lie, and the Links and Unlinks that wait for an answer.
-   * It holds no card (`hasPlacedCards` is false) until the visit's own first
-   * reply has been placed.
+   * Reads the first page and, in the same reply, those of the `held` refs
+   * (at most 400) that still belong to the list. A held ref in neither has
+   * left the list.
    */
-  readonly placement: VisitPlacement;
-  /** The bundle each card of the last fresh reply carried, so a bundle that did not change keeps its identity. */
-  readonly bundles: Readonly<Record<string, CardBundle>>;
-  /** The whole page: no card at all. */
-  readonly everything: Emptiness;
-  /** The Requests column. */
-  readonly requests: Emptiness;
-  /** The signals that landed on the cards, the cards held for their drop, and the cards that are fresh. */
-  readonly landings: SignalLandings;
+  refresh(
+    query: Query,
+    held: readonly string[],
+    signal: AbortSignal,
+  ): Promise<{ readonly firstPage: FirstPage<Row>; readonly heldRows: readonly Row[] }>;
+  /** Reads the `held` refs (at most 400) that still belong to the list. */
+  readRows(query: Query, held: readonly string[], signal: AbortSignal): Promise<readonly Row[]>;
 }
 
-/** A visit that has read nothing yet. */
-export const START_OF_VISIT: VisitHistory = {
-  placement: NO_PLACEMENT,
-  bundles: {},
-  everything: "empty",
-  requests: "empty",
-  landings: NO_LANDINGS,
-};
-
-/** One read of the Inbox, and what the caller knows about it. */
-export interface VisitStep {
-  /** The Inbox as read, with the user's pending edits applied, or `undefined` until the first read ends. */
-  readonly received: Inbox | undefined;
-  /** What the user chose on the toolbar. */
-  readonly view: InboxView;
-  /** The ids of the arrivals whose wait for a still hand is over. */
-  readonly released: ReadonlySet<string>;
-  /**
-   * False while `received` is a copy kept from an earlier visit, which stands
-   * in until this visit's own reply comes. That copy is laid out but never
-   * held and has no arrivals: only the visit's own reply decides where cards
-   * lie and which are new.
-   */
-  readonly isFresh: boolean;
-  /**
-   * True while `received` has moves of the user's own applied that the
-   * controller has not answered yet. The cards that these moves took away are
-   * not an accident: a column they leave empty is `emptiedByMove`.
-   */
-  readonly hasUserMove: boolean;
-  /**
-   * Asks whether the reader wants no movement. The visit asks only when a
-   * signal lands, once for that landing, because the answer costs a style
-   * lookup.
-   */
-  readonly isMotionReduced: () => boolean;
+/** What just happened to the rows, in words. The screen decides how that looks. */
+export interface InboxVisitChange {
+  readonly kind:
+    /** The user dismissed rows. */
+    | "dismissed"
+    /** The user took rows on or handed them off; they stay until a read says otherwise. */
+    | "taken"
+    /** A dismissal emptied the list. */
+    | "emptied-by-move"
+    /** An undo or a refused move put rows back. */
+    | "restored"
+    /** Show took arrivals into the list. */
+    | "arrived"
+    /** A read found rows no longer belong to the list. */
+    | "left";
+  readonly refs: readonly string[];
 }
 
-/** What the screen draws for one read. */
-export interface InboxVisit {
-  /** `received` without the arrivals that are held back, or `undefined` until the first read ends. */
-  readonly inbox: Inbox | undefined;
-  readonly layout: InboxLayout | undefined;
+export interface InboxVisitSnapshot<Row extends InboxVisitRow, Query> {
   /**
-   * The rows of the Group by menu. It keeps a row for the grouping the page
-   * is laid out with, also after a read stops offering it.
+   * `loading` until the first page is in, `failed` when it could not be
+   * read, else `ready`. While another list is being opened, the previous
+   * rows stay shown and the status is `ready` until the new first page fails.
    */
-  readonly groupings: readonly InboxGrouping[];
+  readonly status: "loading" | "failed" | "ready";
+  readonly error: unknown;
+  /** The list the rows belong to: the previous one while a new one is being opened. */
+  readonly query: Query | null;
+  /** The rows in visit order. A handed row is drawn as its hand-off copy. */
+  readonly rows: readonly Row[];
+  /** How many arrivals wait behind "N new". */
+  readonly arrivals: number;
+  readonly current: string | null;
+  /** Refs of the selected rows: always a subset of `rows`. */
+  readonly selection: ReadonlySet<string>;
+  /** The row a range selection starts from, or null. */
+  readonly anchor: string | null;
+  readonly total: number | undefined;
+  readonly order: InboxOrder | undefined;
+  readonly facets: readonly InboxFacet[];
   /**
-   * The ids of the cards of `received` that wait for a still hand. The page
-   * must not count the read as shown while any waits, because the sidebar's
-   * newest arrival covers those cards too.
+   * The latest transition of the rows, or null. A new object per
+   * transition and the same object until the next one, so a screen that sees
+   * a different object knows something new happened.
    */
-  readonly heldArrivals: readonly string[];
-  /** Whether the user's own move took the last card of the whole page, or of the Requests column. */
-  readonly emptiedByMove: { readonly everything: boolean; readonly requests: boolean };
-  /**
-   * The cards a signal landed on, which show the new mark until the user
-   * reaches them (`advanceLanding`). A card whose drop is still falling is not
-   * in it yet.
-   */
-  readonly freshIds: ReadonlySet<string>;
-  /** What a screen reader says for the last signals that landed. Empty before any landed. */
-  readonly announcement: string;
-  /**
-   * The last landing for the screen to play, or `undefined` before any. The
-   * screen plays each landing (by its number) once, and reports back with
-   * `advanceLanding` when the drop has landed. Under Reduce motion there is
-   * nothing to report: the new words are drawn already.
-   */
-  readonly landing: SignalLanding | undefined;
+  readonly lastChange: InboxVisitChange | null;
 }
 
-const NO_ARRIVALS: readonly string[] = [];
+export interface InboxVisit<Row extends InboxVisitRow, Query> {
+  /**
+   * Starts visiting the list of `query`, from its first page. The previous
+   * list's rows stay shown until the new first page arrives. Call it again
+   * with the same query to retry after a failure.
+   */
+  readonly open: (query: Query) => void;
+  /** Cancels every read. Call it when the screen goes away. */
+  readonly close: () => void;
+  /** Tells the visit the controller changed: it reads the visible window again. */
+  readonly pushArrived: () => void;
+  /**
+   * Tells the visit which rows the user sees (indexes into `snapshot.rows`,
+   * both ends included). Rows near the viewport that missed the latest push
+   * are re-read, and the next page is read near the end.
+   */
+  readonly viewportChanged: (firstIndex: number, lastIndex: number) => void;
+  /** Takes the arrivals in ("Show"), after re-reading the first page. */
+  readonly show: () => void;
+  /**
+   * Applies a move of `refs` at once and returns its receipt.
+   * - `dismissed`: the rows leave. A read never brings them back until one
+   *   issued after `confirmMove` finds the controller dropped them.
+   * - `taken`: the rows stay and the current row moves on. `show` gives the
+   *   copy to draw in the meantime (a handed row), kept until a read brings a
+   *   new copy.
+   * Rows the visit does not hold are ignored.
+   */
+  readonly move: (
+    kind: "dismissed" | "taken",
+    refs: readonly string[],
+    show?: (row: Row) => Row,
+  ) => MoveReceipt<Row>;
+  /** Tells the visit the controller accepted the move. */
+  readonly confirmMove: (receipt: MoveReceipt<Row>) => void;
+  /** Takes a move back because the controller refused it. */
+  readonly failMove: (receipt: MoveReceipt<Row>) => void;
+  /**
+   * Takes back a move the controller has already undone: its rows return to
+   * their old places and the topmost becomes current.
+   */
+  readonly undo: (receipt: MoveReceipt<Row>) => void;
+  /** Steps the current row by one (J, K), or with `extend` extends the selection (⇧J, ⇧K). */
+  readonly step: (by: 1 | -1, extend?: boolean) => void;
+  /** Changes the selection or the current row. */
+  readonly select: (change: SelectionChange) => void;
+  /**
+   * Returns the refs a move acts on, in displayed order: the selection or the
+   * current row, or with `hoveredRef` that row (the selection when it is in it).
+   */
+  readonly targets: (hoveredRef?: string) => string[];
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Returns the snapshot: the same object until something changed. */
+  readonly getSnapshot: () => InboxVisitSnapshot<Row, Query>;
+}
 
-/** The menu of a page that has not been read: Place alone, so the toolbar keeps its shape. */
-const GROUPINGS_BEFORE_READ: readonly InboxGrouping[] = [PLACE_GROUPING];
+/** The next page is read when the viewport comes within this many rows of the end. */
+const NEAR_END_ROWS = 20;
 
-/**
- * Returns the Inbox to draw and the ids of the cards it leaves out. Like
- * `holdBackBoardChanges` on the Work board, it leaves out what is new to
- * `shown` until its id is in `released`; everything else in `latest` is drawn
- * at once. Returns `latest` itself when nothing is held. With no `shown`, the
- * first reply of the visit, holds nothing.
- */
-const holdBackArrivals = (
-  shown: VisitPlacement | undefined,
-  latest: Inbox,
-  released: ReadonlySet<string>,
-): { readonly inbox: Inbox; readonly held: readonly string[] } => {
-  if (shown === undefined) return { inbox: latest, held: NO_ARRIVALS };
-  const isHeld = (id: string): boolean => !shown.cards.has(id) && !released.has(id);
-  const held = latest.cards.filter((card) => isHeld(card.id)).map((card) => card.id);
-  if (held.length === 0) return { inbox: latest, held: NO_ARRIVALS };
-  return { inbox: { ...latest, cards: latest.cards.filter((card) => !isHeld(card.id)) }, held };
-};
+/** Shared so the snapshot of a visit that holds nothing keeps the same objects. */
+const NO_SELECTION: ReadonlySet<string> = new Set();
+const NO_FACETS: readonly InboxFacet[] = [];
 
-/**
- * Returns the emptiness of a column after a read. A column the user's own
- * move leaves empty stays "emptied by move" until it fills again. A column
- * that was empty already, or that something else emptied, is only "empty".
- */
-const advanceEmptiness = (before: Emptiness, isEmpty: boolean, hasUserMove: boolean): Emptiness => {
-  if (!isEmpty) return "filled";
-  return before === "emptied by move" || (hasUserMove && before === "filled")
-    ? "emptied by move"
-    : "empty";
-};
+interface Read {
+  /** The visit (list shown) that was current when the read was issued. */
+  readonly visit: number;
+  readonly controller: AbortController;
+  readonly ticket: ReadTicket;
+  readonly refs: ReadonlySet<string>;
+}
 
-/**
- * Returns what the screen draws for the next read of the visit, and what the
- * visit remembers from now on. Call it on every draw with the last `history`
- * and keep the `history` it returns, which is `history` itself when the read
- * adds nothing to it.
- *
- * Only a fresh reply (`step.isFresh`) is held in `history`: a copy kept from
- * an earlier visit is laid out and drawn but leaves no trace in it.
- */
-export const advanceInboxVisit = (
-  history: VisitHistory,
-  step: VisitStep,
-): { readonly visit: InboxVisit; readonly history: VisitHistory } => {
-  const { received, view, released, isFresh, hasUserMove, isMotionReduced } = step;
-  if (received === undefined) {
+/** Creates a visit that reads through `reader`. It starts empty: call `open`. */
+export function createInboxVisit<Row extends InboxVisitRow, Query>(
+  reader: InboxReader<Row, Query>,
+): InboxVisit<Row, Query> {
+  let seq = 0;
+  let pushGen = 0;
+  let visitId = 0;
+  let receiptId = 0;
+  let viewport = { first: 0, last: 0 };
+  /** The state of the list shown, or null before the first first-page arrived. */
+  let state: VisitState<Row, Query> | null = null;
+  /** The list being opened: its first read is on its way or has failed. */
+  let opening: { readonly query: Query; read: Read | null; error: unknown } | null = null;
+  let refreshing: Read | null = null;
+  let nextPage: (Read & { readonly after: string }) | null = null;
+  const rowReads = new Set<Read>();
+  /** The list each move was made in, by receipt id, so an undo can find its list again. */
+  const receiptQueries = new Map<number, Query>();
+  let isShowPending = false;
+  let lastChange: InboxVisitChange | null = null;
+  const listeners = new Set<() => void>();
+  let snapshot = buildSnapshot(null);
+
+  /** Builds the snapshot; its `rows` array is `previous`'s when every row is the same object. */
+  function buildSnapshot(
+    previous: InboxVisitSnapshot<Row, Query> | null,
+  ): InboxVisitSnapshot<Row, Query> {
+    const failed = opening !== null && opening.read === null;
+    const shown =
+      state === null
+        ? []
+        : state.rows.map((row) => {
+            const override = state!.overrides.get(row.ref);
+            return override?.from === row ? override.to : row;
+          });
+    const isSameRows =
+      previous !== null &&
+      previous.rows.length === shown.length &&
+      previous.rows.every((row, index) => row === shown[index]);
     return {
-      visit: {
-        inbox: undefined,
-        layout: undefined,
-        groupings: GROUPINGS_BEFORE_READ,
-        heldArrivals: NO_ARRIVALS,
-        emptiedByMove: { everything: false, requests: false },
-        freshIds: history.landings.freshIds,
-        announcement: history.landings.announcement,
-        landing: history.landings.landing,
-      },
-      history,
+      status: failed ? "failed" : state === null ? "loading" : "ready",
+      error: opening?.error,
+      query: state?.query ?? null,
+      rows: isSameRows ? previous.rows : shown,
+      arrivals: state?.arrivals.length ?? 0,
+      current: state?.current ?? null,
+      selection: state?.selection ?? NO_SELECTION,
+      anchor: state?.anchor ?? null,
+      total: state?.total,
+      order: state?.order,
+      facets: state?.facets ?? NO_FACETS,
+      lastChange,
     };
   }
-  // A copy kept from an earlier visit says nothing about which signals landed in this one.
-  const landings = isFresh
-    ? recordLandedSignals(history.landings, received, isMotionReduced)
-    : history.landings;
-  const known = isFresh && hasPlacedCards(history.placement) ? history.placement : undefined;
-  const { inbox, held } = holdBackArrivals(
-    known,
-    showHeldCards(received, landings.holds),
-    released,
-  );
-  // A copy kept from an earlier visit holds nothing in place, but the user's moves that wait still show.
-  const placementToLayOut = isFresh
-    ? history.placement
-    : { ...NO_PLACEMENT, pendingMoves: history.placement.pendingMoves };
-  const layout = layOutInbox(inbox, view, placementToLayOut, history.bundles);
 
-  const everything = advanceEmptiness(history.everything, inbox.cards.length === 0, hasUserMove);
-  const requests = advanceEmptiness(
-    history.requests,
-    // A filter that hides every request is not the user finishing them: only a column with no request at all counts.
-    layout.requests.isEmpty && !layout.requests.isEmptiedByFilter,
-    hasUserMove,
-  );
-  const placement = isFresh ? layout.placement : history.placement;
-  // The bundles keep their identity already, so this is cheap, and the history is the same object when none changed.
-  const bundles = isFresh ? replaceEqualDeep(history.bundles, layout.bundles) : history.bundles;
-  const isUnchanged =
-    placement === history.placement &&
-    bundles === history.bundles &&
-    everything === history.everything &&
-    requests === history.requests &&
-    landings === history.landings;
-  return {
-    visit: {
-      inbox,
-      layout,
-      groupings: keepHeldGrouping(listInboxGroupings(inbox), layout.placement.grouping),
-      heldArrivals: held,
-      emptiedByMove: {
-        everything: everything === "emptied by move",
-        requests: requests === "emptied by move",
-      },
-      freshIds: listShownFreshIds(landings),
-      announcement: landings.announcement,
-      landing: landings.landing,
-    },
-    history: isUnchanged ? history : { placement, bundles, everything, requests, landings },
-  };
-};
+  /** Rebuilds the snapshot and tells the listeners, unless nothing the screen draws changed. */
+  function commit(): void {
+    const next = buildSnapshot(snapshot);
+    const isUnchanged = (Object.keys(next) as (keyof typeof next)[]).every((key) =>
+      Object.is(next[key], snapshot[key]),
+    );
+    if (isUnchanged) return;
+    snapshot = next;
+    for (const listener of [...listeners]) listener();
+  }
 
-/**
- * One step in the life of a Link or Unlink the user made. The visit keeps the
- * gesture from its start until the controller answers it. Undo is no step of
- * its own: it is a new gesture in the other direction, started when Undo is
- * pressed, which the visit follows like any other.
- *
- * - `start`: the user made the gesture. Its `move` shows at once.
- * - `settle`: the controller accepted it. `remaining` is the answer of an
- *   Unlink: the firmest claim that still joins the pair.
- * - `refuse`: the controller refused it, or it changed nothing. The move is
- *   dropped, and the gestures made after it are played again on what is settled.
- */
-export type LinkGestureStep =
-  | { readonly _tag: "start"; readonly gesture: number; readonly move: RidingMove }
-  | {
-      readonly _tag: "settle";
-      readonly gesture: number;
-      readonly remaining: EntityUnlinkResult["remaining"];
+  /** Replaces the state and commits, naming the transition when rows left or came. */
+  function setState(next: VisitState<Row, Query>, change?: InboxVisitChange): void {
+    if (next === state) return;
+    const before = state;
+    state = next;
+    if (change !== undefined) lastChange = change;
+    else if (before !== null) {
+      const kept = new Set(next.rows.map((row) => row.ref));
+      const left = before.rows.map((row) => row.ref).filter((ref) => !kept.has(ref));
+      if (left.length > 0) lastChange = { kind: "left", refs: left };
     }
-  | { readonly _tag: "refuse"; readonly gesture: number };
+    commit();
+  }
 
-/**
- * Returns the history after `step`, or `history` itself when the step changes
- * nothing, as for a gesture that has no move waiting (one that planned none).
- * Call it when the user makes a Link or Unlink and when the controller answers
- * it. The next `advanceInboxVisit` draws the result.
- */
-export const advanceLinkGesture = (history: VisitHistory, step: LinkGestureStep): VisitHistory => {
-  const { placement } = history;
-  const next =
-    step._tag === "start"
-      ? startRidingMove(placement, step.gesture, step.move)
-      : step._tag === "settle"
-        ? settleRidingMove(placement, step.gesture, step.remaining)
-        : refuseRidingMove(placement, step.gesture);
-  return next === placement ? history : { ...history, placement: next };
-};
+  function startRead(refs: readonly string[] = []): Read {
+    seq += 1;
+    return {
+      visit: visitId,
+      controller: new AbortController(),
+      ticket: { seq, gen: pushGen },
+      refs: new Set(refs),
+    };
+  }
 
-/**
- * One step in the life of a landing. The screen reports the first, and the user
- * causes the second.
- *
- * - `dropLanded`: the drop of landing `landing` has landed. The cards it holds
- *   draw their new words from the next draw on.
- * - `cardReached`: the user reached the card `id` with the pointer or the
- *   keys, or opened it. Its new mark goes.
- */
-export type LandingStep =
-  | { readonly _tag: "dropLanded"; readonly landing: number }
-  | { readonly _tag: "cardReached"; readonly id: string };
+  /**
+   * Returns the state a finished read applies to, or null when the read no
+   * longer applies: it was cancelled, or it was issued for the list that was
+   * shown before the current one. A read of the list left behind never
+   * touches the one that replaced it.
+   */
+  function acceptRead(read: Read): VisitState<Row, Query> | null {
+    return !read.controller.signal.aborted && read.visit === visitId ? state : null;
+  }
 
-/**
- * Returns the history after `step`, and the ids of the cards that draw their
- * new words because of it (only `dropLanded` releases any). A card that a later
- * landing took over is not among them. Returns `history` itself when the step
- * changes nothing. Call it when the screen reports that a drop has landed and
- * when the user reaches a card. The next `advanceInboxVisit` draws the result.
- */
-export const advanceLanding = (
-  history: VisitHistory,
-  step: LandingStep,
-): { readonly history: VisitHistory; readonly released: readonly string[] } => {
-  const { landings } = history;
-  const { landings: next, released } =
-    step._tag === "dropLanded"
-      ? releaseLandedCards(landings, step.landing)
-      : { landings: reachLandedCard(landings, step.id), released: NO_ARRIVALS };
-  return { history: next === landings ? history : { ...history, landings: next }, released };
-};
+  function cancelRowReads(): void {
+    refreshing?.controller.abort();
+    refreshing = null;
+    for (const read of rowReads) read.controller.abort();
+    rowReads.clear();
+  }
+
+  function cancelAll(): void {
+    cancelRowReads();
+    nextPage?.controller.abort();
+    nextPage = null;
+    opening?.read?.controller.abort();
+  }
+
+  function startFirstRead(): void {
+    if (opening === null) return;
+    const current = opening;
+    const read = startRead();
+    current.read?.controller.abort();
+    current.read = read;
+    current.error = undefined;
+    reader.readFirst(current.query, read.controller.signal).then(
+      (page) => {
+        if (read.controller.signal.aborted || opening !== current) return;
+        opening = null;
+        cancelAll();
+        visitId += 1;
+        isShowPending = false;
+        viewport = { first: 0, last: 0 };
+        lastChange = null;
+        state = startVisit(current.query, page, read.ticket);
+        commit();
+      },
+      (error: unknown) => {
+        if (read.controller.signal.aborted || opening !== current) return;
+        current.read = null;
+        current.error = error;
+        commit();
+      },
+    );
+  }
+
+  function startRefresh(): void {
+    if (state === null) return;
+    const query = state.query;
+    cancelRowReads();
+    const held = [
+      ...state.hidden.keys(),
+      ...pickWindow(state.rows, viewport.first, viewport.last).map((row) => row.ref),
+    ].slice(0, HELD_WINDOW);
+    const read = startRead(held);
+    refreshing = read;
+    reader.refresh(query, held, read.controller.signal).then(
+      (reply) => {
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
+        refreshing = null;
+        setState(applyRefresh(accepted, { ...reply, asked: held }, read.ticket));
+        if (isShowPending) takeInArrivals();
+        readStaleRows();
+      },
+      () => {
+        // A row missing from a read that failed would look like a row that left, so nothing is
+        // applied; the next push or scroll reads again. A waiting Show takes in what is held.
+        if (read.controller.signal.aborted) return;
+        refreshing = null;
+        if (isShowPending) takeInArrivals();
+      },
+    );
+  }
+
+  function takeInArrivals(): void {
+    isShowPending = false;
+    if (state === null || state.arrivals.length === 0) return;
+    const refs = state.arrivals.map((row) => row.ref);
+    setState(takeArrivals(state), { kind: "arrived", refs });
+  }
+
+  /** Reads the rows in the window that missed the latest push and that no read in flight covers. */
+  function readStaleRows(): void {
+    if (state === null) return;
+    const current = state;
+    const covered = (ref: string): boolean =>
+      [refreshing, ...rowReads].some((read) => read?.ticket.gen === pushGen && read.refs.has(ref));
+    const stale = pickWindow(current.rows, viewport.first, viewport.last)
+      .map((row) => row.ref)
+      .filter((ref) => (current.freshAt.get(ref) ?? -1) < pushGen && !covered(ref));
+    if (stale.length === 0) return;
+    const read = startRead(stale);
+    rowReads.add(read);
+    reader.readRows(current.query, stale, read.controller.signal).then(
+      (rows) => {
+        rowReads.delete(read);
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
+        setState(applyRowsRead(accepted, { rows, asked: stale }, read.ticket));
+      },
+      () => {
+        rowReads.delete(read);
+      },
+    );
+  }
+
+  function readNextPage(): void {
+    if (state === null || state.frontier === undefined) return;
+    const after = state.frontier;
+    if (nextPage?.after === after) return;
+    const query = state.query;
+    const read = { ...startRead(), after };
+    nextPage = read;
+    reader.readNext(query, after, read.controller.signal).then(
+      (page) => {
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
+        nextPage = null;
+        setState(applyNextPage(accepted, { ...page, after }, read.ticket));
+      },
+      () => {
+        // The next time the viewport nears the end reads this page again.
+        if (nextPage === read) nextPage = null;
+      },
+    );
+  }
+
+  /**
+   * Puts a move back and reads the restored rows afresh when they are in view.
+   * A receipt of an earlier visit still applies when the list shown now is the
+   * same list (same query): the controller took the move back for that list.
+   */
+  function putBack(receipt: MoveReceipt<Row>): void {
+    if (state === null) return;
+    const madeIn = receiptQueries.get(receipt.id);
+    const isSameList = madeIn !== undefined && replaceEqualDeep(madeIn, state.query) === madeIn;
+    if (receipt.visit !== visitId && !isSameList) return;
+    setState(applyUndo(state, receipt, seq), { kind: "restored", refs: receipt.refs });
+    readStaleRows();
+  }
+
+  return {
+    open(query) {
+      cancelAll();
+      isShowPending = false;
+      opening = { query, read: null, error: undefined };
+      startFirstRead();
+      commit();
+    },
+    close() {
+      cancelAll();
+      opening = null;
+    },
+    pushArrived() {
+      pushGen += 1;
+      if (opening === null) {
+        startRefresh();
+        return;
+      }
+      startFirstRead();
+      commit();
+    },
+    viewportChanged(firstIndex, lastIndex) {
+      viewport = { first: firstIndex, last: lastIndex };
+      if (state === null) return;
+      if (lastIndex >= state.rows.length - 1 - NEAR_END_ROWS) readNextPage();
+      readStaleRows();
+    },
+    show() {
+      if (state === null || state.arrivals.length === 0) return;
+      isShowPending = true;
+      startRefresh();
+    },
+    move(kind, refs, show) {
+      const id = (receiptId += 1);
+      if (state === null) return { id, visit: visitId, refs: [], entries: [] };
+      const before = state;
+      const applied = applyMove(before, { id, visit: visitId, kind, refs, show });
+      const emptied =
+        kind === "dismissed" && applied.state.rows.length === 0 && before.rows.length > 0;
+      receiptQueries.set(id, before.query);
+      setState(applied.state, {
+        kind: emptied ? "emptied-by-move" : kind,
+        refs: applied.receipt.refs,
+      });
+      return applied.receipt;
+    },
+    confirmMove(receipt) {
+      if (state === null || receipt.visit !== visitId) return;
+      state = confirmHidden(state, receipt, seq);
+    },
+    failMove: putBack,
+    undo: putBack,
+    step(by, extend) {
+      if (state !== null) setState(moveCurrent(state, { by, ...(extend ? { extend } : {}) }));
+    },
+    select(change) {
+      if (state !== null) setState(applySelectionChange(state, change));
+    },
+    targets(hoveredRef) {
+      return state === null ? [] : listMoveTargets(state, hoveredRef);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot: () => snapshot,
+  };
+}

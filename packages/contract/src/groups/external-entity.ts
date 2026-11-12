@@ -19,9 +19,12 @@ import {
   MAX_ENTITY_FACTS,
   MAX_ENTITY_FIELD_TEXT_LENGTH,
   MAX_ENTITY_KIND_FIELDS,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
+  InboxClause as PluginInboxClause,
   PluginId,
+  splitClauseWord,
 } from "@hercule/plugin-host";
-import { Schema } from "effect";
+import { Schema, SchemaGetter } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
@@ -35,7 +38,9 @@ import {
   Validation,
 } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
+import { closedStruct } from "../closed";
 import { Authenticated } from "../security";
+import { markRepeatedShorthand, markShorthand } from "../shorthand";
 import { atMost, bounded } from "../strings";
 import { MAX_CONNECTION_LABEL_LENGTH } from "./connection";
 import {
@@ -60,15 +65,16 @@ import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./wor
 
 export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
 
-/** The most cards one Inbox read returns. The reply says when there were more. */
-export const MAX_INBOX_CARDS = 1000;
-
 /**
- * The most places one Inbox read carries. Each card brings at most one home,
- * and each edge at most one more place above it, so the bound is the card
- * limit plus `MAX_GRAPH_EDGES`.
+ * One condition of an Inbox query, as the clients send it: a plugin's clause
+ * (see `InboxClause` in the plugin API) with the account as an `Id`.
  */
-export const MAX_INBOX_PLACES = MAX_INBOX_CARDS + MAX_GRAPH_EDGES;
+export const InboxClause = Schema.Struct({
+  ...PluginInboxClause.fields,
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type InboxClause = Schema.Schema.Type<typeof InboxClause>;
 
 /** The most results one search reply holds. */
 export const MAX_ENTITY_SEARCH_RESULTS = 20;
@@ -101,22 +107,6 @@ export const MAX_ENTITY_LINKS = 100;
 
 /** The most hints one entity read lists. Hints are bounded apart from links, so a flood of mentions never hides a link. */
 export const MAX_ENTITY_HINTS = MAX_ENTITY_LINKS;
-
-/**
- * The most direct links one Inbox read carries: the links of the cards on the
- * page. It equals `MAX_GRAPH_EDGES`, the bound of the reply's other lists of
- * pairs. A card links a few things, so the limit is far past real use.
- */
-export const MAX_INBOX_LINKS = MAX_GRAPH_EDGES;
-
-/** The most hints one Inbox read carries. It equals `MAX_INBOX_LINKS`, and the two lists are cut apart. */
-export const MAX_INBOX_HINTS = MAX_INBOX_LINKS;
-
-/**
- * The most peers one Inbox read carries: the records at the far end of a link
- * or a hint that have no card of their own. At most one per link or hint.
- */
-export const MAX_INBOX_PEERS = MAX_INBOX_LINKS + MAX_INBOX_HINTS;
 
 /** The most signal lines one entity read carries. Open signals come first, so open work is never cut for resolved work. */
 export const MAX_ENTITY_SIGNALS = 50;
@@ -332,6 +322,12 @@ export const WorkflowOffer = Schema.Struct({
   answers: atMost(SignalKind, MAX_INPUT_ANSWERED_SIGNAL_KINDS),
   /** The `connection` input the core fills with the acting account. Absent when the workflow has none. */
   connectionInputName: Schema.optionalKey(Schema.String),
+  /**
+   * When the user last handed a thing of this kind to this workflow, from the
+   * hand-off history. Absent when never. The menu ranks by fit, then by this,
+   * then by name.
+   */
+  lastHandedAt: Schema.optionalKey(Timestamp),
   /** Set when the workflow cannot be handed this thing. Absent when it is available. */
   unavailable: Schema.optionalKey(
     Schema.Struct({
@@ -366,23 +362,6 @@ export const ActingConnection = Schema.Struct({
 });
 
 export type ActingConnection = Schema.Schema.Type<typeof ActingConnection>;
-
-/**
- * Which column of the Inbox a card lies in. The server decides it:
- *
- * - `with-someone-else`: the entity has a live Task.
- * - `requests`: no live Task, and the kind's card is `compact`.
- * - `ongoing`: no live Task, and the kind's card is `rich`.
- *
- * A client that keeps a card in its column for the length of a visit, after
- * it gets a Task, does so itself. The next read puts it under
- * `with-someone-else`.
- */
-export const INBOX_SIDES = ["requests", "ongoing", "with-someone-else"] as const;
-
-export const InboxSide = Schema.Literals(INBOX_SIDES);
-
-export type InboxSide = Schema.Schema.Type<typeof InboxSide>;
 
 /**
  * What every read of an entity holds. The slot names (`identifier`,
@@ -462,114 +441,6 @@ export const EntityRecord = Schema.Struct(entityFields);
 
 export type EntityRecord = Schema.Schema.Type<typeof EntityRecord>;
 
-/**
- * One card on the Inbox. A card is a full record of a work kind that concerns
- * the user, is not dismissed, and has a current concern, an open signal or a
- * live Task.
- */
-export const InboxCard = Schema.Struct({
-  ...entityFields,
-  side: InboxSide,
-  signals: Schema.Struct({
-    /** The newest open signal that is not snoozed, by `createdAt`, then `id`. */
-    latest: Schema.optionalKey(EntitySignalLine),
-    /** How many open signals that are not snoozed the card holds. */
-    openCount: Schema.Int,
-    /**
-     * The distinct kinds of the card's open signals, snoozed ones included,
-     * sorted, cut to the first `MAX_ENTITY_SIGNALS`. A handoff ends the open
-     * signals of the kinds its workflow answers, so this lets the menu name
-     * what a click would end. It is a presentation list: the handoff reads
-     * the signals itself.
-     */
-    kinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
-  }),
-  /**
-   * Set when this compact thing rides on a rich thing on the Inbox: it has a
-   * direct `source` or `person` link to it. The client draws it with its lead
-   * instead of as a card of its own.
-   */
-  ridesOn: Schema.optionalKey(ExternalRef),
-  /**
-   * The key of this card's offers in `Inbox.offerSets`. Offers depend on the
-   * kind, the target repository and whether an account can act, not on the
-   * card, so cards that share those share one set.
-   */
-  offerSetId: bounded(1, MAX_OFFER_SET_ID_LENGTH),
-  /**
-   * The Connections that can act on this thing, oldest first, cut to the
-   * first `MAX_ACTING_CONNECTIONS`. The first is the default. A presentation
-   * list: the handoff checks the account it uses itself.
-   */
-  actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
-  /**
-   * The workflows with a live run on this card's active Task, newest run
-   * first. Empty when none.
-   */
-  liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
-});
-
-export type InboxCard = Schema.Schema.Type<typeof InboxCard>;
-
-/**
- * The numbers the sidebar and the page head show. `queryInbox` and
- * `countInbox` return the same thing from the same function, and the counts
- * include cards past `MAX_INBOX_CARDS`.
- */
-export const InboxCounts = Schema.Struct({
-  /**
-   * The sidebar's number: distinct refs on the Inbox, not dismissed, with no
-   * live Task, of a kind with `pace: fast`. An entity seen by two accounts or
-   * for two concerns counts once.
-   */
-  onTheClock: Schema.Int,
-  /** The small count beside Requests. */
-  requests: Schema.Int,
-  /** The count at the foot of the column. */
-  withSomeoneElse: Schema.Int,
-  /**
-   * The highest arrival sequence among the entities counted in `onTheClock`.
-   * It comes from a durable counter the writer raises, never from a time, and
-   * the counter never goes backwards, even after pruning. Opaque and ordered:
-   * a client compares it with the value it stored, and never displays it.
-   */
-  newestArrival: Schema.Int,
-});
-
-export type InboxCounts = Schema.Schema.Type<typeof InboxCounts>;
-
-/** What `queryInbox` returns. */
-export const Inbox = Schema.Struct({
-  /** Oldest first inside each side, by `firstObservedAt` then `id`. Never ordered by activity. */
-  cards: atMost(InboxCard, MAX_INBOX_CARDS),
-  /** Each record above a card, once, so 300 cards do not repeat their repository. */
-  places: atMost(EntityPlace, MAX_INBOX_PLACES),
-  edges: atMost(EntityEdge, MAX_GRAPH_EDGES),
-  counts: InboxCounts,
-  /** The direct links of the cards on the page. */
-  links: atMost(EntityLink, MAX_INBOX_LINKS),
-  /** The pairs of the cards on the page that only text holds together. */
-  hints: atMost(EntityHint, MAX_INBOX_HINTS),
-  /** The records at the far end of those links and hints that have no card of their own. */
-  peers: atMost(EntityPeer, MAX_INBOX_PEERS),
-  /**
-   * The workflows each card can be handed to, by `InboxCard.offerSetId`. One
-   * set serves every card that shares a kind, target repository and
-   * acting-account state, so 300 cards do not repeat their offers. Each set
-   * lists available workflows first, then unavailable ones, each by name,
-   * cut to the first `MAX_ENTITY_OFFERS`. A presentation list: the handoff
-   * checks its workflow itself.
-   */
-  offerSets: Schema.Record(
-    bounded(1, MAX_OFFER_SET_ID_LENGTH),
-    atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
-  ).check(Schema.isMaxProperties(MAX_INBOX_CARDS)),
-  /** True when more cards exist than `MAX_INBOX_CARDS`. The screen says so. */
-  truncated: Schema.Boolean,
-});
-
-export type Inbox = Schema.Schema.Type<typeof Inbox>;
-
 const fieldValueIdentity = {
   key: bounded(1, 64),
   /** The label the kind declares, such as "Team". */
@@ -635,6 +506,508 @@ export const CardFace = Schema.Struct({
 });
 
 export type CardFace = Schema.Schema.Type<typeof CardFace>;
+
+/** The most clauses a search sends beside the list's own. */
+export const MAX_INBOX_QUERY_CLAUSES = 12;
+
+/** The longest free text of a search. */
+export const MAX_INBOX_TEXT_LENGTH = 200;
+
+/**
+ * The most open asks one row lists, newest first. `askCount` still counts all
+ * of them. A row draws only the newest ask and how many there are; the pane
+ * reads every ask from `externalEntity.read`.
+ */
+export const MAX_INBOX_ASKS = 3;
+
+/** The most values one facet lists on a page. `more` counts the rest. */
+export const MAX_INBOX_PAGE_FACET_VALUES = 30;
+
+/** The most values one facet lists in the rail's counts. `more` counts the rest. */
+export const MAX_INBOX_RAIL_FACET_VALUES = 100;
+
+/** The most values a suggestion read returns. */
+export const MAX_INBOX_SUGGESTIONS = 8;
+
+/** The most things one `dismiss` or `restore` call takes. */
+export const MAX_INBOX_MOVED_THINGS = 1000;
+
+/** The longest saved query id: a plugin id, a slash and a word. */
+const MAX_SAVED_QUERY_ID_LENGTH = 130;
+
+/** The most Connections one thing lists as observing it. */
+export const MAX_INBOX_ACCOUNTS = 32;
+
+/** The most sources, accounts, facets and saved queries the Inbox's counts list. */
+const MAX_INBOX_RAIL_ROWS = 500;
+
+/**
+ * The ids of the core's saved queries, the ones that exist whatever plugins
+ * are loaded. A plugin's saved query has a qualified id (`github/review-requests`).
+ */
+export const CORE_SAVED_QUERY_IDS = {
+  waits: "waits",
+  mine: "mine",
+  updates: "updates",
+  held: "with-hercule",
+  everything: "everything",
+} as const;
+
+export type CoreSavedQueryId = (typeof CORE_SAVED_QUERY_IDS)[keyof typeof CORE_SAVED_QUERY_IDS];
+
+/**
+ * One value of one Facet, of one source, in one account when the source has
+ * several: what Browse lists, what the user pins, and what a list or a search
+ * tie names. `key` is the field's key and `value` the stored value (a record's
+ * ref for a facet of records).
+ */
+export const InboxBrowseValue = Schema.Struct({
+  source: PluginId,
+  connectionId: Schema.optionalKey(Id),
+  key: bounded(1, MAX_INBOX_CLAUSE_KEY_LENGTH),
+  value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+});
+
+export type InboxBrowseValue = Schema.Schema.Type<typeof InboxBrowseValue>;
+
+/**
+ * Which list the Inbox reads: a saved query by its id (`waits`,
+ * `github/review-requests`), or Browse, one value of one Facet.
+ *
+ * The CLI types the saved query's id as one word, for `--list`.
+ */
+const InboxListValue = Schema.Union([
+  Schema.Struct({ savedQuery: bounded(1, MAX_SAVED_QUERY_ID_LENGTH) }),
+  Schema.Struct({ browse: InboxBrowseValue }),
+]);
+
+export const InboxList = markShorthand(
+  InboxListValue,
+  Schema.String.pipe(
+    Schema.decodeTo(InboxListValue, {
+      decode: SchemaGetter.transform((word: string) => ({ savedQuery: word })),
+      encode: SchemaGetter.transform((list) =>
+        "savedQuery" in list ? list.savedQuery : JSON.stringify(list),
+      ),
+    }),
+  ),
+);
+
+export type InboxList = Schema.Schema.Type<typeof InboxList>;
+
+/** How a list is ordered: `waiting` puts the oldest open ask first, `newest` the latest change. */
+export const InboxOrder = Schema.Literals(["waiting", "newest"]);
+
+export type InboxOrder = Schema.Schema.Type<typeof InboxOrder>;
+
+/**
+ * Parses one typed clause, `key=value` (is), `key>value` (over) or
+ * `key<value` (under). The value stays the raw text: it is the controller that
+ * reads it for the type of the field the key names (the clause value grammar
+ * of plugin-host), so `team=2d` names a team and `waiting>2d` is a duration.
+ */
+const parseClauseWord = (word: string): InboxClause | undefined => {
+  const raw = splitClauseWord(word);
+  return raw === undefined ? undefined : { key: raw.key, op: raw.op, value: raw.raw };
+};
+
+/** The one-word form of a clause: what `--clause` takes. */
+const InboxClauseFromWord = Schema.String.check(
+  Schema.makeFilter((word: string) =>
+    parseClauseWord(word) === undefined
+      ? `${word} is not a clause. Write key=value, key>value or key<value, such as team=Checkout or waiting>2d.`
+      : undefined,
+  ),
+).pipe(
+  Schema.decodeTo(InboxClause, {
+    // The check above has already rejected every word this cannot parse.
+    decode: SchemaGetter.transform((word: string) => parseClauseWord(word) as InboxClause),
+    encode: SchemaGetter.transform(
+      (clause: InboxClause) =>
+        `${clause.key}${clause.op === "is" ? "=" : clause.op === "over" ? ">" : "<"}${String(clause.value)}`,
+    ),
+  }),
+);
+
+/** The most things one page of the Inbox holds. */
+export const MAX_INBOX_PAGE = 200;
+
+/** The most refs a client holds and sends in a `refresh` or a `rows` read. */
+export const MAX_INBOX_HELD_REFS = 400;
+
+/**
+ * What every `queryInbox` mode selects: the list, and the search inside it.
+ * `clauses` and `text` narrow the list, and nothing more. A Browse list is
+ * ordered `waiting`.
+ */
+const InboxSelectionFields = {
+  list: InboxList,
+  clauses: Schema.optionalKey(
+    markRepeatedShorthand(atMost(InboxClause, MAX_INBOX_QUERY_CLAUSES), InboxClauseFromWord),
+  ),
+  text: Schema.optionalKey(bounded(0, MAX_INBOX_TEXT_LENGTH)),
+};
+
+const InboxHeldRefs = atMost(ExternalRef, MAX_INBOX_HELD_REFS);
+
+/**
+ * The query of `queryInbox`: one selection, read in one of four modes.
+ *
+ * - `first` reads the first page of the selection, with the total and the
+ *   facets of the whole result.
+ * - `next` reads the page after `after`, the `nextCursor` of an earlier page
+ *   of the same selection. A cursor of another selection, or one that does not
+ *   decode, fails with `validation`.
+ * - `refresh` reads the first page, and the rows the client `held` that are
+ *   not on it, in one read at one moment. It is how a client that shows a list
+ *   keeps its rows current.
+ * - `rows` reads the `held` rows alone, at one moment, in the list's order.
+ *
+ * A field that does not belong to the mode is refused, so `after` with `first`
+ * fails instead of silently reading the first page. A held ref that is missing
+ * from the reply of `refresh` or `rows` is no longer on the list. A client that shows a list uses the two held modes; the
+ * CLI uses `first` and `next`.
+ */
+export const InboxQuery = Schema.Union([
+  closedStruct({ mode: Schema.Literal("first"), ...InboxSelectionFields }),
+  closedStruct({ mode: Schema.Literal("next"), ...InboxSelectionFields, after: bounded(1, 512) }),
+  closedStruct({
+    mode: Schema.Literal("refresh"),
+    ...InboxSelectionFields,
+    held: InboxHeldRefs,
+  }),
+  closedStruct({ mode: Schema.Literal("rows"), ...InboxSelectionFields, held: InboxHeldRefs }),
+]);
+
+export type InboxQuery = Schema.Schema.Type<typeof InboxQuery>;
+
+/**
+ * One open ask on a thing: an open signal, not snoozed and not taken, of a
+ * kind that asks the user for a move. `say` is the finished sentence, such as
+ * "Mei asked for your review", and `noun` names the kind ("review request").
+ */
+export const InboxAsk = Schema.Struct({
+  id: Id,
+  kind: SignalKind,
+  noun: bounded(1, 40),
+  asker: Schema.optionalKey(bounded(1, MAX_SIGNAL_ASKER_LENGTH)),
+  say: EntityReason,
+  createdAt: Timestamp,
+});
+
+export type InboxAsk = Schema.Schema.Type<typeof InboxAsk>;
+
+/**
+ * One row of the Inbox. It is lean: it holds only what a row draws, and the
+ * pane reads the rest (such as the lifecycle and every ask) from
+ * `externalEntity.read` when a thing is opened. A page holds 200 rows, so each
+ * field costs 200 times its size.
+ *
+ * - `source` is the plugin that reports the thing.
+ * - `face` is the card face of the thing's kind, or null for the generic row.
+ * - `asks` are the open asks, newest first, at most `MAX_INBOX_ASKS`;
+ *   `askCount` counts all of them, `askKinds` lists their distinct kinds, and
+ *   `waitingSince` is when the oldest one began.
+ * - `takenOn` is true when the user took the thing on: the link to its active
+ *   Task was made or joined by Take on or Add to Work, not by a hand-off, a
+ *   session or a signal. Only then does the row say that you have it.
+ * - `openKinds` are the distinct kinds of every open signal, snoozed ones
+ *   included: what a hand-off ends is read from it.
+ * - `dismissedAt` is set only when the thing came back after a dismissal.
+ * - `arrival` is the thing's place in the controller's arrival sequence: the
+ *   number it took when it last arrived on the Inbox (new, back after a
+ *   dismissal, or began to ask). It is opaque and only ordered: a larger number
+ *   arrived later. 0 when the thing never arrived. A client that holds a list
+ *   uses it to tell a genuine arrival from a row that only slid into the first
+ *   page because another row left.
+ * - `accounts` are the Connections that observe the thing.
+ */
+export const InboxThing = Schema.Struct({
+  id: Id,
+  ref: ExternalRef,
+  kind: Schema.String,
+  noun: bounded(1, 40),
+  source: PluginId,
+  identifier: bounded(1, 64),
+  title: bounded(1, 512),
+  url: Schema.String,
+  status: Schema.optionalKey(EntityStatus),
+  access: Schema.Literals(["ok", "inaccessible", "deleted"]),
+  stale: Schema.Boolean,
+  observedAt: Timestamp,
+  sourceUpdatedAt: Timestamp,
+  /** Copied from the kind: the hours before a wait counts as due. */
+  patience: Schema.Int,
+  face: Schema.NullOr(CardFace),
+  asks: atMost(InboxAsk, MAX_INBOX_ASKS),
+  askCount: Schema.Int,
+  askKinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
+  openKinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
+  waitingSince: Schema.optionalKey(Timestamp),
+  /** The active Task, when there is one. */
+  taskId: Schema.optionalKey(Id),
+  takenOn: Schema.Boolean,
+  liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
+  dismissedAt: Schema.optionalKey(Timestamp),
+  arrival: Schema.Int,
+  /**
+   * The key of this thing's offers in the `offerSets` of a reply. Things that share
+   * a kind, a target repository and an acting-account state share one set.
+   */
+  offerSetId: bounded(1, MAX_OFFER_SET_ID_LENGTH),
+  /** The Connections that can act on the thing, oldest first. The first is the default. */
+  actingConnections: atMost(ActingConnection, MAX_ACTING_CONNECTIONS),
+  accounts: atMost(Id, MAX_INBOX_ACCOUNTS),
+});
+
+export type InboxThing = Schema.Schema.Type<typeof InboxThing>;
+
+/**
+ * One value of a facet, with how many things in the result hold it. `value`
+ * is what a clause sends: the stored text, or the ref of a context record.
+ * `label` is what the row shows: the record's title when the value is a
+ * ref and some Connection can read that record, else the text. `health` is the
+ * record's status, when it has one.
+ */
+export const InboxFacetValue = Schema.Struct({
+  value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+  label: bounded(1, 512),
+  count: Schema.Int,
+  health: Schema.optionalKey(EntityStatus),
+});
+
+export type InboxFacetValue = Schema.Schema.Type<typeof InboxFacetValue>;
+
+/**
+ * The values of one facet field of one source, most common first. `values` is
+ * cut and `more` counts the values left out. `connectionId` is set when the
+ * source has several accounts, and then the counts are that account's.
+ */
+export const InboxFacet = Schema.Struct({
+  source: PluginId,
+  connectionId: Schema.optionalKey(Id),
+  key: bounded(1, 64),
+  label: bounded(1, 40),
+  plural: bounded(1, 40),
+  values: atMost(InboxFacetValue, MAX_INBOX_RAIL_FACET_VALUES),
+  more: Schema.Int,
+});
+
+export type InboxFacet = Schema.Schema.Type<typeof InboxFacet>;
+
+/**
+ * The workflows each thing of a read can be handed to, by
+ * `InboxThing.offerSetId`. A presentation list: the hand-off checks its
+ * workflow itself.
+ */
+const InboxOfferSets = Schema.Record(
+  bounded(1, MAX_OFFER_SET_ID_LENGTH),
+  atMost(WorkflowOffer, MAX_ENTITY_OFFERS),
+).check(Schema.isMaxProperties(MAX_INBOX_HELD_REFS));
+
+/**
+ * The reply to `first`: the first page of a list. `total` counts the whole
+ * result of the selection, not the page, and `facets` describe the whole
+ * result.
+ *
+ * Order `waiting`: things with an open ask come first, the oldest ask first,
+ * then the rest, the latest change first. Order `newest`: the latest change
+ * first. Ties break by ref.
+ */
+export const InboxFirstPage = Schema.Struct({
+  mode: Schema.Literal("first"),
+  things: atMost(InboxThing, MAX_INBOX_PAGE),
+  nextCursor: Schema.optionalKey(bounded(1, 512)),
+  total: Schema.Int,
+  order: InboxOrder,
+  facets: atMost(InboxFacet, MAX_INBOX_RAIL_ROWS),
+  offerSets: InboxOfferSets,
+});
+
+export type InboxFirstPage = Schema.Schema.Type<typeof InboxFirstPage>;
+
+/** The reply to `next`: one more page, in the order of the first. It has no total and no facets. */
+export const InboxNextPage = Schema.Struct({
+  mode: Schema.Literal("next"),
+  things: atMost(InboxThing, MAX_INBOX_PAGE),
+  nextCursor: Schema.optionalKey(bounded(1, 512)),
+  offerSets: InboxOfferSets,
+});
+
+export type InboxNextPage = Schema.Schema.Type<typeof InboxNextPage>;
+
+/**
+ * The held rows of `refresh` and `rows` that are still on the list, in the
+ * list's order. A held ref that is not here has left the list.
+ */
+const InboxHeldRows = {
+  things: atMost(InboxThing, MAX_INBOX_HELD_REFS),
+  offerSets: InboxOfferSets,
+};
+
+/**
+ * The reply to `refresh`: the first page, and the held rows that are still on
+ * the list but not on that page, both read at one moment. A held ref that is
+ * on neither has left the list.
+ */
+export const InboxRefresh = Schema.Struct({
+  mode: Schema.Literal("refresh"),
+  first: InboxFirstPage,
+  held: Schema.Struct(InboxHeldRows),
+});
+
+export type InboxRefresh = Schema.Schema.Type<typeof InboxRefresh>;
+
+/** The reply to `rows`: the held rows that are still on the list, in the list's order. */
+export const InboxRows = Schema.Struct({ mode: Schema.Literal("rows"), ...InboxHeldRows });
+
+export type InboxRows = Schema.Schema.Type<typeof InboxRows>;
+
+/** The reply to `queryInbox`: the reply of the mode that was asked. */
+export const InboxReply = Schema.Union([InboxFirstPage, InboxNextPage, InboxRefresh, InboxRows]);
+
+export type InboxReply = Schema.Schema.Type<typeof InboxReply>;
+
+/** The types a query field has. */
+const InboxFieldType = Schema.Literals([
+  "text",
+  "person",
+  "enum",
+  "number",
+  "money",
+  "age",
+  "bool",
+]);
+
+/**
+ * The numbers the sidebar draws, in one small read that every screen holds.
+ *
+ * - `waiting` is how many things are in "Someone waits on me".
+ * - `newestArrival` is the highest arrival sequence among them. It comes from
+ *   a durable counter the writer raises, never from a time, and the counter
+ *   never goes backwards, even after pruning. Opaque and ordered: a client
+ *   compares it with the value it stored, and never displays it.
+ */
+export const InboxCounts = Schema.Struct({
+  waiting: Schema.Int,
+  newestArrival: Schema.Int,
+});
+
+/**
+ * What the Inbox's rail draws, in one read that only the Inbox screen makes.
+ * Counts are of distinct things, never of rows. The controller reads the
+ * user's own `inbox.pins` and `inbox.browseFolded`, so the reply holds exactly
+ * what the rail draws. It names accounts, so it needs `connection.query`.
+ */
+export const InboxOutline = Schema.Struct({
+  /** Every saved query, the core's first and then the plugins', with its count. */
+  savedQueries: atMost(
+    Schema.Struct({
+      id: bounded(1, MAX_SAVED_QUERY_ID_LENGTH),
+      name: bounded(1, 40),
+      order: InboxOrder,
+      /** The plugin that declared it. Absent for a core query. */
+      source: Schema.optionalKey(PluginId),
+      count: Schema.Int,
+    }),
+    MAX_INBOX_RAIL_ROWS,
+  ),
+  /**
+   * Browse: one entry per source that holds things. `accounts` are listed when
+   * more than one account holds things. `facets` come only for a source that
+   * is not folded, and list known values that hold nothing with count 0.
+   */
+  sources: atMost(
+    Schema.Struct({
+      source: PluginId,
+      count: Schema.Int,
+      folded: Schema.Boolean,
+      accounts: atMost(
+        Schema.Struct({
+          connectionId: Id,
+          label: bounded(1, MAX_CONNECTION_LABEL_LENGTH),
+          count: Schema.Int,
+        }),
+        MAX_INBOX_RAIL_ROWS,
+      ),
+      facets: Schema.optionalKey(atMost(InboxFacet, MAX_INBOX_RAIL_ROWS)),
+    }),
+    MAX_INBOX_RAIL_ROWS,
+  ),
+  /** Each pin with its current label and count. A value that no longer exists keeps its stored text as label, with count 0. */
+  pins: atMost(
+    Schema.Struct({
+      ...InboxBrowseValue.fields,
+      label: bounded(1, 512),
+      count: Schema.Int,
+    }),
+    MAX_INBOX_RAIL_ROWS,
+  ),
+  /** The query fields: one per source and key, and the core's own with no `source`. */
+  fields: atMost(
+    Schema.Struct({
+      key: bounded(1, 64),
+      label: bounded(1, 40),
+      type: InboxFieldType,
+      source: Schema.optionalKey(PluginId),
+      /** The values of an `enum` field, with their labels. */
+      values: Schema.optionalKey(
+        atMost(Schema.Struct({ value: bounded(1, 64), label: bounded(1, 64) }), 64),
+      ),
+      /** The currency of a `money` field. */
+      currency: Schema.optionalKey(bounded(3, 3)),
+    }),
+    MAX_INBOX_RAIL_ROWS * 16,
+  ),
+  /**
+   * The sources that cannot be read now. `updatedAt` is when a failing
+   * Connection of the source was last changed, which is the latest sign of
+   * the failure the controller keeps. It is not when the failure began.
+   */
+  failing: atMost(Schema.Struct({ source: PluginId, updatedAt: Timestamp }), MAX_INBOX_RAIL_ROWS),
+});
+
+export type InboxCounts = Schema.Schema.Type<typeof InboxCounts>;
+
+export type InboxOutline = Schema.Schema.Type<typeof InboxOutline>;
+
+/**
+ * The input of `suggestInboxValues`: the values of the field `key` among the
+ * things of the list `list` (before any search), whose text starts with
+ * `prefix` without regard to case. `source` and `connectionId` limit it to one
+ * source or one account.
+ */
+export const InboxValueQuery = Schema.Struct({
+  list: InboxList,
+  key: bounded(1, 64),
+  prefix: bounded(0, 100),
+  source: Schema.optionalKey(PluginId),
+  connectionId: Schema.optionalKey(Id),
+});
+
+export type InboxValueQuery = Schema.Schema.Type<typeof InboxValueQuery>;
+
+/** What `suggestInboxValues` returns: at most `MAX_INBOX_SUGGESTIONS` values, most common first. */
+export const InboxValues = Schema.Struct({
+  values: atMost(
+    Schema.Struct({
+      value: bounded(1, MAX_ENTITY_FIELD_TEXT_LENGTH),
+      label: bounded(1, 512),
+      count: Schema.Int,
+      source: PluginId,
+    }),
+    MAX_INBOX_SUGGESTIONS,
+  ),
+});
+
+export type InboxValues = Schema.Schema.Type<typeof InboxValues>;
+
+/** The input of `dismiss` and `restore`: the things to move, all or none. */
+export const InboxMove = Schema.Struct({
+  ids: atMost(Id, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(1)),
+});
+
+export type InboxMove = Schema.Schema.Type<typeof InboxMove>;
 
 /**
  * What `read` returns: one full record of a work kind. `kindAvailable` is
@@ -941,26 +1314,51 @@ export type EntityUnlinkResult = Schema.Schema.Type<typeof EntityUnlinkResult>;
 
 /**
  * The External Entity operations: read the Inbox and its counts, read one
- * entity, take one on as a Task, dismiss and restore a card, and the three
+ * entity, take one on as a Task, dismiss and restore things, and the three
  * that let the user add a thing to Work: search the source, list suggestions,
  * and add.
  */
 export const externalEntity = HttpApiGroup.make("externalEntity")
   .add(
     /**
-     * Returns the Inbox whole, capped at `MAX_INBOX_CARDS` with `truncated`,
-     * in one reply and a fixed number of statements.
+     * Reads an Inbox list in one of four modes (see `InboxQuery`): the first
+     * page with the total and the facets of the whole result, the page after a
+     * cursor, a refresh (the first page and the held things beyond it, in one
+     * snapshot), or the held things alone. A page holds at most 200 things in
+     * the list's order. The reply carries the mode it answers.
      */
-    // Static paths beside `/external-entities/:id`: the router prefers them,
-    // and "inbox", "search" and "suggestions" are not ids.
-    HttpApiEndpoint.get("queryInbox", "/external-entities/inbox", {
-      success: Inbox,
-      error: [Unauthenticated, Forbidden, Internal],
+    // A POST that reads and stores nothing, as `workflow.validate` is: the
+    // query is a nested value (a list, an array of clauses) that a flat query
+    // string cannot carry. Static paths beside `/external-entities/:id`: the
+    // router prefers them, and "inbox", "search" and "suggestions" are not ids.
+    HttpApiEndpoint.post("queryInbox", "/external-entities/inbox/query", {
+      payload: InboxQuery,
+      success: InboxReply,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     /** Returns the Inbox's counts alone, for the sidebar, which reads them on every screen. */
     HttpApiEndpoint.get("countInbox", "/external-entities/inbox/count", {
       success: InboxCounts,
       error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Returns what the Inbox's rail draws: every saved query with its count,
+     * the sources, accounts and facet values, the pins, the query fields and
+     * the sources that cannot be read. Only the Inbox screen reads it.
+     */
+    HttpApiEndpoint.get("readInboxOutline", "/external-entities/inbox/outline", {
+      success: InboxOutline,
+      error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Returns the values of one field among the things of a list, for the
+     * search's suggestions. A POST that reads and stores nothing, for the
+     * reason `queryInbox` is one.
+     */
+    HttpApiEndpoint.post("suggestInboxValues", "/external-entities/inbox/values", {
+      payload: InboxValueQuery,
+      success: InboxValues,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.get("search", "/external-entities/search", {
       query: EntitySearchQuery,
@@ -1037,14 +1435,19 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       success: HandOffUndo,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
-    /** Takes the card off the Inbox. Only `restore` brings it back. */
-    HttpApiEndpoint.post("dismiss", "/external-entities/:id/dismiss", {
-      params: { id: Id },
+    /**
+     * Takes things off the Inbox, all or none, in one transaction. `restore`
+     * brings them back, and so does a new ask on a thing after the dismissal.
+     * Fails `NotFound` when an id is unknown, and then none is dismissed.
+     */
+    // Static paths: "dismiss" and "restore" are not ids.
+    HttpApiEndpoint.post("dismiss", "/external-entities/dismiss", {
+      payload: InboxMove,
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
-    HttpApiEndpoint.post("restore", "/external-entities/:id/restore", {
-      params: { id: Id },
+    HttpApiEndpoint.post("restore", "/external-entities/restore", {
+      payload: InboxMove,
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

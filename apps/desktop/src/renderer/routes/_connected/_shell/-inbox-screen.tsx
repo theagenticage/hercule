@@ -1,435 +1,457 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { buildInitials, readErrorMessage } from "@hercule/client-core";
+import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
-  decideEmptyInbox,
-  describeFailingSources,
-  describeTruncatedInbox,
-  listCardOffers,
-  listRailTargets,
-  listRiders,
-  nameLinkEnd,
-  NO_OFFERS,
+  EMPTY_INBOX_SEARCH,
+  addInboxClause,
+  nameInboxScope,
+  typeInboxSearch,
+  type InboxScope,
+  type InboxSearch,
 } from "@hercule/client-core/inbox";
-import type { InboxCard } from "@hercule/contract";
-import type { SavedController } from "../../../app/context";
+import type { InboxClause } from "@hercule/contract";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
-import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../app/live";
-import { connectionsQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
+import { useQuietValue } from "../../../app/use-quiet-value";
+import { inboxCountQuery, inboxOutlineQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
-import { useFirstArrival } from "../../../app/use-first-arrival";
 import { useOfflineSince } from "../../../app/use-offline-since";
-import { useWindowVisible } from "../../../app/window-visibility";
-import { IconPill, KeysSheet, ReadFailure, UndoLine, type KeyRow } from "../../../screens/desk";
-import { HandToMenu } from "../../../screens/inbox/hand-to-menu";
-import { InboxDesk, type InboxDeskState } from "../../../screens/inbox/inbox-desk";
-import { InboxLoading } from "../../../screens/inbox/inbox-loading";
-import { InboxPill } from "../../../screens/inbox/inbox-pill";
-import { AllClear, FirstRun } from "../../../screens/inbox/inbox-states";
-import { InboxToolbar } from "../../../screens/inbox/inbox-toolbar";
-import { buildInboxViewKey } from "../../../screens/inbox/inbox-view-storage";
-import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
-import { OngoingSide } from "../../../screens/inbox/ongoing-side";
-import { InboxOpenCard } from "../../../screens/inbox/open-card";
-import { Rail } from "../../../screens/inbox/rail";
-import { RequestsSide } from "../../../screens/inbox/requests-side";
-import { useRunAndMoveOn } from "../../../screens/inbox/use-run-and-move-on";
-import { useCurrentCard } from "../../../screens/inbox/use-current-card";
-import { useHandOff } from "../../../screens/inbox/use-hand-off";
-import { useInboxCarry } from "../../../screens/inbox/use-inbox-carry";
-import { useInboxPage } from "../../../screens/inbox/use-inbox-page";
-import { useInboxView } from "../../../screens/inbox/use-inbox-view";
-import { useInboxVisit, useVisitHistory } from "../../../screens/inbox/use-inbox-visit";
-import { useOpenCard } from "../../../screens/inbox/use-open-card";
+import type { SavedController } from "../../../app/context";
+import { KeysSheet, UndoLine } from "../../../screens/desk";
+import { InboxFrame } from "../../../screens/inbox/inbox-frame";
+import { buildInboxKeyRows, type InboxKeyAction } from "../../../screens/inbox/inbox-keys";
+import { focusNextInboxRegion } from "../../../screens/inbox/inbox-regions";
+import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
+import type { InboxListHandle } from "../../../screens/inbox/inbox-list";
+import type { RailFacetScope } from "../../../screens/inbox/inbox-rail";
+import type { InboxSearchHandle } from "../../../screens/inbox/inbox-search";
+import { InboxOfflinePill, InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
+import { useInboxPaneWidth } from "../../../screens/inbox/use-inbox-pane-width";
+import { useInboxClock } from "./-inbox-clock";
+import { useInboxVisit, type InboxListRow } from "./-inbox-visit";
+import { InboxHandMenuPart } from "./-inbox-hand-part";
+import { InboxListPart } from "./-inbox-list-part";
 import { useInboxMoves } from "./-inbox-moves";
-import { useInbox } from "./-inbox-read";
+import { useInboxKeys } from "./-use-inbox-keys";
+import { InboxPaneHeadPart, InboxPanePart } from "./-inbox-pane-part";
+import { InboxRailPart } from "./-inbox-rail-part";
+import { InboxSearchPart, type SearchTie } from "./-inbox-search-part";
+import {
+  DEFAULT_INBOX_QUERY_ID,
+  EVERYTHING_INBOX_SCOPE,
+  EVERYTHING_QUERY_ID,
+  buildInboxList,
+  buildInboxSelection,
+  buildInboxScopeParams,
+  isSearching,
+  type InboxNarrowing,
+} from "./-inbox-scope";
 
-/** The keys of the Inbox page and what each does, as its sheet lists them. */
-const KEY_ROWS: readonly KeyRow[] = [
-  ["↑ ↓ ← →", "Move through the page"],
-  ["J K", "Next, previous"],
-  ["Space Return", "Open the card"],
-  ["H", "Hand to an agent"],
-  ["T", "Take it"],
-  ["E", "Dismiss"],
-  ["G", "See its Task on Work"],
-];
+/** How long typing in the search stops before the list reads for it, in milliseconds. */
+const SEARCH_QUIET_MS = 200;
 
-/** Returns the line that says since when the controller cannot be reached, and what that means for moves. */
-const describeOffline = (since: Date): string =>
-  `Offline. What you see is from ${since.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. A move fails until you are back.`;
+/** The hand-off menu that is open: the thing it hands, and the element it opens under. */
+interface HandMenu {
+  readonly thing: InboxListRow;
+  readonly anchor: HTMLElement;
+}
 
 /**
- * Renders the Inbox screen: the cards that concern the user, on the wide side
- * as rows on the surface of their place and in the narrow column as small
- * requests, with the toolbar over them. It reads the Inbox, holds what the user
- * chose (Group by, Filter, and how Requests are shown, grouped and sorted), asks the visit what the
- * page draws (`useInboxVisit`: where each card lies, what waits for a still
- * hand), and hands the page to `screens/inbox/`.
+ * Renders the Inbox screen: the page frame with its rail, search, list and
+ * pane. It owns what the user chose: the search over the scope, the pane's
+ * width and whether the pane lies open over the list. The scope (a saved
+ * query or a Browse value) is the route's, read from the URL and given as
+ * `scope`, and picking another navigates to it. The list itself is the visit
+ * (`useInboxVisit`), and the parts draw it where they read their data.
  *
- * - The Inbox is read while the window is visible, and read again on each
- *   push. Group by, Filter and the Requests view run in client-core over the read, so
- *   they cost no read and change no number in the sidebar.
- * - The first read of a visit holds the words of the cards of the last visit
- *   back, and fades them in. With nothing known yet, quiet bars stand in.
- * - When the page is really shown, the newest arrival it knows is acknowledged,
- *   which takes the sidebar's new mark away.
- * - Offline, or with a source that cannot be read, one line in the bar says
- *   what that means. A read that fails says why, with a Try again button.
- * - The user's moves are here: Take it, Hand to, Dismiss and Undo
- *   (`useInboxMoves`), the pointer and the keys that drive them
- *   (`useCurrentCard`, `useInboxPage`), the open card, and See its Task, which
- *   goes to Work. Hand to (`useHandOff`) hands a card to the one workflow that
- *   can take it, or opens a menu of them; the offers follow the workflows, so
- *   the screen holds the `workflow` topic.
- * - Carrying a card with the pointer raises the rail, whose targets are the
- *   workflows that can take it, Take it and Dismiss. Letting go on another
- *   card links the two, as `Link them` does. A card that arrives meanwhile
- *   waits until the card is let go.
+ * The list reads for the search only after typing has paused, so a word typed
+ * at speed sends one read and not one for each letter.
+ *
+ * It also holds what the keys and the moves share: the keys (`useInboxKeys`
+ * names an action, and `performKey` does it), the moves (`useInboxMoves`) and
+ * where the keyboard focus goes after a move.
  */
-export function InboxScreen({ controller }: { readonly controller: SavedController }): JSX.Element {
-  const { client, url, live } = controller;
-  const scope = controller.accountScopes.read();
+export function InboxScreen({
+  controller,
+  scope,
+}: {
+  readonly controller: SavedController;
+  readonly scope: InboxScope;
+}): JSX.Element {
+  const { client, live, url } = controller;
   const navigate = useNavigate();
-  const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const queryClient = useQueryClient();
-  // The offers of every card depend on the workflows, which the shell does not hold.
+  // The workflows' pushes change who has a thing, which the rows say.
   useScreenTopicsLive(live, queryClient, WORKFLOW_TOPICS);
+  const { bridge } = useRouteContext({ from: "/_connected/_shell" });
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
+  const { newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const { data: connections } = useSuspenseQuery(connectionsQuery(client));
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const read = useInbox(client);
-  const visitHistory = useVisitHistory();
+  const formatClock = useInboxClock(client);
+  const offlineSince = useOfflineSince(live);
+  const [search, setSearch] = useState<InboxSearch>(EMPTY_INBOX_SEARCH);
+  // The source and account a "Search the other N" row tied the clause being typed to.
+  const [searchTie, setSearchTie] = useState<SearchTie | null>(null);
+  const [paneWidth, setPaneWidth] = useInboxPaneWidth();
+  const [isPaneOpen, setIsPaneOpen] = useState(false);
+  const [isStacked, setIsStacked] = useState(false);
+  const [isKeysOpen, setIsKeysOpen] = useState(false);
+  const [isNarrowOpen, setIsNarrowOpen] = useState(false);
+  const [handMenu, setHandMenu] = useState<HandMenu | null>(null);
+  const [listFocusRequest, setListFocusRequest] = useState(0);
+  const [headingFocusRequest, setHeadingFocusRequest] = useState(0);
+  const searchRef = useRef<InboxSearchHandle>(null);
+  const listRef = useRef<InboxListHandle>(null);
+
+  // The field shows every letter at once, but the list reads for the text that has held still.
+  const quietText = useQuietValue(search.text, SEARCH_QUIET_MS);
+  const searched: InboxNarrowing = {
+    clauses: search.clauses,
+    text: search.text.trim() === "" ? "" : quietText,
+  };
+  const { visit, snapshot } = useInboxVisit(client, buildInboxSelection(scope, searched));
+  const isReady = snapshot.status === "ready";
+  const scopeTitle = nameInboxScope(scope, outline);
+  const currentThing = isReady
+    ? snapshot.rows.find((row) => row.ref === snapshot.current)
+    : undefined;
+
+  // What the waits list shows is what the sidebar's dot has been told about.
+  const isShowingWaits =
+    scope.kind === "saved-query" && scope.id === DEFAULT_INBOX_QUERY_ID && !isSearching(searched);
+  useEffect(() => {
+    if (isShowingWaits && isReady) acknowledgeInboxArrival(url, username, newestArrival);
+  }, [isShowingWaits, isReady, url, username, newestArrival]);
+
+  const focusList = (): void => {
+    setListFocusRequest((request) => request + 1);
+  };
+  // A pane that lies over the list is the one place the keys work in then, so the focus stays in it.
+  const isPaneHoldingFocus = isStacked && isPaneOpen;
+  /**
+   * Moves the focus after a move: to the new current row, which takes the
+   * focus and scrolls into view; to the empty state's heading when nothing is
+   * current any more, with the pane stepped aside first.
+   */
+  const followMove = (next: { readonly rows: ReadonlyArray<InboxListRow> }): void => {
+    if (next.rows.length === 0) {
+      setIsPaneOpen(false);
+      setHeadingFocusRequest((request) => request + 1);
+    } else if (!isPaneHoldingFocus) {
+      focusList();
+    }
+  };
   const moves = useInboxMoves({
     client,
-    scope,
-    serverInbox: read.data,
-    visit: visitHistory,
-    scrollRef,
-    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
-    isCarrying: () => readIsCarrying(),
+    scope: controller.accountScopes.read(),
+    visit,
+    isOffline: offlineSince !== null,
     openTask: (taskId) => {
       void navigate({ to: "/work", search: { task: taskId } });
     },
+    onMoved: followMove,
   });
-  const isVisible = useWindowVisible();
-  const offlineSince = useOfflineSince(live);
-  const view = useInboxView(buildInboxViewKey(url, username));
-  const monogram = buildInitials(username);
-
-  // The words of the last visit's cards wait while this visit's read is on its way.
-  const [isHolding, setIsHolding] = useState(read.isFetching);
-  if (isHolding && !read.isFetching) setIsHolding(false);
-  // The cards the cache kept from the last visit stand in until this visit's own reply comes. Only
-  // that reply decides where cards lie and which are new, so a card that changed meanwhile does not
-  // keep the place it had.
-  const [hasOwnReply, setHasOwnReply] = useState(false);
-  if (!hasOwnReply && read.data !== undefined && !isHolding && !read.isError) setHasOwnReply(true);
-  const {
-    inbox,
-    layout,
-    groupings,
-    heldArrivals,
-    emptiedByMove,
-    isWaitingForSunrise,
-    freshIds,
-    clearFresh,
-    announcement,
-  } = useInboxVisit({
-    step: {
-      received: moves.inbox,
-      view: {
-        grouping: view.grouping,
-        filter: view.filter,
-        requestsGrouping: view.requestsGrouping,
-        requestsShow: view.requestsShow,
-        requestsSort: view.requestsSort,
-      },
-      isFresh: hasOwnReply,
-      hasUserMove: moves.hasPendingEdits,
-    },
-    visit: visitHistory,
-    scrollRef,
-    // Read when a card arrives or Undo is pressed, long after the carry below has been made.
-    isCarrying: () => readIsCarrying(),
-  });
-  const hasWords = inbox !== undefined && !isHolding;
-  const isArriving = useFirstArrival(inbox === undefined || read.isFetching, hasWords);
-
-  // The new mark goes when a reply is really shown: its words are in view and no card of it is held back.
-  const newestArrival =
-    hasWords && heldArrivals.length === 0 ? inbox.counts.newestArrival : undefined;
-  useEffect(() => {
-    if (newestArrival !== undefined && isVisible) {
-      acknowledgeInboxArrival(url, username, newestArrival);
+  const openHandMenu = (thing: InboxListRow | null, ref: string): void => {
+    if (thing === null) return;
+    const anchor = listRef.current?.findHandAnchor(ref);
+    if (anchor !== null && anchor !== undefined) setHandMenu({ thing, anchor });
+  };
+  const startHandOff = (ref: string | undefined): void => {
+    openHandMenu(moves.startHandOff(ref), ref ?? snapshot.current ?? "");
+  };
+  /** Slides the pane away first when it lies over the list, for what is about the list. */
+  const slidePaneAside = (): void => {
+    if (isPaneHoldingFocus) setIsPaneOpen(false);
+  };
+  /** Takes in what arrived, which is what both the `.` key and the "N new" pill do. */
+  const showNew = (): void => {
+    slidePaneAside();
+    visit.show();
+    focusList();
+  };
+  const openScope = (entry: InboxScope): void => {
+    void navigate({ to: "/inbox", search: buildInboxScopeParams(entry), replace: true });
+    setSearch(EMPTY_INBOX_SEARCH);
+    setIsPaneOpen(false);
+    setIsNarrowOpen(false);
+    focusList();
+  };
+  const performKey = (action: InboxKeyAction): void => {
+    switch (action.kind) {
+      case "step":
+        visit.step(action.by, action.extend);
+        if (!isPaneHoldingFocus) focusList();
+        return;
+      case "toggleSelect":
+        if (snapshot.current !== null) visit.select({ kind: "toggle", ref: snapshot.current });
+        return;
+      case "selectAll":
+        visit.select({ kind: "all" });
+        return;
+      case "stepBack":
+        if (isKeysOpen) setIsKeysOpen(false);
+        else if (isPaneHoldingFocus) {
+          setIsPaneOpen(false);
+          focusList();
+        } else if (isReady && snapshot.selection.size > 0) {
+          visit.select({ kind: "clear" });
+        } else if (isSearching(search)) setSearch(EMPTY_INBOX_SEARCH);
+        return;
+      case "focusList":
+        focusList();
+        return;
+      case "dismiss":
+        moves.dismiss();
+        return;
+      case "takeOn":
+        moves.takeOn();
+        return;
+      case "handOff":
+        startHandOff(undefined);
+        return;
+      case "goToTask":
+        moves.goToTask();
+        return;
+      case "openAtSource":
+        moves.openAtSource();
+        return;
+      case "showArrivals":
+        showNew();
+        return;
+      case "pickList": {
+        const query = outline.savedQueries[action.index];
+        if (query !== undefined) openScope({ kind: "saved-query", id: query.id });
+        return;
+      }
+      case "search":
+        slidePaneAside();
+        searchRef.current?.focus();
+        return;
+      case "narrow":
+        slidePaneAside();
+        // The list head hides Narrow while the list holds nothing, and so does the key.
+        if (isReady && (snapshot.rows.length > 0 || snapshot.arrivals > 0)) {
+          setIsNarrowOpen((isOpen) => !isOpen);
+        }
+        return;
+      case "toggleKeys":
+        setIsKeysOpen((isOpen) => !isOpen);
+        return;
+      case "nextRegion":
+        focusNextInboxRegion(action.backwards, { isStacked, isPaneOpen });
+        return;
+      case "openPane":
+        if (isStacked && !isPaneOpen && isReady && snapshot.current !== null) setIsPaneOpen(true);
+        return;
     }
-  }, [url, username, newestArrival, isVisible]);
-
-  const empty = inbox === undefined ? null : decideEmptyInbox(inbox, connections, plugins);
-  const failingSources = describeFailingSources(connections, plugins);
-  const truncated = inbox === undefined ? undefined : describeTruncatedInbox(inbox);
-
-  // ---------- Moves, keys and the open card ----------
-  const current = useCurrentCard(scrollRef, clearFresh);
-  const openCard = useOpenCard();
-  // A card that opens is reached too: its new mark goes.
-  const openedId = openCard.shown?.kind === "card" ? openCard.shown.id : undefined;
-  useEffect(() => {
-    if (openedId !== undefined) clearFresh(openedId);
-  }, [openedId, clearFresh]);
-  const findCard = (id: string): InboxCard | undefined =>
-    inbox?.cards.find((card) => card.id === id);
-  const seeTask = (card: InboxCard): void => {
-    if (card.taskId === undefined) return;
-    void navigate({ to: "/work", search: { task: card.taskId } });
   };
-  // Dismissing a card lets what rides on it stand alone, and the undo line says so.
-  const dismissWithRiders = (card: InboxCard, stepsAside = true): void => {
-    moves.dismiss(card, layout === undefined ? [] : listRiders(layout, card.id), stepsAside);
+  useInboxKeys(performKey);
+  const rowActions: InboxRowActions = {
+    onPick: (ref, modifiers) => {
+      visit.select(
+        modifiers.shiftKey
+          ? { kind: "extendTo", ref }
+          : modifiers.metaKey || modifiers.ctrlKey
+            ? { kind: "toggle", ref }
+            : { kind: "focus", ref },
+      );
+      setIsPaneOpen(true);
+    },
+    onToggleSelect: (ref) => {
+      visit.select({ kind: "toggle", ref });
+    },
+    onTakeOn: moves.takeOn,
+    onHandOff: (ref) => {
+      startHandOff(ref);
+    },
+    onGoToTask: moves.goToTask,
+    onDismiss: moves.dismiss,
   };
-  const linkCards = (fromRef: string, toRef: string): void => {
-    if (inbox === undefined) return;
-    moves.link({
-      fromRef,
-      toRef,
-      fromName: nameLinkEnd(inbox, fromRef),
-      toName: nameLinkEnd(inbox, toRef),
+  /**
+   * Starts a search in Everything for a value of the facet that the rail does
+   * not list. The clause being typed keeps the facet's source and account, so
+   * its suggestions and its results come from that account only.
+   */
+  const searchMore = (facet: RailFacetScope): void => {
+    const tie = {
+      key: facet.key,
+      source: facet.source,
+      ...(facet.connectionId === undefined ? {} : { connectionId: facet.connectionId }),
+    };
+    setSearchTie(tie);
+    setSearch(
+      typeInboxSearch(EMPTY_INBOX_SEARCH, `${facet.key}:`, {
+        fields: outline.fields,
+        suggestedValues: {},
+        tie,
+      }),
+    );
+    widenToEverything();
+    searchRef.current?.focus();
+  };
+  const widenToEverything = (): void => {
+    void navigate({
+      to: "/inbox",
+      search: buildInboxScopeParams(EVERYTHING_INBOX_SCOPE),
+      replace: true,
     });
   };
-  const runAndMoveOn = useRunAndMoveOn({ scrollRef, current, open: openCard });
-  const handOff = useHandOff({
-    client,
-    inbox,
-    open: openCard,
-    hand: moves.handOff,
-    say: moves.sayWithoutUndo,
-    runAndMoveOn,
-  });
-  const page = useInboxPage({
-    scrollRef,
-    current,
-    view,
-    findCard,
-    open: openCard,
-    runAndMoveOn,
-    handOff,
-    moves: {
-      take: moves.take,
-      dismiss: dismissWithRiders,
-      seeTask,
-      link: linkCards,
-      say: moves.sayWithoutUndo,
-    },
-  });
-
-  // ---------- Carrying a card ----------
-  const { rail, attachRail, readIsCarrying } = useInboxCarry({
-    pageRef: scrollRef,
-    disabled: openCard.isOpen,
-    canCarry: (cardId) => findCard(cardId) !== undefined,
-    readRailTargets: (cardId) => {
-      const card = findCard(cardId);
-      if (card === undefined) return [];
-      return listRailTargets(
-        card,
-        inbox === undefined ? NO_OFFERS : listCardOffers(card, inbox.offerSets),
-      );
-    },
-    onDropOnTarget: (cardId, target) => {
-      const card = findCard(cardId);
-      if (card === undefined) return;
-      if (target.kind === "hand") handOff.handCard(card, target.workflowId, "pointer");
-      else if (target.kind === "more") {
-        // The same menu the card's own Hand to… button opens, under the card the drop sent home.
-        const scroller = scrollRef.current;
-        const anchor = scroller === null ? null : findCardElement(scroller, card.id);
-        if (anchor !== null) handOff.openMenu(card, anchor, "pointer");
-      } else if (target.kind === "take") moves.take(card);
-      else dismissWithRiders(card, false);
-    },
-    onDropOnCard: (cardId, ontoCardId) => {
-      const card = findCard(cardId);
-      const onto = findCard(ontoCardId);
-      if (card !== undefined && onto !== undefined) linkCards(card.ref, onto.ref);
-    },
-  });
-
-  let state: InboxDeskState = "board";
-  let body: JSX.Element | null;
-  if (inbox === undefined || layout === undefined) {
-    state = "loading";
-    body = read.isError ? (
-      <ReadFailure
-        what="The Inbox"
-        reason={readErrorMessage(read.error)}
-        onRetry={() => {
-          void read.refetch();
-        }}
-      />
-    ) : (
-      <InboxLoading />
-    );
-  } else if (empty?._tag === "first-run") {
-    state = "first-run";
-    body = <FirstRun offers={empty.offers} plugins={plugins} />;
-  } else if (empty?._tag === "all-clear") {
-    state = "clear";
-    // The sunrise plays only when the user's own action empties the Inbox. A page that opens empty shows it at rest.
-    body = isWaitingForSunrise ? null : <AllClear isStill={!emptiedByMove.everything} />;
-  } else {
-    body = (
-      <>
-        <OngoingSide
-          layout={layout}
-          plugins={plugins}
-          monogram={monogram}
-          freshIds={freshIds}
-          note={truncated === undefined ? null : <p className="inbox-note">{truncated}</p>}
-        />
-        <RequestsSide
-          layout={layout}
-          show={view.requestsShow}
-          grouping={view.requestsGrouping}
-          sort={view.requestsSort}
-          onShowChange={view.setRequestsShow}
-          onGroupingChange={view.setRequestsGrouping}
-          onSortChange={view.setRequestsSort}
-          collapsedGroups={view.collapsedGroups}
-          onToggleGroup={view.toggleGroup}
-          plugins={plugins}
-          monogram={monogram}
-          freshIds={freshIds}
-          isSunriseStill={!emptiedByMove.requests}
-        />
-      </>
-    );
-  }
-
-  // A read that fails while the page holds cards keeps them and says so here. With no cards the body says it.
-  const readFailure =
-    read.isError && inbox !== undefined
-      ? `The Inbox could not be read: ${readErrorMessage(read.error).replace(/\.+$/, "")}. What you see is from earlier.`
-      : undefined;
-  const notice =
-    offlineSince !== null ? (
-      <div className="inbox-notice" role="status">
-        <i className="notice-dot" />
-        <span>{describeOffline(offlineSince)}</span>
-      </div>
-    ) : readFailure !== undefined ? (
-      <div className="inbox-notice" role="alert">
-        <i className="notice-dot" />
-        <span title={readFailure}>{readFailure}</span>
-        <button
-          type="button"
-          onClick={() => {
-            void read.refetch();
-          }}
-        >
-          Try again
-        </button>
-      </div>
-    ) : failingSources !== undefined ? (
-      <div className="inbox-notice" role="status">
-        <i className="notice-dot" />
-        <span>{failingSources}</span>
-        <Link to="/settings/connections">Connections</Link>
-      </div>
-    ) : null;
+  const resultsText =
+    isSearching(searched) && snapshot.total !== undefined
+      ? `${String(snapshot.total)} ${snapshot.total === 1 ? "thing matches" : "things match"} in ${scopeTitle}.`
+      : "";
 
   return (
-    <InboxDesk
-      toolbar={
-        <InboxToolbar
-          pill={<InboxPill />}
-          groupings={groupings}
-          grouping={layout?.grouping ?? view.grouping}
-          onGroupingChange={view.setGrouping}
-          facets={layout?.facets ?? []}
-          filter={view.filter}
-          cards={inbox?.cards ?? []}
-          onFilterChange={view.setFilter}
-          plugins={plugins}
-          showsControls={empty === null}
-          notice={notice}
-          end={
-            <IconPill label="Show the keys" title="Keys (?)" onClick={page.toggleKeysSheet}>
-              ?
-            </IconPill>
-          }
+    <InboxFrame
+      rail={
+        <InboxRailPart
+          client={client}
+          current={isSearching(search) ? null : scope}
+          isLoading={snapshot.status === "loading"}
+          onPick={openScope}
+          onSearchMore={searchMore}
+          onSaveFailed={moves.say}
         />
       }
+      scopeName={scopeTitle}
+      search={
+        <InboxSearchPart
+          ref={searchRef}
+          client={client}
+          list={buildInboxList(scope)}
+          scopeTitle={scopeTitle}
+          isScopeEverything={scope.kind === "saved-query" && scope.id === EVERYTHING_QUERY_ID}
+          search={search}
+          resultsText={resultsText}
+          tie={searchTie}
+          onChange={(next) => {
+            setSearch(next);
+            // The tie ends with the clause it was made for.
+            if (next.open?.key !== searchTie?.key) setSearchTie(null);
+          }}
+          onWiden={widenToEverything}
+          onLeaveToResults={focusList}
+          onLeave={focusList}
+        />
+      }
+      list={
+        <InboxListPart
+          client={client}
+          snapshot={snapshot}
+          visit={visit}
+          scope={scope}
+          scopeTitle={scopeTitle}
+          search={searched}
+          rowActions={rowActions}
+          focusRequest={listFocusRequest}
+          headingFocusRequest={headingFocusRequest}
+          isNarrowOpen={isNarrowOpen}
+          ref={listRef}
+          onNarrowOpenChange={setIsNarrowOpen}
+          undoLine={
+            <UndoLine
+              text={moves.line.text}
+              title={moves.line.title}
+              onUndo={moves.line.canUndo ? moves.undoLastMove : null}
+              action={moves.line.action}
+              undoKey={describeUndoKey(bridge.platform)}
+              isShown={moves.line.isShown}
+              onHoldChange={moves.holdLine}
+            />
+          }
+          onNarrowPick={(clause: InboxClause) => {
+            setSearch((before) => addInboxClause(before, clause));
+          }}
+          onShowNew={showNew}
+          onOpenScope={openScope}
+          onSearchEverything={widenToEverything}
+          onClearSearch={() => {
+            setSearch(EMPTY_INBOX_SEARCH);
+          }}
+        />
+      }
+      paneHead={
+        currentThing === undefined ? null : (
+          <InboxPaneHeadPart client={client} thing={currentThing} />
+        )
+      }
+      pane={
+        currentThing === undefined ? (
+          snapshot.status === "loading" ? (
+            <InboxPaneSkeleton />
+          ) : null
+        ) : (
+          <InboxPanePart
+            isActive={!isStacked || isPaneOpen}
+            client={client}
+            thing={currentThing}
+            offers={currentThing.offers}
+            moves={{
+              onTakeOn: () => {
+                moves.takeOn();
+              },
+              onDismiss: () => {
+                moves.dismiss();
+              },
+              onGoToTask: (taskId) => {
+                void navigate({ to: "/work", search: { task: taskId } });
+              },
+              onSeeInIntake: () => {
+                void navigate({ to: "/intake", search: { entity: currentThing.id } });
+              },
+              onHandOff: (offer, connectionId) => {
+                moves.handOff(undefined, offer, connectionId);
+              },
+              onClose: () => {
+                setIsPaneOpen(false);
+                focusList();
+              },
+            }}
+          />
+        )
+      }
+      offlinePill={
+        offlineSince === null ? null : <InboxOfflinePill sinceLabel={formatClock(offlineSince)} />
+      }
+      isPaneShown={currentThing !== undefined || snapshot.status === "loading"}
+      isPaneOpen={isPaneOpen}
+      paneWidth={paneWidth}
+      onPaneWidthChange={setPaneWidth}
+      onClosePane={() => {
+        setIsPaneOpen(false);
+        focusList();
+      }}
+      onOpenAtSource={
+        currentThing === undefined || currentThing.url === "" ? undefined : moves.openAtSource
+      }
+      onOpenIntake={() => {
+        void navigate({ to: "/intake" });
+      }}
+      onOpenKeys={() => {
+        setIsKeysOpen((isOpen) => !isOpen);
+      }}
+      isKeysOpen={isKeysOpen}
+      onStackedChange={setIsStacked}
       overlays={
         <>
-          <InboxOpenCard
-            openCard={openCard}
-            client={client}
-            inbox={inbox}
-            plugins={plugins}
-            platform={bridge.platform}
-            onLink={moves.link}
-            onUnlink={moves.unlink}
-            onSeeInIntake={(entityId) => {
-              openCard.close();
-              void navigate({ to: "/intake", search: { entity: entityId } });
-            }}
-            onTake={(cardId) => {
-              const card = findCard(cardId);
-              if (card !== undefined) {
-                openCard.closeThen(() => {
-                  moves.take(card);
-                });
-              }
-            }}
-            onDismiss={(cardId) => {
-              const card = findCard(cardId);
-              if (card !== undefined) {
-                openCard.closeThen(() => {
-                  dismissWithRiders(card);
-                });
-              }
-            }}
-            chosenConnectionId={handOff.chosenConnectionId}
-            onChooseConnection={handOff.chooseConnection}
-            onHand={handOff.handFromSheet}
-            onSeeTask={(taskId) => {
-              openCard.close();
-              void navigate({ to: "/work", search: { task: taskId } });
-            }}
-          />
-          {handOff.menu !== null && (
-            <HandToMenu
-              offers={handOff.menu.offers}
-              openKinds={handOff.menu.card.signals.kinds}
-              actingConnections={handOff.menu.card.actingConnections}
-              chosenConnectionId={handOff.chosenConnectionId}
-              onChooseConnection={handOff.chooseConnection}
-              onHand={handOff.pickFromMenu}
-              onClose={handOff.closeMenu}
-              anchor={handOff.menu.anchor}
+          {isKeysOpen && (
+            <KeysSheet rows={buildInboxKeyRows(bridge.platform)} platform={bridge.platform} />
+          )}
+          {handMenu !== null && (
+            <InboxHandMenuPart
+              thing={handMenu.thing}
+              offers={handMenu.thing.offers}
+              anchor={handMenu.anchor}
+              onHand={(offer, connectionId) => {
+                moves.handOff(handMenu.thing.ref, offer, connectionId);
+              }}
+              onClose={() => {
+                setHandMenu(null);
+              }}
             />
           )}
-          {rail !== null && <Rail ref={attachRail} targets={rail.targets} monogram={monogram} />}
-          {page.isKeysSheetOpen && <KeysSheet rows={KEY_ROWS} platform={bridge.platform} />}
-          <UndoLine
-            text={moves.line.text}
-            onUndo={moves.line.canUndo ? moves.undoLastMove : null}
-            action={moves.line.action}
-            undoKey={describeUndoKey(bridge.platform)}
-            isShown={moves.line.isShown}
-          />
         </>
       }
-      state={state}
-      isHolding={isHolding && inbox !== undefined}
-      isArriving={isArriving}
-      isOffline={offlineSince !== null}
-      announcement={announcement}
-      scrollRef={scrollRef}
-    >
-      {body}
-    </InboxDesk>
+    />
   );
 }

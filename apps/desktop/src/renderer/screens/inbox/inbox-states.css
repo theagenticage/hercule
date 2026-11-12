@@ -1,242 +1,263 @@
-/* The states around the page: loading, an Inbox with nothing at all, the first
-   run, the small sunrise in the column, and the one line in the bar. From the
-   drawing's `css/states.css` and `css/inbox.css`. */
+/* The Inbox's states: empty, the sunrise, loading, offline and a source that can't be
+   read. The numbers are the drawing's (states.css). The list's own sizes (`--row-h`,
+   `--row-gap`, `--row-pad-x`, `--list-pad`) are the Inbox frame's tokens. */
 
-/* ---------- Loading ----------
-   The real cards, laid out with their words and then held back, so every line
-   keeps its height and nothing shifts when the words arrive. */
-.is-holding :is(.row-title, .request-title) {
-  color: transparent;
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  border-radius: 4px;
+/* ---------- Empty ---------- */
+/* The empty state centres itself in the list's whole height. Its `min-height` is a percentage,
+   which resolves only when every parent has a height, so the lines that hold it take the full
+   height of the scrolling column. */
+.ib-lines.is-centred {
+  height: 100%;
 }
-.is-holding
-  :is(
-    .row-rail > *,
-    .row-end,
-    .row-context,
-    .row-trust,
-    .request-mark,
-    .request-under,
-    .request-trust,
-    .card-wait,
-    .inbox-tucked,
-    .inbox-hint
-  ) {
-  visibility: hidden;
+/* The drawing's state sits 40px under the middle of the free space, because its empty list keeps
+   a 96px foot above the state and so scrolls. The padding puts the state in the same place and
+   leaves the list nothing to scroll. */
+.ib-empty {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 112px 24px 32px;
 }
-/* The first read of a page nothing is known of: bars where the words will be. */
-.loading-bar {
-  display: inline-block;
-  vertical-align: middle;
-  border-radius: 4px;
-  background: color-mix(in oklab, var(--ink) 8%, transparent);
-}
-.loading-bar--place {
-  width: 180px;
-  height: 14px;
-}
-.loading-bar--title {
-  width: 68%;
-  height: 11px;
-}
-.loading-bar--line {
-  width: 40%;
-  height: 9px;
-}
-.inbox-row > .card-body > .row-main > .loading-bar--title {
-  display: block;
-  margin: 5px 0 5px;
-}
-/* The words fade in once the read arrives, block by block (60ms) and card by card (14ms, up to 16). */
-@media (prefers-reduced-motion: no-preference) {
-  .inbox-desk.is-arriving
-    :is(
-      .row-title,
-      .row-rail,
-      .row-context,
-      .row-end,
-      .row-trust,
-      .request-mark,
-      .request-title,
-      .request-under,
-      .request-trust,
-      .card-wait,
-      .inbox-tucked,
-      .inbox-hint
-    ) {
-    animation: inbox-words-in 240ms var(--m-ease)
-      calc(var(--arrive-block, 0) * 60ms + min(var(--arrive-step, 0), 16) * 14ms) backwards;
-  }
-}
-@keyframes inbox-words-in {
-  from {
-    opacity: 0;
-  }
-}
-
-/* ---------- Nothing at all ---------- */
-.inbox-desk[data-state="clear"] .inbox-page {
-  display: block;
-  padding: 0;
-}
-.inbox-clear {
+.ib-em {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding-top: 17vh;
-}
-.inbox-clear .sunrise {
-  max-width: 70%;
-}
-/* The words are set by property and not by the `font` shorthand, which would reset the
-   page's font features (the tailed l), so they keep the drawing's spacing. */
-.inbox-clear h2 {
-  margin: 37px 0 6px;
-  font-size: var(--t-20);
-  font-weight: var(--w-bold);
-  letter-spacing: -0.008em;
-}
-.inbox-clear p {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--t-14);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .inbox-clear:not(:has([data-still])) :is(h2, p) {
-    animation: inbox-fade-up 500ms var(--m-ease) 900ms backwards;
-  }
-}
-@keyframes inbox-fade-up {
-  from {
-    transform: translateY(6px);
-    opacity: 0;
-  }
-}
-/* No requests left: the same sunrise, small, in the column, because lasting work never ends. */
-.inbox-requests-clear {
-  padding-top: 24px;
-}
-.inbox-requests-clear p {
-  margin: 16px 0 0;
-  text-align: center;
-  color: var(--muted);
-  font: var(--type-summary);
-}
-
-/* ---------- First run ----------
-   The page itself. Hercule hands over one line over the top edge of a card of
-   the page's own stock, and each side asks for the sources whose cards will lie there. */
-.inbox-welcome {
-  position: relative;
-  isolation: isolate;
-  margin: 0 0 26px;
-  padding: 5px 0;
-  color: var(--ink);
-}
-.inbox-welcome .card-holder {
-  right: 16px;
-}
-.inbox-welcome .card-paws {
-  right: 19px;
-}
-.inbox-welcome p {
-  margin: 0;
-  padding: 8px 56px 8px 16px;
-  font: var(--type-card);
-  font-size: var(--t-14);
-  color: var(--ink);
-}
-.inbox-welcome small {
-  display: block;
-  color: var(--muted);
-  font: var(--type-summary);
-}
-.inbox-offer {
-  position: relative;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  column-gap: 10px;
-  align-items: center;
-  width: 100%;
-  min-height: 84px;
-  padding: 12px;
-  border-radius: var(--card-r);
-  background: var(--stock);
-  box-shadow: var(--h-rest);
-  color: var(--ink);
-  text-align: left;
-  transition: box-shadow var(--m-quick) var(--m-ease);
-}
-.inbox-offer:hover {
-  box-shadow: var(--h-hover);
-}
-.inbox-offer:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-.inbox-offer b {
-  display: block;
-  font: var(--type-card);
-  font-size: calc(15px + var(--text-size-step));
-  line-height: calc(21px + var(--text-size-step));
-}
-.inbox-offer small {
-  color: var(--muted);
-  font: var(--type-summary);
-}
-.offer-go {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-  font: var(--type-summary);
-}
-.inbox-offer:hover .offer-go {
-  color: var(--ink);
-}
-.inbox-offers-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.inbox-offers-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* ---------- The one line in the bar ----------
-   Offline, or a source that fails: what the user sees, and what it means for it. */
-.inbox-notice {
-  display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 14px;
-  background: color-mix(in oklab, var(--you) 18%, transparent);
+  max-width: 340px;
+  text-align: center;
+}
+/* The heading takes the focus only so a screen reader starts there. It is not a control, so no ring. */
+.ib-em-title:focus {
+  outline: none;
+}
+.ib-em-title {
+  margin: 8px 0 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.ib-em-line {
+  margin: 0 0 10px;
+  text-wrap: balance;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 20px;
+}
+.ib-em-line code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sunken);
   color: var(--ink);
-  font: var(--type-summary);
+  font-size: var(--t-12);
+}
+.ib-em--zero .ib-em-title {
+  font-size: var(--t-20);
+  line-height: 28px;
+}
+.ib-em-link {
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+/* A link inside a sentence shows its focus on itself: a thick focus-coloured underline and a tint,
+   never a ring over the words beside it. */
+.ib-em-link:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--focus) 14%, transparent);
+  text-decoration-color: var(--focus);
+  text-decoration-thickness: 2px;
+}
+
+/* ---------- The sunrise ---------- */
+/* Hercule's head comes up over a brass horizon and the rays draw outward, once. Nothing shows
+   below the horizon (y 58 of 64 in the drawing, 81px of 90): the head rises out of it. */
+.ib-em-sun {
+  position: relative;
+  width: 168px;
+  height: 90px;
+  clip-path: inset(0 0 7.5px 0);
+}
+.ib-em-sun--small {
+  transform: scale(0.8);
+  margin: -8px 0 -10px;
+}
+.ib-sun {
+  position: absolute;
+  inset: 0;
+}
+.ib-sun-line {
+  stroke: var(--brass);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  /* The horizon draws outward from its middle. */
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ib-sun-rays line {
+  stroke: color-mix(in oklab, var(--brass) 70%, transparent);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-dasharray: 2 4;
+}
+.ib-sun-head {
+  position: absolute;
+  left: 50%;
+  bottom: 9px;
+  translate: -50% 0;
+  clip-path: inset(-20px -20px 0 -20px);
+  line-height: 0;
+}
+/* The animations hold their start with `backwards`, so the horizon and the rays stay unseen
+   until their turn, and the words stay at opacity 0 until theirs. Only a state that rises
+   (`ib-em--rises`) draws them: one the user's own move reached. */
+@media (prefers-reduced-motion: no-preference) {
+  .ib-em--rises .ib-sun-line {
+    animation: ib-sun-line 700ms var(--m-ease) var(--sun-wait, 0ms) backwards;
+  }
+  .ib-em--rises .ib-sun-rays line {
+    animation: ib-sun-ray 520ms var(--m-ease) backwards;
+    animation-delay: calc(var(--sun-wait, 0ms) + 420ms + var(--ray) * 26ms);
+  }
+  .ib-em--rises .ib-sun-head {
+    animation: ib-sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) var(--sun-wait, 0ms) backwards;
+  }
+  .ib-em--rises .ib-em-sun ~ .ib-em-title,
+  .ib-em--rises .ib-em-sun ~ .ib-em-line {
+    animation: ib-em-words 400ms var(--m-ease) calc(var(--sun-wait, 0ms) + 600ms) backwards;
+  }
+}
+@keyframes ib-sun-line {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+@keyframes ib-sun-ray {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ib-sun-rise {
+  from {
+    transform: translateY(44px);
+  }
+}
+@keyframes ib-em-words {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---------- Loading ---------- */
+/* The rows' shapes, still. Nothing pulses, so a slow read costs no frames. */
+.ib-skel {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  grid-template-rows: var(--line-18) var(--line-16);
+  column-gap: var(--row-gap);
+  row-gap: 2px;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+}
+.ib-skel i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.ib-skel i:nth-child(1) {
+  width: 14px;
+  height: 14px;
+}
+.ib-skel i:nth-child(4) {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  justify-self: center;
+}
+.ib-skel i:nth-child(5) {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.ib-skel-n {
+  display: inline-block;
+  width: 16px;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.ib-pane-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+}
+.ib-pane-skel i {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+
+/* ---------- Offline ---------- */
+/* One quiet pill in the bar. It counts nothing: a move made offline is refused. */
+.ib-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
   white-space: nowrap;
 }
-.inbox-notice > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.ib-offline[hidden] {
+  display: none;
 }
-.inbox-notice a,
-.inbox-notice button {
-  flex: none;
-  margin-left: 4px;
-  color: inherit;
-  text-decoration: underline;
-}
-.notice-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
+.ib-offline::before {
+  content: "";
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--you);
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+
+/* ---------- A source that can't be read ---------- */
+.ib-failing {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 var(--list-pad) 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--fail-tint);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.ib-failing[hidden] {
+  display: none;
+}
+.ib-failing svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--fail-ink);
+}
+.ib-failing b {
+  font-weight: var(--w-medium);
+}
+.ib-failing-link {
+  margin-left: auto;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ib-failing-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 2px;
 }

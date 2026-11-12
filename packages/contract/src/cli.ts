@@ -361,7 +361,7 @@ export const CLI = {
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults (thread.providerAccountId, thread.harnessId, thread.model and the like), the default GitHub account (github.defaultConnectionId), mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults (thread.providerAccountId, thread.harnessId, thread.model and the like), the default GitHub account (github.defaultConnectionId), mutes, the Inbox rail's pins (inbox.pins) and folded sources (inbox.browseFolded).",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -1440,13 +1440,55 @@ export const CLI = {
 
   "externalEntity.queryInbox": {
     command: "entity list",
-    help: "Lists the Inbox: the pull requests, tickets and errors in other systems that concern you, as cards. Each card gives the thing's kind, identifier, title, status, who it is from, why it is here, its facts, and the place it sits under. A card has its side: requests (small cards), ongoing (rows under their place) or with-someone-else (a Task already has it). Each card also gives its signals: the newest open one that is not snoozed, and how many are open. Also gives the places above the cards, the links between them, the records at the far end of those links, the counts, and the workflows each card can be handed to (offer sets) with the accounts that can act. Oldest first, by when Hercule first saw each. At most 1000 cards come back; the reply says when there were more. A dismissed card is not listed. Needs the grants `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query`, because cards show signal text, the workflows and accounts they can be handed to, and the workflows running on their Task. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
-    examples: [{ args: [] }],
-    fields: {},
+    help: "Lists a page of your Inbox: what in other systems concerns you. Each thing gives its kind, identifier, title, status, its open asks (what someone waits on you for, newest first, with who asked), when the oldest ask began, its card face, the workflows it can be handed to (offer sets) with the accounts that can act, and its Task if one has it. A list is a saved query (`waits` is Someone waits on me, then `mine`, `updates`, `with-hercule`, `everything`, and a plugin's such as `github/review-requests`). Narrow it with --clause and --text; both can only shrink the list. A list ordered `waiting` puts the oldest ask first, the others the latest change first. At most 200 things come back. The first page (`--mode first`, the default) gives `total` and the facets of the whole result, and `nextCursor` when more follow: pass it to `--mode next --after <cursor>`, with the same list and search, for the next page. A next page gives only things, `nextCursor` and the offer sets. A dismissed thing is not listed until a new ask on it brings it back. Needs the grants `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query`, because things show signal text, the workflows and accounts they can be handed to, and the workflows running on their Task. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
+    examples: [
+      { args: [] },
+      { args: ["--list", "waits"] },
+      { args: ["--list", "github/review-requests", "--clause", "team=Checkout"] },
+      { args: ["--list", "everything", "--clause", "waiting>2d", "--text", "login flaky"] },
+      { args: ["--list", "waits", "--mode", "next", "--after", "eyJoIjoi"] },
+    ],
+    fields: {
+      list: {
+        flag: "list",
+        default: "everything",
+        help: "The saved query to read, by its id, such as waits or github/review-requests. Left out, everything. The core ones are waits, mine, updates, everything and with-hercule; a plugin's is its plugin id, a slash and a word.",
+      },
+      clauses: {
+        flag: "clause",
+        help: "A condition, written key=value, key>value or key<value, such as team=Checkout, size>1000 or waiting>2d (a duration is a number with s, m, h, d or w). The key is a core key (source, kind, account, from, waiting, asks, held, mine, signal) or a field a source declares. Repeat it to add more; all must hold.",
+      },
+      text: {
+        flag: "text",
+        help: "Words to find: each must appear, in any case, in the thing's title, identifier or a text field.",
+      },
+      mode: {
+        flag: "mode",
+        default: "first",
+        help: "What to read. `first` (the default) reads the first page; `next` reads the page after --after. `refresh` and `rows` are for an app that keeps a list on screen: they need the refs it holds, which the command line cannot send, so they fail here.",
+      },
+      after: {
+        flag: "after",
+        help: "With --mode next: the nextCursor of the previous page of this same list and search. A cursor of another query is refused, and so is --after with any other mode.",
+      },
+      // The refs a client holds: a command line cannot name hundreds of them.
+      held: { hidden: true },
+    },
+    errors: {
+      validation:
+        "the list is not a saved query that exists, a clause is not valid for its key, the cursor belongs to another list or search, or a flag does not fit the mode (--after needs --mode next); read the message, and start again from the first page",
+    },
   },
-  // Exists only for the sidebar and the undo line: the sidebar reads the
-  // counts on every screen. A terminal gets the same counts from `entity list`.
+  // Exists only for the sidebar: it reads the one number on every screen. A
+  // terminal gets the same count from `entity list --list waits`, whose reply has `total`.
   "externalEntity.countInbox": { hidden: true },
+  // Exists only for the rail of the desktop app's Inbox: it draws the saved
+  // queries, sources, accounts, facets and pins in one read. A terminal lists a
+  // saved query with `entity list` and filters with --clause.
+  "externalEntity.readInboxOutline": { hidden: true },
+  // Exists only for the search box of the desktop app: it suggests values of a
+  // field while the user types. A terminal types the value it knows.
+  "externalEntity.suggestInboxValues": { hidden: true },
   "externalEntity.read": {
     command: "entity read",
     help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the fields its kind declares that have a value (`fields`, in declaration order) and the card face drawn from them (`face`, null for the generic card), the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
@@ -1527,24 +1569,31 @@ export const CLI = {
   "externalEntity.undoTakeOn": { hidden: true },
   "externalEntity.dismiss": {
     command: "entity dismiss",
-    help: "Takes a card off your Inbox. The thing keeps its history and nothing is told to its source. A new concern or signal does not bring it back; only `hercule entity restore` does.",
-    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    help: "Takes things off your Inbox, as you, all or none in one call. They keep their history and nothing is told to their source. An ask raised on a thing after you dismissed it brings it back; a new concern, an ask that was open when you dismissed it, or a signal that asks nothing does not. `hercule entity restore` brings them back at once. At most 1000 things.",
+    examples: [
+      { args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] },
+      {
+        args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c", "2a4b6c8d-1e3f-7a40-8c11-0d5e6f7a8b9c"],
+      },
+    ],
     fields: {
-      id: {
+      ids: {
         positional: true,
-        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+        placeholder: "id",
+        help: "An entity's full id, as `hercule entity list` shows it. A tail is not accepted. Give several to dismiss them in one call.",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "externalEntity.restore": {
     command: "entity restore",
-    help: "Brings a dismissed card back onto your Inbox.",
+    help: "Brings dismissed things back onto your Inbox, as you, all or none in one call.",
     examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
     fields: {
-      id: {
+      ids: {
         positional: true,
-        help: "The entity's full id. A dismissed card is not in `hercule entity list`, so keep the id from before; a tail is not accepted.",
+        placeholder: "id",
+        help: "An entity's full id. A dismissed thing is not in `hercule entity list`, so keep the id from before; a tail is not accepted. Give several to restore them in one call.",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

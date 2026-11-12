@@ -897,6 +897,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "review-requested",
     label: "Review requested",
     description: "Someone asked you to review a pull request.",
+    noun: "review request",
+    asks: true,
     from: ["github.pr.review-requested"],
     rule: 'event.payload.reviewer == "you" ? "yes" : "no"',
     guidance: "A review was requested from the user by name. It is always a signal.",
@@ -911,6 +913,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "team-review-requested",
     label: "Team review requested",
     description: "Someone asked a team you are on to review a pull request.",
+    noun: "team review request",
+    asks: true,
     from: ["github.pr.review-requested"],
     rule: 'event.payload.reviewer == "team" && !event.payload.byYou ? "yes" : "no"',
     guidance:
@@ -930,6 +934,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "mentioned",
     label: "Mentioned",
     description: "Someone mentioned you by name in a comment on an issue or a pull request.",
+    noun: "mention",
+    asks: true,
     from: ["github.mentioned"],
     rule: 'event.payload.byYou ? "no" : "yes"',
     guidance: "A comment names the user with @login. A comment the user wrote is never a signal.",
@@ -959,6 +965,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "assigned",
     label: "Assigned",
     description: "Someone assigned you an issue or a pull request.",
+    noun: "assignment",
+    asks: false,
     from: ["github.issue.assigned"],
     rule: `event.payload.toYou && !event.payload.byYou && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:
@@ -984,6 +992,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "changes-requested",
     label: "Changes requested",
     description: "A reviewer asked for changes on your pull request.",
+    noun: "requested changes",
+    asks: true,
     from: ["github.pr.review-submitted"],
     rule: `event.payload.verdict == "changes-requested" && event.payload.onYourPullRequest && !event.payload.byYou && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:
@@ -1012,6 +1022,8 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     word: "checks-failed",
     label: "Checks failed",
     description: "The checks on your pull request failed.",
+    noun: "failing checks",
+    asks: true,
     from: ["github.pr.checks-completed"],
     rule: `event.payload.conclusion == "failure" && event.payload.onYourPullRequest && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:

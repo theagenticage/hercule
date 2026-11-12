@@ -802,6 +802,54 @@ describe("undoHandOff", () => {
     });
   });
 
+  it("tells the menu when the user last handed a thing of this kind to the workflow, until the hand-off is taken back", async () => {
+    await withNorthwind(async (controller) => {
+      const { thing, workflowId } = await arrangeOneThing(controller);
+      // A Task holds the thing, so it is on the Inbox before and after. The
+      // arranged record lacks the columns a page of the Inbox reads.
+      const { sql } = controller.harness;
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            sql,
+            sql`UPDATE external_entities SET card = 'compact', url = '', patience = 24,
+                  lifecycle = 'open', source_updated_at = first_observed_at
+                WHERE ref = ${thing.ref}`,
+          ),
+        ),
+      );
+      await createTaskFor(controller, thing, "planned");
+      const readLastHandedAt = async () => {
+        const response = await post(
+          controller.base,
+          "/api/v1/external-entities/inbox/query",
+          { mode: "first", list: { savedQuery: "everything" } },
+          controller.token,
+        );
+        const page = (await response.json()) as {
+          readonly things: ReadonlyArray<{ readonly id: string; readonly offerSetId: string }>;
+          readonly offerSets: Readonly<
+            Record<
+              string,
+              ReadonlyArray<{ readonly workflowId: string; readonly lastHandedAt?: string }>
+            >
+          >;
+        };
+        const row = page.things.find((entry) => entry.id === thing.id)!;
+        return page.offerSets[row.offerSetId]!.find((offer) => offer.workflowId === workflowId)
+          ?.lastHandedAt;
+      };
+      expect(await readLastHandedAt()).toBeUndefined();
+
+      const result = await handOff(controller, thing, { workflowId });
+      expect(await readLastHandedAt()).toEqual(expect.any(String));
+
+      await rewindRunToPending(controller, result.runId);
+      await undoHandOff(controller, result.runId);
+      expect(await readLastHandedAt()).toBeUndefined();
+    });
+  });
+
   it("answers not found for a run no handoff of an entity started", async () => {
     await withNorthwind(async (controller) => {
       const response = await requestUndoHandOff(controller, ABSENT_ID);

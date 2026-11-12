@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { TASK_STAGES } from "@hercule/contract";
 import {
+  CORE_INBOX_FIELD_KEYS,
   ENTITY_STATUS_STAGES,
   type EntityKindDeclaration,
   type EventSourceContribution,
@@ -482,6 +483,15 @@ describe("decodeEntityKinds", () => {
         }),
       ]);
       expect(Array.isArray(kinds)).toBe(true);
+    });
+
+    it.each(CORE_INBOX_FIELD_KEYS)("refuses a field with the Inbox's own key %s", async (key) => {
+      const message = await decode([buildKind("ticket", { fields: [text(key)] })]);
+
+      expect(message).toContain(
+        `its field "${key}" has the key of one of the Inbox's own query fields`,
+      );
+      expect(message).toContain("Give the field another key");
     });
 
     it("lets a fact name a key that is no declared field", async () => {

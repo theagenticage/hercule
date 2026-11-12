@@ -28,14 +28,16 @@ export class SignalEntities extends Context.Service<
     /**
      * Runs `write`, which writes an open signal on the thread `ref`, and
      * returns its result. When the write put the entity of `ref` onto the
-     * Inbox and the clock, the entity becomes an arrival, as a new concern
-     * would. The port looks at the Inbox before `write` runs, so a signal that
+     * Inbox, or made it ask for a move when it did not, the entity becomes an
+     * arrival, as a new concern would. `askingKinds` are the signal kinds that
+     * ask the user for a move. The port looks at the Inbox before `write` runs, so a signal that
      * lands on a card that is on the Inbox already makes no arrival. It does
      * nothing extra for a ref with no entity. It runs in the caller's
      * transaction and checks no grant.
      */
     readonly recordArrivalAfter: <A, E, R>(
       ref: string,
+      askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | SqlError, R>;
   }

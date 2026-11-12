@@ -5,6 +5,7 @@ import type { EntityKindDeclaration, EntityLookup, IngestEntities } from "./enti
 import { PLUGIN_ID_SOURCE } from "./manifest";
 import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
+import type { SavedQuery } from "./saved-queries";
 
 const Support = Schema.Literals(["native", "unsupported"]);
 
@@ -468,6 +469,15 @@ export interface EventSourceContribution {
    */
   readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
   /**
+   * The saved queries this source adds to the Inbox's rail, at most
+   * `MAX_SAVED_QUERIES_PER_PLUGIN` for the whole plugin. None when left out.
+   * The host refuses the source when two queries share a word, when a clause
+   * has a key that is neither a core key nor a field this source declares,
+   * when an operator does not fit the field's type, or when a `kind` or
+   * `signal` clause names a kind this plugin does not declare.
+   */
+  readonly savedQueries?: ReadonlyArray<SavedQuery>;
+  /**
    * Recognizes, searches and reads this source's things for the Add button on
    * Work. A plugin declares one `entityLookup` at most, because the host
    * reaches it by plugin id: the host refuses a second source of the same
@@ -498,6 +508,14 @@ export interface EventSourceContribution {
  *   id, so `review-requested` becomes `github/review-requested`.
  * - `label` and `description` are shown to the user: the label on Intake,
  *   the description in Intake's settings.
+ * - `noun` names one signal of the kind in a sentence, singular and in lower
+ *   case, such as "review request", "mention" or "failing checks". It is 1 to
+ *   40 characters.
+ * - `asks` says whether an open signal of the kind asks the user to make a
+ *   move, such as a review request, a mention or failing checks on the user's
+ *   pull request. A thing with an open asking signal is one someone waits on
+ *   the user for. A kind that only informs, such as a new issue in a watched
+ *   project, does not ask.
  * - `from` lists the event kinds the rule reads. The rule never runs on
  *   another kind.
  * - `rule` returns `"yes"`, `"no"` or `"undecided"`: whether the event is a
@@ -520,6 +538,8 @@ export interface SignalKindDeclaration {
   readonly word: string;
   readonly label: string;
   readonly description: string;
+  readonly noun: string;
+  readonly asks: boolean;
   readonly from: ReadonlyArray<string>;
   readonly rule: string;
   readonly guidance: string;

@@ -22,6 +22,7 @@ import { MAX_ENTITY_SIGNALS, type Signal } from "@hercule/contract";
 import { uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { signalRepository } from "../signals/repository";
+import { inbox } from "./inbox.testing";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
@@ -116,7 +117,11 @@ const project: ObservedEntity = {
   fieldRows: [],
 };
 
-const environment = (minutes: number) => ({ now: at(minutes), activePluginIds: [PLUGIN] });
+const environment = (minutes: number) => ({
+  now: at(minutes),
+  activePluginIds: [PLUGIN],
+  askingKinds: [],
+});
 
 let signalCounter = 0;
 const signalId = () => `0199e0e7-0005-7000-8000-${String(++signalCounter).padStart(12, "0")}`;
@@ -223,11 +228,30 @@ const run = <A>(
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
-const readInbox = (repository: Repository, minutes: number) =>
-  repository.queryInbox(environment(minutes));
+/** The signal kinds the tests raise: the mention and the unlisted kind ask, the assignment does not. */
+const ASKING_KINDS = ["acme-tracker/mentioned", "acme-tracker/unlisted"];
 
-const cardRefs = (inbox: { readonly cards: ReadonlyArray<{ readonly ref: string }> }) =>
-  inbox.cards.map((card) => card.ref);
+const inboxEnvironment = (minutes: number) => ({
+  ...environment(minutes),
+  signalKinds: [
+    { kind: "acme-tracker/mentioned", noun: "mention", asks: true },
+    { kind: "acme-tracker/unlisted", noun: "unlisted thing", asks: true },
+    { kind: "acme-tracker/assigned", noun: "assignment", asks: false },
+  ],
+  savedQueries: [],
+  askingKinds: ASKING_KINDS,
+});
+
+const readInbox = (minutes: number) =>
+  inbox.readFirstPage(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
+
+const readSidebarCounts = (minutes: number) => inbox.countInbox(inboxEnvironment(minutes));
+
+const readCounts = (minutes: number) =>
+  inbox.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
+
+const cardRefs = (inbox: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
+  inbox.things.map((card) => card.ref);
 
 const readDetail = (
   repository: Repository,
@@ -256,52 +280,52 @@ describe("the join of a signal to its entity", () => {
     readonly expected: ReadonlyArray<readonly [string, number]>;
   }
 
-  const summarize = (repository: Repository) =>
-    Effect.map(readInbox(repository, 10), (inbox) =>
-      inbox.cards.map((card): readonly [string, number] => [card.ref, card.signals.openCount]),
+  const summarize = () =>
+    Effect.map(readInbox(10), (inbox) =>
+      inbox.things.map((card): readonly [string, number] => [card.ref, card.askCount]),
     );
 
   const cases: ReadonlyArray<JoinCase> = [
     {
       name: "a signal before its entity stays alone, then attaches when the entity appears",
-      arrange: ({ repository, refresh }) =>
+      arrange: ({ refresh }) =>
         Effect.gen(function* () {
           yield* raiseSignal(ticketRef("early"));
-          expect(cardRefs(yield* readInbox(repository, 5))).toEqual([]);
+          expect(cardRefs(yield* readInbox(5))).toEqual([]);
           yield* refresh(ACCOUNT_A, [ticket("early")], 6);
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
       expected: [[ticketRef("early"), 1]],
     },
     {
       name: "an entity before its signal gets the signal on its card",
-      arrange: ({ repository, reconcile }) =>
+      arrange: ({ reconcile }) =>
         Effect.gen(function* () {
           yield* reconcile(ACCOUNT_A, [ticket("late", { concerns: ["assigned"] })], 1);
           yield* raiseSignal(ticketRef("late"));
           yield* raiseSignal(ticketRef("late"), { createdAt: at(3) });
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
       expected: [[ticketRef("late"), 2]],
     },
     {
-      name: "a core signal raised from an event joins like any other",
-      arrange: ({ repository, refresh }) =>
+      name: "a core signal raised from an event joins like any other, and asks nothing",
+      arrange: ({ refresh }) =>
         Effect.gen(function* () {
           yield* refresh(ACCOUNT_A, [ticket("core")], 1);
           yield* raiseSignal(ticketRef("core"), { kind: "fyi", title: "Heads up" });
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
-      expected: [[ticketRef("core"), 1]],
+      expected: [[ticketRef("core"), 0]],
     },
     {
       name: "a thread on a place stays alone before and after its record exists",
       arrange: ({ repository, reconcile }) =>
         Effect.gen(function* () {
           yield* raiseSignal(PROJECT);
-          const before = yield* summarize(repository);
+          const before = yield* summarize();
           yield* reconcile(ACCOUNT_A, [project], 2);
-          const after = yield* summarize(repository);
+          const after = yield* summarize();
           const entities = yield* repository.readSignalEntities([PROJECT]);
           expect([before, after, entities.size]).toEqual([[], [], 0]);
           return after;
@@ -310,34 +334,34 @@ describe("the join of a signal to its entity", () => {
     },
     {
       name: "a ticket and an epic of the same name are different things",
-      arrange: ({ repository, refresh }) =>
+      arrange: ({ refresh }) =>
         Effect.gen(function* () {
           yield* refresh(ACCOUNT_A, [ticket("7")], 1);
           yield* refresh(ACCOUNT_A, [epic("7")], 1);
           yield* raiseSignal(ticketRef("7"));
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
       expected: [[ticketRef("7"), 1]],
     },
     {
       name: "a resolved signal holds nothing",
-      arrange: ({ repository, refresh }) =>
+      arrange: ({ refresh }) =>
         Effect.gen(function* () {
           yield* refresh(ACCOUNT_A, [ticket("done")], 1);
           yield* raiseSignal(ticketRef("done"), { resolved: true });
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
       expected: [],
     },
     {
       name: "an API signal has no thread and joins nothing",
-      arrange: ({ repository, refresh, sql }) =>
+      arrange: ({ refresh, sql }) =>
         Effect.gen(function* () {
           yield* refresh(ACCOUNT_A, [ticket("api")], 1);
           const id = yield* raiseSignal(ticketRef("api"));
           // An API signal stores a null thread ref.
           yield* sql`UPDATE signals SET thread_ref = NULL WHERE id = ${uuidFromString(id)}`;
-          return yield* summarize(repository);
+          return yield* summarize();
         }),
       expected: [],
     },
@@ -403,27 +427,27 @@ describe("the join of a signal to its entity", () => {
 });
 
 describe("Inbox membership and arrivals", () => {
-  it("brings a card in with an open signal and no concern, takes it out when the signal ends, and leaves the sidebar numbers consistent", async () => {
-    const steps = await run(({ repository, refresh, sql }) =>
+  it("brings a card in with an open signal and no concern, takes it out when the signal ends, and leaves the counts consistent", async () => {
+    const steps = await run(({ refresh, sql }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("quiet")], 1);
-        const before = yield* readInbox(repository, 3);
+        const before = yield* readInbox(3);
         const id = yield* raiseSignal(ticketRef("quiet"));
-        const during = yield* readInbox(repository, 3);
-        const counts = yield* repository.countInbox(at(3));
+        const during = yield* readInbox(3);
+        const counts = yield* readCounts(3);
         yield* sql`UPDATE signals SET status = 'resolved',
           resolution = '{"kind":"decided","outcome":"x","actor":"user","origin":"web","at":"2026-03-01T00:04:00.000Z"}'
           WHERE id = ${uuidFromString(id)}`;
-        const after = yield* readInbox(repository, 5);
+        const after = yield* readInbox(5);
         return { before, during, counts, after };
       }),
     );
     expect(cardRefs(steps.before)).toEqual([]);
     expect(cardRefs(steps.during)).toEqual([ticketRef("quiet")]);
-    expect(steps.during.counts).toEqual(steps.counts);
-    expect(steps.counts).toMatchObject({ onTheClock: 1, requests: 1 });
+    expect(steps.during.total).toBe(1);
+    expect(steps.counts.savedQueries.find((query) => query.id === "everything")!.count).toBe(1);
+    expect(steps.counts.savedQueries.find((query) => query.id === "waits")!.count).toBe(1);
     expect(cardRefs(steps.after)).toEqual([]);
-    expect(steps.after.counts.onTheClock).toBe(0);
   });
 
   it("makes a card that a signal alone creates an arrival, and a card it lands on no second one", async () => {
@@ -432,47 +456,51 @@ describe("Inbox membership and arrivals", () => {
         // The signal came first: the refresh creates the entity and the card arrives.
         yield* raiseSignal(ticketRef("new"));
         yield* refresh(ACCOUNT_A, [ticket("new")], 3);
-        const created = (yield* repository.countInbox(at(3))).newestArrival;
+        const created = (yield* readSidebarCounts(3)).newestArrival;
 
         // An entity that was off the clock gains a signal.
         yield* refresh(ACCOUNT_A, [ticket("known")], 4);
         yield* repository.recordArrivalAfter(
           ticketRef("known"),
           at(5),
+          ASKING_KINDS,
           raiseSignal(ticketRef("known")),
         );
-        const raised = (yield* repository.countInbox(at(5))).newestArrival;
+        const raised = (yield* readSidebarCounts(5)).newestArrival;
 
         // A second signal, from a second Connection, on a card on the clock already.
         yield* repository.recordArrivalAfter(
           ticketRef("known"),
           at(6),
+          ASKING_KINDS,
           raiseSignal(ticketRef("known"), { connectionId: ACCOUNT_B }),
         );
-        const afterSecond = (yield* repository.countInbox(at(6))).newestArrival;
+        const afterSecond = (yield* readSidebarCounts(6)).newestArrival;
 
         // A signal on a card that concerns the user already.
         yield* reconcile(ACCOUNT_A, [ticket("mine", { concerns: ["assigned"] })], 7);
-        const mineArrival = (yield* repository.countInbox(at(7))).newestArrival;
+        const mineArrival = (yield* readSidebarCounts(7)).newestArrival;
         yield* repository.recordArrivalAfter(
           ticketRef("mine"),
           at(8),
+          ASKING_KINDS,
           raiseSignal(ticketRef("mine")),
         );
-        const afterMine = (yield* repository.countInbox(at(8))).newestArrival;
+        const afterMine = (yield* readSidebarCounts(8)).newestArrival;
 
         // A ref with no entity does nothing.
-        yield* repository.recordArrivalAfter(ticketRef("nobody"), at(9), Effect.void);
+        yield* repository.recordArrivalAfter(ticketRef("nobody"), at(9), ASKING_KINDS, Effect.void);
         return { created, raised, afterSecond, mineArrival, afterMine };
       }),
     );
     expect(steps.created).toBe(1);
     expect(steps.raised).toBe(2);
     expect(steps.afterSecond).toBe(2);
-    expect(steps.afterMine).toBe(steps.mineArrival);
+    // The card concerned the user already, but it begins to ask: that is a new arrival of "Someone waits on me".
+    expect(steps.afterMine).toBeGreaterThan(steps.mineArrival);
   });
 
-  it("records no second arrival when a concern joins a card that a live signal holds, in either order", async () => {
+  it("records no second arrival when a concern joins a card that a live ask holds, and one when an ask joins a concerned card", async () => {
     const steps = await run(({ repository, refresh, reconcile }) =>
       Effect.gen(function* () {
         // Signal first: the signal brings the quiet card onto the clock, then the first concern comes.
@@ -480,60 +508,75 @@ describe("Inbox membership and arrivals", () => {
         yield* repository.recordArrivalAfter(
           ticketRef("signal-first"),
           at(2),
+          ASKING_KINDS,
           raiseSignal(ticketRef("signal-first")),
         );
-        const signalArrival = (yield* repository.countInbox(at(2))).newestArrival;
+        const signalArrival = (yield* readSidebarCounts(2)).newestArrival;
         yield* reconcile(ACCOUNT_A, [ticket("signal-first", { concerns: ["assigned"] })], 3);
-        const afterConcern = (yield* repository.countInbox(at(3))).newestArrival;
+        const afterConcern = (yield* readSidebarCounts(3)).newestArrival;
 
         // Concern first: a later signal finds the card on the clock already.
         yield* reconcile(ACCOUNT_A, [ticket("concern-first", { concerns: ["assigned"] })], 4);
-        const concernArrival = (yield* repository.countInbox(at(4))).newestArrival;
+        const concernArrival = (yield* readSidebarCounts(4)).newestArrival;
         yield* repository.recordArrivalAfter(
           ticketRef("concern-first"),
           at(5),
+          ASKING_KINDS,
           raiseSignal(ticketRef("concern-first")),
         );
-        const afterSignal = (yield* repository.countInbox(at(5))).newestArrival;
+        const afterSignal = (yield* readSidebarCounts(5)).newestArrival;
         return { signalArrival, afterConcern, concernArrival, afterSignal };
       }),
     );
     expect(steps.signalArrival).toBe(1);
     expect(steps.afterConcern).toBe(steps.signalArrival);
-    expect(steps.concernArrival).toBe(2);
-    expect(steps.afterSignal).toBe(steps.concernArrival);
+    // The concerned card is not in "Someone waits on me", so its arrival is not the newest there.
+    expect(steps.concernArrival).toBe(steps.signalArrival);
+    // A thing that only begins to ask later arrives in "Someone waits on me" then, not before.
+    expect(steps.afterSignal).toBeGreaterThan(steps.concernArrival);
   });
 
-  it("raises no arrival for a signal on a dismissed card, and keeps the card off the Inbox", async () => {
+  it("keeps a dismissed card off the Inbox for a signal that asks nothing, and brings it back as an arrival for an ask", async () => {
     const steps = await run(({ repository, refresh, sql }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("hidden")], 1);
         const rows = yield* sql<{ readonly id: Uint8Array }>`
           SELECT id FROM external_entities WHERE ref = ${ticketRef("hidden")}`;
-        yield* repository.dismiss(uuidToString(rows[0]!.id), "user", at(2));
+        yield* repository.dismiss([uuidToString(rows[0]!.id)], "user", at(2));
         yield* repository.recordArrivalAfter(
           ticketRef("hidden"),
           at(3),
-          raiseSignal(ticketRef("hidden")),
+          ASKING_KINDS,
+          raiseSignal(ticketRef("hidden"), { kind: "acme-tracker/assigned", createdAt: at(3) }),
         );
-        const inbox = yield* readInbox(repository, 4);
+        const quiet = yield* readInbox(4);
+        const quietArrival = (yield* readSidebarCounts(4)).newestArrival;
         const open = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM signals WHERE status = 'open'`;
-        return {
-          inbox,
-          open: open[0]!.n,
-          suggestions: yield* repository.listSuggestions({
-            contextRef: undefined,
-            limit: 10,
-            now: at(4),
-          }),
-        };
+        const suggestions = yield* repository.listSuggestions({
+          contextRef: undefined,
+          limit: 10,
+          now: at(4),
+          askingKinds: ASKING_KINDS,
+        });
+        yield* repository.recordArrivalAfter(
+          ticketRef("hidden"),
+          at(5),
+          ASKING_KINDS,
+          raiseSignal(ticketRef("hidden"), { createdAt: at(5) }),
+        );
+        const back = yield* readInbox(6);
+        const backArrival = (yield* readSidebarCounts(6)).newestArrival;
+        return { quiet, quietArrival, open: open[0]!.n, suggestions, back, backArrival };
       }),
     );
-    expect(cardRefs(steps.inbox)).toEqual([]);
-    expect(steps.inbox.counts.newestArrival).toBe(0);
+    expect(cardRefs(steps.quiet)).toEqual([]);
+    expect(steps.quietArrival).toBe(0);
     expect(steps.open).toBe(1);
     expect(steps.suggestions).toEqual([]);
+    expect(cardRefs(steps.back)).toEqual([ticketRef("hidden")]);
+    expect(steps.back.things[0]!.dismissedAt).toBe(at(2));
+    expect(steps.backArrival).toBeGreaterThan(0);
   });
 
   it("brings a card held only by a snoozed signal back when the snooze ends, and writes nothing", async () => {
@@ -543,19 +586,21 @@ describe("Inbox membership and arrivals", () => {
         yield* raiseSignal(ticketRef("later"), { snoozeUntil: at(60) });
         const changes = sql<{ readonly n: number }>`SELECT total_changes() AS n`;
         const written = (yield* changes)[0]!.n;
-        const during = yield* readInbox(repository, 30);
-        const duringCounts = yield* repository.countInbox(at(30));
+        const during = yield* readInbox(30);
+        const duringCounts = yield* readCounts(30);
         const duringSuggestions = yield* repository.listSuggestions({
           contextRef: undefined,
           limit: 5,
           now: at(30),
+          askingKinds: ASKING_KINDS,
         });
-        const atEnd = yield* readInbox(repository, 60);
-        const afterEnd = yield* readInbox(repository, 61);
+        const atEnd = yield* readInbox(60);
+        const afterEnd = yield* readInbox(61);
         const afterSuggestions = yield* repository.listSuggestions({
           contextRef: undefined,
           limit: 5,
           now: at(61),
+          askingKinds: ASKING_KINDS,
         });
         return {
           during,
@@ -569,11 +614,13 @@ describe("Inbox membership and arrivals", () => {
       }),
     );
     expect(cardRefs(steps.during)).toEqual([]);
-    expect(steps.duringCounts.onTheClock).toBe(0);
+    expect(steps.duringCounts.savedQueries.find((query) => query.id === "everything")!.count).toBe(
+      0,
+    );
     expect(steps.duringSuggestions).toEqual([]);
     // The snooze ran out at `until`, so a read at that minute sees the card.
     expect(cardRefs(steps.atEnd)).toEqual([ticketRef("later")]);
-    expect(steps.afterEnd.cards[0]!.signals.openCount).toBe(1);
+    expect(steps.afterEnd.things[0]!.askCount).toBe(1);
     expect(steps.afterSuggestions.map((row) => row.ref)).toEqual([ticketRef("later")]);
     expect(steps.writes).toBe(0);
   });
@@ -588,14 +635,15 @@ describe("Inbox membership and arrivals", () => {
           title: "Snoozed newest",
           snoozeUntil: at(99),
         });
-        const inbox = yield* readInbox(repository, 5);
+        const inbox = yield* readInbox(5);
         const detail = yield* readDetail(repository, sql, ticketRef("two"), 5);
         return { inbox, detail };
       }),
     );
-    expect(steps.inbox.cards[0]!.signals).toMatchObject({
-      openCount: 1,
-      latest: { title: "First", snoozed: false },
+    expect(steps.inbox.things[0]!).toMatchObject({
+      askCount: 1,
+      asks: [{ say: { say: "First" } }],
+      openKinds: ["acme-tracker/mentioned"],
     });
     expect(steps.detail.openCount).toBe(2);
     expect(steps.detail.signals.map((line) => [line.title, line.snoozed])).toEqual([
@@ -605,7 +653,7 @@ describe("Inbox membership and arrivals", () => {
   });
 
   it("lists the distinct kinds of all the open signals on a card, snoozed ones too and resolved ones never", async () => {
-    const inbox = await run(({ repository, refresh, reconcile }) =>
+    const inbox = await run(({ refresh, reconcile }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("two")], 1);
         yield* reconcile(ACCOUNT_A, [ticket("three", { concerns: ["assigned"] })], 1);
@@ -616,17 +664,17 @@ describe("Inbox membership and arrivals", () => {
           snoozeUntil: at(99),
         });
         yield* raiseSignal(ticketRef("two"), { kind: "acme-tracker/closed", resolved: true });
-        return yield* readInbox(repository, 5);
+        return yield* readInbox(5);
       }),
     );
     const kindsOf = (name: string) =>
-      inbox.cards.find((card) => card.ref === ticketRef(name))!.signals.kinds;
+      inbox.things.find((card) => card.ref === ticketRef(name))!.openKinds;
     expect(kindsOf("two")).toEqual(["acme-tracker/assigned", "acme-tracker/mentioned"]);
     expect(kindsOf("three")).toEqual([]);
   });
 
   it("cuts the open kinds of a card to the bound, keeping the first ones in order", async () => {
-    const inbox = await run(({ repository, refresh }) =>
+    const inbox = await run(({ refresh }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("two")], 1);
         for (let index = MAX_ENTITY_SIGNALS + 5; index > 0; index--) {
@@ -634,17 +682,17 @@ describe("Inbox membership and arrivals", () => {
             kind: `acme-tracker/kind-${String(index).padStart(3, "0")}`,
           });
         }
-        return yield* readInbox(repository, 5);
+        return yield* readInbox(5);
       }),
     );
-    const kinds = inbox.cards[0]!.signals.kinds;
+    const kinds = inbox.things[0]!.openKinds;
     expect(kinds).toHaveLength(MAX_ENTITY_SIGNALS);
     expect(kinds[0]).toBe("acme-tracker/kind-001");
     expect(kinds.at(-1)).toBe(`acme-tracker/kind-0${String(MAX_ENTITY_SIGNALS)}`);
   });
 
   it("picks the latest signal by creation time, then id", async () => {
-    const latest = await run(({ repository, refresh }) =>
+    const latest = await run(({ refresh }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("order")], 1);
         yield* raiseSignal(ticketRef("order"), { createdAt: at(5), title: "Older id, same time" });
@@ -653,8 +701,8 @@ describe("Inbox membership and arrivals", () => {
           title: "Newer id, same time",
         });
         yield* raiseSignal(ticketRef("order"), { createdAt: at(4), title: "Earlier" });
-        const inbox = yield* readInbox(repository, 6);
-        return { line: inbox.cards[0]!.signals.latest, newer };
+        const inbox = yield* readInbox(6);
+        return { line: inbox.things[0]!.asks[0], newer };
       }),
     );
     expect(latest.line?.id).toBe(latest.newer);
@@ -662,7 +710,7 @@ describe("Inbox membership and arrivals", () => {
 
   it("sends the same number of statements for 3 cards with signals as for 40", async () => {
     const countStatements = (cards: number) =>
-      run(({ repository, refresh }) =>
+      run(({ refresh }) =>
         Effect.gen(function* () {
           for (let index = 0; index < cards; index++) {
             yield* refresh(ACCOUNT_A, [ticket(`c${index}`)], 1);
@@ -670,7 +718,7 @@ describe("Inbox membership and arrivals", () => {
             yield* raiseSignal(ticketRef(`c${index}`));
           }
           const statements: Array<string> = [];
-          const inbox = yield* readInbox(repository, 3).pipe(
+          const inbox = yield* readInbox(3).pipe(
             Effect.provideService(Statement.CurrentTransformer, (statement) =>
               Effect.sync(() => {
                 statements.push(statement.compile()[0]);
@@ -683,13 +731,13 @@ describe("Inbox membership and arrivals", () => {
       );
     const small = await countStatements(3);
     const large = await countStatements(40);
-    expect(large.inbox.cards.every((card) => card.signals.openCount === 2)).toBe(true);
+    expect(large.inbox.things.every((card) => card.askCount === 2)).toBe(true);
     expect(large.statements).toHaveLength(small.statements.length);
   });
 });
 
 describe("how the signal reads use the database", () => {
-  it("seeks signals by ref through the thread index for the Inbox, the detail, its counts and an arrival, never scanning the table", async () => {
+  it("reads signals through an index for the Inbox, the detail, its counts and an arrival, never scanning the table", async () => {
     const plans = await run(({ repository, refresh, sql }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("indexed")], 1);
@@ -697,10 +745,10 @@ describe("how the signal reads use the database", () => {
         yield* raiseSignal(ticketRef("indexed"), { resolved: true });
         const captured: Array<readonly [string, ReadonlyArray<unknown>]> = [];
         yield* Effect.all([
-          readInbox(repository, 3),
-          repository.countInbox(at(3)),
+          readInbox(3),
+          readCounts(3),
           readDetail(repository, sql, ticketRef("indexed"), 3),
-          repository.recordArrivalAfter(ticketRef("indexed"), at(3), Effect.void),
+          repository.recordArrivalAfter(ticketRef("indexed"), at(3), ASKING_KINDS, Effect.void),
         ]).pipe(
           Effect.provideService(Statement.CurrentTransformer, (statement) =>
             Effect.sync(() => {
@@ -721,29 +769,29 @@ describe("how the signal reads use the database", () => {
         return plans;
       }),
     );
-    // The card read, the detail read and the Inbox membership (read by the counts and by the arrival).
+    // The detail seeks by thread ref. The Inbox membership (read by the page, the counts and the
+    // arrival) reads each open signal once through the index of open signals.
     expect(plans.length).toBeGreaterThanOrEqual(3);
     for (const plan of plans) {
-      expect(plan).toMatch(/SEARCH s USING (COVERING )?INDEX signals_thread_ref/);
-      expect(plan).not.toMatch(/SCAN s\b/);
+      expect(plan).toMatch(/(SEARCH|SCAN) s USING (COVERING )?INDEX signals_(thread_ref|open)/);
+      expect(plan).not.toMatch(/SCAN s(\n|$)/);
     }
   });
 });
 
-describe("the sentence of a card and its lines", () => {
+describe("the sentence of an ask and the lines of a detail", () => {
   const sentences = (repository: Repository, sql: SqlClient.SqlClient, ref: string) =>
     Effect.gen(function* () {
-      const inbox = yield* readInbox(repository, 10);
+      const inbox = yield* readInbox(10);
       const detail = yield* readDetail(repository, sql, ref, 10);
-      const card = inbox.cards.find((candidate) => candidate.ref === ref)!;
+      const thing = inbox.things.find((candidate) => candidate.ref === ref)!;
       return {
-        reason: card.reason,
-        say: card.signals.latest?.say,
+        asks: thing.asks.map((ask) => ask.say),
         lines: detail.signals.map((line) => line.say),
       };
     });
 
-  it("fills the kind's words for the signal with the asker, on the card and on every line", async () => {
+  it("fills the kind's words for the signal with the asker, on the ask and on every line", async () => {
     const found = await run(({ repository, refresh, sql }) =>
       Effect.gen(function* () {
         yield* refresh(ACCOUNT_A, [ticket("words")], 1);
@@ -752,8 +800,7 @@ describe("the sentence of a card and its lines", () => {
       }),
     );
     const expected = { say: "Marta mentioned you", tone: "attention" };
-    expect(found.reason).toEqual(expected);
-    expect(found.say).toEqual(expected);
+    expect(found.asks).toEqual([expected]);
     expect(found.lines).toEqual([expected]);
   });
 
@@ -781,7 +828,11 @@ describe("the sentence of a card and its lines", () => {
       { say: "No words", tone: "plain" },
       { say: "A core note", tone: "plain" },
     ]);
-    expect(found.reason).toEqual({ say: "A core note", tone: "plain" });
+    // The core note asks nothing, so it is a line of the detail and no ask.
+    expect(found.asks).toEqual([
+      { say: "No words", tone: "plain" },
+      { say: "No person", tone: "plain" },
+    ]);
   });
 
   it("cuts a long title at a word to the length a sentence allows", async () => {
@@ -795,45 +846,8 @@ describe("the sentence of a card and its lines", () => {
         return yield* sentences(repository, sql, ticketRef("long"));
       }),
     );
-    expect(found.reason!.say.length).toBeLessThanOrEqual(200);
-    expect(found.reason!.say.endsWith("word…")).toBe(true);
-  });
-
-  it("keeps the observation's own reason on a card with no live signal, and says nothing for a thing that is only assigned", async () => {
-    const reasons = await run(({ repository, reconcile }) =>
-      Effect.gen(function* () {
-        yield* reconcile(
-          ACCOUNT_A,
-          [
-            ticket("own", {
-              concerns: ["assigned"],
-              slots: {
-                ...TICKET_SLOTS,
-                reason: { say: "Assigned to you", tone: "plain" },
-              } as EntitySlots,
-            }),
-            ticket("silent", {
-              concerns: ["assigned"],
-              slots: {
-                noun: "Ticket",
-                card: "compact",
-                pace: "fast",
-                patience: 24,
-                identifier: "T",
-                facts: [],
-              },
-            }),
-          ],
-          1,
-        );
-        const inbox = yield* readInbox(repository, 2);
-        return inbox.cards.map((card) => [card.ref, card.reason] as const);
-      }),
-    );
-    expect(reasons).toEqual([
-      [ticketRef("own"), { say: "Assigned to you", tone: "plain" }],
-      [ticketRef("silent"), undefined],
-    ]);
+    expect(found.asks[0]!.say.length).toBeLessThanOrEqual(200);
+    expect(found.asks[0]!.say.endsWith("word…")).toBe(true);
   });
 });
 
@@ -977,7 +991,7 @@ describe("what a signal keeps wanted", () => {
   });
 
   it("creates the entity with no concern on refresh, never touches another Connection's concerns, and lets it go when the signal ends", async () => {
-    const steps = await run(({ repository, reconcile, refresh, sql }) =>
+    const steps = await run(({ reconcile, refresh, sql }) =>
       Effect.gen(function* () {
         // Another Connection already says this ticket concerns the user.
         yield* reconcile(ACCOUNT_B, [ticket("shared", { concerns: ["assigned"] })], 1);
@@ -993,17 +1007,17 @@ describe("what a signal keeps wanted", () => {
         // A mention of a thing nobody lists: the refresh creates it, with no concern.
         const mention = yield* raiseSignal(ticketRef("mention"));
         yield* refresh(ACCOUNT_A, [ticket("mention")], 4);
-        const withSignal = cardRefs(yield* readInbox(repository, 5));
+        const withSignal = cardRefs(yield* readInbox(5));
         yield* sql`UPDATE signals SET status = 'resolved',
           resolution = '{"kind":"decided","outcome":"x","actor":"user","origin":"web","at":"2026-03-01T00:06:00.000Z"}'
           WHERE id = ${uuidFromString(mention)}`;
-        const withoutSignal = cardRefs(yield* readInbox(repository, 7));
+        const withoutSignal = cardRefs(yield* readInbox(7));
         void id;
         return { concerns, withSignal, withoutSignal };
       }),
     );
     expect(steps.concerns.map((row) => row.concerns)).toEqual(['["assigned"]', "[]"]);
-    expect(steps.withSignal).toEqual([ticketRef("shared"), ticketRef("mention")]);
+    expect([...steps.withSignal].sort()).toEqual([ticketRef("mention"), ticketRef("shared")]);
     expect(steps.withoutSignal).toEqual([ticketRef("shared")]);
   });
 

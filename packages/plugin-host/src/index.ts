@@ -142,6 +142,33 @@ export {
 } from "./contributions";
 
 export {
+  CORE_INBOX_FIELD_KEYS,
+  CORE_INBOX_FIELDS,
+  InboxClause,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
+  MAX_SAVED_QUERIES_PER_PLUGIN,
+  MAX_SAVED_QUERY_CLAUSES,
+  SavedQuery,
+  type CoreInboxFieldKey,
+} from "./saved-queries";
+
+export {
+  CLAUSE_OPERATORS_BY_TYPE,
+  DURATION_UNIT_SECONDS,
+  findClauseListProblem,
+  interpretClauseValue,
+  listClauseValues,
+  MAX_CLAUSE_VALUES,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+  type ClauseOperand,
+  type ClauseValue,
+  type InboxClauseOperator,
+  type RawClause,
+} from "./clause-grammar";
+
+export {
   AccountKind,
   AccountSetupStep,
   AccountUsageDeclaration,

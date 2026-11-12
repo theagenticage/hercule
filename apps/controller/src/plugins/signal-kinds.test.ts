@@ -24,6 +24,8 @@ const buildDeclaration = (matchFields: ReadonlyArray<SignalMatchField>): SignalK
   word: "asked",
   label: "Asked",
   description: "Someone asked.",
+  noun: "question",
+  asks: true,
   from: ["acme.asked"],
   rule: '"yes"',
   guidance: "Raise it.",
@@ -44,13 +46,16 @@ const buildMatchFields = (count: number): ReadonlyArray<SignalMatchField> =>
   }));
 
 /** Decodes the one declaration, and returns `accepted` or the refusal's message. */
-const decode = (matchFields: ReadonlyArray<SignalMatchField>) =>
+const decode = (
+  matchFields: ReadonlyArray<SignalMatchField>,
+  overrides: Partial<SignalKindDeclaration> = {},
+) =>
   Effect.runPromise(
     Effect.match(
       decodeSignalKinds(
         MANIFEST,
         "desk",
-        [buildDeclaration(matchFields)],
+        [{ ...buildDeclaration(matchFields), ...overrides }],
         new Set(["acme.asked"]),
         new Set(),
       ),
@@ -78,6 +83,34 @@ describe("decodeSignalKinds", () => {
     expect(await decode([{ ...field!, name: "" }])).toContain("is invalid");
     expect(
       await decode([{ ...field!, name: "n".repeat(MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH + 1) }]),
+    ).toContain("is invalid");
+  });
+
+  it("refuses a noun that is empty, too long, or not in lower case", async () => {
+    for (const noun of ["", "n".repeat(41), "Review request"]) {
+      expect(await decode([], { noun }), noun).toContain("is invalid");
+    }
+    expect(await decode([], { noun: "n".repeat(40) })).toBe("accepted");
+  });
+
+  it("refuses a kind that does not say whether it asks", async () => {
+    const withoutAsks = Object.fromEntries(
+      Object.entries(buildDeclaration([])).filter(([key]) => key !== "asks"),
+    );
+
+    expect(
+      await Effect.runPromise(
+        Effect.match(
+          decodeSignalKinds(
+            MANIFEST,
+            "desk",
+            [withoutAsks as unknown as SignalKindDeclaration],
+            new Set(["acme.asked"]),
+            new Set(),
+          ),
+          { onFailure: (error) => error.message, onSuccess: () => "accepted" },
+        ),
+      ),
     ).toContain("is invalid");
   });
 });

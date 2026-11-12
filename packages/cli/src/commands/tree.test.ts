@@ -308,6 +308,31 @@ describe("a command's fields against the schema", () => {
     ]);
   });
 
+  // `queryInbox` is a union of four modes. The command line gets the fields of
+  // all of them, and sends the mode it is given.
+  it("takes the fields of a payload that is a union of modes, once each", () => {
+    const list = findCommandByWords(["entity", "list"])!;
+    expect(list.payload.map((field) => field.spelling)).toEqual([
+      "mode",
+      "list",
+      "clause",
+      "text",
+      "after",
+    ]);
+    expect(list.payload.find((field) => field.name === "mode")).toMatchObject({
+      optional: true,
+      defaultText: "first",
+    });
+    expect([...list.payload.find((field) => field.name === "mode")!.choices!.keys()]).toEqual([
+      "first",
+      "next",
+      "refresh",
+      "rows",
+    ]);
+    // Only the modes that read it have `after`, so it is optional.
+    expect(list.payload.find((field) => field.name === "after")!.optional).toBe(true);
+  });
+
   // Only a row that opts in makes a record field take named values: a record
   // read from stdin is still one JSON document.
   it("reads named values only where the row asks for them", () => {
@@ -335,6 +360,8 @@ describe("the placeholders a usage line shows", () => {
     "entity link": "<ref>",
     "entity unlink": "<ref>",
     "entity undo-hand-off": "<run-id>",
+    "entity dismiss": "<id>...",
+    "entity restore": "<id>...",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",

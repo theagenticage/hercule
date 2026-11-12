@@ -323,6 +323,21 @@ describe("the Inbox's and the entities' keys", () => {
     });
   }
 
+  it("reads the rail's outline again on every push that reads the Inbox's pages, because its key is inside the pages' prefix", () => {
+    for (const topic of ["task", "signal", "externalEntity", "connection", "plugin"] as const) {
+      const keys = buildQueryKeys(topic, ["x"]);
+      assert.isTrue(
+        keys.some((read) => isPrefixOf(read, queryKeys.inboxOutline())),
+        topic,
+      );
+    }
+    // The pages' own keys carry a query object, so the outline is a different cache entry.
+    assert.notDeepEqual(
+      queryKeys.inboxOutline(),
+      queryKeys.inbox({ list: { savedQuery: "waits" } }),
+    );
+  });
+
   it("leaves the signal lists alone on an externalEntity push, because the controller announces a signal push when a thing's open signals gain their entity", () => {
     const keys = buildQueryKeys("externalEntity", ["e1"]);
     assert.isFalse(keys.some((read) => isPrefixOf(read, queryKeys.signals({ view: "to-do" }))));

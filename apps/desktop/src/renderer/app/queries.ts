@@ -49,6 +49,9 @@ import {
   type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
+  type InboxClause,
+  type InboxList,
+  type InboxValueQuery,
   type Input,
   type RunSummary,
   type Runner,
@@ -1059,16 +1062,66 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Inbox whole: its cards, the places above them, and its counts.
- * Not shell data: only the Inbox screen reads it, and it is read again for
- * the pushes of the live topics while that screen is open. The sidebar reads the
- * counts alone, see `inboxCountQuery`.
+ * Reads what the Inbox's rail, search and list head draw: the saved queries
+ * with their counts, the Browse sources, the pins, the query fields and the
+ * failing sources. It is not shell data: only the Inbox screen reads it, and
+ * the route's loader prefetches it. Its key is inside the `inbox` prefix, so
+ * the pushes that read the pages read it again.
  */
-export const inboxQuery = (client: HerculeClient) =>
+export const inboxOutlineQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: queryKeys.inbox(),
-    queryFn: () => client.externalEntity.queryInbox(),
+    queryKey: queryKeys.inboxOutline(),
+    queryFn: () => client.externalEntity.readInboxOutline(),
     ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * What an Inbox list shows: the scope (a saved query or a Browse value), and
+ * the search that narrows it. The same selection names a list to every read.
+ */
+export interface InboxSelection {
+  readonly list: InboxList;
+  readonly clauses: ReadonlyArray<InboxClause>;
+  readonly text: string;
+}
+
+/**
+ * Reads the first page of an Inbox list, for what only its size or its
+ * facets are wanted (the size of a search in another list). The rows the
+ * screen draws are never read through here: the Inbox visit reads them
+ * (`buildInboxReader`), so a refetch cannot move a row under the user's eyes.
+ */
+export const inboxQuery = (client: HerculeClient, selection: InboxSelection) =>
+  queryOptions({
+    queryKey: queryKeys.inbox(selection),
+    queryFn: async ({ signal }) => {
+      const reply = await client.externalEntity.queryInbox(
+        { payload: { mode: "first", ...selection } },
+        { signal },
+      );
+      if (reply.mode !== "first")
+        throw new Error(`The Inbox answered a first read in ${reply.mode} mode.`);
+      return reply;
+    },
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the values of one field among the things of a list, for the search's
+ * suggestions. The key is under the Inbox's, so a push on the Inbox reads the
+ * values again. `input` is `undefined` while no clause is being typed, and
+ * then nothing is read. A newer input replaces an older one, which aborts.
+ */
+export const inboxValuesQuery = (client: HerculeClient, input: InboxValueQuery | undefined) =>
+  queryOptions({
+    queryKey: [...queryKeys.inbox(), "values", input ?? null],
+    queryFn:
+      input === undefined
+        ? skipToken
+        : ({ signal }) => client.externalEntity.suggestInboxValues({ payload: input }, { signal }),
+    retry: false,
+    ...LIVE_KEPT_READ_OPTIONS,
+    gcTime: 30_000,
   });
 
 /**
@@ -1098,8 +1151,9 @@ export const taskAttentionQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
- * every screen. A push on `task` reads it again, so the read is a small one.
+ * Reads the sidebar's Inbox numbers: how many things wait, and the newest
+ * arrival. It is shell data, drawn on every screen, so it stays small. A push
+ * on `task`, `signal` or `externalEntity` reads it again.
  */
 export const inboxCountQuery = (client: HerculeClient) =>
   queryOptions({

@@ -399,34 +399,81 @@ const buildFields = (
   rows: Record<string, FieldRow>,
   carriedIn: FieldCarrier,
 ): ReadonlyArray<Field> => {
-  const struct = schema as
-    | { ast?: Ast; fields?: Record<string, unknown>; schema?: { fields?: Record<string, unknown> } }
-    | undefined;
+  const struct = schema as StructSchema | undefined;
+  // A payload that is a union of structs (a discriminated union of modes) has
+  // the fields of all its members, each one given once.
+  const members = struct?.members ?? (struct === undefined ? [] : [struct]);
+  const properties = mergeProperties(members);
   // A query parameter schema is wrapped in the codec that reads a query
   // string, so for a query the struct with the field schemas is one level
   // down.
-  const fields = struct?.fields ?? struct?.schema?.fields;
-  const ast = struct?.ast;
-  if (ast?.propertySignatures === undefined) return [];
-  return ast.propertySignatures
-    .map((property) => [String(property.name), property.type] as const)
-    .filter(([name]) => !PAGE_FIELDS.has(name))
-    .flatMap(([name, type]) => {
-      const row = rows[name];
-      if (row === undefined) throw new Error(`${id}: ${name} has no row`);
-      if ("hidden" in row) return [];
-      // A field that takes named values is repeatable. As a bare word it
-      // would take every word after it, so the table is wrong.
-      if ("namedValues" in row && "positional" in row) {
-        throw new Error(`${id}: ${name} takes named values, so it must be a flag, not a bare word`);
-      }
-      if ("namedValues" in row && !isRecordOfText(type)) {
-        throw new Error(
-          `${id}: ${name} takes named values, but its schema is not a record of text`,
-        );
-      }
-      return [buildField(name, type, row, carriedIn, fields?.[name])];
-    });
+  const readFieldSchema = (name: string): unknown => {
+    for (const member of members) {
+      const fields = member.fields ?? member.schema?.fields ?? member.to?.fields;
+      if (fields !== undefined && name in fields) return fields[name];
+    }
+    return undefined;
+  };
+  return (
+    properties
+      // Only a query string pages by name. A payload field called `cursor`, such
+      // as the Inbox's, is an ordinary flag with its own row.
+      .filter(([name]) => carriedIn !== "query" || !PAGE_FIELDS.has(name))
+      .flatMap(([name, type]) => {
+        const row = rows[name];
+        if (row === undefined) throw new Error(`${id}: ${name} has no row`);
+        if ("hidden" in row) return [];
+        // A field that takes named values is repeatable. As a bare word it
+        // would take every word after it, so the table is wrong.
+        if ("namedValues" in row && "positional" in row) {
+          throw new Error(
+            `${id}: ${name} takes named values, so it must be a flag, not a bare word`,
+          );
+        }
+        if ("namedValues" in row && !isRecordOfText(type)) {
+          throw new Error(
+            `${id}: ${name} takes named values, but its schema is not a record of text`,
+          );
+        }
+        return [buildField(name, type, row, carriedIn, readFieldSchema(name))];
+      })
+  );
+};
+
+/** What `buildFields` reads of a schema: a struct, or a union of structs in `members`. */
+interface StructSchema {
+  readonly ast?: Ast;
+  readonly fields?: Record<string, unknown>;
+  readonly schema?: { readonly fields?: Record<string, unknown> };
+  /** The plain struct a closed struct decodes to. */
+  readonly to?: { readonly fields?: Record<string, unknown> };
+  readonly members?: ReadonlyArray<StructSchema>;
+}
+
+/**
+ * Lists the properties of the structs, each name once, in the order they first
+ * appear. A property that every struct has keeps its type; where the structs
+ * type it differently (the literal of a `mode`), the type is the union of
+ * those types. A property that only some structs have is optional, because the
+ * command line gives each field its own flag, and only the modes that have it
+ * read it.
+ */
+const mergeProperties = (
+  structs: ReadonlyArray<StructSchema>,
+): ReadonlyArray<readonly [string, Ast]> => {
+  const found = new Map<string, { types: Set<Ast>; count: number }>();
+  for (const struct of structs) {
+    for (const property of struct.ast?.propertySignatures ?? []) {
+      const entry = found.get(String(property.name)) ?? { types: new Set(), count: 0 };
+      entry.types.add(property.type);
+      entry.count += 1;
+      found.set(String(property.name), entry);
+    }
+  }
+  return [...found].map(([name, { types, count }]) => {
+    const type: Ast = types.size === 1 ? [...types][0]! : { _tag: "Union", types: [...types] };
+    return [name, count === structs.length ? type : { ...type, context: { isOptional: true } }];
+  });
 };
 
 /** Returns the payload schema, which is one level deeper: inside a map from media type to codec. */
@@ -523,9 +570,12 @@ const buildCommands = (): ReadonlyArray<Command> => {
       // hidden or not. Throw here, as `buildFields` throws for a field with no
       // row, so the CLI table and the schemas always list the same fields.
       const taken = new Set(
-        [each.params, payloadSchema, each.query].flatMap((schema) =>
-          listPropertyNames((schema as { ast?: Ast } | undefined)?.ast),
-        ),
+        [each.params, payloadSchema, each.query].flatMap((schema) => {
+          const struct = schema as StructSchema | undefined;
+          return mergeProperties(struct?.members ?? (struct === undefined ? [] : [struct])).map(
+            ([name]) => name,
+          );
+        }),
       );
       const stale = Object.keys(row.fields).find((name) => !taken.has(name));
       if (stale !== undefined) {
