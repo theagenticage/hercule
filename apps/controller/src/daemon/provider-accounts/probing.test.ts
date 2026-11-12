@@ -1534,10 +1534,15 @@ describe("a sweep of a runner that just connected", () => {
 });
 
 describe("the announcement of an expiring token", () => {
-  /** Runs `body` while recording what the controller announces. */
+  /**
+   * Runs `body` while recording what the controller announces. `announcedAt`
+   * holds the wall-clock time in milliseconds of each change in `announced`,
+   * at the same index.
+   */
   const runAnnouncing = <A, E>(
     body: (
       announced: ReadonlyArray<Change>,
+      announcedAt: ReadonlyArray<number>,
     ) => Effect.Effect<
       A,
       E,
@@ -1550,15 +1555,19 @@ describe("the announcement of an expiring token", () => {
     providerApi?: HttpClient.HttpClient,
   ) => {
     const announced: Array<Change> = [];
+    const announcedAt: Array<number> = [];
     const listener = {
       publish: (changes: ReadonlyArray<Change>) =>
         Effect.sync(() => {
           announced.push(...changes);
+          announcedAt.push(...changes.map(() => Date.now()));
         }),
     };
     return run(
       [],
-      body(announced).pipe(Effect.provideService(AfterCommit, listener)) as Effect.Effect<
+      body(announced, announcedAt).pipe(
+        Effect.provideService(AfterCommit, listener),
+      ) as Effect.Effect<
         A,
         E,
         | HarnessAccounts
@@ -1585,6 +1594,27 @@ describe("the announcement of an expiring token", () => {
 
   const announcesProvider = (change: Change, accountId: string): boolean =>
     change._tag === "record" && change.topic === "provider" && change.id === accountId;
+
+  /** A timer can fire a millisecond before its wall-clock deadline, so the check allows for that. */
+  const TIMER_EARLINESS_MS = 20;
+
+  /**
+   * Checks that the account was announced on the `provider` topic at or after
+   * `expiresAt`. Announcements made earlier, such as the ones a probe or a
+   * usage read makes while storing its result, do not count, so the answer
+   * does not depend on how long those steps took.
+   */
+  const announcedAfterExpiry = (
+    announced: ReadonlyArray<Change>,
+    announcedAt: ReadonlyArray<number>,
+    accountId: string,
+    expiresAt: number,
+  ): boolean =>
+    announced.some(
+      (change, index) =>
+        announcesProvider(change, accountId) &&
+        announcedAt[index]! >= expiresAt - TIMER_EARLINESS_MS,
+    );
 
   it("announces the account on the provider topic when its token expires, and not before", async () => {
     const outcome = await runAnnouncing((announced) =>
@@ -1644,7 +1674,7 @@ describe("the announcement of an expiring token", () => {
   });
 
   it("plans again when a snapshot is stored, so a token that now expires sooner is announced on time", async () => {
-    const announcedAfterChange = await runAnnouncing((announced) =>
+    const announcedAfterExpiryOutcome = await runAnnouncing((announced, announcedAt) =>
       Effect.gen(function* () {
         const probing = yield* ProviderAccountProbing;
         const account = yield* addAccount({ kind: TOKEN_KIND });
@@ -1661,33 +1691,33 @@ describe("the announcement of an expiring token", () => {
         // The driver plans with no expiry at all: its next wake is the hourly sweep.
         const driver = yield* Effect.forkChild(probing.driving);
         yield* Effect.sleep(Duration.millis(30));
-        yield* setTokenExpiry(account.id, new Date(Date.now() + 250).toISOString());
+        // The expiry is worked out after the setup, so a slow setup cannot make it past.
+        const expiresAt = Date.now() + 250;
+        yield* setTokenExpiry(account.id, new Date(expiresAt).toISOString());
         // A sign-in ends in a stored snapshot, which is what makes the driver plan again.
         yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
-        const afterProbe = announced.filter((change) =>
-          announcesProvider(change, account.id),
-        ).length;
-        yield* waitUntil(
-          () =>
-            announced.filter((change) => announcesProvider(change, account.id)).length > afterProbe,
-        );
+        // The test waits for an announcement made at or after the expiry instead of counting
+        // from the end of the probe: the driver plans again as soon as the snapshot is stored,
+        // so on a slow probe the announcement lands before the probe returns.
+        yield* waitUntil(() => announcedAfterExpiry(announced, announcedAt, account.id, expiresAt));
         yield* Fiber.interrupt(driver);
-        return (
-          announced.filter((change) => announcesProvider(change, account.id)).length - afterProbe
-        );
+        return announcedAfterExpiry(announced, announcedAt, account.id, expiresAt);
       }),
     );
 
-    expect(announcedAfterChange).toBe(1);
+    expect(announcedAfterExpiryOutcome).toBe(true);
   });
 
   it("plans again when a usage read stores an expiry, so the account is announced when the key expires", async () => {
-    const expiry = new Date(Date.now() + 300).toISOString();
-    const api = buildFakeProviderApi(
-      () => new Response(JSON.stringify({ used: 40, expires: expiry })),
-    );
-    const announcedAfterRead = await runAnnouncing(
-      (announced) =>
+    // The usage API reports an expiry 300 ms after the read asks, not after the test starts, so
+    // a slow setup cannot make the expiry past before the read stores it.
+    let expiresAt = 0;
+    const api = buildFakeProviderApi(() => {
+      expiresAt = Date.now() + 300;
+      return new Response(JSON.stringify({ used: 40, expires: new Date(expiresAt).toISOString() }));
+    });
+    const announcedOutcome = await runAnnouncing(
+      (announced, announcedAt) =>
         Effect.gen(function* () {
           const probing = yield* ProviderAccountProbing;
           const account = yield* addAccount({
@@ -1700,22 +1730,17 @@ describe("the announcement of an expiring token", () => {
           yield* Effect.sleep(Duration.millis(30));
           // No probe runs in this test: the read alone stores the expiry.
           yield* (yield* ProviderAccountService).readUsageWithKey(account.id);
-          const afterRead = announced.filter((change) =>
-            announcesProvider(change, account.id),
-          ).length;
-          yield* waitUntil(
-            () =>
-              announced.filter((change) => announcesProvider(change, account.id)).length >
-              afterRead,
+          // The read announces the account itself, so the test waits for an announcement made
+          // at or after the expiry instead of counting from the end of the read.
+          yield* waitUntil(() =>
+            announcedAfterExpiry(announced, announcedAt, account.id, expiresAt),
           );
           yield* Fiber.interrupt(driver);
-          return (
-            announced.filter((change) => announcesProvider(change, account.id)).length - afterRead
-          );
+          return announcedAfterExpiry(announced, announcedAt, account.id, expiresAt);
         }),
       api.client,
     );
 
-    expect(announcedAfterRead).toBe(1);
+    expect(announcedOutcome).toBe(true);
   });
 });
