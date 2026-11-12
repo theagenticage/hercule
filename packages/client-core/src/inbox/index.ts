@@ -31,3 +31,4 @@ export * from "./inbox-visit";
 export { isMarkShownByHead, listSurfaceAboveWords, nameSurface } from "./surface-words";
 export * from "./card-moves";
 export * from "./inbox-walk";
+export * from "./inbox-search";
