@@ -110,16 +110,16 @@ globalThis.setTimeout = ((handler: TimerHandler, delay = 0, ...rest: unknown[]) 
   pending.set(`t${String(id)}`, { kind: "timeout", delayMs: Number(delay) || 0 });
   return id;
 }) as typeof setTimeout;
-globalThis.clearTimeout = ((id?: number) => {
+globalThis.clearTimeout = (id?: number) => {
   pending.delete(`t${String(id)}`);
   native.clearTimeout(id);
-}) as typeof clearTimeout;
+};
 globalThis.setInterval = ((handler: TimerHandler, delay = 0, ...rest: unknown[]) => {
   const id: number = native.setInterval(handler, delay, ...rest);
   pending.set(`t${String(id)}`, { kind: "interval", delayMs: Number(delay) || 0 });
   return id;
 }) as typeof setInterval;
-globalThis.clearInterval = globalThis.clearTimeout as typeof clearInterval;
+globalThis.clearInterval = globalThis.clearTimeout;
 globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
   const id = native.requestAnimationFrame((time) => {
     pending.delete(`f${String(id)}`);

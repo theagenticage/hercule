@@ -345,7 +345,13 @@ async function measureScreen(
   );
   // The idle reading: what stays pending once the screen has been quiet for a second.
   await sleep(1_000);
-  const { renders: _renders, ...idle } = await callPage(page, (perf) => perf.readProbe());
+  const reading = await callPage(page, (perf) => perf.readProbe());
+  const idle: IdleCounts = {
+    intervals: reading.intervals,
+    shortTimeouts: reading.shortTimeouts,
+    longTimeouts: reading.longTimeouts,
+    frames: reading.frames,
+  };
   await plan.measureSteps({ page, measure });
   await cdp.detach();
   return { steps, idle };
