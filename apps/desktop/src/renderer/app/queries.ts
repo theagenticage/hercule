@@ -1062,7 +1062,8 @@ export const pluginsQuery = (client: HerculeClient) =>
 
 /**
  * Reads the first page of an Inbox list: `query` names the list, its search
- * and no cursor. It is not shell data: only the Inbox screen reads it, and a
+ * and no cursor. A read the screen no longer needs (the user went on to
+ * another list or kept typing) is aborted. It is not shell data: only the Inbox screen reads it, and a
  * live push on the Inbox's keys reads it again while the screen is open. The
  * screen never draws this reply by itself: the held list takes it in (see
  * `useHeldInboxList`), so a refetch cannot move a row under the user's eyes.
@@ -1070,7 +1071,7 @@ export const pluginsQuery = (client: HerculeClient) =>
 export const inboxQuery = (client: HerculeClient, query: InboxQuery) =>
   queryOptions({
     queryKey: queryKeys.inbox(query),
-    queryFn: () => client.externalEntity.queryInbox({ payload: query }),
+    queryFn: ({ signal }) => client.externalEntity.queryInbox({ payload: query }, { signal }),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -1083,7 +1084,7 @@ export const inboxQuery = (client: HerculeClient, query: InboxQuery) =>
 export const inboxPartialPageQuery = (client: HerculeClient, query: InboxQuery) =>
   queryOptions({
     queryKey: queryKeys.inbox(query),
-    queryFn: () => client.externalEntity.queryInbox({ payload: query }),
+    queryFn: ({ signal }) => client.externalEntity.queryInbox({ payload: query }, { signal }),
     staleTime: 0,
     gcTime: 0,
     retry: false,

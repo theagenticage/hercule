@@ -121,6 +121,7 @@ function RowMoves({
             <button
               type="button"
               className="ib-row-act ib-row-act--named"
+              data-hand-anchor=""
               tabIndex={-1}
               title={handOff.kind === "one" ? `Hand to ${handOff.name} (H)` : "Hand to… (H)"}
               aria-label={handOff.kind === "one" ? `Hand to ${handOff.name}` : "Hand to…"}

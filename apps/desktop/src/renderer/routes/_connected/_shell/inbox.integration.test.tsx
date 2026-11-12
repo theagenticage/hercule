@@ -25,7 +25,7 @@ import {
   readRowTitles,
   request,
   QUERY_PATH,
-} from "./inbox.testing";
+} from "./-inbox.testing";
 
 beforeEach(() => {
   stubIntersectionObserver();
@@ -85,10 +85,14 @@ describe("the Inbox screen", () => {
       "Round loyalty points down, again",
       BASKET.title,
     ]);
+    const readsBeforeShow = readQueries(calls).length;
     await userEvent.click(await screen.findByRole("button", { name: /1 new/ }));
-    expect(readRowTitles()).toContain(arrival.title);
+    // Show reads the first page again before it takes the arrivals in.
+    await waitFor(() => {
+      expect(readRowTitles()).toContain(arrival.title);
+    });
     expect(screen.queryByRole("button", { name: /1 new/ })).toBeNull();
-    expect(readQueries(calls).length).toBeGreaterThan(1);
+    expect(readQueries(calls).length).toBeGreaterThan(readsBeforeShow);
   });
 
   it("changes the list when a rail entry is picked", async () => {

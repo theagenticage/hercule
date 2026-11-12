@@ -1,5 +1,16 @@
 import { useState, type JSX, type KeyboardEvent } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
+import type {
+  InboxScope,
+  InboxScopeValue,
+  RailAccount,
+  RailFacet,
+  RailFacetValue,
+  RailHealth,
+  RailPin,
+  RailSavedQuery,
+  RailSource,
+} from "@hercule/client-core/inbox";
 import { AgentIcon } from "../../icons/agent";
 import { AlertIcon } from "../../icons/alert";
 import { ChevronRightIcon } from "../../icons/chevron-right";
@@ -10,79 +21,6 @@ import { IntakeIcon } from "../../icons/intake";
 import { UserIcon } from "../../icons/user";
 import { PluginMark } from "../../marks/plugin-mark";
 import "./inbox-rail.css";
-
-/** A Browse value: one value of one Facet, of one source, in one account when the source has several. */
-export interface RailValue {
-  readonly source: string;
-  readonly connectionId?: string;
-  readonly key: string;
-  readonly value: string;
-}
-
-/** What the list is on: a saved query, or a Browse value. */
-export type RailEntry =
-  | { readonly kind: "saved-query"; readonly id: string }
-  | { readonly kind: "value"; readonly value: RailValue };
-
-/** The icons of the core's saved queries. A plugin's saved query draws its plugin's mark instead. */
-export type RailIconName = "clock" | "user" | "eye" | "agent" | "intake";
-
-export interface RailSavedQuery {
-  readonly id: string;
-  readonly name: string;
-  readonly count: number;
-  /** The core's icon, or the id of the plugin whose mark is drawn. Exactly one of the two. */
-  readonly icon: RailIconName | { readonly pluginId: string };
-  /** The digit that picks this entry, shown over the count under the pointer and on focus. */
-  readonly shortcut?: string;
-}
-
-export interface RailPin extends RailValue {
-  readonly label: string;
-  readonly count: number;
-  /** The account's label, given only when the pin's source has several accounts. */
-  readonly accountLabel?: string;
-}
-
-export type RailHealth = "on-track" | "at-risk" | "off-track";
-
-export interface RailFacetValue {
-  readonly value: string;
-  readonly label: string;
-  readonly count: number;
-  readonly health?: RailHealth;
-}
-
-export interface RailFacet {
-  /** The account this facet is read in; absent when the source has one account. */
-  readonly connectionId?: string;
-  readonly key: string;
-  /** The facet's plural name, shown as its small label: "Teams". */
-  readonly plural: string;
-  readonly values: ReadonlyArray<RailFacetValue>;
-  /** How many more values exist than the ones sent. The search reaches them. */
-  readonly more: number;
-}
-
-export interface RailAccount {
-  readonly connectionId: string;
-  readonly label: string;
-  readonly count: number;
-}
-
-export interface RailSource {
-  /** The source's plugin id. */
-  readonly source: string;
-  readonly name: string;
-  readonly count: number;
-  readonly folded: boolean;
-  /** When the source stopped being readable, as the time to show ("08:40"). Absent while it reads. */
-  readonly failingSince?: string;
-  /** Listed only when more than one account holds things. */
-  readonly accounts: ReadonlyArray<RailAccount>;
-  /** Empty while the source is folded. */
-  readonly facets: ReadonlyArray<RailFacet>;
-}
 
 /** The facet a "Search the other N" row stands for. */
 export interface RailFacetScope {
@@ -97,14 +35,14 @@ export interface InboxRailProps {
   readonly sources: ReadonlyArray<RailSource>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /** What the list is on. Null when the user is searching: nothing in the rail is drawn on then. */
-  readonly current: RailEntry | null;
+  readonly current: InboxScope | null;
   /** While counts load, each is drawn as a still bar. */
   readonly loading: boolean;
   /** Called when the user picks an entry. The caller moves the focus to the list. */
-  readonly onPick: (entry: RailEntry) => void;
+  readonly onPick: (entry: InboxScope) => void;
   readonly onToggleFold: (source: string) => void;
   /** Pins the value, or unpins it when it is pinned. */
-  readonly onTogglePin: (value: RailValue) => void;
+  readonly onTogglePin: (value: InboxScopeValue) => void;
   readonly onSearchMore: (facet: RailFacetScope) => void;
 }
 
@@ -117,13 +55,13 @@ const HEALTH_WORDS: Readonly<Record<RailHealth, string>> = {
   "off-track": "Off track",
 };
 
-const valueKey = (value: RailValue): string =>
+const valueKey = (value: InboxScopeValue): string =>
   JSON.stringify([value.source, value.connectionId ?? null, value.key, value.value]);
 
 const facetKey = (source: string, facet: RailFacet): string =>
   JSON.stringify([source, facet.connectionId ?? null, facet.key]);
 
-const isCurrentValue = (current: RailEntry | null, value: RailValue): boolean =>
+const isCurrentValue = (current: InboxScope | null, value: InboxScopeValue): boolean =>
   current?.kind === "value" && valueKey(current.value) === valueKey(value);
 
 /** Returns the facets of `source` that belong under `account`, or all of them when it has no account level. */
@@ -185,7 +123,7 @@ function listStopCandidates(
   return candidates;
 }
 
-const valueOf = (source: string, facet: RailFacet, item: RailFacetValue): RailValue => ({
+const valueOf = (source: string, facet: RailFacet, item: RailFacetValue): InboxScopeValue => ({
   source,
   key: facet.key,
   value: item.value,
@@ -286,7 +224,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
     },
   });
 
-  const star = (value: RailValue, name: string, id: string): JSX.Element => {
+  const star = (value: InboxScopeValue, name: string, id: string): JSX.Element => {
     const isPinned = pins.some((pin) => valueKey(pin) === valueKey(value));
     return (
       <button
@@ -306,7 +244,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
     );
   };
 
-  const valueRow = (value: RailValue, label: string, item: RailFacetValue): JSX.Element => {
+  const valueRow = (value: InboxScopeValue, label: string, item: RailFacetValue): JSX.Element => {
     const id = `value:${valueKey(value)}`;
     const isOn = isCurrentValue(current, value);
     const isEmpty = item.count === 0 && !loading;

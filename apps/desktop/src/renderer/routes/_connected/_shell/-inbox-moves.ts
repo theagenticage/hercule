@@ -59,12 +59,23 @@ import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import type { SidebarFlight } from "../../../app/motion/sidebar-flight";
 import { flyHandedMarkToWork, rollHandedRow } from "../../../screens/inbox/inbox-hand-off-motion";
+import type { InboxLeaveHow } from "../../../screens/inbox/use-inbox-list-motion";
 import type { HeldInboxList } from "./-inbox-held-list";
 
 /** The key every Inbox move runs under, so one move waits for the one before it. */
 const INBOX_MOVES_KEY = ["inbox-moves"];
 
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
+
+/**
+ * How the rows of a move went, for the list's motion: whether the rows that
+ * left were dismissed (they slide aside as they fade) and which rows an undo
+ * put back (they come back from aside).
+ */
+export interface InboxMoveMotion {
+  readonly leaveHow: InboxLeaveHow;
+  readonly returning: ReadonlyArray<string>;
+}
 
 /** What `useInboxMoves` returns. */
 export interface InboxMoves {
@@ -89,18 +100,18 @@ export interface InboxMoves {
    */
   readonly startHandOff: (hoveredRef?: string) => InboxThing | null;
   /**
-   * Hands the thing `ref` to `offer`, as `connectionId` (or the account the
-   * controller picks). The current row moves on at once and the mark flies to
-   * Work.
-   */
-  readonly handOff: (ref: string, offer: WorkflowOffer, connectionId: string | undefined) => void;
-  /**
    * Hands the one thing the move is for (see `dismiss`: the selection, else
-   * the current row) to `offer`, after the same check the H key makes. The
-   * pane's workflow rows use it, so they refuse a selection of several
-   * things with the same reason as H.
+   * the current row, or with `hoveredRef` that row) to `offer`, as
+   * `connectionId` (or the account the controller picks), after the same
+   * check the H key makes: offline, a selection of several things and a thing
+   * no workflow takes are refused with their reason on the undo line. The
+   * current row moves on at once and the mark flies to Work.
    */
-  readonly handOffTarget: (offer: WorkflowOffer, connectionId: string | undefined) => void;
+  readonly handOff: (
+    hoveredRef: string | undefined,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ) => void;
   /**
    * Returns `thing` as it reads while its hand-off is on its way: the
    * workflow has it. Returns `thing` itself when it was not handed, or the
@@ -129,8 +140,9 @@ const joinGestureWords = ({ text, title }: InboxLineWords): string =>
  * Makes the moves of the Inbox for `client`, for the user of `scope`, over
  * the list `held`. `isOffline` makes every move but Go to its Task refuse.
  * `openTask` opens a Task on Work. `onMoved` is called with the list a move
- * or an undo left, so the screen can move the focus to the row that is
- * current now, or to the empty state when none is.
+ * or an undo left and how its rows went, so the screen can move the focus to
+ * the row that is current now, or to the empty state when none is, and tell
+ * the list how to move.
  */
 export const useInboxMoves = ({
   client,
@@ -145,7 +157,7 @@ export const useInboxMoves = ({
   readonly held: HeldInboxList;
   readonly isOffline: boolean;
   readonly openTask: (taskId: string) => void;
-  readonly onMoved: (list: InboxListState<InboxThing>) => void;
+  readonly onMoved: (list: InboxListState<InboxThing>, motion: InboxMoveMotion) => void;
 }): InboxMoves => {
   const queryClient = useQueryClient();
   const { undoStack, isCurrent } = scope;
@@ -222,8 +234,8 @@ export const useInboxMoves = ({
 
   /** Returns the things a move is for, in list order: see `decideMoveTargets`. */
   const readTargets = (hoveredRef: string | undefined): InboxThing[] => {
-    const { list } = latest.current.held;
-    if (list === null) return [];
+    const list = latest.current.held.readLatest()?.list;
+    if (list === undefined) return [];
     const wanted = new Set(decideMoveTargets(list, hoveredRef));
     return list.rows.filter((row) => wanted.has(row.ref));
   };
@@ -240,7 +252,7 @@ export const useInboxMoves = ({
       move,
       things,
       isOffline: latest.current.isOffline,
-      offers: listCardOffers(first, latest.current.held.offerSets),
+      offers: listCardOffers(first, latest.current.held.readLatest()?.offerSets ?? {}),
     });
     if (plan.kind === "refuse") {
       say(plan.reason);
@@ -249,22 +261,22 @@ export const useInboxMoves = ({
     return things;
   };
 
-  /** Applies a move to the held list at once, and tells the screen what is current now. */
-  const showMove = (refs: readonly string[], leavesList: boolean): void => {
+  /** Applies a move to the newest held list at once, and tells the screen what is current now. */
+  const showMove = (
+    refs: readonly string[],
+    leavesList: boolean,
+    leaveHow: InboxLeaveHow,
+  ): void => {
     const { held: now, onMoved: tell } = latest.current;
-    if (now.list === null) return;
-    const next = applyInboxMove(now.list, refs, { leavesList });
-    now.change(() => next);
-    tell(next);
+    const next = now.change((list) => applyInboxMove(list, refs, { leavesList }));
+    if (next !== null) tell(next, { leaveHow, returning: [] });
   };
 
   /** Puts back the rows of a move that left or stayed, and makes the topmost current. */
   const showUndo = (refs: readonly string[]): void => {
     const { held: now, onMoved: tell } = latest.current;
-    if (now.list === null) return;
-    const next = undoInboxMove(now.list, refs);
-    now.change(() => next);
-    tell(next);
+    const next = now.change((list) => undoInboxMove(list, refs));
+    if (next !== null) tell(next, { leaveHow: "taken", returning: refs });
   };
 
   const dismiss = (hoveredRef?: string): void => {
@@ -273,7 +285,7 @@ export const useInboxMoves = ({
     const refs = things.map((thing) => thing.ref);
     const ids = things.map((thing) => thing.id);
     const words = describeInboxDismissal(things);
-    showMove(refs, true);
+    showMove(refs, true, "dismiss");
     const request = dismissRequest.mutateAsync(ids);
     const wasSaved = request.then(
       () => true,
@@ -304,7 +316,7 @@ export const useInboxMoves = ({
     const things = readAllowedTargets("takeOn", hoveredRef);
     const thing = things?.[0];
     if (thing === undefined) return;
-    showMove([thing.ref], false);
+    showMove([thing.ref], false, "taken");
     const request = takeOnRequest.mutateAsync(thing.id);
     // A Take on that made no Task (it failed, or the thing already had one) has nothing to put back.
     const wasCreated = request.then(
@@ -344,9 +356,13 @@ export const useInboxMoves = ({
     );
   };
 
-  const handOff = (ref: string, offer: WorkflowOffer, connectionId: string | undefined): void => {
-    const thing = latest.current.held.list?.rows.find((row) => row.ref === ref);
-    if (thing === undefined) return;
+  /** Hands `thing`, which the caller has checked may be handed, to `offer`. */
+  const sendHandOff = (
+    thing: InboxThing,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ): void => {
+    const { ref } = thing;
     if (handing.current.has(ref)) {
       say("That hand-off is still on its way.");
       return;
@@ -358,7 +374,7 @@ export const useInboxMoves = ({
     const roll = rollHandedRow(ref, () => {
       setHanded((before) => new Map(before).set(ref, { from: thing, to: handedThing }));
     });
-    showMove([ref], false);
+    showMove([ref], false, "taken");
     // What the hand-off ends stays ended, whatever Undo does.
     const endedKinds = thing.openKinds.filter((kind) => offer.answers.includes(kind));
     const request = handOffRequest.mutateAsync({
@@ -417,18 +433,24 @@ export const useInboxMoves = ({
     );
   };
 
-  const handOffTarget = (offer: WorkflowOffer, connectionId: string | undefined): void => {
-    const thing = readAllowedTargets("handOff", undefined)?.[0];
-    if (thing !== undefined) handOff(thing.ref, offer, connectionId);
+  const handOff = (
+    hoveredRef: string | undefined,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ): void => {
+    const thing = readAllowedTargets("handOff", hoveredRef)?.[0];
+    if (thing !== undefined) sendHandOff(thing, offer, connectionId);
   };
 
   const startHandOff = (hoveredRef?: string): InboxThing | null => {
     const things = readAllowedTargets("handOff", hoveredRef);
     const thing = things?.[0];
     if (thing === undefined) return null;
-    const move = decideHandMove(listCardOffers(thing, latest.current.held.offerSets));
+    const move = decideHandMove(
+      listCardOffers(thing, latest.current.held.readLatest()?.offerSets ?? {}),
+    );
     if (move.kind === "one") {
-      handOff(thing.ref, move.offer, undefined);
+      sendHandOff(thing, move.offer, undefined);
       return null;
     }
     return move.kind === "several" ? thing : null;
@@ -440,7 +462,7 @@ export const useInboxMoves = ({
   };
 
   const openAtSource = (): void => {
-    const { list } = latest.current.held;
+    const list = latest.current.held.readLatest()?.list;
     const thing = list?.rows.find((row) => row.ref === list.current);
     if (thing === undefined) return;
     if (thing.url === "") {
@@ -455,7 +477,6 @@ export const useInboxMoves = ({
     takeOn,
     startHandOff,
     handOff,
-    handOffTarget,
     readHandedThing: (thing) => {
       const entry = handed.get(thing.ref);
       return entry?.from === thing ? entry.to : thing;

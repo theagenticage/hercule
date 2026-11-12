@@ -1,9 +1,10 @@
-import { useEffect, useState, type JSX, type Ref } from "react";
+import { useState, type JSX, type Ref } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { InboxSearch, InboxSearchContext } from "@hercule/client-core/inbox";
 import type { InboxList } from "@hercule/contract";
 import { inboxCountQuery, inboxValuesQuery, pluginsQuery } from "../../../app/queries";
+import { useQuietValue } from "../../../app/use-quiet-value";
 import { InboxSearchField, type InboxSearchHandle } from "../../../screens/inbox/inbox-search";
 
 /** How long typing stops before the field asks for the values of the clause being typed, in milliseconds. */
@@ -46,18 +47,8 @@ export function InboxSearchPart({
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const [typing, setTyping] = useState<{ key: string; typed: string } | null>(null);
-  const [asked, setAsked] = useState<{ key: string; typed: string } | null>(null);
-
   // The read waits for a quiet: `asked` follows `typing` once it has held still.
-  useEffect(() => {
-    if (typing === null) return;
-    const timer = setTimeout(() => {
-      setAsked(typing);
-    }, QUIET_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [typing]);
+  const asked = useQuietValue(typing, QUIET_MS);
 
   // Once no clause is being typed, an older ask is not read any more.
   const ask = typing === null ? null : asked;

@@ -170,6 +170,7 @@ function OpenCardMoves({
  * - A card whose plugin is off keeps its words, its moves are off, and the
  *   sheet says why.
  * - `onWalk` is called with a place's ref when a row of "Part of" is chosen.
+ *   With none, the rows are plain rows: nothing opens from them.
  *
  * - `timeline` is the timeline of signals, drawn between the facts and the
  *   places. A card with no timeline says why it is here in one line instead.
@@ -200,7 +201,7 @@ export function OpenCardBody({
   readonly linked: ReactNode;
   readonly hand: ReactNode;
   readonly onClose: () => void;
-  readonly onWalk: (ref: string) => void;
+  readonly onWalk?: ((ref: string) => void) | undefined;
   readonly onTake: () => void;
   readonly onDismiss: () => void;
   readonly onSeeTask: (taskId: string) => void;

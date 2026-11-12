@@ -11,6 +11,7 @@ import {
   buildOpenTimeline,
   decideOpenCard,
   describeTimelineOverflow,
+  findAccountLabel,
   findFirstOpenLine,
   type CardOffers,
 } from "@hercule/client-core/inbox";
@@ -29,6 +30,8 @@ export interface InboxPaneMoves {
   readonly onTakeOn: () => void;
   readonly onDismiss: () => void;
   readonly onGoToTask: (taskId: string) => void;
+  /** Shows the open thing's group on Intake, where its other open asks are. */
+  readonly onSeeInIntake: () => void;
   /** Hands the open thing to `offer`, as `connectionId` or the account the controller picks. */
   readonly onHandOff: (offer: WorkflowOffer, connectionId: string | undefined) => void;
   readonly onClose: () => void;
@@ -47,11 +50,10 @@ export function InboxPaneHeadPart({
 }): JSX.Element {
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const accounts = counts.sources.find((source) => source.source === thing.source)?.accounts ?? [];
-  const account =
-    accounts.length > 1
-      ? accounts.find((each) => thing.accounts.includes(each.connectionId))?.label
-      : undefined;
+  const account = findAccountLabel(
+    counts.sources.find((source) => source.source === thing.source)?.accounts ?? [],
+    thing.accounts,
+  );
   return (
     <InboxPaneHead
       pluginId={thing.source}
@@ -116,7 +118,7 @@ export function InboxPanePart({
         onToggleLine={(signalId) => {
           setChosenLine((current) => (current === signalId ? null : signalId));
         }}
-        onSeeInIntake={() => undefined}
+        onSeeInIntake={moves.onSeeInIntake}
         answers={(signalId) => (
           <OpenCardLine
             key={signalId}
@@ -150,7 +152,6 @@ export function InboxPanePart({
           />
         }
         onClose={moves.onClose}
-        onWalk={() => undefined}
         onTake={moves.onTakeOn}
         onDismiss={moves.onDismiss}
         onSeeTask={moves.onGoToTask}

@@ -12,7 +12,7 @@ import { InboxSelectionBar } from "./inbox-selection-bar";
 
 describe("InboxEmpty", () => {
   it("says all is clear when nothing is anywhere", () => {
-    render(<InboxEmpty state={{ kind: "all-clear" }} />);
+    render(<InboxEmpty isRising={false} state={{ kind: "all-clear" }} />);
 
     expect(screen.getByRole("heading", { name: "All clear" })).toBeTruthy();
     expect(
@@ -24,7 +24,12 @@ describe("InboxEmpty", () => {
 
   it("tells how many things changed without asking, and opens Updates from its link", async () => {
     const onOpenUpdates = vi.fn();
-    render(<InboxEmpty state={{ kind: "nobody-waits", updatesCount: 26, onOpenUpdates }} />);
+    render(
+      <InboxEmpty
+        isRising={false}
+        state={{ kind: "nobody-waits", updatesCount: 26, onOpenUpdates }}
+      />,
+    );
 
     expect(screen.getByRole("heading", { name: "Nobody waits on you" })).toBeTruthy();
     expect(
@@ -36,14 +41,19 @@ describe("InboxEmpty", () => {
 
   it("names one thing in the singular", () => {
     render(
-      <InboxEmpty state={{ kind: "nobody-waits", updatesCount: 1, onOpenUpdates: vi.fn() }} />,
+      <InboxEmpty
+        isRising={false}
+        state={{ kind: "nobody-waits", updatesCount: 1, onOpenUpdates: vi.fn() }}
+      />,
     );
 
     expect(screen.getByText(/^1 thing changed without asking anything\./)).toBeTruthy();
   });
 
   it("names the saved query that holds nothing", () => {
-    render(<InboxEmpty state={{ kind: "nothing-in-list", title: "Review requests" }} />);
+    render(
+      <InboxEmpty isRising={false} state={{ kind: "nothing-in-list", title: "Review requests" }} />,
+    );
 
     expect(screen.getByRole("heading", { name: "Nothing in Review requests" })).toBeTruthy();
     expect(screen.getByText("Nothing of yours here yet.")).toBeTruthy();
@@ -53,6 +63,7 @@ describe("InboxEmpty", () => {
     const onClearSearch = vi.fn();
     render(
       <InboxEmpty
+        isRising={false}
         state={{
           kind: "nothing-matches",
           scopeTitle: "Mine",
@@ -84,26 +95,54 @@ describe("InboxEmpty", () => {
       onSearchEverything,
       onClearSearch: vi.fn(),
     };
-    const { rerender } = render(<InboxEmpty state={{ ...search, widerCount: 0 }} />);
+    const { rerender } = render(
+      <InboxEmpty isRising={false} state={{ ...search, widerCount: 0 }} />,
+    );
 
     expect(screen.queryByRole("button", { name: /Search Everything/ })).toBeNull();
 
-    rerender(<InboxEmpty state={{ ...search, widerCount: 3 }} />);
+    rerender(<InboxEmpty isRising={false} state={{ ...search, widerCount: 3 }} />);
     await userEvent.click(screen.getByRole("button", { name: /Search Everything · 3/ }));
     expect(onSearchEverything).toHaveBeenCalledOnce();
+  });
+
+  it("says what waits behind the new pill when the last row left, and takes it in from its button", async () => {
+    const onShowNew = vi.fn();
+    render(<InboxEmpty isRising={false} state={{ kind: "new-waiting", count: 2, onShowNew }} />);
+
+    expect(screen.getByRole("heading", { name: "Nothing left here" })).toBeTruthy();
+    expect(screen.getByText("2 new things arrived while you worked.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Show what is new/ }));
+    expect(onShowNew).toHaveBeenCalledOnce();
+  });
+
+  it("draws the sunrise rising only when the user's own move emptied the list", () => {
+    const { container, rerender } = render(<InboxEmpty isRising state={{ kind: "all-clear" }} />);
+    expect(container.querySelector(".ib-em--rises")).not.toBeNull();
+
+    rerender(<InboxEmpty isRising={false} state={{ kind: "all-clear" }} />);
+    expect(container.querySelector(".ib-em--rises")).toBeNull();
   });
 
   it("lets the heading take the focus, and keeps it when the words change", () => {
     const headingRef = createRef<HTMLHeadingElement>();
     const { rerender } = render(
-      <InboxEmpty state={{ kind: "nothing-in-list", title: "Mine" }} headingRef={headingRef} />,
+      <InboxEmpty
+        isRising={false}
+        state={{ kind: "nothing-in-list", title: "Mine" }}
+        headingRef={headingRef}
+      />,
     );
 
     headingRef.current?.focus();
     expect(document.activeElement).toBe(headingRef.current);
 
     rerender(
-      <InboxEmpty state={{ kind: "nothing-in-list", title: "Updates" }} headingRef={headingRef} />,
+      <InboxEmpty
+        isRising={false}
+        state={{ kind: "nothing-in-list", title: "Updates" }}
+        headingRef={headingRef}
+      />,
     );
     expect(document.activeElement).toBe(headingRef.current);
     expect(headingRef.current?.textContent).toBe("Nothing in Updates");

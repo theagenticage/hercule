@@ -19,20 +19,20 @@ const FOCUSABLE = "button, a[href], input, [tabindex]:not([tabindex='-1'])";
 const isReachable = (element: HTMLElement | null): element is HTMLElement =>
   element !== null && element.closest("[inert], [hidden]") === null;
 
-const byId = (id: string): HTMLElement | null => document.getElementById(id);
+const findElementById = (id: string): HTMLElement | null => document.getElementById(id);
 
 /** The regions in the order F6 visits them, each with the element that takes the focus and the element that holds it. */
 const readRegions = (
   layout: InboxRegionLayout,
 ): ReadonlyArray<{ readonly holder: HTMLElement | null; readonly stop: HTMLElement | null }> => {
-  const rail = byId(INBOX_REGION_IDS.rail);
-  const scopeButton = byId(INBOX_REGION_IDS.scopeButton);
-  const list = byId(INBOX_REGION_IDS.list);
-  const pane = byId(INBOX_REGION_IDS.pane);
+  const rail = findElementById(INBOX_REGION_IDS.rail);
+  const scopeButton = findElementById(INBOX_REGION_IDS.scopeButton);
+  const list = findElementById(INBOX_REGION_IDS.list);
+  const pane = findElementById(INBOX_REGION_IDS.pane);
   const regions = [
     {
-      holder: byId(INBOX_REGION_IDS.search),
-      stop: byId(INBOX_REGION_IDS.search)?.querySelector<HTMLElement>("input") ?? null,
+      holder: findElementById(INBOX_REGION_IDS.search),
+      stop: findElementById(INBOX_REGION_IDS.search)?.querySelector<HTMLElement>("input") ?? null,
     },
     scopeButton !== null
       ? { holder: scopeButton, stop: scopeButton }

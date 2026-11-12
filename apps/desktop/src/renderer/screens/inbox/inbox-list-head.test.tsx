@@ -1,4 +1,5 @@
 /** Tests the Inbox list's head: what the list is, its count, the order or the "N new" pill, and Narrow. */
+import { createRef } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import { TEST_PLUGINS } from "./inbox-row.testing";
 const renderHead = (props: Partial<Parameters<typeof InboxListHead>[0]> = {}) => {
   const onShowNew = vi.fn();
   const onNarrow = vi.fn();
+  const narrowRef = createRef<HTMLButtonElement>();
   render(
     <InboxListHead
       title="Someone waits on me"
@@ -17,12 +19,13 @@ const renderHead = (props: Partial<Parameters<typeof InboxListHead>[0]> = {}) =>
       newCount={0}
       empty={false}
       narrowOpen={false}
+      narrowRef={narrowRef}
       onShowNew={onShowNew}
       onNarrow={onNarrow}
       {...props}
     />,
   );
-  return { onShowNew, onNarrow };
+  return { onShowNew, onNarrow, narrowRef };
 };
 
 describe("InboxListHead", () => {
@@ -60,6 +63,11 @@ describe("InboxListHead", () => {
     expect(narrow.getAttribute("aria-expanded")).toBe("true");
     await user.click(narrow);
     expect(onNarrow).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the Narrow button to the ref the menu anchors to", () => {
+    const { narrowRef } = renderHead();
+    expect(narrowRef.current).toBe(screen.getByRole("button", { name: "Narrow" }));
   });
 
   it("hides the order, the pill and Narrow for an empty list", () => {

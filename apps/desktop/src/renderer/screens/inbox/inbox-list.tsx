@@ -1,5 +1,13 @@
 import type { PluginIdentity } from "@hercule/client-core";
-import { useCallback, useEffect, useLayoutEffect, useRef, type JSX } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  type JSX,
+  type Ref,
+} from "react";
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { useVirtualLines, VIRTUAL_OVERSCAN } from "../use-virtual-lines";
@@ -23,6 +31,16 @@ const FOOT_FADE_PX = 28;
 
 /** Reads a row's height from the page's CSS: 52px at the default Text size, and a pixel more per line for each step up. */
 const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-row" }).row;
+
+/** What the list lets its owner ask of it. */
+export interface InboxListHandle {
+  /**
+   * Returns the element a hand-off menu of the row `ref` opens under: the
+   * row's own hand-off button, or the row itself when it draws none. Returns
+   * `null` when the row is not drawn (the list is virtual).
+   */
+  readonly findHandAnchor: (ref: string) => HTMLElement | null;
+}
 
 /** Renders the copy of a row that left, which fades out under the list and then asks to be removed. */
 function LeavingCopy({
@@ -96,6 +114,7 @@ function LeavingCopy({
  * the last one held, so the caller can read the next page. It may be called
  * again for the same end, so the caller ignores it when no page follows.
  * A change of `focusRequest` moves the keyboard focus to the current row.
+ * `handle` receives the list's `InboxListHandle`.
  */
 export function InboxList({
   listId,
@@ -111,6 +130,7 @@ export function InboxList({
   footReserve,
   focusRequest,
   onNearEnd,
+  handle,
 }: {
   readonly listId: string;
   /** The list's name for assistive technology, such as "Someone waits on me". */
@@ -126,6 +146,7 @@ export function InboxList({
   readonly footReserve?: number;
   readonly focusRequest?: number;
   readonly onNearEnd: () => void;
+  readonly handle?: Ref<InboxListHandle> | undefined;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const reserve = footReserve ?? 0;
@@ -148,6 +169,13 @@ export function InboxList({
     returning: returning ?? NO_ROWS,
     arriving: arriving ?? NO_ROWS,
   });
+
+  useImperativeHandle(handle, () => ({
+    findHandAnchor: (ref) => {
+      const row = scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`);
+      return row?.querySelector<HTMLElement>("[data-hand-anchor]") ?? row ?? null;
+    },
+  }));
 
   // The least scroll that brings the current row clear of both edges, with the fade at the foot counted out of the view.
   const foot = FOOT_FADE_PX + reserve;

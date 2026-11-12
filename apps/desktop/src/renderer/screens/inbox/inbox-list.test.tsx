@@ -1,9 +1,10 @@
 /** Tests the Inbox list: its tree semantics, the current row, the rows it draws of a long list, and what it asks for near the end. */
+import { createRef } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubElementSize } from "../../app/testing";
-import { InboxList } from "./inbox-list";
+import { InboxList, type InboxListHandle } from "./inbox-list";
 import { buildInboxRowActions, buildInboxRowView, TEST_PLUGINS } from "./inbox-row.testing";
 
 const buildRows = (count: number) =>
@@ -121,5 +122,35 @@ describe("InboxList", () => {
     expect(document.activeElement).toBe(document.body);
     rerender(draw(1));
     expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /thing-1/ }));
+  });
+
+  it("gives the hand-off menu its anchor: the row's hand-off button, else the row", () => {
+    const handle = createRef<InboxListHandle>();
+    const rows = [
+      buildInboxRowView("thing-0", {
+        handOff: { kind: "one", name: "Review PR", faceSeed: "review" },
+      }),
+      buildInboxRowView("thing-1"),
+    ];
+    render(
+      <InboxList
+        listId="waits"
+        label="Someone waits on me"
+        rows={rows}
+        plugins={TEST_PLUGINS}
+        currentRef="thing-0"
+        selection={new Set()}
+        actions={buildInboxRowActions()}
+        onNearEnd={() => {}}
+        handle={handle}
+      />,
+    );
+
+    const withHand = handle.current!.findHandAnchor("thing-0")!;
+    expect(withHand.getAttribute("aria-label")).toBe("Hand to Review PR");
+    expect(handle.current!.findHandAnchor("thing-1")).toBe(
+      screen.getByRole("treeitem", { name: /thing-1/ }),
+    );
+    expect(handle.current!.findHandAnchor("gone")).toBeNull();
   });
 });

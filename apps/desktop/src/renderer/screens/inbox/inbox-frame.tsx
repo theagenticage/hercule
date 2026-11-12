@@ -96,9 +96,8 @@ function computeWidestPaneWidth(frameWidth: number, railWidth: number): number {
  *   popover that the scope button of the bar opens, named `scopeName`, with
  *   the focus on the rail's entry marked `aria-current="true"` (else its tab
  *   stop). The popover closes when `scopeName` changes.
- * - `search`, `listHead` and `list` fill the bar's middle and the list column.
- *   `listHead` and `list` are children of one flex column, so the scrolling
- *   part of `list` can take `flex: 1`.
+ * - `search` fills the bar's middle, and `list` the list column. `list` is
+ *   a child of one flex column, so its scrolling part can take `flex: 1`.
  * - `paneHead` is the line at the start of the pane's head, and `pane` is its
  *   body. The pane keeps showing what it last showed while it fades out.
  * - `offlinePill` sits before the keys button.
@@ -126,7 +125,6 @@ export function InboxFrame({
   rail,
   scopeName,
   search,
-  listHead,
   list,
   paneHead,
   pane,
@@ -146,7 +144,6 @@ export function InboxFrame({
   readonly rail: ReactNode;
   readonly scopeName: string;
   readonly search: ReactNode;
-  readonly listHead: ReactNode;
   readonly list: ReactNode;
   readonly paneHead: ReactNode;
   readonly pane: ReactNode;
@@ -329,7 +326,6 @@ export function InboxFrame({
         aria-label="The list"
         inert={isStacked && isPaneOpen}
       >
-        {listHead}
         {list}
       </section>
       <InboxPaneFrame

@@ -17,3 +17,4 @@ export * from "./open-card";
 export * from "./open-timeline";
 export * from "./inbox-search";
 export * from "./inbox-moves";
+export * from "./inbox-outline";

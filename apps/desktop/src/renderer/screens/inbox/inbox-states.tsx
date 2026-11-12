@@ -1,4 +1,5 @@
 import { Fragment, type JSX, type Ref } from "react";
+import { joinClassNames } from "../../app/join-class-names";
 import { Face, HERCULE_LOOK } from "../../faces";
 import { AlertIcon } from "../../icons/alert";
 import "./inbox-states.css";
@@ -168,6 +169,15 @@ export type InboxEmptyState =
       readonly onOpenUpdates: () => void;
     }
   | {
+      /**
+       * Nothing is left in the list, but `count` things that arrived wait behind
+       * the list head's "N new". The body says so, and `onShowNew` takes them in.
+       */
+      readonly kind: "new-waiting";
+      readonly count: number;
+      readonly onShowNew: () => void;
+    }
+  | {
       /** A saved query other than the waits list holds nothing. `title` is its name. */
       readonly kind: "nothing-in-list";
       readonly title: string;
@@ -227,6 +237,13 @@ function EmptyLine({ state }: { readonly state: InboxEmptyState }): JSX.Element 
           .
         </>
       );
+    case "new-waiting":
+      return (
+        <>
+          {state.count === 1 ? "A new thing arrived" : `${String(state.count)} new things arrived`}{" "}
+          while you worked.
+        </>
+      );
     case "nothing-in-list":
       return <>Nothing of yours here yet.</>;
     case "nothing-matches":
@@ -245,6 +262,8 @@ function emptyHeading(state: InboxEmptyState): string {
       return "All clear";
     case "nobody-waits":
       return "Nobody waits on you";
+    case "new-waiting":
+      return "Nothing left here";
     case "nothing-in-list":
       return `Nothing in ${state.title}`;
     case "nothing-matches":
@@ -257,12 +276,15 @@ function emptyHeading(state: InboxEmptyState): string {
  *
  * - `all-clear`: nothing anywhere. The full sunrise.
  * - `nobody-waits` and `nothing-in-list`: the small sunrise.
+ * - `new-waiting`: no sunrise, a button that takes in what arrived.
  * - `nothing-matches`: no sunrise, the search and two buttons.
  *
- * A sunrise draws once, when it mounts, and waits 240ms first for the last
- * row and the pane to leave. The component keeps the same elements when
- * `state` changes between the two sunrise kinds, so it does not draw again.
- * Reduced motion shows it at rest.
+ * A sunrise rises only when `isRising`, which is for a list the user's own
+ * move just emptied; any other list shows it at rest, drawn still. It draws
+ * once, when it mounts, and waits 240ms first for the last row and the pane
+ * to leave. The component keeps the same elements when `state` changes
+ * between the two sunrise kinds, so it does not draw again. Reduced motion
+ * shows it at rest.
  *
  * The heading takes the focus without drawing a ring, for a screen reader to
  * start there: pass `headingRef` and call `focus()` on it. The orchestrator
@@ -272,16 +294,22 @@ function emptyHeading(state: InboxEmptyState): string {
  */
 export function InboxEmpty({
   state,
+  isRising,
   headingRef,
 }: {
   readonly state: InboxEmptyState;
+  readonly isRising: boolean;
   readonly headingRef?: Ref<HTMLHeadingElement>;
 }): JSX.Element {
-  const hasSunrise = state.kind !== "nothing-matches";
+  const hasSunrise = state.kind !== "nothing-matches" && state.kind !== "new-waiting";
   return (
     <div className="ib-empty">
       <div
-        className={state.kind === "all-clear" ? "ib-em ib-em--zero" : "ib-em"}
+        className={joinClassNames(
+          "ib-em",
+          state.kind === "all-clear" && "ib-em--zero",
+          isRising && "ib-em--rises",
+        )}
         style={hasSunrise ? { "--sun-wait": "240ms" } : undefined}
       >
         {hasSunrise && (
@@ -295,6 +323,12 @@ export function InboxEmpty({
         <p className="ib-em-line">
           <EmptyLine state={state} />
         </p>
+        {state.kind === "new-waiting" && (
+          <button type="button" className="btn btn--sm" onClick={state.onShowNew}>
+            Show what is new
+            <kbd>.</kbd>
+          </button>
+        )}
         {state.kind === "nothing-matches" && (
           <>
             {state.widerCount > 0 && (

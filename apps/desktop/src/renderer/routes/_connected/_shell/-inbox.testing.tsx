@@ -146,10 +146,14 @@ export const answerQuery = (inbox: FakeInbox, call: Call): { body: InboxPage } =
   };
 };
 
-/** Opens the Inbox on a fake controller. `inbox` is mutable: a test changes it, then pushes. */
+/**
+ * Opens the Inbox on a fake controller, at `path` (the Inbox's own address, with
+ * its search params, by default). `inbox` is mutable: a test changes it, then pushes.
+ */
 export const openInbox = async (
   inbox: FakeInbox,
   handlers: Readonly<Record<string, Handler>> = {},
+  path = "/inbox",
 ) => {
   const all = Object.values(inbox.lists).flat();
   const entityHandlers: Record<string, Handler> = Object.fromEntries(
@@ -167,7 +171,7 @@ export const openInbox = async (
   });
   const app = await renderApp(
     createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    { path: "/inbox", retryFailedReads: false },
+    { path, retryFailedReads: false },
   );
   return { calls, ...app };
 };

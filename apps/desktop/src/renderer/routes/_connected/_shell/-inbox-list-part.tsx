@@ -1,21 +1,30 @@
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type JSX,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { namePlugin, readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import {
+  changeInboxSelection,
   decideInboxEmpty,
   describeInboxClause,
   describeInboxRow,
+  findAccountLabel,
   listCardOffers,
-  type InboxSearch,
+  type InboxScope,
 } from "@hercule/client-core/inbox";
 import type { InboxClause, InboxOrder, InboxThing } from "@hercule/contract";
 import { inboxCountQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
-import { InboxList } from "../../../screens/inbox/inbox-list";
+import { InboxList, type InboxListHandle } from "../../../screens/inbox/inbox-list";
 import { InboxListHead } from "../../../screens/inbox/inbox-list-head";
 import { InboxNarrowMenu, type NarrowFacet } from "../../../screens/inbox/inbox-narrow-menu";
 import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
-import type { RailEntry } from "../../../screens/inbox/inbox-rail";
 import { InboxSelectionBar } from "../../../screens/inbox/inbox-selection-bar";
 import {
   InboxEmpty,
@@ -24,13 +33,15 @@ import {
   InboxRowsSkeleton,
   type InboxEmptyState,
 } from "../../../screens/inbox/inbox-states";
+import type { InboxLeaveHow } from "../../../screens/inbox/use-inbox-list-motion";
 import type { HeldInboxList } from "./-inbox-held-list";
 import { useInboxClock, useInboxNow } from "./-inbox-clock";
 import {
   EVERYTHING_INBOX_SCOPE,
   EVERYTHING_QUERY_ID,
   buildInboxList,
-  isSearching as isSearchNarrowing,
+  isSearching,
+  type InboxNarrowing,
 } from "./-inbox-scope";
 
 /** How the saved queries' orders read in the list head. */
@@ -62,7 +73,13 @@ function ListState({ children, isBusy }: { children: JSX.Element; isBusy?: boole
  * list), and the selection bar.
  *
  * The rows are the held list's, never a read's: this part draws what
- * `useHeldInboxList` holds. It owns Narrow's open state.
+ * `useHeldInboxList` holds. Whether Narrow's menu is open is the screen's
+ * (`isNarrowOpen`), because a key opens it too; this part draws it under the
+ * Narrow button.
+ *
+ * `ref` receives the list's handle once it draws rows. `leaveHow` and
+ * `returning` tell how the rows of the last move went, and `isRising` says
+ * that the user's own move emptied the list, so the empty state's sunrise rises.
  *
  * Orchestrating: it reads the counts, the plugins and the user where it draws
  * them, and the size of the same search in Everything while an empty search
@@ -78,27 +95,43 @@ export function InboxListPart({
   readHandedThing,
   focusRequest,
   headingFocusRequest,
+  leaveHow,
+  returning,
+  isRising,
+  isNarrowOpen,
   undoLine,
+  ref,
+  onNarrowOpenChange,
   onNarrowPick,
+  onShowNew,
   onOpenScope,
   onSearchEverything,
   onClearSearch,
 }: {
   readonly client: HerculeClient;
   readonly held: HeldInboxList;
-  readonly scope: RailEntry;
+  readonly scope: InboxScope;
   readonly scopeTitle: string;
-  readonly search: InboxSearch;
+  readonly search: InboxNarrowing;
   readonly rowActions: InboxRowActions;
   /** Returns a thing as its row reads while a hand-off of it is on its way. */
   readonly readHandedThing: (thing: InboxThing) => InboxThing;
   readonly focusRequest: number;
   /** Rises when a move left nothing current: the focus then goes to the empty state's heading. */
   readonly headingFocusRequest: number;
+  readonly leaveHow: InboxLeaveHow;
+  readonly returning: ReadonlyArray<string>;
+  /** Whether the empty state's sunrise rises, which it does for a list the user's own move emptied. */
+  readonly isRising: boolean;
+  readonly isNarrowOpen: boolean;
   /** The undo line, drawn over the foot of the list. */
   readonly undoLine: ReactNode;
+  readonly ref: Ref<InboxListHandle>;
+  readonly onNarrowOpenChange: (isOpen: boolean) => void;
   readonly onNarrowPick: (clause: InboxClause) => void;
-  readonly onOpenScope: (entry: RailEntry) => void;
+  /** Takes in what arrived, as the `.` key does. */
+  readonly onShowNew: () => void;
+  readonly onOpenScope: (entry: InboxScope) => void;
   readonly onSearchEverything: () => void;
   readonly onClearSearch: () => void;
 }): JSX.Element {
@@ -107,14 +140,15 @@ export function InboxListPart({
   const formatClock = useInboxClock(client);
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const [narrowAnchor, setNarrowAnchor] = useState<HTMLElement | null>(null);
+  const [narrowButton, setNarrowButton] = useState<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const handledHeadingRequest = useRef(headingFocusRequest);
   const { list } = held;
   const rows = list?.rows ?? [];
   const now = useInboxNow(rows);
-  const isSearching = isSearchNarrowing(search);
-  const isEmpty = held.status === "ready" && rows.length === 0 && list?.arrivals.length === 0;
+  const isNarrowed = isSearching(search);
+  const arrivalCount = list?.arrivals.length ?? 0;
+  const isEmpty = held.status === "ready" && rows.length === 0 && arrivalCount === 0;
   const isEverything = scope.kind === "saved-query" && scope.id === EVERYTHING_QUERY_ID;
 
   // What the same search finds in Everything, which an empty search offers to widen to.
@@ -124,8 +158,18 @@ export function InboxListPart({
       clauses: [...search.clauses],
       text: search.text,
     }),
-    enabled: isEmpty && isSearching && !isEverything,
+    enabled: isEmpty && isNarrowed && !isEverything,
   });
+
+  // Narrow's button is gone while the head is empty, and its menu goes with it: it must not come
+  // back open when the button does.
+  const handleNarrowButton = useCallback(
+    (button: HTMLButtonElement | null): void => {
+      setNarrowButton(button);
+      if (button === null) onNarrowOpenChange(false);
+    },
+    [onNarrowOpenChange],
+  );
 
   // Only a new request moves the focus, not a render.
   useEffect(() => {
@@ -147,9 +191,12 @@ export function InboxListPart({
         );
 
   const empty: InboxEmptyState | null = (() => {
+    if (held.status === "ready" && rows.length === 0 && arrivalCount > 0) {
+      return { kind: "new-waiting", count: arrivalCount, onShowNew };
+    }
     if (!isEmpty) return null;
     const decision = decideInboxEmpty({
-      isSearching,
+      isSearching: isNarrowed,
       savedQueryId: scope.kind === "saved-query" ? scope.id : null,
       counts,
     });
@@ -190,29 +237,31 @@ export function InboxListPart({
 
   const browseValue = scope.kind === "value" ? scope.value : undefined;
   const browseAccount =
-    browseValue?.connectionId === undefined
+    browseValue === undefined
       ? undefined
-      : counts.sources
-          .find((source) => source.source === browseValue.source)
-          ?.accounts.find((account) => account.connectionId === browseValue.connectionId)?.label;
+      : findAccountLabel(
+          counts.sources.find((source) => source.source === browseValue.source)?.accounts ?? [],
+          browseValue.connectionId === undefined ? [] : [browseValue.connectionId],
+        );
   const selectionSize = list?.selection.size ?? 0;
-  const arrivalCount = list?.arrivals.length ?? 0;
+  const isHeadEmpty = held.status !== "ready" || (rows.length === 0 && arrivalCount === 0);
 
   return (
     <>
       <InboxListHead
-        title={isSearching ? "Search" : scopeTitle}
+        title={isNarrowed ? "Search" : scopeTitle}
         mark={browseValue?.source}
         plugins={plugins}
         account={browseAccount}
         count={held.status === "ready" ? (held.total ?? rows.length) : null}
         orderWords={held.order === undefined ? "" : ORDER_WORDS[held.order]}
         newCount={arrivalCount}
-        empty={held.status !== "ready" || (rows.length === 0 && arrivalCount === 0)}
-        narrowOpen={narrowAnchor !== null}
-        onShowNew={held.showArrivals}
-        onNarrow={(anchor) => {
-          setNarrowAnchor((open) => (open === null ? anchor : null));
+        empty={isHeadEmpty}
+        narrowOpen={isNarrowOpen && narrowButton !== null}
+        narrowRef={handleNarrowButton}
+        onShowNew={onShowNew}
+        onNarrow={() => {
+          onNarrowOpenChange(!isNarrowOpen);
         }}
       />
       {counts.failing.map((source) => (
@@ -225,17 +274,17 @@ export function InboxListPart({
           }}
         />
       ))}
-      {narrowAnchor === null ? null : (
+      {isNarrowOpen && narrowButton !== null && (
         <InboxNarrowMenu
           facets={narrowFacets}
           plugins={plugins}
-          anchor={narrowAnchor}
+          anchor={narrowButton}
           onPick={(clause) => {
-            setNarrowAnchor(null);
+            onNarrowOpenChange(false);
             onNarrowPick(clause);
           }}
           onClose={() => {
-            setNarrowAnchor(null);
+            onNarrowOpenChange(false);
           }}
         />
       )}
@@ -251,28 +300,31 @@ export function InboxListPart({
       )}
       {empty !== null && (
         <ListState>
-          <InboxEmpty state={empty} headingRef={headingRef} />
+          <InboxEmpty state={empty} isRising={isRising} headingRef={headingRef} />
         </ListState>
       )}
       {held.status === "ready" && rows.length > 0 && (
         <InboxList
           listId={list!.listId}
-          label={isSearching ? "Search results" : scopeTitle}
+          label={isNarrowed ? "Search results" : scopeTitle}
           rows={views}
           plugins={plugins}
           currentRef={list!.current}
           selection={list!.selection}
           actions={rowActions}
+          leaveHow={leaveHow}
+          returning={returning}
           arriving={held.arrived}
           footReserve={selectionSize > 0 ? SELECTION_BAR_RESERVE : 0}
           focusRequest={focusRequest}
           onNearEnd={held.loadNextPage}
+          handle={ref}
         />
       )}
       <InboxSelectionBar
         count={selectionSize}
         onClear={() => {
-          held.change((state) => ({ ...state, selection: new Set(), anchor: null }));
+          held.change((state) => changeInboxSelection(state, { kind: "clear" }));
         }}
       />
       {undoLine}

@@ -52,7 +52,6 @@ function renderFrame(props: Partial<ComponentProps<typeof InboxFrame>> = {}): {
       }
       scopeName="Someone waits on me"
       search={<input aria-label="Search the Inbox" />}
-      listHead={<p>List head</p>}
       list={<p>The rows</p>}
       paneHead={<span>From GitHub</span>}
       pane={<p>The open thing</p>}
@@ -332,7 +331,6 @@ describe("InboxFrame without a current thing", () => {
         rail={null}
         scopeName="Mine"
         search={null}
-        listHead={null}
         list={null}
         paneHead={null}
         pane={isPaneShown ? <p>The open thing</p> : null}

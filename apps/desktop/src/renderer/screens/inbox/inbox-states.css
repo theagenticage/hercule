@@ -110,20 +110,21 @@
   line-height: 0;
 }
 /* The animations hold their start with `backwards`, so the horizon and the rays stay unseen
-   until their turn, and the words stay at opacity 0 until theirs. */
+   until their turn, and the words stay at opacity 0 until theirs. Only a state that rises
+   (`ib-em--rises`) draws them: one the user's own move reached. */
 @media (prefers-reduced-motion: no-preference) {
-  .ib-sun-line {
+  .ib-em--rises .ib-sun-line {
     animation: ib-sun-line 700ms var(--m-ease) var(--sun-wait, 0ms) backwards;
   }
-  .ib-sun-rays line {
+  .ib-em--rises .ib-sun-rays line {
     animation: ib-sun-ray 520ms var(--m-ease) backwards;
     animation-delay: calc(var(--sun-wait, 0ms) + 420ms + var(--ray) * 26ms);
   }
-  .ib-sun-head {
+  .ib-em--rises .ib-sun-head {
     animation: ib-sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) var(--sun-wait, 0ms) backwards;
   }
-  .ib-em-sun ~ .ib-em-title,
-  .ib-em-sun ~ .ib-em-line {
+  .ib-em--rises .ib-em-sun ~ .ib-em-title,
+  .ib-em--rises .ib-em-sun ~ .ib-em-line {
     animation: ib-em-words 400ms var(--m-ease) calc(var(--sun-wait, 0ms) + 600ms) backwards;
   }
 }

@@ -1,7 +1,7 @@
-/** Tests how the Inbox's counts become what the rail draws. */
+/** Tests how the Inbox's counts become what the rail draws, and the names they give a scope and an account. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
-import { describeInboxRail } from "./inbox-rail-props";
+import { buildInboxCounts } from "./cards.testing";
+import { describeInboxRail, findAccountLabel, nameInboxScope } from "./inbox-outline";
 
 const PLUGINS = [{ id: "linear", displayName: "Linear" }];
 const time = (iso: string): string => iso.slice(11, 16);
@@ -65,5 +65,60 @@ describe("describeInboxRail", () => {
     expect(rail.pins[0]?.accountLabel).toBe("Labs");
     expect(rail.sources[0]).toMatchObject({ name: "Linear", failingSince: "08:40" });
     expect(rail.sources[0]?.facets[0]?.values[0]?.health).toBe("at-risk");
+  });
+});
+
+describe("nameInboxScope", () => {
+  const counts = buildInboxCounts({
+    savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 3 }],
+    pins: [{ source: "linear", key: "team", value: "t1", label: "Checkout (pinned)", count: 2 }],
+    sources: [
+      {
+        source: "linear",
+        count: 5,
+        folded: false,
+        accounts: [],
+        facets: [
+          {
+            source: "linear",
+            key: "project",
+            label: "Project",
+            plural: "Projects",
+            more: 0,
+            values: [{ value: "p1", label: "Checkout revamp", count: 1 }],
+          },
+        ],
+      },
+    ],
+  });
+
+  it("names a saved query, falling back to its id", () => {
+    expect(nameInboxScope({ kind: "saved-query", id: "waits" }, counts)).toBe(
+      "Someone waits on me",
+    );
+    expect(nameInboxScope({ kind: "saved-query", id: "gone" }, counts)).toBe("gone");
+  });
+
+  it("names a value by its pin, else by its facet value, else as it was sent", () => {
+    const value = (key: string, text: string) => ({
+      kind: "value" as const,
+      value: { source: "linear", key, value: text },
+    });
+    expect(nameInboxScope(value("team", "t1"), counts)).toBe("Checkout (pinned)");
+    expect(nameInboxScope(value("project", "p1"), counts)).toBe("Checkout revamp");
+    expect(nameInboxScope(value("project", "p9"), counts)).toBe("p9");
+  });
+});
+
+describe("findAccountLabel", () => {
+  const accounts = [
+    { connectionId: "c1", label: "Northwind" },
+    { connectionId: "c2", label: "Labs" },
+  ];
+
+  it("names the account only when the source has several", () => {
+    expect(findAccountLabel(accounts, ["c2"])).toBe("Labs");
+    expect(findAccountLabel(accounts.slice(0, 1), ["c1"])).toBeUndefined();
+    expect(findAccountLabel(accounts, ["other"])).toBeUndefined();
   });
 });

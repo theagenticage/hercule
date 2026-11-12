@@ -2,18 +2,19 @@ import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import {
-  InboxRail,
-  type RailEntry,
-  type RailFacetScope,
-  type RailValue,
-} from "../../../screens/inbox/inbox-rail";
-import { describeInboxRail } from "../../../screens/inbox/inbox-rail-props";
+  describeInboxRail,
+  type InboxScope,
+  type InboxScopeValue,
+} from "@hercule/client-core/inbox";
+import { InboxRail, type RailFacetScope } from "../../../screens/inbox/inbox-rail";
 import { inboxCountQuery, pluginsQuery, settingsQuery } from "../../../app/queries";
+import { readReason } from "../../../app/read-reason";
 import { useInboxClock } from "./-inbox-clock";
 
-type Pin = { source: string; connectionId?: string; key: string; value: string };
+type Pin = InboxScopeValue;
+type FoldedSource = { source: string; connectionId?: string };
 
-const isSameValue = (a: RailValue, b: RailValue): boolean =>
+const isSameValue = (a: InboxScopeValue, b: InboxScopeValue): boolean =>
   a.source === b.source &&
   a.connectionId === b.connectionId &&
   a.key === b.key &&
@@ -29,6 +30,8 @@ const isSameValue = (a: RailValue, b: RailValue): boolean =>
  * the drawing does. The counts themselves are shell data and are always read.
  *
  * `current` is the entry the list is on, or `null` while a search narrows it.
+ * `onSaveFailed` is called with the sentence that says why a save did not go
+ * through, for the screen to put on its undo line.
  */
 export function InboxRailPart({
   client,
@@ -36,24 +39,30 @@ export function InboxRailPart({
   onPick,
   isLoading,
   onSearchMore,
+  onSaveFailed,
 }: {
   readonly client: HerculeClient;
-  readonly current: RailEntry | null;
-  readonly onPick: (entry: RailEntry) => void;
+  readonly current: InboxScope | null;
+  readonly onPick: (entry: InboxScope) => void;
   readonly isLoading: boolean;
   readonly onSearchMore: (facet: RailFacetScope) => void;
+  readonly onSaveFailed: (sentence: string) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const formatClock = useInboxClock(client);
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const { user: settings } = useSuspenseQuery(settingsQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const save = useMutation({
     // One scope for every settings save, so they run in the order they were made.
     scope: { id: "settings" },
     mutationFn: (user: {
       readonly "inbox.pins"?: ReadonlyArray<Pin>;
-      readonly "inbox.browseFolded"?: ReadonlyArray<{ source: string }>;
+      readonly "inbox.browseFolded"?: ReadonlyArray<FoldedSource>;
     }) => client.settings.update({ payload: { user } }),
+    onError: (error) => {
+      onSaveFailed(`Your pins and folded sources did not save. ${readReason(error)}.`);
+    },
     onSuccess: async (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
       await queryClient.invalidateQueries({ queryKey: queryKeys.inboxCount() });
@@ -68,10 +77,13 @@ export function InboxRailPart({
       loading={isLoading}
       onPick={onPick}
       onToggleFold={(source) => {
-        const folded = counts.sources
-          .filter((each) => each.folded !== (each.source === source))
-          .map((each) => ({ source: each.source }));
-        save.mutate({ "inbox.browseFolded": folded });
+        // Written from the setting itself, not from the counts: a folded source that holds nothing
+        // now is not in the counts, and rewriting from them would unfold it.
+        const folded = settings["inbox.browseFolded"] ?? [];
+        const kept = folded.filter((entry) => entry.source !== source);
+        save.mutate({
+          "inbox.browseFolded": kept.length < folded.length ? kept : [...folded, { source }],
+        });
       }}
       onTogglePin={(value) => {
         const pins: Pin[] = counts.pins.map(({ source, connectionId, key, value: text }) => ({

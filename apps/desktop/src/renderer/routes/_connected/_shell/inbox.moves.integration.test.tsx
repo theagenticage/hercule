@@ -24,9 +24,10 @@ import {
   SLOTS,
   defaultInbox,
   openInbox,
+  readQueries,
   request,
   type FakeInbox,
-} from "./inbox.testing";
+} from "./-inbox.testing";
 
 beforeEach(() => {
   stubIntersectionObserver();
@@ -265,6 +266,110 @@ describe("Dismiss", () => {
     expect(callsTo(calls, DISMISS)[0]?.body).toEqual({ ids: [BASKET.id] });
     expect(getRow(SLOTS.title).getAttribute("aria-selected")).toBe("true");
   });
+
+  it("acts on the whole selection when the row whose own button was pressed is part of it", async () => {
+    const { user, calls } = await open(undefined, { [DISMISS]: { body: {} } });
+    await user.keyboard("x");
+    await user.keyboard("j");
+    await user.keyboard("x");
+    const row = getRow(LOYALTY.title);
+
+    await user.hover(row);
+    await user.click(within(row).getByRole("button", { name: "Dismiss", hidden: true }));
+
+    expect(callsTo(calls, DISMISS)[0]?.body).toEqual({ ids: [SLOTS.id, LOYALTY.id] });
+  });
+
+  it("dismisses a thing again after a new ask brought it back, and sends the second dismissal", async () => {
+    const { user, calls, live, inbox } = await open(undefined, { [DISMISS]: { body: {} } });
+    await waitFor(() => {
+      expect(live.readTopics()).toContain("externalEntity");
+    });
+    await user.keyboard("e");
+    await waitFor(() => {
+      expect(callsTo(calls, DISMISS)).toHaveLength(1);
+    });
+    inbox.lists.waits = [LOYALTY, BASKET];
+    const readsBeforePush = readQueries(calls).length;
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+    // The first page that lacks the thing tells the list the controller has taken it out.
+    await waitFor(() => {
+      expect(readQueries(calls).length).toBeGreaterThan(readsBeforePush);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The controller takes it back to the list: a newer ask put it there again.
+    inbox.lists.waits = [{ ...SLOTS, askCount: 2 }, LOYALTY, BASKET];
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+    await user.click(await screen.findByRole("button", { name: /1 new/ }));
+    const row = await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+
+    await user.hover(row);
+    await user.click(within(row).getByRole("button", { name: "Dismiss", hidden: true }));
+
+    await waitFor(() => {
+      expect(callsTo(calls, DISMISS)).toHaveLength(2);
+    });
+    expect(callsTo(calls, DISMISS)[1]?.body).toEqual({ ids: [SLOTS.id] });
+  });
+});
+
+describe("the last thing leaving", () => {
+  it("plays the sunrise for the user's own move, and draws it still when the Inbox opens empty", async () => {
+    const { user } = await open(
+      (inbox) => {
+        inbox.lists.waits = [SLOTS];
+      },
+      { [DISMISS]: { body: {} } },
+    );
+    expect(document.querySelector(".ib-em")).toBeNull();
+
+    await user.keyboard("e");
+
+    await screen.findByRole("heading", { name: /Nobody waits on you|All clear/ });
+    expect(document.querySelector(".ib-em--rises")).not.toBeNull();
+    cleanup();
+
+    const empty = defaultInbox();
+    empty.lists.waits = [];
+    await openInbox(empty);
+    await screen.findByRole("heading", { name: /Nobody waits on you/ });
+    expect(document.querySelector(".ib-em")).not.toBeNull();
+    expect(document.querySelector(".ib-em--rises")).toBeNull();
+  });
+
+  it("says what waits behind the new pill, instead of drawing nothing, and the focus goes to it", async () => {
+    const { user, live, inbox } = await open(
+      (fake) => {
+        fake.lists.waits = [SLOTS];
+      },
+      { [DISMISS]: { body: {} } },
+    );
+    await waitFor(() => {
+      expect(live.readTopics()).toContain("externalEntity");
+    });
+    inbox.lists.waits = [request(4, "Bump the checkout SDK", "Noa"), SLOTS];
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+    await screen.findByRole("button", { name: /1 new/ });
+
+    await user.keyboard("e");
+
+    const heading = await screen.findByRole("heading", { name: "Nothing left here" });
+    expect(screen.getByRole("button", { name: /1 new/ })).toBeTruthy();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
+    inbox.lists.waits = [request(4, "Bump the checkout SDK", "Noa")];
+    await user.click(screen.getByRole("button", { name: /Show what is new/ }));
+    await screen.findByRole("treeitem", { name: /Bump the checkout SDK/ });
+  });
 });
 
 describe("Take on", () => {
@@ -386,6 +491,25 @@ describe("the hand-off", () => {
     expect(document.activeElement).toBe(getRow(LOYALTY.title));
   });
 
+  it("refuses a hand-off picked from an open menu when the connection was lost meanwhile", async () => {
+    const { user, live, calls } = await open(handable, {
+      [handOffPath(LOYALTY.id)]: { body: { runId: RUN_ID, taskId: TASK_ID } },
+    });
+    await live.waitForFirstPushes();
+    await user.keyboard("j");
+    await user.keyboard("h");
+    await screen.findByRole("menuitem", { name: /Repair the build/, hidden: true });
+    act(() => {
+      live.drop();
+    });
+    await screen.findByText(/Offline/);
+
+    await user.keyboard("2");
+
+    await waitForUndoLine("You are offline, so that was not done.");
+    expect(callsTo(calls, handOffPath(LOYALTY.id))).toHaveLength(0);
+  });
+
   it("refuses a selection, and a thing no workflow takes, with the reason", async () => {
     const { user, calls } = await open(handable);
     await user.keyboard("j");
@@ -487,6 +611,20 @@ describe("the hand-off", () => {
     await user.keyboard("h");
 
     await waitForUndoLine("was not handed to Review PR: Review PR already works on its Task");
+  });
+});
+
+describe("Narrow", () => {
+  it("opens its menu from the F key, and a press outside closes it", async () => {
+    const { user } = await open();
+
+    await user.keyboard("f");
+
+    expect(await screen.findByText("Narrow what the list holds")).toBeTruthy();
+    await user.click(document.body);
+    await waitFor(() => {
+      expect(screen.queryByText("Narrow what the list holds")).toBeNull();
+    });
   });
 });
 
