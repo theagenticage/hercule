@@ -16,7 +16,7 @@ import {
   type CardOffers,
 } from "@hercule/client-core/inbox";
 import type { InboxThing, WorkflowOffer } from "@hercule/contract";
-import { entityQuery, inboxCountQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { entityQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { OpenCardBody } from "../../../screens/inbox/open-card-body";
 import { OpenCardHandRows } from "../../../screens/inbox/open-card-hand";
 import { OpenCardLine } from "../../../screens/inbox/open-card-line";
@@ -48,10 +48,10 @@ export function InboxPaneHeadPart({
   readonly client: HerculeClient;
   readonly thing: InboxThing;
 }): JSX.Element {
-  const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const account = findAccountLabel(
-    counts.sources.find((source) => source.source === thing.source)?.accounts ?? [],
+    outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
     thing.accounts,
   );
   return (

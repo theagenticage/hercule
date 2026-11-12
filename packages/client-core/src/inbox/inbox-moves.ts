@@ -34,7 +34,7 @@ const QUOTED_TITLE_LENGTH = 44;
 const quoteTitle = (title: string): string =>
   `“${title.length > QUOTED_TITLE_LENGTH ? `${title.slice(0, QUOTED_TITLE_LENGTH - 2)}…` : title}”`;
 
-/** Returns who has the thing, as a sentence's subject: its first live workflow, else the user. */
+/** Returns who has the thing, as a sentence's subject: its first live workflow, else the user. Used for a thing the user took on. */
 const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows">): string =>
   thing.liveWorkflows[0] === undefined ? "You have" : `${thing.liveWorkflows[0].name} has`;
 
@@ -48,8 +48,8 @@ const OFFLINE = "You are offline, so that was not done. Try again when the conne
  * - Every move but Go to its Task needs the connection, because the outbox
  *   that would hold a move for later does not exist yet.
  * - Dismiss takes up to `MAX_INBOX_MOVED_THINGS` things, in one call.
- * - Take on and the hand-off take one thing. Take on also refuses a thing a
- *   Task already holds, and the hand-off a thing no workflow can take
+ * - Take on and the hand-off take one thing. Take on also refuses a thing the
+ *   user already took on, and the hand-off a thing no workflow can take
  *   (`offers`, the offers of the one thing).
  * - Go to its Task needs one thing that has a Task.
  *
@@ -81,7 +81,9 @@ export const planInboxMove = ({
         return refuse(
           "Take on makes one Task for one thing. Press Esc to clear the selection, then T on the thing you want.",
         );
-      return thing.taskId === undefined
+      // A thing with a Task the user did not take on (a signal's, a hand-off's) may be taken on:
+      // the controller marks that Task as taken instead of making another.
+      return !thing.takenOn
         ? GO
         : refuse(`${describeWhoHasIt(thing)} this already. G goes to its Task.`);
     case "handOff":

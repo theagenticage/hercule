@@ -37,37 +37,23 @@ export const invalidateWithoutCancelling = (queryClient: QueryClient, queryKey: 
   }
 };
 
-/** The pushes of one key that wait for a shared read: its timer, per client. */
-const waitingPushes = new WeakMap<QueryClient, Map<string, ReturnType<typeof setTimeout>>>();
-
 /**
- * Invalidates the queries under `queryKey` like `invalidateWithoutCancelling`,
- * but `windowMs` later, and once for every push of that key that arrives in
- * the meantime. One change often causes several pushes in a row (a signal's
- * push, then its entity's), and a large read such as the Inbox's page would
- * otherwise be read once for each. The window starts at the first push and
- * does not move, so a long burst still reads every `windowMs`. Returns at once.
+ * Invalidates every active query under `queryKey`, and joins a read that is
+ * already running instead of cancelling it or reading again after it.
+ *
+ * Use it for a large read whose several pushes come from one change (a
+ * signal's push, then its entity's): the controller sends every push after
+ * the change is committed, so a read that started after the first push already
+ * sees what the later ones report, and one read answers them all. A push that
+ * arrives after the read has finished starts a new read.
+ *
+ * The price is that a push about a different change, arriving while a read
+ * runs, is also joined. Only use it where the reads are large enough for that
+ * to be worth it. An inactive query is only marked stale. Returns at once;
+ * never fails.
  */
-export const invalidateWithoutCancellingSoon = (
-  queryClient: QueryClient,
-  queryKey: QueryKey,
-  windowMs: number,
-): void => {
-  let timers = waitingPushes.get(queryClient);
-  if (timers === undefined) {
-    timers = new Map();
-    waitingPushes.set(queryClient, timers);
-  }
-  const id = JSON.stringify(queryKey);
-  if (timers.has(id)) return;
-  const waiting = timers;
-  waiting.set(
-    id,
-    setTimeout(() => {
-      waiting.delete(id);
-      invalidateWithoutCancelling(queryClient, queryKey);
-    }, windowMs),
-  );
+export const invalidateJoiningRead = (queryClient: QueryClient, queryKey: QueryKey): void => {
+  void queryClient.invalidateQueries({ queryKey, refetchType: "active" }, { cancelRefetch: false });
 };
 
 /** Invalidates one query for a push, as `invalidateWithoutCancelling` describes. */

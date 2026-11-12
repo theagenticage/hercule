@@ -1,6 +1,6 @@
-/** Tests how the Inbox's counts become what the rail draws, and the names they give a scope and an account. */
+/** Tests how the Inbox's outline become what the rail draws, and the names they give a scope and an account. */
 import { describe, expect, it } from "vitest";
-import { buildInboxCounts } from "./cards.testing";
+import { buildInboxOutline } from "./cards.testing";
 import { describeInboxRail, findAccountLabel, nameInboxScope } from "./inbox-outline";
 
 const PLUGINS = [{ id: "linear", displayName: "Linear" }];
@@ -8,7 +8,7 @@ const time = (iso: string): string => iso.slice(11, 16);
 
 describe("describeInboxRail", () => {
   it("gives the core's lists their icons and the first seven their digit, and a plugin's list its mark", () => {
-    const counts = buildInboxCounts({
+    const counts = buildInboxOutline({
       savedQueries: [
         { id: "waits", name: "Someone waits on me", order: "waiting", count: 3 },
         { id: "linear/cycle", name: "This cycle", order: "newest", source: "linear", count: 1 },
@@ -20,7 +20,7 @@ describe("describeInboxRail", () => {
   });
 
   it("names a pin's account only when its source has several, and a failing source's time", () => {
-    const counts = buildInboxCounts({
+    const counts = buildInboxOutline({
       pins: [
         {
           source: "linear",
@@ -59,17 +59,17 @@ describe("describeInboxRail", () => {
           ],
         },
       ],
-      failing: [{ source: "linear", since: "2026-11-12T08:40:00.000Z" }],
+      failing: [{ source: "linear", updatedAt: "2026-11-12T08:40:00.000Z" }],
     });
     const rail = describeInboxRail(counts, PLUGINS, time);
     expect(rail.pins[0]?.accountLabel).toBe("Labs");
-    expect(rail.sources[0]).toMatchObject({ name: "Linear", failingSince: "08:40" });
+    expect(rail.sources[0]).toMatchObject({ name: "Linear", failingChangedAt: "08:40" });
     expect(rail.sources[0]?.facets[0]?.values[0]?.health).toBe("at-risk");
   });
 });
 
 describe("nameInboxScope", () => {
-  const counts = buildInboxCounts({
+  const counts = buildInboxOutline({
     savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 3 }],
     pins: [{ source: "linear", key: "team", value: "t1", label: "Checkout (pinned)", count: 2 }],
     sources: [

@@ -1,10 +1,11 @@
 /** Tests the offers of a card, what a click on one ends, the card once handed, and the line after an undo. */
-import type { HandOffUndo } from "@hercule/contract";
+import type { EntitySignalLine, HandOffUndo } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   decideHandMove,
   decideHandOffFit,
   describeHandOffAsks,
+  readHandOffAsks,
   describeHandOffEnds,
   describeHandOffUndo,
   findHandOffs,
@@ -336,5 +337,46 @@ describe("listAvailableHandOffs and findHandOffs", () => {
       { ...thing, asks: [buildInboxAsk("a1", "Leaves Smith")] },
     );
     expect(findHandOffs(odd, "smith").map(({ offer }) => offer.name)).toEqual(["Security review"]);
+  });
+});
+
+describe("readHandOffAsks", () => {
+  const reviewKind = "acme/review-requested";
+  const mentionKind = "acme/mention";
+  const signal = (id: string, kind: string, overrides: Partial<EntitySignalLine> = {}) => ({
+    id,
+    kind,
+    title: "A title",
+    priority: "normal" as const,
+    status: "open" as const,
+    createdAt: `2026-11-0${id}T09:00:00.000Z`,
+    say: { say: "Someone asked", tone: "plain" as const },
+    snoozed: false,
+    ...overrides,
+  });
+  const row = {
+    asks: [buildInboxAsk("a1", "Mei")],
+    askCount: 5,
+    askKinds: [reviewKind, mentionKind],
+    openKinds: [reviewKind, mentionKind],
+  };
+
+  it("lists every open ask of the detail, newest first, and leaves out snoozed and resolved signals", () => {
+    const { asks, askCount } = readHandOffAsks(row, [
+      signal("1", reviewKind, { asker: "Mei" }),
+      signal("2", mentionKind, { asker: "Omar" }),
+      signal("3", reviewKind, { snoozed: true }),
+      signal("4", reviewKind, { status: "resolved" }),
+      signal("5", "acme/fyi"),
+    ]);
+
+    expect(asks.map((ask) => ask.id)).toEqual(["2", "1"]);
+    expect(askCount).toBe(2);
+  });
+
+  it("takes the noun from a row ask of the same kind, else from the kind's key", () => {
+    const { asks } = readHandOffAsks(row, [signal("1", reviewKind), signal("2", mentionKind)]);
+
+    expect(asks.map((ask) => ask.noun)).toEqual(["mention", "review request"]);
   });
 });

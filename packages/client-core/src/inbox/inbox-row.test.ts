@@ -96,10 +96,17 @@ describe("describeInboxRow reason", () => {
       taskId: "task-1",
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
-    const you = buildInboxThing("1", { taskId: "task-1" });
+    const you = buildInboxThing("1", { taskId: "task-1", takenOn: true });
 
     expect(describe_(colleague).reason).toMatchObject({ rest: "Review PR has it", quiet: true });
     expect(describe_(you).reason).toMatchObject({ rest: "You took it on", quiet: true });
+  });
+
+  it("shows no holder mark for a Task the user did not take on", () => {
+    const signalsTask = buildInboxThing("1", { taskId: "task-1", takenOn: false });
+
+    expect(describe_(signalsTask).reason).toMatchObject({ rest: "Ticket", quiet: true });
+    expect(describe_(signalsTask).time).not.toMatchObject({ kind: "holder" });
   });
 
   it("adds who has the rest when a workflow has the thing and an ask is left", () => {
@@ -182,7 +189,7 @@ describe("describeInboxRow time", () => {
       taskId: "task-1",
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
-    const you = buildInboxThing("1", { taskId: "task-1" });
+    const you = buildInboxThing("1", { taskId: "task-1", takenOn: true });
 
     for (const order of ["waiting", "newest"] as const) {
       expect(describe_(colleague, { order }).time).toEqual({

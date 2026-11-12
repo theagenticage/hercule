@@ -20,7 +20,7 @@ import {
   type InboxScope,
 } from "@hercule/client-core/inbox";
 import type { InboxClause, InboxOrder, InboxThing } from "@hercule/contract";
-import { inboxCountQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { inboxOutlineQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxList, type InboxListHandle } from "../../../screens/inbox/inbox-list";
 import { InboxListHead } from "../../../screens/inbox/inbox-list-head";
 import { InboxNarrowMenu, type NarrowFacet } from "../../../screens/inbox/inbox-narrow-menu";
@@ -81,7 +81,7 @@ function ListState({ children, isBusy }: { children: JSX.Element; isBusy?: boole
  * `returning` tell how the rows of the last move went, and `isRising` says
  * that the user's own move emptied the list, so the empty state's sunrise rises.
  *
- * Orchestrating: it reads the counts, the plugins and the user where it draws
+ * Orchestrating: it reads the outline, the plugins and the user where it draws
  * them, and the size of the same search in Everything while an empty search
  * offers to widen.
  */
@@ -136,7 +136,7 @@ export function InboxListPart({
   readonly onClearSearch: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const formatClock = useInboxClock(client);
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -198,7 +198,7 @@ export function InboxListPart({
     const decision = decideInboxEmpty({
       isSearching: isNarrowed,
       savedQueryId: scope.kind === "saved-query" ? scope.id : null,
-      counts,
+      counts: outline,
     });
     switch (decision.kind) {
       case "all-clear":
@@ -217,7 +217,7 @@ export function InboxListPart({
         return {
           kind: "nothing-matches",
           scopeTitle,
-          tokens: search.clauses.map((clause) => describeInboxClause(clause, counts.fields)),
+          tokens: search.clauses.map((clause) => describeInboxClause(clause, outline.fields)),
           text: search.text.trim(),
           widerCount: isEverything ? 0 : (wider.data?.total ?? 0),
           onSearchEverything,
@@ -240,7 +240,7 @@ export function InboxListPart({
     browseValue === undefined
       ? undefined
       : findAccountLabel(
-          counts.sources.find((source) => source.source === browseValue.source)?.accounts ?? [],
+          outline.sources.find((source) => source.source === browseValue.source)?.accounts ?? [],
           browseValue.connectionId === undefined ? [] : [browseValue.connectionId],
         );
   const selectionSize = list?.selection.size ?? 0;
@@ -264,11 +264,11 @@ export function InboxListPart({
           onNarrowOpenChange(!isNarrowOpen);
         }}
       />
-      {counts.failing.map((source) => (
+      {outline.failing.map((source) => (
         <InboxFailingSource
           key={source.source}
           sourceName={namePlugin(source.source, plugins)}
-          sinceLabel={formatClock(source.since)}
+          changedLabel={formatClock(source.updatedAt)}
           onOpenConnections={() => {
             void navigate({ to: "/settings/connections" });
           }}

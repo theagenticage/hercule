@@ -321,7 +321,9 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
 
   const sourceBlock = (source: RailSource): JSX.Element => {
     const warning =
-      source.failingSince === undefined ? null : `Can't be read since ${source.failingSince}`;
+      source.failingChangedAt === undefined
+        ? null
+        : `Can't be read; last changed ${source.failingChangedAt}`;
     const hasAccounts = source.accounts.length > 1;
     return (
       <div className="ib-rail-source" key={source.source}>

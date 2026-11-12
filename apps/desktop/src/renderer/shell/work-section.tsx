@@ -162,8 +162,7 @@ function InboxRow(): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected/_shell" });
   const { client } = controller;
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const { savedQueries, newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
-  const waiting = savedQueries.find((query) => query.id === "waits")?.count ?? 0;
+  const { waiting, newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
   const acknowledgedArrival = useSyncExternalStore(subscribeInboxArrival, () =>
     readAcknowledgedInboxArrival(controller.url, username),
   );

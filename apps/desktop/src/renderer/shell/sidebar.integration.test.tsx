@@ -1103,17 +1103,7 @@ describe("the sidebar's faces", () => {
       const app = await startSidebar({
         handlers: {
           [INBOX_COUNT_ROUTE]: {
-            body: buildInboxCounts({
-              savedQueries: [
-                {
-                  id: "waits",
-                  name: "Someone waits on me",
-                  order: "waiting",
-                  count: counts.waiting,
-                },
-              ],
-              newestArrival: counts.newestArrival,
-            }),
+            body: buildInboxCounts(counts),
           },
         },
       });

@@ -16,7 +16,7 @@ import type { InboxClause, InboxThing } from "@hercule/contract";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { useQuietValue } from "../../../app/use-quiet-value";
-import { inboxCountQuery, userQuery } from "../../../app/queries";
+import { inboxCountQuery, inboxOutlineQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import type { SavedController } from "../../../app/context";
@@ -96,7 +96,8 @@ export function InboxScreen({
   // The workflows' pushes change who has a thing, which the rows say.
   useScreenTopicsLive(live, queryClient, WORKFLOW_TOPICS);
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
-  const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
+  const { newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const formatClock = useInboxClock(client);
   const offlineSince = useOfflineSince(live);
@@ -137,7 +138,7 @@ export function InboxScreen({
   ) {
     setEmptiedListId(null);
   }
-  const scopeTitle = nameInboxScope(scope, counts);
+  const scopeTitle = nameInboxScope(scope, outline);
   const currentThing = list?.rows.find((row) => row.ref === list.current);
 
   // What the waits list shows is what the sidebar's dot has been told about.
@@ -145,8 +146,8 @@ export function InboxScreen({
     scope.kind === "saved-query" && scope.id === DEFAULT_INBOX_QUERY_ID && !isSearching(searched);
   const isReady = held.status === "ready";
   useEffect(() => {
-    if (isShowingWaits && isReady) acknowledgeInboxArrival(url, username, counts.newestArrival);
-  }, [isShowingWaits, isReady, url, username, counts.newestArrival]);
+    if (isShowingWaits && isReady) acknowledgeInboxArrival(url, username, newestArrival);
+  }, [isShowingWaits, isReady, url, username, newestArrival]);
 
   const focusList = (): void => {
     setListFocusRequest((request) => request + 1);
@@ -251,7 +252,7 @@ export function InboxScreen({
         showNew();
         return;
       case "pickList": {
-        const query = counts.savedQueries[action.index];
+        const query = outline.savedQueries[action.index];
         if (query !== undefined) openScope({ kind: "saved-query", id: query.id });
         return;
       }
@@ -302,7 +303,7 @@ export function InboxScreen({
   const searchMore = (facet: RailFacetScope): void => {
     setSearch(
       typeInboxSearch(EMPTY_INBOX_SEARCH, `${facet.key}:`, {
-        fields: counts.fields,
+        fields: outline.fields,
         suggestedValues: {},
       }),
     );

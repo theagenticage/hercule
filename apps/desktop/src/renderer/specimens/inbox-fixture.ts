@@ -16,7 +16,7 @@
 import type {
   Connection,
   ExternalEntityDetail,
-  InboxCounts,
+  InboxOutline,
   InboxFacet,
   InboxPage,
   InboxQuery,
@@ -95,7 +95,6 @@ const pullRequest = (
     identifier: `#${String(number)}`,
     title,
     url: `https://github.example/acme/${repo}/pull/${String(number)}`,
-    lifecycle: "open",
     access: "ok",
     stale: false,
     observedAt: hoursAgo(0.1),
@@ -113,6 +112,7 @@ const pullRequest = (
     askCount: asks.length,
     askKinds: [...new Set(asks.map((ask) => ask.kind))],
     openKinds: [...new Set(asks.map((ask) => ask.kind))],
+    takenOn: false,
     ...(asks.length === 0
       ? {}
       : { waitingSince: hoursAgo(Math.max(...asks.map((ask) => ask.hours))) }),
@@ -145,7 +145,6 @@ const ticket = (
     title,
     url: `https://tidewatch.example/shop/${String(number)}`,
     status: { shape: "half", tone: "active", label: "In progress" },
-    lifecycle: "open",
     access: "ok",
     stale: false,
     observedAt: hoursAgo(0.1),
@@ -156,6 +155,7 @@ const ticket = (
     askCount: 0,
     askKinds: [],
     openKinds: [],
+    takenOn: false,
     liveWorkflows: [],
     offerSetId: "none",
     actingConnections: [],
@@ -266,6 +266,7 @@ const ITEMS: ReadonlyArray<Item> = [
       askCount: 1,
       askKinds: [REGRESSED],
       openKinds: [REGRESSED],
+      takenOn: false,
       waitingSince: hoursAgo(1),
       accounts: [buildId(902)],
     },
@@ -279,6 +280,7 @@ const ITEMS: ReadonlyArray<Item> = [
     2,
     {
       taskId: buildId(800),
+      takenOn: true,
       liveWorkflows: [{ workflowId: buildId(700), name: "Review PR" }],
     },
   ),
@@ -298,7 +300,7 @@ const ITEMS: ReadonlyArray<Item> = [
 const ALL_THINGS: ReadonlyArray<InboxThing> = ITEMS.map((item) => item.thing);
 
 /** The saved queries, with the same words the controller's core list has. */
-const SAVED_QUERIES: InboxCounts["savedQueries"] = [
+const SAVED_QUERIES: InboxOutline["savedQueries"] = [
   { id: "waits", name: "Someone waits on me", order: "waiting", count: 6 },
   { id: "mine", name: "Mine", order: "newest", count: 2 },
   { id: "updates", name: "Updates", order: "newest", count: 3 },
@@ -334,8 +336,8 @@ const facet = (
   values: InboxFacet["values"],
 ): InboxFacet => ({ source, key, label, plural, values, more: 0 });
 
-/** Builds the counts the sidebar and the rail read, for the fixture's world. */
-export const buildInboxWorldCounts = (): InboxCounts => ({
+/** Builds the outline the rail, the search and the list head read, for the fixture's world. */
+export const buildInboxWorldOutline = (): InboxOutline => ({
   savedQueries: SAVED_QUERIES,
   sources: [
     {
@@ -390,7 +392,6 @@ export const buildInboxWorldCounts = (): InboxCounts => ({
     { key: "events", label: "Events", type: "number", source: "sentry" },
   ],
   failing: [],
-  newestArrival: 0,
 });
 
 /** Returns whether `item` passes one clause of the search or of a Browse scope. */
@@ -513,7 +514,7 @@ export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
 
 /** Everything the specimen reads of the Inbox besides the shell's lists. */
 export interface InboxRecords {
-  readonly counts: InboxCounts;
+  readonly outline: InboxOutline;
   /** Answers one page read. `"never"` plays a controller that has not answered yet, which draws the loading shapes. */
   readonly answer: (query: InboxQuery) => InboxPage | "never";
   /** Answers the read of a field's values, which the search offers as it is typed. */
@@ -545,7 +546,7 @@ export interface InboxScene {
 }
 
 const BASE: InboxRecords = {
-  counts: buildInboxWorldCounts(),
+  outline: buildInboxWorldOutline(),
   answer: answerInboxQuery,
   answerValues: answerInboxValues,
   details: DETAILS,
@@ -610,8 +611,8 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
         "savedQuery" in query.list && query.list.savedQuery === "waits"
           ? NO_THINGS
           : answerInboxQuery(query),
-      counts: {
-        ...BASE.counts,
+      outline: {
+        ...BASE.outline,
         savedQueries: SAVED_QUERIES.map((query) =>
           query.id === "waits" ? { ...query, count: 0 } : query,
         ),
@@ -623,8 +624,8 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     records: {
       ...BASE,
       answer: () => NO_THINGS,
-      counts: {
-        ...BASE.counts,
+      outline: {
+        ...BASE.outline,
         savedQueries: SAVED_QUERIES.map((query) => ({ ...query, count: 0 })),
         sources: [],
         pins: [],
@@ -637,7 +638,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     name: "failing",
     records: {
       ...BASE,
-      counts: { ...BASE.counts, failing: [{ source: "github", since: hoursAgo(1) }] },
+      outline: { ...BASE.outline, failing: [{ source: "github", updatedAt: hoursAgo(1) }] },
     },
   },
   {

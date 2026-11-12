@@ -23,7 +23,7 @@ import {
   type Handler,
   type StubSocket,
 } from "@hercule/client-core/testing";
-import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
+import { buildInboxCounts, buildInboxOutline } from "@hercule/client-core/inbox/testing";
 import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildAgentStreamTopic,
@@ -788,6 +788,10 @@ export const buildSidebarHandlers = (
   // The shell reads the Inbox's counts, for the Inbox row.
   "GET /api/v1/external-entities/inbox/count": {
     body: buildInboxCounts(),
+  },
+  // The Inbox screen reads its outline once, for the rail.
+  "GET /api/v1/external-entities/inbox/outline": {
+    body: buildInboxOutline(),
   },
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
   // Settings > Intake reads the Ignore Rules each time it opens.

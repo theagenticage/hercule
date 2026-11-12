@@ -193,12 +193,26 @@ describe("a push", () => {
     expect(readRowTitles()).toEqual([SLOTS.title, LOYALTY.title, BASKET.title]);
   });
 
-  it("reads the first page once for one push, and once for the signal push and entity push that one change causes", async () => {
+  /** Opens the Inbox on a controller whose first-page reads, once `slow.on` is set, take 100 ms to answer. */
+  const openWithSlowFirstPage = async () => {
+    const inbox = defaultInbox();
+    const slow = { on: false };
+    const opened = await openWithPush({
+      [QUERY_PATH]: async (call: Call) => {
+        const query = call.body as InboxQuery;
+        if (slow.on && query.refs === undefined && query.cursor === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return answerQuery(inbox, call);
+      },
+    });
+    return { ...opened, inbox, slow };
+  };
+  const isFirstPage = (query: InboxQuery) => query.refs === undefined && query.cursor === undefined;
+
+  it("reads the first page once for one push", async () => {
     const { inbox, live, calls } = await openWithPush();
-    const isFirstPage = (query: InboxQuery) =>
-      query.refs === undefined && query.cursor === undefined;
-    const countFirstPages = () => readQueries(calls).filter(isFirstPage).length;
-    const before = countFirstPages();
+    const before = readQueries(calls).filter(isFirstPage).length;
     inbox.lists.waits = [SLOTS, BASKET];
 
     act(() => {
@@ -207,9 +221,16 @@ describe("a push", () => {
     await waitFor(() => {
       expect(readRowTitles()).toEqual([SLOTS.title, BASKET.title]);
     });
-    expect(countFirstPages() - before).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // A change to a thing's signals pushes the signal topic, then the entity topic.
+    expect(readQueries(calls).filter(isFirstPage).length - before).toBe(1);
+  });
+
+  it("reads the first page once for the signal push and the entity push of one change, because the second joins the read the first started", async () => {
+    const { live, calls, slow } = await openWithSlowFirstPage();
+    const before = readQueries(calls).filter(isFirstPage).length;
+    slow.on = true;
+
     act(() => {
       live.pushInvalidation("signal", ["s1"]);
     });
@@ -217,8 +238,26 @@ describe("a push", () => {
     act(() => {
       live.pushInvalidation("externalEntity", [SLOTS.id]);
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(countFirstPages() - before).toBe(2);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(readQueries(calls).filter(isFirstPage).length - before).toBe(1);
+  });
+
+  it("reads the first page again for a push that arrives after the read finished", async () => {
+    const { live, calls, slow } = await openWithSlowFirstPage();
+    const before = readQueries(calls).filter(isFirstPage).length;
+    slow.on = true;
+
+    act(() => {
+      live.pushInvalidation("signal", ["s1"]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(readQueries(calls).filter(isFirstPage).length - before).toBe(2);
   });
 
   it("reads the first page again for the . key, and takes the arrivals in after it", async () => {

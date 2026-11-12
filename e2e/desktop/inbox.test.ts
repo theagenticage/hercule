@@ -61,8 +61,8 @@ function seedInbox(home: string): void {
 
 /** Returns how many things the controller says someone waits on. */
 async function readWaitingCount({ client }: ArrangedFleet): Promise<number> {
-  const { savedQueries } = await client.externalEntity.countInbox();
-  return savedQueries.find((query) => query.id === WAITS)!.count;
+  const { waiting } = await client.externalEntity.countInbox();
+  return waiting;
 }
 
 /**
@@ -120,7 +120,7 @@ describe("Inbox", () => {
 
     // The rail lists the saved queries, the first one picked, each with its count.
     const rail = page.getByRole("navigation", { name: "Inbox lists" });
-    const { savedQueries } = await arranged.client.externalEntity.countInbox();
+    const { savedQueries } = await arranged.client.externalEntity.readInboxOutline();
     expect(savedQueries[0]!.id).toBe(WAITS);
     for (const query of savedQueries) {
       const entry = rail

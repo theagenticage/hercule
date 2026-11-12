@@ -1061,6 +1061,20 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads what the Inbox's rail, search and list head draw: the saved queries
+ * with their counts, the Browse sources, the pins, the query fields and the
+ * failing sources. It is not shell data: only the Inbox screen reads it, and
+ * the route's loader prefetches it. Its key is inside the `inbox` prefix, so
+ * the pushes that read the pages read it again.
+ */
+export const inboxOutlineQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.inboxOutline(),
+    queryFn: () => client.externalEntity.readInboxOutline(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the first page of an Inbox list: `query` names the list, its search
  * and no cursor. A read the screen no longer needs (the user went on to
  * another list or kept typing) is aborted. It is not shell data: only the Inbox screen reads it, and a
@@ -1135,8 +1149,9 @@ export const taskAttentionQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Inbox's counts: the sidebar's row shows them on every screen, and
- * the rail shares the same cache entry. A push on `task` reads it again.
+ * Reads the sidebar's Inbox numbers: how many things wait, and the newest
+ * arrival. It is shell data, drawn on every screen, so it stays small. A push
+ * on `task`, `signal` or `externalEntity` reads it again.
  */
 export const inboxCountQuery = (client: HerculeClient) =>
   queryOptions({

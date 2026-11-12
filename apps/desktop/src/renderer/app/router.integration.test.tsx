@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
-import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
+import { buildInboxCounts, buildInboxOutline } from "@hercule/client-core/inbox/testing";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import openingSheetCss from "../screens/desk/opening-sheet.css?raw";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
@@ -334,6 +334,7 @@ describe("the controls that float over a screen", () => {
       "GET /api/v1/external-entities/inbox/count": {
         body: buildInboxCounts(),
       },
+      "GET /api/v1/external-entities/inbox/outline": { body: buildInboxOutline() },
     });
     await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
       path: "/inbox",

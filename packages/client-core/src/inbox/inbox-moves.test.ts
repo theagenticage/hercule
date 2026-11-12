@@ -13,7 +13,7 @@ import {
 } from "./inbox-moves";
 
 const thing = buildInboxThing("1", { title: "Cache delivery slot lookups" });
-const held = buildInboxThing("2", { taskId: "t-1" });
+const held = buildInboxThing("2", { taskId: "t-1", takenOn: true });
 const online = { isOffline: false, offers: NO_OFFERS } as const;
 const oneOffer = { available: [buildWorkflowOffer("Review PR", [])], unavailable: [] };
 
@@ -42,12 +42,19 @@ describe("planInboxMove", () => {
     ).toContain("Hand-off takes one thing at a time");
   });
 
-  it("refuses Take on for a thing a Task holds, naming who has it", () => {
+  it("lets Take on join a Task the user did not take on, such as a signal's", () => {
+    const signalsTask = buildInboxThing("4", { taskId: "t-3", takenOn: false });
+
+    expect(planInboxMove({ move: "takeOn", things: [signalsTask], ...online }).kind).toBe("go");
+  });
+
+  it("refuses Take on for a thing the user took on, naming who has it", () => {
     expect(reasonOf(planInboxMove({ move: "takeOn", things: [held], ...online }))).toBe(
       "You have this already. G goes to its Task.",
     );
     const handed = buildInboxThing("3", {
       taskId: "t-2",
+      takenOn: true,
       liveWorkflows: [{ workflowId: "w", name: "Review PR" }],
     });
     expect(reasonOf(planInboxMove({ move: "takeOn", things: [handed], ...online }))).toBe(

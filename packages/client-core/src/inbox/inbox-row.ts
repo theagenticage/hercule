@@ -142,7 +142,11 @@ const readFieldText = (field: EntityFieldValue | undefined, now: Date): string |
 /** Returns an age as it follows "ago": "1d ago", or "just now" for less than a minute. */
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
-/** Who holds the thing's Task, or `undefined` when nobody does. */
+/**
+ * Returns who has the thing: the first live workflow as a colleague's face,
+ * else the user when they took the thing on, else `undefined`. A Task made by
+ * a signal or a hand-off is not the user's, so it shows no holder mark.
+ */
 const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
   const [workflow] = thing.liveWorkflows;
   if (workflow !== undefined) {
@@ -152,9 +156,7 @@ const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undef
       words: `${workflow.name} has it`,
     };
   }
-  return thing.taskId === undefined
-    ? undefined
-    : { kind: "you", name: userName, words: "You took it on" };
+  return thing.takenOn ? { kind: "you", name: userName, words: "You took it on" } : undefined;
 };
 
 /** Returns the wait of the oldest open ask, or `undefined` when the thing asks nothing. */

@@ -229,8 +229,8 @@ describe("InboxRail", () => {
   });
 
   it("says when a source cannot be read", () => {
-    renderRail({ sources: [{ ...LINEAR, failingSince: "08:40" }] });
-    expect(screen.getByRole("img", { name: "Can't be read since 08:40" })).toBeTruthy();
+    renderRail({ sources: [{ ...LINEAR, failingChangedAt: "08:40" }] });
+    expect(screen.getByRole("img", { name: "Can't be read; last changed 08:40" })).toBeTruthy();
   });
 
   it("names a project's health in words", () => {

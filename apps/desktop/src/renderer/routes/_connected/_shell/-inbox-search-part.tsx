@@ -3,7 +3,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { InboxSearch, InboxSearchContext } from "@hercule/client-core/inbox";
 import type { InboxList } from "@hercule/contract";
-import { inboxCountQuery, inboxValuesQuery, pluginsQuery } from "../../../app/queries";
+import { inboxOutlineQuery, inboxValuesQuery, pluginsQuery } from "../../../app/queries";
 import { useQuietValue } from "../../../app/use-quiet-value";
 import { InboxSearchField, type InboxSearchHandle } from "../../../screens/inbox/inbox-search";
 
@@ -44,7 +44,7 @@ export function InboxSearchPart({
   readonly onLeave: () => void;
   readonly ref: Ref<InboxSearchHandle>;
 }): JSX.Element {
-  const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const [typing, setTyping] = useState<{ key: string; typed: string } | null>(null);
   // The read waits for a quiet: `asked` follows `typing` once it has held still.
@@ -66,7 +66,7 @@ export function InboxSearchPart({
     <InboxSearchField
       ref={ref}
       search={search}
-      context={{ fields: counts.fields, suggestedValues: suggested }}
+      context={{ fields: outline.fields, suggestedValues: suggested }}
       scopeTitle={scopeTitle}
       scopeIsEverything={isScopeEverything}
       plugins={plugins}

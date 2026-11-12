@@ -1,11 +1,11 @@
 /**
- * What the Inbox's rail and its list head read from the counts: the saved
+ * What the Inbox's rail and its list head read from the outline: the saved
  * queries, pins and Browse sources the rail draws, the name of the list the
  * user is on, and the account a thing or a value belongs to.
  *
  * The scope is what the list is on: a saved query, or one Browse value.
  */
-import type { EntityStatus, InboxCounts } from "@hercule/contract";
+import type { EntityStatus, InboxOutline } from "@hercule/contract";
 import { namePlugin, type PluginName } from "../intake";
 
 /** A Browse value: one value of one Facet, of one source, in one account when the source has several. */
@@ -73,15 +73,15 @@ export interface RailSource {
   readonly name: string;
   readonly count: number;
   readonly folded: boolean;
-  /** When the source stopped being readable, as the time to show ("08:40"). Absent while it reads. */
-  readonly failingSince?: string;
+  /** When a failing Connection of the source last changed, as the time to show ("08:40"). It is not when the failure began: the controller does not keep that. Absent while it reads. */
+  readonly failingChangedAt?: string;
   /** Listed only when more than one account holds things. */
   readonly accounts: ReadonlyArray<RailAccount>;
   /** Empty while the source is folded. */
   readonly facets: ReadonlyArray<RailFacet>;
 }
 
-/** What the rail draws from the Inbox's counts: its lists, pins and Browse sources. */
+/** What the rail draws from the Inbox's outline: its lists, pins and Browse sources. */
 export interface InboxRailContent {
   readonly savedQueries: ReadonlyArray<RailSavedQuery>;
   readonly pins: ReadonlyArray<RailPin>;
@@ -125,21 +125,21 @@ export const findAccountLabel = (
     : undefined;
 
 /**
- * Returns the rail's saved queries, pins and Browse sources for `counts`.
+ * Returns the rail's saved queries, pins and Browse sources for `outline`.
  *
  * - A core saved query has the icon of its id, a plugin's has its plugin's
  *   mark, and the first seven have their digit.
  * - A pin names its account when its source has more than one.
- * - A source names itself with its plugin's name, and carries the time it
- *   stopped being readable when `counts.failing` lists it. `formatTime` writes
+ * - A source names itself with its plugin's name, and carries the time a failing Connection
+ *   last changed when `outline.failing` lists it. `formatTime` writes
  *   that time for the reader ("08:40").
  */
 export function describeInboxRail(
-  counts: InboxCounts,
+  outline: InboxOutline,
   plugins: ReadonlyArray<PluginName>,
   formatTime: (iso: string) => string,
 ): InboxRailContent {
-  const savedQueries = counts.savedQueries.map((query, index): RailSavedQuery => ({
+  const savedQueries = outline.savedQueries.map((query, index): RailSavedQuery => ({
     id: query.id,
     name: query.name,
     count: query.count,
@@ -147,8 +147,8 @@ export function describeInboxRail(
       query.source === undefined ? (CORE_ICONS[query.id] ?? "intake") : { pluginId: query.source },
     ...(index < KEYED_SAVED_QUERIES ? { shortcut: String(index + 1) } : {}),
   }));
-  const pins = counts.pins.map((pin): RailPin => {
-    const accounts = counts.sources.find((source) => source.source === pin.source)?.accounts ?? [];
+  const pins = outline.pins.map((pin): RailPin => {
+    const accounts = outline.sources.find((source) => source.source === pin.source)?.accounts ?? [];
     const accountLabel = findAccountLabel(
       accounts,
       pin.connectionId === undefined ? [] : [pin.connectionId],
@@ -163,14 +163,14 @@ export function describeInboxRail(
       ...(accountLabel === undefined ? {} : { accountLabel }),
     };
   });
-  const sources = counts.sources.map((source): RailSource => {
-    const failing = counts.failing.find((each) => each.source === source.source);
+  const sources = outline.sources.map((source): RailSource => {
+    const failing = outline.failing.find((each) => each.source === source.source);
     return {
       source: source.source,
       name: namePlugin(source.source, plugins),
       count: source.count,
       folded: source.folded,
-      ...(failing === undefined ? {} : { failingSince: formatTime(failing.since) }),
+      ...(failing === undefined ? {} : { failingChangedAt: formatTime(failing.updatedAt) }),
       accounts: source.accounts,
       facets: (source.facets ?? []).map((facet) => ({
         key: facet.key,
@@ -195,18 +195,18 @@ export function describeInboxRail(
 /**
  * Returns the name of a scope for the list head and the search's scope token:
  * a saved query's name, else the label of the Browse value (a pin or a facet
- * value of the counts), else the value as it was sent.
+ * value of the outline), else the value as it was sent.
  */
-export const nameInboxScope = (scope: InboxScope, counts: InboxCounts): string => {
+export const nameInboxScope = (scope: InboxScope, outline: InboxOutline): string => {
   if (scope.kind === "saved-query") {
-    return counts.savedQueries.find((query) => query.id === scope.id)?.name ?? scope.id;
+    return outline.savedQueries.find((query) => query.id === scope.id)?.name ?? scope.id;
   }
   const { value } = scope;
-  const pinned = counts.pins.find(
+  const pinned = outline.pins.find(
     (pin) => pin.source === value.source && pin.key === value.key && pin.value === value.value,
   );
   if (pinned !== undefined) return pinned.label;
-  for (const source of counts.sources) {
+  for (const source of outline.sources) {
     if (source.source !== value.source) continue;
     for (const facet of source.facets ?? []) {
       if (facet.key !== value.key) continue;

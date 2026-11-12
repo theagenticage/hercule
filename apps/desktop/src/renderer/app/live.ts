@@ -40,7 +40,7 @@ import { useRouter } from "@tanstack/react-router";
 import {
   findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
-  invalidateWithoutCancellingSoon,
+  invalidateJoiningRead,
   isAnyLegAffectedByRunPush,
   isAnyLegAffectedByTaskPush,
   queryKeys,
@@ -91,18 +91,17 @@ const invalidateLegReads = (
 
 /**
  * The first segments of the keys whose reads are large and that several pushes
- * of one change all name: the Inbox's page and counts, and the entity panes.
- * A signal's change pushes `signal`, then `externalEntity`; read separately,
- * each push would read the 200-thing page again.
+ * of one change all name: the Inbox's pages and outline, the sidebar's counts,
+ * and the entity panes. A signal's change pushes `signal`, then
+ * `externalEntity`. These keys join a read that is running (see
+ * `invalidateJoiningRead`), so the second push does not read the 200-thing
+ * page again.
  */
 const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.inbox()[0],
   queryKeys.inboxCount()[0],
   queryKeys.externalEntity()[0],
 ] as string[]);
-
-/** How long the pushes of one change have to arrive before the shared reads start. */
-const SHARED_READ_WINDOW_MS = 100;
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
@@ -137,7 +136,7 @@ export const invalidateForPush = (
 ): void => {
   for (const queryKey of keys) {
     if (SHARED_READ_KEYS.has(queryKey[0] as string)) {
-      invalidateWithoutCancellingSoon(queryClient, queryKey, SHARED_READ_WINDOW_MS);
+      invalidateJoiningRead(queryClient, queryKey);
     } else {
       invalidateWithoutCancelling(queryClient, queryKey);
     }

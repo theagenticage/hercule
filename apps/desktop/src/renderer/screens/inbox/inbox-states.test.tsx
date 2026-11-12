@@ -161,18 +161,18 @@ describe("InboxOfflinePill", () => {
 });
 
 describe("InboxFailingSource", () => {
-  it("names the source and since when, and opens Connections", async () => {
+  it("names the source and when its Connection last changed, and opens Connections", async () => {
     const onOpenConnections = vi.fn();
     render(
       <InboxFailingSource
         sourceName="GitHub"
-        sinceLabel="08:40"
+        changedLabel="08:40"
         onOpenConnections={onOpenConnections}
       />,
     );
 
     expect(screen.getByRole("status").textContent).toContain(
-      "GitHub can’t be read since 08:40. Its things show what it said then.",
+      "GitHub can’t be read; last changed 08:40. Its things show what it said then.",
     );
     await userEvent.click(screen.getByRole("button", { name: "Connections" }));
     expect(onOpenConnections).toHaveBeenCalledOnce();

@@ -7,7 +7,7 @@ import {
   type InboxScopeValue,
 } from "@hercule/client-core/inbox";
 import { InboxRail, type RailFacetScope } from "../../../screens/inbox/inbox-rail";
-import { inboxCountQuery, pluginsQuery, settingsQuery } from "../../../app/queries";
+import { inboxOutlineQuery, pluginsQuery, settingsQuery } from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { useInboxClock } from "./-inbox-clock";
 
@@ -21,13 +21,13 @@ const isSameValue = (a: InboxScopeValue, b: InboxScopeValue): boolean =>
   a.value === b.value;
 
 /**
- * Renders the Inbox's rail from the counts, which the sidebar's row reads from
- * the same cache entry. It owns the two settings the rail writes: folding a
+ * Renders the Inbox's rail from the outline, which only the Inbox screen reads
+ * (the sidebar's row reads the small counts). It owns the two settings the rail writes: folding a
  * source (`inbox.browseFolded`) and pinning a value (`inbox.pins`). A save
- * reads the counts again, because their reply carries what the rail draws.
+ * reads the outline again, because their reply carries what the rail draws.
  *
  * `isLoading` draws the count bars while the list's first read is pending, as
- * the drawing does. The counts themselves are shell data and are always read.
+ * the drawing does. The route's loader reads the outline before the screen draws.
  *
  * `current` is the entry the list is on, or `null` while a search narrows it.
  * `onSaveFailed` is called with the sentence that says why a save did not go
@@ -50,7 +50,7 @@ export function InboxRailPart({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const formatClock = useInboxClock(client);
-  const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { user: settings } = useSuspenseQuery(settingsQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const save = useMutation({
@@ -65,10 +65,10 @@ export function InboxRailPart({
     },
     onSuccess: async (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.inboxCount() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inboxOutline() });
     },
   });
-  const rail = describeInboxRail(counts, plugins, formatClock);
+  const rail = describeInboxRail(outline, plugins, formatClock);
   return (
     <InboxRail
       {...rail}
@@ -77,8 +77,8 @@ export function InboxRailPart({
       loading={isLoading}
       onPick={onPick}
       onToggleFold={(source) => {
-        // Written from the setting itself, not from the counts: a folded source that holds nothing
-        // now is not in the counts, and rewriting from them would unfold it.
+        // Written from the setting itself, not from the outline: a folded source that holds nothing
+        // now is not in the outline, and rewriting from them would unfold it.
         const folded = settings["inbox.browseFolded"] ?? [];
         const kept = folded.filter((entry) => entry.source !== source);
         save.mutate({
@@ -86,7 +86,7 @@ export function InboxRailPart({
         });
       }}
       onTogglePin={(value) => {
-        const pins: Pin[] = counts.pins.map(({ source, connectionId, key, value: text }) => ({
+        const pins: Pin[] = outline.pins.map(({ source, connectionId, key, value: text }) => ({
           source,
           key,
           value: text,

@@ -1,18 +1,18 @@
 /**
  * The world of the Inbox's integration tests: a fake controller that holds the
- * things of each saved query and answers the page, the counts and the detail
+ * things of each saved query and answers the page, the counts, the outline and the detail
  * the pane reads, and the helpers to open the Inbox on it and read what it
  * draws. `inbox` is mutable: a test changes it, then pushes.
  */
 import { screen, within } from "@testing-library/react";
 import {
   buildInboxAsk,
-  buildInboxCounts,
+  buildInboxOutline,
   buildInboxThing,
 } from "@hercule/client-core/inbox/testing";
 import type {
   ExternalEntityDetail,
-  InboxCounts,
+  InboxOutline,
   InboxPage,
   InboxQuery,
   InboxThing,
@@ -54,7 +54,7 @@ export const SLOTS = request(1, "Cache delivery slot lookups", "Mei");
 export const LOYALTY = request(2, "Round loyalty points down", "Omar");
 export const BASKET = request(3, "Fix the basket rounding", "Tessa");
 
-export const COUNTS: InboxCounts = buildInboxCounts({
+export const OUTLINE: InboxOutline = buildInboxOutline({
   savedQueries: [
     { id: "waits", name: "Someone waits on me", order: "waiting", count: 3 },
     { id: "mine", name: "Mine", order: "newest", count: 1 },
@@ -106,10 +106,12 @@ export const buildDetail = (thing: InboxThing): ExternalEntityDetail => ({
   actingConnections: [],
 });
 
-/** What the fake controller holds for the Inbox: the things of each saved query, in order, and the counts. */
+/** What the fake controller holds for the Inbox: the things of each saved query, in order, the rail's outline, and the arrival the sidebar's count reports. */
 export interface FakeInbox {
   lists: Record<string, InboxThing[]>;
-  counts: InboxCounts;
+  outline: InboxOutline;
+  /** The sidebar's `newestArrival`. */
+  newestArrival: number;
   /** The most things one page holds. */
   pageSize: number;
   /** The workflows each `offerSetId` of the things offers. */
@@ -164,7 +166,13 @@ export const openInbox = async (
   );
   const calls = stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
-    "GET /api/v1/external-entities/inbox/count": () => ({ body: inbox.counts }),
+    "GET /api/v1/external-entities/inbox/count": () => ({
+      body: {
+        waiting: inbox.outline.savedQueries.find((query) => query.id === "waits")?.count ?? 0,
+        newestArrival: inbox.newestArrival,
+      },
+    }),
+    "GET /api/v1/external-entities/inbox/outline": () => ({ body: inbox.outline }),
     [QUERY_PATH]: (call: Call) => answerQuery(inbox, call),
     ...entityHandlers,
     ...handlers,
@@ -183,7 +191,8 @@ export const defaultInbox = (): FakeInbox => ({
     updates: [],
     everything: [SLOTS, LOYALTY, BASKET],
   },
-  counts: COUNTS,
+  outline: OUTLINE,
+  newestArrival: 0,
   pageSize: 200,
   offerSets: {},
 });

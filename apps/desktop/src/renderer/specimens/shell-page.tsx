@@ -135,6 +135,7 @@ import {
   projectsQuery,
   harnessesQuery,
   inboxCountQuery,
+  inboxOutlineQuery,
   providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
@@ -908,18 +909,12 @@ const seedQueryCache = (
   queryClient.setQueryData(taskAttentionQuery(client).queryKey, {
     anyFailure: records.hasFailedRun ?? false,
   });
-  // The sidebar's Inbox row reads the counts on every screen: no one waits on the user.
-  queryClient.setQueryData(
-    inboxCountQuery(client).queryKey,
-    inbox?.counts ?? {
-      savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 0 }],
-      sources: [],
-      pins: [],
-      fields: [],
-      failing: [],
-      newestArrival: 0,
-    },
-  );
+  // The sidebar's Inbox row reads its small counts on every screen: no one waits on the user.
+  const waiting = inbox?.outline.savedQueries.find((query) => query.id === "waits")?.count ?? 0;
+  queryClient.setQueryData(inboxCountQuery(client).queryKey, { waiting, newestArrival: 0 });
+  // The Inbox screen reads its outline once, and the route's loader waits for it.
+  if (inbox !== undefined)
+    queryClient.setQueryData(inboxOutlineQuery(client).queryKey, inbox.outline);
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
     queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);

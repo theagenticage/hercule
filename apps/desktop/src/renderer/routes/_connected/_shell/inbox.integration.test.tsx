@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
+import { buildInboxOutline } from "@hercule/client-core/inbox/testing";
 import {
   neverAnswer,
   setVisibility,
@@ -16,7 +16,7 @@ import {
 } from "../../../app/testing";
 import {
   BASKET,
-  COUNTS,
+  OUTLINE,
   LOYALTY,
   SLOTS,
   defaultInbox,
@@ -219,8 +219,8 @@ describe("the Inbox screen", () => {
 
     const clear = defaultInbox();
     clear.lists.waits = [];
-    clear.counts = buildInboxCounts({
-      savedQueries: COUNTS.savedQueries.map((query) => ({ ...query, count: 0 })),
+    clear.outline = buildInboxOutline({
+      savedQueries: OUTLINE.savedQueries.map((query) => ({ ...query, count: 0 })),
     });
     await openInbox(clear);
     expect(await screen.findByRole("heading", { name: "All clear" })).toBeTruthy();
@@ -234,17 +234,17 @@ describe("the Inbox screen", () => {
     });
   });
 
-  it("writes the time a source stopped being readable as a 24-hour clock time", async () => {
+  it("writes the time a failing source's Connection last changed as a 24-hour clock time", async () => {
     const inbox = defaultInbox();
-    inbox.counts = {
-      ...COUNTS,
-      failing: [{ source: "github", since: "2026-11-11T09:12:00.000Z" }],
+    inbox.outline = {
+      ...OUTLINE,
+      failing: [{ source: "github", updatedAt: "2026-11-11T09:12:00.000Z" }],
     };
     await openInbox(inbox);
 
-    const line = await screen.findByText(/can’t be read since/);
+    const line = await screen.findByText(/can’t be read; last changed/);
 
-    expect(line.textContent).toMatch(/since \d{2}:\d{2}\./);
+    expect(line.textContent).toMatch(/last changed \d{2}:\d{2}\./);
   });
 
   it("offers the values of the field being typed", async () => {

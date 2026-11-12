@@ -85,23 +85,26 @@ export function InboxOfflinePill({ sinceLabel }: { readonly sinceLabel: string }
 
 /**
  * Renders the line over the list that names a source Hercule cannot read
- * (`sourceName`, "GitHub") and since when (`sinceLabel`, "08:40"), with a
+ * (`sourceName`, "GitHub") and when its Connection last changed
+ * (`changedLabel`, "08:40"). The controller does not keep when the failure
+ * began, so the line does not claim it. It has a
  * link that calls `onOpenConnections`, where the source's Connection is.
  */
 export function InboxFailingSource({
   sourceName,
-  sinceLabel,
+  changedLabel,
   onOpenConnections,
 }: {
   readonly sourceName: string;
-  readonly sinceLabel: string;
+  readonly changedLabel: string;
   readonly onOpenConnections: () => void;
 }): JSX.Element {
   return (
     <div className="ib-failing" role="status">
       <AlertIcon size={14} />
       <span>
-        <b>{sourceName}</b> can’t be read since {sinceLabel}. Its things show what it said then.
+        <b>{sourceName}</b> can’t be read; last changed {changedLabel}. Its things show what it said
+        then.
       </span>
       <button type="button" className="ib-failing-link" onClick={onOpenConnections}>
         Connections
