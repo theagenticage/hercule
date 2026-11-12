@@ -41,7 +41,7 @@ Durations from the app: `--m-quick` 140ms, `--m-base` 220ms, `--m-slow` 360ms. O
 
 Undo plays it back: the row is current again and lies under the list, like a drawer's members, and comes back from 28px aside on `travel` while the rows after it, carrying the list's ground, part off it on `hand`. Nothing reads over anything.
 
-When a move leaves nothing current (the last row of a list), the pane's copy fades out where it stood over 140ms, before the sunrise begins, and the list takes its room.
+When a move leaves nothing current (the last row of a list), the pane fades out over 140ms with what it showed, and only then does the list take its room, before the sunrise begins.
 
 ### Keeping the current row in view
 
@@ -56,6 +56,8 @@ After a move, the current row is measured where it will rest. When it would be o
 | 0 | The group's row | Appears in place from 98.5% on `hand`, under the rows still moving past it, which uncover it |
 | 0 | Rows that change order | Carry the list's ground while they cross, and the current row carries its own fill while the puck waits |
 | ~420ms | Rest | The group is open and current |
+
+A card flies box to box: its width and its left padding (a member's indent) ride the same spring to the new row's, so its mark lands on the row's mark and it never hangs past the list's edge. It leaves the group's hairline behind. A card that has landed while other rows still cross under it stays whole on top until they rest, then sinks.
 
 **By drag**: a press that moves 6px lifts a copy at 102%, and its shadow grows in over 160ms. The row's place stays, at 32%. The copy follows the pointer one to one and leans up to 2.5° with its speed; held still for 90ms it stands up straight. The row under it lights with a 1.5px focus ring. **Letting go on it hands the carried copy itself to the link**: the ring goes at once, and it flies from under the pointer with the speed the hand gave it, straightening, into the group, on top of everything. The row it was dropped on moves to its member place quietly, on the list's ground, with no shadow. Esc, or letting go elsewhere, sends it home on `travel` with the hand's speed.
 
@@ -124,7 +126,7 @@ Its body changes height on `hand` from its measured height, its chevron turns, a
 
 Dragged, the width follows the pointer one to one. The arrows step a target by 40px, so quick presses add up and the spring keeps its speed. Home and End go to the widest and the narrowest. A double click springs back to 420. The ⋯ menu sets Narrow, Default or Wide.
 
-### Under 900px
+### Under 1032px
 
 The pane lies over the list and slides in from the right over `--m-base` on ↩ or a click; Esc slides it out and gives the focus back to the row.
 

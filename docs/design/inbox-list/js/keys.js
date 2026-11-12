@@ -137,7 +137,7 @@ window.Keys = (function () {
     Menus.close();
     Bar.closeNarrow();
     Bar.closeScope();
-    // When the rail is folded away, its place in the cycle is the scope button. Under 900px the list
+    // When the rail is folded away, its place in the cycle is the scope button. Under 1032px the list
     // and the pane share one place: whichever is showing.
     var railStop = matchMedia("(max-width: 1329px)").matches ? document.getElementById("scope-btn") : document.querySelector("#rail [tabindex='0']");
     var list = App.el.list.querySelector("[tabindex='0']") || App.el.list;
@@ -211,7 +211,7 @@ window.Keys = (function () {
     else if (lower === "n") Moves.run("thread");
     else if (lower === "o") { var c0 = App.currentRow(); if (c0 && c0.thing) Moves.say("Opening " + (Draw.identifier(c0.thing) || "it") + " in " + Kinds.SOURCES[Model.sourceOf(c0.thing)].name + "…"); }
     else if (lower === "f") {
-      // Narrow belongs to the list's head, so under 900px the pane over the list slides away first.
+      // Narrow belongs to the list's head, so under 1032px the pane over the list slides away first.
       if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
       var nb = document.querySelector("[data-narrow]");
       if (nb) Bar.narrow(nb);
@@ -225,7 +225,11 @@ window.Keys = (function () {
       if (c && c.type === "group") Moves.toggleGroup(c.key, false);
       else if (c && (c.type === "member" || c.type === "more")) { App.focusRow("g:" + c.group.lead.id, { keyboard: true }); }
     }
-    else if (k === "/") Bar.focus();
+    else if (k === "/") {
+      // Search results show in the list, so under 1032px the pane over it slides away first.
+      if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false, true);
+      Bar.focus();
+    }
     else if (k === "?") sheet();
     else if (k === ".") Moves.showNew();
     else if (/^[1-7]$/.test(k)) Moves.setScope({ saved: Kinds.SAVED[+k - 1].id });

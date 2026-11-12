@@ -204,7 +204,7 @@ N opens the app's glass dialog around the real composer of the new-thread screen
 | Nothing matches | What was searched, and "Clear the search Esc" |
 | Offline | One quiet pill in the bar: "Offline · 09:12 · 2 waiting", with the whole sentence in its tooltip. Moves still work and wait in the outbox, so nothing dims, and each undo line says it waits |
 | A selection | The pane shows the selection (two or more, or one that is not the current row): what is in it, and Link, Thread, Take on, Dismiss. A small bar at the foot of the list counts it and clears it |
-| Under 900px, or 200% zoom | The pane lies over the whole width of the list: ↩ or a click slides it in, Esc or "List" slides it out, and the focus goes back to the row |
+| Under 1032px, or 200% zoom | The pane lies over the whole width of the list: ↩ or a click slides it in, Esc or "List" slides it out, and the focus goes back to the row |
 | A source that can't be read | A line over the list naming it and what it means, with a way to Connections, and a mark on its row in Browse |
 | N new | A solid pill in the list head, beside the count: a marigold dot, "3 new", "Show ." It covers no row, and holds back what arrived until you ask |
 | Light day | Five things; the list is short, nothing else changes |
@@ -283,7 +283,7 @@ Each is a choice the map left open, made for the best design. Each can be turned
 27. **The pane's width without a drag**: Narrow, Default and Wide in its ⋯ menu.
 28. **A selection gets the pane**: two or more selected, the pane shows them and what a selection can do.
 29. **Unsent words are kept**: closing the dialog keeps what was typed for those things, and N opens it again. A starter replaces your words through the field, so ⌘Z in the field brings them back. The last chip cannot be removed.
-30. **Under 900px** (and at 200% zoom) the pane lies over the list.
+30. **Under 1032px** (and at 200% zoom) the pane lies over the list. Below that width the list could not keep its 400px beside the narrowest pane (the sidebar's 272px, 400 and 360); half of a 1920px screen is 960.
 31. **The focus follows the current row**: after any move from the list or the pane, the new current row takes the focus, and it is always scrolled into view. A move that keeps its place makes the next row in the old order current, even when the handled thing stays elsewhere in the list.
 32. **A group that just came under the keys** takes its own, fresh E: an E within 0.6s of the move says the group is there and does nothing.
 33. **Answers already sent** say so on ⌘Z: "Already sent to GitHub, so it can't be taken back here."
@@ -295,15 +295,18 @@ Each is a choice the map left open, made for the best design. Each can be turned
 39. **A search value can hold spaces**: a space ends a value unless a value the field holds goes on past it, so `project:Checkout revamp` and `from:Priya Raman` type out whole, and `team:Checkout bug` still makes a token and free text.
 40. **⌫ never removes the scope.** In an empty field ⌫ removes the last token and stops there; the scope token's × searches Everything. A stray ⌫ would otherwise move you to another list.
 41. **⌘Z puts back the current row too**: the thing that comes back is current and has the focus again, so a second E acts on it, not on its neighbour.
-42. **The undo line waits for you**: it stays while the pointer or the focus is on it, and goes 3s after both leave. It rises over the selection bar, and under 900px over the pane's moves.
-43. **Under 900px with the pane open**, J, K and the moves keep the focus in the pane, and F6 treats the list and the pane as one place, whichever shows.
+42. **The undo line waits for you**: it stays while the pointer or the focus is on it, and goes 3s after both leave. It rises over the selection bar, and under 1032px over the pane's moves.
+43. **Under 1032px with the pane open**, J, K and the moves keep the focus in the pane, and F6 treats the list and the pane as one place, whichever shows.
 44. **After a move, the next current row stays where your eyes are**: a row that travels away with a re-sorted group is passed over for the next one that stays.
 45. **Tokens that do not fit fold into +N whole**, every one if need be; only the scope token shortens with an ellipsis.
 46. **Holding the undo line holds the answer.** While the pointer or the focus is on the line, an answer waits to be sent, so its Undo always works; when it goes, the line says "Sent to GitHub." and Undo leaves it.
 47. **A space after part of a value completes it** to the value the menu offers first (`team:Check ` gives `team:Checkout`), unless a value goes on past the space.
 48. **With nothing typed, no suggestion is highlighted**: ↩ goes to the results and ↓ reaches the suggestions, so ↩ never adds a filter you did not pick.
-49. **Under 900px the list under the open pane is inert**, and every move that is about the list (picking a list, `.`, F) slides the pane away first.
-50. **The undo line puts the thing's title last**, "Handed to Review PR: “…”", so a narrow line cuts the title, never who has it. When the words do not fit, the buttons drop their key hints and the action keeps only its key; a line with nothing to press wraps.
+49. **Under 1032px the list under the open pane is inert**, and every move that is about the list (picking a list, `.`, F) slides the pane away first.
+50. **The undo line puts the thing's title last**, "Handed to Review PR: “…”", so a narrow line cuts the title, never who has it. When the words do not fit, the title shortens first, to 12 letters; only then do the buttons drop their key hints and the action keep only its key. A line with nothing to press wraps.
+51. **A row's own buttons act on that row.** With a selection elsewhere, hovering a row and pressing its Dismiss dismisses that row and keeps the selection; on a selected row they act on the selection, as the pane does.
+52. **Reply drafts are kept per ask**: closing the box or moving away keeps the words, and ⌘Z on a sent reply opens the box again with them.
+53. **The hand-off button says "Hand to…"** in its words and its name when several workflows fit, and says when its menu is open.
 
 ## Proposed changes to #1119
 
@@ -341,6 +344,8 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **Keyboard**: H then a quick E dismissed a whole group; under 900px J and E sent the focus to a row hidden under the pane, and F6 was stuck; the undo line covered the selection bar's × and, under 900px, the pane's moves; a value with a space broke the search; ⌘Z did not make the restored thing current; the focus jumped off a token's × and fell to the page after `/` Esc or when the undo line went; F6 left the scope menu open; ⌫ and Esc hints that did nothing; the hand-off menu's "Change" could not be reached and did nothing (it is the app's account picker now, a Tab away).
 
 **Round five** checked round four's list and found little, but some of it mattered: ⌘Z after accepting a suggested link flew a member onto the suggestion's row, and the new group and member came in over rows still moving; the pane's fade-out never showed (the copy kept the class that hides the pane); a held undo line went on offering Undo after its answer was sent; ↩ in an empty search added `source:`; under 900px Tab, Narrow, picking a list and `.` still reached rows under the pane; ⌘Z after a triage move left the neighbour current; at 200% zoom the keys sheet and Narrow ran off the window; the pane's hand-off button took its name from the face. Also fixed: link pairs whose identifier shortened, undo lines that cut the important words, the account picker inside a menu, the pin star 2px under the 24px target, digits in the scope menu.
+
+**Round six** found that windows from 900 to 1031px wide squeezed the list under its 400px (the pane now lies over the list below 1032px, so half of a 1920px screen works); the pane's fade still did not show (the pane now fades with what it showed, then the list takes its room); pane link pairs cut identifiers at a 360px pane (who linked them now moves under the pair); cards flying back out of a group hung past the list's edge, with the group's hairline (they now fly box to box, their indent springing); a row's hover buttons acted on a selection elsewhere; ↩ after a typed token added a filter; ⌘Z on a sent reply lost its words; the hand-off button's words and name differed. All fixed and checked.
 
 ## Tried and dropped
 

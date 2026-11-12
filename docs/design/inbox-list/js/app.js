@@ -108,13 +108,15 @@ window.App = (function () {
     state.focusHint = null;
     state.focusAfter = null;
     var paneless = !state.focus && !state.selection.size && !state.loading;
-    if (paneless !== el.ib.classList.contains("is-paneless") && opts.flip && !Motion.isReduced()) {
-      if (paneless) fadePaneOut(); else el.pane.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
-    }
-    el.ib.classList.toggle("is-paneless", paneless);
+    var wasPaneless = el.ib.classList.contains("is-paneless");
+    if (paneFade && !paneless) { paneFade.cancel(); paneFade = null; }
+    var stepsAside = paneless && !wasPaneless && opts.flip && !Motion.isReduced() && !paneFade;
+    if (stepsAside) stepPaneAside();
+    else if (!paneFade) el.ib.classList.toggle("is-paneless", paneless);
+    if (!paneless && wasPaneless && opts.flip && !Motion.isReduced()) el.pane.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
     Rail.draw(el.rail, state);
     List.draw(el.list, el.listHead, state, opts);
-    Pane.draw(el.pane, state, opts);
+    if (!paneFade) Pane.draw(el.pane, state, opts);
     Bar.draw(state);
     var n = Model.countSaved("waits");
     var c = document.querySelector("[data-inbox-count]");
@@ -155,18 +157,24 @@ window.App = (function () {
     return here.find(function (k) { return Math.abs(newAt.get(k) - oldAt.get(k) - usual) <= 1; }) || here[0];
   }
 
-  /** Fades a copy of the pane where it stood, so the pane steps aside rather than vanishing in one frame. */
-  function fadePaneOut() {
-    var r = el.pane.getBoundingClientRect(), at = el.ib.getBoundingClientRect();
-    if (!r.width) return;
-    var copy = el.pane.cloneNode(true);
-    copy.removeAttribute("id");
-    copy.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
-    copy.setAttribute("aria-hidden", "true");
-    copy.inert = true;
-    Object.assign(copy.style, { display: "flex", position: "absolute", left: r.left - at.left + "px", top: r.top - at.top + "px", width: r.width + "px", height: r.height + "px", zIndex: 4, pointerEvents: "none" });
-    el.ib.appendChild(copy);
-    copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: "ease-out", fill: "forwards" }).finished.then(function () { copy.remove(); });
+  /**
+   * Steps the pane aside when nothing is current: it fades over 140ms with what it showed, and only
+   * then does the list take its room, so nothing in the list reads through the fading pane. A render
+   * that brings a current row back during the fade cancels it.
+   */
+  var paneFade = null;
+  function stepPaneAside() {
+    el.pane.inert = true;
+    var fade = paneFade = el.pane.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: "ease-out", fill: "forwards" });
+    var done = function () {
+      el.pane.inert = false;
+      if (paneFade !== fade) return;
+      paneFade = null;
+      el.ib.classList.add("is-paneless");
+      fade.cancel();
+      Pane.draw(el.pane, state, {});
+    };
+    fade.finished.then(done, function () { el.pane.inert = false; });
   }
 
   function currentRow() { return state.rows.find(function (r) { return r.key === state.focus; }) || null; }
@@ -199,17 +207,18 @@ window.App = (function () {
   // The bar's tokens and hint fit the field, so they are fitted again when the window changes.
   window.addEventListener("resize", function () { setPaneWidth(); Bar.draw(state); });
 
-  // Under 900px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
-  var stacked = matchMedia("(max-width: 899px)");
+  // Under 1032px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
+  var stacked = matchMedia("(max-width: 1031px)");
   function isStacked() { return stacked.matches; }
   /**
-   * Opens or closes the pane over the list (under 900px) and puts the focus on what then shows. While
-   * the pane covers the list, the list is inert, so neither Tab nor a click reaches a hidden row.
+   * Opens or closes the pane over the list (under 1032px) and puts the focus on what then shows, unless
+   * `keepFocus` is set because the caller moves the focus itself. While the pane covers the list, the
+   * list is inert, so neither Tab nor a click reaches a hidden row.
    */
-  function setPaneOpen(on) {
+  function setPaneOpen(on, keepFocus) {
     el.ib.classList.toggle("is-pane-open", !!on);
     syncCover();
-    focusCurrent();
+    if (!keepFocus) focusCurrent();
   }
   function syncCover() { el.list.closest(".ib-list").inert = isStacked() && isPaneOpen(); }
   stacked.addEventListener("change", syncCover);
@@ -224,7 +233,7 @@ window.App = (function () {
 
   /**
    * Puts the keyboard focus on the current row, or on the pane's title while the pane lies over the
-   * list (under 900px), so the focus is never on a row nobody can see. Does nothing with no current row.
+   * list (under 1032px), so the focus is never on a row nobody can see. Does nothing with no current row.
    */
   function focusCurrent() {
     var target = isStacked() && isPaneOpen() ? el.pane.querySelector(".pn-title") : el.list.querySelector('[data-key="' + state.focus + '"]');

@@ -61,7 +61,7 @@ export const STATES = [
   ["35-extreme", "load=extreme", { wait: 1600 }, "2,400 things"],
   ["36-width-1280", "scene=pr", { w: 1280, h: 800 }, "At 1280 px: the rail folds into the bar, the list keeps 400 px"],
   ["37-width-1024-scope", "", { w: 1024, h: 768, run: scopeMenu }, "At 1024 px: the rail as a menu"],
-  ["41-stacked-880", "", { w: 880, h: 700, run: async (p) => { await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true })); await p.keyboard.press("Enter"); await p.waitForTimeout(500); } }, "Under 900 px, or at 200% zoom: the pane over the list"],
+  ["41-stacked-880", "", { w: 880, h: 700, run: async (p) => { await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true })); await p.keyboard.press("Enter"); await p.waitForTimeout(500); } }, "Under 1032 px, or at 200% zoom: the pane over the list"],
   ["42-selection-one", "", { run: async (p) => { await p.evaluate(() => { App.focusRow("r:gm-quote"); Moves.toggleSelect("gm-quote"); App.focusRow("r:pr-6230"); }); await p.waitForTimeout(300); } }, "One thing selected, another current: the pane shows the selection"],
   ["38-keys", "scene=keys", {}, "The keys"],
   ["39-pane-wide", "scene=wide", {}, "The pane, made wide"],

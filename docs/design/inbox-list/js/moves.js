@@ -38,7 +38,7 @@ window.Moves = (function () {
 
   function setScope(scope) {
     var st = s();
-    // A list picked under 900px is a list to see, so the pane over it slides away first.
+    // A list picked under 1032px is a list to see, so the pane over it slides away first.
     if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
     st.scope = scope;
     st.anchor = null;
@@ -282,13 +282,13 @@ window.Moves = (function () {
     if (a.field) return Reply.open(button, f, a);
     settle(f, a.label === "Approve" ? "Approved " + (D.identifier(f.t) || "it") + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name : a.label + " " + (D.identifier(f.t) || quote(f.t.title)) + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true);
   }
-  /** Closes one signal and says so. A thing whose last ask closed leaves a list of asks. */
   /**
    * Closes one signal and says so. An answer that acts on the source (Approve, Reply) is held for the
    * undo line's eight seconds before it is sent, as mail apps hold a sent mail, so ⌘Z takes back every
-   * move the same way. A thing whose last ask closed leaves a list of asks.
+   * move the same way. A thing whose last ask closed leaves a list of asks. `restore` runs after ⌘Z
+   * has put the ask back, for an answer that had more than one step (a reply's box opens again).
    */
-  function settle(f, words, external) {
+  function settle(f, words, external, restore) {
     var was = s().focus;
     holdPlace();
     f.s.done = true;
@@ -296,7 +296,7 @@ window.Moves = (function () {
     var entry = {
       say: words,
       note: external ? "Sends in 8s" : null,
-      undo: function () { f.s.done = false; s().focus = was; redraw({ enter: "return" }); },
+      undo: function () { f.s.done = false; s().focus = was; redraw({ enter: "return" }); if (restore) restore(); },
       undone: external ? "Not sent. The ask is open again." : "The ask is open again.",
     };
     push(entry);
@@ -307,7 +307,7 @@ window.Moves = (function () {
       var where = Kinds.SOURCES[Model.sourceOf(f.t)].name;
       var send = function () {
         if (stack.indexOf(entry) < 0 || s().offline) return;
-        if (Undo.holds(entry)) { setTimeout(send, 500); return; }
+        if (Undo.holds(entry)) { Undo.setNote(entry, "Sends when you let go"); setTimeout(send, 500); return; }
         entry.sent = where;
         Undo.markSent(entry, "Sent to " + where + ".");
       };

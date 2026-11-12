@@ -827,3 +827,9 @@ html.is-carrying .row-acts,
 .row--more .ic {
   width: 16px;
 }
+/* A card in flight is the thing alone: it leaves the group's hairline behind. */
+.flights .row--member::before,
+.flights .row--member::after,
+.flights .row--group::after {
+  content: none;
+}

@@ -1,4 +1,4 @@
-/* States: empty, the sunrise, loading, offline, a failing source, and widths under 1330px and 900px. */
+/* States: empty, the sunrise, loading, offline, a failing source, and widths under 1330px and 1032px. */
 .empty {
   display: grid;
   place-items: center;
@@ -293,8 +293,8 @@
 .pn-back {
   display: none;
 }
-/* ---- Under 900px, or 200% zoom: the pane lies over the list, opened with ↩ or a click ---- */
-@media (max-width: 899px) {
+/* ---- Under 1032px, or 200% zoom: the pane lies over the list, opened with ↩ or a click ---- */
+@media (max-width: 1031px) {
   .ib {
     grid-template-columns: 0 minmax(0, 1fr) 0 0;
   }

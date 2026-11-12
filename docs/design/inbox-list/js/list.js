@@ -240,13 +240,12 @@ window.List = (function () {
     if (tick) tick.classList.remove("is-on");
     var land = function () { target.style.opacity = ""; ghost.remove(); };
     if (Motion.isReduced()) { land(); return; }
-    var toLead = target.querySelector(".row-lead"), fromLead = ghost.querySelector(".row-lead");
-    var indent = toLead && fromLead ? toLead.offsetLeft - fromLead.offsetLeft : 0;
-    // The copy's width rides the flight's spring to its new row's width less the indent, so its columns
-    // land on the row's columns with no jump.
-    var w0 = ghost.offsetWidth, w1 = target.offsetWidth - indent;
-    if (w0 !== w1 && !Motion.isReduced()) Motion.value(w0, function (w) { ghost.style.width = w + "px"; }).to(w1, "travel");
-    else ghost.style.width = w1 + "px";
+    // The copy flies box to box, so it never hangs past the list's edge. Its width and its left padding
+    // (a member's indent) ride the flight's spring to the new row's, so its mark lands on the row's mark
+    // and its columns on the row's columns, with no jump.
+    var spring = function (from, to, set) { if (from !== to) Motion.value(from, set).to(to, "travel"); };
+    spring(ghost.offsetWidth, target.offsetWidth, function (w) { ghost.style.width = w + "px"; });
+    spring(parseFloat(getComputedStyle(ghost).paddingLeft), parseFloat(getComputedStyle(target).paddingLeft), function (v) { ghost.style.paddingLeft = v + "px"; });
     if (!quiet) {
       ghost.classList.add("is-flying");
       ghost.animate([{ boxShadow: "none" }, { boxShadow: getComputedStyle(ghost).boxShadow }], { duration: 160, easing: "cubic-bezier(.2,.8,.2,1)" });
@@ -254,13 +253,18 @@ window.List = (function () {
     // Measured without the copy's scale and tilt, so it lands exactly, mark on mark.
     var to = Motion.layoutRect(target), base = Motion.layoutRect(ghost);
     var b = Motion.body(ghost);
-    var x = to.left + (toLead ? toLead.offsetLeft : 0) - (base.left + (fromLead ? fromLead.offsetLeft : 0));
+    var x = to.left - base.left;
     var y = to.top - base.top;
     b.to({ x: x, y: y, r: 0, s: 1 }, "travel", {
       done: function () {
         target.style.opacity = "";
-        // The shadow sinks into the row, and the copy fades off the row that is now under it.
-        ghost.animate([{ opacity: 1 }, { opacity: 0, boxShadow: "none" }], { duration: 120, easing: "ease-out", fill: "forwards" }).finished.then(function () { ghost.remove(); });
+        // The shadow sinks into the row, and the copy fades off the row that is now under it. While
+        // other rows still cross under it the copy stays whole on top, so no words read through it.
+        var sink = function () {
+          if (target.parentElement && target.parentElement.querySelector(".row.is-moving")) { requestAnimationFrame(sink); return; }
+          ghost.animate([{ opacity: 1 }, { opacity: 0, boxShadow: "none" }], { duration: 120, easing: "ease-out", fill: "forwards" }).finished.then(function () { ghost.remove(); });
+        };
+        sink();
       },
     });
   }
@@ -359,7 +363,7 @@ window.List = (function () {
         // The list's scroll padding keeps the row out of the fade at its foot. A caller that scrolls
         // the row into view itself, smoothly, passes `scroll: false`.
         if (!(opts && opts.scroll === false)) c.scrollIntoView({ block: "nearest" });
-        // Under 900px with the pane open the row is under the pane, so the focus stays in the pane.
+        // Under 1032px with the pane open the row is under the pane, so the focus stays in the pane.
         if (opts && opts.keyboard && !(App.isStacked() && App.isPaneOpen())) c.focus({ preventScroll: true });
       }
     });
@@ -373,7 +377,18 @@ window.List = (function () {
       var row = App.state.rows.find(function (r) { return r.key === key; });
       if (!row) return;
       var act = e.target.closest("[data-row-act]");
-      if (act) { e.stopPropagation(); App.focusRow(key); Moves.run(act.dataset.rowAct, act); return; }
+      if (act) {
+        e.stopPropagation();
+        // A row's own buttons act on that row. Only on a selected row do they act on the selection, as
+        // the pane's moves do; a selection elsewhere is kept as it was.
+        var sel = App.state.selection, ids = Keys.idsOf(row, true);
+        var kept = sel.size && (!ids.length || !ids.every(function (id) { return sel.has(id); })) ? new Set(sel) : null;
+        if (kept) sel.clear();
+        App.focusRow(key);
+        Moves.run(act.dataset.rowAct, act);
+        if (kept) { kept.forEach(function (id) { if (!Model.gone.has(id)) sel.add(id); }); App.render({}); }
+        return;
+      }
       var st = App.state;
       if (e.shiftKey && (row.thing || row.type === "group")) {
         var from = st.anchor && st.rows.some(function (x) { return x.key === st.anchor; }) ? st.anchor : st.focus || key;

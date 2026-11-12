@@ -358,12 +358,12 @@ body > .flight {
   --undo-line-x: calc(var(--rail-w) / 2 - var(--pane-w) / 2);
   max-width: calc(100% - var(--rail-w) - var(--pane-w) - 24px);
 }
-/* The undo line never covers what it sits beside: it rises over the selection bar, and under 900px
+/* The undo line never covers what it sits beside: it rises over the selection bar, and under 1032px
    over the pane's moves while the pane lies over the list. */
 .ib:has(#selbar:not([hidden])) .undo-line {
   bottom: 66px;
 }
-@media (max-width: 899px) {
+@media (max-width: 1031px) {
   .ib.is-pane-open .undo-line {
     bottom: 66px;
   }

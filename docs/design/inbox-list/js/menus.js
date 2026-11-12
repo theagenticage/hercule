@@ -12,6 +12,7 @@ window.Menus = (function () {
     else el.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-2px) scale(.99)" }], { duration: 120, easing: "ease-in" }).finished.then(function () { if (!open || open.el !== el) el.hidden = true; });
     var back = open.back;
     if (back && back.getAttribute && back.hasAttribute("aria-expanded")) back.setAttribute("aria-expanded", "false");
+    if (open.trigger) open.trigger.setAttribute("aria-expanded", "false");
     open = null;
     if (back && back.focus) back.focus({ preventScroll: true });
   }
@@ -42,7 +43,10 @@ window.Menus = (function () {
     el.hidden = false;
     var row = App.el.list.querySelector('[data-id="' + t.id + '"] .row-time');
     place(el, button && button.getBoundingClientRect ? button : row || App.el.pane);
-    open = { el: el, kind: "hand", active: 0, n: ok.length, back: document.activeElement, pick: function (i) { close(); Moves.handTo(t, ok[i]); } };
+    // The pane's hand-off button says its menu is open, however the menu was opened.
+    var trigger = document.querySelector('#pane [data-move="hand"][aria-haspopup]');
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    open = { el: el, kind: "hand", active: 0, n: ok.length, back: document.activeElement, trigger: trigger, pick: function (i) { close(); Moves.handTo(t, ok[i]); } };
     el.onclick = function (e) { var b = e.target.closest("[data-hand-row]"); if (b) open.pick(+b.dataset.handRow); };
     el.onpointermove = function (e) { var b = e.target.closest("[data-hand-row]"); if (b) setActive(+b.dataset.handRow); };
     el.querySelector(".hand-row").focus({ preventScroll: true });

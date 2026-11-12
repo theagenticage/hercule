@@ -85,7 +85,7 @@ window.Pane = (function () {
     if (!offers.length) return "";
     var one = offers.length === 1;
     var label = '<span class="pn-faces" aria-hidden="true">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">' + (one ? D.esc(offers[0].w.name) : "Hand to…") + "</span>";
-    return move("hand", label, "H", " pn-move--hand", false, one ? "Hand to " + offers[0].w.name : "Hand off…", one ? "" : ' aria-haspopup="menu"');
+    return move("hand", label, "H", " pn-move--hand", false, one ? "Hand to " + offers[0].w.name : "Hand to…", one ? "" : ' aria-haspopup="menu" aria-expanded="false"');
   }
 
   function thingPane(t) {

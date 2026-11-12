@@ -460,7 +460,7 @@ for (const s of ["pr", "accounts", "selection", "reply", "proposal"]) {
   await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
   await key(p, "Enter");
   await settle(p, 400);
-  await expect(p, "under 900px ↩ slides the pane in over the list", () => { const r = document.getElementById("pane").getBoundingClientRect(); return r.width > 300 && r.right <= innerWidth + 1 && r.left >= 0; });
+  await expect(p, "under 1032px ↩ slides the pane in over the list", () => { const r = document.getElementById("pane").getBoundingClientRect(); return r.width > 300 && r.right <= innerWidth + 1 && r.left >= 0; });
   await key(p, "Escape");
   await settle(p, 400);
   await expect(p, "Esc slides it out and the row has the focus", () => !document.getElementById("ib").classList.contains("is-pane-open") && document.activeElement.dataset.key === "r:pr-6213");
@@ -564,10 +564,10 @@ for (const w of [1024, 1120]) {
   await key(p, "Enter");
   await settle(p, 400);
   await key(p, "j");
-  await expect(p, "under 900px with the pane open, J keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
+  await expect(p, "under 1032px with the pane open, J keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
   await key(p, "e");
   await settle(p, 400);
-  await expect(p, "under 900px with the pane open, E keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
+  await expect(p, "under 1032px with the pane open, E keeps the focus in the pane", () => document.getElementById("pane").contains(document.activeElement));
   await key(p, "F6");
   await expect(p, "F6 moves on from the stacked pane", () => !document.getElementById("pane").contains(document.activeElement));
   await c.close();
@@ -603,7 +603,7 @@ for (const w of [1024, 1120]) {
 }
 {
   const p = await open("theme=whitehaven&scene=pr");
-  await expect(p, "the pane's hand-off button is named for the hand-off, not the face", () => { const b = document.querySelector('#pane [data-move="hand"]'); return !b || /^Hand (to |off)/.test(b.getAttribute("aria-label") || ""); });
+  await expect(p, "the pane's hand-off button is named for the hand-off, not the face", () => { const b = document.querySelector('#pane [data-move="hand"]'); return !b || /^Hand to/.test(b.getAttribute("aria-label") || ""); });
   await p.close();
 }
 {
@@ -629,11 +629,56 @@ for (const w of [1024, 1120]) {
   await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
   await key(p, "Enter");
   await settle(p, 400);
-  await expect(p, "under 900px the list under the open pane is inert", () => document.querySelector(".ib-list").inert === true);
+  await expect(p, "under 1032px the list under the open pane is inert", () => document.querySelector(".ib-list").inert === true);
   await key(p, "Escape");
   await settle(p, 300);
   await expect(p, "and comes back when the pane slides away", () => document.querySelector(".ib-list").inert === false);
   await c.close();
+}
+
+// ---- Round-six regressions ----
+for (const w of [960, 1024, 1100]) {
+  const c = await browser.newContext({ viewport: { width: w, height: 760 } });
+  const p = await c.newPage();
+  await p.goto(page0 + "?theme=whitehaven&scene=pr");
+  await p.waitForSelector("html[data-ready]");
+  await expect(p, `at ${w}px the list keeps 400px or the pane lies over it`, () => App.isStacked() || document.querySelector(".ib-list").getBoundingClientRect().width >= 399);
+  await c.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => { App.focusRow("r:pr-6213", { keyboard: true }); Moves.toggleSelect("pr-6213"); Moves.toggleSelect("pr-6230"); });
+  await p.hover('[data-key="r:gm-quote"]');
+  await p.click('[data-key="r:gm-quote"] [data-row-act="dismiss"]');
+  await settle(p, 300);
+  await expect(p, "a row's own Dismiss acts on that row, not on the selection elsewhere", () => Model.gone.has("gm-quote") && !Model.gone.has("pr-6213") && App.state.selection.has("pr-6213") && App.state.selection.has("pr-6230"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "/");
+  await p.keyboard.type("team:Checkout ");
+  await settle(p, 200);
+  await key(p, "Enter");
+  await expect(p, "↩ after a typed token adds nothing more", () => App.state.search.clauses.length === 1 && !document.getElementById("sx-input").value);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=reply");
+  await settle(p, 500);
+  await p.keyboard.type("Friday works for us.");
+  await p.keyboard.press("Meta+Enter");
+  await settle(p, 400);
+  await p.keyboard.press("Meta+z");
+  await settle(p, 500);
+  await expect(p, "⌘Z on a sent reply opens it again with its words", () => { const t = document.querySelector("#pane .reply textarea"); return !!t && t.value === "Friday works for us." && document.activeElement === t; });
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow(App.state.rows.find((r) => r.thing && r.thing.id === "pr-1302").key));
+  await expect(p, "a hand-off button that opens a menu says so, in the words it shows", () => { const b = document.querySelector('#pane [data-move="hand"]'); return !b || (b.getAttribute("aria-label") === "Hand to…" && b.getAttribute("aria-haspopup") === "menu"); });
+  await p.close();
 }
 
 await browser.close();

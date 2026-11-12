@@ -23,8 +23,16 @@
       el.classList.toggle("is-wrap", !opts.undo && !opts.action);
       el.classList.add("is-on");
       el.removeAttribute("inert");
+      // A line that does not fit shortens the thing's title first, to 12 letters at least; only then do
+      // the buttons drop their labels.
       var words = el.querySelector(".undo-text");
-      if (words.scrollWidth > words.clientWidth + 1) el.classList.add("is-tight");
+      var fits = function () { return words.scrollWidth <= words.clientWidth + 1; };
+      var quoted = /“([^”]*)”/.exec(text);
+      for (var keep = quoted ? quoted[1].replace(/…$/, "").length : 0; !fits() && keep > 12; ) {
+        keep = Math.max(12, keep - 3);
+        words.textContent = text.replace(quoted[0], "“" + quoted[1].slice(0, keep).trimEnd() + "…”");
+      }
+      if (!fits()) el.classList.add("is-tight");
       var spoken = [text, opts.note, opts.undo ? "Command Z undoes it" : ""].filter(Boolean).map(function (x) { return x.replace(/[.\s]+$/, ""); }).join(". ") + ".";
       Announce.say(spoken);
       clearTimeout(timer);
@@ -69,7 +77,13 @@
       if (had) App.focusCurrent();
       if (!el.matches(":hover")) { clearTimeout(timer); timer = setTimeout(hide, 3000); }
     }
-    return { show: show, hide: hide, holds: holds, markSent: markSent };
+    /** Changes the note on the line, if the line still shows this move. */
+    function setNote(entry, words) {
+      var el = document.getElementById("undo");
+      var note = el._entry === entry && el.querySelector(".undo-note");
+      if (note && note.textContent !== words) note.textContent = words;
+    }
+    return { show: show, hide: hide, holds: holds, markSent: markSent, setNote: setNote };
   })();
 
   // ---- One polite live region, always in the tree, for what a screen reader user would otherwise miss ----
@@ -250,6 +264,9 @@
 
   // ---- The reply box of an answer with a field, inside its signal's section ----
   window.Reply = (function () {
+    // Unsent words per ask and answer: closing the box, moving away, or ⌘Z on a sent reply keeps them.
+    var drafts = {};
+    /** Opens the reply box of an answer under its signal's section, with any words kept from before. */
     function open(button, f, a) {
       var sec = button.closest(".sig");
       var box = sec.querySelector(".reply");
@@ -260,8 +277,13 @@
       sec.querySelector(".sig-answers").after(box);
       button.classList.add("is-pressed");
       var ta = box.querySelector("textarea");
+      var key = f.s.id + "|" + a.id;
+      ta.value = drafts[key] || "";
+      ta.addEventListener("input", function () { drafts[key] = ta.value; });
       ta.focus();
-      var send = function () { if (!ta.value.trim()) { ta.focus(); return; } Moves.settle(f, a.label.replace("…", "") + " sent to " + f.s.by + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true); };
+      // ⌘Z on a sent reply opens the box again, with the words and the focus in it.
+      var again = function () { var b = document.querySelector('#pane [data-answer="' + a.id + '"][data-sig="' + f.s.id + '"]'); if (b) open(b, f, a); };
+      var send = function () { if (!ta.value.trim()) { ta.focus(); return; } Moves.settle(f, a.label.replace("…", "") + " sent to " + f.s.by + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true, again); };
       box.addEventListener("click", function (e) {
         if (e.target.closest("[data-reply-cancel]")) { box.remove(); button.classList.remove("is-pressed"); button.focus(); }
         if (e.target.closest("[data-reply-send]")) send();

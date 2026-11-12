@@ -51,10 +51,13 @@ window.Bar = (function () {
     return out;
   }
 
+  /** Closes the suggestions and tells assistive tech so: the field is collapsed and points at no option. */
+  function closeMenu() { menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
+
   function drawMenu() {
     var text = input.value.trim();
     var show = document.activeElement === input;
-    var shut = function () { menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); };
+    var shut = closeMenu;
     if (!show) { shut(); return; }
     items = suggest(text);
     if (!items.length) { shut(); return; }
@@ -135,7 +138,7 @@ window.Bar = (function () {
 
   /** Leaves the search for the list, keeping the query, with the first result current. */
   function toList() {
-    menu.hidden = true;
+    closeMenu();
     var first = App.state.rows.find(function (r) { return r.type !== "tmore" && r.type !== "more"; });
     if (first) App.focusRow(first.key, { keyboard: true });
     else { var b = document.querySelector("#empty button"); if (b) b.focus(); else input.blur(); }
@@ -152,7 +155,7 @@ window.Bar = (function () {
       absorb(false);
       active = firstActive();
       apply();
-      menu.hidden = true;
+      closeMenu();
       return;
     }
     absorb(true);
@@ -312,18 +315,19 @@ window.Bar = (function () {
     // hint is fitted again once fonts arrive.
     document.fonts.addEventListener("loadingdone", function () { fitPlaceholder(); });
     input.addEventListener("focus", function () { field.classList.add("is-focus"); active = firstActive(); drawChips(); drawMenu(); });
-    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) menu.hidden = true; }, 120); });
+    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) closeMenu(); }, 120); });
     // The scope token shows while the focus is anywhere in the field, its tokens' buttons too.
     field.addEventListener("focusout", function () { setTimeout(function () { if (!field.contains(document.activeElement)) drawChips(); }, 120); });
     input.addEventListener("input", function () {
-      active = firstActive();
+      // What is left in the field after tokens are taken decides whether a suggestion is highlighted.
       absorb(false);
+      active = firstActive();
       apply();
       drawMenu();
     });
     input.addEventListener("keydown", function (e) {
       var st = App.state;
-      if (e.key === "F6" || e.key === "Tab") { menu.hidden = true; return; }
+      if (e.key === "F6" || e.key === "Tab") { closeMenu(); return; }
       if (e.key === "ArrowDown") {
         if (menu.hidden || active >= items.length - 1) toList(); else { active++; drawMenu(); }
         e.preventDefault();
@@ -333,20 +337,20 @@ window.Bar = (function () {
         // ↩ takes the highlighted suggestion; a typed value is taken as it is only when nothing is offered.
         var m = /^([a-z]+):(.+)$/i.exec(input.value.trim());
         if (!menu.hidden && items[active] && items[active].kind !== "text") pick(items[active]);
-        else if (m && tokenField(m[1].toLowerCase())) { absorb(true); apply(); menu.hidden = true; }
+        else if (m && tokenField(m[1].toLowerCase())) { absorb(true); apply(); closeMenu(); }
         else { absorb(true); apply(); toList(); }
         e.preventDefault();
       }
       else if (e.key === "Backspace" && !input.value) {
         // ⌫ in an empty field removes the last token. It never removes the scope: with no query left,
         // a stray ⌫ would change the saved query you are in. The scope token's × does that.
-        if (st.search.clauses.length) { st.search.clauses.pop(); apply(); drawMenu(); }
+        if (st.search.clauses.length) { st.search.clauses.pop(); active = firstActive(); apply(); drawMenu(); }
         e.preventDefault();
       }
       else if (e.key === "Escape") {
         // The first Esc leaves the search and keeps the query; Esc in the list then clears it. With
         // nothing typed, Esc goes back to the current row.
-        menu.hidden = true;
+        closeMenu();
         if (st.search.text || st.search.clauses.length) toList(); else App.focusCurrent();
         e.preventDefault();
       }

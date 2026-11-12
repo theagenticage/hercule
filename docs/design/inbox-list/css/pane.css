@@ -481,16 +481,23 @@
 .pl-unlink:hover {
   color: var(--ink);
 }
+/* A pair and who linked it share a line while both fit whole; when they do not, who linked it moves
+   under the pair, so the pair's identifiers are never cut. */
 .pc li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 2px 12px;
   min-height: 28px;
   font-size: var(--t-12);
 }
+.pc li .pc-pair {
+  flex: 1 1 auto;
+}
 .pc li .pl-claim {
+  flex: none;
   justify-content: flex-end;
+  margin-left: auto;
 }
 .pc-pair {
   display: flex;
