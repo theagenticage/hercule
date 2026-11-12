@@ -116,6 +116,7 @@ const buildCreatedTask = (title: string, projectId: string | undefined): Task =>
   id: buildTaskId(50),
   title,
   description: "",
+  leadSessionId: null,
   status: "open",
   stage: "exploring",
   priority: "normal",

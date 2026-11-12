@@ -52,6 +52,7 @@ import {
   type TaskChangeResult,
   TaskFilter,
   TaskMoveInput,
+  TaskStageReportInput,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
   refuseFinishedCheckWithoutStageFact,
@@ -60,6 +61,7 @@ import {
   InvalidState,
   NotFound,
   Validation,
+  prepareForQuoting,
   type ExternalRef,
   type Forbidden,
   type HandOffUndo,
@@ -67,6 +69,8 @@ import {
   type Task,
   type TaskAttention,
   type TaskPriority,
+  type StageReportOutcome,
+  type TaskStageReport,
   type TaskStage,
   type TaskStatus,
   type TaskMergeCheck,
@@ -96,11 +100,13 @@ import {
   describeMergeLoop,
   type EdgeWrite,
 } from "./blockers";
+import { makeLeads, type LeadMove } from "./lead";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
 import { LinkedEntities } from "./linked-entities";
 import { makeLinkedFacts } from "./linked-facts";
-import { makeStageDecisions } from "./stage-decision";
+import { makeStageDecisions, type StageDecision } from "./stage-decision";
+import { describeStage, UNTITLED_THREAD_TITLE } from "./stage-cause";
 import { TaskLinkOwners } from "./link-owners";
 import { makeSummaryDirtyMarker } from "./summary-dirty";
 import {
@@ -154,6 +160,7 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeMove = Schema.decodeUnknownEffect(MoveInput);
+const decodeStageReport = Schema.decodeUnknownEffect(TaskStageReportInput);
 const decodeEntityLink = Schema.decodeUnknownEffect(LinkEntityInput);
 
 /** The fields `updateTask` changes: an update after decoding. */
@@ -285,6 +292,51 @@ export type FailureRestoration =
   | { readonly restored: true; readonly taskId: string }
   | { readonly restored: false; readonly reason: FailureRestoreRefusal };
 
+/** The refusal of `reportStage` for a caller that is not a session. */
+const ONLY_A_SESSION_REPORTS =
+  "Only an agent session reports a stage. To move a card yourself, use `hercule task move`.";
+
+/** The refusal of `reportStage` for a session that is on no Task. */
+const REPORTER_IS_ON_NO_TASK =
+  "This session is on no Task, so there is no stage to report. Tell the user what you found instead.";
+
+/** The refusal of `reportStage` for a Task that no Thread leads. */
+const NO_THREAD_LEADS_THE_TASK =
+  "No Thread leads this Task, so no session can report its stage. Tell the user what you found instead.";
+
+/** Returns the refusal of `reportStage` for a session that does not lead its Task, naming the lead. */
+const describeOnlyTheLeadReports = (leadTitle: string): string => {
+  // The title is agent text, so it is cleaned before it goes between quotes.
+  const quoted = prepareForQuoting(leadTitle, 80).trim();
+  const title = quoted === "" ? UNTITLED_THREAD_TITLE : quoted;
+  return `Only the Thread that leads this Task reports its stage: \u201c${title}\u201d. Tell it what you found instead.`;
+};
+
+/**
+ * Returns the one line `reportStage` answers with, that says what became of
+ * the report and why. `held` is the stage the Task has after the report.
+ */
+const describeStageReportOutcome = (
+  outcome: StageReportOutcome,
+  held: TaskStage,
+  reported: TaskStage,
+): string => {
+  switch (outcome) {
+    case "moved":
+      return `Moved to ${describeStage(reported)}.`;
+    case "already":
+      return `Already at ${describeStage(held)}.`;
+    case "finished":
+      return `Kept at ${describeStage(held)}: the Task is finished.`;
+    case "repeat":
+      return `Kept at ${describeStage(held)}: ${describeStage(reported)} is already this Task's last report, so repeating it does not move the card. If the card should move, tell the user.`;
+    case "fact":
+      return `Kept at ${describeStage(held)}: something linked to this Task is still open, and facts outrank reports. The card moves when the linked work finishes; tell the user if it should move now.`;
+    case "open-links":
+      return `Kept at ${describeStage(held)}: something linked to this Task is still open. Your report of ${describeStage(reported)} is recorded; the card moves when the linked work finishes, or tell the user if it should move now.`;
+  }
+};
+
 /** The refusal of `merge` for a caller who is not the user. */
 const ONLY_THE_USER_MERGES =
   "only the user may merge Tasks: merging is the user's correction of how work is grouped, so a session or a workflow step may not; ask the user instead";
@@ -354,13 +406,6 @@ const NO_SUCH_INITIATIVE = "no such initiative";
 const INITIATIVE_IS_CLOSED =
   "the initiative is closed, so no Task can be put on it; " +
   "ask the user to reopen it, or name another initiative";
-
-/**
- * The title of the Task made for a Thread whose title is blank. A Task's title
- * has at least one character, and a stored empty title would make every read
- * of the Task fail.
- */
-const UNTITLED_THREAD_TITLE = "Untitled thread";
 
 /** The message for a spawn that names a finished Task. */
 const buildFinishedTaskRefusal = (stage: TaskStage): string =>
@@ -473,6 +518,7 @@ const make = Effect.gen(function* () {
   const linkedEntities = yield* LinkedEntities;
   const linked = yield* makeLinkedFacts;
   const stageDecisions = yield* makeStageDecisions(linked.countLinkedWork);
+  const leads = yield* makeLeads;
   const facts = yield* entityFactRepository;
   const blockers = yield* blockerRepository;
 
@@ -772,6 +818,10 @@ const make = Effect.gen(function* () {
    * `stage` always decides, even the one the Task has, which writes no event.
    * A refused `stageFactId` drops the stage of the patch.
    *
+   * `reportDecision` is the decision of a `moved` Stage Report, already made by
+   * `decideStageOfReport`. When it is given, it is written instead of deciding
+   * from the patch, which must then name no stage. Only `reportStage` passes it.
+   *
    * The other fields of a patch with a `stageFactId` are not guarded by the
    * fact: they apply whether the fact is accepted or refused. The workflows
    * that ship with the product send the stage alone.
@@ -780,6 +830,7 @@ const make = Effect.gen(function* () {
     requestedId: string,
     patch: TaskPatch,
     actor: string,
+    reportDecision?: StageDecision,
   ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
     withTransaction(
       sql,
@@ -788,7 +839,8 @@ const make = Effect.gen(function* () {
         const before = yield* readLiveTaskOrFail(requestedId);
         // A merged id lands on the survivor, and everything below is about it.
         const id = before.id;
-        const decision = yield* stageDecisions.decideStageOfPatch(before, patch, actor);
+        const decision =
+          reportDecision ?? (yield* stageDecisions.decideStageOfPatch(before, patch, actor));
         yield* ensureProjectExists(patch.projectId);
 
         // Each field is compared on its own, rather than in a loop over
@@ -1106,6 +1158,7 @@ const make = Effect.gen(function* () {
       | "initiativeId"
       | "provenance"
       | "following"
+      | "leadSessionId"
     >,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
@@ -1201,10 +1254,16 @@ const make = Effect.gen(function* () {
    * The new Task is `exploring`, with priority `normal`, no description, no
    * labels and no provenance. It has the Thread's project only when that
    * project still exists: a fork can carry a deleted one, and a Task cannot
-   * name it. The `task.created` event is stamped with `actor`.
+   * name it. The `task.created` event is stamped with `actor`. When
+   * `leadSessionId` is set, the Task is born led by that Thread, so
+   * `task.created` carries the lead and no later lead write is announced.
    */
   const makeTaskFromThread = (
-    session: { readonly title: string; readonly projectId: string | undefined },
+    session: {
+      readonly title: string;
+      readonly projectId: string | undefined;
+      readonly leadSessionId?: string;
+    },
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
     Effect.gen(function* () {
@@ -1221,6 +1280,7 @@ const make = Effect.gen(function* () {
           labels: [],
           projectId,
           provenance: [],
+          ...(session.leadSessionId === undefined ? {} : { leadSessionId: session.leadSessionId }),
         },
         actor,
       );
@@ -1234,7 +1294,11 @@ const make = Effect.gen(function* () {
    * the new Task.
    */
   const makeThreadTask = (
-    session: { readonly title: string; readonly projectId: string | undefined },
+    session: {
+      readonly title: string;
+      readonly projectId: string | undefined;
+      readonly leadSessionId?: string;
+    },
     workspaceId: string | null,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
@@ -1940,6 +2004,89 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Reports the stage of the calling session's own Task, as its lead: the
+     * weakest way to move a card (spec 09, "Stage reports"). Returns the
+     * outcome and one line the caller can act on. A report that leaves the card
+     * where it is is an answer, not an error.
+     *
+     * Fails with `InvalidState`, and writes nothing, when the caller is not a
+     * session, the session is on no Task, or the session is not the Task's
+     * lead (the message names the lead). Needs the grant `task.update`.
+     *
+     * Otherwise one transaction stores the stage as the Task's claim, decides
+     * the outcome (`decideStageOfReport`), writes a `moved` decision through
+     * `updateTask` (so the card goes last in its new cell and one
+     * `task.updated` is emitted, stamped with the session) and appends the
+     * audit entry `task.stageReported`, whatever the outcome.
+     */
+    reportStage: (
+      input: TaskStageReportInput,
+    ): Effect.Effect<
+      TaskStageReport,
+      Unauthenticated | Forbidden | Validation | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        const caller = yield* requireGrant("task.update");
+        const { stage } = yield* Effect.mapError(
+          decodeStageReport(input),
+          createDecodeValidationError,
+        );
+        if (caller._tag !== "session") {
+          return yield* Effect.fail(createInvalidStateError(ONLY_A_SESSION_REPORTS));
+        }
+        const sessionId = caller.sessionId;
+        const stamp = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const taskId = yield* tasks.readSessionTaskId(sessionId);
+            const task = Option.isNone(taskId)
+              ? Option.none<Task>()
+              : yield* tasks.readLiveOrSurvivor(taskId.value);
+            if (Option.isNone(task)) {
+              return yield* Effect.fail(createInvalidStateError(REPORTER_IS_ON_NO_TASK));
+            }
+            const lead = task.value.leadSessionId;
+            if (lead === null) {
+              return yield* Effect.fail(createInvalidStateError(NO_THREAD_LEADS_THE_TASK));
+            }
+            if (lead !== sessionId) {
+              // Sessions are never deleted, so the lead's row exists.
+              const leadTitle = Option.getOrThrow(yield* tasks.readSessionTitle(lead));
+              return yield* Effect.fail(
+                createInvalidStateError(describeOnlyTheLeadReports(leadTitle)),
+              );
+            }
+
+            // Decide before the claim is stored: the decision reads the previous claim.
+            const { outcome, decision } = yield* stageDecisions.decideStageOfReport(task.value, {
+              stage,
+              sessionId,
+            });
+            yield* tasks.writeStageClaim(task.value.id, sessionId, stage, at);
+            const held =
+              decision === undefined
+                ? task.value.stage
+                : (yield* updateTask(task.value.id, {}, stamp, decision).pipe(
+                    // The Task was read in this transaction, so it still exists.
+                    Effect.catchIf(
+                      (error): error is NotFound => error instanceof NotFound,
+                      Effect.die,
+                    ),
+                  )).stage;
+            yield* audit.append({
+              kind: "task.stageReported",
+              actor: stamp,
+              payload: { taskId: task.value.id, sessionId, stage, outcome },
+              at,
+            });
+            return { outcome, message: describeStageReportOutcome(outcome, held, stage) };
+          }),
+        );
+      }),
+
+    /**
      * Merges the Task `id` (the source) into the Task `input.intoTaskId` (the
      * survivor), as the user, and returns the survivor. Only the user merges:
      * a session or a workflow step is refused with `Forbidden`.
@@ -2002,6 +2149,7 @@ const make = Effect.gen(function* () {
             yield* facts.moveFactsAndSuppressions(sourceId, targetId);
             yield* tasks.writeStageDecision(targetId, yield* stageDecisions.decideStageOfMerge());
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
+            yield* leads.settleLeadAfterMerge({ survivorTaskId: targetId, sourceTaskId: sourceId });
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
             // Tracking joins them to the runs, which moved just above.
@@ -2289,6 +2437,8 @@ const make = Effect.gen(function* () {
       readonly requestedTaskId: string | undefined;
       readonly callerTaskId: string | undefined;
       readonly workspaceId: string | null;
+      /** The id the session row will get. It leads a Task made here for a Thread. */
+      readonly sessionId: string;
       readonly sessionKind: "thread" | "agent";
       readonly title: string;
       readonly projectId: string | undefined;
@@ -2335,11 +2485,44 @@ const make = Effect.gen(function* () {
             return { taskId, created: false };
           }
           if (input.sessionKind === "agent") return undefined;
-          const task = yield* makeThreadTask(input, input.workspaceId, yield* currentStamp);
+          // The Thread leads the Task it makes (lead.ts), so the Task is
+          // written with that lead and `task.created` carries it.
+          const task = yield* makeThreadTask(
+            { ...input, leadSessionId: input.sessionId },
+            input.workspaceId,
+            yield* currentStamp,
+          );
           yield* markSummaryDirty(task.id);
           return { taskId: task.id, created: true };
         }),
       ),
+
+    /**
+     * Keeps the lead of the Tasks a session left and joined true, after the
+     * session's row was written or its `task_id` changed (see `lead.ts` for
+     * the rules). It joins the caller's transaction, which must be the one
+     * that wrote the membership, and checks no grant. It announces every Task
+     * whose lead changed, so a client that reads the Task sees the new lead,
+     * and announces nothing when no lead changed. `continuedFromSessionId` is
+     * set only for a fork made by `session.continue`, never for a spawned
+     * child.
+     */
+    settleLeadAfterMove: (move: LeadMove): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          for (const taskId of yield* leads.settleLeadAfterMove(move)) {
+            yield* announce({ _tag: "record", topic: "task", id: taskId, kind: "updated" });
+          }
+        }),
+      ),
+
+    /**
+     * Returns the title of the Task the session leads, or none when it leads
+     * no open Task (see `lead.ts`). Reads only, and checks no grant.
+     */
+    readLedTaskTitle: (sessionId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      leads.readLedTaskTitle(sessionId),
 
     /**
      * Returns the Task a Thread has when it is taken off Done. The Thread
@@ -2356,6 +2539,8 @@ const make = Effect.gen(function* () {
      * `actor`, the actor of the reopen.
      */
     rejoinThread: (input: {
+      /** The reopened Thread. It leads a Task made here for it. */
+      readonly sessionId: string;
       readonly currentTaskId: string | undefined;
       readonly workspaceId: string | null;
       readonly title: string;
@@ -2377,7 +2562,11 @@ const make = Effect.gen(function* () {
               joinableTaskId: undefined,
               workspaceId: input.workspaceId,
             })) ??
-            (yield* makeThreadTask(input, input.workspaceId, input.actor)).id;
+            (yield* makeThreadTask(
+              { ...input, leadSessionId: input.sessionId },
+              input.workspaceId,
+              input.actor,
+            )).id;
           // The Task has a live Thread again, in each of the three cases.
           yield* markSummaryDirty(taskId);
           return taskId;

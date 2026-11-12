@@ -103,6 +103,7 @@ const COMMANDS: Record<string, string> = {
   "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
+  "task.reportStage": "task report",
   "task.move": "task move",
   "task.merge": "task merge",
   "task.linkEntity": "task link",

@@ -18,6 +18,7 @@ import { runRepository } from "../../runs";
 import { sessionRepository } from "../../sessions";
 import {
   describeStageCause,
+  describeStageReport,
   entityFactRepository,
   groupByTask,
   TaskBoardFacts,
@@ -115,10 +116,32 @@ const buildStageCause = (
   return cause === undefined
     ? undefined
     : {
+        kind: "fact",
         factId: cause.id,
         ref: cause.ref,
         text: describeStageCause({ ...cause, thing: words.get(cause.ref) }),
       };
+};
+
+/**
+ * Builds a card's stage cause: the fact's, when a fact placed the stage, else
+ * a Stage Report's, when a session's report did. Returns `undefined` for a
+ * Task whose stage neither placed.
+ */
+const buildCardStageCause = (
+  task: BoardFactsRequest,
+  causes: ReadonlyMap<number, EntityFact>,
+  words: ReadonlyMap<string, StageCauseThing>,
+  reportTitles: ReadonlyMap<string, string>,
+): BoardCardFacts["stageCause"] => {
+  const fromFact = buildStageCause(causes, words, task.stageCauseFactId);
+  if (fromFact !== undefined || task.stageCauseSessionId === undefined) return fromFact;
+  return {
+    kind: "report",
+    sessionId: task.stageCauseSessionId,
+    stageRevision: task.stageRevision,
+    text: describeStageReport(reportTitles.get(task.stageCauseSessionId) ?? "", task.stage),
+  };
 };
 
 /**
@@ -131,6 +154,7 @@ const buildStageCause = (
  * - when the latest run of each Task ended;
  * - the workflow name and cause of each failed run a Task shows;
  * - the fact that placed each Task's stage, with the stored words of its thing;
+ * - the titles of the sessions whose Stage Report placed a Task's stage;
  * - the refs every Task links, one walk up `part of` from all of them, and
  *   the records and observations of the refs found, which tell whether each
  *   place can be read now.
@@ -178,6 +202,11 @@ export const TaskBoardFactsLayer: Layer.Layer<
           const causeWords = yield* entities.listEntityWords(
             [...causes.values()].map((cause) => cause.ref),
           );
+          const reportTitles = yield* sessions.listTitles(
+            tasks.flatMap((task) =>
+              task.stageCauseSessionId === undefined ? [] : [task.stageCauseSessionId],
+            ),
+          );
           const linksByTask = yield* tasksRepository.listEntityLinks(taskIds);
           const linkedRefs = [...new Set([...linksByTask.values()].flat())];
           const read = yield* entities.readContext({
@@ -200,7 +229,7 @@ export const TaskBoardFactsLayer: Layer.Layer<
                 lastRunEndedAt: lastRunEndings.get(task.id),
                 failure:
                   task.failedRunId === undefined ? undefined : failures.get(task.failedRunId),
-                stageCause: buildStageCause(causes, causeWords, task.stageCauseFactId),
+                stageCause: buildCardStageCause(task, causes, causeWords, reportTitles),
                 linkedRefs: linksByTask.get(task.id) ?? [],
                 entityMarks: cardFactsByTask.get(task.id)?.entityMarks ?? [],
                 contextRefs: cardFactsByTask.get(task.id)?.contextRefs ?? [],

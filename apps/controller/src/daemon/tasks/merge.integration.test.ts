@@ -642,16 +642,19 @@ describe("the join rule, after a merge", () => {
           projectId: undefined,
         };
         const named = yield* tasks.joinSession({
+          sessionId: Bun.randomUUIDv7(),
           ...input,
           requestedTaskId: source.id,
           callerTaskId: undefined,
         });
         const spawned = yield* tasks.joinSession({
+          sessionId: Bun.randomUUIDv7(),
           ...input,
           requestedTaskId: undefined,
           callerTaskId: source.id,
         });
         const reopened = yield* tasks.rejoinThread({
+          sessionId: Bun.randomUUIDv7(),
           currentTaskId: source.id,
           workspaceId: null,
           title: "A Thread",
@@ -675,6 +678,7 @@ describe("the join rule, after a merge", () => {
         // the title adoption keeps it from being renamed.
         const survivor = yield* createTask("a session");
         const made = yield* tasks.joinSession({
+          sessionId: Bun.randomUUIDv7(),
           requestedTaskId: undefined,
           callerTaskId: undefined,
           workspaceId: null,

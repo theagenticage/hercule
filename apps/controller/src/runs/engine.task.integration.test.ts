@@ -616,6 +616,7 @@ describe("task.undoTryAgain", () => {
       disturb: (arranged) =>
         Effect.flatMap(TaskService, (tasks) =>
           tasks.joinSession({
+            sessionId: Bun.randomUUIDv7(),
             requestedTaskId: arranged.taskId,
             callerTaskId: undefined,
             workspaceId: null,

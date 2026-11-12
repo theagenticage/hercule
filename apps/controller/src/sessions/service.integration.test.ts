@@ -2959,6 +2959,7 @@ describe("SessionService.moveToTask", () => {
         const moved = yield* moveAs(USER, sessionId);
         const tasks = yield* TaskService;
         const next = yield* tasks.joinSession({
+          sessionId: Bun.randomUUIDv7(),
           requestedTaskId: undefined,
           callerTaskId: undefined,
           workspaceId,

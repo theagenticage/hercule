@@ -784,6 +784,21 @@ export const CLI = {
       },
     },
   },
+  "task.reportStage": {
+    command: "task report",
+    help: "Reports the stage of your own task, as its lead: the thread that speaks for it. Run it once when the work moves to another stage, not every turn. The card moves only if nothing outranks the report; the answer says whether it moved and why. Only a thread reports, and only on the task it leads.",
+    examples: [{ args: ["--stage", "planned"] }, { args: ["--stage", "landed"] }],
+    fields: {
+      stage: {
+        flag: "stage",
+        help: "The stage the work is in now. exploring: working out what to do, nothing is settled yet. planned: what to do is agreed, and building has not started. building: making the thing. in-review: built, and being reviewed. landed: finished from your side, waiting for the user to look. A report never beats a fact about a linked pull request or ticket, and a repeated report never undoes the user's move. done and dropped are the user's to set and are refused.",
+      },
+    },
+    errors: {
+      invalid_state:
+        'the caller is not a session ("Only an agent session reports a stage. To move a card yourself, use `hercule task move`."), the session is on no task, or the session is not the lead of its task; the message names the lead',
+    },
+  },
   "task.move": {
     command: "task move",
     help: "Moves a task on the Work board: to another stage, project, initiative or place in its cell. Send at least one of them; a field you leave out keeps its value. The task goes last among the cards of its new project and stage unless --after names the card it follows. A move to done or dropped is refused: use `hercule task update --stage` for those. Returns the task.",

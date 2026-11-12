@@ -9,7 +9,8 @@
  * - the stage to write, if it differs from the stored one;
  * - the fence (`stage_fact_fence`): the highest fact id the stage now accounts
  *   for, so an older fact can never move the card afterwards;
- * - the cause (`stage_cause_fact_id`): the fact that placed the stage, or none;
+ * - the cause (`stage_cause_fact_id` or `stage_cause_session_id`): the fact or
+ *   the Stage Report that placed the stage, or none;
  * - whether the write counts as someone deciding, which the Undo of a handoff
  *   reads through `stage_revision`, and as an edit, which it reads through
  *   `revision`.
@@ -23,6 +24,7 @@ import {
   createValidationError,
   deriveTaskStatus,
   isFinishedStage,
+  type StageReportOutcome,
   type Task,
   type TaskStage,
   type TaskStatus,
@@ -33,14 +35,23 @@ import { entityFactRepository } from "./entity-facts";
 import type { LinkedWorkCounts } from "./linked-work";
 import { taskRepository, type ProvenanceInput } from "./repository";
 
+/** What placed a Task's stage: a fact about a linked thing, or the Task's lead reporting it. */
+export type StageCause =
+  | { readonly kind: "fact"; readonly factId: number }
+  | { readonly kind: "report"; readonly sessionId: string };
+
 /** What a write does about a Task's stage. See the top of this file. */
 export interface StageDecision {
   /** The stage to write, or `undefined` when the Task keeps the stage it has. */
   readonly stage: TaskStage | undefined;
-  /** The fence after the write: the highest fact id the stage accounts for. */
-  readonly fence: number;
-  /** The fact that placed the stage after the write, `null` for none, `undefined` to leave it. */
-  readonly cause: number | null | undefined;
+  /**
+   * The fence after the write: the highest fact id the stage accounts for.
+   * `undefined` leaves the fence alone, which a Stage Report does so that the
+   * next fact still applies.
+   */
+  readonly fence: number | undefined;
+  /** What placed the stage after the write, `null` for nothing, `undefined` to leave the cause as it is. */
+  readonly cause: StageCause | null | undefined;
   /** True when the write counts as someone deciding the stage (`stage_revision` rises). */
   readonly raisesStageRevision: boolean;
   /**
@@ -152,6 +163,25 @@ export const makeStageDecisions = (
         return patch.stageFactId;
       });
 
+    /**
+     * Returns the cause an accepted fact leaves. A fact that moves the stage
+     * is the cause. A fact that agrees with the stage the Task holds placed
+     * nothing, so the cause stays, except when the cause is a Stage Report:
+     * then the fact takes it over, so a later report cannot move the card away
+     * from a stage a fact now backs.
+     */
+    const chooseCauseOfFact = (
+      task: Task,
+      stage: TaskStage | undefined,
+      factId: number,
+    ): Effect.Effect<StageCause | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const fact: StageCause = { kind: "fact", factId };
+        if (stage !== undefined) return fact;
+        const held = yield* tasks.readStageCause(task.id);
+        return held?.kind === "report" ? fact : undefined;
+      });
+
     return {
       /**
        * Turns a write's stage fields into a stage decision, or returns
@@ -171,7 +201,8 @@ export const makeStageDecisions = (
        * - A stage written from an accepted fact sets the fence to the fact. If
        *   the stage differs, the cause becomes the fact; if the Task holds
        *   that stage already, only the fence moves and the cause stays, because
-       *   the fact placed nothing.
+       *   the fact placed nothing. The one exception is a cause that is a Stage
+       *   Report: the fact takes it over.
        * - A workflow run that writes from a fact is not anyone deciding, so its
        *   write leaves the stage revision alone, and the revision too when the
        *   stage is all it changes. A user or a session that passes a fact is
@@ -209,9 +240,70 @@ export const makeStageDecisions = (
           return {
             stage,
             fence: factId,
-            cause: stage === undefined ? undefined : factId,
+            cause: yield* chooseCauseOfFact(task, stage, factId),
             raisesStageRevision: !byRun,
             countsAsEdit: !byRun,
+          };
+        }),
+
+      /**
+       * Decides what a Stage Report does, the one place that holds the rules of
+       * the table in spec 09 "Stage reports". It reads the Task's stored claim
+       * and stage cause itself, so the caller must call it before it stores the
+       * new claim. The first case that matches wins:
+       *
+       * 1. The Task is finished: `finished`.
+       * 2. The stored claim (whoever made it) equals `stage`: `repeat`. So a
+       *    repeat never undoes a drag.
+       * 3. A fact placed the stage, that fact is not voided, and something
+       *    linked to the Task is still open: `fact`. Facts outrank reports
+       *    while the thing they report on still stands. Once the fact is voided
+       *    or nothing linked is open any more (the pull request was closed
+       *    unmerged, or unlinked), the fact is stale and the rules go on.
+       * 4. `stage` is `landed` and something linked is still open: `open-links`.
+       * 5. The Task holds `stage` already: `already`.
+       * 6. Otherwise `moved`, with the decision to write.
+       *
+       * Linked work is counted at most once per call.
+       *
+       * The decision of a `moved` report leaves the fence alone and makes the
+       * reporting session the cause. Every other outcome has no decision: the
+       * card stays as it is.
+       */
+      decideStageOfReport: (
+        task: Task,
+        report: { readonly stage: TaskStage; readonly sessionId: string },
+      ): Effect.Effect<
+        { readonly outcome: StageReportOutcome; readonly decision?: StageDecision },
+        SqlError
+      > =>
+        Effect.gen(function* () {
+          const { stage } = report;
+          if (isFinishedStage(task.stage)) return { outcome: "finished" };
+          const claim = yield* tasks.readStageClaim(task.id);
+          if (Option.getOrUndefined(claim) === stage) return { outcome: "repeat" };
+          let counts: LinkedWorkCounts | undefined;
+          const readOpenLinks = Effect.gen(function* () {
+            counts ??= yield* countLinkedWork(task.id, []);
+            return counts.openLinks;
+          });
+          const cause = yield* tasks.readStageCause(task.id);
+          if (cause?.kind === "fact") {
+            const fact = yield* facts.readFact(cause.factId);
+            const standing = Option.isSome(fact) && fact.value.voidedAt === null;
+            if (standing && (yield* readOpenLinks) > 0) return { outcome: "fact" };
+          }
+          if (stage === "landed" && (yield* readOpenLinks) > 0) return { outcome: "open-links" };
+          if (stage === task.stage) return { outcome: "already" };
+          return {
+            outcome: "moved",
+            decision: {
+              stage,
+              fence: undefined,
+              cause: { kind: "report", sessionId: report.sessionId },
+              raisesStageRevision: true,
+              countsAsEdit: true,
+            },
           };
         }),
 

@@ -229,6 +229,8 @@ export const Task = Schema.Struct({
    * Initiative clears it.
    */
   initiativeId: Schema.optionalKey(Id),
+  /** The Thread that leads this Task: the one session that reports its stage. Null when no Thread is on it. */
+  leadSessionId: Schema.NullOr(Id),
   provenance: Schema.Array(ProvenanceEntry),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -558,6 +560,66 @@ export const TaskMoveInput = Schema.Struct({
 });
 
 export type TaskMoveInput = Schema.Schema.Type<typeof TaskMoveInput>;
+
+/**
+ * Refuses `done` and `dropped` as a reported stage, with a message that tells
+ * the agent what to do instead. Done is the user's sign-off and Drop is the
+ * user's decision, so an agent never reports either.
+ */
+const refuseUserOnlyStage = Schema.makeFilter((stage: TaskStage) =>
+  stage === "done"
+    ? "An agent cannot report done: Done is the user's sign-off. Report landed, and the user signs it off."
+    : stage === "dropped"
+      ? "An agent cannot report dropped: Drop is the user's decision. Report the stage the work is in, and tell the user why you think it should be dropped."
+      : undefined,
+);
+
+/**
+ * The input of `task.reportStage`: the stage the calling Thread says its Task
+ * is in. It names no Task, because the controller finds the Task from the
+ * calling session. `done` and `dropped` fail as invalid input.
+ */
+export const TaskStageReportInput = Schema.Struct({
+  stage: TaskStage.check(refuseUserOnlyStage),
+});
+
+export type TaskStageReportInput = Schema.Schema.Type<typeof TaskStageReportInput>;
+
+/**
+ * What came of a stage report:
+ * - `finished`: the Task is `done` or `dropped`, so the card stays.
+ * - `repeat`: the stage is the one the lead reported last, so the card stays.
+ *   A repeat never undoes the user's move.
+ * - `fact`: a fact about a linked thing placed the current stage, so the card
+ *   stays. Facts outrank reports, but only while the fact that placed the stage
+ *   is not voided and something linked is still open.
+ * - `open-links`: the report was `landed`, but something linked to the Task is
+ *   still open, so the card stays.
+ * - `already`: the Task is already in that stage, so the card stays.
+ * - `moved`: the card moved to the reported stage.
+ */
+export const StageReportOutcome = Schema.Literals([
+  "finished",
+  "repeat",
+  "fact",
+  "open-links",
+  "already",
+  "moved",
+]);
+
+export type StageReportOutcome = Schema.Schema.Type<typeof StageReportOutcome>;
+
+/** The most characters of `TaskStageReport.message`. */
+export const MAX_STAGE_REPORT_MESSAGE = 400;
+
+/** What `task.reportStage` returns: the outcome, and one line the agent can act on. */
+export const TaskStageReport = Schema.Struct({
+  outcome: StageReportOutcome,
+  /** Says what happened and why, such as "Kept at In review: pull request #12 is still open, and facts outrank reports." */
+  message: bounded(1, MAX_STAGE_REPORT_MESSAGE),
+});
+
+export type TaskStageReport = Schema.Schema.Type<typeof TaskStageReport>;
 
 /**
  * One call of `task.update` as a single object: the task's id, which an HTTP
@@ -997,21 +1059,39 @@ export const WorkCard = Schema.Struct({
   entityMarks: atMost(EntityMark, MAX_ENTITY_MARKS),
   /**
    * Why the card is in its stage, set only when the current stage came from a
-   * fact about a linked thing. Any other write of the stage clears it: a
-   * drag, an edit, an agent. `text` says what happened in the thing's words,
-   * such as "PR #6221 merged".
+   * fact about a linked thing (`kind: "fact"`) or from the lead Thread's
+   * report (`kind: "report"`). Any other write of the stage clears it: a
+   * drag, an edit, an agent. `text` says what happened, such as
+   * "PR #6221 merged" or "“Pricing research” says Planned".
    */
   stageCause: Schema.optionalKey(
-    Schema.Struct({
-      /**
-       * The id of the fact that placed the stage. A client uses it to tell one
-       * move by a fact from the next: `stageChangedAt` can repeat, when two
-       * writes share a millisecond or the clock steps back.
-       */
-      factId: Schema.Int,
-      ref: ExternalRef,
-      text: bounded(1, MAX_STAGE_CAUSE_TEXT),
-    }),
+    Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("fact"),
+        /**
+         * The id of the fact that placed the stage. A client uses it to tell one
+         * move by a fact from the next: `stageChangedAt` can repeat, when two
+         * writes share a millisecond or the clock steps back.
+         */
+        factId: Schema.Int,
+        ref: ExternalRef,
+        text: bounded(1, MAX_STAGE_CAUSE_TEXT),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("report"),
+        /** The Thread that reported the stage. */
+        sessionId: Id,
+        /**
+         * The Task's stage revision when the report placed the stage. It rises
+         * with every decided stage write, so it identifies the report move: a
+         * client uses it to tell one report from the next, when `stageChangedAt`
+         * repeats or the same Thread reports the same words twice.
+         */
+        stageRevision: Schema.Int,
+        /** What the report said, such as "“Pricing research” says Planned". */
+        text: bounded(1, MAX_STAGE_CAUSE_TEXT),
+      }),
+    ]),
   ),
   /**
    * The Tasks this card waits on and that still block it, at most
@@ -1301,6 +1381,20 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.get("queryBoard", "/tasks/board", {
       success: WorkBoard,
       error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Reports the stage of the calling session's own Task, as its lead. The
+     * Task is found from the session. The weakest way to move a card: facts
+     * and the user's moves outrank it, and the outcome says which rule kept
+     * the card where it was. Fails `InvalidState` when the caller is not a
+     * session, is on no Task, or is not the Task's lead.
+     */
+    // A static path beside `/tasks/:id`, for the same reason as `/tasks/board`:
+    // the router prefers it, and "report-stage" is not an id.
+    HttpApiEndpoint.post("reportStage", "/tasks/report-stage", {
+      payload: TaskStageReportInput,
+      success: TaskStageReport,
+      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
     }),
     /**
      * Returns the leg of each given run that is the run of a handoff of a

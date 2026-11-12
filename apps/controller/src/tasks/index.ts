@@ -14,6 +14,7 @@ export {
   type UpdateInput,
 } from "./service";
 export { groupByTask } from "./lists";
+export type { LeadMove } from "./lead";
 export type { EntityLinkPair } from "./entity-facts";
 export {
   LIVE_TASK_LINKS_SQL,
@@ -33,7 +34,7 @@ export {
 } from "./summaries";
 export { TaskLinkOwners } from "./link-owners";
 export { entityFactRepository, type EntityFact } from "./entity-facts";
-export { describeStageCause, type StageCauseThing } from "./stage-cause";
+export { describeStageCause, describeStageReport, type StageCauseThing } from "./stage-cause";
 export { LinkedEntities, type LinkedEntityState } from "./linked-entities";
 export { makeSummaryDirtyMarker } from "./summary-dirty";
 export { makeSummaryWake, TaskSummaryWake, type SummaryWake } from "./summary-wake";

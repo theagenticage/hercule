@@ -96,6 +96,7 @@ const buildTask = (id: string, title: string, minutes: number): Task => ({
   id,
   title,
   description: "",
+  leadSessionId: null,
   status: "in-progress",
   stage: "building",
   priority: "normal",

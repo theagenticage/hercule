@@ -11,7 +11,12 @@ import { holdBackBoardChanges } from "./hold-back-board";
 import { listCardMoves } from "./list-card-moves";
 
 const NOTHING = new Set<string>();
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+const MERGED = {
+  kind: "fact" as const,
+  factId: 4,
+  ref: "github:pull-request:6221",
+  text: "Pull request #6221 merged",
+};
 
 /** Returns a card that landed at the given time of 2 November 2026. */
 const buildLanded = (id: string, hour: number) =>

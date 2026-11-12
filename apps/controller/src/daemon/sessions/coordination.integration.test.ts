@@ -8,27 +8,36 @@
  *   Wiki's page count and its most recently changed titles;
  * - a session without `wiki.read` gets no paragraph, until a Permission
  *   Request for it is decided with outcome `session`;
- * - only the first five repositories get a line with Wiki facts.
+ * - only the first five repositories get a line with Wiki facts;
+ * - the thread that leads an open Task gets the lead paragraph, with or
+ *   without a checkout, and no other session does.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { withTransaction } from "../../db";
+import type { LiveSessionsServices } from "../../http/testing";
+import { uuidFromString, withTransaction } from "../../db";
 import { permissionRequestRepository } from "../../permissions";
-import { WAIT_DEADLINE_MS, createProfile, type Arranged } from "../../sessions/testing";
+import {
+  WAIT_DEADLINE_MS,
+  createProfile,
+  spawnSessionOrFail,
+  type Arranged,
+} from "../../sessions/testing";
 import { createRepo, spawnWithCheckouts, withFleet } from "../../workspaces/testing";
-import { buildSessionCoordination } from "./coordination";
+import { buildLeadInstructions, buildSessionCoordination } from "./coordination";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** Runs an effect that needs the database against the controller's database. */
-const runWithDatabase = <A>(
+const runWithDatabase = async <A>(
   arranged: Arranged,
-  effect: Effect.Effect<A, unknown, SqlClient.SqlClient>,
-) =>
-  Effect.runPromise(
-    Effect.orDie(Effect.provideService(effect, SqlClient.SqlClient, arranged.harness.sql)),
-  );
+  effect: Effect.Effect<A, unknown, LiveSessionsServices>,
+): Promise<A> => {
+  const exit = await arranged.harness.runWithLiveSessions(effect);
+  if (Exit.isFailure(exit)) throw new Error(Cause.pretty(exit.cause));
+  return exit.value;
+};
 
 /**
  * Stores `count` pages in a repository's Wiki, titled `Page 1` and on, where
@@ -51,6 +60,12 @@ const seedPages = (arranged: Arranged, resourceId: string, count: number) =>
       ),
     ),
   );
+
+/**
+ * The text of a thread that leads its Task and gets nothing else: a Thread
+ * spawned here leads its own Task, titled by its prompt, `hello`.
+ */
+const LEAD_ONLY = buildLeadInstructions("hello");
 
 /** Returns the paragraph's last block: its lines about the checked-out repositories. */
 const readRepositoryLines = (paragraph: string | undefined): ReadonlyArray<string> | undefined =>
@@ -79,7 +94,7 @@ describe("the coordination paragraph", () => {
       const writer = await createProfile(arranged, "wiki-writer", ["wiki.write"]);
 
       const frame = await spawnWithCheckouts(arranged, writer.id, [web]);
-      expect(frame.spec.coordination).toBeUndefined();
+      expect(frame.spec.coordination).toBe(LEAD_ONLY);
 
       const requests = await runWithDatabase(arranged, permissionRequestRepository);
       const requestId = await runWithDatabase(
@@ -99,9 +114,9 @@ describe("the coordination paragraph", () => {
         ),
       );
       // An open request grants nothing yet.
-      expect(
-        await runWithDatabase(arranged, buildSessionCoordination(frame.sessionId)),
-      ).toBeUndefined();
+      expect(await runWithDatabase(arranged, buildSessionCoordination(frame.sessionId))).toBe(
+        LEAD_ONLY,
+      );
 
       await runWithDatabase(
         arranged,
@@ -137,6 +152,117 @@ describe("the coordination paragraph", () => {
           ),
         `Also checked out: github.com/acme/six (--resource ${ids[5]!}).`,
       ]);
+    });
+  });
+
+  describe("the lead paragraph", () => {
+    /** Runs `statement` against the database, inside a transaction. */
+    const execute = (
+      arranged: Arranged,
+      statement: (sql: SqlClient.SqlClient) => Effect.Effect<unknown, unknown, never>,
+    ) =>
+      runWithDatabase(
+        arranged,
+        Effect.flatMap(SqlClient.SqlClient, (sql) => withTransaction(sql, statement(sql))),
+      );
+
+    /** Makes `sessionId` the lead of its own Task, titled `title`, in `stage`. */
+    const makeLead = (arranged: Arranged, sessionId: string, title: string, stage = "building") =>
+      execute(
+        arranged,
+        (sql) => sql`
+          UPDATE tasks SET lead_session_id = ${uuidFromString(sessionId)}, title = ${title},
+                           stage = ${stage}
+          WHERE id = (SELECT task_id FROM sessions WHERE id = ${uuidFromString(sessionId)})`,
+      );
+
+    const spawnPlain = async (arranged: Arranged, resourceIds: ReadonlyArray<string> = []) => {
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        workspace: {
+          kind: "ephemeral",
+          checkouts: resourceIds.map((resourceId) => ({ resourceId })),
+        },
+      });
+      return session.id;
+    };
+
+    it("reaches a lead with no repository checked out, and is the whole text", async () => {
+      await withFleet(async (arranged) => {
+        const sessionId = await spawnPlain(arranged);
+        await makeLead(arranged, sessionId, "Fix the login");
+
+        expect(await runWithDatabase(arranged, buildSessionCoordination(sessionId))).toBe(
+          buildLeadInstructions("Fix the login"),
+        );
+      });
+    });
+
+    it("reaches a lead with a repository checked out, as the first paragraph", async () => {
+      await withFleet(async (arranged) => {
+        const web = await createRepo(arranged, "https://github.com/acme/web.git");
+        const sessionId = await spawnPlain(arranged, [web]);
+        await makeLead(arranged, sessionId, "Fix the login");
+
+        const text = await runWithDatabase(arranged, buildSessionCoordination(sessionId));
+
+        expect(text?.startsWith(buildLeadInstructions("Fix the login"))).toBe(true);
+      });
+    });
+
+    it("is left out for a helper on a Task another thread leads, and for a session on no Task", async () => {
+      await withFleet(async (arranged) => {
+        const leadId = await spawnPlain(arranged);
+        const helperId = await spawnPlain(arranged);
+        const strayId = await spawnPlain(arranged);
+        await makeLead(arranged, leadId, "Fix the login");
+        await execute(
+          arranged,
+          (sql) => sql`
+            UPDATE sessions
+            SET task_id = (SELECT task_id FROM sessions WHERE id = ${uuidFromString(leadId)})
+            WHERE id = ${uuidFromString(helperId)}`,
+        );
+        await execute(
+          arranged,
+          (sql) => sql`UPDATE sessions SET task_id = NULL WHERE id = ${uuidFromString(strayId)}`,
+        );
+
+        expect(await runWithDatabase(arranged, buildSessionCoordination(helperId))).toBeUndefined();
+        expect(await runWithDatabase(arranged, buildSessionCoordination(strayId))).toBeUndefined();
+      });
+    });
+
+    it("is left out when the Task is deleted", async () => {
+      await withFleet(async (arranged) => {
+        const sessionId = await spawnPlain(arranged);
+        await makeLead(arranged, sessionId, "Fix the login");
+        await execute(
+          arranged,
+          (sql) => sql`
+            UPDATE tasks SET deleted_at = '2026-10-14T10:00:00.000Z'
+            WHERE lead_session_id = ${uuidFromString(sessionId)}`,
+        );
+
+        expect(
+          await runWithDatabase(arranged, buildSessionCoordination(sessionId)),
+        ).toBeUndefined();
+      });
+    });
+
+    it("is left out once the Task is done or dropped", async () => {
+      await withFleet(async (arranged) => {
+        const sessionId = await spawnPlain(arranged);
+        await makeLead(arranged, sessionId, "Fix the login", "done");
+        expect(
+          await runWithDatabase(arranged, buildSessionCoordination(sessionId)),
+        ).toBeUndefined();
+
+        await makeLead(arranged, sessionId, "Fix the login", "dropped");
+        expect(
+          await runWithDatabase(arranged, buildSessionCoordination(sessionId)),
+        ).toBeUndefined();
+      });
     });
   });
 });

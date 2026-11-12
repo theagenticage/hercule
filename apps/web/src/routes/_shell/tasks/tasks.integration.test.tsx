@@ -42,6 +42,7 @@ interface Fixture {
   readonly statusChangedAt: string;
   readonly stage: string;
   readonly stageChangedAt: string;
+  readonly leadSessionId: string | null;
 }
 
 const RUNNER: Fixture = {
@@ -64,6 +65,7 @@ const RUNNER: Fixture = {
   updatedAt: "2026-09-04T15:21:31.646Z",
   statusChangedAt: "2026-09-04T15:21:31.646Z",
   stageChangedAt: "2026-09-04T15:21:31.646Z",
+  leadSessionId: null,
 };
 
 const PRUNE: Fixture = {
@@ -86,6 +88,7 @@ const PRUNE: Fixture = {
   updatedAt: "2026-09-04T15:21:31.755Z",
   statusChangedAt: "2026-09-04T15:21:31.755Z",
   stageChangedAt: "2026-09-04T15:21:31.755Z",
+  leadSessionId: null,
 };
 
 /**

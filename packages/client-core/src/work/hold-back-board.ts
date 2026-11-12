@@ -32,14 +32,19 @@ const buildFailureKey = (runId: string): string => `failure:${runId}`;
 /**
  * Returns the key that releases the move of `card` into the stage it is in
  * now, so each move has a key of its own. A move by a fact is named by the
- * fact's id, which never repeats. A move with no cause (a drag from another
- * client, which the morning replay also plays) is named by the time the stage
- * changed.
+ * fact's id, which never repeats. A move by a report is named by the
+ * Task's stage revision when the report placed the stage, which rises with
+ * every stage write, so it never repeats for the card (the key is also scoped
+ * by the card id). A move with no cause (a drag from another client, which the morning
+ * replay also plays) is named by the time the stage changed.
  */
-export const buildStageMoveKey = (card: WorkCard): string =>
-  card.stageCause === undefined
-    ? `move:${card.id}:${card.stageChangedAt}`
-    : `move:${card.id}:fact-${String(card.stageCause.factId)}`;
+export const buildStageMoveKey = (card: WorkCard): string => {
+  const { stageCause } = card;
+  if (stageCause === undefined) return `move:${card.id}:${card.stageChangedAt}`;
+  return stageCause.kind === "fact"
+    ? `move:${card.id}:fact-${String(stageCause.factId)}`
+    : `move:${card.id}:report-${String(stageCause.stageRevision)}`;
+};
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
@@ -74,8 +79,8 @@ const isSameValue = (a: unknown, b: unknown): boolean =>
  * plays it). A drag from another client or an undo changes the stage and
  * leaves the cause out, so it is shown at once.
  *
- * The key holds the id of the fact (`buildStageMoveKey`), so that each move by a
- * fact has a key of its own: releasing one does not release the next fact for
+ * The key holds the id of the fact or the stage revision of the report (`buildStageMoveKey`), so that each move by a
+ * fact or a report has a key of its own: releasing one does not release the next fact for
  * the same card, even when its words are the same ("Pull request #6221 merged" after a
  * relink).
  */

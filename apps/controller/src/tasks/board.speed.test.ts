@@ -1155,6 +1155,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("what a spawned Thread's Task costs", () => 
         /** The join of a spawned Thread, in no workspace or in the workspace of Task 2. */
         const join = (workspaceId: string | null) =>
           tasks.joinSession({
+            sessionId: Bun.randomUUIDv7(),
             requestedTaskId: undefined,
             callerTaskId: undefined,
             workspaceId,
