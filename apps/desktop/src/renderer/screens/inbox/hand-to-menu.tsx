@@ -1,3 +1,8 @@
+"use no memo";
+// The Inbox chunk has a size budget (spec 17 §What the Inbox costs). This file draws what is
+// shown rarely or rarely changes, so the React Compiler's cache for it would cost more bytes
+// than the renders it saves.
+
 import { useId, useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import {
   findHandOffs,

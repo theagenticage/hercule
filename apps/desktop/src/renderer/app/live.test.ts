@@ -457,10 +457,93 @@ describe("invalidateForPush for the Inbox's keys", () => {
   });
 });
 
+/** Waits longer than the window in which pushes that name a shared read are gathered. */
+const waitPastPushWindow = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 120));
+
+describe("invalidateForPush for pushes of one change on several topics", () => {
+  const push = { ids: ["e-1"], kind: "updated" } as const;
+
+  /** Returns a client whose Inbox page, outline, count and entity reads are counted by key. */
+  const buildCountedInboxReads = async () => {
+    const queryClient = new QueryClient();
+    const reads = new Map<string, number>();
+    const keys = [
+      queryKeys.inbox({ list: "all" }),
+      queryKeys.inboxOutline(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity("e-1"),
+    ];
+    for (const queryKey of keys) {
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: () => {
+          const name = JSON.stringify(queryKey);
+          reads.set(name, (reads.get(name) ?? 0) + 1);
+          return Promise.resolve(null);
+        },
+      });
+      observers.push(observer.subscribe(() => {}));
+    }
+    await waitPastPushWindow();
+    reads.clear();
+    return { queryClient, reads };
+  };
+
+  it("reads each key once for the pushes of five topics that arrive together, as a reload's first pushes do", async () => {
+    const { queryClient, reads } = await buildCountedInboxReads();
+    let visitPushes = 0;
+    listenForInboxPushes(queryClient, () => {
+      visitPushes += 1;
+    });
+
+    for (const topic of ["signal", "task", "connection", "plugin", "externalEntity"] as const) {
+      invalidateForPush(queryClient, topic, buildQueryKeys(topic, []), {
+        ids: [],
+        kind: "updated",
+      });
+    }
+    await waitPastPushWindow();
+
+    expect([...reads.values()]).toEqual([1, 1, 1, 1]);
+    expect(visitPushes).toBe(1);
+  });
+
+  it("reads each key once for a signal push followed by an externalEntity push", async () => {
+    const { queryClient, reads } = await buildCountedInboxReads();
+
+    invalidateForPush(queryClient, "signal", buildQueryKeys("signal", ["s-1"]), push);
+    invalidateForPush(
+      queryClient,
+      "externalEntity",
+      buildQueryKeys("externalEntity", ["e-1"]),
+      push,
+    );
+    await waitPastPushWindow();
+
+    expect([...reads.values()]).toEqual([1, 1, 1, 1]);
+  });
+
+  it("reads again for a push that arrives after the window, which may report a later change", async () => {
+    const { queryClient, reads } = await buildCountedInboxReads();
+
+    invalidateForPush(queryClient, "signal", buildQueryKeys("signal", ["s-1"]), push);
+    await waitPastPushWindow();
+    invalidateForPush(
+      queryClient,
+      "externalEntity",
+      buildQueryKeys("externalEntity", ["e-1"]),
+      push,
+    );
+    await waitPastPushWindow();
+
+    expect([...reads.values()]).toEqual([2, 2, 2, 2]);
+  });
+});
+
 describe("listenForInboxPushes", () => {
   const push = { ids: ["e-1"], kind: "updated" } as const;
 
-  it("calls the listener once for a push that names the Inbox's keys, however many keys it names", () => {
+  it("calls the listener once for the pushes that name the Inbox's keys, however many keys and topics", async () => {
     const queryClient = new QueryClient();
     let calls = 0;
     const stop = listenForInboxPushes(queryClient, () => {
@@ -473,12 +556,14 @@ describe("listenForInboxPushes", () => {
       [queryKeys.inbox(), queryKeys.inboxOutline(), queryKeys.inboxCount()],
       push,
     );
+    invalidateForPush(queryClient, "signal", [queryKeys.inbox()], push);
+    await waitPastPushWindow();
 
     expect(calls).toBe(1);
     stop();
   });
 
-  it("ignores a push that names no Inbox key, and another client's push", () => {
+  it("ignores a push that names no Inbox key, and another client's push", async () => {
     const queryClient = new QueryClient();
     let calls = 0;
     const stop = listenForInboxPushes(queryClient, () => {
@@ -487,12 +572,13 @@ describe("listenForInboxPushes", () => {
 
     invalidateForPush(queryClient, "task", [queryKeys.tasks()], push);
     invalidateForPush(new QueryClient(), "externalEntity", [queryKeys.inbox()], push);
+    await waitPastPushWindow();
 
     expect(calls).toBe(0);
     stop();
   });
 
-  it("stops calling the listener once it is stopped", () => {
+  it("stops calling the listener once it is stopped", async () => {
     const queryClient = new QueryClient();
     let calls = 0;
     listenForInboxPushes(queryClient, () => {
@@ -500,6 +586,7 @@ describe("listenForInboxPushes", () => {
     })();
 
     invalidateForPush(queryClient, "externalEntity", [queryKeys.inbox()], push);
+    await waitPastPushWindow();
 
     expect(calls).toBe(0);
   });
