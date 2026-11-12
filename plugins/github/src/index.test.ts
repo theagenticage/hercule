@@ -248,7 +248,7 @@ describe("what the github plugin registers", () => {
       ["review-requested", "review request", true],
       ["team-review-requested", "team review request", true],
       ["mentioned", "mention", true],
-      ["assigned", "assignment", true],
+      ["assigned", "assignment", false],
       ["changes-requested", "requested changes", true],
       ["checks-failed", "failing checks", true],
     ]);

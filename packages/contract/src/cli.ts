@@ -1440,7 +1440,7 @@ export const CLI = {
 
   "externalEntity.queryInbox": {
     command: "entity list",
-    help: "Lists one page of your Inbox: the pull requests, tickets and errors in other systems that concern you. Each thing gives its kind, identifier, title, status, its open asks (what someone waits on you for, newest first, with who asked), when the oldest ask began, its card face, the workflows it can be handed to (offer sets) with the accounts that can act, and its Task if one has it. A list is a saved query (`waits` is Someone waits on me, then `mine`, `updates`, `with-hercule`, `everything`, and a plugin's such as `github/review-requests`). Narrow it with --clause and --text; both can only shrink the list. A list ordered `waiting` puts the oldest ask first, the others the latest change first. At most 200 things come back; the reply gives `total`, and `nextCursor` when more follow: pass it to --cursor, with the same list and search, for the next page. The first page also gives the facets of the whole result. A dismissed thing is not listed until a new ask on it brings it back. Needs the grants `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query`, because things show signal text, the workflows and accounts they can be handed to, and the workflows running on their Task. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
+    help: "Lists a page of your Inbox: what in other systems concerns you. Each thing gives its kind, identifier, title, status, its open asks (what someone waits on you for, newest first, with who asked), when the oldest ask began, its card face, the workflows it can be handed to (offer sets) with the accounts that can act, and its Task if one has it. A list is a saved query (`waits` is Someone waits on me, then `mine`, `updates`, `with-hercule`, `everything`, and a plugin's such as `github/review-requests`). Narrow it with --clause and --text; both can only shrink the list. A list ordered `waiting` puts the oldest ask first, the others the latest change first. At most 200 things come back; the reply gives `total`, and `nextCursor` when more follow: pass it to --after, with the same list and search, for the next page. The first page also gives the facets of the whole result. A dismissed thing is not listed until a new ask on it brings it back. Needs the grants `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query`, because things show signal text, the workflows and accounts they can be handed to, and the workflows running on their Task. Use it to find the id that `hercule entity read`, `hercule entity take-on` and `hercule entity dismiss` take; give the whole id.",
     examples: [
       { args: [] },
       { args: ["--list", "waits"] },
@@ -1461,15 +1461,17 @@ export const CLI = {
         flag: "text",
         help: "Words to find: each must appear, in any case, in the thing's title, identifier or a text field.",
       },
+      // Spelled `--after`, because `--cursor` is the paging flag of the
+      // commands that page by query string, and no field may take that name.
       cursor: {
-        flag: "cursor",
+        flag: "after",
         help: "The nextCursor of the previous page of this same list and search. A cursor of another query is refused.",
       },
       refs: { hidden: true },
     },
     errors: {
       validation:
-        "the list is not a saved query that exists, a clause is not valid for its key, or the cursor belongs to another list or search; read the message, and start again from the first page without --cursor",
+        "the list is not a saved query that exists, a clause is not valid for its key, or the cursor belongs to another list or search; read the message, and start again from the first page without --after",
     },
   },
   // Exists only for the sidebar and the undo line: the sidebar reads the
