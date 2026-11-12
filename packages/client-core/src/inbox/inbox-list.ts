@@ -186,27 +186,53 @@ export function showInboxArrivals<Row extends InboxListRow>(
 }
 
 /**
- * Removes the rows the user handled (dismissed, taken on, handed off) at once,
- * remembering where they stood. When the current row is among them, the next
- * row after it in the old order becomes current, else the previous one.
+ * Applies a move on the rows the user handled. The current row moves on at
+ * once when it is among them: to the next row after it in the old order that
+ * is not handled, else the previous one. The selection drops the handled rows.
+ *
+ * `leavesList` says whether the handled rows certainly stop belonging to this
+ * list:
+ * - true (dismiss): the rows are removed at once, remembered for undo, and a
+ *   refresh that still has them does not bring them back;
+ * - false (take on, hand-off): the rows may still belong, so they stay
+ *   displayed. The next refresh updates them in place, or drops them if the
+ *   list no longer has them.
  */
 export function applyInboxMove<Row extends InboxListRow>(
   state: InboxListState<Row>,
   handledRefs: readonly string[],
+  { leavesList }: { readonly leavesList: boolean },
 ): InboxListState<Row> {
-  const handled = new Map(state.handled);
-  state.rows.forEach((row, index) => {
-    if (handledRefs.includes(row.ref)) handled.set(row.ref, { row, index, awaitingServer: true });
-  });
-  return withRows(
-    { ...state, handled },
-    state.rows.filter((row) => !handledRefs.includes(row.ref)),
-  );
+  if (leavesList) {
+    const handled = new Map(state.handled);
+    state.rows.forEach((row, index) => {
+      if (handledRefs.includes(row.ref)) handled.set(row.ref, { row, index, awaitingServer: true });
+    });
+    return withRows(
+      { ...state, handled },
+      state.rows.filter((row) => !handledRefs.includes(row.ref)),
+    );
+  }
+  const refs = state.rows.map((row) => row.ref);
+  const at = state.current === null ? -1 : refs.indexOf(state.current);
+  const isHandled = (ref: string) => handledRefs.includes(ref);
+  const current =
+    at < 0 || !isHandled(state.current!)
+      ? state.current
+      : ([...refs.slice(at + 1), ...refs.slice(0, at).reverse()].find((ref) => !isHandled(ref)) ??
+        state.current);
+  return {
+    ...state,
+    current,
+    selection: new Set([...state.selection].filter((ref) => !isHandled(ref))),
+    anchor: state.anchor !== null && isHandled(state.anchor) ? null : state.anchor,
+  };
 }
 
 /**
- * Puts handled rows back at their old positions and makes the topmost of them
- * current. Refs that were not handled in this list are ignored.
+ * Takes a move back and makes the topmost of its rows current. Rows that left
+ * the list are put back at their old positions; rows that stayed are only made
+ * current. Refs the list never held are ignored.
  */
 export function undoInboxMove<Row extends InboxListRow>(
   state: InboxListState<Row>,
@@ -215,12 +241,14 @@ export function undoInboxMove<Row extends InboxListRow>(
   const entries = restoredRefs
     .flatMap((ref) => state.handled.get(ref) ?? [])
     .sort((a, b) => a.index - b.index);
-  if (entries.length === 0) return state;
   const rows = [...state.rows];
   for (const { row, index } of entries) rows.splice(Math.min(index, rows.length), 0, row);
   const handled = new Map(state.handled);
   for (const { row } of entries) handled.delete(row.ref);
-  return { ...withRows({ ...state, handled }, rows), current: entries[0]!.row.ref };
+  const wanted = new Set(restoredRefs);
+  const topmost = rows.find((row) => wanted.has(row.ref));
+  if (topmost === undefined) return state;
+  return { ...withRows({ ...state, handled }, rows), current: topmost.ref };
 }
 
 /**

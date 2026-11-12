@@ -32,6 +32,9 @@ const refresh = (state: InboxListState<Row>, firstPage: Row[], found: Row[] = []
   });
 };
 
+const leaves = { leavesList: true };
+const stays = { leavesList: false };
+
 describe("refresh", () => {
   it("updates a held row in place without re-sorting", () => {
     const state = refresh(start("a", "b", "c"), [row("c"), row("b", "new title"), row("a")]);
@@ -128,23 +131,24 @@ describe("next page", () => {
 
 describe("moves", () => {
   it("removes handled rows at once and makes the next row current", () => {
-    const state = applyInboxMove(start("a", "b", "c"), ["a"]);
+    const state = applyInboxMove(start("a", "b", "c"), ["a"], leaves);
     expect(refsOf(state)).toEqual(["b", "c"]);
     expect(state.current).toBe("b");
   });
 
   it("skips next rows that leave too, in the old order", () => {
-    const moved = applyInboxMove(moveInboxCurrent(start("a", "b", "c", "d"), { by: 1 }), [
-      "b",
-      "c",
-    ]);
+    const moved = applyInboxMove(
+      moveInboxCurrent(start("a", "b", "c", "d"), { by: 1 }),
+      ["b", "c"],
+      leaves,
+    );
     expect(moved.current).toBe("d");
   });
 
   it("falls back to the previous row after the last one, and to none when empty", () => {
-    const state = applyInboxMove(moveInboxCurrent(start("a", "b"), { by: 1 }), ["b"]);
+    const state = applyInboxMove(moveInboxCurrent(start("a", "b"), { by: 1 }), ["b"], leaves);
     expect(state.current).toBe("a");
-    expect(applyInboxMove(state, ["a"]).current).toBeNull();
+    expect(applyInboxMove(state, ["a"], leaves).current).toBeNull();
   });
 
   it("settles the current row when a refresh removes it", () => {
@@ -153,13 +157,13 @@ describe("moves", () => {
   });
 
   it("does not bring a handled row back when a stale refresh still has it", () => {
-    const stale = refresh(applyInboxMove(start("a", "b"), ["a"]), rows("a", "b"));
+    const stale = refresh(applyInboxMove(start("a", "b"), ["a"], leaves), rows("a", "b"));
     expect(refsOf(stale)).toEqual(["b"]);
     expect(stale.arrivals).toEqual([]);
   });
 
   it("undo restores rows at their old index and makes the first current, even after a refresh", () => {
-    let state = applyInboxMove(start("a", "b", "c", "d"), ["b", "c"]);
+    let state = applyInboxMove(start("a", "b", "c", "d"), ["b", "c"], leaves);
     state = refresh(state, rows("a", "d"));
     state = undoInboxMove(state, ["b", "c"]);
     expect(refsOf(state)).toEqual(["a", "b", "c", "d"]);
@@ -168,7 +172,39 @@ describe("moves", () => {
 
   it("prunes the selection to displayed rows after a move", () => {
     const all = changeInboxSelection(start("a", "b", "c"), { kind: "all" });
-    expect([...applyInboxMove(all, ["b"]).selection]).toEqual(["a", "c"]);
+    expect([...applyInboxMove(all, ["b"], leaves).selection]).toEqual(["a", "c"]);
+  });
+});
+
+describe("a move whose rows may still belong to the list", () => {
+  it("keeps the row, moves current on, and prunes the selection", () => {
+    const selected = changeInboxSelection(start("a", "b", "c"), { kind: "toggle", ref: "a" });
+    const state = applyInboxMove(selected, ["a"], stays);
+    expect(refsOf(state)).toEqual(["a", "b", "c"]);
+    expect(state.current).toBe("b");
+    expect(state.selection.size).toBe(0);
+    expect(state.anchor).toBeNull();
+  });
+
+  it("updates the row in place on the next refresh", () => {
+    const moved = applyInboxMove(start("a", "b"), ["a"], stays);
+    const state = refresh(moved, [row("a", "still asks"), row("b")]);
+    expect(state.rows[0]!.title).toBe("still asks");
+    expect(state.arrivals).toEqual([]);
+  });
+
+  it("drops the row when the next refresh no longer has it", () => {
+    const moved = applyInboxMove(start("a", "b"), ["a"], stays);
+    expect(refsOf(refresh(moved, rows("b")))).toEqual(["b"]);
+  });
+
+  it("makes the handled row current again on undo", () => {
+    const moved = applyInboxMove(start("a", "b"), ["a"], stays);
+    expect(undoInboxMove(moved, ["a"]).current).toBe("a");
+  });
+
+  it("keeps current when every row was handled", () => {
+    expect(applyInboxMove(start("a"), ["a"], stays).current).toBe("a");
   });
 });
 
@@ -205,6 +241,7 @@ describe("selection", () => {
     const state = applyInboxMove(
       changeInboxSelection(start("a", "b"), { kind: "toggle", ref: "b" }),
       ["b"],
+      leaves,
     );
     expect(state.anchor).toBeNull();
   });
@@ -232,7 +269,7 @@ describe("what a move acts on", () => {
 
 describe("a list change", () => {
   it("starts over: no arrivals, selection, anchor or undo memory", () => {
-    const old = applyInboxMove(refresh(start("a", "b"), rows("n", "a", "b")), ["a"]);
+    const old = applyInboxMove(refresh(start("a", "b"), rows("n", "a", "b")), ["a"], leaves);
     const state = startInboxList("list-2", rows("x", "y"));
     expect(old.arrivals.length).toBe(1);
     expect(state.arrivals).toEqual([]);
