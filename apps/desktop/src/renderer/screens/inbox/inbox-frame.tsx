@@ -114,6 +114,10 @@ function computeWidestPaneWidth(frameWidth: number, railWidth: number): number {
  *   which the caller moves the focus back to the row.
  * - `onOpenAtSource` adds "Open at its source" to the pane's menu.
  *
+ * `overlays` is drawn last in the page, over everything: the keys sheet and
+ * the hand-off menu. `onStackedChange` is called with whether the pane lies
+ * over the list, when that changes, for the screen's keys and focus.
+ *
  * `onOpenIntake` is called by the pill's Intake tab. `onOpenKeys` is called by
  * the keys button, whose state is `isKeysOpen`. The regions have the ids of
  * `INBOX_REGION_IDS`.
@@ -136,6 +140,8 @@ export function InboxFrame({
   onOpenIntake,
   onOpenKeys,
   isKeysOpen,
+  overlays,
+  onStackedChange,
 }: {
   readonly rail: ReactNode;
   readonly scopeName: string;
@@ -154,6 +160,8 @@ export function InboxFrame({
   readonly onOpenIntake: () => void;
   readonly onOpenKeys: () => void;
   readonly isKeysOpen: boolean;
+  readonly overlays?: ReactNode;
+  readonly onStackedChange?: ((isStacked: boolean) => void) | undefined;
 }): JSX.Element {
   const frameRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLElement>(null);
@@ -187,6 +195,9 @@ export function InboxFrame({
 
   const isStacked = frameWidth < PANE_STACKS_BELOW;
   const isRailFolded = frameWidth < RAIL_FOLDS_BELOW;
+  useEffect(() => {
+    onStackedChange?.(isStacked);
+  }, [isStacked, onStackedChange]);
   const widestPaneWidth = computeWidestPaneWidth(frameWidth, isRailFolded ? 0 : RAIL_WIDTH);
   const shownPaneWidth = Math.round(
     Math.max(INBOX_PANE_MIN_WIDTH, Math.min(widestPaneWidth, paneWidth)),
@@ -336,6 +347,7 @@ export function InboxFrame({
       >
         {lastPane.body}
       </InboxPaneFrame>
+      {overlays}
     </div>
   );
 }

@@ -31,6 +31,8 @@ export interface UndoLineState {
   readonly canUndo: boolean;
   /** A second button beside Undo, such as "See its Task", or `null` for none. */
   readonly action: UndoAction | null;
+  /** The title of the thing the line is about, which the line puts last, or `null` for none. */
+  readonly title: string | null;
   readonly isShown: boolean;
   /** Whether the pointer or the focus is on the line, which keeps it from hiding. */
   readonly isHeld: boolean;
@@ -43,6 +45,7 @@ interface HeldLine<Page> {
   readonly text: string;
   readonly offered: Gesture<Page> | null;
   readonly action: UndoAction | null;
+  readonly title: string | null;
   readonly isShown: boolean;
   readonly serial: number;
   readonly hold: Hold;
@@ -57,8 +60,15 @@ export interface UndoLineControls<Page> {
    * Shows `text` on the line and starts its timer again. With `offered`, the
    * line shows Undo for as long as that gesture is on the undo stack. Without
    * it, the line has no Undo. With `action`, the line shows that button too.
+   * With `title`, the line shows the title of the thing last, and cuts it
+   * first when the line is too narrow (see `UndoLine`).
    */
-  readonly say: (text: string, offered?: Gesture<Page>, action?: UndoAction) => void;
+  readonly say: (
+    text: string,
+    offered?: Gesture<Page>,
+    action?: UndoAction,
+    title?: string,
+  ) => void;
   /**
    * Takes `gesture` off the undo stack, for a gesture that cannot be undone
    * any more. When the line offers it, Undo goes from the line at once.
@@ -104,6 +114,7 @@ export function useUndoLine<Page>(
     text: "",
     offered: null,
     action: null,
+    title: null,
     isShown: false,
     serial: 0,
     hold: "free",
@@ -113,16 +124,23 @@ export function useUndoLine<Page>(
     text: held.text,
     canUndo: held.offered !== null,
     action: held.action,
+    title: held.title,
     isShown: held.isShown,
     isHeld: held.hold === "held",
     serial: held.serial,
   };
 
-  const say = (text: string, offeredGesture?: Gesture<Page>, action?: UndoAction): void => {
+  const say = (
+    text: string,
+    offeredGesture?: Gesture<Page>,
+    action?: UndoAction,
+    title?: string,
+  ): void => {
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,
       action: action ?? null,
+      title: title ?? null,
       isShown: true,
       serial: before.serial + 1,
       hold: before.hold === "held" ? "held" : "free",

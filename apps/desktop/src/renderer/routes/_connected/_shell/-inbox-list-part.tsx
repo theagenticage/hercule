@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { namePlugin, readErrorMessage, type HerculeClient } from "@hercule/client-core";
@@ -77,6 +77,8 @@ export function InboxListPart({
   search,
   rowActions,
   focusRequest,
+  headingFocusRequest,
+  undoLine,
   onNarrowPick,
   onOpenScope,
   onSearchEverything,
@@ -89,6 +91,10 @@ export function InboxListPart({
   readonly search: InboxSearch;
   readonly rowActions: InboxRowActions;
   readonly focusRequest: number;
+  /** Rises when a move left nothing current: the focus then goes to the empty state's heading. */
+  readonly headingFocusRequest: number;
+  /** The undo line, drawn over the foot of the list. */
+  readonly undoLine: ReactNode;
   readonly onNarrowPick: (clause: InboxClause) => void;
   readonly onOpenScope: (entry: RailEntry) => void;
   readonly onSearchEverything: () => void;
@@ -99,6 +105,8 @@ export function InboxListPart({
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const [narrowAnchor, setNarrowAnchor] = useState<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const handledHeadingRequest = useRef(headingFocusRequest);
   const { list } = held;
   const rows = list?.rows ?? [];
   const now = useInboxNow(rows);
@@ -115,6 +123,13 @@ export function InboxListPart({
     }),
     enabled: isEmpty && isSearching && !isEverything,
   });
+
+  // Only a new request moves the focus, not a render.
+  useEffect(() => {
+    if (headingFocusRequest === handledHeadingRequest.current) return;
+    handledHeadingRequest.current = headingFocusRequest;
+    headingRef.current?.focus({ preventScroll: true });
+  }, [headingFocusRequest]);
 
   const views =
     held.order === undefined
@@ -233,7 +248,7 @@ export function InboxListPart({
       )}
       {empty !== null && (
         <ListState>
-          <InboxEmpty state={empty} />
+          <InboxEmpty state={empty} headingRef={headingRef} />
         </ListState>
       )}
       {held.status === "ready" && rows.length > 0 && (
@@ -257,6 +272,7 @@ export function InboxListPart({
           held.change((state) => ({ ...state, selection: new Set(), anchor: null }));
         }}
       />
+      {undoLine}
     </>
   );
 }

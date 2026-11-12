@@ -12,10 +12,12 @@ import {
   decideOpenCard,
   describeTimelineOverflow,
   findFirstOpenLine,
+  type CardOffers,
 } from "@hercule/client-core/inbox";
-import type { InboxThing } from "@hercule/contract";
+import type { InboxThing, WorkflowOffer } from "@hercule/contract";
 import { entityQuery, inboxCountQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { OpenCardBody } from "../../../screens/inbox/open-card-body";
+import { OpenCardHandRows } from "../../../screens/inbox/open-card-hand";
 import { OpenCardLine } from "../../../screens/inbox/open-card-line";
 import { OpenCardTimeline } from "../../../screens/inbox/open-card-timeline";
 import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
@@ -27,6 +29,8 @@ export interface InboxPaneMoves {
   readonly onTakeOn: () => void;
   readonly onDismiss: () => void;
   readonly onGoToTask: (taskId: string) => void;
+  /** Hands the open thing to `offer`, as `connectionId` or the account the controller picks. */
+  readonly onHandOff: (offer: WorkflowOffer, connectionId: string | undefined) => void;
   readonly onClose: () => void;
 }
 
@@ -69,10 +73,13 @@ export function InboxPaneHeadPart({
 export function InboxPanePart({
   client,
   thing,
+  offers,
   moves,
 }: {
   readonly client: HerculeClient;
   readonly thing: InboxThing;
+  /** The workflows the open thing can be handed to, which the pane's moves list. */
+  readonly offers: CardOffers;
   readonly moves: InboxPaneMoves;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
@@ -83,6 +90,7 @@ export function InboxPanePart({
   const lines = record === undefined ? [] : buildOpenTimeline(record, []);
   const now = useOpenCardClock(record, lines);
   // The card opens its first open line by itself, once it has one.
+  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
   const firstLine = record === undefined ? undefined : findFirstOpenLine(record.signals);
   if (chosenLine === undefined && firstLine !== undefined) setChosenLine(firstLine);
@@ -128,7 +136,19 @@ export function InboxPanePart({
         userMonogram={buildInitials(username)}
         timeline={timeline}
         linked={null}
-        hand={null}
+        hand={
+          <OpenCardHandRows
+            offers={offers}
+            openKinds={thing.openKinds}
+            actingConnections={thing.actingConnections}
+            chosenConnectionId={chosenConnectionId}
+            onChooseConnection={setChosenConnectionId}
+            onHand={(workflowId) => {
+              const offer = offers.available.find((each) => each.workflowId === workflowId);
+              if (offer !== undefined) moves.onHandOff(offer, chosenConnectionId);
+            }}
+          />
+        }
         onClose={moves.onClose}
         onWalk={() => undefined}
         onTake={moves.onTakeOn}
