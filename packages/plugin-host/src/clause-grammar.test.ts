@@ -34,6 +34,7 @@ describe("the clause value grammar", () => {
     { type: "bool", op: "over", value: "yes", expected: { cause: "operator" } },
     // Numbers take is, over and under.
     { type: "number", op: "is", value: "5", expected: { value: 5 } },
+    { type: "number", op: "over", value: "9".repeat(309), expected: { cause: "value" } },
     { type: "number", op: "over", value: "1000", expected: { value: 1000 } },
     { type: "money", op: "under", value: "-2.5", expected: { value: -2.5 } },
     { type: "number", op: "over", value: 7, expected: { value: 7 } },
@@ -48,6 +49,8 @@ describe("the clause value grammar", () => {
     { type: "age", op: "over", value: "1.5h", expected: { value: 5_400 } },
     { type: "age", op: "over", value: 86_400, expected: { value: 86_400 } },
     { type: "age", op: "over", value: "2y", expected: { cause: "value" } },
+    { type: "age", op: "over", value: `${"9".repeat(309)}s`, expected: { cause: "value" } },
+    { type: "age", op: "over", value: `${"9".repeat(305)}w`, expected: { cause: "value" } },
     { type: "age", op: "over", value: "2", expected: { cause: "value" } },
     { type: "age", op: "is", value: "2d", expected: { cause: "operator" } },
   ])("reads $value on $type with $op", ({ type, op, value, expected }) => {

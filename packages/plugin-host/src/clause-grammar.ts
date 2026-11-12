@@ -137,22 +137,22 @@ export const interpretClauseValue = (
     }
     case "number":
     case "money": {
-      if (typeof value === "number") return Number.isFinite(value) ? { ok: true, value } : refuse();
-      return typeof value === "string" && NUMBER_TEXT.test(value)
-        ? { ok: true, value: Number(value) }
+      const number = typeof value === "string" && NUMBER_TEXT.test(value) ? Number(value) : value;
+      return typeof number === "number" && Number.isFinite(number)
+        ? { ok: true, value: number }
         : refuse();
     }
     case "age": {
-      if (typeof value === "number") return Number.isFinite(value) ? { ok: true, value } : refuse();
       const duration = typeof value === "string" ? DURATION_TEXT.exec(value.toLowerCase()) : null;
-      return duration === null
-        ? refuse()
-        : {
-            ok: true,
-            value:
-              Number(duration[1]) *
-              DURATION_UNIT_SECONDS[duration[2] as keyof typeof DURATION_UNIT_SECONDS],
-          };
+      // Text such as 999...9s overflows to Infinity, once parsed and again once multiplied.
+      const seconds =
+        duration === null
+          ? value
+          : Number(duration[1]) *
+            DURATION_UNIT_SECONDS[duration[2] as keyof typeof DURATION_UNIT_SECONDS];
+      return typeof seconds === "number" && Number.isFinite(seconds)
+        ? { ok: true, value: seconds }
+        : refuse();
     }
   }
 };
