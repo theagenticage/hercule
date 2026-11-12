@@ -49,11 +49,20 @@ export const CONCERNED_REFS_SQL = `SELECT ref FROM external_entity_observations 
 /**
  * The refs the daily sweep keeps a record for, and keeps whatever sits above
  * them: refs that concern the user, refs any Task links (finished Tasks too,
- * because a finished Task still names its things) and refs of open signals,
- * snoozed or not. As a `SELECT` of one `ref` column.
+ * because a finished Task still names its things), refs of open signals,
+ * snoozed or not, and context records (a project, a team) that a Connection's
+ * latest inventory lists, because the known values of a Facet come from them
+ * and a listed project with no issues must not be deleted and recreated every
+ * month. A listed work record with no concern is not kept: a call that cuts its
+ * inventory short lists records for good, and those would never be pruned.
+ * As a `SELECT` of one `ref` column.
  */
 export const RETAINED_ROOT_REFS_SQL = `
   ${CONCERNED_REFS_SQL}
+  UNION
+  SELECT o.ref FROM external_entity_observations o
+    JOIN external_entities e ON e.ref = o.ref
+    WHERE o.listed = 1 AND e.pace = 'context'
   UNION
   SELECT ref FROM task_entity_links
   UNION

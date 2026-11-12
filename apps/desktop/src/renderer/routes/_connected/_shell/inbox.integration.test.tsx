@@ -859,6 +859,8 @@ describe("the Inbox's moves", () => {
           body: {
             ...SLOTS,
             kindAvailable: true,
+            fields: [],
+            face: null,
             places: [SHOP_WEB],
             edges: [],
             links: [],
@@ -921,6 +923,8 @@ const buildDetailHandler = (card: InboxCard): Record<string, Handler> => ({
     body: {
       ...card,
       kindAvailable: true,
+      fields: [],
+      face: null,
       places: [SHOP_WEB],
       edges: [{ fromRef: card.ref, toRef: SHOP_WEB.ref }],
       links: [],

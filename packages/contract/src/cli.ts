@@ -1449,7 +1449,7 @@ export const CLI = {
   "externalEntity.countInbox": { hidden: true },
   "externalEntity.read": {
     command: "entity read",
-    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
+    help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the fields its kind declares that have a value (`fields`, in declaration order) and the card face drawn from them (`face`, null for the generic card), the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
     examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
     fields: {
       id: {

@@ -65,6 +65,8 @@ const buildDetail = (
   return {
     ...card,
     kindAvailable: true,
+    fields: [],
+    face: null,
     places: [ROUND_A, ROUND_B, DEPOT],
     edges: EDGES,
     links: [],

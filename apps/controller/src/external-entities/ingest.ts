@@ -46,6 +46,7 @@ import {
   decideConnectionWarning,
 } from "./connection-warning";
 import { claimRepository, type RecognizedEvidence } from "./claims";
+import { encodeObservedFields } from "./entity-fields";
 import { isPendingTarget } from "./pending-target";
 import {
   externalEntityRepository,
@@ -175,6 +176,9 @@ const assertFullObservationFits = (
  * - a parent or peer in `relations` starts with `unresolved:`, which is reserved
  *   for the core's own pending targets;
  * - a full observation breaks `assertFullObservationFits`;
+ * - a declared field of a full observation has a value of the wrong type, an
+ *   undeclared `enum` value, or a ref that is not of its context kind
+ *   (`encodeObservedFields`);
  * - the slots cannot be rendered.
  */
 export const prepareObservations = (
@@ -243,7 +247,13 @@ export const prepareObservations = (
       if (decoded.partial !== true) yield* assertFullObservationFits(declaration, decoded);
       const observation = yield* normalizeTimes(decoded);
       const slots = yield* renderObservationSlots(declaration, observation);
-      prepared.push({ kind: declaration.word, observation, slots });
+      if (observation.partial === true) {
+        prepared.push({ kind: declaration.word, observation, slots });
+        continue;
+      }
+      const encoded = encodeObservedFields({ declaration, kinds: reporter.kinds, observation });
+      if ("refusal" in encoded) return yield* Effect.fail(refuse(encoded.refusal));
+      prepared.push({ kind: declaration.word, observation, slots, fieldRows: encoded.rows });
     }
     return prepared;
   });

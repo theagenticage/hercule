@@ -743,6 +743,8 @@ export {
 } from "./groups/entity-context";
 export {
   ActingConnection,
+  CardFace,
+  EntityFieldValue,
   ENTITY_CONCERNS,
   ENTITY_SEARCH_OUTCOMES,
   EntityAddToWorkInput,

@@ -306,6 +306,27 @@ interface EntityKindDeclaration {
   status: Record<string, EntityStatusDeclaration> | null  // each status by key; null for a kind with no status
   facts: EntityFactDeclaration[]               // at most 3
   reasons: Record<string, { say: string; tone: "plain" | "attention" | "good" | "bad" }>  // the sentence for each reason a card is here, for each signal kind word ("mention") and for each change at the source ("reassigned", "moved", "linked")
+  // added 2026-11-12 (#1121), all optional:
+  plural?: string                              // "Pull requests"; at most 40 characters
+  lasting?: number                             // 0 to 3, a whole number: how long a thing of this kind lasts. A linked group is labelled with its most lasting thing's title (read by #1124)
+  fields?: EntityFieldDeclaration[]            // at most 16, unique keys; the order is the display order. A key keeps its type, currency and meaning: the core stores only a value, so a plugin that changes any of them must use a new key
+  face?: CardFaceDeclaration                   // only on a kind with a card; left out means the generic card
+}
+
+type EntityFieldDeclaration = {                // added 2026-11-12 (#1121)
+  key: string                                  // the observation field it reads, `fields[key]`, and the search token: "team"
+  label: string                                // "Team"; at most 40 characters
+  facet?: { plural: string; values?: string }  // Browse lists its values and Narrow offers them. plural: "Teams". values: the word of a context kind of the same source
+} & (
+  | { type: "text" | "person" | "number" | "age" | "bool" }
+  | { type: "enum"; values: { value: string; label?: string }[] }   // a closed set, in order; 1 to 32, each value unique
+  | { type: "money"; currency: string }                              // ISO 4217: three capital letters
+)
+
+interface CardFaceDeclaration {                // added 2026-11-12 (#1121); each slot names a declared field by key
+  place?: string                               // the faint "where" at the end of a row, beside the identifier
+  context?: string                             // what a quiet row says after its status
+  fact?: string                                // a number or an amount a quiet row says
 }
 
 interface EntityStatusDeclaration {
@@ -332,7 +353,7 @@ interface IngestContext {
 interface EntityObservation {                  // a full one; a partial one (partial: true) needs only kind, ref and title
   kind: string; ref: string; title: string; partial?: boolean
   url?: string; lifecycle?: "open" | "completed" | "abandoned"; status?: string; reason?: string
-  fields: Record<string, string | number | null>
+  fields: Record<string, string | number | boolean | null>   // amended 2026-11-12 (#1121): boolean, for a `bool` field
   concerns: ("assigned" | "opened" | "review-requested" | "mentioned")[]   // `following` is refused
   ownedByYou?: boolean
   repository?: { target: { remote: string }; head?: { remote: string; branch: string } }
@@ -367,6 +388,23 @@ interface EntityLookupContext { credentials(): Effect<Record<string, string>, Co
 - *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* **`reconcile` and `refresh` each take at most 2,000 observations per call.** A plugin that must refresh more sends several `refresh` calls. It cannot split one kind over several `reconcile` calls ([./20-external-entities.md](./20-external-entities.md#51-reconcile)).
 - **`reconcile` emits no event and raises no signal.** Its writes are stamped `plugin:<id>`. Its transaction uses `assertConnectionIngesting`, as `emit` does.
 - **Lookups run outside any transaction.** `EntityLookupContext` holds `credentials` only, read at the moment of the call. The host gives each call a timeout of 8 seconds and fails it with `PluginError`. Recognition is the plugin's own and credential-free. Resolution always uses the target plugin's eligible Connection ([./20-external-entities.md](./20-external-entities.md#10-search-recognition-and-resolution)).
+*(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121); [ADR 0058](../adr/0058-the-inbox-is-a-list-queried-on-the-controller-over-fields-plugins-declare.md).)* **Typed fields, Facets and the Card Face.** A kind may declare the fields a plugin knows about its things, and how a row shows them. Like the rest of a kind, it is plain data: a plugin ships no UI, and the client never branches on a kind. The core stores the values ([./20-external-entities.md](./20-external-entities.md#11-records)), and draws the Card Face from them when a thing is read ([./20-external-entities.md](./20-external-entities.md#52-the-core-renders-the-plugin-reports-fields)).
+  - **A field's value is read from `fields[key]`** of the observation, and nothing else is read. A plugin that wants a value searchable puts it in `fields`. A missing or `null` value means the thing has no value. A value of the wrong type refuses the whole call before anything is written, and the error names the ref, the field and the expected type:
+
+    | Type | The value in `fields[key]` |
+    |---|---|
+    | `text`, `person` | a string |
+    | `enum` | a string that is one of the declared `values[].value` |
+    | `number` | a finite number |
+    | `money` | a finite number: the amount in major units of the declared `currency` |
+    | `age` | an ISO timestamp string: the moment the age counts from |
+    | `bool` | a boolean |
+
+  - **A Facet is a field marked `facet`.** Only a `text`, `person` or `enum` field can be one. `facet.plural` names its values in the plural ("Teams"). `facet.values` is the word of a context kind of the same source whose stored records are every value the source knows of. A Linear project is such a record, and so Browse can list every project, with its health, even one that holds nothing of the user's. The record's title is the value, and its status word is its few words.
+  - **A field with `facet.values` holds a ref, not a name.** The plugin reports `fields.project = "linear:project:<workspace id>/<project id>"`, and ingest refuses a value that does not start with that kind's `refPrefix`. Such a field must be of type `text`. On read, the core shows the title of the stored record. A ref with no stored record shows no value. A rename at the source changes nothing here, and two projects with one title stay two values.
+  - **The Card Face names three slots,** each a key of a declared field. The status glyph and the identifier come from `status` and `identifier` as before. A slot whose field has no value on a thing is left out. A kind with no `face` draws the generic card.
+  - **The host validates these at load** and refuses the source, naming the kind, for: a duplicate field key in a kind, or more than 16 fields; a `facet` on a type other than `text`, `person` or `enum`; a `facet.values` that names no context kind (`pace: "context"`) of the same source, or on a field that is not `text`; a `face` on a context kind; a face slot that names no declared field; `place` or `context` on a type other than `text`, `person` or `enum`; `fact` on a type other than `number` or `money`; a `plural` over 40 characters; a `lasting` that is not a whole number from 0 to 3; an `enum` with no values, more than 32, or a repeated value; a `money` currency that is not three capital letters; and one key declared by two kinds of one source with declarations that are not deeply equal, so one key has one meaning per source. The host qualifies `facet.values` to `<pluginId>/<word>`, as it does `home`.
+  - **Not here yet.** A plugin's saved queries arrive with [#1122](https://github.com/theagenticage/hercule/issues/1122), because they are written in its query shape. A plugin's entity blocks for the detail pane (fields, trend and code, and the lookup that serves them) arrive with [#1123](https://github.com/theagenticage/hercule/issues/1123).
 - **The manifest's `mark`** gains optional `hue` and `solid` beside it, for a mark drawn in a declared hue.
 - *(Added 2026-11-10, [#1105](https://github.com/theagenticage/hercule/issues/1105).)* **A plugin colour is one type for the mark and for a status icon,** `withPluginColor` in `@hercule/plugin-host`. A plugin declares at most one of:
   - `hue`, an angle from 0 to 360. The apps draw it at the lightness and strength of the theme, so no plugin's colour is louder than a name or unreadable in any theme.
@@ -682,7 +720,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* **`hostApi` is 6.** ~~`hostApi` is 5.~~ `modelArgument` moves from the provider entry of a harness's `runs` onto each account kind in it, and is required there. A harness plugin built against 5 is refused at load. The reason is in [./06-providers.md](./06-providers.md) section 2.
 - *(Amended 2026-10-31, [#940](https://github.com/theagenticage/hercule/issues/940).)* **`hostApi` is 7.** ~~`hostApi` is 6.~~ `catalogSource` is now `{ kind: "harness-probe", harnessId }` or `{ kind: "provider-api", url, headers }`, where `url` and `headers` follow the rules of `keyCheck`: the controller reads the catalog with the account's key, and the plugin passes `parseCatalogBody` beside the definition when it registers the provider (`ProviderRegistrationOptions`). A usage parser may also return `expiresAt` (absent: the body says nothing about expiry; `null`: the credential does not expire). A plugin built against 6 is refused at load ([./06-providers.md](./06-providers.md) sections 16 and 18).
 - *(Amended 2026-11-03, [#985](https://github.com/theagenticage/hercule/issues/985).)* **`hostApi` is 8.** ~~`hostApi` is 7.~~ `HarnessDefinition` gains a required `releaseSource`, `{ kind: "npm", package }`, the place where the harness's releases are published. A harness plugin built against 7 declares none, so it is refused at load ([./06-providers.md](./06-providers.md) section 2).
-- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **External Entities add to the host contract and leave `hostApi` at 8.** A new capability name, `entities`, and the optional `entityKinds` and `entityLookup` on an event source, `IngestContext.entities`, and `hue` and `solid` on the manifest's `mark` are all new optional facets, so by the rules above a plugin built against 8 loads and runs unchanged. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `relations.linkedUrls` and `texts` on an observation are optional too, and so stay at 8. A plugin that requests `entities` has it granted, and one that does not gets no `entities` member on its context.
+- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **External Entities add to the host contract and leave `hostApi` at 8.** A new capability name, `entities`, and the optional `entityKinds` and `entityLookup` on an event source, `IngestContext.entities`, and `hue` and `solid` on the manifest's `mark` are all new optional facets, so by the rules above a plugin built against 8 loads and runs unchanged. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `relations.linkedUrls` and `texts` on an observation are optional too, and so stay at 8. A plugin that requests `entities` has it granted, and one that does not gets no `entities` member on its context. *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* `plural`, `lasting`, `fields` and `face` on a kind, and a boolean in an observation's `fields`, are additive too, so `hostApi` stays 8.
 
 ## 10. Connections and plugin-defined connection types
 

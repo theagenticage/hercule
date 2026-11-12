@@ -5,7 +5,7 @@
  * `fields` and a status key, and these tables say how a card shows them.
  * `entity-reads.ts` builds the status keys and reason keys written here.
  */
-import type { EntityKindDeclaration } from "@hercule/plugin-host";
+import type { EntityFieldDeclaration, EntityKindDeclaration } from "@hercule/plugin-host";
 import {
   CLOSED_COLOR,
   DONE_COLOR,
@@ -36,11 +36,25 @@ const OPEN_PULL_REQUEST = {
   color: OPEN_COLOR,
 } as const;
 
+/**
+ * The repository an item belongs to. It holds the ref of the repository's
+ * record, so Browse lists the repositories the Connection knows, and a
+ * renamed repository changes no item. Both kinds declare it identically.
+ */
+const REPO_FIELD: EntityFieldDeclaration = {
+  key: "repo",
+  label: "Repository",
+  type: "text",
+  facet: { plural: "Repositories", values: REPOSITORY_KIND },
+};
+
 const PULL_REQUEST: EntityKindDeclaration = {
   word: PULL_REQUEST_KIND,
   connect: "Reviews people ask of you",
   card: "compact",
   noun: "Pull request",
+  plural: "Pull requests",
+  lasting: 1,
   refPrefix: "github:pr:",
   pace: "fast",
   patience: 24,
@@ -77,6 +91,32 @@ const PULL_REQUEST: EntityKindDeclaration = {
       color: CLOSED_COLOR,
     },
   },
+  fields: [
+    REPO_FIELD,
+    { key: "author", label: "Author", type: "person" },
+    {
+      key: "checks",
+      label: "Checks",
+      type: "enum",
+      facet: { plural: "Checks" },
+      values: [
+        { value: "passing", label: "Passing" },
+        { value: "failing", label: "Failing" },
+        { value: "pending", label: "Pending" },
+      ],
+    },
+    {
+      key: "review",
+      label: "Review",
+      type: "enum",
+      values: [
+        { value: "approved", label: "Approved" },
+        { value: "changes", label: "Changes requested" },
+        { value: "required", label: "Review required" },
+      ],
+    },
+  ],
+  face: { place: "repo" },
   facts: [
     { field: "diff", form: "delta" },
     { field: "files", form: "count", unit: "file" },
@@ -97,6 +137,8 @@ const ISSUE: EntityKindDeclaration = {
   connect: "Issues assigned to you",
   card: "rich",
   noun: "Issue",
+  plural: "Issues",
+  lasting: 1,
   refPrefix: "github:issue:",
   pace: "slow",
   patience: 336,
@@ -121,6 +163,12 @@ const ISSUE: EntityKindDeclaration = {
       color: DONE_COLOR,
     },
   },
+  fields: [
+    REPO_FIELD,
+    { key: "assignee", label: "Assignee", type: "person" },
+    { key: "labels", label: "Labels", type: "text" },
+  ],
+  face: { place: "repo" },
   facts: [{ field: "labels", form: "word" }],
   reasons: {
     assigned: { say: "Assigned to you", tone: "plain" },

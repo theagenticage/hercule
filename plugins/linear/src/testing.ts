@@ -610,6 +610,26 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
         });
       return { places: { nodes } };
     }
+    case "LinearProjects": {
+      const projects = world.projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        url: project.url,
+        health: project.health ?? null,
+        progress: project.progress ?? 0,
+        targetDate: project.targetDate ?? null,
+        updatedAt: "2026-11-01T10:00:00.000Z",
+        initiatives: {
+          nodes: (project.initiativeIds ?? []).slice(0, 50).map((id) => ({ id })),
+          pageInfo: { hasNextPage: (project.initiativeIds ?? []).length > 50 },
+        },
+        teams: {
+          nodes: project.teamIds.slice(0, 50).map((id) => ({ id })),
+          pageInfo: { hasNextPage: project.teamIds.length > 50 },
+        },
+      }));
+      return { projects: buildPage(projects, variables, world.pageSize) };
+    }
     case "LinearInitiativeContext": {
       const ids = readIdIn(filter) ?? [];
       const nodes = world.initiatives

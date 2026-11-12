@@ -236,6 +236,212 @@ describe("decodeEntityKinds", () => {
     expect(await decode(declarations, taken)).toContain(message);
   });
 
+  describe("fields and card face", () => {
+    const text = (key: string, extra: Record<string, unknown> = {}) =>
+      ({ key, label: key, type: "text", ...extra }) as const;
+    const project = buildKind("project", { pace: "context" });
+
+    it("returns a full declaration with each facet.values qualified with the plugin id", async () => {
+      const kinds = await decode([
+        buildKind("ticket", {
+          plural: "Tickets",
+          lasting: 1,
+          fields: [
+            text("team", { facet: { plural: "Teams", values: "project" } }),
+            { key: "priority", label: "Priority", type: "enum", values: [{ value: "high" }] },
+            { key: "estimate", label: "Estimate", type: "money", currency: "EUR" },
+            { key: "opened", label: "Opened", type: "age" },
+          ],
+          face: { place: "team", context: "priority", fact: "estimate" },
+        }),
+        project,
+      ]);
+
+      expect(kinds).toMatchObject([
+        {
+          plural: "Tickets",
+          lasting: 1,
+          fields: [
+            { key: "team", facet: { plural: "Teams", values: "acme/project" } },
+            { key: "priority" },
+            { key: "estimate" },
+            { key: "opened" },
+          ],
+          face: { place: "team", context: "priority", fact: "estimate" },
+        },
+        { word: "acme/project" },
+      ]);
+    });
+
+    it.each([
+      {
+        name: "a field key declared twice in a kind",
+        declarations: [buildKind("ticket", { fields: [text("team"), text("team")] })],
+        message:
+          'acme/ticket of the event source tracker is invalid: its field "team" is declared twice',
+      },
+      {
+        name: "more than 16 fields",
+        declarations: [
+          buildKind("ticket", {
+            fields: Array.from({ length: 17 }, (_, index) => text(`field-${String(index)}`)),
+          }),
+        ],
+        message: "at most 16",
+      },
+      {
+        name: "an enum that lists a value twice",
+        declarations: [
+          buildKind("ticket", {
+            fields: [
+              { key: "p", label: "P", type: "enum", values: [{ value: "a" }, { value: "a" }] },
+            ],
+          }),
+        ],
+        message: 'lists the value "a" twice',
+      },
+      {
+        name: "a facet on a number field",
+        declarations: [
+          buildKind("ticket", {
+            fields: [{ key: "n", label: "N", type: "number", facet: { plural: "Ns" } }],
+          }),
+        ],
+        message: 'its field "n" has a facet, but its type is "number"',
+      },
+      {
+        name: "facet values that name a kind that is not a context kind",
+        declarations: [
+          buildKind("ticket", {
+            fields: [text("team", { facet: { plural: "Teams", values: "other" } })],
+          }),
+          buildKind("other"),
+        ],
+        message: 'name "other", which is not a context kind',
+      },
+      {
+        name: "facet values that name no kind of the source",
+        declarations: [
+          buildKind("ticket", {
+            fields: [text("team", { facet: { plural: "Teams", values: "missing" } })],
+          }),
+        ],
+        message: 'name "missing", which is not a context kind',
+      },
+      {
+        name: "a face on a context kind",
+        declarations: [
+          buildKind("project", { pace: "context", fields: [text("a")], face: { place: "a" } }),
+        ],
+        message: "a context kind has no card",
+      },
+      {
+        name: "a face slot that names no declared field",
+        declarations: [buildKind("ticket", { fields: [text("a")], face: { place: "b" } })],
+        message: 'its face place is "b", which is not a field the kind declares',
+      },
+      {
+        name: "a face place on a number field",
+        declarations: [
+          buildKind("ticket", {
+            fields: [{ key: "n", label: "N", type: "number" }],
+            face: { place: "n" },
+          }),
+        ],
+        message: 'its face place is the field "n", whose type is "number"',
+      },
+      {
+        name: "a face context on a bool field",
+        declarations: [
+          buildKind("ticket", {
+            fields: [{ key: "b", label: "B", type: "bool" }],
+            face: { context: "b" },
+          }),
+        ],
+        message: 'its face context is the field "b", whose type is "bool"',
+      },
+      {
+        name: "a face fact on a text field",
+        declarations: [buildKind("ticket", { fields: [text("a")], face: { fact: "a" } })],
+        message: 'its face fact is the field "a", whose type is "text"',
+      },
+      {
+        name: "one key declared by two kinds with a different type",
+        declarations: [
+          buildKind("ticket", { fields: [text("size")] }),
+          buildKind("epic", { fields: [{ key: "size", label: "size", type: "number" }] }),
+        ],
+        message: 'its field "size" is declared differently from the same key in ticket',
+      },
+      {
+        name: "one key declared by two kinds with a different label",
+        declarations: [
+          buildKind("ticket", { fields: [text("size", { label: "Size" })] }),
+          buildKind("epic", { fields: [text("size", { label: "Bulk" })] }),
+        ],
+        message: 'its field "size" is declared differently from the same key in ticket',
+      },
+      {
+        name: "one key declared by two kinds with different enum values",
+        declarations: [
+          buildKind("ticket", {
+            fields: [{ key: "p", label: "P", type: "enum", values: [{ value: "a" }] }],
+          }),
+          buildKind("epic", {
+            fields: [{ key: "p", label: "P", type: "enum", values: [{ value: "b" }] }],
+          }),
+        ],
+        message: 'its field "p" is declared differently from the same key in ticket',
+      },
+      {
+        name: "facet values on a field that is not text",
+        declarations: [
+          buildKind("ticket", {
+            fields: [
+              {
+                key: "p",
+                label: "P",
+                type: "enum",
+                values: [{ value: "a" }],
+                facet: { plural: "Ps", values: "project" },
+              },
+            ],
+          }),
+          buildKind("project", { pace: "context" }),
+        ],
+        message: 'has facet values from the context kind "project", but its type is "enum"',
+      },
+    ])("refuses $name", async ({ declarations, message }) => {
+      expect(await decode(declarations)).toContain(message);
+    });
+
+    it.each([
+      { name: "a lasting above 3", overrides: { lasting: 4 } },
+      { name: "a fractional lasting", overrides: { lasting: 1.5 } },
+      {
+        name: "a bad currency",
+        overrides: { fields: [{ key: "m", label: "M", type: "money", currency: "eur" }] },
+      },
+      { name: "a field key with a space", overrides: { fields: [text("a b")] } },
+      {
+        name: "an enum with no values",
+        overrides: { fields: [{ key: "e", label: "E", type: "enum", values: [] }] },
+      },
+    ])("refuses $name", async ({ overrides }) => {
+      expect(
+        await decode([buildKind("ticket", overrides as Partial<EntityKindDeclaration>)]),
+      ).toContain("the entity kind acme/ticket of the event source tracker is invalid");
+    });
+
+    it("lets two kinds declare the same key with the same type and label", async () => {
+      const kinds = await decode([
+        buildKind("ticket", { fields: [text("team")] }),
+        buildKind("epic", { fields: [text("team")] }),
+      ]);
+      expect(Array.isArray(kinds)).toBe(true);
+    });
+  });
+
   it("returns status colours as hex codes, and icons and hues as declared", async () => {
     const icon = { paths: ["M0 0h16v16H0z"] };
     const kinds = await decode([

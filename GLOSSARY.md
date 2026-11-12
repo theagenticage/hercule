@@ -61,8 +61,16 @@ A durable record of one outside thing, such as a pull request, an issue or a rep
 _Avoid_: item, object, mirror, copy, resource (a **Resource** is something Hercule works in); "entity" in any text the user reads
 
 **Entity Kind**:
-One kind of External Entity that a plugin's event source declares as data: its noun, ref prefix, card size, pace and patience, the templates for its identifier, person and facts, its statuses and the sentence for each reason a card is here. The core renders every card from it and keeps copies on the row, so a card still draws after its plugin is gone. A kind with `pace: context` is a place and has no card. A kind is not a signal kind: `linear/issue` can be both, in two namespaces.
+One kind of External Entity that a plugin's event source declares as data: its noun, ref prefix, card size, pace and patience, the templates for its identifier, person and facts, its statuses and the sentence for each reason a card is here. The core renders every card from it and keeps copies of its nouns, status words and templates on the row, so a card still draws after its plugin is gone; the Card Face is the exception, drawn on read from the declared fields. A kind with `pace: context` is a place and has no card. A kind is not a signal kind: `linear/issue` can be both, in two namespaces.
 _Avoid_: entity type, schema, template (the kind holds templates), signal kind
+
+**Facet**:
+A field a plugin marks as browsable on an Entity Kind, such as a Linear issue's team or project, or a pull request's repository. Browse lists its values and Narrow offers them, each with a count, and a click adds the same clause the search bar would. A Facet may name a context kind whose stored records are every value the source knows of, so Browse can list a Linear project that holds nothing of the user's yet. Then the field holds the record's ref, not its name. A plugin declares Facets as plain data, and the controller counts them.
+_Avoid_: filter (a Facet is declared by the plugin and is a way to browse; the user sets no filter), category, tag, label (a source's own labels are plain fields)
+
+**Card Face**:
+What a kind's row shows, drawn on read from the field values stored for the thing and the kind's declaration: the status glyph, the identifier, the place, the context and the fact. A plugin declares which declared fields fill the place, the context and the fact, and nothing is stored per thing. A thing whose plugin is inactive has no Card Face and draws the generic card from the title, identifier, status and noun the record holds.
+_Avoid_: card template, layout, bundle, renderer (a plugin never draws), view
 
 **Observation**:
 What one Connection says about one External Ref: the Concerns it reported, whether it can read the ref, and when it last tried. Kept per ref and Connection, so one account's failure never hides another account's good read. An entity's concerns, access and freshness are worked out from its observations. Also what a plugin hands to `reconcile`: one thing it read from its source.
