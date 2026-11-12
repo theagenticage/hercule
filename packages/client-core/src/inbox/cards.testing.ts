@@ -3,6 +3,7 @@ import type {
   Connection,
   EntityPlace,
   EntitySignalLine,
+  InboxCounts,
   InboxThing,
   PluginDetail,
   WorkflowOffer,
@@ -110,6 +111,17 @@ export const buildWorkflowOffer = (
   name,
   answers,
   ...(unavailable === undefined ? {} : { unavailable }),
+});
+
+/** Returns the Inbox's counts with nothing in them: no saved query counts anything. `overrides` change any field. */
+export const buildInboxCounts = (overrides: Partial<InboxCounts> = {}): InboxCounts => ({
+  savedQueries: [],
+  sources: [],
+  pins: [],
+  fields: [],
+  failing: [],
+  newestArrival: 0,
+  ...overrides,
 });
 
 /**

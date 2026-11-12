@@ -1059,19 +1059,6 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Inbox whole: its cards, the places above them, and its counts.
- * Not shell data: only the Inbox screen reads it, and it is read again for
- * the pushes of the live topics while that screen is open. The sidebar reads the
- * counts alone, see `inboxCountQuery`.
- */
-export const inboxQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: queryKeys.inbox(),
-    queryFn: () => client.externalEntity.queryInbox(),
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
  * Reads one External Entity whole, as the open card of the Inbox draws it: the
  * card's own record with the places above it, its links, and whether its
  * plugin is still active. A push on the `externalEntity` topic reads it again.
@@ -1098,8 +1085,8 @@ export const taskAttentionQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Inbox's counts alone, for the sidebar's row, which shows them on
- * every screen. A push on `task` reads it again, so the read is a small one.
+ * Reads the Inbox's counts: the sidebar's row shows them on every screen, and
+ * the rail shares the same cache entry. A push on `task` reads it again.
  */
 export const inboxCountQuery = (client: HerculeClient) =>
   queryOptions({

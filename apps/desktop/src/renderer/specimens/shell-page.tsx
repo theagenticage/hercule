@@ -894,11 +894,13 @@ const seedQueryCache = (
   queryClient.setQueryData(taskAttentionQuery(client).queryKey, {
     anyFailure: records.hasFailedRun ?? false,
   });
-  // The sidebar's Inbox row reads the counts on every screen: nothing is on the clock.
+  // The sidebar's Inbox row reads the counts on every screen: no one waits on the user.
   queryClient.setQueryData(inboxCountQuery(client).queryKey, {
-    onTheClock: 0,
-    requests: 0,
-    withSomeoneElse: 0,
+    savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 0 }],
+    sources: [],
+    pins: [],
+    fields: [],
+    failing: [],
     newestArrival: 0,
   });
   if (workflows !== undefined) {

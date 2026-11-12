@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildInbox } from "@hercule/client-core/inbox/testing";
+import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
 import { buildSession, buildWorkspace } from "@hercule/client-core/threads/testing";
 import { buildBoard, buildCard, buildPlace, buildSummary } from "@hercule/client-core/work/testing";
 import type {
@@ -613,7 +613,7 @@ describe("the Work screen's keys", () => {
     const user = userEvent.setup();
     await openWork({
       handlers: {
-        "GET /api/v1/external-entities/inbox/count": { body: buildInbox([]).counts },
+        "GET /api/v1/external-entities/inbox/count": { body: buildInboxCounts() },
       },
     });
     await user.click(await screen.findByRole("link", { name: /^Inbox/ }));

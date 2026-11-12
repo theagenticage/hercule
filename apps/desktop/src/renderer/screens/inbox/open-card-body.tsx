@@ -1,17 +1,10 @@
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
-import {
-  describeLockedRow,
-  formatTargetDate,
-  readEntityPluginId,
-  type PlaceRow,
-} from "@hercule/client-core/desk";
-import type { OpenCardWords, PlaceView } from "@hercule/client-core/inbox";
-import type { EntityStatus } from "@hercule/contract";
+import type { OpenCardWords } from "@hercule/client-core/inbox";
 import { CloseIcon } from "../../icons/close";
 import { ExternalIcon } from "../../icons/external";
 import { PluginMark } from "../../marks";
-import { EntityStatusIcon, ProgressBar, RelationRows } from "../desk";
+import { RelationRows } from "../desk";
 import { CardFactText, CardStatus } from "./card-parts";
 import "./open-card.css";
 
@@ -76,38 +69,6 @@ function PriorityBars({ level }: { readonly level: number }): JSX.Element {
         <i key={bar} data-lit={bar <= level ? "" : undefined} />
       ))}
     </span>
-  );
-}
-
-/** Renders one row of a place's contents: a card or an inner place, as a button that walks there. */
-function WalkRow({
-  title,
-  status,
-  end,
-  onWalk,
-  isInner,
-}: {
-  readonly title: string;
-  readonly status?: EntityStatus | undefined;
-  readonly end?: string | undefined;
-  readonly onWalk: () => void;
-  readonly isInner?: boolean | undefined;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      className={isInner === true ? "open-card-inner-go" : "open-card-card-go"}
-      onClick={onWalk}
-    >
-      <span className="open-card-go-title">{title}</span>
-      {status !== undefined && (
-        <span className="open-card-go-status">
-          <EntityStatusIcon status={status} size={13} />
-          {status.label}
-        </span>
-      )}
-      {end !== undefined && <span className="open-card-go-end">{end}</span>}
-    </button>
   );
 }
 
@@ -294,132 +255,6 @@ export function OpenCardBody({
         onDismiss={onDismiss}
         onSeeTask={onSeeTask}
       />
-    </>
-  );
-}
-
-/** Returns the words a place row says about itself: its kind, its status and its target date. */
-const describeInnerPlaceEnd = (row: PlaceRow): string | undefined => {
-  if (row.isLocked) return undefined;
-  return [
-    row.progress?.words,
-    row.targetDate === undefined ? undefined : formatTargetDate(row.targetDate),
-  ]
-    .filter((part) => part !== undefined)
-    .join("  ");
-};
-
-/**
- * Renders what the open sheet shows for a place: what it says about itself,
- * how far along its source says it is, the cards of this page under it (and
- * under each place inside it), and every place above it. A place has no moves.
- *
- * - `view` is `readPlaceView`'s answer.
- * - `onWalkCard` is called with a card's id, and `onWalk` with a place's ref.
- */
-export function OpenPlaceBody({
-  view,
-  plugins,
-  onClose,
-  onWalk,
-  onWalkCard,
-}: {
-  readonly view: PlaceView;
-  readonly plugins: readonly PluginIdentity[];
-  readonly onClose: () => void;
-  readonly onWalk: (ref: string) => void;
-  readonly onWalkCard: (cardId: string) => void;
-}): JSX.Element {
-  const { row } = view;
-  const pluginId = readEntityPluginId(row.kind);
-  const pluginName = namePlugin(pluginId, plugins);
-  if (row.isLocked) {
-    return (
-      <OpenCardHead
-        pluginId={pluginId}
-        plugins={plugins}
-        title={describeLockedRow(row, pluginName)}
-        meta={[row.noun]}
-        onClose={onClose}
-      />
-    );
-  }
-  const hasCards = view.inner.length > 0 || view.cards.length > 0;
-  return (
-    <>
-      <OpenCardHead
-        pluginId={pluginId}
-        plugins={plugins}
-        title={row.title}
-        meta={[row.caption ?? row.noun]}
-        onClose={onClose}
-      />
-      {(row.status !== undefined || row.targetDate !== undefined) && (
-        <div className="open-card-facts">
-          {row.status !== undefined && <CardStatus status={row.status} size={15} />}
-          {row.targetDate !== undefined && (
-            <span className="open-card-wait">{`Target ${formatTargetDate(row.targetDate)}`}</span>
-          )}
-        </div>
-      )}
-      {row.progress !== undefined && (
-        <p className="open-card-progress">
-          <ProgressBar fraction={row.progress.fraction} wide />
-          <span>
-            {row.progress.words === undefined
-              ? `As reported by ${pluginName}`
-              : `${row.progress.words} done, as reported by ${pluginName}`}
-          </span>
-        </p>
-      )}
-      {hasCards && (
-        <OpenCardSection heading="Yours here">
-          <ul className="open-card-inner-list">
-            {view.inner.map((inner) => (
-              <li key={inner.row.ref} className="open-card-inner">
-                <WalkRow
-                  isInner
-                  title={inner.row.isLocked ? inner.row.noun : inner.row.title}
-                  status={inner.row.isLocked ? undefined : inner.row.status}
-                  end={describeInnerPlaceEnd(inner.row)}
-                  onWalk={() => {
-                    onWalk(inner.row.ref);
-                  }}
-                />
-                <ul>
-                  {inner.cards.map((card) => (
-                    <li key={card.id}>
-                      <WalkRow
-                        title={card.title}
-                        status={card.status}
-                        onWalk={() => {
-                          onWalkCard(card.id);
-                        }}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-            {view.cards.map((card) => (
-              <li key={card.id}>
-                <WalkRow
-                  title={card.title}
-                  status={card.status}
-                  onWalk={() => {
-                    onWalkCard(card.id);
-                  }}
-                />
-              </li>
-            ))}
-          </ul>
-        </OpenCardSection>
-      )}
-      {view.above.length > 0 && (
-        <OpenCardSection heading="Part of">
-          <RelationRows rows={view.above} plugins={plugins} onWalk={onWalk} />
-        </OpenCardSection>
-      )}
     </>
   );
 }
