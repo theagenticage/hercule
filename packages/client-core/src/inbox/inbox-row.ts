@@ -6,17 +6,7 @@
  */
 import type { EntityFieldValue, EntityStatus, InboxOrder, InboxThing } from "@hercule/contract";
 import { listAvailableHandOffs, type CardOffers } from "./card-hand-off";
-
-/**
- * How long a wait has lasted against the patience of its ask. The row draws
- * each tone in ink and weight only:
- *
- * - `fresh`: under half the patience;
- * - `recent`: half the patience up to the whole;
- * - `due`: the whole patience up to three times it;
- * - `over`: three times the patience or more.
- */
-export type InboxWaitTone = "fresh" | "recent" | "due" | "over";
+import { describeWaitSince, measureSpan, type Span, type WaitLevel } from "./card-wait";
 
 /**
  * Whoever holds a thing's Task. The user is drawn as a monogram of `name`; a
@@ -37,7 +27,7 @@ export type InboxRowTime =
   | {
       readonly kind: "wait";
       readonly text: string;
-      readonly tone: InboxWaitTone;
+      readonly tone: WaitLevel;
       readonly words: string;
     }
   | { readonly kind: "holder"; readonly holder: InboxRowHolder }
@@ -105,53 +95,6 @@ const PLACE_AND_IDENTIFIER_LIMIT = 26;
 /** How many faces the hand-off button of a row shows when several workflows fit. */
 const HAND_OFF_FACES = 3;
 
-const HOUR_MS = 3_600_000;
-const SPAN_UNITS = [
-  { ms: 30 * 86_400_000, suffix: "mo", word: "month" },
-  { ms: 7 * 86_400_000, suffix: "w", word: "week" },
-  { ms: 86_400_000, suffix: "d", word: "day" },
-  { ms: HOUR_MS, suffix: "h", word: "hour" },
-  { ms: 60_000, suffix: "m", word: "minute" },
-] as const;
-
-/** A stretch of time written short ("5d") and in words ("5 days"). */
-interface Span {
-  readonly text: string;
-  readonly words: string;
-}
-
-/**
- * Returns the time from `since` to `now`, rounded down to the largest unit it
- * fills: "now", "12m", "3h", "5d", "2w" or "4mo" (a month is 30 days). A moment
- * after `now` counts as no time at all.
- */
-const measureSpan = (since: string, now: Date): Span => {
-  const elapsed = Math.max(0, now.getTime() - Date.parse(since));
-  const unit = SPAN_UNITS.find((candidate) => elapsed >= candidate.ms);
-  if (unit === undefined) return { text: "now", words: "less than a minute" };
-  const count = Math.floor(elapsed / unit.ms);
-  return {
-    text: `${String(count)}${unit.suffix}`,
-    words: `${String(count)} ${unit.word}${count === 1 ? "" : "s"}`,
-  };
-};
-
-/** Returns how far a wait is through the patience of its ask, as a tone. */
-const decideWaitTone = (waitingSince: string, patienceHours: number, now: Date): InboxWaitTone => {
-  const hours = Math.max(0, now.getTime() - Date.parse(waitingSince)) / HOUR_MS;
-  const used = hours / Math.max(1, patienceHours);
-  if (used >= 3) return "over";
-  if (used >= 1) return "due";
-  return used >= 0.5 ? "recent" : "fresh";
-};
-
-const WAIT_TONE_WORDS: Readonly<Record<InboxWaitTone, string>> = {
-  fresh: "",
-  recent: "",
-  due: ", due",
-  over: ", overdue",
-};
-
 /** Returns a number as the row writes it: "950", "1.2k", "34k", "1.5M". */
 const formatCompactNumber = (value: number): string => {
   if (Math.abs(value) < 1000) return String(value);
@@ -159,6 +102,18 @@ const formatCompactNumber = (value: number): string => {
     Math.abs(value) < 10_000 || Math.abs(value) >= 1e6 ? 1 : 0,
   );
   return `${scaled.replace(/\.0$/, "")}${Math.abs(value) < 1e6 ? "k" : "M"}`;
+};
+
+const currencyFormats = new Map<string, Intl.NumberFormat>();
+
+/** Returns an amount in its currency, such as "£1,200.00". Builds each currency's formatter once, because building one is slow and a list formats many rows. */
+const formatMoney = (amount: number, currency: string): string => {
+  let format = currencyFormats.get(currency);
+  if (format === undefined) {
+    format = new Intl.NumberFormat("en-GB", { style: "currency", currency });
+    currencyFormats.set(currency, format);
+  }
+  return format.format(amount);
 };
 
 /**
@@ -176,9 +131,7 @@ const readFieldText = (field: EntityFieldValue | undefined, now: Date): string |
     case "number":
       return `${formatCompactNumber(field.number)} ${field.label.toLowerCase()}`;
     case "money":
-      return new Intl.NumberFormat("en-GB", { style: "currency", currency: field.currency }).format(
-        field.amount,
-      );
+      return formatMoney(field.amount, field.currency);
     case "age":
       return measureSpan(field.since, now).text;
     case "bool":
@@ -207,9 +160,8 @@ const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undef
 /** Returns the wait of the oldest open ask, or `undefined` when the thing asks nothing. */
 const readWait = (thing: InboxThing, now: Date) => {
   if (thing.askCount === 0 || thing.waitingSince === undefined) return undefined;
-  const span = measureSpan(thing.waitingSince, now);
-  const tone = decideWaitTone(thing.waitingSince, thing.patience, now);
-  return { text: span.text, tone, words: `Waiting ${span.words}${WAIT_TONE_WORDS[tone]}` };
+  const { text, words, level } = describeWaitSince(thing.waitingSince, thing.patience, now);
+  return { text, words, tone: level };
 };
 
 /**

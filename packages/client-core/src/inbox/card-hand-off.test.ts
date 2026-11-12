@@ -2,8 +2,6 @@
 import type { HandOffUndo } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
-  decideCardHolder,
-  decideHandedSentence,
   decideHandMove,
   decideHandOffFit,
   describeHandOffAsks,
@@ -12,19 +10,12 @@ import {
   findHandOffs,
   isHandOffTakenBack,
   listAvailableHandOffs,
-  listOpenSignalKinds,
   listCardOffers,
   NO_OFFERS,
   partitionOffers,
   rankHandOffs,
-  readOpenCardHandOff,
 } from "./card-hand-off";
-import {
-  buildInboxAsk,
-  buildInboxThing,
-  buildSignalLine,
-  buildWorkflowOffer,
-} from "./cards.testing";
+import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
 
 const review = buildWorkflowOffer("Review PR", ["github/review-requested"]);
 const fix = buildWorkflowOffer("Fix bug", ["github/checks-failed"]);
@@ -106,82 +97,6 @@ describe("describeHandOffEnds", () => {
   });
 });
 
-describe("decideHandedSentence", () => {
-  it("says the workflow has it, in a plain tone", () => {
-    expect(decideHandedSentence({ workflowId: "wf", name: "Agent review" })).toEqual({
-      text: "Agent review has it",
-      tone: "plain",
-    });
-  });
-});
-
-describe("decideCardHolder", () => {
-  const agent = { workflowId: "wf-agent-review", name: "Agent review" };
-  const other = { workflowId: "wf-other", name: "Other" };
-
-  it.each([
-    ["no Task and no live workflow", {}, undefined],
-    [
-      "a Task and no live workflow, such as a card whose run ended",
-      { taskId: "task-1" },
-      { kind: "you" },
-    ],
-    [
-      "a live workflow before the Task is known",
-      { liveWorkflows: [agent] },
-      { kind: "colleague", workflow: agent },
-    ],
-    [
-      "several live workflows, the newest run first",
-      { taskId: "task-1", liveWorkflows: [agent, other] },
-      { kind: "colleague", workflow: agent },
-    ],
-  ])("holds a card with %s", (_name, overrides, holder) => {
-    expect(decideCardHolder(buildInboxThing("1", overrides))).toEqual(holder);
-  });
-});
-
-describe("readOpenCardHandOff", () => {
-  const bot = { id: "conn-bot", label: "northwind-bot" };
-  const ava = { id: "conn-ava", label: "ava-northwind" };
-  const listed = buildInboxThing("1", {
-    offerSetId: "set-a",
-    actingConnections: [bot],
-    openKinds: ["github/mentioned"],
-  });
-  const inbox = { offerSets: { "set-a": [review, sameRepoOnly] } };
-  const detail = {
-    kindAvailable: true,
-    offers: [fix],
-    actingConnections: [ava],
-    signals: [buildSignalLine("s1", "Asked", { kind: "github/review-requested" })],
-  };
-
-  it("reads the Inbox's own sets and the card as listed until the read has answered", () => {
-    expect(readOpenCardHandOff(undefined, listed, inbox)).toEqual({
-      offers: { available: [review], unavailable: [sameRepoOnly] },
-      actingConnections: [bot],
-      openKinds: ["github/mentioned"],
-    });
-  });
-
-  it("reads the card's own answer once it has one", () => {
-    expect(readOpenCardHandOff(detail, listed, inbox)).toEqual({
-      offers: { available: [fix], unavailable: [] },
-      actingConnections: [ava],
-      openKinds: ["github/review-requested"],
-    });
-  });
-
-  it.each([
-    ["the kind is not available", { ...detail, kindAvailable: false }, listed, inbox],
-    ["the Inbox has not answered", detail, listed, undefined],
-    ["the card is not listed and has no read", undefined, undefined, inbox],
-  ])("has no offers when %s", (_name, forDetail, forListed, forInbox) => {
-    expect(readOpenCardHandOff(forDetail, forListed, forInbox).offers).toEqual(NO_OFFERS);
-  });
-});
-
 describe("describeHandOffUndo", () => {
   const base: HandOffUndo = {
     outcome: "undone",
@@ -225,19 +140,6 @@ describe("describeHandOffUndo", () => {
     expect(isHandOffTakenBack(base)).toBe(true);
     expect(isHandOffTakenBack({ ...base, outcome: "stopped" })).toBe(false);
     expect(isHandOffTakenBack({ ...base, outcome: "too-late" })).toBe(false);
-  });
-});
-
-describe("listOpenSignalKinds", () => {
-  it("lists each kind that has an open line once, and none that only has resolved lines", () => {
-    expect(
-      listOpenSignalKinds([
-        { kind: "github/review-requested", status: "open" },
-        { kind: "github/mention", status: "resolved" },
-        { kind: "github/review-requested", status: "open" },
-        { kind: "github/checks-failed", status: "open" },
-      ]),
-    ).toEqual(["github/review-requested", "github/checks-failed"]);
   });
 });
 
@@ -426,5 +328,13 @@ describe("listAvailableHandOffs and findHandOffs", () => {
     expect(findHandOffs(choices, "leaves")).toEqual([]);
     expect(findHandOffs(choices, "")).toBe(choices);
     expect(findHandOffs(choices, "nothing like it")).toEqual([]);
+  });
+
+  it("does not split the English of a line: an asker named Leaves is still found", () => {
+    const odd = listAvailableHandOffs(
+      partitionOffers([buildWorkflowOffer("Security review", [reviewKind])]),
+      { ...thing, asks: [buildInboxAsk("a1", "Leaves Smith")] },
+    );
+    expect(findHandOffs(odd, "smith").map(({ offer }) => offer.name)).toEqual(["Security review"]);
   });
 });

@@ -6,7 +6,6 @@
  *
  * Nothing here knows a kind by name: a plugin's card draws from its record.
  */
-export * from "./card-aloud";
 export * from "./card-face";
 export * from "./card-hand-off";
 export * from "./card-wait";

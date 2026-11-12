@@ -31,8 +31,9 @@ interface HandledRow<Row extends InboxListRow> {
   readonly row: Row;
   readonly index: number;
   /**
-   * True until a first page arrives without the row, which shows the server
-   * has taken it out. Until then a refresh must not bring it back.
+   * True from a dismissal until a first page arrives without the row, which
+   * shows the server has taken it out. Until then a refresh must not bring it
+   * back. Always false for a move that leaves the row displayed.
    */
   readonly awaitingServer: boolean;
 }
@@ -55,6 +56,12 @@ export interface InboxListState<Row extends InboxListRow> {
   /** The refs of the latest first page in its rank, used to place arrivals on Show. */
   readonly firstPageRefs: readonly string[];
   readonly handled: ReadonlyMap<string, HandledRow<Row>>;
+  /**
+   * Rows an undo just put back. The next refresh keeps them even when it did
+   * not find them, because it may have been read before the undo reached the
+   * server. That refresh then clears the set.
+   */
+  readonly restored: ReadonlySet<string>;
 }
 
 /**
@@ -76,6 +83,7 @@ export function startInboxList<Row extends InboxListRow>(
     anchor: null,
     firstPageRefs: firstPage.map((row) => row.ref),
     handled: new Map(),
+    restored: new Set(),
   };
 }
 
@@ -93,11 +101,14 @@ export interface InboxRefreshReply<Row extends InboxListRow> {
  * Applies one refresh. Call it only when every read of the refresh succeeded:
  * a row missing from a failed read would look like a row that left. Then:
  * - a held row found in any reply is replaced by the reply's copy, in place;
- * - a held row that was asked for and found in none has left, and is dropped;
+ * - a held row that was asked for and found in none has left, and is dropped,
+ *   unless an undo put it back since (see `restored`);
  * - a held row that was not asked for (a page appended meanwhile) is kept;
  * - a first-page row that is not held becomes an arrival.
  *
- * Rows the user handled are never brought back by a reply that still has them.
+ * Rows the user dismissed are not brought back by a reply that still has them,
+ * until a reply shows the server dropped them. A row that then comes back is a
+ * new arrival, and its undo memory is forgotten so an undo cannot duplicate it.
  * Returns the same state when the reply belongs to another list.
  */
 export function applyInboxRefresh<Row extends InboxListRow>(
@@ -111,26 +122,37 @@ export function applyInboxRefresh<Row extends InboxListRow>(
 
   const asked = new Set(reply.askedRefs);
   const heldRefs = new Set(state.rows.map((row) => row.ref));
-  const rows = state.rows.flatMap((row) => latest.get(row.ref) ?? (asked.has(row.ref) ? [] : row));
+  const rows = state.rows.flatMap(
+    (row) => latest.get(row.ref) ?? (asked.has(row.ref) && !state.restored.has(row.ref) ? [] : row),
+  );
   const arrivals = reply.firstPage.filter(
     (row) => !heldRefs.has(row.ref) && !state.handled.get(row.ref)?.awaitingServer,
   );
   const onFirstPage = new Set(reply.firstPage.map((row) => row.ref));
-  const handled = new Map(
-    [...state.handled].map(([ref, entry]) => [
-      ref,
-      entry.awaitingServer && !onFirstPage.has(ref) ? { ...entry, awaitingServer: false } : entry,
-    ]),
-  );
+  const handled = new Map<string, HandledRow<Row>>();
+  for (const [ref, entry] of state.handled) {
+    if (entry.awaitingServer) {
+      handled.set(ref, onFirstPage.has(ref) ? entry : { ...entry, awaitingServer: false });
+    } else if (heldRefs.has(ref) || !onFirstPage.has(ref)) {
+      handled.set(ref, entry);
+    }
+  }
   return withRows(
-    { ...state, arrivals, handled, firstPageRefs: reply.firstPage.map((row) => row.ref) },
+    {
+      ...state,
+      arrivals,
+      handled,
+      restored: new Set(),
+      firstPageRefs: reply.firstPage.map((row) => row.ref),
+    },
     rows,
   );
 }
 
 /**
- * Appends a next page: the rows the list does not hold yet and the user did
- * not handle. `after` is the cursor the page was requested with. The page is
+ * Appends a next page: the rows the list does not hold yet, except those the
+ * user dismissed and the server has not yet dropped (the same rule as a
+ * refresh). `after` is the cursor the page was requested with. The page is
  * ignored when it belongs to another list or did not continue from the
  * frontier (another page was fetched meanwhile). The page's `nextCursor`
  * becomes the new frontier.
@@ -146,11 +168,16 @@ export function applyInboxNextPage<Row extends InboxListRow>(
 ): InboxListState<Row> {
   if (page.listId !== state.listId || page.after !== state.frontier) return state;
   const known = new Set(state.rows.map((row) => row.ref));
-  const added = page.rows.filter((row) => !known.has(row.ref) && !state.handled.has(row.ref));
+  const added = page.rows.filter(
+    (row) => !known.has(row.ref) && !state.handled.get(row.ref)?.awaitingServer,
+  );
   const addedRefs = new Set(added.map((row) => row.ref));
+  const handled = new Map(state.handled);
+  for (const ref of addedRefs) handled.delete(ref);
   return withRows(
     {
       ...state,
+      handled,
       frontier: page.nextCursor,
       arrivals: state.arrivals.filter((row) => !addedRefs.has(row.ref)),
     },
@@ -168,18 +195,34 @@ export function showInboxArrivals<Row extends InboxListRow>(
   state: InboxListState<Row>,
 ): InboxListState<Row> {
   if (state.arrivals.length === 0) return state;
-  const rows = [...state.rows];
-  for (const arrival of state.arrivals) {
-    let at = 0;
-    for (let i = state.firstPageRefs.indexOf(arrival.ref) - 1; i >= 0; i--) {
-      const above = rows.findIndex((row) => row.ref === state.firstPageRefs[i]);
-      if (above >= 0) {
-        at = above + 1;
-        break;
-      }
+  // Each arrival goes right after the nearest row above it in the first
+  // page's rank that is held or is itself an arrival (arrivals are in that
+  // rank). One pass over the rank finds every anchor.
+  const members = new Set([...state.rows, ...state.arrivals].map((row) => row.ref));
+  const arrivalByRef = new Map(state.arrivals.map((row) => [row.ref, row]));
+  const placed = new Set<string>();
+  const after = new Map<string, Row>();
+  const top: Row[] = [];
+  let anchor: string | undefined;
+  for (const ref of state.firstPageRefs) {
+    const arrival = arrivalByRef.get(ref);
+    if (arrival !== undefined) {
+      placed.add(ref);
+      if (anchor === undefined) top.push(arrival);
+      else after.set(anchor, arrival);
     }
-    rows.splice(at, 0, arrival);
+    if (members.has(ref)) anchor = ref;
   }
+  // An arrival missing from the rank cannot be placed; it goes to the top.
+  for (const arrival of state.arrivals) if (!placed.has(arrival.ref)) top.push(arrival);
+  const rows: Row[] = [];
+  const emit = (row: Row) => {
+    rows.push(row);
+    const next = after.get(row.ref);
+    if (next !== undefined) emit(next);
+  };
+  for (const row of top) emit(row);
+  for (const row of state.rows) emit(row);
   const shown = new Set(state.arrivals.map((row) => row.ref));
   const first = rows.find((row) => shown.has(row.ref));
   return { ...withRows({ ...state, arrivals: [] }, rows), current: first?.ref ?? state.current };
@@ -203,52 +246,60 @@ export function applyInboxMove<Row extends InboxListRow>(
   handledRefs: readonly string[],
   { leavesList }: { readonly leavesList: boolean },
 ): InboxListState<Row> {
+  const isHandled = new Set(handledRefs);
+  const handled = new Map(state.handled);
+  state.rows.forEach((row, index) => {
+    if (isHandled.has(row.ref)) handled.set(row.ref, { row, index, awaitingServer: leavesList });
+  });
   if (leavesList) {
-    const handled = new Map(state.handled);
-    state.rows.forEach((row, index) => {
-      if (handledRefs.includes(row.ref)) handled.set(row.ref, { row, index, awaitingServer: true });
-    });
     return withRows(
       { ...state, handled },
-      state.rows.filter((row) => !handledRefs.includes(row.ref)),
+      state.rows.filter((row) => !isHandled.has(row.ref)),
     );
   }
   const refs = state.rows.map((row) => row.ref);
   const at = state.current === null ? -1 : refs.indexOf(state.current);
-  const isHandled = (ref: string) => handledRefs.includes(ref);
   const current =
-    at < 0 || !isHandled(state.current!)
+    at < 0 || !isHandled.has(state.current!)
       ? state.current
-      : ([...refs.slice(at + 1), ...refs.slice(0, at).reverse()].find((ref) => !isHandled(ref)) ??
-        state.current);
+      : ([...refs.slice(at + 1), ...refs.slice(0, at).reverse()].find(
+          (ref) => !isHandled.has(ref),
+        ) ?? state.current);
   return {
     ...state,
+    handled,
     current,
-    selection: new Set([...state.selection].filter((ref) => !isHandled(ref))),
-    anchor: state.anchor !== null && isHandled(state.anchor) ? null : state.anchor,
+    selection: new Set([...state.selection].filter((ref) => !isHandled.has(ref))),
+    anchor: state.anchor !== null && isHandled.has(state.anchor) ? null : state.anchor,
   };
 }
 
 /**
  * Takes a move back and makes the topmost of its rows current. Rows that left
- * the list are put back at their old positions; rows that stayed are only made
- * current. Refs the list never held are ignored.
+ * the list are put back at their old positions; rows that stayed, or came back
+ * on their own since, are only made current, never added twice. Refs the list
+ * never held are ignored. The restored rows survive the next refresh even if
+ * it was read before the undo (see `restored`).
  */
 export function undoInboxMove<Row extends InboxListRow>(
   state: InboxListState<Row>,
   restoredRefs: readonly string[],
 ): InboxListState<Row> {
+  const held = new Set(state.rows.map((row) => row.ref));
   const entries = restoredRefs
     .flatMap((ref) => state.handled.get(ref) ?? [])
     .sort((a, b) => a.index - b.index);
   const rows = [...state.rows];
-  for (const { row, index } of entries) rows.splice(Math.min(index, rows.length), 0, row);
+  for (const { row, index } of entries) {
+    if (!held.has(row.ref)) rows.splice(Math.min(index, rows.length), 0, row);
+  }
   const handled = new Map(state.handled);
   for (const { row } of entries) handled.delete(row.ref);
   const wanted = new Set(restoredRefs);
   const topmost = rows.find((row) => wanted.has(row.ref));
   if (topmost === undefined) return state;
-  return { ...withRows({ ...state, handled }, rows), current: topmost.ref };
+  const restored = new Set(rows.filter((row) => wanted.has(row.ref)).map((row) => row.ref));
+  return { ...withRows({ ...state, handled, restored }, rows), current: topmost.ref };
 }
 
 /**

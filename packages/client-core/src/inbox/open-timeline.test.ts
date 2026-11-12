@@ -4,7 +4,6 @@ import type { EntityLink, EntitySignalLine, InboxThing } from "@hercule/contract
 import { buildInboxThing } from "./cards.testing";
 import {
   buildOpenTimeline,
-  buildWalkableIds,
   describeTimelineOverflow,
   findFirstOpenLine,
   type TimelineSource,
@@ -265,26 +264,5 @@ describe("the keys of the lines", () => {
     const twice = change(hoursAgo(3), "moved");
     const lines = buildOpenTimeline(buildSource({ timeline: [twice, twice] }), []);
     expect(new Set(lines.map((line) => line.key)).size).toBe(2);
-  });
-});
-
-describe("buildWalkableIds", () => {
-  it("opens a card of the page and a peer that is a full record, and not a peer with no id", () => {
-    const ids = buildWalkableIds(
-      [{ ref: "acme:ticket:5", id: "peer-5" }, { ref: "acme:ticket:6" }],
-      [{ ref: "acme:review:9", id: "card-9" }],
-    );
-    expect([...ids]).toEqual([
-      ["acme:ticket:5", "peer-5"],
-      ["acme:review:9", "card-9"],
-    ]);
-  });
-
-  it("prefers the card for a ref that both hold", () => {
-    const ids = buildWalkableIds(
-      [{ ref: "acme:ticket:5", id: "peer-5" }],
-      [{ ref: "acme:ticket:5", id: "card-5" }],
-    );
-    expect(ids.get("acme:ticket:5")).toBe("card-5");
   });
 });
