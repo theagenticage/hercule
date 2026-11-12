@@ -313,7 +313,7 @@ export function printFrames(name: string, frames: Awaited<ReturnType<typeof trac
 }
 
 /** An expression that is true in the page once the Inbox has drawn its frame. */
-const INBOX_DRAWN = `document.querySelector(".inbox-frame") !== null`;
+const INBOX_DRAWN = `document.querySelector(".ib") !== null`;
 
 /**
  * Measures the Inbox (see the top of this file): writes the world, then

@@ -339,8 +339,11 @@ describe("the controls that float over a screen", () => {
       path: "/inbox",
     });
     await screen.findByRole("heading", { name: "Inbox" });
-    expect(document.querySelector(".inbox-frame .desk-toolbar")).not.toBeNull();
-    expect(findDraggableControls(".inbox-frame", ".inbox-page"), HOW_TO_FIX).toEqual([]);
+    expect(document.querySelector(".ib .ib-bar")).not.toBeNull();
+    expect(
+      findDraggableControls(".ib", ".ib-rail, .ib-list, .ib-edge, .ib-pane"),
+      HOW_TO_FIX,
+    ).toEqual([]);
   });
 
   it("are no part of the drag strip in an opened sheet, which can reach the top of the window", () => {
