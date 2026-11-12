@@ -361,7 +361,7 @@ export const CLI = {
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults (thread.providerAccountId, thread.harnessId, thread.model and the like), the default GitHub account (github.defaultConnectionId), mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults (thread.providerAccountId, thread.harnessId, thread.model and the like), the default GitHub account (github.defaultConnectionId), mutes, the Inbox rail's pins (inbox.pins) and folded sources (inbox.browseFolded).",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

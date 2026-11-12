@@ -142,6 +142,15 @@ export {
 } from "./contributions";
 
 export {
+  CORE_INBOX_FIELD_KEYS,
+  InboxClause,
+  MAX_SAVED_QUERIES_PER_PLUGIN,
+  MAX_SAVED_QUERY_CLAUSES,
+  SavedQuery,
+  type CoreInboxFieldKey,
+} from "./saved-queries";
+
+export {
   AccountKind,
   AccountSetupStep,
   AccountUsageDeclaration,

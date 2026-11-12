@@ -38,6 +38,7 @@ export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";
 export { BUILD_TIMEOUT_SECONDS, signalBuilds } from "./signal-build";
+export type { RegisteredSavedQuery } from "./saved-queries";
 export type { RegisteredSignalKind } from "./signal-kinds";
 export { pluginRepository, type CatalogEntityKind } from "./repository";
 export { registry } from "./registry";
