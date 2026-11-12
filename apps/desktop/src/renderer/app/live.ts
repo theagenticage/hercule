@@ -92,9 +92,9 @@ const invalidateLegReads = (
  * The first segments of the keys whose reads are large and that several pushes
  * of one change all name: the Inbox's outline, the sidebar's counts, and the
  * entity panes. A signal's change pushes `signal`, then
- * `externalEntity`. A push that arrives while one of their reads is running
- * cancels it and reads again, so the read always starts after the push and
- * the list never misses a change.
+ * `externalEntity`, and a first push on each of five subscribed topics names
+ * them all. `invalidateForPush` reads each of these keys once for the pushes
+ * that arrive within `SHARED_READ_WINDOW_MS`, see `queueSharedReads`.
  */
 const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.inbox()[0],
@@ -102,12 +102,62 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.externalEntity()[0],
 ] as string[]);
 
+/**
+ * How long the pushes that name a shared read's key are gathered before the
+ * read starts. One change is announced on several topics in a row, and the
+ * controller answers a new connection with a first push on every topic, so
+ * without a wait each push would cancel the read of the one before and send
+ * its request again: a page reload read the Inbox six times.
+ *
+ * A change is always followed by a read that starts after its push arrived:
+ * the read starts when the window ends, and a push that arrives after that
+ * opens a window of its own, which ends in another read. A push never joins a
+ * read that is already running, because that read may have been answered
+ * before the change the push reports.
+ */
+const SHARED_READ_WINDOW_MS = 50;
+
 /** Who listens for the Inbox's pushes, by the query client the pushes reach. */
 const inboxPushListeners = new WeakMap<QueryClient, Set<() => void>>();
 
+/** What the pushes of one window have named, by the query client they reached. */
+interface GatheredPushes {
+  readonly keys: Map<string, LiveQueryKey>;
+  namesInbox: boolean;
+}
+const gatheredPushes = new WeakMap<QueryClient, GatheredPushes>();
+
 /**
- * Calls `listener` once for each push that names the Inbox's keys, on any
- * topic, as the shell and the screens deliver them to `invalidateForPush`.
+ * Remembers that `keys` need a read, and starts one read of each, and one
+ * call of each Inbox listener, when the window of `SHARED_READ_WINDOW_MS` that
+ * the first push opened ends.
+ */
+const queueSharedReads = (queryClient: QueryClient, keys: ReadonlyArray<LiveQueryKey>): void => {
+  let gathered = gatheredPushes.get(queryClient);
+  if (gathered === undefined) {
+    const opened: GatheredPushes = { keys: new Map(), namesInbox: false };
+    gathered = opened;
+    gatheredPushes.set(queryClient, opened);
+    setTimeout(() => {
+      gatheredPushes.delete(queryClient);
+      if (opened.namesInbox) {
+        for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener();
+      }
+      for (const queryKey of opened.keys.values()) {
+        void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
+      }
+    }, SHARED_READ_WINDOW_MS);
+  }
+  for (const queryKey of keys) {
+    gathered.keys.set(JSON.stringify(queryKey), queryKey);
+    if (queryKey[0] === queryKeys.inbox()[0]) gathered.namesInbox = true;
+  }
+};
+
+/**
+ * Calls `listener` once for the pushes that name the Inbox's keys within one
+ * window (`SHARED_READ_WINDOW_MS`), on any topic, as the shell and the screens
+ * deliver them to `invalidateForPush`.
  * Returns a function that stops. The Inbox visit listens through this
  * instead of subscribing to topics itself: a new subscription is answered
  * with a first push that would read the list again right after it opened.
@@ -155,13 +205,10 @@ export const invalidateForPush = (
   keys: ReadonlyArray<LiveQueryKey>,
   push: LiveInvalidatePush,
 ): void => {
-  if (keys.some((queryKey) => queryKey[0] === queryKeys.inbox()[0])) {
-    for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener();
-  }
+  const sharedKeys = keys.filter((queryKey) => SHARED_READ_KEYS.has(queryKey[0] as string));
+  if (sharedKeys.length > 0) queueSharedReads(queryClient, sharedKeys);
   for (const queryKey of keys) {
-    if (SHARED_READ_KEYS.has(queryKey[0] as string)) {
-      void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
-    } else {
+    if (!SHARED_READ_KEYS.has(queryKey[0] as string)) {
       invalidateWithoutCancelling(queryClient, queryKey);
     }
   }
