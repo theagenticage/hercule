@@ -37,8 +37,10 @@ afterEach(() => {
 /** Renders a frame with filled slots; `props` replace the defaults. */
 function renderFrame(props: Partial<ComponentProps<typeof InboxFrame>> = {}): {
   readonly frame: HTMLElement;
+  /** Renders the same frame again with `more` laid over its props. */
+  readonly rerender: (more: Partial<ComponentProps<typeof InboxFrame>>) => void;
 } {
-  const element: JSX.Element = (
+  const buildElement = (given: Partial<ComponentProps<typeof InboxFrame>>): JSX.Element => (
     <InboxFrame
       rail={
         <>
@@ -64,11 +66,16 @@ function renderFrame(props: Partial<ComponentProps<typeof InboxFrame>> = {}): {
       onOpenIntake={vi.fn()}
       onOpenKeys={vi.fn()}
       isKeysOpen={false}
-      {...props}
+      {...given}
     />
   );
-  const { container } = render(element);
-  return { frame: container.firstElementChild as HTMLElement };
+  const { container, rerender } = render(buildElement(props));
+  return {
+    frame: container.firstElementChild as HTMLElement,
+    rerender: (more) => {
+      rerender(buildElement({ ...props, ...more }));
+    },
+  };
 }
 
 describe("InboxFrame layout", () => {
@@ -269,6 +276,32 @@ describe("InboxFrame stacked pane", () => {
     const { frame } = renderFrame({ isPaneOpen: false });
     reportWidth(759);
     expect(frame.querySelector("#inbox-pane")?.hasAttribute("inert")).toBe(true);
+  });
+
+  it("hides the closed pane when its slide ends, and shows it again before it opens", () => {
+    document.documentElement.style.setProperty("--dur-2", "200ms");
+    const { frame, rerender } = renderFrame({ isPaneOpen: true });
+    reportWidth(759);
+    const pane = frame.querySelector("#inbox-pane")!;
+
+    rerender({ isPaneOpen: false });
+    // Sliding out: the pane stays drawn so the slide can be seen, whatever else finishes.
+    fireEvent.transitionEnd(pane, { propertyName: "box-shadow" });
+    expect(pane.classList.contains("is-away")).toBe(false);
+    fireEvent.transitionEnd(pane, { propertyName: "transform" });
+    expect(pane.classList.contains("is-away")).toBe(true);
+
+    rerender({ isPaneOpen: true });
+    expect(pane.classList.contains("is-away")).toBe(false);
+    fireEvent.transitionEnd(pane, { propertyName: "transform" });
+    expect(pane.classList.contains("is-away")).toBe(false);
+  });
+
+  it("hides the closed pane at once under reduced motion", () => {
+    const { frame } = renderFrame({ isPaneOpen: false });
+    reportWidth(759);
+
+    expect(frame.querySelector("#inbox-pane")?.classList.contains("is-away")).toBe(true);
   });
 
   it("calls onClosePane for Esc in the pane and for the List button", async () => {

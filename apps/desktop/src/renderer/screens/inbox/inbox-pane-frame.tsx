@@ -1,5 +1,6 @@
-import type { JSX, KeyboardEvent, ReactNode, RefObject } from "react";
+import { useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { joinClassNames } from "../../app/join-class-names";
+import { isMotionReduced } from "../../app/motion";
 import { CheckIcon } from "../../icons/check";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { MoreIcon } from "../../icons/more";
@@ -46,6 +47,10 @@ const MENU_WIDTHS: ReadonlyArray<{ readonly name: string; readonly width: number
  * - `isStacked` is true while the pane lies over the list. There it has no
  *   edge and no width menu, `isOpen` says whether it is slid in, and Esc or
  *   the "List" button call `onClose`.
+ *   A closed pane slides out first and is hidden when the slide ends (its
+ *   `transform` transition's `transitionend`), or at once under Reduce motion,
+ *   so the text waiting beyond the frame's edge is neither found by a search
+ *   nor counted as cut off.
  * - `isShown` is false while the pane steps aside: it is inert then.
  * - `onOpenAtSource`, when given, adds "Open at its source" to the menu.
  * - `paneRef` is the pane's element, which the frame fades.
@@ -90,6 +95,11 @@ export function InboxPaneFrame({
     onCommit: onWidthChange,
   });
   const menu = usePopoverMenu();
+  const isClosedStacked = isStacked && !isOpen;
+  const [hasSlidOut, setHasSlidOut] = useState(false);
+  // Opening, or leaving the stacked layout, brings the pane back before it moves.
+  if (!isClosedStacked && hasSlidOut) setHasSlidOut(false);
+  const isAway = isClosedStacked && (hasSlidOut || isMotionReduced());
 
   const closeOnEscape = (event: KeyboardEvent<HTMLElement>): void => {
     // A menu open in the pane takes Esc for itself.
@@ -109,10 +119,22 @@ export function InboxPaneFrame({
       <aside
         ref={paneRef}
         id={INBOX_PANE_ID}
-        className={joinClassNames("ib-pane", isStacked && "is-stacked", isOpen && "is-open")}
+        className={joinClassNames(
+          "ib-pane",
+          isStacked && "is-stacked",
+          isOpen && "is-open",
+          isAway && "is-away",
+        )}
         aria-label="The open thing"
         inert={!isShown || (isStacked && !isOpen)}
         onKeyDown={closeOnEscape}
+        onTransitionEnd={(event) => {
+          const isTheSlide =
+            event.target === event.currentTarget && event.propertyName === "transform";
+          if (isTheSlide && isClosedStacked) {
+            setHasSlidOut(true);
+          }
+        }}
       >
         {hasHead && (
           <header className="ib-pane-head">
