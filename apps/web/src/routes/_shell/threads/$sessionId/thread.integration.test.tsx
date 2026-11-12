@@ -1440,11 +1440,13 @@ describe("Thread: token tap", () => {
     });
 
     // No row will ever take this text from the tail, so it must not stay painted.
+    // The tap is unsubscribed in an effect cleanup that runs after the render
+    // that clears the text, so the topics are awaited too.
     await waitFor(() => {
       expect(screen.queryByText("half a paragraph")).toBeNull();
+      expect(live.topics()).not.toContain(TAP);
+      expect(live.topics()).not.toContain(STREAM);
     });
-    expect(live.topics()).not.toContain(TAP);
-    expect(live.topics()).not.toContain(STREAM);
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
