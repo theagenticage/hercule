@@ -2,7 +2,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { InboxClause } from "@hercule/client-core/inbox";
+import type { InboxClause } from "@hercule/contract";
 import { InboxNarrowMenu, type NarrowFacet } from "./inbox-narrow-menu";
 
 const FACETS: NarrowFacet[] = [

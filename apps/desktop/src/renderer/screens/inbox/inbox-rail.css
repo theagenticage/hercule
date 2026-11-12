@@ -1,24 +1,11 @@
 /* The Inbox's rail. Rows sit on the sidebar's rhythm: 30px, the icon column 16px, the name at 34px
    from the row's edge, counts at the end in tabular figures. Groups are told apart by space. */
 .ib-rail {
-  /* Project health: a shape and a colour, so it reads in grey too. At risk has a hue of its own,
-     between tomato and marigold, so it is never read as either. */
-  --health-on: var(--ok);
-  --health-risk: oklch(0.56 0.15 48);
-  --health-off: var(--fail-ink);
-
   min-height: 0;
   overflow-y: auto;
   padding: 9px 10px 32px 14px;
   border-right: 1px solid var(--divider);
   scrollbar-width: thin;
-}
-[data-theme="orient-express"] .ib-rail,
-[data-theme="dark"] .ib-rail,
-[data-theme="nile"] .ib-rail,
-[data-theme="end-house"] .ib-rail,
-[data-theme="blue-train"] .ib-rail {
-  --health-risk: oklch(0.78 0.13 50);
 }
 .ib-rail [hidden] {
   display: none;

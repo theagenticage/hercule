@@ -12,11 +12,12 @@
 
   /* A row is two lines, 18 and 16, with 2 between and 8 above and below: 52px. Text size steps add
      to each line, so a larger setting never clips a row. */
-  --row-h: calc(52px + 2 * var(--text-size-step));
+  --row-h: var(--list-height-two-line-row);
   --row-pad-x: 12px;
   --row-r: 10px;
   --row-gap: 12px; /* lead column to text */
   --list-pad: 12px; /* list edge to a row's box */
+  --list-ground: var(--bg); /* what the list sits on */
 
   /* The knock-out inside a filled glyph (a check, a cross): the ground the row sits on. */
   --glyph-knock: var(--bg);

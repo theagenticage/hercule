@@ -3,9 +3,9 @@ import { createRef, useState, type JSX } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { InboxClause } from "@hercule/contract";
 import {
   EMPTY_INBOX_SEARCH,
-  type InboxClause,
   type InboxField,
   type InboxSearch,
   type InboxSearchContext,

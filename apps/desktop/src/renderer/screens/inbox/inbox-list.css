@@ -4,19 +4,9 @@
    shape), the right column the wait over where the thing lives. The title is the only
    medium weight; everything else steps back. */
 
-/* What the list adds to the app's tokens. A row is two lines, 18 and 16 with 2 between
-   and 8 above and below; the Text size adds to each line, so a larger setting never
-   clips a row. `--ib-ground` is the colour the list sits on: rows that move carry it,
-   so they cover what they pass. */
-.ib-head,
-.ib-list {
-  --ib-row-h: var(--list-height-two-line-row);
-  --ib-row-pad-x: 12px;
-  --ib-row-r: 10px;
-  --ib-row-gap: 12px;
-  --ib-list-pad: 12px;
-  --ib-ground: var(--bg);
-}
+/* The list's sizes (`--row-h`, `--row-pad-x`, `--row-r`, `--row-gap`, `--list-pad`) and its
+   ground (`--list-ground`, the colour rows that move carry, so they cover what they pass) are
+   the Inbox frame's tokens, defined once on `.ib`. */
 
 /* ---- The head: what the list is, how many, in what order, and Narrow ---- */
 .ib-head {
@@ -26,7 +16,7 @@
   justify-content: space-between;
   gap: 12px;
   height: 48px;
-  padding: 0 calc(var(--ib-list-pad) + var(--ib-row-pad-x));
+  padding: 0 calc(var(--list-pad) + var(--row-pad-x));
 }
 .ib-head-title {
   display: flex;
@@ -181,14 +171,14 @@
   overflow-y: auto;
 }
 .ib-lines {
-  padding: 0 var(--ib-list-pad);
+  padding: 0 var(--list-pad);
 }
 .ib-fade {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  background: linear-gradient(to bottom, transparent, var(--ib-ground));
+  background: linear-gradient(to bottom, transparent, var(--list-ground));
   pointer-events: none;
 }
 
@@ -202,20 +192,20 @@
 }
 .ib-row {
   --ib-fill: transparent;
-  --ib-solid: var(--ib-ground);
+  --ib-solid: var(--list-ground);
   position: relative;
   z-index: 1;
   display: grid;
   flex: none;
   grid-template-columns: 16px minmax(0, 1fr);
   grid-template-rows: var(--line-18) var(--line-16);
-  column-gap: var(--ib-row-gap);
+  column-gap: var(--row-gap);
   row-gap: 2px;
   align-content: center;
   align-items: center;
-  height: var(--ib-row-h);
-  padding: 0 var(--ib-row-pad-x);
-  border-radius: var(--ib-row-r);
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  border-radius: var(--row-r);
   background: var(--ib-fill);
   cursor: default;
   user-select: none;
@@ -223,12 +213,12 @@
 }
 .ib-row:hover {
   --ib-fill: var(--hover);
-  --ib-solid: color-mix(in oklab, var(--ink) 5%, var(--ib-ground));
+  --ib-solid: color-mix(in oklab, var(--ink) 5%, var(--list-ground));
 }
 /* The current row's fill is the puck under the list: it stays where it is while rows move into it. */
 .ib-row.is-current {
   --ib-fill: transparent;
-  --ib-solid: color-mix(in oklab, var(--ink) 7%, var(--ib-ground));
+  --ib-solid: color-mix(in oklab, var(--ink) 7%, var(--list-ground));
 }
 .ib-puck {
   position: absolute;
@@ -236,8 +226,8 @@
   top: 0;
   right: 0;
   left: 0;
-  height: var(--ib-row-h);
-  border-radius: var(--ib-row-r);
+  height: var(--row-h);
+  border-radius: var(--row-r);
   background: var(--selected);
   pointer-events: none;
 }
@@ -264,7 +254,7 @@
    (the copies of rows that left, the puck). A moving current row carries the puck's edge too. */
 .ib-row.is-moving {
   z-index: 2;
-  background: linear-gradient(var(--ib-fill), var(--ib-fill)), var(--ib-ground);
+  background: linear-gradient(var(--ib-fill), var(--ib-fill)), var(--list-ground);
 }
 .ib-row.is-moving.is-current {
   z-index: 3;
@@ -275,7 +265,7 @@
       )
       3px 50% / 2px calc(100% - 28px) no-repeat,
     linear-gradient(var(--selected), var(--selected)),
-    var(--ib-ground);
+    var(--list-ground);
 }
 /* A row that came back lies under the list, like a drawer's members: the moving rows pass over it. */
 .ib-row.is-under {

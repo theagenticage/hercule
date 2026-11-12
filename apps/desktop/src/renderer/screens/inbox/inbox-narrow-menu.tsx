@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import type { InboxClause } from "@hercule/client-core/inbox";
+import type { InboxClause } from "@hercule/contract";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";

@@ -1,7 +1,6 @@
 /* The Inbox's states: empty, the sunrise, loading, offline and a source that can't be
    read. The numbers are the drawing's (states.css). The list's own sizes (`--row-h`,
-   `--row-gap`, `--row-pad-x`, `--list-pad`) come from the Inbox frame; the fallbacks are
-   the drawing's values for a frame that does not define them. */
+   `--row-gap`, `--row-pad-x`, `--list-pad`) are the Inbox frame's tokens. */
 
 /* ---------- Empty ---------- */
 .ib-empty {
@@ -148,11 +147,11 @@
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) 28px;
   grid-template-rows: var(--line-18) var(--line-16);
-  column-gap: var(--row-gap, 12px);
+  column-gap: var(--row-gap);
   row-gap: 2px;
   align-items: center;
-  height: var(--row-h, 52px);
-  padding: 0 var(--row-pad-x, 12px);
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
 }
 .ib-skel i {
   display: block;
@@ -223,7 +222,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 0 var(--list-pad, 12px) 8px;
+  margin: 0 var(--list-pad) 8px;
   padding: 8px 12px;
   border-radius: var(--r-sm);
   background: var(--fail-tint);

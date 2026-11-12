@@ -1,6 +1,6 @@
 /* The Inbox search field, over the list's column: the drawing's `.sx` (`docs/design/inbox-list/css/frame.css`
    on the branch `prototype/inbox-list-hifi`) on the app's tokens. It sits in the list column's bar slot, so
-   its margin is the list's edge, `--list-pad`, which the list column defines. */
+   its margin is the list's edge, `--list-pad`, which the Inbox frame defines. */
 .ib-sx {
   position: relative;
   min-width: 0;
@@ -8,7 +8,7 @@
   align-items: center;
   gap: 6px;
   height: 36px;
-  margin: 0 var(--list-pad, 12px);
+  margin: 0 var(--list-pad);
   padding: 0 6px 0 12px;
   border-radius: var(--r-md);
   background: var(--glass-fill);
