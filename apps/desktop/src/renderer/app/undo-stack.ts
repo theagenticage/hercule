@@ -70,6 +70,20 @@ export interface Gesture<Page> {
    * user makes after Undo is sent after the inverse. The stack just awaits it.
    */
   readonly undo: (page: Page) => Promise<string | UndoAnswer | undefined>;
+  /**
+   * Tells the gesture whether the user is on the undo line that shows it
+   * (pointer or focus). A gesture that waits to be sent keeps waiting while
+   * `isHeld` is true.
+   */
+  readonly hold?: (isHeld: boolean) => void;
+  /**
+   * For a gesture that waits before it acts: the undo line stays up while it
+   * waits, and shows no countdown of its own. Resolves when the wait ends,
+   * with the words the line shows from then on (and without Undo), or with
+   * `undefined` when the gesture stopped waiting for another reason
+   * (cancelled or failed) and the line should end on its own timer.
+   */
+  readonly settled?: Promise<string | undefined>;
 }
 
 /**

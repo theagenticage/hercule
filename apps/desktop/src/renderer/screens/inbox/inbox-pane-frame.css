@@ -60,7 +60,11 @@
   margin-left: -10px;
   color: var(--muted);
 }
-.ib-pane-more {
+.ib-pane-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
   margin-right: -6px;
 }
 .ib-pane-body {

@@ -19,6 +19,7 @@ export { deriveCatalogJsonSchema } from "./json-schema";
 export {
   EntityLookups,
   EntityLookupsLayer,
+  type BlocksOutcome,
   type DecidedResolution,
   type LookupObservation,
   type SearchOutcome,

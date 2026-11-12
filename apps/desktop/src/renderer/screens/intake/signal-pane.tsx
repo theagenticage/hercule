@@ -420,7 +420,7 @@ function SignalDetail({
             {snoozeLine}
           </p>
         )}
-        <SignalBlocks blocks={signal.blocks} task={signal.task} timezone={timezone} />
+        <SignalBlocks blocks={signal.blocks} task={signal.task} timezone={timezone} now={now} />
         <YourWorkBlocks items={yourWork} onShowInTracking={onShowInTracking} />
         {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
         {notScreened !== null && <p className="ad-flag">{notScreened}</p>}

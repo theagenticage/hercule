@@ -32,7 +32,11 @@ const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
  * or a pull request, in bold. An action with no describe line shows its
  * description, or nothing.
  */
-function DescribeLineText({ action }: { readonly action: SignalAction }): JSX.Element | null {
+export function DescribeLineText({
+  action,
+}: {
+  readonly action: SignalAction;
+}): JSX.Element | null {
   const line: DescribeLine | undefined = action.describeLine;
   if (line === undefined)
     return action.description === undefined ? null : <>{action.description}</>;

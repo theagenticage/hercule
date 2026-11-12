@@ -81,7 +81,7 @@ import {
   type SortTuple,
   type SqlValue,
 } from "./inbox-relation";
-import { findSavedQuery, listSavedQueries } from "./saved-queries";
+import { findSavedQuery, listQuerySignalKinds, listSavedQueries } from "./saved-queries";
 import { buildSignalSay } from "./signal-lines";
 import { buildWorkflowOfferTarget, makeEntityRowReads } from "./entity-reads";
 import { makeWorkflowOfferReads } from "./workflow-offer-reads";
@@ -1050,6 +1050,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           name: query.name,
           order: query.order,
           ...(query.source === undefined ? {} : { source: query.source }),
+          signalKinds: listQuerySignalKinds(query),
           count: readCountColumn(index),
         })),
         sources: sourceIds.map((source) => {

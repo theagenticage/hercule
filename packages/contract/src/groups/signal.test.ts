@@ -5,6 +5,9 @@ import { MAX_BOUND_INPUT_BYTES } from "./notification";
 import {
   Block,
   MAX_CHECK_LOG_LINES,
+  MAX_CODE_LINES,
+  MAX_FIELD_ROWS,
+  MAX_TREND_POINTS,
   MAX_SIGNAL_BLOCKS,
   MAX_SIGNAL_BYTES,
   MAX_TEXT_BLOCK_LENGTH,
@@ -57,6 +60,70 @@ describe("a block", () => {
         message: `The log has more than ${MAX_CHECK_LOG_LINES} lines. Keep its last ${MAX_CHECK_LOG_LINES} lines.`,
       },
       { path: ["type"], message: "The checks block does not fit its schema." },
+    ]);
+  });
+});
+
+describe("the fields, trend and code blocks", () => {
+  const encodeBlock = Schema.encodeUnknownSync(Block);
+  const decodeBlock = Schema.decodeUnknownSync(Block);
+  const POINT = { at: "2026-11-10T00:00:00.000Z", value: 3 };
+
+  it.each([
+    { type: "fields", title: "Details", rows: [{ label: "Branch", value: "main" }] },
+    { type: "trend", caption: "Events", points: [POINT, { ...POINT, value: 0 }] },
+    { type: "code", title: "Stack", text: "a\nb", truncated: true },
+  ])("keeps every field of a $type block through encode and decode", (block) => {
+    expect(encodeBlock(decodeBlock(block))).toEqual(block);
+  });
+
+  it("refuses a fields block with no rows or too many", () => {
+    const row = { label: "a", value: "b" };
+    expect(listIssues(Block, { type: "fields", rows: [] }).length).toBeGreaterThan(0);
+    expect(
+      listIssues(Block, {
+        type: "fields",
+        rows: Array.from({ length: MAX_FIELD_ROWS + 1 }, () => row),
+      }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      listIssues(Block, { type: "fields", rows: [{ label: "x".repeat(41), value: "b" }] }),
+    ).not.toEqual([]);
+    expect(
+      listIssues(Block, { type: "fields", rows: [{ label: "a", value: "x".repeat(201) }] }),
+    ).not.toEqual([]);
+  });
+
+  it("refuses a trend with fewer than two points, too many, or a negative or infinite value", () => {
+    expect(listIssues(Block, { type: "trend", caption: "c", points: [POINT] })).not.toEqual([]);
+    expect(
+      listIssues(Block, {
+        type: "trend",
+        caption: "c",
+        points: Array.from({ length: MAX_TREND_POINTS + 1 }, () => POINT),
+      }),
+    ).not.toEqual([]);
+    expect(
+      listIssues(Block, { type: "trend", caption: "c", points: [POINT, { ...POINT, value: -1 }] }),
+    ).not.toEqual([]);
+    expect(
+      listIssues(Block, {
+        type: "trend",
+        caption: "c",
+        points: [POINT, { ...POINT, value: Number.POSITIVE_INFINITY }],
+      }),
+    ).not.toEqual([]);
+  });
+
+  it("refuses a code block with more lines than its limit, and reports it as a known type", () => {
+    const text = Array.from({ length: MAX_CODE_LINES + 1 }, () => "x").join("\n");
+    const issues = listIssues(Block, { type: "code", text });
+    expect(issues).toEqual([
+      {
+        path: ["text"],
+        message: `The text has more than ${MAX_CODE_LINES} lines. Keep at most ${MAX_CODE_LINES} lines.`,
+      },
+      { path: ["type"], message: "The code block does not fit its schema." },
     ]);
   });
 });

@@ -14,6 +14,7 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  type EntityBlockDraft,
   type EntityLookup,
   type EntityLookupContext,
   type EntityObservation,
@@ -46,6 +47,7 @@ interface FakeLookup {
   recognizeThrows: boolean;
   search: Behavior<ReadonlyArray<EntityObservation>>;
   resolve: Behavior<EntityResolution>;
+  readBlocks: Behavior<ReadonlyArray<EntityBlockDraft>>;
 }
 
 const buildObservation = (ref: string): EntityObservation => ({
@@ -59,7 +61,8 @@ const buildObservation = (ref: string): EntityObservation => ({
   sourceUpdatedAt: "2026-01-01T00:00:00Z",
 });
 
-const buildFakeLookup = (): FakeLookup => {
+/** Builds a lookup that records its calls. `withReadBlocks` false leaves out the optional `readBlocks` hook. */
+const buildFakeLookup = (withReadBlocks = true): FakeLookup => {
   const fake: FakeLookup = {
     calls: [],
     targets: [],
@@ -68,6 +71,7 @@ const buildFakeLookup = (): FakeLookup => {
     recognizeThrows: false,
     search: () => Effect.succeed([]),
     resolve: () => Effect.succeed({ missing: "unknown" }),
+    readBlocks: () => Effect.succeed([]),
     lookup: {
       recognize: () => {
         if (fake.recognizeThrows) throw new Error("boom");
@@ -85,6 +89,15 @@ const buildFakeLookup = (): FakeLookup => {
           fake.targets.push(target);
           return fake.resolve(connection.accountId);
         }),
+      ...(withReadBlocks
+        ? {
+            readBlocks: (connection: IngestConnection) =>
+              Effect.suspend(() => {
+                fake.calls.push(connection.accountId);
+                return fake.readBlocks(connection.accountId);
+              }),
+          }
+        : {}),
     },
   };
   return fake;
@@ -166,10 +179,11 @@ const runWith = <A>(
     fake: FakeLookup,
     lookups: EntityLookups["Service"],
   ) => Effect.Effect<A, never, SqlClient.SqlClient | Plugins | Secrets>,
+  withReadBlocks = true,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const fake = buildFakeLookup();
+      const fake = buildFakeLookup(withReadBlocks);
       const host = yield* PluginHost;
       yield* host.boot([buildLookupPlugin("tracker", fake.lookup)]);
       for (const [index, account] of accounts.entries()) {
@@ -475,6 +489,102 @@ describe("resolve", () => {
       }),
     );
     expect(answer).toEqual({ unavailable: true });
+  });
+});
+
+describe("readBlocks", () => {
+  const BLOCK: EntityBlockDraft = { type: "text", markdown: "hello" };
+
+  it("answers no blocks, and asks no Connection, for a plugin whose lookup has no readBlocks", async () => {
+    const { answer, calls } = await runWith(
+      ["a"],
+      (fake, lookups) =>
+        Effect.map(lookups.readBlocks("tracker", "tracker:ticket:1", []), (answer) => ({
+          answer,
+          calls: fake.calls,
+        })),
+      false,
+    );
+    expect(answer).toEqual({ blocks: [] });
+    expect(calls).toEqual([]);
+  });
+
+  it("reads from the first Connection that answers, oldest first, and an empty list is an answer", async () => {
+    const { answer, calls } = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.readBlocks = (account) =>
+          account === "a" ? Effect.succeed([]) : Effect.succeed([BLOCK]);
+        return {
+          answer: yield* lookups.readBlocks("tracker", "tracker:ticket:1", []),
+          calls: fake.calls,
+        };
+      }),
+    );
+    expect(answer).toEqual({ blocks: [] });
+    expect(calls).toEqual(["a"]);
+  });
+
+  it("goes on to the next Connection when one fails, and never resolves the thing first", async () => {
+    const { answer, calls, resolved } = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.readBlocks = (account) =>
+          account === "a"
+            ? Effect.fail(new AuthError({ message: "rejected" }))
+            : Effect.succeed([BLOCK]);
+        const answer = yield* lookups.readBlocks("tracker", "tracker:ticket:1", []);
+        return { answer, calls: fake.calls, resolved: fake.targets };
+      }),
+    );
+    expect(answer).toEqual({ blocks: [BLOCK] });
+    expect(calls).toEqual(["a", "b"]);
+    expect(resolved).toEqual([]);
+  });
+
+  it("asks a Connection that observed the thing before an older one that did not", async () => {
+    const calls = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        const connections = yield* connectionRepository;
+        const newer = (yield* Effect.orDie(connections.ofPlugin("tracker"))).find(
+          (connection) => connection.accountId === "b",
+        )!;
+        yield* lookups.readBlocks("tracker", "tracker:ticket:1", [newer.id]);
+        return fake.calls;
+      }),
+    );
+    expect(calls).toEqual(["b"]);
+  });
+
+  it("is unreadable when every asked Connection fails, at most 3 of them, or none is eligible", async () => {
+    const { answer, calls } = await runWith(["a", "b", "c", "d"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.readBlocks = () => Effect.fail(new PluginError({ message: "boom" }));
+        return {
+          answer: yield* lookups.readBlocks("tracker", "tracker:ticket:1", []),
+          calls: fake.calls,
+        };
+      }),
+    );
+    expect(answer).toEqual({ unreadable: true });
+    expect(calls).toEqual(["a", "b", "c"]);
+    expect(
+      await runWith([["a", "disabled"]], (_fake, lookups) =>
+        lookups.readBlocks("tracker", "tracker:ticket:1", []),
+      ),
+    ).toEqual({ unreadable: true });
+  });
+
+  it("is unreadable when a Connection times out after 8 seconds", async () => {
+    const answer = await runWith(["a"], (fake, lookups) =>
+      Effect.gen(function* () {
+        fake.readBlocks = () => Effect.never;
+        const fiber = yield* Effect.forkChild(
+          lookups.readBlocks("tracker", "tracker:ticket:1", []),
+        );
+        yield* TestClock.adjust("8 seconds");
+        return yield* Fiber.join(fiber);
+      }),
+    );
+    expect(answer).toEqual({ unreadable: true });
   });
 });
 

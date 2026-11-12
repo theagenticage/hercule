@@ -29,7 +29,13 @@ import { connectionRepository } from "../connections";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
-import { EntityLookups, PluginHost, type DecidedResolution, type SearchOutcome } from "../plugins";
+import {
+  EntityLookups,
+  PluginHost,
+  type BlocksOutcome,
+  type DecidedResolution,
+  type SearchOutcome,
+} from "../plugins";
 import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins/testing";
 import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
@@ -120,6 +126,7 @@ interface Script {
   resolve: (target: EntityRecognition) => DecidedResolution;
   search: () => SearchOutcome;
   recognize: (text: string) => ReadonlyArray<EntityRecognition>;
+  readBlocks: () => BlocksOutcome;
   readonly resolved: Array<EntityRecognition>;
 }
 
@@ -127,6 +134,7 @@ const buildScript = (): Script => ({
   resolve: () => ({ missing: "unknown" }),
   search: () => ({ observations: [], incomplete: false, outcome: "results" }),
   recognize: () => [],
+  readBlocks: () => ({ blocks: [] }),
   resolved: [],
 });
 
@@ -136,6 +144,7 @@ const buildLookups = (script: Script): EntityLookups["Service"] => ({
       script.recognize(text).map((recognition) => ({ pluginId: "acme", recognition })),
     ),
   listLinkSources: () => Effect.succeed(["acme"]),
+  readBlocks: () => Effect.sync(() => script.readBlocks()),
   search: () => Effect.sync(() => script.search()),
   resolve: (_pluginId, target) =>
     Effect.sync(() => {
@@ -734,6 +743,96 @@ describe("takeOn", () => {
       expect(resolvedCount).toBe(0);
       expect(error).toMatchObject({ error: { code: "conflict" } });
       expect(taskCount).toBe(0);
+    });
+  });
+});
+
+describe("readBlocks", () => {
+  const ARRANGE_ONE = ({ report, connectionId, entityId }: Arranged) =>
+    Effect.gen(function* () {
+      yield* report(connectionId, [buildObservation("1")]);
+      return yield* entityId(ticketRef("1"));
+    });
+
+  it("returns the blocks the lookup read, decoded against the contract", async () => {
+    const reply = await run((arranged) =>
+      Effect.gen(function* () {
+        arranged.script.readBlocks = () => ({
+          blocks: [
+            { type: "text", markdown: "hello" },
+            { type: "calendar", day: "2026-11-12" },
+          ],
+        });
+        return yield* arranged.service.readBlocks(yield* ARRANGE_ONE(arranged));
+      }),
+    );
+    expect(reply).toEqual({
+      blocks: [{ type: "text", markdown: "hello" }, { type: "calendar" }],
+    });
+  });
+
+  it("returns no blocks for a plugin that offers none", async () => {
+    const reply = await run((arranged) =>
+      Effect.gen(function* () {
+        return yield* arranged.service.readBlocks(yield* ARRANGE_ONE(arranged));
+      }),
+    );
+    expect(reply).toEqual({ blocks: [] });
+  });
+
+  it("fails with one safe error when no Connection could read, or a draft breaks the contract", async () => {
+    const errors = await run((arranged) =>
+      Effect.gen(function* () {
+        const id = yield* ARRANGE_ONE(arranged);
+        arranged.script.readBlocks = () => ({ unreadable: true });
+        const unreadable = yield* Effect.flip(arranged.service.readBlocks(id));
+        arranged.script.readBlocks = () => ({
+          blocks: [{ type: "fields", rows: [] }],
+        });
+        const invalid = yield* Effect.flip(arranged.service.readBlocks(id));
+        return [unreadable, invalid];
+      }),
+    );
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        error: { code: "invalid_state", details: { reason: "source-unreadable" } },
+      });
+    }
+    expect(errors[1]).toEqual(errors[0]);
+  });
+
+  it("refuses an unknown id, a place, and a session without the grants", async () => {
+    const { unknown, place, forbidden } = await run((arranged) =>
+      Effect.gen(function* () {
+        const id = yield* ARRANGE_ONE(arranged);
+        yield* arranged.report(arranged.connectionId, [
+          {
+            kind: "project",
+            ref: projectRef("harbour"),
+            title: "Harbour",
+            fields: { key: "HARBOUR" },
+            concerns: [],
+            sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
+          },
+        ]);
+        const noGrants = { ...A_SESSION, grants: ["task.read"] } as unknown as Actor;
+        return {
+          unknown: yield* Effect.flip(
+            arranged.service.readBlocks("0199e0e7-0000-7000-8000-000000000000"),
+          ),
+          place: yield* Effect.flip(
+            arranged.service.readBlocks(yield* arranged.entityId(projectRef("harbour"))),
+          ),
+          forbidden: yield* Effect.flip(
+            Effect.provideService(arranged.service.readBlocks(id), CurrentActor, noGrants),
+          ),
+        };
+      }),
+    );
+    expect(unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(place).toMatchObject({ error: { code: "not_found" } });
+    expect(forbidden).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
     });
   });
 });

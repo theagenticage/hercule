@@ -1500,6 +1500,17 @@ export const CLI = {
       },
     },
   },
+  "externalEntity.readBlocks": {
+    command: "entity blocks",
+    help: "Reads the extra parts the Inbox pane draws for one thing, at most 8. They come from the source, as fields, a trend or code, and are read when you ask and are never stored. Prints them as text. A thing whose plugin offers none prints `no blocks`. Fails with invalid_state when the source could not be read. Needs the grants `task.read` and `signal.query`.",
+    examples: [{ args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The entity's full id, as `hercule entity list` shows it. A tail is not accepted.",
+      },
+    },
+  },
   "externalEntity.takeOn": {
     command: "entity take-on",
     help: "Takes a thing from another system on as a Task, linked to it. Returns the Task's id and whether this call created it. Calling it again, or from another account, returns the same Task and makes no second one. The Task starts at the stage the thing's status maps to, else Planned, in the Project whose repository the thing lands in when exactly one matches. Nothing is written on the source.",

@@ -6,6 +6,7 @@
  * - the undo stack (Undo must not reach the next user);
  * - the card moves the controller has not answered yet;
  * - the pending intents, with their undo-window timers;
+ * - the reply drafts;
  * - the check a request makes before it goes on with its answer.
  *
  * A request that waits (a read before a spawn, a Try again on its way) can end
@@ -33,6 +34,7 @@ import {
   type IntentStorage,
   type PendingIntents,
 } from "./pending-intents";
+import { createReplyDrafts, type ReplyDrafts } from "./reply-drafts";
 import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
@@ -58,6 +60,8 @@ export interface AccountScope {
   readonly pendingCardMoves: PendingCardMoves;
   /** The answers and merges the app holds back for the undo line before it sends them. */
   readonly pendingIntents: PendingIntents;
+  /** The words typed into reply boxes and not yet sent, which a closed box gives back when it opens again. */
+  readonly replyDrafts: ReplyDrafts;
   /**
    * Returns whether this user is still the one signed in. It is `false` once
    * the scope is closed, and once the client no longer holds the token the
@@ -111,6 +115,23 @@ const readAgainAfterChange = async (
 };
 
 /**
+ * Reads again what a signal answer changes and waits for all: the detail of
+ * its entity, the signal itself and the Inbox's list. A failed read is
+ * ignored, as in `readAgainAfterChange`: the source already took the answer.
+ */
+const readAgainAfterSignalAnswer = async (
+  queryClient: QueryClient,
+  entityId: string,
+  signalId: string,
+): Promise<void> => {
+  await Promise.allSettled(
+    [queryKeys.externalEntity(entityId), queryKeys.signal(signalId), queryKeys.inbox()].map(
+      (queryKey) => queryClient.invalidateQueries({ queryKey, refetchType: "active" }),
+    ),
+  );
+};
+
+/**
  * Returns the function that sends an intent to the controller and resolves
  * once the reads it changes have been refreshed. It rejects when the
  * controller refuses the intent or cannot be reached, and when the user has
@@ -136,6 +157,18 @@ const buildIntentSender =
           payload: { intoTaskId: intent.intoTaskId },
         });
         if (isCurrent()) await readAgainAfterChange(queryClient, intent.taskId, intent.intoTaskId);
+        return;
+      case "signal-answer":
+        await client.signal.act({
+          params: { id: intent.signalId },
+          payload:
+            intent.text === undefined
+              ? { actionId: intent.actionId }
+              : { actionId: intent.actionId, text: intent.text },
+        });
+        if (isCurrent()) {
+          await readAgainAfterSignalAnswer(queryClient, intent.entityId, intent.signalId);
+        }
         return;
     }
   };
@@ -179,6 +212,7 @@ export const createAccountScopes = ({
           storageKey: buildPendingIntentsKey(controllerUrl, username),
           send: buildIntentSender(client, queryClient, isCurrent),
         }),
+        replyDrafts: createReplyDrafts(),
         isCurrent,
       };
       open = {
@@ -188,6 +222,7 @@ export const createAccountScopes = ({
           scope.pendingIntents.dispose();
           scope.undoStack.clear();
           scope.pendingCardMoves.clear();
+          scope.replyDrafts.clear();
         },
       };
       return scope;

@@ -171,7 +171,7 @@ const buildFactsBlock = (issue: IssueBlock) => {
 };
 
 /** Returns the blocks of a description: one `text` block, or none when the description is empty. */
-const buildDescriptionTextBlocks = (description: string | null | undefined) =>
+export const buildDescriptionTextBlocks = (description: string | null | undefined) =>
   description === null || description === undefined || description.trim() === ""
     ? []
     : [{ type: "text", markdown: description }];

@@ -1,0 +1,207 @@
+/* The pane's content for one thing: the title, the meta line, who has it, the asks, the blocks, what
+   is linked and what happened. 24px sides, 13px body at 20px leading, sections 28px apart. The
+   frame's head sits above it, so the scroll area starts at the title. */
+.ib-pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 32px;
+  scrollbar-width: thin;
+}
+.ib-pane-title {
+  margin: 12px 0 8px;
+  text-wrap: pretty;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  line-height: 24px;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+/* The title takes the focus when the pane opens over the list. Its ring stands off the words, in the
+   pane's side room, so it reads as a frame and not as a box drawn on the letters. */
+.ib-pane-title:focus-visible {
+  outline-offset: 6px;
+  border-radius: var(--r-sm);
+}
+.ib-pane-id {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  white-space: nowrap;
+}
+
+/* The meta line's dots sit in the gap before each item. Every item, the first of each line too, has
+   that gap; the line starts 16px further left and that strip is cut off, so the first item of every
+   line lines up and its dot is never seen. A wrap leaves no dot at either end of a line. */
+.ib-pane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 0;
+  margin: 0 0 0 -16px;
+  clip-path: inset(-4px -8px -4px 16px);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.ib-pane-meta > span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+}
+.ib-pane-meta > span::before {
+  content: "·";
+  position: absolute;
+  left: -10px;
+  color: var(--faint);
+}
+
+/* Who has the thing: a face or a monogram, the Task, and the way to it. */
+.ib-pane-held {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--section-fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+}
+.ib-pane-held-who {
+  display: grid;
+  place-items: center;
+}
+.ib-pane-held-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--muted);
+}
+.ib-pane-held-words b {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+
+/* The slots for the asks, then the blocks. */
+.ib-pane-asks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+.ib-pane-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 24px;
+}
+.ib-pane-blocks-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+/* The blocks' shapes while they are read, still like the other loading shapes. */
+.ib-pane-blocks-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ib-pane-blocks-skel i {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+
+/* The core's sections. */
+.ib-pane-sec {
+  margin-top: 28px;
+}
+.ib-pane-sec--first {
+  margin-top: 20px;
+}
+.ib-pane-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+}
+.ib-pane-h-n {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+
+/* Linked: each row is the thing's mark, its title, its identifier and, under them, who claims the
+   link. Nothing moves or appears on hover: the rows only take the hover fill. */
+.ib-pane-links,
+.ib-pane-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ib-pane-link {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+}
+.ib-pane-link:hover {
+  background: var(--hover);
+}
+.ib-pane-link-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 18px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ib-pane-link-title:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.ib-pane-link-id {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.ib-pane-link-claim {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+
+/* What happened: the time, then the sentence. */
+.ib-pane-history li {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 3px 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.ib-pane-history time {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

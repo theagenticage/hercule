@@ -51,6 +51,8 @@ interface HeldLine<Page> {
   readonly hold: Hold;
   /** How long the line stays, fixed when it is said: a withdrawn gesture does not restart the timer. */
   readonly staysMs: number;
+  /** Whether the offered gesture still waits (`Gesture.settled`), which keeps the line up. */
+  readonly isWaiting: boolean;
 }
 
 /** What `useUndoLine` returns. */
@@ -119,6 +121,12 @@ export function useUndoLine<Page>(
     serial: 0,
     hold: "free",
     staysMs: FAILURE_LINE_MS,
+    isWaiting: false,
+  });
+  // The newest line, for the calls that must read it outside a state update.
+  const current = useRef(held);
+  useLayoutEffect(() => {
+    current.current = held;
   });
   const line: UndoLineState = {
     text: held.text,
@@ -136,6 +144,25 @@ export function useUndoLine<Page>(
     action?: UndoAction,
     title?: string,
   ): void => {
+    // A line that replaces a held one passes the user's hold on to its gesture.
+    if (current.current.hold === "held") {
+      current.current.offered?.hold?.(false);
+      offeredGesture?.hold?.(true);
+    }
+    void offeredGesture?.settled?.then((sentText) => {
+      setHeld((before) =>
+        before.offered !== offeredGesture || !before.isWaiting
+          ? before
+          : {
+              ...before,
+              isWaiting: false,
+              serial: before.serial + 1,
+              text: sentText ?? before.text,
+              offered: sentText === undefined ? before.offered : null,
+              staysMs: MOVE_LINE_MS,
+            },
+      );
+    });
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,
@@ -145,6 +172,7 @@ export function useUndoLine<Page>(
       serial: before.serial + 1,
       hold: before.hold === "held" ? "held" : "free",
       staysMs: offeredGesture === undefined ? FAILURE_LINE_MS : MOVE_LINE_MS,
+      isWaiting: offeredGesture?.settled !== undefined,
     }));
   };
 
@@ -154,12 +182,13 @@ export function useUndoLine<Page>(
     // Compiler caches a render by its inputs and cannot see the stack change.
     setHeld((before) =>
       before.offered !== null && !undoStack.holds(before.offered)
-        ? { ...before, offered: null }
+        ? { ...before, offered: null, isWaiting: false }
         : before,
     );
   };
 
   const hold = (isHeld: boolean): void => {
+    current.current.offered?.hold?.(isHeld);
     setHeld((before) => {
       if (isHeld) return before.hold === "held" ? before : { ...before, hold: "held" };
       return before.hold === "held" ? { ...before, hold: "released" } : before;
@@ -167,7 +196,7 @@ export function useUndoLine<Page>(
   };
 
   useEffect(() => {
-    if (!held.isShown || held.hold === "held") return;
+    if (!held.isShown || held.hold === "held" || held.isWaiting) return;
     const stays = held.hold === "released" ? RELEASED_LINE_MS : held.staysMs;
     const timer = setTimeout(() => {
       setHeld((now) => (now.serial === held.serial ? { ...now, isShown: false } : now));
@@ -175,7 +204,7 @@ export function useUndoLine<Page>(
     return () => {
       clearTimeout(timer);
     };
-  }, [held.serial, held.isShown, held.staysMs, held.hold]);
+  }, [held.serial, held.isShown, held.staysMs, held.hold, held.isWaiting]);
 
   // The newest state of the page, so a later render is what Undo uses.
   const latest = useRef({ buildPage, isPaused, say });

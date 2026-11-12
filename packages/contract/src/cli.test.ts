@@ -134,6 +134,7 @@ const COMMANDS: Record<string, string> = {
   "signal.lowerPriority": "signal lower-priority",
   "externalEntity.queryInbox": "entity list",
   "externalEntity.read": "entity read",
+  "externalEntity.readBlocks": "entity blocks",
   "externalEntity.takeOn": "entity take-on",
   "externalEntity.handOff": "entity hand-off",
   "externalEntity.undoHandOff": "entity undo-hand-off",

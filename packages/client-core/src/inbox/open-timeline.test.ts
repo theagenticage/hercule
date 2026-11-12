@@ -39,6 +39,7 @@ const buildLine = (id: string, hours: number, overrides: Partial<EntitySignalLin
     status: "open",
     createdAt: hoursAgo(hours),
     say: { say: `Said ${id}`, tone: "plain" },
+    asks: true,
     snoozed: false,
     ...overrides,
   }) satisfies EntitySignalLine;

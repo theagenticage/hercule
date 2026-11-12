@@ -53,6 +53,7 @@ import {
   MAX_GRAPH_EDGES,
 } from "./entity-context";
 import {
+  Block,
   MAX_SIGNAL_ASKER_LENGTH,
   MAX_SIGNAL_OUTCOME_LENGTH,
   MAX_SIGNAL_TITLE_LENGTH,
@@ -275,6 +276,8 @@ export const EntitySignalLine = Schema.Struct({
   outcome: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH))),
   /** True while the signal is snoozed. */
   snoozed: Schema.Boolean,
+  /** True when the signal's kind asks the user for a move (`listAskingKinds`). */
+  asks: Schema.Boolean,
 });
 
 export type EntitySignalLine = Schema.Schema.Type<typeof EntitySignalLine>;
@@ -879,6 +882,9 @@ const InboxFieldType = Schema.Literals([
   "bool",
 ]);
 
+/** The most signal kinds one saved query reports in the outline. */
+export const MAX_SAVED_QUERY_SIGNAL_KINDS = 8;
+
 /**
  * The numbers the sidebar draws, in one small read that every screen holds.
  *
@@ -908,6 +914,12 @@ export const InboxOutline = Schema.Struct({
       order: InboxOrder,
       /** The plugin that declared it. Absent for a core query. */
       source: Schema.optionalKey(PluginId),
+      /**
+       * The qualified signal kinds the query's `signal is` clause names, at
+       * most 8. Empty when it has none. The Inbox pane unfolds the ask of one
+       * of these first.
+       */
+      signalKinds: atMost(SignalKind, MAX_SAVED_QUERY_SIGNAL_KINDS),
       count: Schema.Int,
     }),
     MAX_INBOX_RAIL_ROWS,
@@ -1065,6 +1077,16 @@ export const ExternalEntityDetail = Schema.Struct({
 });
 
 export type ExternalEntityDetail = Schema.Schema.Type<typeof ExternalEntityDetail>;
+
+/** The most blocks one read of an entity's blocks returns. */
+export const MAX_ENTITY_BLOCKS = 8;
+
+/** What `externalEntity.readBlocks` returns: the blocks the Inbox pane draws, in order. */
+export const EntityBlocks = Schema.Struct({
+  blocks: atMost(Block, MAX_ENTITY_BLOCKS),
+});
+
+export type EntityBlocks = Schema.Schema.Type<typeof EntityBlocks>;
 
 /** What `takeOn` returns: the active Task, and whether this call made it. */
 export const EntityTakeOnResult = Schema.Struct({ taskId: Id, created: Schema.Boolean });
@@ -1380,6 +1402,19 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       params: { id: Id },
       success: ExternalEntityDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Reads, from the source, the blocks the Inbox pane draws for the entity,
+     * at most 8, in order. They are read when asked and never stored. A plugin
+     * that offers none answers an empty list. Fails `NotFound` for an unknown
+     * id, and `InvalidState` with the reason `source-unreadable` when the
+     * source could not be read or answered something the contract does not
+     * accept.
+     */
+    HttpApiEndpoint.get("readBlocks", "/external-entities/:id/blocks", {
+      params: { id: Id },
+      success: EntityBlocks,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
      * Returns the entity's active Task, or makes one. Fails `NotFound` for an
