@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useState,
   type JSX,
   type Ref,
 } from "react";
@@ -31,6 +32,39 @@ const FOOT_FADE_PX = 28;
 
 /** Reads a row's height from the page's CSS: 52px at the default Text size, and a pixel more per line for each step up. */
 const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-row" }).row;
+
+/**
+ * Returns a set of row actions that never changes identity and calls the
+ * latest `actions` given. The owner builds a new set on every render, and a
+ * row (which is memoized) would draw again for each of them.
+ */
+function useStableActions(actions: InboxRowActions): InboxRowActions {
+  const latest = useRef(actions);
+  useLayoutEffect(() => {
+    latest.current = actions;
+  });
+  const [stable] = useState<InboxRowActions>(() => ({
+    onPick: (ref, modifiers) => {
+      latest.current.onPick(ref, modifiers);
+    },
+    onToggleSelect: (ref) => {
+      latest.current.onToggleSelect(ref);
+    },
+    onTakeOn: (ref) => {
+      latest.current.onTakeOn(ref);
+    },
+    onHandOff: (ref) => {
+      latest.current.onHandOff(ref);
+    },
+    onGoToTask: (ref) => {
+      latest.current.onGoToTask(ref);
+    },
+    onDismiss: (ref) => {
+      latest.current.onDismiss(ref);
+    },
+  }));
+  return stable;
+}
 
 /** What the list lets its owner ask of it. */
 export interface InboxListHandle {
@@ -149,6 +183,7 @@ export function InboxList({
   readonly handle?: Ref<InboxListHandle> | undefined;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowActions = useStableActions(actions);
   const reserve = footReserve ?? 0;
   const focusRequested = focusRequest ?? 0;
   const rowHeight = useMeasuredAtTextSize(readRowHeight);
@@ -234,12 +269,6 @@ export function InboxList({
             aria-multiselectable="true"
             style={{ minHeight: totalSize }}
           >
-            <div
-              className="ib-puck"
-              hidden={selectedIndex < 0}
-              style={{ transform: `translateY(${String(selectedIndex * rowHeight)}px)` }}
-              aria-hidden="true"
-            />
             <div className="ib-leaving" aria-hidden="true" inert>
               {leavingRows.map((leaving) => (
                 <LeavingCopy
@@ -262,10 +291,16 @@ export function InboxList({
                   size={rows.length}
                   current={line.item.key === currentRef}
                   selected={selection.has(line.item.key)}
-                  actions={actions}
+                  actions={rowActions}
                 />
               ),
             )}
+            <div
+              className="ib-puck"
+              hidden={selectedIndex < 0}
+              style={{ transform: `translateY(${String(selectedIndex * rowHeight)}px)` }}
+              aria-hidden="true"
+            />
           </div>
         </div>
       </div>

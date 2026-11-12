@@ -382,7 +382,6 @@ export function InboxScreen({
           ) : null
         ) : (
           <InboxPanePart
-            key={currentThing.id}
             isActive={!isStacked || isPaneOpen}
             client={client}
             thing={currentThing}

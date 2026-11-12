@@ -6,7 +6,7 @@
 /* The empty state centres itself in the list's whole height. Its `min-height` is a percentage,
    which resolves only when every parent has a height, so the lines that hold it take the full
    height of the scrolling column. */
-.ib-lines:has(> .ib-empty) {
+.ib-lines.is-centred {
   height: 100%;
 }
 /* The drawing's state sits 40px under the middle of the free space, because its empty list keeps

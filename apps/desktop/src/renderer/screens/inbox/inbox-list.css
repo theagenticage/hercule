@@ -233,7 +233,8 @@
 }
 .ib-puck {
   position: absolute;
-  z-index: 0;
+  /* Under everything in the rows, whatever its place in the markup. The rows' container is a stacking context. */
+  z-index: -1;
   top: 0;
   right: 0;
   left: 0;
@@ -256,8 +257,10 @@
   border-radius: 1px;
   background: color-mix(in oklab, var(--ink) 60%, transparent);
 }
-/* The keyboard's ring is drawn on the puck, so ring and fill are always one place. */
-.ib-scroll:has(.ib-row.is-current:focus-visible) .ib-puck {
+/* The keyboard's ring is drawn on the puck, so ring and fill are always one place. The puck follows
+   the rows in the markup so a sibling selector finds it: a `:has()` on the scroll area would make
+   the browser check every row again each time the focus moves. */
+.ib-row.is-current:focus-visible ~ .ib-puck {
   box-shadow: inset 0 0 0 2px var(--focus);
 }
 

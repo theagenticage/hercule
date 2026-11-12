@@ -174,6 +174,30 @@ describe("the Inbox screen", () => {
     expect([SLOTS.id, LOYALTY.id, BASKET.id].map(readsOf)).toEqual([slotsBefore, 1, 1]);
   });
 
+  it("keeps the detail of the thing before drawn, inert and busy, while the next thing is read", async () => {
+    const { calls } = await openInbox(defaultInbox(), {
+      [`GET /api/v1/external-entities/${LOYALTY.id}`]: neverAnswer,
+    });
+    await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+    const pane = document.getElementById("inbox-pane")!;
+    await within(pane).findByRole("heading", { name: SLOTS.title });
+    screen.getByRole("treeitem", { name: /Cache delivery slot lookups/ }).focus();
+
+    await userEvent.keyboard("j");
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === `/api/v1/external-entities/${LOYALTY.id}`)).toBe(
+        true,
+      );
+    });
+    // The read of the new thing is out: the old detail stays, with no quiet shapes in its place.
+    const card = pane.querySelector<HTMLElement>(".open-card")!;
+    expect(within(card).getByRole("heading", { name: SLOTS.title })).toBeTruthy();
+    expect(card.getAttribute("aria-busy")).toBe("true");
+    expect(card.hasAttribute("inert")).toBe(true);
+    expect(pane.querySelector(".ib-pane-skel")).toBeNull();
+  });
+
   it("reads no thing for a pane that lies over the list and is closed", async () => {
     // Only the frame is told its width: the list's virtualizer measures itself.
     vi.stubGlobal(

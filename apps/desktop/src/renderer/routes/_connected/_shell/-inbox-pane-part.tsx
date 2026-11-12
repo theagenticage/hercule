@@ -1,5 +1,5 @@
 import { useState, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildInitials,
@@ -67,11 +67,17 @@ export function InboxPaneHeadPart({
 /**
  * Renders the body of the pane for `thing`: today's open-card body, read with
  * `externalEntity.read`, until the pane's own content replaces it. It shows
- * quiet shapes while the read is on its way, and says why when it fails.
- * Keyed by the thing, so the opened line of the timeline starts over for each.
+ * quiet shapes while the first read is on its way, and says why when it fails.
  * With `isActive` false (the pane lies over the list and is closed) nothing is
  * read, so stepping through the list reads no thing the user does not see. What
  * was read stays cached for the next time the pane shows it.
+ *
+ * Stepping to another thing keeps this component mounted: the body of the
+ * thing before stays drawn, inert and marked busy, until the read of the new
+ * thing answers, and then the same elements show the new one. Drawing the
+ * quiet shapes and the whole body again on every step would cost two renders
+ * of the pane a step. The open line and the chosen account start over for each
+ * thing.
  *
  * Orchestrating: it owns the read and the choice of the open line.
  */
@@ -92,15 +98,25 @@ export function InboxPanePart({
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const detail = useQuery({ ...entityQuery(client, thing.id), enabled: isActive });
+  const detail = useQuery({
+    ...entityQuery(client, thing.id),
+    enabled: isActive,
+    placeholderData: keepPreviousData,
+  });
   const record = detail.data;
+  // True while `record` is the thing before's, kept drawn until this thing's read answers.
+  const isStale = detail.isPlaceholderData;
   const lines = record === undefined ? [] : buildOpenTimeline(record, []);
   const now = useOpenCardClock(record, lines);
   // The card opens its first open line by itself, once it has one.
   const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
   const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
-  const firstLine = record === undefined ? undefined : findFirstOpenLine(record.signals);
-  if (chosenLine === undefined && firstLine !== undefined) setChosenLine(firstLine);
+  const [choicesAreOf, setChoicesAreOf] = useState<string | undefined>(undefined);
+  if (record !== undefined && !isStale && choicesAreOf !== thing.id) {
+    setChoicesAreOf(thing.id);
+    setChosenConnectionId(undefined);
+    setChosenLine(findFirstOpenLine(record.signals));
+  }
 
   if (record === undefined) {
     return detail.isError ? (
@@ -135,8 +151,9 @@ export function InboxPanePart({
       />
     );
   return (
-    <div className="open-card">
+    <div className="open-card" aria-busy={isStale ? "true" : undefined} inert={isStale}>
       <OpenCardBody
+        sheetKey={thing.id}
         url={record.url}
         words={words}
         plugins={plugins}

@@ -180,6 +180,7 @@ function OpenCardMoves({
  *   moves, or `null` when the card cannot be handed to a workflow.
  */
 export function OpenCardBody({
+  sheetKey,
   url,
   words,
   plugins,
@@ -193,6 +194,8 @@ export function OpenCardBody({
   linked,
   hand,
 }: {
+  /** Names the card the sheet shows. Another one starts the moves' arming again, as a new sheet does. */
+  readonly sheetKey: string;
   readonly url: string;
   readonly words: OpenCardWords;
   readonly plugins: readonly PluginIdentity[];
@@ -248,6 +251,7 @@ export function OpenCardBody({
       )}
       {linked}
       <OpenCardMoves
+        key={sheetKey}
         words={words}
         hand={hand}
         pluginName={pluginName}
