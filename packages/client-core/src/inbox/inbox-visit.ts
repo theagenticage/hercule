@@ -126,19 +126,19 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
    * list's rows stay shown until the new first page arrives. Call it again
    * with the same query to retry after a failure.
    */
-  open(query: Query): void;
+  readonly open: (query: Query) => void;
   /** Cancels every read. Call it when the screen goes away. */
-  close(): void;
+  readonly close: () => void;
   /** Tells the visit the controller changed: it reads the visible window again. */
-  pushArrived(): void;
+  readonly pushArrived: () => void;
   /**
    * Tells the visit which rows the user sees (indexes into `snapshot.rows`,
    * both ends included). Rows near the viewport that missed the latest push
    * are re-read, and the next page is read near the end.
    */
-  viewportChanged(firstIndex: number, lastIndex: number): void;
+  readonly viewportChanged: (firstIndex: number, lastIndex: number) => void;
   /** Takes the arrivals in ("Show"), after re-reading the first page. */
-  show(): void;
+  readonly show: () => void;
   /**
    * Applies a move of `refs` at once and returns its receipt.
    * - `dismissed`: the rows leave. A read never brings them back until one
@@ -148,32 +148,32 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
    *   new copy.
    * Rows the visit does not hold are ignored.
    */
-  move(
+  readonly move: (
     kind: "dismissed" | "taken",
     refs: readonly string[],
     show?: (row: Row) => Row,
-  ): MoveReceipt<Row>;
+  ) => MoveReceipt<Row>;
   /** Tells the visit the controller accepted the move. */
-  confirmMove(receipt: MoveReceipt<Row>): void;
+  readonly confirmMove: (receipt: MoveReceipt<Row>) => void;
   /** Takes a move back because the controller refused it. */
-  failMove(receipt: MoveReceipt<Row>): void;
+  readonly failMove: (receipt: MoveReceipt<Row>) => void;
   /**
    * Takes back a move the controller has already undone: its rows return to
    * their old places and the topmost becomes current.
    */
-  undo(receipt: MoveReceipt<Row>): void;
+  readonly undo: (receipt: MoveReceipt<Row>) => void;
   /** Steps the current row by one (J, K), or with `extend` extends the selection (⇧J, ⇧K). */
-  step(by: 1 | -1, extend?: boolean): void;
+  readonly step: (by: 1 | -1, extend?: boolean) => void;
   /** Changes the selection or the current row. */
-  select(change: SelectionChange): void;
+  readonly select: (change: SelectionChange) => void;
   /**
    * Returns the refs a move acts on, in displayed order: the selection or the
    * current row, or with `hoveredRef` that row (the selection when it is in it).
    */
-  targets(hoveredRef?: string): string[];
-  subscribe(listener: () => void): () => void;
+  readonly targets: (hoveredRef?: string) => string[];
+  readonly subscribe: (listener: () => void) => () => void;
   /** Returns the snapshot: the same object until something changed. */
-  getSnapshot(): InboxVisitSnapshot<Row, Query>;
+  readonly getSnapshot: () => InboxVisitSnapshot<Row, Query>;
 }
 
 /** The next page is read when the viewport comes within this many rows of the end. */

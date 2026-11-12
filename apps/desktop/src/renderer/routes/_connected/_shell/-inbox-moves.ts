@@ -3,7 +3,7 @@
  * Open at its source) and the undo line at the foot of the list. It follows
  * the Work board's moves (`-card-moves.ts`):
  *
- * - A move shows at once on the held list (`applyInboxMove`) and is sent after
+ * - A move shows at once on the visit (`visit.move`) and is sent after
  *   the moves before it, one at a time, in the order the user made them. The
  *   reversal of a move joins the same line when the user presses Undo, so a
  *   move made after Undo reaches the controller after the reversal.
@@ -21,17 +21,15 @@
  * - A refused move says why on the undo line, and nothing is sent: the choice
  *   of what may be moved is `planInboxMove`.
  */
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
   DISMISSAL_UNDONE,
   TAKE_ON_UNDONE,
   NO_SOURCE_ADDRESS,
-  applyInboxMove,
   buildHandedThing,
   decideHandMove,
-  decideMoveTargets,
   describeHandOffUndo,
   describeInboxDismissal,
   describeInboxDismissalFailure,
@@ -40,13 +38,11 @@ import {
   describeInboxTakeOn,
   describeInboxTakeOnFailure,
   isHandOffTakenBack,
-  listCardOffers,
   planInboxMove,
-  undoInboxMove,
   type InboxLineWords,
-  type InboxListState,
+  type MoveReceipt,
 } from "@hercule/client-core/inbox";
-import type { InboxThing, WorkflowOffer } from "@hercule/contract";
+import type { WorkflowOffer } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import {
   buildCachedCardMover,
@@ -59,23 +55,12 @@ import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import type { SidebarFlight } from "../../../app/motion/sidebar-flight";
 import { flyHandedMarkToWork, rollHandedRow } from "../../../screens/inbox/inbox-hand-off-motion";
-import type { InboxLeaveHow } from "../../../screens/inbox/use-inbox-list-motion";
-import type { HeldInboxList } from "./-inbox-held-list";
+import type { InboxListRow, InboxListSnapshot, InboxListVisit } from "./-inbox-visit";
 
 /** The key every Inbox move runs under, so one move waits for the one before it. */
 const INBOX_MOVES_KEY = ["inbox-moves"];
 
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
-
-/**
- * How the rows of a move went, for the list's motion: whether the rows that
- * left were dismissed (they slide aside as they fade) and which rows an undo
- * put back (they come back from aside).
- */
-export interface InboxMoveMotion {
-  readonly leaveHow: InboxLeaveHow;
-  readonly returning: ReadonlyArray<string>;
-}
 
 /** What `useInboxMoves` returns. */
 export interface InboxMoves {
@@ -98,7 +83,7 @@ export interface InboxMoves {
    * thing, for the screen to open the menu of workflows over. A refusal says
    * why on the undo line and returns `null`.
    */
-  readonly startHandOff: (hoveredRef?: string) => InboxThing | null;
+  readonly startHandOff: (hoveredRef?: string) => InboxListRow | null;
   /**
    * Hands the one thing the move is for (see `dismiss`: the selection, else
    * the current row, or with `hoveredRef` that row) to `offer`, as
@@ -112,12 +97,6 @@ export interface InboxMoves {
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ) => void;
-  /**
-   * Returns `thing` as it reads while its hand-off is on its way: the
-   * workflow has it. Returns `thing` itself when it was not handed, or the
-   * list has been read since. The list draws its rows through it.
-   */
-  readonly readHandedThing: (thing: InboxThing) => InboxThing;
   /** Goes to the Task of the one thing the move is for, or says it has none. */
   readonly goToTask: (hoveredRef?: string) => void;
   /** Opens the current thing at its source, or says it has no address. */
@@ -138,47 +117,34 @@ const joinGestureWords = ({ text, title }: InboxLineWords): string =>
 
 /**
  * Makes the moves of the Inbox for `client`, for the user of `scope`, over
- * the list `held`. `isOffline` makes every move but Go to its Task refuse.
- * `openTask` opens a Task on Work. `onMoved` is called with the list a move
- * or an undo left and how its rows went, so the screen can move the focus to
- * the row that is current now, or to the empty state when none is, and tell
- * the list how to move.
+ * the list `visit` holds. `isOffline` makes every move but Go to its Task
+ * refuse. `openTask` opens a Task on Work. `onMoved` is called with the
+ * snapshot a move or an undo left, so the screen can move the focus to the
+ * row that is current now, or to the empty state when none is.
  */
 export const useInboxMoves = ({
   client,
   scope,
-  held,
+  visit,
   isOffline,
   openTask,
   onMoved,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
-  readonly held: HeldInboxList;
+  readonly visit: InboxListVisit;
   readonly isOffline: boolean;
   readonly openTask: (taskId: string) => void;
-  readonly onMoved: (list: InboxListState<InboxThing>, motion: InboxMoveMotion) => void;
+  readonly onMoved: (snapshot: InboxListSnapshot) => void;
 }): InboxMoves => {
   const queryClient = useQueryClient();
   const { undoStack, isCurrent } = scope;
 
   // A gesture outlives the render that made it, so it reads the newest of these.
-  const latest = useRef({ held, isOffline, openTask, onMoved });
+  const latest = useRef({ isOffline, openTask, onMoved });
   useLayoutEffect(() => {
-    latest.current = { held, isOffline, openTask, onMoved };
+    latest.current = { isOffline, openTask, onMoved };
   });
-  // The things handed and what they read as meanwhile. An entry applies only to the very thing it
-  // was made for, so the next read of the list, which brings a new thing, ends it.
-  const [handed, setHanded] = useState<ReadonlyMap<string, { from: InboxThing; to: InboxThing }>>(
-    new Map(),
-  );
-  const putHandedBack = (ref: string): void => {
-    setHanded((before) => {
-      const next = new Map(before);
-      next.delete(ref);
-      return next;
-    });
-  };
   // The things whose hand-off the controller has not answered, so a second H waits for the first.
   const handing = useRef(new Set<string>());
 
@@ -232,19 +198,17 @@ export const useInboxMoves = ({
     },
   });
 
-  /** Returns the things a move is for, in list order: see `decideMoveTargets`. */
-  const readTargets = (hoveredRef: string | undefined): InboxThing[] => {
-    const list = latest.current.held.readLatest()?.list;
-    if (list === undefined) return [];
-    const wanted = new Set(decideMoveTargets(list, hoveredRef));
-    return list.rows.filter((row) => wanted.has(row.ref));
+  /** Returns the things a move is for, in list order: see `InboxVisit.targets`. */
+  const readTargets = (hoveredRef: string | undefined): InboxListRow[] => {
+    const wanted = new Set(visit.targets(hoveredRef));
+    return visit.getSnapshot().rows.filter((row) => wanted.has(row.ref));
   };
 
   /** Returns the things `move` may be made on, or says why not and returns `null`. */
   const readAllowedTargets = (
     move: Parameters<typeof planInboxMove>[0]["move"],
     hoveredRef: string | undefined,
-  ): InboxThing[] | null => {
+  ): InboxListRow[] | null => {
     const things = readTargets(hoveredRef);
     const first = things[0];
     if (first === undefined) return null;
@@ -252,7 +216,7 @@ export const useInboxMoves = ({
       move,
       things,
       isOffline: latest.current.isOffline,
-      offers: listCardOffers(first, latest.current.held.readLatest()?.offerSets ?? {}),
+      offers: first.offers,
     });
     if (plan.kind === "refuse") {
       say(plan.reason);
@@ -261,22 +225,9 @@ export const useInboxMoves = ({
     return things;
   };
 
-  /** Applies a move to the newest held list at once, and tells the screen what is current now. */
-  const showMove = (
-    refs: readonly string[],
-    leavesList: boolean,
-    leaveHow: InboxLeaveHow,
-  ): void => {
-    const { held: now, onMoved: tell } = latest.current;
-    const next = now.change((list) => applyInboxMove(list, refs, { leavesList }));
-    if (next !== null) tell(next, { leaveHow, returning: [] });
-  };
-
-  /** Puts back the rows of a move that left or stayed, and makes the topmost current. */
-  const showUndo = (refs: readonly string[]): void => {
-    const { held: now, onMoved: tell } = latest.current;
-    const next = now.change((list) => undoInboxMove(list, refs));
-    if (next !== null) tell(next, { leaveHow: "taken", returning: refs });
+  /** Tells the screen what is current once a move or an undo has changed the list. */
+  const tellMoved = (): void => {
+    latest.current.onMoved(visit.getSnapshot());
   };
 
   const dismiss = (hoveredRef?: string): void => {
@@ -285,10 +236,14 @@ export const useInboxMoves = ({
     const refs = things.map((thing) => thing.ref);
     const ids = things.map((thing) => thing.id);
     const words = describeInboxDismissal(things);
-    showMove(refs, true, "dismiss");
+    const receipt = visit.move("dismissed", refs);
+    tellMoved();
     const request = dismissRequest.mutateAsync(ids);
     const wasSaved = request.then(
-      () => true,
+      () => {
+        visit.confirmMove(receipt);
+        return true;
+      },
       () => false,
     );
     const gesture: Gesture<CardMover> = {
@@ -299,7 +254,8 @@ export const useInboxMoves = ({
           requireSignedIn(scope);
           await client.externalEntity.restore({ payload: { ids } });
           if (!isCurrent()) return undefined;
-          showUndo(refs);
+          visit.undo(receipt);
+          tellMoved();
           return { text: DISMISSAL_UNDONE };
         }),
     };
@@ -307,7 +263,8 @@ export const useInboxMoves = ({
     say(words.text, gesture, undefined, words.title ?? undefined);
     request.catch((error: unknown) => {
       if (!isCurrent()) return;
-      showUndo(refs);
+      visit.failMove(receipt);
+      tellMoved();
       say(describeInboxDismissalFailure(things, readReason(error)));
     });
   };
@@ -316,11 +273,15 @@ export const useInboxMoves = ({
     const things = readAllowedTargets("takeOn", hoveredRef);
     const thing = things?.[0];
     if (thing === undefined) return;
-    showMove([thing.ref], false, "taken");
+    const receipt = visit.move("taken", [thing.ref]);
+    tellMoved();
     const request = takeOnRequest.mutateAsync(thing.id);
     // A Take on that made no Task (it failed, or the thing already had one) has nothing to put back.
     const wasCreated = request.then(
-      ({ created }) => created,
+      ({ created }) => {
+        visit.confirmMove(receipt);
+        return created;
+      },
       () => false,
     );
     const gesture: Gesture<CardMover> = {
@@ -333,7 +294,8 @@ export const useInboxMoves = ({
           // The Task was touched since, so it stays and the line says why.
           await undoAddedTask(client, thing.id, taskId);
           if (!isCurrent()) return undefined;
-          showUndo([thing.ref]);
+          visit.undo(receipt);
+          tellMoved();
           return { text: TAKE_ON_UNDONE };
         }),
     };
@@ -351,6 +313,8 @@ export const useInboxMoves = ({
       },
       (error: unknown) => {
         if (!isCurrent()) return;
+        visit.failMove(receipt);
+        tellMoved();
         say(describeInboxTakeOnFailure(thing, readReason(error)));
       },
     );
@@ -358,7 +322,7 @@ export const useInboxMoves = ({
 
   /** Hands `thing`, which the caller has checked may be handed, to `offer`. */
   const sendHandOff = (
-    thing: InboxThing,
+    thing: InboxListRow,
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ): void => {
@@ -370,11 +334,15 @@ export const useInboxMoves = ({
     handing.current.add(ref);
     const flight: SidebarFlight = flyHandedMarkToWork(ref);
     // The row draws the workflow having the thing as the chain starts, and keeps it until the list is read.
-    const handedThing = buildHandedThing(thing, offer);
+    const moved: { receipt?: MoveReceipt<InboxListRow> } = {};
     const roll = rollHandedRow(ref, () => {
-      setHanded((before) => new Map(before).set(ref, { from: thing, to: handedThing }));
+      moved.receipt = visit.move("taken", [ref], (row) => ({
+        ...buildHandedThing(row, offer),
+        offers: row.offers,
+      }));
     });
-    showMove([ref], false, "taken");
+    const receipt = moved.receipt!;
+    tellMoved();
     // What the hand-off ends stays ended, whatever Undo does.
     const endedKinds = thing.openKinds.filter((kind) => offer.answers.includes(kind));
     const request = handOffRequest.mutateAsync({
@@ -403,8 +371,8 @@ export const useInboxMoves = ({
           // Stopped and too-late are the controller's final answers, not failures: the line says
           // them in its own words, and the row stays as it is.
           if (isHandOffTakenBack(result)) {
-            putHandedBack(ref);
-            showUndo([ref]);
+            visit.undo(receipt);
+            tellMoved();
           }
           return result.outcome === "stopped"
             ? {
@@ -426,7 +394,8 @@ export const useInboxMoves = ({
         handing.current.delete(ref);
         roll.cancel();
         flight.cancel();
-        putHandedBack(ref);
+        visit.failMove(receipt);
+        tellMoved();
         if (!isCurrent()) return;
         say(describeInboxHandOffFailure(thing, offer.name, readReason(error)));
       },
@@ -442,13 +411,11 @@ export const useInboxMoves = ({
     if (thing !== undefined) sendHandOff(thing, offer, connectionId);
   };
 
-  const startHandOff = (hoveredRef?: string): InboxThing | null => {
+  const startHandOff = (hoveredRef?: string): InboxListRow | null => {
     const things = readAllowedTargets("handOff", hoveredRef);
     const thing = things?.[0];
     if (thing === undefined) return null;
-    const move = decideHandMove(
-      listCardOffers(thing, latest.current.held.readLatest()?.offerSets ?? {}),
-    );
+    const move = decideHandMove(thing.offers);
     if (move.kind === "one") {
       sendHandOff(thing, move.offer, undefined);
       return null;
@@ -462,8 +429,8 @@ export const useInboxMoves = ({
   };
 
   const openAtSource = (): void => {
-    const list = latest.current.held.readLatest()?.list;
-    const thing = list?.rows.find((row) => row.ref === list.current);
+    const { rows, current } = visit.getSnapshot();
+    const thing = rows.find((row) => row.ref === current);
     if (thing === undefined) return;
     if (thing.url === "") {
       say(NO_SOURCE_ADDRESS);
@@ -477,10 +444,6 @@ export const useInboxMoves = ({
     takeOn,
     startHandOff,
     handOff,
-    readHandedThing: (thing) => {
-      const entry = handed.get(thing.ref);
-      return entry?.from === thing ? entry.to : thing;
-    },
     goToTask,
     openAtSource,
     say: (text) => {

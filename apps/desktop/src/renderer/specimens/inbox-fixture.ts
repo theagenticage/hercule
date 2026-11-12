@@ -18,8 +18,9 @@ import type {
   ExternalEntityDetail,
   InboxOutline,
   InboxFacet,
-  InboxPage,
+  InboxFirstPage,
   InboxQuery,
+  InboxReply,
   InboxValueQuery,
   InboxValues,
   InboxThing,
@@ -424,8 +425,42 @@ const pickItems = (list: InboxQuery["list"]): ReadonlyArray<Item> => {
   );
 };
 
+/**
+ * Returns the reply of the mode `query` asks for, from `first`, the one page
+ * the fixture holds. The fixture has no second page, so `next` is empty, and
+ * every held row it still has is on the first page.
+ */
+const replyInMode = (query: InboxQuery, first: InboxFirstPage): InboxReply => {
+  const { offerSets } = first;
+  switch (query.mode) {
+    case "first":
+      return first;
+    case "next":
+      return { mode: "next", things: [], offerSets };
+    case "refresh":
+      return { mode: "refresh", first, held: { things: [], offerSets } };
+    case "rows":
+      return {
+        mode: "rows",
+        things: first.things.filter((thing) => query.held.includes(thing.ref)),
+        offerSets,
+      };
+  }
+};
+
+/** Returns the reply of a list that holds nothing. */
+const answerNothing = (query: InboxQuery): InboxReply =>
+  replyInMode(query, {
+    mode: "first",
+    things: [],
+    total: 0,
+    order: "newest",
+    facets: [],
+    offerSets: {},
+  });
+
 /** Plays the controller's `queryInbox` over the fixture's things. */
-export const answerInboxQuery = (query: InboxQuery): InboxPage => {
+export const answerInboxQuery = (query: InboxQuery): InboxReply => {
   const { list } = query;
   let items = pickItems(list);
   items = items.filter((item) => (query.clauses ?? []).every((clause) => passes(item, clause)));
@@ -443,7 +478,8 @@ export const answerInboxQuery = (query: InboxQuery): InboxPage => {
   const things = ordered.map((item) => item.thing);
   const repos = tally(ordered, "repo");
   const projects = tally(ordered, "project");
-  return {
+  return replyInMode(query, {
+    mode: "first",
     things,
     total: things.length,
     order: isWaiting ? "waiting" : "newest",
@@ -454,7 +490,7 @@ export const answerInboxQuery = (query: InboxQuery): InboxPage => {
         ? []
         : [facet("tidewatch", "project", "Project", "Projects", projects)]),
     ],
-  };
+  });
 };
 
 /** Counts the values of the tag `key` among `items`, most common first. */
@@ -525,7 +561,7 @@ export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
 export interface InboxRecords {
   readonly outline: InboxOutline;
   /** Answers one page read. `"never"` plays a controller that has not answered yet, which draws the loading shapes. */
-  readonly answer: (query: InboxQuery) => InboxPage | "never";
+  readonly answer: (query: InboxQuery) => InboxReply | "never";
   /** Answers the read of a field's values, which the search offers as it is typed. */
   readonly answerValues: (query: InboxValueQuery) => InboxValues;
   /** What the pane reads for a thing, by id. */
@@ -541,8 +577,6 @@ export interface InboxRecords {
 }
 
 const DETAILS = new Map(ALL_THINGS.map((thing) => [thing.id, buildInboxDetail(thing)]));
-
-const NO_THINGS: InboxPage = { things: [], total: 0, order: "newest", offerSets: {} };
 
 /** What the page does after it draws: presses what a user would press. */
 type Play = (page: Document) => Promise<void>;
@@ -618,7 +652,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       ...BASE,
       answer: (query) =>
         "savedQuery" in query.list && query.list.savedQuery === CORE_SAVED_QUERY_IDS.waits
-          ? NO_THINGS
+          ? answerNothing(query)
           : answerInboxQuery(query),
       outline: {
         ...BASE.outline,
@@ -632,7 +666,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     name: "zero",
     records: {
       ...BASE,
-      answer: () => NO_THINGS,
+      answer: answerNothing,
       outline: {
         ...BASE.outline,
         savedQueries: SAVED_QUERIES.map((query) => ({ ...query, count: 0 })),

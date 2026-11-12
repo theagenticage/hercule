@@ -8,12 +8,8 @@ import type { InboxScope, InboxSearch } from "@hercule/client-core/inbox";
 
 /** What of the search narrows the list: its clauses and its free text, not what is half typed. */
 export type InboxNarrowing = Pick<InboxSearch, "clauses" | "text">;
-import {
-  CORE_SAVED_QUERY_IDS,
-  MAX_INBOX_TEXT_LENGTH,
-  type InboxList,
-  type InboxQuery,
-} from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS, MAX_INBOX_TEXT_LENGTH, type InboxList } from "@hercule/contract";
+import type { InboxSelection } from "../../../app/queries";
 
 /** The id of the saved query the Inbox opens on: the things someone waits on the user for. */
 export const DEFAULT_INBOX_QUERY_ID = CORE_SAVED_QUERY_IDS.waits;
@@ -31,8 +27,8 @@ export const EVERYTHING_INBOX_SCOPE: InboxScope = { kind: "saved-query", id: EVE
 export const buildInboxList = (scope: InboxScope): InboxList =>
   scope.kind === "saved-query" ? { savedQuery: scope.id } : { browse: scope.value };
 
-/** Returns the first-page query of a scope and the search over it. */
-export const buildInboxQuery = (scope: InboxScope, search: InboxNarrowing): InboxQuery => ({
+/** Returns the selection of a scope and the search over it: what a list shows. */
+export const buildInboxSelection = (scope: InboxScope, search: InboxNarrowing): InboxSelection => ({
   list: buildInboxList(scope),
   clauses: [...search.clauses],
   text: search.text,

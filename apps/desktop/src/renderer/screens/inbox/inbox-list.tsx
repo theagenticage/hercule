@@ -10,7 +10,7 @@ import {
 } from "react";
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
-import { useVirtualLines, VIRTUAL_OVERSCAN } from "../use-virtual-lines";
+import { useVirtualLines } from "../use-virtual-lines";
 import type { InboxRowView } from "@hercule/client-core/inbox";
 import { InboxRow, type InboxRowActions } from "./inbox-row";
 import {
@@ -110,9 +110,9 @@ function LeavingCopy({
  *   The list animates only what changed between two renders; `listId` names
  *   the list, and a new one shows at once.
  *
- * `onNearEnd` is called whenever the rows drawn reach within a few rows of
- * the last one held, so the caller can read the next page. It may be called
- * again for the same end, so the caller ignores it when no page follows.
+ * `onViewportChange` is called with the index of the first and of the last
+ * row drawn in or near the view, each time either changes or the rows held
+ * grow, so the caller can read the rows around the view and the next page.
  * A change of `focusRequest` moves the keyboard focus to the current row.
  * `handle` receives the list's `InboxListHandle`.
  */
@@ -129,7 +129,7 @@ export function InboxList({
   arriving,
   footReserve,
   focusRequest,
-  onNearEnd,
+  onViewportChange,
   handle,
 }: {
   readonly listId: string;
@@ -145,7 +145,7 @@ export function InboxList({
   readonly arriving?: ReadonlyArray<string>;
   readonly footReserve?: number;
   readonly focusRequest?: number;
-  readonly onNearEnd: () => void;
+  readonly onViewportChange: (firstIndex: number, lastIndex: number) => void;
   readonly handle?: Ref<InboxListHandle> | undefined;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -154,7 +154,7 @@ export function InboxList({
   const rowHeight = useMeasuredAtTextSize(readRowHeight);
   const estimateSize = useCallback(() => rowHeight, [rowHeight]);
   const items = rows.map((view, index) => ({ key: view.ref, view, index }));
-  const { lines, totalSize, lastDrawnIndex, selectedIndex } = useVirtualLines({
+  const { lines, totalSize, firstDrawnIndex, lastDrawnIndex, selectedIndex } = useVirtualLines({
     items,
     scrollRef,
     estimateSize,
@@ -210,10 +210,10 @@ export function InboxList({
   }, [focusRequested, currentRef]);
 
   useEffect(() => {
-    if (lastDrawnIndex !== undefined && lastDrawnIndex >= rows.length - 1 - VIRTUAL_OVERSCAN) {
-      onNearEnd();
+    if (firstDrawnIndex !== undefined && lastDrawnIndex !== undefined) {
+      onViewportChange(firstDrawnIndex, lastDrawnIndex);
     }
-  }, [lastDrawnIndex, rows.length, onNearEnd]);
+  }, [firstDrawnIndex, lastDrawnIndex, rows.length, onViewportChange]);
 
   return (
     <div className="ib-list">

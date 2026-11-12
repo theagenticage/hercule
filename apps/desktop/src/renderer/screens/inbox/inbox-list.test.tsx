@@ -16,7 +16,7 @@ const renderList = (
   props: {
     readonly currentRef?: string | null;
     readonly selection?: ReadonlySet<string>;
-    readonly onNearEnd?: () => void;
+    readonly onViewportChange?: (first: number, last: number) => void;
   } = {},
 ) => {
   const actions = buildInboxRowActions();
@@ -29,7 +29,7 @@ const renderList = (
       currentRef={props.currentRef === undefined ? "thing-0" : props.currentRef}
       selection={props.selection ?? new Set()}
       actions={actions}
-      onNearEnd={props.onNearEnd ?? (() => {})}
+      onViewportChange={props.onViewportChange ?? (() => {})}
     />,
   );
   return { actions, ...view };
@@ -83,16 +83,19 @@ describe("InboxList", () => {
     expect(screen.getByRole("treeitem", { name: /thing-1500/ }).tabIndex).toBe(0);
   });
 
-  it("asks for the next page when the rows drawn reach the end of the rows held", () => {
-    const onNearEnd = vi.fn();
-    renderList(5, { onNearEnd });
-    expect(onNearEnd).toHaveBeenCalled();
+  it("tells the first and the last row drawn, so the caller can read around the view and the next page", () => {
+    const onViewportChange = vi.fn();
+    renderList(5, { onViewportChange });
+    expect(onViewportChange).toHaveBeenLastCalledWith(0, 4);
   });
 
-  it("does not ask for the next page while the end is far away", () => {
-    const onNearEnd = vi.fn();
-    renderList(2000, { onNearEnd });
-    expect(onNearEnd).not.toHaveBeenCalled();
+  it("tells a last row far from the end of the rows held while the end is far away", () => {
+    const onViewportChange = vi.fn();
+    renderList(2000, { onViewportChange });
+    const [first, last] = onViewportChange.mock.lastCall as [number, number];
+    expect(first).toBe(0);
+    expect(last).toBeGreaterThan(0);
+    expect(last).toBeLessThan(100);
   });
 
   it("passes a row's clicks on with the row's reference", async () => {
@@ -115,7 +118,7 @@ describe("InboxList", () => {
         selection={new Set()}
         actions={actions}
         focusRequest={focusRequest}
-        onNearEnd={() => {}}
+        onViewportChange={() => {}}
       />
     );
     const { rerender } = render(draw(0));
@@ -141,7 +144,7 @@ describe("InboxList", () => {
         currentRef="thing-0"
         selection={new Set()}
         actions={buildInboxRowActions()}
-        onNearEnd={() => {}}
+        onViewportChange={() => {}}
         handle={handle}
       />,
     );

@@ -207,7 +207,9 @@ describe("the Inbox screen", () => {
 
     await screen.findByRole("treeitem", { name: /Fix the basket rounding/ });
     expect(readRowTitles()).toEqual([SLOTS.title, LOYALTY.title, BASKET.title]);
-    expect(readQueries(calls).some((query) => query.cursor === "2")).toBe(true);
+    expect(readQueries(calls).some((query) => query.mode === "next" && query.after === "2")).toBe(
+      true,
+    );
   });
 
   it("says nobody waits when the list is empty, and all is clear when nothing is anywhere", async () => {

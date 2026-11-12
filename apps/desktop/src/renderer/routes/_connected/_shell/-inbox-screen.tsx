@@ -4,15 +4,12 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   EMPTY_INBOX_SEARCH,
   addInboxClause,
-  changeInboxSelection,
-  listCardOffers,
-  moveInboxCurrent,
   nameInboxScope,
   typeInboxSearch,
   type InboxScope,
   type InboxSearch,
 } from "@hercule/client-core/inbox";
-import type { InboxClause, InboxThing } from "@hercule/contract";
+import type { InboxClause } from "@hercule/contract";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { useQuietValue } from "../../../app/use-quiet-value";
@@ -29,13 +26,12 @@ import type { InboxListHandle } from "../../../screens/inbox/inbox-list";
 import type { RailFacetScope } from "../../../screens/inbox/inbox-rail";
 import type { InboxSearchHandle } from "../../../screens/inbox/inbox-search";
 import { InboxOfflinePill, InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
-import type { InboxLeaveHow } from "../../../screens/inbox/use-inbox-list-motion";
 import { useInboxPaneWidth } from "../../../screens/inbox/use-inbox-pane-width";
 import { useInboxClock } from "./-inbox-clock";
-import { useHeldInboxList } from "./-inbox-held-list";
+import { useInboxVisit, type InboxListRow } from "./-inbox-visit";
 import { InboxHandMenuPart } from "./-inbox-hand-part";
 import { InboxListPart } from "./-inbox-list-part";
-import { useInboxMoves, type InboxMoveMotion } from "./-inbox-moves";
+import { useInboxMoves } from "./-inbox-moves";
 import { useInboxKeys } from "./-use-inbox-keys";
 import { InboxPaneHeadPart, InboxPanePart } from "./-inbox-pane-part";
 import { InboxRailPart } from "./-inbox-rail-part";
@@ -45,7 +41,7 @@ import {
   EVERYTHING_INBOX_SCOPE,
   EVERYTHING_QUERY_ID,
   buildInboxList,
-  buildInboxQuery,
+  buildInboxSelection,
   buildInboxScopeParams,
   isSearching,
   type InboxNarrowing,
@@ -54,17 +50,9 @@ import {
 /** How long typing in the search stops before the list reads for it, in milliseconds. */
 const SEARCH_QUIET_MS = 200;
 
-const NO_REFS: ReadonlyArray<string> = [];
-
-/** How the rows of a list change when no move of the user made the change: they leave and come as they are. */
-const STILL_MOTION: InboxMoveMotion = {
-  leaveHow: "taken" satisfies InboxLeaveHow,
-  returning: NO_REFS,
-};
-
 /** The hand-off menu that is open: the thing it hands, and the element it opens under. */
 interface HandMenu {
-  readonly thing: InboxThing;
+  readonly thing: InboxListRow;
   readonly anchor: HTMLElement;
 }
 
@@ -73,8 +61,8 @@ interface HandMenu {
  * pane. It owns what the user chose: the search over the scope, the pane's
  * width and whether the pane lies open over the list. The scope (a saved
  * query or a Browse value) is the route's, read from the URL and given as
- * `scope`, and picking another navigates to it. The list itself is the held
- * list (`useHeldInboxList`), and the parts draw it where they read their data.
+ * `scope`, and picking another navigates to it. The list itself is the visit
+ * (`useInboxVisit`), and the parts draw it where they read their data.
  *
  * The list reads for the search only after typing has paused, so a word typed
  * at speed sends one read and not one for each letter.
@@ -110,13 +98,6 @@ export function InboxScreen({
   const [isKeysOpen, setIsKeysOpen] = useState(false);
   const [isNarrowOpen, setIsNarrowOpen] = useState(false);
   const [handMenu, setHandMenu] = useState<HandMenu | null>(null);
-  // How the rows of the last move went, which holds only for the rows that move left.
-  const [lastMove, setLastMove] = useState<{
-    readonly rows: ReadonlyArray<InboxThing>;
-    readonly motion: InboxMoveMotion;
-  } | null>(null);
-  // The list the user's own move emptied: the empty state's sunrise rises only for it.
-  const [emptiedListId, setEmptiedListId] = useState<string | null>(null);
   const [listFocusRequest, setListFocusRequest] = useState(0);
   const [headingFocusRequest, setHeadingFocusRequest] = useState(0);
   const searchRef = useRef<InboxSearchHandle>(null);
@@ -128,25 +109,16 @@ export function InboxScreen({
     clauses: search.clauses,
     text: search.text.trim() === "" ? "" : quietText,
   };
-  const held = useHeldInboxList(client, buildInboxQuery(scope, searched));
-  const { list } = held;
-  const isLastMoveShown = lastMove !== null && list?.rows === lastMove.rows;
-  const motion = isLastMoveShown ? lastMove.motion : STILL_MOTION;
-  // Once rows are back or another list shows, the list is no longer the one the move emptied.
-  if (
-    emptiedListId !== null &&
-    list !== null &&
-    (list.rows.length > 0 || list.listId !== emptiedListId)
-  ) {
-    setEmptiedListId(null);
-  }
+  const { visit, snapshot } = useInboxVisit(client, buildInboxSelection(scope, searched));
+  const isReady = snapshot.status === "ready";
   const scopeTitle = nameInboxScope(scope, outline);
-  const currentThing = list?.rows.find((row) => row.ref === list.current);
+  const currentThing = isReady
+    ? snapshot.rows.find((row) => row.ref === snapshot.current)
+    : undefined;
 
   // What the waits list shows is what the sidebar's dot has been told about.
   const isShowingWaits =
     scope.kind === "saved-query" && scope.id === DEFAULT_INBOX_QUERY_ID && !isSearching(searched);
-  const isReady = held.status === "ready";
   useEffect(() => {
     if (isShowingWaits && isReady) acknowledgeInboxArrival(url, username, newestArrival);
   }, [isShowingWaits, isReady, url, username, newestArrival]);
@@ -161,7 +133,7 @@ export function InboxScreen({
    * focus and scrolls into view; to the empty state's heading when nothing is
    * current any more, with the pane stepped aside first.
    */
-  const followMove = (next: { readonly rows: ReadonlyArray<InboxThing> }): void => {
+  const followMove = (next: { readonly rows: ReadonlyArray<InboxListRow> }): void => {
     if (next.rows.length === 0) {
       setIsPaneOpen(false);
       setHeadingFocusRequest((request) => request + 1);
@@ -172,24 +144,20 @@ export function InboxScreen({
   const moves = useInboxMoves({
     client,
     scope: controller.accountScopes.read(),
-    held,
+    visit,
     isOffline: offlineSince !== null,
     openTask: (taskId) => {
       void navigate({ to: "/work", search: { task: taskId } });
     },
-    onMoved: (next, moved) => {
-      setLastMove({ rows: next.rows, motion: moved });
-      setEmptiedListId(next.rows.length === 0 ? next.listId : null);
-      followMove(next);
-    },
+    onMoved: followMove,
   });
-  const openHandMenu = (thing: InboxThing | null, ref: string): void => {
+  const openHandMenu = (thing: InboxListRow | null, ref: string): void => {
     if (thing === null) return;
     const anchor = listRef.current?.findHandAnchor(ref);
     if (anchor !== null && anchor !== undefined) setHandMenu({ thing, anchor });
   };
   const startHandOff = (ref: string | undefined): void => {
-    openHandMenu(moves.startHandOff(ref), ref ?? list?.current ?? "");
+    openHandMenu(moves.startHandOff(ref), ref ?? snapshot.current ?? "");
   };
   /** Slides the pane away first when it lies over the list, for what is about the list. */
   const slidePaneAside = (): void => {
@@ -198,7 +166,7 @@ export function InboxScreen({
   /** Takes in what arrived, which is what both the `.` key and the "N new" pill do. */
   const showNew = (): void => {
     slidePaneAside();
-    held.showArrivals();
+    visit.show();
     focusList();
   };
   const openScope = (entry: InboxScope): void => {
@@ -211,25 +179,22 @@ export function InboxScreen({
   const performKey = (action: InboxKeyAction): void => {
     switch (action.kind) {
       case "step":
-        held.change((state) => moveInboxCurrent(state, { by: action.by, extend: action.extend }));
+        visit.step(action.by, action.extend);
         if (!isPaneHoldingFocus) focusList();
         return;
       case "toggleSelect":
-        if (list?.current != null) {
-          const ref = list.current;
-          held.change((state) => changeInboxSelection(state, { kind: "toggle", ref }));
-        }
+        if (snapshot.current !== null) visit.select({ kind: "toggle", ref: snapshot.current });
         return;
       case "selectAll":
-        held.change((state) => changeInboxSelection(state, { kind: "all" }));
+        visit.select({ kind: "all" });
         return;
       case "stepBack":
         if (isKeysOpen) setIsKeysOpen(false);
         else if (isPaneHoldingFocus) {
           setIsPaneOpen(false);
           focusList();
-        } else if (list !== null && list.selection.size > 0) {
-          held.change((state) => changeInboxSelection(state, { kind: "clear" }));
+        } else if (isReady && snapshot.selection.size > 0) {
+          visit.select({ kind: "clear" });
         } else if (isSearching(search)) setSearch(EMPTY_INBOX_SEARCH);
         return;
       case "focusList":
@@ -265,7 +230,7 @@ export function InboxScreen({
       case "narrow":
         slidePaneAside();
         // The list head hides Narrow while the list holds nothing, and so does the key.
-        if (list !== null && (list.rows.length > 0 || list.arrivals.length > 0)) {
+        if (isReady && (snapshot.rows.length > 0 || snapshot.arrivals > 0)) {
           setIsNarrowOpen((isOpen) => !isOpen);
         }
         return;
@@ -276,24 +241,24 @@ export function InboxScreen({
         focusNextInboxRegion(action.backwards, { isStacked, isPaneOpen });
         return;
       case "openPane":
-        if (isStacked && !isPaneOpen && list?.current != null) setIsPaneOpen(true);
+        if (isStacked && !isPaneOpen && isReady && snapshot.current !== null) setIsPaneOpen(true);
         return;
     }
   };
   useInboxKeys(performKey);
   const rowActions: InboxRowActions = {
     onPick: (ref, modifiers) => {
-      held.change((state) =>
+      visit.select(
         modifiers.shiftKey
-          ? changeInboxSelection(state, { kind: "extendTo", ref })
+          ? { kind: "extendTo", ref }
           : modifiers.metaKey || modifiers.ctrlKey
-            ? changeInboxSelection(state, { kind: "toggle", ref })
-            : moveInboxCurrent(state, { to: ref }),
+            ? { kind: "toggle", ref }
+            : { kind: "focus", ref },
       );
       setIsPaneOpen(true);
     },
     onToggleSelect: (ref) => {
-      held.change((state) => changeInboxSelection(state, { kind: "toggle", ref }));
+      visit.select({ kind: "toggle", ref });
     },
     onTakeOn: moves.takeOn,
     onHandOff: (ref) => {
@@ -332,8 +297,8 @@ export function InboxScreen({
     });
   };
   const resultsText =
-    isSearching(searched) && held.total !== undefined
-      ? `${String(held.total)} ${held.total === 1 ? "thing matches" : "things match"} in ${scopeTitle}.`
+    isSearching(searched) && snapshot.total !== undefined
+      ? `${String(snapshot.total)} ${snapshot.total === 1 ? "thing matches" : "things match"} in ${scopeTitle}.`
       : "";
 
   return (
@@ -342,7 +307,7 @@ export function InboxScreen({
         <InboxRailPart
           client={client}
           current={isSearching(search) ? null : scope}
-          isLoading={held.status === "loading"}
+          isLoading={snapshot.status === "loading"}
           onPick={openScope}
           onSearchMore={searchMore}
           onSaveFailed={moves.say}
@@ -372,17 +337,14 @@ export function InboxScreen({
       list={
         <InboxListPart
           client={client}
-          held={held}
+          snapshot={snapshot}
+          visit={visit}
           scope={scope}
           scopeTitle={scopeTitle}
           search={searched}
           rowActions={rowActions}
-          readHandedThing={moves.readHandedThing}
           focusRequest={listFocusRequest}
           headingFocusRequest={headingFocusRequest}
-          leaveHow={motion.leaveHow}
-          returning={motion.returning}
-          isRising={list !== null && list.listId === emptiedListId}
           isNarrowOpen={isNarrowOpen}
           ref={listRef}
           onNarrowOpenChange={setIsNarrowOpen}
@@ -415,7 +377,7 @@ export function InboxScreen({
       }
       pane={
         currentThing === undefined ? (
-          held.status === "loading" ? (
+          snapshot.status === "loading" ? (
             <InboxPaneSkeleton />
           ) : null
         ) : (
@@ -424,7 +386,7 @@ export function InboxScreen({
             isActive={!isStacked || isPaneOpen}
             client={client}
             thing={currentThing}
-            offers={listCardOffers(currentThing, held.offerSets)}
+            offers={currentThing.offers}
             moves={{
               onTakeOn: () => {
                 moves.takeOn();
@@ -452,7 +414,7 @@ export function InboxScreen({
       offlinePill={
         offlineSince === null ? null : <InboxOfflinePill sinceLabel={formatClock(offlineSince)} />
       }
-      isPaneShown={currentThing !== undefined || held.status === "loading"}
+      isPaneShown={currentThing !== undefined || snapshot.status === "loading"}
       isPaneOpen={isPaneOpen}
       paneWidth={paneWidth}
       onPaneWidthChange={setPaneWidth}
@@ -479,7 +441,7 @@ export function InboxScreen({
           {handMenu !== null && (
             <InboxHandMenuPart
               thing={handMenu.thing}
-              offers={listCardOffers(handMenu.thing, held.offerSets)}
+              offers={handMenu.thing.offers}
               anchor={handMenu.anchor}
               onHand={(offer, connectionId) => {
                 moves.handOff(handMenu.thing.ref, offer, connectionId);

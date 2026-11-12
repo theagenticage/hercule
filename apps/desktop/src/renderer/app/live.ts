@@ -90,8 +90,8 @@ const invalidateLegReads = (
 
 /**
  * The first segments of the keys whose reads are large and that several pushes
- * of one change all name: the Inbox's pages and outline, the sidebar's counts,
- * and the entity panes. A signal's change pushes `signal`, then
+ * of one change all name: the Inbox's outline, the sidebar's counts, and the
+ * entity panes. A signal's change pushes `signal`, then
  * `externalEntity`. A push that arrives while one of their reads is running
  * cancels it and reads again, so the read always starts after the push and
  * the list never misses a change.
@@ -101,6 +101,28 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.inboxCount()[0],
   queryKeys.externalEntity()[0],
 ] as string[]);
+
+/** Who listens for the Inbox's pushes, by the query client the pushes reach. */
+const inboxPushListeners = new WeakMap<QueryClient, Set<() => void>>();
+
+/**
+ * Calls `listener` once for each push that names the Inbox's keys, on any
+ * topic, as the shell and the screens deliver them to `invalidateForPush`.
+ * Returns a function that stops. The Inbox visit listens through this
+ * instead of subscribing to topics itself: a new subscription is answered
+ * with a first push that would read the list again right after it opened.
+ */
+export const listenForInboxPushes = (
+  queryClient: QueryClient,
+  listener: () => void,
+): (() => void) => {
+  const listeners = inboxPushListeners.get(queryClient) ?? new Set<() => void>();
+  inboxPushListeners.set(queryClient, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
@@ -133,6 +155,9 @@ export const invalidateForPush = (
   keys: ReadonlyArray<LiveQueryKey>,
   push: LiveInvalidatePush,
 ): void => {
+  if (keys.some((queryKey) => queryKey[0] === queryKeys.inbox()[0])) {
+    for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener();
+  }
   for (const queryKey of keys) {
     if (SHARED_READ_KEYS.has(queryKey[0] as string)) {
       void queryClient.invalidateQueries({ queryKey, refetchType: "active" });

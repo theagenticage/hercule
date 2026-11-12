@@ -61,7 +61,7 @@ const PATHS = [
   join(HERE, "inbox.tsx"),
   join(HERE, "-inbox-clock.ts"),
   join(HERE, "-inbox-hand-part.tsx"),
-  join(HERE, "-inbox-held-list.ts"),
+  join(HERE, "-inbox-visit.ts"),
   join(HERE, "-inbox-list-part.tsx"),
   join(HERE, "-inbox-moves.ts"),
   join(HERE, "-inbox-pane-part.tsx"),

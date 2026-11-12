@@ -20,7 +20,7 @@ import {
   type TrackingRead,
 } from "@hercule/client-core";
 import type { HandoffLeg, TrackingRun } from "@hercule/contract";
-import { invalidateForPush, useSubagentsLive } from "./live";
+import { invalidateForPush, listenForInboxPushes, useSubagentsLive } from "./live";
 import {
   handoffLegQuery,
   signalsClearedTodayQuery,
@@ -454,5 +454,53 @@ describe("invalidateForPush for the Inbox's keys", () => {
       expect(startedWith).toEqual([0, 0, 1]);
       expect(queryClient.getQueryData(queryKeys.inbox())).toBe(1);
     });
+  });
+});
+
+describe("listenForInboxPushes", () => {
+  const push = { ids: ["e-1"], kind: "updated" } as const;
+
+  it("calls the listener once for a push that names the Inbox's keys, however many keys it names", () => {
+    const queryClient = new QueryClient();
+    let calls = 0;
+    const stop = listenForInboxPushes(queryClient, () => {
+      calls += 1;
+    });
+
+    invalidateForPush(
+      queryClient,
+      "externalEntity",
+      [queryKeys.inbox(), queryKeys.inboxOutline(), queryKeys.inboxCount()],
+      push,
+    );
+
+    expect(calls).toBe(1);
+    stop();
+  });
+
+  it("ignores a push that names no Inbox key, and another client's push", () => {
+    const queryClient = new QueryClient();
+    let calls = 0;
+    const stop = listenForInboxPushes(queryClient, () => {
+      calls += 1;
+    });
+
+    invalidateForPush(queryClient, "task", [queryKeys.tasks()], push);
+    invalidateForPush(new QueryClient(), "externalEntity", [queryKeys.inbox()], push);
+
+    expect(calls).toBe(0);
+    stop();
+  });
+
+  it("stops calling the listener once it is stopped", () => {
+    const queryClient = new QueryClient();
+    let calls = 0;
+    listenForInboxPushes(queryClient, () => {
+      calls += 1;
+    })();
+
+    invalidateForPush(queryClient, "externalEntity", [queryKeys.inbox()], push);
+
+    expect(calls).toBe(0);
   });
 });

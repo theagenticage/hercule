@@ -13,8 +13,9 @@ import {
 import type {
   ExternalEntityDetail,
   InboxOutline,
-  InboxPage,
+  InboxFirstPage,
   InboxQuery,
+  InboxReply,
   InboxThing,
   WorkflowOffer,
 } from "@hercule/contract";
@@ -41,6 +42,8 @@ export const request = (
 ) =>
   buildInboxThing(String(n), {
     id: buildThingId(n),
+    // A larger number arrived later, which is how the list tells an arrival from a row it holds.
+    arrival: n,
     title,
     asks: [buildInboxAsk(buildThingId(100 + n), asker)],
     askCount: 1,
@@ -118,8 +121,8 @@ export interface FakeInbox {
   offerSets: Record<string, WorkflowOffer[]>;
 }
 
-/** Builds the controller's answer to one `queryInbox`: a first page, a next page or a `refs` read. */
-export const answerQuery = (inbox: FakeInbox, call: Call): { body: InboxPage } => {
+/** Builds the controller's answer to one `queryInbox`, in the mode the query asks. */
+export const answerQuery = (inbox: FakeInbox, call: Call): { body: InboxReply } => {
   const query = call.body as InboxQuery;
   const name = "savedQuery" in query.list ? query.list.savedQuery : "browse";
   let things = inbox.lists[name] ?? [];
@@ -128,22 +131,38 @@ export const answerQuery = (inbox: FakeInbox, call: Call): { body: InboxPage } =
   things = things.filter((thing) =>
     values.every((value) => thing.title.toLowerCase().includes(value)),
   );
-  const total = things.length;
-  if (query.refs !== undefined) {
-    const wanted = new Set<string>(query.refs);
-    things = things.filter((thing) => wanted.has(thing.ref));
-    return { body: { things, total, order: "waiting", offerSets: inbox.offerSets } };
+  const { offerSets } = inbox;
+  const heldThings = (refs: readonly string[]): InboxThing[] =>
+    things.filter((thing) => refs.includes(thing.ref));
+  if (query.mode === "rows") {
+    return { body: { mode: "rows", things: heldThings(query.held), offerSets } };
   }
-  const from = query.cursor === undefined ? 0 : Number(query.cursor);
+  const from = query.mode === "next" ? Number(query.after) : 0;
   const page = things.slice(from, from + inbox.pageSize);
   const next = from + inbox.pageSize;
+  const nextCursor = next < things.length ? { nextCursor: String(next) } : {};
+  if (query.mode === "next") {
+    return { body: { mode: "next", things: page, ...nextCursor, offerSets } };
+  }
+  const first: InboxFirstPage = {
+    mode: "first",
+    things: page,
+    total: things.length,
+    order: name === "waits" ? "waiting" : "newest",
+    facets: [],
+    ...nextCursor,
+    offerSets,
+  };
+  if (query.mode === "first") return { body: first };
+  const onFirstPage = new Set(page.map((thing) => thing.ref));
   return {
     body: {
-      things: page,
-      total,
-      order: name === "waits" ? "waiting" : "newest",
-      ...(next < things.length ? { nextCursor: String(next) } : {}),
-      offerSets: inbox.offerSets,
+      mode: "refresh",
+      first,
+      held: {
+        things: heldThings(query.held).filter((thing) => !onFirstPage.has(thing.ref)),
+        offerSets,
+      },
     },
   };
 };
@@ -181,6 +200,10 @@ export const openInbox = async (
     createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
     { path, retryFailedReads: false },
   );
+  // The shell's first pushes make the visit read the list again. Let those reads finish, so a
+  // test acts on a list that holds still and counts only the reads it causes.
+  await app.live.waitForFirstPushes();
+  for (let tick = 0; tick < 3; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   return { calls, ...app };
 };
 

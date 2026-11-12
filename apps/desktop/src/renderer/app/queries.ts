@@ -49,7 +49,8 @@ import {
   type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
-  type InboxQuery,
+  type InboxClause,
+  type InboxList,
   type InboxValueQuery,
   type Input,
   type RunSummary,
@@ -1075,33 +1076,34 @@ export const inboxOutlineQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the first page of an Inbox list: `query` names the list, its search
- * and no cursor. A read the screen no longer needs (the user went on to
- * another list or kept typing) is aborted. It is not shell data: only the Inbox screen reads it, and a
- * live push on the Inbox's keys reads it again while the screen is open. The
- * screen never draws this reply by itself: the held list takes it in (see
- * `useHeldInboxList`), so a refetch cannot move a row under the user's eyes.
+ * What an Inbox list shows: the scope (a saved query or a Browse value), and
+ * the search that narrows it. The same selection names a list to every read.
  */
-export const inboxQuery = (client: HerculeClient, query: InboxQuery) =>
-  queryOptions({
-    queryKey: queryKeys.inbox(query),
-    queryFn: ({ signal }) => client.externalEntity.queryInbox({ payload: query }, { signal }),
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
+export interface InboxSelection {
+  readonly list: InboxList;
+  readonly clauses: ReadonlyArray<InboxClause>;
+  readonly text: string;
+}
 
 /**
- * Reads a page of an Inbox list that is not the first: the next page (a
- * `cursor`) or the rows a refresh holds beyond the first page (`refs`). Each
- * read is made once for the use that asked, so nothing is kept: a cached
- * answer would be older than the first page it is compared with.
+ * Reads the first page of an Inbox list, for what only its size or its
+ * facets are wanted (the size of a search in another list). The rows the
+ * screen draws are never read through here: the Inbox visit reads them
+ * (`buildInboxReader`), so a refetch cannot move a row under the user's eyes.
  */
-export const inboxPartialPageQuery = (client: HerculeClient, query: InboxQuery) =>
+export const inboxQuery = (client: HerculeClient, selection: InboxSelection) =>
   queryOptions({
-    queryKey: queryKeys.inbox(query),
-    queryFn: ({ signal }) => client.externalEntity.queryInbox({ payload: query }, { signal }),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false,
+    queryKey: queryKeys.inbox(selection),
+    queryFn: async ({ signal }) => {
+      const reply = await client.externalEntity.queryInbox(
+        { payload: { mode: "first", ...selection } },
+        { signal },
+      );
+      if (reply.mode !== "first")
+        throw new Error(`The Inbox answered a first read in ${reply.mode} mode.`);
+      return reply;
+    },
+    ...LIVE_KEPT_READ_OPTIONS,
   });
 
 /**
