@@ -47,8 +47,9 @@ window.List = (function () {
   function where(t, inGroup) {
     var id = D.identifier(t), p = D.place(t);
     // Beside a long identifier the place would be cut to a stub, so it is left to the pane. A row that
-    // also says who has the rest of it leaves the place to the pane too, so those words are whole.
-    if (p && id && (p.length + id.length > 26 || (t.held && t.held.workflow && Model.asks(t)))) p = "";
+    // also says who has the rest of it, or that it came back after a dismissal, leaves the place to
+    // the pane too, so those words are whole.
+    if (p && id && (p.length + id.length > 26 || (t.held && t.held.workflow && Model.asks(t)) || t.dismissed)) p = "";
     return '<span class="row-where">' + (p ? '<span class="row-place">' + D.esc(p) + "</span>" : "") + (id ? '<span class="row-id">' + D.esc(id) + "</span>" : "") + "</span>";
   }
 

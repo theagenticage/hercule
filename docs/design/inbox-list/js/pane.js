@@ -107,6 +107,9 @@ window.Pane = (function () {
     else if (t.fields.from) meta.push("<span>From " + D.esc(t.fields.from) + "</span>");
     if (t.fields.events != null) meta.push("<span>" + D.num(t.fields.events) + " events · " + D.num(t.fields.users) + " users</span>");
     if (accounts.length > 1) meta.push('<span title="The account it is seen through">in ' + D.esc(t.account) + "</span>");
+    // A thing that came back after a dismissal says what brought it back.
+    var back = Model.asksSinceDismissed(t);
+    if (back.length) meta.push("<span>Dismissed " + D.agoWords(t.dismissed.at) + ", back for " + D.esc(back.map(Model.nameAsk).join(" and ")) + "</span>");
     html += '<p class="pn-meta">' + meta.join("") + "</p>";
     if (t.held) html += '<p class="pn-held">' + (t.held.by === "you" ? D.you(20) : D.face(t.held.by, "working", 22)) + "<span><b>" + (t.held.by === "you" ? "Your Task" : D.esc(t.held.by) + " has it") + "</b>" + D.esc(t.held.task) + '</span><button type="button" class="btn btn--sm" data-move="goto">Go to the Task' + kbd("G") + "</button></p>";
     if (sigs.length) html += '<div class="sigs">' + sigs.map(function (s) { return signalSection(t, s, s.id === openId); }).join("") + "</div>";

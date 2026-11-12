@@ -67,6 +67,7 @@ export const STATES = [
   ["44-hand-find", "scene=hand-find", { wait: 1300 }, "Finding a workflow by what it does"],
   ["45-handed-mention-left", "scene=hand", { wait: 1300, run: async (p) => { await p.keyboard.press("1"); await p.waitForTimeout(1800); } }, "Handed to Review PR: Omar’s mention stays with you"],
   ["46-pane-360-hand", "scene=sentry", { run: async (p) => { await p.evaluate(() => App.setPaneWidth(360)); await p.waitForTimeout(400); } }, "A 360 px pane: the hand-off keeps its name, the other moves are icons"],
+  ["47-dismissed-returns", "scene=returned", {}, "Dismissed yesterday, back for Kwame’s new mention"],
   ["38-keys", "scene=keys", {}, "The keys"],
   ["39-pane-wide", "scene=wide", {}, "The pane, made wide"],
   ["40-undo", "scene=undo", { wait: 1200 }, "Dismissed, with Undo"],

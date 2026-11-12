@@ -7,6 +7,13 @@ window.Scenes = (function () {
 
   var BEFORE = {
     pr: function (s) { s.open.add("g:shop-142"); s.focus = "m:shop-142:pr-6244"; },
+    // Dismissed yesterday with Theo's review request open; Kwame's mention since brings it back.
+    returned: function (s) {
+      var t = Model.byId("pr-6230");
+      t.dismissed = { at: 1440, by: "you" };
+      t.signals.push({ id: "s12b", kind: "mention", by: "Kwame", at: 25, blocks: [{ type: "messages", items: [{ author: "Kwame Mensah", at: 25, text: "@you the courier app still calls /wishlist/sync on start. Can we keep it one more release?" }] }] });
+      s.focus = "r:pr-6230";
+    },
     "pr-second": function (s) { s.open.add("g:shop-142"); s.focus = "m:shop-142:pr-6244"; },
     linear: function (s) { s.scope = { saved: "mine" }; s.focus = "r:shop-150"; },
     sentry: function (s) { s.scope = { saved: "errors" }; s.focus = "r:sn-21c"; },

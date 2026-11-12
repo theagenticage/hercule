@@ -119,7 +119,8 @@ window.Draw = (function () {
     var a = Model.askingSignals(t).slice().sort(function (x, y) { return x.at - y.at; });
     // A workflow that has a thing may leave an ask open: the ask is the reason, and who has the rest follows.
     if (t.held && !(t.held.workflow && a.length)) return t.held.by === "you" ? "You took it on" : esc(t.held.by) + " has it";
-    var also = t.held ? ' <span class="held-by">· ' + esc(t.held.by) + " has the rest</span>" : "";
+    // What else a row should say: who has the rest of it, or that it came back after you dismissed it.
+    var also = t.held ? ' <span class="row-aside">· ' + esc(t.held.by) + " has the rest</span>" : t.dismissed ? ' <span class="row-aside">· dismissed ' + ago(t.dismissed.at) + " ago</span>" : "";
     if (a.length) {
       var s = a[0];
       var text = esc(saySignal(s, t));

@@ -320,10 +320,11 @@ Each is a choice the map left open, made for the best design. Each can be turned
 64. **With several workflows, the hand-off button shows the first three faces** and "Hand to…", so it never reads as one of them.
 65. **A hand-off ends only the asks its workflow declares.** An ask it leaves keeps the thing in "Someone waits on me": the row says "Omar mentioned you · Review PR has the rest", shows the wait of that ask, and the undo line says "Omar’s mention stays with you". A thing you take on yourself waits on nobody.
 66. **A group's chevron sits on its second line**, in the glyph column; its first line's lead selects, as on every row.
+67. **A new ask brings a dismissed thing back.** A signal that asks you, raised after you dismissed the thing, puts it back in the lists; the row says "Kwame mentioned you · dismissed 1d ago", and the pane "Dismissed 1 day ago, back for Kwame’s mention". Asks that were open when you dismissed it, a new concern, or activity that asks nothing keep it dismissed. To never hear of a thing again, an Ignore Rule mutes it. Arriving while the page is open, it waits behind "N new" like any arrival.
 
 ## Proposed changes to #1119
 
-The drawing keeps every decision. Five would read better changed:
+The drawing keeps every decision. Six would read better changed:
 
 1. **Decision 15 to 17, the pane's order**: "Where it is from, the title, one section per open signal, then the plugin's blocks, then the core's sections." It is drawn this way (call 1).
 2. **Decision 7, "things you handle leave at once"**: "leave as soon as the move's motion ends", so a hand-off can show the colleague taking it before the row goes.
@@ -331,6 +332,8 @@ The drawing keeps every decision. Five would read better changed:
 4. **Decision 16, answers**: "an answer that acts on the source is held for the undo window before it is sent". This touches `signal.act` (spec 10 §9.4, spec 20): the controller, or the client, waits eight seconds, and ⌘Z cancels. It is what makes ↩ safe as the suggested answer's key.
 
 5. **Decision 2, "Someone waits on me"**: define it over open signals alone: a thing is in it while a signal asking you is open on it, whatever Task or run it has. Spec 20 §9.6 already ends only the signals of the kinds a workflow `answers` ("A mention on the same pull request stays open on the card"); the list must not then hide the card because a Task has it. The drawing's first query did ("asks, and nobody has it"), so Omar's mention left the list with the pull request handed to Review PR. Drawn now as call 65.
+
+6. **Spec 20 §4.2, dismissal** (Rogier, 2026-11-12): "a new signal or a new concern does not bring it back: only restore does" holds today only because the signal still shows on Intake. Once Intake's signals live in the Inbox (#1048), an ask on a dismissed thing would show nowhere. Proposed: a signal that asks the user, raised after the dismissal, brings the thing back (call 67); a new concern, or a signal that asks nothing, does not; the Ignore Rule (spec 10 §9.9) is the way to mute a thing for good. The server then compares the dismissal's time with each signal's, the marker §4.2 says it does not need today.
 
 For spec 17's hand-off menu (HandToMenu), outside #1119: rank by fit (call 62), add the find field from six workflows (call 63), name each ask in the line ("Ends Mei’s review request. Leaves Omar’s mention with you."), and show several faces on the button (call 64). The menu was drawn unchanged until Rogier asked what happens with many workflows.
 

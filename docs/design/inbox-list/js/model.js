@@ -25,7 +25,15 @@ window.Model = (function () {
     var a = askingSignals(t);
     return a.length ? Math.max.apply(null, a.map(function (s) { return s.at; })) : null;
   }
-  function isLive(t) { return !gone.has(t.id) && !t.dismissed; }
+  /**
+   * Returns the asks raised after a dismissed thing was dismissed, newest first: those bring it back.
+   * Asks that were open when it was dismissed do not, nor does anything that asks nothing.
+   */
+  function asksSinceDismissed(t) {
+    if (!t.dismissed) return [];
+    return askingSignals(t).filter(function (s) { return s.at < t.dismissed.at; }).sort(function (a, b) { return a.at - b.at; });
+  }
+  function isLive(t) { return !gone.has(t.id) && (!t.dismissed || asksSinceDismissed(t).length > 0); }
   function live() { return world.things.filter(isLive); }
 
   /** Checks whether a thing answers a saved query's declared clauses. */
@@ -246,6 +254,6 @@ window.Model = (function () {
     sourceOf: sourceOf, openSignals: openSignals, askingSignals: askingSignals, asks: asks, waitOf: waitOf, readField: readField,
     find: find, holds: holds, buildRows: buildRows, decideGroups: decideGroups, groupOf: groupOf, linksOf: linksOf, triageLive: triageLive,
     countSaved: countSaved, countTriage: countTriage, facetValues: facetValues, accountsOf: accountsOf, countSource: countSource,
-    offersFor: offersFor, noteHanded: noteHanded, nameAsk: nameAsk, matchClause: matchClause, isLive: isLive,
+    offersFor: offersFor, noteHanded: noteHanded, nameAsk: nameAsk, asksSinceDismissed: asksSinceDismissed, matchClause: matchClause, isLive: isLive,
   };
 })();

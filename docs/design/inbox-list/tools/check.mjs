@@ -879,6 +879,17 @@ for (const w of [640, 420, 360]) {
   await p.close();
 }
 
+// ---- A dismissed thing comes back for a new ask, and only for one ----
+{
+  const p = await open("theme=whitehaven&scene=returned");
+  await settle(p, 300);
+  await expect(p, "a new ask brings a dismissed thing back, and its row says it was dismissed", () => { const el = document.querySelector('[data-key="r:pr-6230"]'); return !!el && /Kwame mentioned you.*dismissed 1d ago/.test(el.querySelector(".row-why").textContent); });
+  await expect(p, "its pane says what brought it back", () => /Dismissed 1 day ago, back for Kwame’s mention/.test(document.querySelector("#pane .pn-meta").textContent));
+  await p.evaluate(() => { const t = Model.byId("pr-6230"); t.signals = t.signals.filter((s) => s.id !== "s12b"); App.render({}); });
+  await expect(p, "an ask that was open when it was dismissed does not bring it back", () => !App.state.rows.some((r) => r.thing && r.thing.id === "pr-6230"));
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

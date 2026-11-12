@@ -865,3 +865,7 @@ html.is-carrying .row-acts,
 .flights .row--group::after {
   content: none;
 }
+/* What a row adds after its reason: who has the rest of it, or that it came back after a dismissal. */
+.row-aside {
+  color: var(--faint);
+}
