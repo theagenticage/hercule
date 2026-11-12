@@ -24,8 +24,8 @@ apps/android/.idea/
 apps/android/**/*.iml
 apps/android/captures/
 
-# The Vitest report of a desktop end-to-end run, which CI uploads.
-/desktop-e2e-report/
 
-# The run times of a test shard, which CI uploads to refresh the shard weights.
+# The run times of a test shard, which CI uploads, and the run times CI
+# merges from them and hands to every shard (see `scripts/test-shards.ts`).
 /test-durations.json
+/test-shard-weights.json

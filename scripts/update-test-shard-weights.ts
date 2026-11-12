@@ -1,29 +1,30 @@
 #!/usr/bin/env bun
 /**
- * Refreshes `test-shard-weights.json` from the shards of one finished CI run.
+ * Updates `test-shard-weights.json` with the run times the shards of one CI
+ * run recorded. CI runs it after every run on `main`, then saves the file to
+ * the Actions cache:
  *
- *   bun run scripts/update-test-shard-weights.ts <run id>
+ *   bun run scripts/update-test-shard-weights.ts <folder>
  *
- * It downloads the artifacts named `test-durations-<suite>-<shard>` of the
- * run with `gh`, and writes each file's run time. The weights come from CI,
- * where the shards run, because a laptop's timings are not a runner's.
+ * `<folder>` holds one `test-durations-<suite>-<shard>` folder per shard, as
+ * `actions/download-artifact` writes them, each with the `test-durations.json`
+ * of `test-durations-reporter.ts`. The file is changed one suite at a time:
  *
- * It writes nothing, and says why, unless the run qualifies. The run must be
- * completed, and for each suite (`node` and `react`) every shard must have
- * uploaded its report once, with every test passed: a test that failed or
- * timed out says nothing about how long its file takes. Other jobs of the run
- * may have failed.
+ * - A suite whose shards all uploaded a report once, and all passed, replaces
+ *   every weight of its projects. A file that is gone loses its weight.
+ * - Any other suite keeps the weights it had, and the script says why. A test
+ *   that failed or timed out says nothing about how long its file takes, and
+ *   a missing shard would drop the weights of its files.
+ *
+ * Exits with 1, writing nothing, when no suite could be updated.
  */
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ShardWeights } from "./shard-plan";
 import { DURATIONS_FILE, type DurationsReport } from "./test-durations-reporter";
-import { TEST_WEIGHTS_PATH } from "./test-shards";
+import { readTestShardWeights, type ShardWeights, TEST_WEIGHTS_PATH } from "./test-shards";
 
-/** The suites whose shards CI runs, each its own job: `pnpm test:node` and `pnpm test:react`. */
-export const SUITES = ["node", "react"] as const;
+/** The suites CI shards, each in a job of its own. */
+export const SUITES = ["node", "react", "desktop"] as const;
 
 /** The report one shard uploaded, and the suite it belongs to. */
 export interface SuiteShardReport {
@@ -31,76 +32,95 @@ export interface SuiteShardReport {
   readonly report: DurationsReport;
 }
 
+/** The weights after an update, and why each suite that was not updated kept its weights. */
+export interface WeightsUpdate {
+  readonly weights: ShardWeights;
+  readonly updatedSuites: ReadonlyArray<string>;
+  readonly refusals: ReadonlyArray<string>;
+}
+
 /**
- * Returns the run times of every file, sorted by name, from the reports of
- * all shards of one run. Fails, saying why, when a suite of `SUITES` has no
- * reports, when its shards disagree on the number of shards, when a shard is
- * missing or appears twice, or when a shard has a failed test.
+ * Returns why the reports of one suite cannot update the weights, or
+ * undefined when they can: when the suite has no reports, its shards disagree
+ * on the number of shards, a shard is missing or appears twice, or a shard
+ * has a failed test.
  */
-export function readWeightsFromReports(reports: ReadonlyArray<SuiteShardReport>): ShardWeights {
-  const weights: Record<string, number> = {};
+function findRefusal(suite: string, shards: ReadonlyArray<DurationsReport>): string | undefined {
+  const count = shards[0]?.count;
+  if (count === undefined) return `The ${suite} tests uploaded no reports.`;
+  if (shards.some((shard) => shard.count !== count)) {
+    return `The shards of the ${suite} tests disagree on the number of shards.`;
+  }
+  const indices = shards.map((shard) => shard.index).toSorted((a, b) => a - b);
+  if (indices.length !== count || indices.some((index, position) => index !== position + 1)) {
+    return `The ${suite} tests have shards ${indices.join(", ")}, not each of 1 to ${count} once.`;
+  }
+  const failed = shards.find((shard) => !shard.passed);
+  if (failed !== undefined) return `Shard ${failed.index} of the ${suite} tests has a failed test.`;
+  return undefined;
+}
+
+/**
+ * Returns `previous` with the weights of every suite whose reports qualify
+ * replaced by the run times in those reports, sorted by name.
+ */
+export function updateWeights(
+  previous: ShardWeights,
+  reports: ReadonlyArray<SuiteShardReport>,
+): WeightsUpdate {
+  const weights: Record<string, number> = { ...previous };
+  const updatedSuites: Array<string> = [];
+  const refusals: Array<string> = [];
   for (const suite of SUITES) {
     const shards = reports.filter((report) => report.suite === suite).map(({ report }) => report);
-    const count = shards[0]?.count;
-    if (count === undefined) throw new Error(`The run has no reports of the ${suite} tests.`);
-    if (shards.some((shard) => shard.count !== count)) {
-      throw new Error(`The shards of the ${suite} tests disagree on the number of shards.`);
+    const refusal = findRefusal(suite, shards);
+    if (refusal !== undefined) {
+      refusals.push(refusal);
+      continue;
     }
-    const indices = shards.map((shard) => shard.index).toSorted((a, b) => a - b);
-    if (indices.length !== count || indices.some((index, position) => index !== position + 1)) {
-      throw new Error(
-        `The ${suite} tests have shards ${indices.join(", ")}, not each of 1 to ${count} once. A shard did not upload its report.`,
-      );
+    const durations = Object.assign({}, ...shards.map((shard) => shard.durations)) as ShardWeights;
+    const projects = new Set(Object.keys(durations).map((key) => key.split(":")[0]));
+    for (const key of Object.keys(weights)) {
+      if (projects.has(key.split(":")[0])) delete weights[key];
     }
-    const failed = shards.find((shard) => !shard.passed);
-    if (failed !== undefined) {
-      throw new Error(
-        `Shard ${failed.index} of the ${suite} tests has a failed test. Pick a run in which every test passed.`,
-      );
-    }
-    for (const shard of shards) Object.assign(weights, shard.durations);
+    Object.assign(weights, durations);
+    updatedSuites.push(suite);
   }
-  return Object.fromEntries(Object.entries(weights).toSorted(([a], [b]) => (a < b ? -1 : 1)));
+  return {
+    weights: Object.fromEntries(Object.entries(weights).toSorted(([a], [b]) => (a < b ? -1 : 1))),
+    updatedSuites,
+    refusals,
+  };
 }
 
 /** Reads the report in each `test-durations-<suite>-<shard>` folder under `folder`. */
 function readReports(folder: string): Array<SuiteShardReport> {
-  return readdirSync(folder).map((name) => ({
-    suite: name.replace(/^test-durations-/, "").replace(/-\d+$/, ""),
-    report: JSON.parse(readFileSync(join(folder, name, DURATIONS_FILE), "utf8")) as DurationsReport,
-  }));
-}
-
-/** Runs `gh` and returns its output. Fails with `gh`'s own message when it fails. */
-function runGh(args: ReadonlyArray<string>): string {
-  const result = spawnSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
-  if (result.status !== 0) throw new Error(`gh ${args.join(" ")} failed.`);
-  return result.stdout;
+  return readdirSync(folder)
+    .filter((name) => existsSync(join(folder, name, DURATIONS_FILE)))
+    .map((name) => ({
+      suite: name.replace(/^test-durations-/, "").replace(/-\d+$/, ""),
+      report: JSON.parse(
+        readFileSync(join(folder, name, DURATIONS_FILE), "utf8"),
+      ) as DurationsReport,
+    }));
 }
 
 if (import.meta.main) {
-  const runId = process.argv[2];
-  if (runId === undefined || !/^\d+$/.test(runId)) {
-    console.error("Usage: bun run scripts/update-test-shard-weights.ts <run id>");
+  const folder = process.argv[2];
+  if (folder === undefined) {
+    console.error("Usage: bun run scripts/update-test-shard-weights.ts <folder>");
     process.exit(1);
   }
-  const folder = mkdtempSync(join(tmpdir(), "hercule-test-durations-"));
-  try {
-    const status = runGh(["run", "view", runId, "--json", "status", "--jq", ".status"]).trim();
-    if (status !== "completed") throw new Error(`Run ${runId} is ${status}, not completed.`);
-    runGh(["run", "download", runId, "--pattern", "test-durations-*", "--dir", folder]);
-    const reports = readReports(folder);
-    writeFileSync(
-      TEST_WEIGHTS_PATH,
-      `${JSON.stringify(readWeightsFromReports(reports), null, 2)}\n`,
-    );
-    console.log(`Wrote ${TEST_WEIGHTS_PATH} from ${reports.length} shards of run ${runId}.`);
-  } catch (error) {
-    console.error(
-      `${error instanceof Error ? error.message : String(error)}\nThe weights file is unchanged.`,
-    );
-    process.exitCode = 1;
-  } finally {
-    rmSync(folder, { recursive: true, force: true });
+  const { weights, updatedSuites, refusals } = updateWeights(
+    readTestShardWeights(),
+    readReports(folder),
+  );
+  for (const refusal of refusals)
+    console.warn(`${refusal} The weights of that suite are unchanged.`);
+  if (updatedSuites.length === 0) {
+    console.error("No suite's weights could be updated; the weights file is unchanged.");
+    process.exit(1);
   }
+  writeFileSync(TEST_WEIGHTS_PATH, `${JSON.stringify(weights, null, 2)}\n`);
+  console.log(`Updated the weights of the ${updatedSuites.join(", ")} tests.`);
 }

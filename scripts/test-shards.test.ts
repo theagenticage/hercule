@@ -1,43 +1,72 @@
 import { describe, expect, it } from "vitest";
-import type { TestSpecification, Vitest } from "vitest/node";
+import type { TestSpecification } from "vitest/node";
 import type { DurationsReport } from "./test-durations-reporter";
-import { readTestShardWeights, WeighedShardSequencer } from "./test-shards";
-import { readWeightsFromReports, type SuiteShardReport } from "./update-test-shard-weights";
+import { planShards, selectShardSpecs } from "./test-shards";
+import { type SuiteShardReport, updateWeights } from "./update-test-shard-weights";
 
-describe("WeighedShardSequencer", () => {
-  /** Returns the files of each of `count` shards, as the sequencer splits `keys`. */
-  const splitIntoShards = async (keys: ReadonlyArray<string>, count: number) => {
-    const specs = keys.map((key) => {
-      const [project, path] = key.split(":") as [string, string];
-      return { project: { name: project }, moduleId: `/repo/${path}` } as TestSpecification;
-    });
-    const shards = [];
-    for (let index = 1; index <= count; index++) {
-      const ctx = { config: { root: "/repo", shard: { index, count } } } as unknown as Vitest;
-      const shard = await new WeighedShardSequencer(ctx).shard(specs);
-      shards.push(shard.map((spec) => `${spec.project.name}:${spec.moduleId.slice(6)}`));
-    }
-    return shards;
-  };
+describe("planShards", () => {
+  it("plans a file with no recorded weight, and ignores a weight for a file that is gone", () => {
+    const shards = planShards(
+      ["a.test.ts", "b.test.ts", "new.test.ts"],
+      { "a.test.ts": 3, "b.test.ts": 1, "gone.test.ts": 99 },
+      2,
+    );
+    expect(shards.flat().toSorted()).toEqual(["a.test.ts", "b.test.ts", "new.test.ts"]);
+  });
 
-  it("weighs each file by its recorded run time, and puts every file in exactly one shard", async () => {
-    // The heaviest file outweighs the three lightest together, so it gets a
-    // shard of its own. With no weight found, every file would weigh the same and
-    // the heaviest would share its shard.
-    const [heaviest, ...others] = Object.entries(readTestShardWeights())
-      .toSorted(([, a], [, b]) => b - a)
-      .map(([key]) => key);
-    const keys = [heaviest!, ...others.slice(-3), "react:apps/web/src/new.test.tsx"];
+  it("keeps the long files apart", () => {
+    const weights = {
+      "a.test.ts": 10,
+      "b.test.ts": 9,
+      "c.test.ts": 3,
+      "d.test.ts": 2,
+      "e.test.ts": 2,
+      "f.test.ts": 2,
+    };
+    expect(planShards(Object.keys(weights), weights, 2)).toEqual([
+      ["a.test.ts", "d.test.ts", "e.test.ts"],
+      ["b.test.ts", "c.test.ts", "f.test.ts"],
+    ]);
+  });
 
-    const shards = await splitIntoShards(keys, 2);
+  it("spreads files that weigh the same over every shard, as when no weight is recorded", () => {
+    const files = ["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts", "e.test.ts"];
+    expect(planShards(files, {}, 3).map((shard) => shard.length)).toEqual([2, 2, 1]);
+  });
 
-    expect(shards.flat().toSorted()).toEqual(keys.toSorted());
-    expect(shards.find((shard) => shard.includes(heaviest!))).toEqual([heaviest]);
+  it("refuses a shard count that is not a positive whole number", () => {
+    expect(() => planShards(["a.test.ts"], {}, 0)).toThrow(/positive whole number/);
+    expect(() => planShards(["a.test.ts"], {}, 1.5)).toThrow(/positive whole number/);
   });
 });
 
-describe("readWeightsFromReports", () => {
-  /** A passing report of shard `index` of 2 of `suite`, whose one file took 1.5 seconds. */
+describe("selectShardSpecs", () => {
+  it("weighs each spec by its project and its path from the root, and puts each in one shard", () => {
+    const specs = [
+      { project: { name: "react" }, moduleId: "/repo/apps/web/src/long.test.tsx" },
+      { project: { name: "react" }, moduleId: "/repo/apps/web/src/a.test.tsx" },
+      { project: { name: "node" }, moduleId: "/repo/apps/web/src/long.test.tsx" },
+      { project: { name: "react" }, moduleId: "/repo/apps/web/src/b.test.tsx" },
+    ] as Array<TestSpecification>;
+    const weights = {
+      "react:apps/web/src/long.test.tsx": 60,
+      "react:apps/web/src/a.test.tsx": 20,
+      "react:apps/web/src/b.test.tsx": 20,
+      "node:apps/web/src/long.test.tsx": 1,
+    };
+
+    const shards = [1, 2].map((index) =>
+      selectShardSpecs(specs, "/repo", { index, count: 2 }, weights),
+    );
+
+    expect(shards.flat()).toHaveLength(specs.length);
+    expect(new Set(shards.flat())).toEqual(new Set(specs));
+    expect(shards[0]).toEqual([specs[0]]);
+  });
+});
+
+describe("updateWeights", () => {
+  /** A passing report of shard `index` of 2 of `suite`, whose one file took `seconds`. */
   const buildReport = (
     suite: string,
     index: number,
@@ -52,41 +81,61 @@ describe("readWeightsFromReports", () => {
       ...overrides,
     },
   });
-  const passingRun = (): Array<SuiteShardReport> => [
-    buildReport("react", 2),
-    buildReport("react", 1),
-    buildReport("node", 1),
-    buildReport("node", 2),
-  ];
+  const passingSuite = (suite: string) => [buildReport(suite, 2), buildReport(suite, 1)];
 
-  it("merges the files of every shard of every suite, sorted by name", () => {
-    expect(readWeightsFromReports(passingRun())).toEqual({
-      "node:file-1.test.ts": 1.5,
-      "node:file-2.test.ts": 1.5,
-      "react:file-1.test.ts": 1.5,
-      "react:file-2.test.ts": 1.5,
+  it("replaces the weights of each suite whose shards all passed, and drops a file that is gone", () => {
+    const previous = {
+      "react:gone.test.ts": 9,
+      "node:file-1.test.ts": 9,
+      "desktop:file-1.test.ts": 9,
+    };
+    const reports = [...passingSuite("react"), ...passingSuite("node"), ...passingSuite("desktop")];
+
+    expect(updateWeights(previous, reports)).toEqual({
+      weights: {
+        "desktop:file-1.test.ts": 1.5,
+        "desktop:file-2.test.ts": 1.5,
+        "node:file-1.test.ts": 1.5,
+        "node:file-2.test.ts": 1.5,
+        "react:file-1.test.ts": 1.5,
+        "react:file-2.test.ts": 1.5,
+      },
+      updatedSuites: ["node", "react", "desktop"],
+      refusals: [],
     });
   });
 
   it.each([
-    ["a suite has no reports", () => passingRun().slice(0, 2), /no reports of the node tests/],
-    ["a shard is missing", () => passingRun().slice(1), /react tests have shards 1, not each/],
+    ["has no reports", [], /desktop tests uploaded no reports/],
+    ["is missing a shard", [buildReport("desktop", 1)], /shards 1, not each of 1 to 2 once/],
     [
-      "a shard appears twice",
-      () => [...passingRun().slice(1), buildReport("react", 1)],
-      /react tests have shards 1, 1, not each/,
+      "has a shard twice",
+      [buildReport("desktop", 1), buildReport("desktop", 1)],
+      /shards 1, 1, not each/,
     ],
     [
-      "the shards disagree on their number",
-      () => [...passingRun().slice(1), buildReport("react", 1, { count: 3 })],
+      "disagrees on the number of shards",
+      [buildReport("desktop", 1), buildReport("desktop", 2, { count: 3 })],
       /disagree on the number of shards/,
     ],
     [
-      "a test failed",
-      () => [...passingRun().slice(0, 3), buildReport("node", 2, { passed: false })],
-      /Shard 2 of the node tests has a failed test/,
+      "has a failed test",
+      [buildReport("desktop", 1), buildReport("desktop", 2, { passed: false })],
+      /Shard 2 of the desktop tests has a failed test/,
     ],
-  ])("refuses the run when %s", (_case, build, message) => {
-    expect(() => readWeightsFromReports(build())).toThrow(message);
-  });
+  ])(
+    "keeps the weights of a suite that %s, and still updates the others",
+    (_case, desktop, refusal) => {
+      const previous = { "desktop:old.test.ts": 9 };
+      const update = updateWeights(previous, [
+        ...passingSuite("node"),
+        ...passingSuite("react"),
+        ...desktop,
+      ]);
+
+      expect(update.updatedSuites).toEqual(["node", "react"]);
+      expect(update.weights["desktop:old.test.ts"]).toBe(9);
+      expect(update.refusals).toEqual([expect.stringMatching(refusal)]);
+    },
+  );
 });

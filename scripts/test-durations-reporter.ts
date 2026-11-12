@@ -1,7 +1,8 @@
 /**
  * A Vitest reporter that writes how long each test file took to
  * `test-durations.json`, for `update-test-shard-weights.ts`. CI adds it to
- * every shard of `pnpm test:node` and `pnpm test:react`:
+ * every shard of `pnpm test:node`, `pnpm test:react` and the desktop
+ * end-to-end tests:
  *
  *   pnpm test:react --shard=2/4 --reporter=default --reporter=./scripts/test-durations-reporter.ts
  *
@@ -13,8 +14,7 @@
 import { writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Reporter, TestModule, TestRunEndReason, Vitest } from "vitest/node";
-import type { ShardWeights } from "./shard-plan";
-import { buildWeightKey } from "./test-shards";
+import { buildWeightKey, type ShardWeights } from "./test-shards";
 
 /** Where the reporter writes, at the repository root. */
 export const DURATIONS_FILE = "test-durations.json";

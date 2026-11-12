@@ -155,7 +155,7 @@ pnpm test:react apps/web packages/ui apps/desktop   # these three folders run on
 pnpm test:node <any other path>                     # everything else, on Bun
 ```
 
-CI splits each half into shards by the run time recorded for each file in `scripts/test-shard-weights.json`, so `pnpm test:react --shard=2/4` runs the files of CI's second shard. A new file weighs the median until the weights are refreshed with `bun run scripts/update-test-shard-weights.ts <run id>`.
+CI splits each half, and the desktop end-to-end suite, into shards by each file's recorded run time (`scripts/test-shards.ts`). The times are kept in the Actions cache and updated after every run on `main`, so nobody refreshes them. A new file weighs the median until then. To run CI's second shard locally, put the run's `test-shard-weights` artifact at the repository root and run `pnpm test:react --shard=2/4`; without that file, `--shard` splits by file count.
 
 Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
 release binary rather than building one, so it needs the build before it and fails
@@ -167,12 +167,12 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. With Docker, on a headless Linux machine or on a Mac, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files; CI passes each of its shards the files that `bun run scripts/desktop-e2e-shards.ts <index>/<count>` prints.
+The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. With Docker, on a headless Linux machine or on a Mac, `pnpm test:desktop:container` builds both in a container, as unpacked folders only, and runs the suite on a virtual screen (`apps/desktop/container`). Its arguments go to `vitest`, such as test files or `--shard=2/6`.
 
 **A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
 
 - macOS runs `pnpm build:desktop`, `pnpm compare:bureau` and the end-to-end files that do not depend on a screen, timing or focus. `compare:bureau` runs only there, and nobody needs a Mac to run it.
-- Linux runs the whole end-to-end suite in the container, split over parallel runners by recorded run time (`desktop-e2e-linux`; the weights in `scripts/desktop-e2e-shard-weights.json` are refreshed from a green run with `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`), installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
+- Linux runs the whole end-to-end suite in the container, split over parallel runners by recorded run time (`desktop-e2e-linux`), installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
 - On `main`, `edge-build` also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease.
 
 ```
