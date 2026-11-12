@@ -23,7 +23,7 @@
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
-import type { InboxRowView } from "./inbox-row";
+import type { InboxRowView } from "@hercule/client-core/inbox";
 
 /** How the rows that left in a change went: dismissed rows slide aside as they fade. */
 export type InboxLeaveHow = "dismiss" | "taken";

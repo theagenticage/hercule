@@ -3,7 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type JSX } from "react
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { useVirtualLines, VIRTUAL_OVERSCAN } from "../use-virtual-lines";
-import { InboxRow, type InboxRowActions, type InboxRowView } from "./inbox-row";
+import type { InboxRowView } from "@hercule/client-core/inbox";
+import { InboxRow, type InboxRowActions } from "./inbox-row";
 import {
   ASIDE_PX,
   FADE_EASING,

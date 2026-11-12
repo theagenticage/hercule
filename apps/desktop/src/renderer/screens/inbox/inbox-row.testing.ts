@@ -1,5 +1,6 @@
 import type { PluginIdentity } from "@hercule/client-core";
-import type { InboxRowActions, InboxRowView } from "./inbox-row";
+import type { InboxRowView } from "@hercule/client-core/inbox";
+import type { InboxRowActions } from "./inbox-row";
 
 /** The plugins the tests' rows draw their marks from. */
 export const TEST_PLUGINS: ReadonlyArray<PluginIdentity> = [
