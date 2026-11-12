@@ -253,6 +253,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
+    name: "inbox-selection",
+    path: "inbox.html?state=selection",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",
