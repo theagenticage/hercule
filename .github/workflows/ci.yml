@@ -51,8 +51,17 @@ jobs:
       - run: pnpm lint
 
   # The two halves of `pnpm test`. Each needs its own runtime (see
-  # `vitest.config.ts`), so each is its own job, split into shards.
+  # `vitest.config.ts`), so each is its own job, split into shards. `--shard`
+  # splits the files by the run times recorded in
+  # `scripts/test-shard-weights.json` (see `scripts/test-shards.ts`), so the
+  # shards take about as long as each other and a file with no recorded time
+  # weighs the median. Each shard uploads the run time of each of its files;
+  # refresh the weights from a green run with
+  # `bun run scripts/update-test-shard-weights.ts <run id>`. Add a shard when
+  # the slowest one grows. The longest file sets a floor: the shard that holds
+  # it can never be shorter.
   test-node:
+    name: test-node (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -64,19 +73,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:node --shard=${{ matrix.shard }}/3
+      - run: >-
+          pnpm test:node --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      # The repository keeps artifacts for 3 days.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-node-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   test-react:
+    name: test-react (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:react --shard=${{ matrix.shard }}/3
+      - run: >-
+          pnpm test:react --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-react-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   check:
     runs-on: ubuntu-latest

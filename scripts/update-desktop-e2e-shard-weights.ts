@@ -28,7 +28,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ShardRecord, type ShardWeights, WEIGHTS_PATH } from "./desktop-e2e-shards";
+import { type ShardRecord, WEIGHTS_PATH } from "./desktop-e2e-shards";
+import type { ShardWeights } from "./shard-plan";
 
 /** The part of a Vitest JSON report that this script reads. */
 export interface VitestReport {
