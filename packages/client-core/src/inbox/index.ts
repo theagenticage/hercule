@@ -16,6 +16,7 @@ export * from "./card-hand-off";
 export * from "./card-links";
 export * from "./card-wait";
 export * from "./empty-inbox";
+export * from "./inbox-list";
 export * from "./facets";
 export * from "./groupings";
 export * from "./inbox-notes";
