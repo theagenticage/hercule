@@ -22,6 +22,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { MAX_ENTITY_ANCESTORS } from "@hercule/contract";
+import { externalEntityInbox } from "./inbox-query";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
@@ -173,7 +174,7 @@ const readAbove = (
       maxPlaces: MAX_ENTITY_ANCESTORS * 2,
       environment: readEnvironment,
     });
-    const inbox = yield* repository.queryInbox(
+    const page = yield* (yield* externalEntityInbox).queryInbox(
       { ...readEnvironment, signalKinds: [], savedQueries: [], askingKinds: [] },
       { list: { savedQuery: "everything" } },
     );
@@ -182,7 +183,7 @@ const readAbove = (
       contextComplete: context.contextComplete.get(startRef),
       places: context.places,
       edges: context.edges,
-      thing: inbox.things.find((one) => one.ref === startRef),
+      thing: page.things.find((one) => one.ref === startRef),
     };
   });
 

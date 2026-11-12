@@ -395,13 +395,7 @@ const make = Effect.gen(function* () {
       const now = yield* nowIso;
       // Only this plugin's own Connections observe its refs, so its being
       // active (it is polling) is all the repository needs to know.
-      // An observation write raises no signal, so no ask begins in it and the
-      // asking kinds change no answer it needs.
-      const environment: EntityEnvironment = {
-        now,
-        activePluginIds: [reporter.pluginId],
-        askingKinds: [],
-      };
+      const environment: EntityEnvironment = { now, activePluginIds: [reporter.pluginId] };
       return yield* withTransaction(
         sql,
         Effect.andThen(assertConnectionIngesting(sql, reporter.connectionId), write(environment)),
@@ -575,7 +569,6 @@ const make = Effect.gen(function* () {
         yield* refreshAndAnnounce(input.connectionId, [input.observed], {
           now,
           activePluginIds: input.activePluginIds,
-          askingKinds: [],
         });
         return true;
       }),

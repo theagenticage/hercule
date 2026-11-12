@@ -34,15 +34,12 @@ import {
   type EntityPlace,
   type EntityStatus,
   type ExternalEntityDetail,
-  type InboxQuery,
-  type InboxValueQuery,
   type SignalEntity,
   type TaskStage,
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { runRepository } from "../runs";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
 import {
   LIVE_TASK_LINKS_SQL,
@@ -76,14 +73,10 @@ import {
 import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
-import { makeWorkflowOfferReads, type WorkflowOfferTarget } from "./workflow-offer-reads";
-import {
-  buildEligibleEntities,
-  makeInboxPopulation,
-  RETAINED_ROOT_REFS_SQL,
-  WANTED_REFS_SQL,
-} from "./inbox-population";
-import { makeInboxQueries, type InboxEnvironment, type InboxRailSettings } from "./inbox-query";
+import { buildWorkflowOfferTarget, makeEntityRowReads, readTargetRemote } from "./entity-reads";
+import { makeWorkflowOfferReads } from "./workflow-offer-reads";
+import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
+import { buildEligibleEntities } from "./inbox-relation";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
 import { buildDetailSignalFields } from "./signal-lines";
@@ -228,6 +221,8 @@ export interface SuggestionRow {
 export interface EntityReadEnvironment extends EntityEnvironment {
   /** The qualified kinds that are declared by a plugin that is active now. */
   readonly activeKinds: ReadonlySet<string>;
+  /** The qualified signal kinds that ask the user for a move (`listAskingKinds`). Empty means none ask. */
+  readonly askingKinds: ReadonlyArray<string>;
 }
 
 /** What `readContext` returns: the context above a list of start refs, cut by one rule. */
@@ -503,16 +498,6 @@ interface RefStates {
   readonly observations: ReadonlyMap<string, ReadonlyArray<ObservationRow>>;
 }
 
-const groupBy = <Row extends { readonly ref: string }>(rows: ReadonlyArray<Row>) => {
-  const groups = new Map<string, Array<Row>>();
-  for (const row of rows) {
-    const group = groups.get(row.ref);
-    if (group === undefined) groups.set(row.ref, [row]);
-    else group.push(row);
-  }
-  return groups;
-};
-
 /**
  * Returns a function that builds a string, equal for two states of a ref
  * exactly when a card, a place, or a card below it would show the same. It
@@ -544,25 +529,11 @@ const MAX_REFS_PER_STATEMENT = 1000;
 /** Returns the refs sorted, each once. */
 const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
-/** Returns the canonical remote of the repository an entity's work lands in, or none when its kind has no repository. */
-const readTargetRemote = (row: EntityRow): string | undefined =>
-  row.repository === null
-    ? undefined
-    : (JSON.parse(String(row.repository)) as { target: { remote: string } }).target.remote;
-
-/** Builds what the offers read needs of a full record of a work kind. */
-const buildWorkflowOfferTarget = (row: EntityRow): WorkflowOfferTarget => ({
-  ref: row.ref,
-  kind: row.kind as string,
-  targetRemote: readTargetRemote(row),
-});
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* claimRepository;
   const tasks = yield* taskRepository;
   const signals = yield* signalRepository;
-  const runs = yield* runRepository;
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
@@ -599,50 +570,7 @@ const make = Effect.gen(function* () {
           (rows) => new Map(rows.map((row) => [row.ref, row])),
         );
 
-  /** Reads the entity rows of `refs` in one statement. */
-  const readEntities = (
-    refs: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, EntityRow>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed(new Map())
-      : Effect.map(
-          sql<EntityRow>`
-            SELECT * FROM external_entities
-            WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          (rows) => new Map(rows.map((row) => [row.ref, row])),
-        );
-
-  /**
-   * Reads the observation rows of `refs`, every Connection's, in one
-   * statement. Each row carries its Connection's status and plugin, and the
-   * time that Connection last scanned the entity's kind completely.
-   */
-  const readObservations = (
-    refs: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<ObservationRow>>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed(new Map())
-      : Effect.map(
-          sql<ObservationRow>`
-            SELECT o.ref, o.connection_id, o.concerns, o.listed, o.owned_by_you, o.access,
-                   o.last_refreshed_at, o.next_attempt_at, o.attempt_count,
-                   c.status AS connection_status, c.plugin_id, s.last_complete_at
-            FROM external_entity_observations o
-            JOIN connections c ON c.id = o.connection_id
-            LEFT JOIN external_entities e ON e.ref = o.ref
-            LEFT JOIN external_entity_scans s ON s.connection_id = o.connection_id AND s.kind = e.kind
-            WHERE o.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          groupBy,
-        );
-
-  const inboxQueries = makeInboxQueries(sql, {
-    readEntities,
-    readObservations,
-    listOpenKindsByThread: signals.listOpenKindsByThread,
-    listLiveWorkflowsOfTasks: runs.listLiveWorkflowsOfTasks,
-    readWorkflowOffers: workflowOfferReads.readWorkflowOffers,
-    buildOfferTarget: buildWorkflowOfferTarget,
-  });
+  const { readEntities, readObservations } = makeEntityRowReads(sql);
 
   const readRefStates = (
     refs: ReadonlyArray<string>,
@@ -796,10 +724,9 @@ const make = Effect.gen(function* () {
       ...observed.map((entry) => entry.observation.ref),
       ...input.leaving,
     ]);
-    return inbox.recordArrivalsAfter(
+    return inbox.recordArrivalsAfterObservations(
       touched,
       now,
-      environment.askingKinds,
       writeObservations(input, observed, touched),
     );
   };
@@ -1370,13 +1297,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns one page of an Inbox list (see `makeInboxQueries`). Fails with
-     * `Validation` for a query that cannot be answered.
-     */
-    queryInbox: (environment: InboxEnvironment, query: InboxQuery) =>
-      inboxQueries.queryInbox(environment, query),
-
-    /**
      * Returns the offers and acting Connections of things, as the Inbox and
      * the detail show them, with their lists cut to the contract's bounds
      * (see `makeWorkflowOfferReads`). They are for display only.
@@ -1402,17 +1322,6 @@ const make = Effect.gen(function* () {
      * draw as a stack (see `makeEntityLinkReads`).
      */
     listStackCandidates: linkReads.listStackCandidates,
-
-    /** Returns the counts of the Inbox for the sidebar (see `makeInboxQueries`). */
-    countInbox: (environment: InboxEnvironment) => inboxQueries.countInbox(environment),
-
-    /** Returns what the Inbox's rail draws (see `makeInboxQueries`). */
-    readInboxOutline: (environment: InboxEnvironment, settings: InboxRailSettings) =>
-      inboxQueries.readInboxOutline(environment, settings),
-
-    /** Returns the values of one field among the things of a list, for the search's suggestions. */
-    suggestInboxValues: (environment: InboxEnvironment, query: InboxValueQuery) =>
-      inboxQueries.suggestInboxValues(environment, query),
 
     /**
      * Returns one entity with the records above it and what it is linked to,
@@ -1481,7 +1390,7 @@ const make = Effect.gen(function* () {
           ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            yield* inbox.listEligibleRefs(linkedRefs, environment.now, environment.askingKinds),
+            yield* inbox.listEligibleRefs(linkedRefs, environment),
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
@@ -1677,7 +1586,7 @@ const make = Effect.gen(function* () {
       readonly now: string;
       readonly askingKinds: ReadonlyArray<string>;
     }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> => {
-      const eligible = buildEligibleEntities(input.now, input.askingKinds);
+      const eligible = buildEligibleEntities(input);
       return Effect.map(
         sql.unsafe<{
           readonly ref: string;
@@ -1780,7 +1689,7 @@ const make = Effect.gen(function* () {
       askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E | SqlError, R> =>
-      inbox.recordArrivalsAfter([ref], now, askingKinds, write),
+      inbox.recordArrivalAfterSignal(ref, { now, askingKinds }, write),
 
     /**
      * Dismisses entities: they leave the Inbox until `restore`, or until an

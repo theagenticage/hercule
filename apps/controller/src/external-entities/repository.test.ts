@@ -29,10 +29,24 @@ import {
   type ObservedEntity,
   type ReconcileChanges,
 } from "./repository";
+import { externalEntityInbox } from "./inbox-query";
 import type { ActiveEntityKind } from "./entity-records";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
+type Inbox = Effect.Success<typeof externalEntityInbox>;
+
+/** The Inbox's reads. Each one gets the Inbox service when it runs. */
+const inbox = {
+  queryInbox: (...args: Parameters<Inbox["queryInbox"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.queryInbox(...args)),
+  countInbox: (...args: Parameters<Inbox["countInbox"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
+  readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
+  suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
+};
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
 const MINUTE = 60_000;
@@ -221,11 +235,11 @@ const inboxEnvironment = (minutes: number) => ({
 });
 
 /** Reads the whole Inbox, the latest change first. */
-const readInbox = (repository: Repository, minutes: number) =>
-  repository.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
+const readInbox = (minutes: number) =>
+  inbox.queryInbox(inboxEnvironment(minutes), { list: { savedQuery: "everything" } });
 
-const countInbox = (repository: Repository, minutes: number) =>
-  repository.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
+const countInbox = (minutes: number) =>
+  inbox.readInboxOutline(inboxEnvironment(minutes), { pins: [], browseFolded: [] });
 
 /** Reads the arrival number a thing took, or null when it took none. */
 const arrivalOf = (sql: SqlClient.SqlClient, ref: string) =>
@@ -302,13 +316,13 @@ const linkTaskToRef = (ref: string, minutes: number, stage: "planned" | "done" =
 
 describe("reconcile: first sight and several Connections", () => {
   it("stores a thing seen for the first time as a row, with its first arrival number", async () => {
-    const { changes, inbox, counts } = await run(({ repository, reconcile }) =>
+    const { changes, inbox, counts } = await run(({ reconcile }) =>
       Effect.gen(function* () {
         const changes = yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 5 });
         return {
           changes,
-          inbox: yield* readInbox(repository, 6),
-          counts: yield* countInbox(repository, 6),
+          inbox: yield* readInbox(6),
+          counts: yield* countInbox(6),
         };
       }),
     );
@@ -333,11 +347,11 @@ describe("reconcile: first sight and several Connections", () => {
         yield* reconcile(ACCOUNT_B, [ticket("t1", { concerns: ["review-requested"] })], {
           minutes: 2,
         });
-        const both = yield* readInbox(repository, 3);
+        const both = yield* readInbox(3);
         yield* reconcile(ACCOUNT_A, [], { minutes: 4 });
-        const onlyB = yield* readInbox(repository, 5);
+        const onlyB = yield* readInbox(5);
         yield* reconcile(ACCOUNT_B, [], { minutes: 6 });
-        const none = yield* readInbox(repository, 7);
+        const none = yield* readInbox(7);
         const standings = yield* repository.readStandings([ticketRef("t1")]);
         return { both, onlyB, none, standings };
       }),
@@ -351,18 +365,18 @@ describe("reconcile: first sight and several Connections", () => {
   });
 
   it("removes nothing on an incomplete read", async () => {
-    const afterPartial = await run(({ repository, reconcile }) =>
+    const afterPartial = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 2, complete: false });
-        return yield* readInbox(repository, 3);
+        return yield* readInbox(3);
       }),
     );
     expect(thingRefs(afterPartial)).toEqual([ticketRef("t1"), ticketRef("t2")]);
   });
 
   it("records a loop as a conflict and applies the rest", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+    const steps = await run(({ reconcile }) =>
       Effect.gen(function* () {
         const changes = yield* reconcile(
           ACCOUNT_A,
@@ -372,7 +386,7 @@ describe("reconcile: first sight and several Connections", () => {
           ],
           { minutes: 1, kind: EPIC_KIND },
         );
-        return { changes, inbox: yield* readInbox(repository, 2) };
+        return { changes, inbox: yield* readInbox(2) };
       }),
     );
     expect(steps.changes.conflicts).toHaveLength(1);
@@ -441,7 +455,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
           { minutes: 6 },
         );
         yield* report(context);
-        const inbox = yield* readInbox(context.repository, 30);
+        const inbox = yield* readInbox(30);
         return inbox.things[0]!.title;
       }),
     );
@@ -509,7 +523,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
             ],
             { minutes: 10 },
           );
-          return (yield* readInbox(context.repository, 30)).things[0]!.title;
+          return (yield* readInbox(30)).things[0]!.title;
         }),
       );
       expect(title).toBe(expected);
@@ -552,7 +566,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
           actor: `plugin:${PLUGIN}`,
           environment: environment(10, active),
         });
-        return (yield* readInbox(repository, 30)).things[0]!.title;
+        return (yield* readInbox(30)).things[0]!.title;
       }),
     );
     expect(title).toBe("Second");
@@ -573,7 +587,7 @@ describe("reconcile: which Connection wins the shared fields", () => {
         yield* reconcile(ACCOUNT_B, [ticket("t1", { title: "Second", sourceUpdatedAt: at(5) })], {
           minutes: 10,
         });
-        return (yield* readInbox(repository, 30)).things[0]!.title;
+        return (yield* readInbox(30)).things[0]!.title;
       }),
     );
     expect(title).toBe("Second");
@@ -606,7 +620,7 @@ describe("reconcile: writing only what changed", () => {
   });
 
   it("changes what a card shows when its facts change, and reports the ref", async () => {
-    const outcome = await run(({ repository, reconcile }) =>
+    const outcome = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1", { sourceUpdatedAt: at(1) })], { minutes: 1 });
         const changes = yield* reconcile(
@@ -614,7 +628,7 @@ describe("reconcile: writing only what changed", () => {
           [ticket("t1", { title: "Renamed", sourceUpdatedAt: at(2) })],
           { minutes: 3 },
         );
-        return { changes, inbox: yield* readInbox(repository, 4) };
+        return { changes, inbox: yield* readInbox(4) };
       }),
     );
     expect(outcome.changes.changedRefs).toEqual([ticketRef("t1")]);
@@ -659,7 +673,7 @@ describe("access and Connections that go away", () => {
             (changes) => named(sql, changes),
           );
         const read = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.access);
+          Effect.map(readInbox(minutes), (inbox) => inbox.things[0]!.access);
         yield* missing(ACCOUNT_A, "inaccessible", 3);
         const oneRefused = yield* read(4);
         const second = yield* missing(ACCOUNT_B, "inaccessible", 5);
@@ -676,11 +690,11 @@ describe("access and Connections that go away", () => {
   });
 
   it("keeps the last known facts of a card that lost access, and marks it stale when nothing can poll", async () => {
-    const card = await run(({ repository, reconcile, sql }) =>
+    const card = await run(({ reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1", { title: "Known" })], { minutes: 1 });
         yield* sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(ACCOUNT_A)}`;
-        return (yield* readInbox(repository, 2)).things[0]!;
+        return (yield* readInbox(2)).things[0]!;
       }),
     );
     expect(card).toMatchObject({ title: "Known", access: "ok", stale: true });
@@ -700,7 +714,7 @@ describe("access and Connections that go away", () => {
         // Only A can poll. B still holds a good read, so the access stays ok.
         yield* sql`UPDATE connections SET status = 'disabled' WHERE id = ${uuidFromString(ACCOUNT_B)}`;
         const epicCard = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) =>
+          Effect.map(readInbox(minutes), (inbox) =>
             inbox.things.find((card) => card.ref === epicRef("e1")),
           );
         const lost = yield* repository.reportMissing({
@@ -756,7 +770,7 @@ describe("access and Connections that go away", () => {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
         yield* sql`DELETE FROM connections WHERE id = ${uuidFromString(ACCOUNT_A)}`;
         return {
-          inbox: yield* readInbox(repository, 2),
+          inbox: yield* readInbox(2),
           standings: yield* repository.readStandings([ticketRef("t1")]),
           presenters: yield* sql`SELECT presented_by FROM external_entities`,
           observations: yield* countRows(sql, "external_entity_observations"),
@@ -777,7 +791,7 @@ describe("access and Connections that go away", () => {
         // The inventory no longer lists it, but its Task keeps it on the Inbox and wanted.
         yield* reconcile(ACCOUNT_A, [], { minutes: 5 });
         const observedAt = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.observedAt);
+          Effect.map(readInbox(minutes), (inbox) => inbox.things[0]!.observedAt);
         const wanted = yield* repository.listWanted({
           connectionId: ACCOUNT_A,
           refPrefix: TICKET_PREFIX,
@@ -811,10 +825,10 @@ describe("access and Connections that go away", () => {
 
 describe("observedAt of a listed record with no concerns", () => {
   it("is dated by the complete scan that lists it, with or without concerns, and by none once the inventory leaves it out", async () => {
-    const times = await run(({ repository, reconcile }) =>
+    const times = await run(({ reconcile }) =>
       Effect.gen(function* () {
         const observedAt = (minutes: number) =>
-          Effect.map(readInbox(repository, minutes), (inbox) => inbox.things[0]!.observedAt);
+          Effect.map(readInbox(minutes), (inbox) => inbox.things[0]!.observedAt);
         yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: [] })], { minutes: 1 });
         yield* linkTaskToRef(ticketRef("t1"), 2);
         // The title changes in a later complete scan: the card shows facts read at minute 10.
@@ -870,11 +884,11 @@ describe("partial records", () => {
     const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [partialTicket("t1", "Only a title")], { minutes: 1 });
-        const first = yield* readInbox(repository, 2);
+        const first = yield* readInbox(2);
         const standing = yield* repository.readStandings([ticketRef("t1")]);
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 3 });
         const arrival = yield* arrivalOf(sql, ticketRef("t1"));
-        return { first, standing, second: yield* readInbox(repository, 4), arrival };
+        return { first, standing, second: yield* readInbox(4), arrival };
       }),
     );
     expect(steps.first.things).toEqual([]);
@@ -899,7 +913,7 @@ describe("partial records", () => {
           observed: [partialTicket("t1", "Partial title")],
           environment: environment(2),
         });
-        return (yield* readInbox(repository, 3)).things[0]!;
+        return (yield* readInbox(3)).things[0]!;
       }),
     );
     expect(card).toMatchObject({
@@ -1361,7 +1375,7 @@ describe("listSuggestions under a context", () => {
 
 describe("the Inbox: membership and counts", () => {
   it("counts one thing seen by two accounts for two concerns once", async () => {
-    const { inbox, counts } = await run(({ repository, reconcile }) =>
+    const { inbox, counts } = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1", { concerns: ["assigned", "opened"] })], {
           minutes: 1,
@@ -1369,7 +1383,7 @@ describe("the Inbox: membership and counts", () => {
         yield* reconcile(ACCOUNT_B, [ticket("t1", { concerns: ["review-requested"] })], {
           minutes: 2,
         });
-        return { inbox: yield* readInbox(repository, 3), counts: yield* countInbox(repository, 3) };
+        return { inbox: yield* readInbox(3), counts: yield* countInbox(3) };
       }),
     );
     expect(inbox.things).toHaveLength(1);
@@ -1379,26 +1393,26 @@ describe("the Inbox: membership and counts", () => {
   });
 
   it("lists a slow kind beside a fast one", async () => {
-    const inbox = await run(({ repository, reconcile }) =>
+    const inbox = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [epic("e1")], { minutes: 1, kind: EPIC_KIND });
-        return yield* readInbox(repository, 2);
+        return yield* readInbox(2);
       }),
     );
     expect(thingRefs(inbox)).toEqual([epicRef("e1")]);
   });
 
   it("puts a thing with a Task in With Hercule, and keeps the others out of it", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+    const steps = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1"), ticket("t2")], { minutes: 1 });
         const task = yield* linkTaskToRef(ticketRef("t1"), 2);
-        const inbox = yield* readInbox(repository, 3);
-        const held = yield* repository.queryInbox(inboxEnvironment(3), {
+        const everything = yield* readInbox(3);
+        const held = yield* inbox.queryInbox(inboxEnvironment(3), {
           list: { savedQuery: "with-hercule" },
         });
-        const counts = yield* countInbox(repository, 3);
-        return { task, inbox, held, counts };
+        const counts = yield* countInbox(3);
+        return { task, inbox: everything, held, counts };
       }),
     );
     const byRef = new Map(steps.inbox.things.map((thing) => [thing.ref, thing]));
@@ -1415,12 +1429,12 @@ describe("the Inbox: membership and counts", () => {
   });
 
   it("keeps a thing on the Inbox for its live Task alone, with no concern left", async () => {
-    const steps = await run(({ repository, reconcile }) =>
+    const steps = await run(({ reconcile }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
         const task = yield* linkTaskToRef(ticketRef("t1"), 2);
         yield* reconcile(ACCOUNT_A, [], { minutes: 3 });
-        return { task, inbox: yield* readInbox(repository, 4) };
+        return { task, inbox: yield* readInbox(4) };
       }),
     );
     expect(steps.inbox.things.map((thing) => [thing.ref, thing.taskId, thing.accounts])).toEqual([
@@ -1430,7 +1444,7 @@ describe("the Inbox: membership and counts", () => {
 
   it("sends the same number of statements for 10 things as for 100", async () => {
     const countStatements = (cards: number) =>
-      run(({ repository, reconcile }) =>
+      run(({ reconcile }) =>
         Effect.gen(function* () {
           const relations = { complete: true, partOf: [PROJECT], linked: [] };
           yield* reconcile(
@@ -1440,7 +1454,7 @@ describe("the Inbox: membership and counts", () => {
           );
           yield* reconcile(ACCOUNT_A, [project()], { minutes: 2, kind: PROJECT_KIND });
           const statements: Array<string> = [];
-          const inbox = yield* readInbox(repository, 3).pipe(
+          const inbox = yield* readInbox(3).pipe(
             Effect.provideService(Statement.CurrentTransformer, (statement) =>
               Effect.sync(() => {
                 statements.push(statement.compile()[0]);
@@ -1512,7 +1526,7 @@ describe("the arrival counter", () => {
     const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
-        const inbox = yield* readInbox(repository, 2);
+        const inbox = yield* readInbox(2);
         const id = inbox.things[0]!.id;
         yield* repository.dismiss([id], "user", at(3));
         yield* repository.restore([id], "user", at(4));
@@ -1534,7 +1548,7 @@ describe("dismissal", () => {
     const steps = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
-        const id = (yield* readInbox(repository, 2)).things[0]!.id;
+        const id = (yield* readInbox(2)).things[0]!.id;
         const dismissed = yield* repository.dismiss([id], "user", at(3));
         const again = yield* repository.dismiss([id], "user", at(4));
         yield* reconcile(
@@ -1544,18 +1558,18 @@ describe("dismissal", () => {
             minutes: 5,
           },
         );
-        const afterNewConcern = yield* readInbox(repository, 6);
+        const afterNewConcern = yield* readInbox(6);
         yield* reconcile(ACCOUNT_A, [], { minutes: 7 });
         const pruned = yield* repository.pruneEntities(atDay(31));
         yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 32 * 24 * 60 });
-        const afterReturn = yield* readInbox(repository, 32 * 24 * 60 + 1);
+        const afterReturn = yield* readInbox(32 * 24 * 60 + 1);
         const restored = yield* repository.restore([id], "session:abc", atDay(33));
         const restoredBy = yield* sql<{
           readonly restored_by: string | null;
           readonly dismissed_by: string | null;
         }>`
           SELECT restored_by, dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
-        const afterRestore = yield* readInbox(repository, 33 * 24 * 60 + 1);
+        const afterRestore = yield* readInbox(33 * 24 * 60 + 1);
         const unknownId = uuidToString(mintUuid());
         const unknown = yield* repository.dismiss([id, unknownId], "user", at(1));
         return {
@@ -1751,7 +1765,6 @@ describe("listWanted and failed reads", () => {
             environment: {
               now: new Date(BASE + seconds * 1000).toISOString(),
               activePluginIds: [PLUGIN],
-              askingKinds: [],
             },
           });
         const asks = (seconds: number) =>
@@ -1778,7 +1791,6 @@ describe("listWanted and failed reads", () => {
           environment: {
             now: new Date(BASE + 400_000).toISOString(),
             activePluginIds: [PLUGIN],
-            askingKinds: [],
           },
         });
         yield* fail(500);
@@ -1814,7 +1826,7 @@ describe("pruning", () => {
           minutes: 0,
           kind: PROJECT_KIND,
         });
-        const dismissedId = (yield* readInbox(repository, 1)).things.find(
+        const dismissedId = (yield* readInbox(1)).things.find(
           (card) => card.ref === ticketRef("dismissed"),
         )!.id;
         yield* linkTaskToRef(ticketRef("linked"), 1, "done");
@@ -2060,7 +2072,7 @@ describe("what changed outside", () => {
   it("moves no card, ends no signal, changes no Task and raises no event", async () => {
     const outcome = await run((context) =>
       Effect.gen(function* () {
-        const { repository, reconcile, sql } = context;
+        const { reconcile, sql } = context;
         yield* reconcile(ACCOUNT_A, [owned("t1", { owner: "Mei", status: STATUS_OPEN })], {
           minutes: 1,
         });
@@ -2071,7 +2083,7 @@ describe("what changed outside", () => {
           tasks: sql`SELECT * FROM tasks`,
           claims: countRows(sql, "external_entity_relation_claims"),
         });
-        const cardBefore = (yield* readInbox(repository, 3)).things[0]!;
+        const cardBefore = (yield* readInbox(3)).things[0]!;
         const before = yield* counts;
         yield* reconcile(
           ACCOUNT_A,
@@ -2079,7 +2091,7 @@ describe("what changed outside", () => {
           { minutes: 5 },
         );
         const after = yield* counts;
-        const cardAfter = (yield* readInbox(repository, 6)).things[0]!;
+        const cardAfter = (yield* readInbox(6)).things[0]!;
         return { task, before, after, cardBefore, cardAfter };
       }),
     );

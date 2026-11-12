@@ -10,7 +10,7 @@
  * reader (ADR 0004, amendment of 2026-10-18), not SQLite's in-memory mode. It
  * is seeded with a migrated schema and no statistics, as a controller starts.
  *
- * It drives the repository's four Inbox reads, at 300, 1,000 and 2,400
+ * It drives the four Inbox reads, at 300, 1,000 and 2,400
  * things:
  *
  * - `queryInbox`: the first page of "Someone waits on me" (order waiting) and
@@ -45,8 +45,7 @@ import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
 import { claimRepository } from "./claims";
 import type { ActiveEntityKind } from "./entity-records";
-import type { InboxEnvironment } from "./inbox-query";
-import { externalEntityRepository } from "./repository";
+import { externalEntityInbox, type InboxEnvironment } from "./inbox-query";
 
 /** Set to "1" by `pnpm test:speed`. */
 const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
@@ -463,24 +462,20 @@ const SIZES = [300, 1000, 2400] as const;
 const runSize = (size: number) =>
   Effect.gen(function* () {
     yield* seed(size);
-    const repository = yield* externalEntityRepository;
+    const inbox = yield* externalEntityInbox;
     const waits = { list: { savedQuery: "waits" } } as const;
     const everything = { list: { savedQuery: "everything" } } as const;
-    const firstWaiting = yield* repository.queryInbox(ENVIRONMENT, waits);
-    const firstNewest = yield* repository.queryInbox(ENVIRONMENT, everything);
+    const firstWaiting = yield* inbox.queryInbox(ENVIRONMENT, waits);
+    const firstNewest = yield* inbox.queryInbox(ENVIRONMENT, everything);
     const refs = firstNewest.things.map((thing) => thing.ref);
     const cases: Array<Case> = [];
     const pages = (page: { readonly things: ReadonlyArray<unknown> }) => page.things.length;
     cases.push(
-      yield* runCase("page: waits (waiting)", repository.queryInbox(ENVIRONMENT, waits), pages),
-      yield* runCase(
-        "page: everything (newest)",
-        repository.queryInbox(ENVIRONMENT, everything),
-        pages,
-      ),
+      yield* runCase("page: waits (waiting)", inbox.queryInbox(ENVIRONMENT, waits), pages),
+      yield* runCase("page: everything (newest)", inbox.queryInbox(ENVIRONMENT, everything), pages),
       yield* runCase(
         "page: narrowed by clauses+text",
-        repository.queryInbox(ENVIRONMENT, {
+        inbox.queryInbox(ENVIRONMENT, {
           ...everything,
           clauses: [
             { key: "priority", op: "is", value: "normal" },
@@ -493,40 +488,36 @@ const runSize = (size: number) =>
       ),
       yield* runCase(
         "refs read (200 refs)",
-        repository.queryInbox(ENVIRONMENT, { ...everything, refs: refs.slice(0, 200) }),
+        inbox.queryInbox(ENVIRONMENT, { ...everything, refs: refs.slice(0, 200) }),
         pages,
       ),
       yield* runCase(
         "suggest: team",
-        repository.suggestInboxValues(ENVIRONMENT, { ...everything, key: "team", prefix: "Te" }),
+        inbox.suggestInboxValues(ENVIRONMENT, { ...everything, key: "team", prefix: "Te" }),
         (reply) => reply.values.length,
       ),
       yield* runCase(
         "suggest: from",
-        repository.suggestInboxValues(ENVIRONMENT, { ...everything, key: "from", prefix: "" }),
+        inbox.suggestInboxValues(ENVIRONMENT, { ...everything, key: "from", prefix: "" }),
         (reply) => reply.values.length,
       ),
       yield* runCase(
         "outline: rail open",
-        repository.readInboxOutline(ENVIRONMENT, OPEN_RAIL),
+        inbox.readInboxOutline(ENVIRONMENT, OPEN_RAIL),
         (counts) => counts.sources.length,
       ),
       yield* runCase(
         "outline: all folded",
-        repository.readInboxOutline(ENVIRONMENT, FOLDED_RAIL),
+        inbox.readInboxOutline(ENVIRONMENT, FOLDED_RAIL),
         (counts) => counts.sources.length,
       ),
-      yield* runCase(
-        "counts: sidebar",
-        repository.countInbox(ENVIRONMENT),
-        (counts) => counts.waiting,
-      ),
+      yield* runCase("counts: sidebar", inbox.countInbox(ENVIRONMENT), (counts) => counts.waiting),
     );
     if (firstNewest.nextCursor !== undefined) {
       cases.push(
         yield* runCase(
           "page: the second one",
-          repository.queryInbox(ENVIRONMENT, { ...everything, cursor: firstNewest.nextCursor }),
+          inbox.queryInbox(ENVIRONMENT, { ...everything, cursor: firstNewest.nextCursor }),
           pages,
         ),
       );

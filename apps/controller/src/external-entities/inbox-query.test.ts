@@ -19,7 +19,7 @@ import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
 import type { ActiveEntityKind } from "./entity-records";
 import { replaceFieldRows } from "./entity-fields";
-import type { InboxEnvironment } from "./inbox-query";
+import { externalEntityInbox, type InboxEnvironment } from "./inbox-query";
 import { externalEntityRepository } from "./repository";
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
@@ -73,6 +73,19 @@ const environment = (minutes: number, extra: Partial<InboxEnvironment> = {}): In
 });
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
+type Inbox = Effect.Success<typeof externalEntityInbox>;
+
+/** The Inbox's reads. Each one gets the Inbox service when it runs. */
+const inbox = {
+  queryInbox: (...args: Parameters<Inbox["queryInbox"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.queryInbox(...args)),
+  countInbox: (...args: Parameters<Inbox["countInbox"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
+  readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
+  suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
+};
 
 const run = <A>(
   body: (context: {
@@ -193,17 +206,14 @@ const everything = { savedQuery: "everything" } as const;
 const refsOf = (page: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
   page.things.map((thing) => thing.ref.replace("acme:ticket:", ""));
 
-const list = (
-  repository: Repository,
-  minutes: number,
-  query: Partial<Parameters<Repository["queryInbox"]>[1]> = {},
-) => repository.queryInbox(environment(minutes), { list: everything, ...query });
+const list = (minutes: number, query: Partial<Parameters<Inbox["queryInbox"]>[1]> = {}) =>
+  inbox.queryInbox(environment(minutes), { list: everything, ...query });
 
 const withClause = (clause: InboxClause) => ({ clauses: [clause] });
 
 describe("who is on the Inbox", () => {
   it("lists a thing for a concern, a live Task or an open signal, and no other", async () => {
-    const refs = await run(({ repository }) =>
+    const refs = await run(() =>
       Effect.gen(function* () {
         yield* insertTicket({ key: "concern" });
         yield* insertTicket({ key: "task", concerns: [] });
@@ -223,22 +233,22 @@ describe("who is on the Inbox", () => {
           actor: "user",
         });
         yield* raise("acme:ticket:signal", NOTE, 2);
-        return refsOf(yield* list(repository, 5)).sort();
+        return refsOf(yield* list(5)).sort();
       }),
     );
     expect(refs).toEqual(["concern", "signal", "task"]);
   });
 
   it("does not list a signal that is snoozed until later", async () => {
-    const refs = await run(({ repository, sql }) =>
+    const refs = await run(({ sql }) =>
       Effect.gen(function* () {
         yield* insertTicket({ key: "a", concerns: [] });
         const id = yield* raise("acme:ticket:a", NOTE, 2);
         yield* sql`INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
           VALUES (${uuidFromString(id)}, ${at(60)}, ${at(3)}, 'user')`;
         return {
-          before: refsOf(yield* list(repository, 10)),
-          after: refsOf(yield* list(repository, 61)),
+          before: refsOf(yield* list(10)),
+          after: refsOf(yield* list(61)),
         };
       }),
     );
@@ -252,23 +262,23 @@ describe("who is on the Inbox", () => {
         yield* raise(ref, REVIEW, 2);
         const [moved] = yield* Effect.map(
           repository.dismiss(
-            [(yield* repository.queryInbox(environment(3), { list: everything })).things[0]!.id],
+            [(yield* inbox.queryInbox(environment(3), { list: everything })).things[0]!.id],
             "user",
             at(4),
           ),
           (result) => ("moved" in result ? result.moved : []),
         );
-        const afterDismiss = refsOf(yield* list(repository, 5));
+        const afterDismiss = refsOf(yield* list(5));
         // Not an ask, and an ask that was open before: neither brings it back.
         yield* raise(ref, NOTE, 6);
-        const afterNote = refsOf(yield* list(repository, 7));
+        const afterNote = refsOf(yield* list(7));
         yield* raise(ref, REVIEW, 8, "Mei");
-        const back = yield* list(repository, 9);
+        const back = yield* list(9);
         // Dismissing the thing that came back moves the cutoff, so it goes again.
         const again = yield* repository.dismiss([back.things[0]!.id], "user", at(10));
-        const afterSecondDismiss = refsOf(yield* list(repository, 11));
+        const afterSecondDismiss = refsOf(yield* list(11));
         yield* raise(ref, REVIEW, 12, "Omar");
-        const backAgain = yield* list(repository, 13);
+        const backAgain = yield* list(13);
         return { moved, afterDismiss, afterNote, back, again, afterSecondDismiss, backAgain };
       }),
     );
@@ -289,12 +299,11 @@ describe("who is on the Inbox", () => {
     const arrivals = await run(({ repository, sql }) =>
       Effect.gen(function* () {
         const ref = yield* insertTicket({ key: "a" });
-        const id = (yield* repository.queryInbox(environment(2), { list: everything })).things[0]!
-          .id;
+        const id = (yield* inbox.queryInbox(environment(2), { list: everything })).things[0]!.id;
         yield* repository.dismiss([id], "user", at(3));
-        const before = (yield* repository.countInbox(environment(4))).newestArrival;
+        const before = (yield* inbox.countInbox(environment(4))).newestArrival;
         yield* repository.recordArrivalAfter(ref, at(5), [REVIEW], raise(ref, REVIEW, 5));
-        const after = (yield* repository.countInbox(environment(6))).newestArrival;
+        const after = (yield* inbox.countInbox(environment(6))).newestArrival;
         const stored = yield* sql<{ readonly arrival_sequence: number }>`
           SELECT arrival_sequence FROM external_entities WHERE ref = ${ref}`;
         return { before, after, stored: stored[0]!.arrival_sequence };
@@ -306,7 +315,7 @@ describe("who is on the Inbox", () => {
   });
 
   it("takes an ask off the list only when the user took the thing on after it was raised", async () => {
-    const steps = await run(({ repository }) =>
+    const steps = await run(() =>
       Effect.gen(function* () {
         const refs = {
           taken: yield* insertTicket({ key: "taken" }),
@@ -347,9 +356,9 @@ describe("who is on the Inbox", () => {
         // Taken on before the ask was raised: the ask stays.
         yield* makeTask(refs.before, { takenOn: true, minutes: 1 });
         const waits = { savedQuery: "waits" } as const;
-        const afterTake = refsOf(yield* list(repository, 4, { list: waits }));
+        const afterTake = refsOf(yield* list(4, { list: waits }));
         yield* raise(refs.taken, REVIEW, 5);
-        const afterNewAsk = refsOf(yield* list(repository, 6, { list: waits }));
+        const afterNewAsk = refsOf(yield* list(6, { list: waits }));
         return { afterTake, afterNewAsk };
       }),
     );
@@ -366,7 +375,7 @@ describe("who is on the Inbox", () => {
 
 describe("the order and the pages of a list", () => {
   it("orders the waiting list by the oldest ask, then the rest by the latest change, and newest by the latest change", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a", updated: 10 });
         const b = yield* insertTicket({ key: "b", updated: 30 });
@@ -376,10 +385,10 @@ describe("the order and the pages of a list", () => {
         yield* raise(b, REVIEW, 5);
         yield* raise(b, REVIEW, 9);
         return {
-          waiting: yield* list(repository, 50, {
+          waiting: yield* list(50, {
             list: { browse: { source: "acme", key: "source", value: "acme" } },
           }),
-          newest: yield* list(repository, 50),
+          newest: yield* list(50),
         };
       }),
     );
@@ -390,7 +399,7 @@ describe("the order and the pages of a list", () => {
   });
 
   it("pages in keysets of 200 with a cursor bound to its query, and total counts the whole result", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         for (let index = 0; index < 205; index++) {
           const key = `t${String(index).padStart(3, "0")}`;
@@ -398,16 +407,16 @@ describe("the order and the pages of a list", () => {
           if (index % 2 === 0) yield* raise(ref, REVIEW, 300 - index);
         }
         const waits = { list: { savedQuery: "waits" } } as const;
-        const first = yield* list(repository, 400, waits);
-        const second = yield* list(repository, 400, { ...waits, cursor: first.nextCursor! });
-        const newestFirst = yield* list(repository, 400);
-        const newestSecond = yield* list(repository, 400, { cursor: newestFirst.nextCursor! });
+        const first = yield* list(400, waits);
+        const second = yield* list(400, { ...waits, cursor: first.nextCursor! });
+        const newestFirst = yield* list(400);
+        const newestSecond = yield* list(400, { cursor: newestFirst.nextCursor! });
         const wrong = yield* Effect.exit(
-          list(repository, 400, { list: { savedQuery: "mine" }, cursor: newestFirst.nextCursor! }),
+          list(400, { list: { savedQuery: "mine" }, cursor: newestFirst.nextCursor! }),
         );
-        const garbage = yield* Effect.exit(list(repository, 400, { cursor: "not a cursor" }));
+        const garbage = yield* Effect.exit(list(400, { cursor: "not a cursor" }));
         const both = yield* Effect.exit(
-          list(repository, 400, { cursor: newestFirst.nextCursor!, refs: ["acme:ticket:t001"] }),
+          list(400, { cursor: newestFirst.nextCursor!, refs: ["acme:ticket:t001"] }),
         );
         return { first, second, newestFirst, newestSecond, wrong, garbage, both };
       }),
@@ -430,14 +439,14 @@ describe("the order and the pages of a list", () => {
   });
 
   it("reads a refs request for those things only, in the list's order, with no total", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a", updated: 10 });
         const b = yield* insertTicket({ key: "b", updated: 30 });
         yield* insertTicket({ key: "c", updated: 20 });
         yield* raise(a, REVIEW, 2);
-        const refs = yield* list(repository, 5, { refs: [a, b, "acme:ticket:missing"] });
-        const first = yield* list(repository, 5);
+        const refs = yield* list(5, { refs: [a, b, "acme:ticket:missing"] });
+        const first = yield* list(5);
         return { refs, first };
       }),
     );
@@ -452,7 +461,7 @@ describe("the order and the pages of a list", () => {
   });
 
   it("pages the waiting order across the two groups", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         for (let index = 0; index < 250; index++) {
           const ref = yield* insertTicket({
@@ -464,8 +473,8 @@ describe("the order and the pages of a list", () => {
         const browse = {
           list: { browse: { source: "acme", key: "source", value: "acme" } },
         } as const;
-        const first = yield* list(repository, 400, browse);
-        const second = yield* list(repository, 400, { ...browse, cursor: first.nextCursor! });
+        const first = yield* list(400, browse);
+        const second = yield* list(400, { ...browse, cursor: first.nextCursor! });
         return { first, second };
       }),
     );
@@ -479,12 +488,12 @@ describe("the order and the pages of a list", () => {
   });
 
   it("reads only the named refs that still belong, in the list's order", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         yield* insertTicket({ key: "a", updated: 1 });
         yield* insertTicket({ key: "b", updated: 2 });
         yield* insertTicket({ key: "gone", concerns: [] });
-        return yield* list(repository, 9, {
+        return yield* list(9, {
           refs: ["acme:ticket:a", "acme:ticket:b", "acme:ticket:gone", "acme:ticket:never"],
         });
       }),
@@ -495,7 +504,7 @@ describe("the order and the pages of a list", () => {
 
   it("sends the same number of statements for 5 things as for 60", async () => {
     const countStatements = (things: number) =>
-      run(({ repository }) =>
+      run(() =>
         Effect.gen(function* () {
           for (let index = 0; index < things; index++) {
             const ref = yield* insertTicket({
@@ -511,15 +520,15 @@ describe("the order and the pages of a list", () => {
               return statement;
             }),
           );
-          const page = yield* list(repository, 100).pipe(record);
+          const page = yield* list(100).pipe(record);
           const pageStatements = statements.splice(0);
-          yield* repository.countInbox(environment(100)).pipe(record);
+          yield* inbox.countInbox(environment(100)).pipe(record);
           const sidebarStatements = statements.splice(0);
-          yield* repository
+          yield* inbox
             .readInboxOutline(environment(100), { pins: [], browseFolded: [] })
             .pipe(record);
           const outlineStatements = statements.splice(0);
-          yield* repository
+          yield* inbox
             .suggestInboxValues(environment(100), {
               list: everything,
               key: "team",
@@ -549,7 +558,7 @@ describe("the order and the pages of a list", () => {
 
 describe("what a thing carries", () => {
   it("carries its asks newest first with the kind's noun, the kinds, the face and its accounts", async () => {
-    const thing = await run(({ repository }) =>
+    const thing = await run(() =>
       Effect.gen(function* () {
         const ref = yield* insertTicket({
           key: "a",
@@ -559,7 +568,7 @@ describe("what a thing carries", () => {
         yield* raise(ref, REVIEW, 2, "Mei");
         yield* raise(ref, REVIEW, 4, "Omar");
         yield* raise(ref, NOTE, 5);
-        return (yield* list(repository, 9)).things[0]!;
+        return (yield* list(9)).things[0]!;
       }),
     );
     expect(thing.asks.map((ask) => [ask.noun, ask.asker, ask.createdAt])).toEqual([
@@ -615,12 +624,12 @@ describe("the clauses of a query", () => {
   });
 
   const query = (clause: InboxClause | ReadonlyArray<InboxClause>, text?: string) =>
-    run(({ repository }) =>
+    run(() =>
       Effect.gen(function* () {
         yield* seed;
         const clauses = Array.isArray(clause) ? clause : [clause];
         return refsOf(
-          yield* list(repository, 2 * 24 * 60, {
+          yield* list(2 * 24 * 60, {
             clauses,
             ...(text === undefined ? {} : { text }),
           }),
@@ -682,22 +691,14 @@ describe("the clauses of a query", () => {
   });
 
   it("does not match the title of a record no Connection can read", async () => {
-    const found = await run(({ repository, sql }) =>
+    const found = await run(({ sql }) =>
       Effect.gen(function* () {
         yield* seed;
         yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
           WHERE ref = ${SEARCH}`;
-        const byTitle = yield* list(
-          repository,
-          9,
-          withClause({ key: "team", op: "is", value: "Search" }),
-        );
-        const byRef = yield* list(
-          repository,
-          9,
-          withClause({ key: "team", op: "is", value: SEARCH }),
-        );
-        const byText = yield* list(repository, 9, { text: "Search" });
+        const byTitle = yield* list(9, withClause({ key: "team", op: "is", value: "Search" }));
+        const byRef = yield* list(9, withClause({ key: "team", op: "is", value: SEARCH }));
+        const byText = yield* list(9, { text: "Search" });
         return { byTitle: refsOf(byTitle), byRef: refsOf(byRef), byText: refsOf(byText) };
       }),
     );
@@ -733,24 +734,22 @@ describe("the clauses of a query", () => {
   });
 
   it("combines the clauses with the list, and refuses a key nobody declares", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         yield* seed;
-        const narrowed = yield* list(repository, 2 * 24 * 60, {
+        const narrowed = yield* list(2 * 24 * 60, {
           list: { savedQuery: "waits" },
           clauses: [{ key: "size", op: "under", value: 10 }],
         });
-        const empty = yield* list(repository, 2 * 24 * 60, {
+        const empty = yield* list(2 * 24 * 60, {
           list: { savedQuery: "waits" },
           clauses: [{ key: "size", op: "over", value: 10 }],
         });
         const unknown = yield* Effect.exit(
-          list(repository, 9, withClause({ key: "colour", op: "is", value: "red" })),
+          list(9, withClause({ key: "colour", op: "is", value: "red" })),
         );
-        const badList = yield* Effect.exit(list(repository, 9, { list: { savedQuery: "nope" } }));
-        const tooMany = yield* Effect.exit(
-          list(repository, 9, { text: "a b c d e f g h i j k l m" }),
-        );
+        const badList = yield* Effect.exit(list(9, { list: { savedQuery: "nope" } }));
+        const tooMany = yield* Effect.exit(list(9, { text: "a b c d e f g h i j k l m" }));
         return { narrowed: refsOf(narrowed), empty: refsOf(empty), unknown, badList, tooMany };
       }),
     );
@@ -761,11 +760,59 @@ describe("the clauses of a query", () => {
     expect(result.tooMany._tag).toBe("Failure");
   });
 
-  it("counts the facets of the whole result on the first page", async () => {
-    const page = await run(({ repository }) =>
+  it("refuses an operator its key does not take, with a reason, on a core key and on a declared field", async () => {
+    const refusals = await run(() =>
       Effect.gen(function* () {
         yield* seed;
-        return yield* list(repository, 9);
+        const refuse = (clause: InboxClause) =>
+          Effect.map(Effect.exit(list(9, withClause(clause))), (exit) => JSON.stringify(exit));
+        return [
+          yield* refuse({ key: "asks", op: "over", value: 1 }),
+          yield* refuse({ key: "waiting", op: "is", value: 5 }),
+          yield* refuse({ key: "team", op: "over", value: 3 }),
+        ];
+      }),
+    );
+    expect(refusals[0]).toContain('asks takes \\"is\\", not \\"over\\"');
+    expect(refusals[1]).toContain('waiting takes \\"over\\" or \\"under\\"');
+    expect(refusals[2]).toContain('team takes \\"is\\", not \\"over\\"');
+  });
+
+  it("treats a hostile value as plain text, so it matches nothing and harms nothing", async () => {
+    const hostile = "x'; DROP TABLE external_entities; --";
+    const found = await run(() =>
+      Effect.gen(function* () {
+        yield* seed;
+        return {
+          byFrom: refsOf(yield* list(9, withClause({ key: "from", op: "is", value: hostile }))),
+          byField: refsOf(yield* list(9, withClause({ key: "team", op: "is", value: hostile }))),
+          byText: refsOf(yield* list(9, { text: hostile })),
+          after: refsOf(yield* list(9)),
+        };
+      }),
+    );
+    expect(found).toEqual({ byFrom: [], byField: [], byText: [], after: ["a", "b"] });
+  });
+
+  it("matches the characters of free text literally, not as a pattern", async () => {
+    const found = await run(() =>
+      Effect.gen(function* () {
+        yield* seed;
+        return {
+          percent: refsOf(yield* list(9, { text: "%" })),
+          underscore: refsOf(yield* list(9, { text: "Login_is" })),
+          words: refsOf(yield* list(9, { text: "login FLAKY" })),
+        };
+      }),
+    );
+    expect(found).toEqual({ percent: [], underscore: [], words: ["a"] });
+  });
+
+  it("counts the facets of the whole result on the first page", async () => {
+    const page = await run(() =>
+      Effect.gen(function* () {
+        yield* seed;
+        return yield* list(9);
       }),
     );
     // The source has two accounts here, so each has its own facets.
@@ -789,17 +836,17 @@ describe("the clauses of a query", () => {
 
 describe("the outline of the rail", () => {
   it("counts every saved query, each source and its accounts, and the sidebar's waits", async () => {
-    const { counts, sidebar } = await run(({ repository }) =>
+    const { counts, sidebar } = await run(() =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a", owned: true });
         yield* insertTicket({ key: "b", accounts: [ACCOUNT_A, ACCOUNT_B] });
         yield* raise(a, REVIEW, 2);
         return {
-          counts: yield* repository.readInboxOutline(environment(9), {
+          counts: yield* inbox.readInboxOutline(environment(9), {
             pins: [],
             browseFolded: [],
           }),
-          sidebar: yield* repository.countInbox(environment(9)),
+          sidebar: yield* inbox.countInbox(environment(9)),
         };
       }),
     );
@@ -831,16 +878,16 @@ describe("the outline of the rail", () => {
   });
 
   it("lists every known record of a facet with count 0, per account when the source has several, and none for a folded source", async () => {
-    const result = await run(({ repository }) =>
+    const result = await run(() =>
       Effect.gen(function* () {
         yield* insertTeam(CHECKOUT, "Checkout", "Late");
         yield* insertTeam(SEARCH, "Search");
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: CHECKOUT }] });
-        const open = yield* repository.readInboxOutline(environment(9), {
+        const open = yield* inbox.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [],
         });
-        const folded = yield* repository.readInboxOutline(environment(9), {
+        const folded = yield* inbox.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [{ source: "acme" }],
         });
@@ -849,7 +896,7 @@ describe("the outline of the rail", () => {
           accounts: [ACCOUNT_B],
           fields: [{ key: "team", text: SEARCH }],
         });
-        const several = yield* repository.readInboxOutline(environment(9), {
+        const several = yield* inbox.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [],
         });
@@ -878,14 +925,14 @@ describe("the outline of the rail", () => {
   });
 
   it("cuts a facet at 100 values and says how many more there are", async () => {
-    const team = await run(({ repository }) =>
+    const team = await run(() =>
       Effect.gen(function* () {
         for (let index = 0; index < 105; index++) {
           const ref = `acme:team:t${String(index).padStart(3, "0")}`;
           yield* insertTeam(ref, `Team ${String(index).padStart(3, "0")}`);
         }
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: "acme:team:t104" }] });
-        const counts = yield* repository.readInboxOutline(environment(9), {
+        const counts = yield* inbox.readInboxOutline(environment(9), {
           pins: [],
           browseFolded: [],
         });
@@ -898,12 +945,12 @@ describe("the outline of the rail", () => {
   });
 
   it("gives each pin its live label and count, and keeps the text of a value that is gone", async () => {
-    const pins = await run(({ repository }) =>
+    const pins = await run(() =>
       Effect.gen(function* () {
         yield* insertTeam(CHECKOUT, "Checkout revamp");
         yield* insertTicket({ key: "a", fields: [{ key: "team", text: CHECKOUT }] });
         yield* insertTicket({ key: "b", fields: [{ key: "team", text: CHECKOUT }] });
-        const counts = yield* repository.readInboxOutline(environment(9), {
+        const counts = yield* inbox.readInboxOutline(environment(9), {
           pins: [
             { source: "acme", key: "team", value: CHECKOUT },
             { source: "acme", key: "team", value: "acme:team:gone" },
@@ -924,11 +971,11 @@ describe("the outline of the rail", () => {
   });
 
   it("lists a source with a Connection that needs signing in again as failing", async () => {
-    const failing = await run(({ repository, sql }) =>
+    const failing = await run(({ sql }) =>
       Effect.gen(function* () {
         yield* sql`UPDATE connections SET status = 'needs-reauth', updated_at = ${at(5)}
           WHERE id = ${uuidFromString(ACCOUNT_B)}`;
-        return (yield* repository.readInboxOutline(environment(9), { pins: [], browseFolded: [] }))
+        return (yield* inbox.readInboxOutline(environment(9), { pins: [], browseFolded: [] }))
           .failing;
       }),
     );
@@ -963,10 +1010,10 @@ describe("suggested values", () => {
   });
 
   const suggest = (key: string, prefix: string, extra: object = {}) =>
-    run(({ repository }) =>
+    run(() =>
       Effect.gen(function* () {
         yield* seed;
-        return (yield* repository.suggestInboxValues(environment(9), {
+        return (yield* inbox.suggestInboxValues(environment(9), {
           list: everything,
           key,
           prefix,
@@ -990,11 +1037,11 @@ describe("suggested values", () => {
 
   it("also suggests the known records of a facet that nothing of yours holds, with count 0", async () => {
     const run2 = (extra: object, prefix: string) =>
-      run(({ repository }) =>
+      run(() =>
         Effect.gen(function* () {
           yield* seed;
           yield* insertTeam("acme:team:pay", "Payments");
-          return (yield* repository.suggestInboxValues(environment(9), {
+          return (yield* inbox.suggestInboxValues(environment(9), {
             list: everything,
             key: "team",
             prefix,
@@ -1027,7 +1074,7 @@ describe("suggested values", () => {
   });
 
   it("limits the suggestions to the scope and at most 8", async () => {
-    const scoped = await run(({ repository }) =>
+    const scoped = await run(() =>
       Effect.gen(function* () {
         yield* seed;
         for (let index = 0; index < 12; index++) {
@@ -1037,17 +1084,17 @@ describe("suggested values", () => {
           });
         }
         return {
-          waiting: (yield* repository.suggestInboxValues(environment(9), {
+          waiting: (yield* inbox.suggestInboxValues(environment(9), {
             list: { savedQuery: "waits" },
             key: "team",
             prefix: "",
           })).values,
-          many: (yield* repository.suggestInboxValues(environment(9), {
+          many: (yield* inbox.suggestInboxValues(environment(9), {
             list: everything,
             key: "owner",
             prefix: "zed",
           })).values,
-          other: (yield* repository.suggestInboxValues(environment(9), {
+          other: (yield* inbox.suggestInboxValues(environment(9), {
             list: everything,
             key: "team",
             prefix: "",
@@ -1086,25 +1133,21 @@ describe("signals by noun, readable records and plugin saved queries", () => {
     });
 
   it("matches a signal clause by the kind's noun and suggests signals by their noun", async () => {
-    const found = await run(({ repository }) =>
+    const found = await run(() =>
       Effect.gen(function* () {
         const a = yield* insertTicket({ key: "a" });
         yield* insertTicket({ key: "b" });
         yield* raise(a, REVIEW, 2);
         return {
           byNoun: refsOf(
-            yield* list(
-              repository,
-              9,
-              withClause({ key: "signal", op: "is", value: "Review Request" }),
-            ),
+            yield* list(9, withClause({ key: "signal", op: "is", value: "Review Request" })),
           ),
-          suggested: (yield* repository.suggestInboxValues(environment(9), {
+          suggested: (yield* inbox.suggestInboxValues(environment(9), {
             list: everything,
             key: "signal",
             prefix: "review r",
           })).values,
-          byWord: (yield* repository.suggestInboxValues(environment(9), {
+          byWord: (yield* inbox.suggestInboxValues(environment(9), {
             list: everything,
             key: "signal",
             prefix: "rev",
@@ -1120,7 +1163,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
   });
 
   it("does not match an account that was refused and holds no concern", async () => {
-    const found = await run(({ repository }) =>
+    const found = await run(() =>
       Effect.gen(function* () {
         const ref = yield* insertTicket({
           key: "a",
@@ -1132,12 +1175,8 @@ describe("signals by noun, readable records and plugin saved queries", () => {
         yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
           WHERE ref = ${ref} AND connection_id = ${uuidFromString(ACCOUNT_B)}`;
         return {
-          refused: refsOf(
-            yield* list(repository, 9, withClause({ key: "account", op: "is", value: "home" })),
-          ),
-          reading: refsOf(
-            yield* list(repository, 9, withClause({ key: "account", op: "is", value: "work" })),
-          ),
+          refused: refsOf(yield* list(9, withClause({ key: "account", op: "is", value: "home" }))),
+          reading: refsOf(yield* list(9, withClause({ key: "account", op: "is", value: "work" }))),
         };
       }),
     );
@@ -1146,7 +1185,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
   });
 
   it("names a record nobody can read by its kind, and lists no unreadable known record", async () => {
-    const outline = await run(({ repository, sql }) =>
+    const outline = await run(({ sql }) =>
       Effect.gen(function* () {
         yield* insertTeam(CHECKOUT, "Checkout revamp");
         yield* insertTeam(SEARCH, "Search");
@@ -1164,7 +1203,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
             (id, ref, kind, noun, pace, completeness, title, first_observed_at, updated_at)
           VALUES (${mintUuid()}, 'acme:team:hidden', ${TEAM_KIND}, 'Team', 'context', 'full',
             'Secret team', ${at(1)}, ${at(1)})`;
-        return yield* repository.readInboxOutline(environment(9), {
+        return yield* inbox.readInboxOutline(environment(9), {
           pins: [{ source: "acme", key: "team", value: "acme:team:hidden" }],
           browseFolded: [],
         });
@@ -1182,7 +1221,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
   });
 
   it("ties a plugin's saved query to its own source", async () => {
-    const found = await run(({ repository }) =>
+    const found = await run(() =>
       Effect.gen(function* () {
         yield* insertTicket({ key: "a" });
         yield* insertBetaIssue("1");
@@ -1194,14 +1233,12 @@ describe("signals by noun, readable records and plugin saved queries", () => {
           clauses: [{ key: "asks", op: "is", value: false } satisfies InboxClause],
         };
         const withQuery = environment(9, { savedQueries: [saved] });
-        const outline = yield* repository.readInboxOutline(withQuery, {
+        const outline = yield* inbox.readInboxOutline(withQuery, {
           pins: [],
           browseFolded: [],
         });
         return {
-          page: refsOf(
-            yield* repository.queryInbox(withQuery, { list: { savedQuery: "acme/quiet" } }),
-          ),
+          page: refsOf(yield* inbox.queryInbox(withQuery, { list: { savedQuery: "acme/quiet" } })),
           counted: outline.savedQueries.find((query) => query.id === "acme/quiet")!.count,
           everything: outline.savedQueries.find((query) => query.id === "everything")!.count,
         };
@@ -1213,10 +1250,10 @@ describe("signals by noun, readable records and plugin saved queries", () => {
   });
 
   it("labels the pin of an enum value by the value's label", async () => {
-    const pins = await run(({ repository }) =>
+    const pins = await run(() =>
       Effect.gen(function* () {
         yield* insertTicket({ key: "a", fields: [{ key: "priority", text: "p1" }] });
-        return (yield* repository.readInboxOutline(environment(9), {
+        return (yield* inbox.readInboxOutline(environment(9), {
           pins: [{ source: "acme", key: "priority", value: "p1" }],
           browseFolded: [],
         })).pins;
@@ -1226,7 +1263,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
   });
 
   it("answers an empty first page with a total of zero and no second count", async () => {
-    const found = await run(({ repository }) =>
+    const found = await run(() =>
       Effect.gen(function* () {
         const statements: Array<string> = [];
         const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
@@ -1235,7 +1272,7 @@ describe("signals by noun, readable records and plugin saved queries", () => {
             return statement;
           }),
         );
-        const page = yield* list(repository, 9).pipe(record);
+        const page = yield* list(9).pipe(record);
         return {
           page,
           counts: statements.filter((text) => text.includes("COUNT(*) AS n FROM matched")),

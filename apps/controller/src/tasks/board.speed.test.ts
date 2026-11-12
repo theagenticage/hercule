@@ -703,7 +703,7 @@ const writeContext = (tasks: number) =>
         complete: true,
         observed,
         actor: `plugin:${PLUGIN}`,
-        environment: { now: AT, activePluginIds: [PLUGIN], askingKinds: [] },
+        environment: { now: AT, activePluginIds: [PLUGIN] },
       });
     yield* inTransaction(
       Effect.gen(function* () {

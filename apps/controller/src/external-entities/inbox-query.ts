@@ -2,8 +2,9 @@
  * The reads behind the Inbox: a page of a list, the counts of the rail, and
  * the values the search suggests.
  *
- * What is on the Inbox is `buildEligibleEntities` (inbox-population.ts), and
- * what a clause means is `compileInboxFilter` (inbox-predicates.ts). This
+ * What is on the Inbox, and what each core key means, is the Inbox relation
+ * (`inbox-relation.ts`). What a clause means is `compileInboxFilter`
+ * (`inbox-predicates.ts`). This
  * module composes them into statements and reads only what it shows:
  *
  * - A page is one statement that finds, filters, counts, orders and cuts the
@@ -41,6 +42,8 @@ import {
 } from "@hercule/contract";
 import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
 import { uuidFromString, uuidToString } from "../db";
+import { runRepository } from "../runs";
+import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
   deriveAccess,
@@ -48,28 +51,38 @@ import {
   deriveStale,
   parseStoredStatus,
   type EntityEnvironment,
-  type EntityRow,
-  type ObservationRow,
 } from "./entity-records";
 import { readFieldValues, type EntityFieldValues } from "./entity-fields";
-import { buildAsksOfRefs, buildEligibleEntities, buildTakenOfRefs } from "./inbox-population";
 import {
-  buildSourceOfKindSql,
   compileInboxFilter,
   escapeLike,
   listDeclaredInboxFields,
-  OBSERVING_SQL,
-  UUID_TEXT,
-  parseSourceOfKind,
-  READABLE_RECORD_SQL,
-  type CompiledSql,
   type DeclaredInboxField,
   type InboxFilterInput,
-  type SqlValue,
 } from "./inbox-predicates";
+import {
+  buildAsksOfRefs,
+  buildEligibleEntities,
+  buildKeyset,
+  buildMatchedEntities,
+  buildSortTuple,
+  buildSourceOfKindSql,
+  buildTakenOfRefs,
+  CORE_KEYS,
+  isCoreKey,
+  OBSERVING_SQL,
+  ORDER_BY,
+  parseSourceOfKind,
+  READABLE_RECORD_SQL,
+  UUID_TEXT,
+  type CompiledSql,
+  type SortTuple,
+  type SqlValue,
+} from "./inbox-relation";
 import { findSavedQuery, listSavedQueries } from "./saved-queries";
 import { buildSignalSay } from "./signal-lines";
-import type { WorkflowOfferTarget } from "./workflow-offer-reads";
+import { buildWorkflowOfferTarget, makeEntityRowReads } from "./entity-reads";
+import { makeWorkflowOfferReads } from "./workflow-offer-reads";
 
 /**
  * What the Inbox reads need to know beyond the database: the plugins that are
@@ -93,39 +106,6 @@ export interface InboxRailSettings {
     readonly value: string;
   }>;
   readonly browseFolded: ReadonlyArray<{ readonly source: string; readonly connectionId?: string }>;
-}
-
-/** The reads of other modules that the Inbox's hydration uses, passed in by the repository. */
-export interface InboxReaders {
-  readonly readEntities: (
-    refs: ReadonlyArray<string>,
-  ) => Effect.Effect<ReadonlyMap<string, EntityRow>, SqlError>;
-  readonly readObservations: (
-    refs: ReadonlyArray<string>,
-  ) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<ObservationRow>>, SqlError>;
-  readonly listOpenKindsByThread: (
-    refs: ReadonlyArray<string>,
-    limit: number,
-  ) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError>;
-  readonly listLiveWorkflowsOfTasks: (
-    taskIds: ReadonlyArray<string>,
-    perTask: number,
-  ) => Effect.Effect<
-    ReadonlyMap<string, ReadonlyArray<{ readonly workflowId: string; readonly name: string }>>,
-    SqlError
-  >;
-  readonly readWorkflowOffers: (
-    targets: ReadonlyArray<WorkflowOfferTarget>,
-    kindSources: NonNullable<EntityEnvironment["kindSources"]>,
-  ) => Effect.Effect<
-    {
-      readonly offerSetIds: ReadonlyMap<string, string>;
-      readonly offerSets: InboxPage["offerSets"];
-      readonly actingConnections: ReadonlyMap<string, InboxThing["actingConnections"]>;
-    },
-    SqlError
-  >;
-  readonly buildOfferTarget: (row: EntityRow) => WorkflowOfferTarget;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,37 +175,12 @@ const compileFilterOrFail = (
     : Effect.succeed(compiled);
 };
 
-/**
- * The statements that hold what a read works on: the common table expressions
- * of the Inbox and `matched`, the eligible things that pass `filter`, with the
- * columns every read needs. With `onlyRefs`, only those things are looked at.
- */
-const buildMatched = (
-  environment: InboxEnvironment,
-  filter: CompiledSql,
-  extra: CompiledSql = { sql: "", params: [] },
-  onlyRefs?: ReadonlyArray<string>,
-): CompiledSql => {
-  const eligible = buildEligibleEntities(environment.now, environment.askingKinds, onlyRefs);
-  return {
-    sql: `${eligible.sql},
-      matched AS MATERIALIZED (
-        SELECT e.ref, e.id, e.kind, e.task_id, e.oldest_ask, e.source_updated_at AS upd,
-          CASE WHEN e.oldest_ask IS NULL THEN 1 ELSE 0 END AS grp
-        FROM eligible e WHERE ${filter.sql})${extra.sql}`,
-    params: [...eligible.params, ...filter.params, ...extra.params],
-  };
-};
-
 /** Runs a statement written with `?` placeholders. */
 const runStatement = <Row extends object>(
   sql: SqlClient.SqlClient,
   statement: string,
   params: ReadonlyArray<SqlValue>,
 ) => sql.unsafe<Row>(statement, [...params]);
-
-/** The sort key of a thing in a list, which a cursor carries. */
-type SortTuple = ReadonlyArray<string | number>;
 
 /** Hashes what a cursor is bound to, so a cursor never reads another query. */
 const hashQuery = (list: InboxList, query: InboxQuery, order: string): string =>
@@ -260,36 +215,6 @@ const decodeCursor = (cursor: string, hash: string, order: string): SortTuple | 
   } catch {
     return "the cursor is not one this server wrote. Use the nextCursor of a page, unchanged.";
   }
-};
-
-/**
- * Builds the `WHERE` and the parameters that keep the things after the sort
- * tuple. Order `waiting` sorts things with an ask first, oldest ask first
- * (`grp = 0`), then the rest by the latest change; order `newest` by the
- * latest change. Ties break by ref.
- */
-const buildKeyset = (order: "waiting" | "newest", tuple: SortTuple | undefined): CompiledSql => {
-  if (tuple === undefined) return { sql: "1", params: [] };
-  if (order === "newest") {
-    const [upd, ref] = tuple as [string, string];
-    return { sql: "(m.upd < ? OR (m.upd = ? AND m.ref > ?))", params: [upd, upd, ref] };
-  }
-  const [grp, key, ref] = tuple as [number, string, string];
-  return grp === 0
-    ? {
-        sql: "((m.grp = 0 AND (m.oldest_ask > ? OR (m.oldest_ask = ? AND m.ref > ?))) OR m.grp = 1)",
-        params: [key, key, ref],
-      }
-    : {
-        sql: "(m.grp = 1 AND (m.upd < ? OR (m.upd = ? AND m.ref > ?)))",
-        params: [key, key, ref],
-      };
-};
-
-const ORDER_BY: Readonly<Record<"waiting" | "newest", string>> = {
-  waiting:
-    "m.grp ASC, CASE WHEN m.grp = 0 THEN m.oldest_ask END ASC, CASE WHEN m.grp = 1 THEN m.upd END DESC, m.ref ASC",
-  newest: "m.upd DESC, m.ref ASC",
 };
 
 // ---------------------------------------------------------------------------
@@ -605,8 +530,14 @@ interface AskRow {
   readonly kinds: string;
 }
 
-/** Builds the reads of the Inbox over `sql`, with the readers of the other modules in `readers`. */
-export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders) => {
+/** Builds the reads of the Inbox: a page, the counts, the outline of the rail and the suggested values. */
+export const externalEntityInbox = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const signals = yield* signalRepository;
+  const runs = yield* runRepository;
+  const offerReads = yield* makeWorkflowOfferReads;
+  const { readEntities, readObservations } = makeEntityRowReads(sql);
+
   /** Runs a read of the field table with this client. */
   const withSql = Effect.provideService(SqlClient.SqlClient, sql);
 
@@ -619,7 +550,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     refs: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<AskRow>>, SqlError> => {
     if (refs.length === 0) return Effect.succeed(new Map());
-    const own = buildAsksOfRefs(refs, environment.now, environment.askingKinds);
+    const own = buildAsksOfRefs(refs, environment);
     return Effect.map(
       runStatement<AskRow>(
         sql,
@@ -680,26 +611,26 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     SqlError
   > =>
     Effect.gen(function* () {
-      const entities = yield* readers.readEntities(rows.map((row) => row.ref));
+      const entities = yield* readEntities(rows.map((row) => row.ref));
       // A thing the page statement found can be pruned before this read; it is
       // left out, as it no longer belongs to the list.
       const present = rows.filter((row) => entities.has(row.ref));
       const refs = present.map((row) => row.ref);
-      const observations = yield* readers.readObservations(refs);
+      const observations = yield* readObservations(refs);
       const asks = yield* readAsks(environment, refs);
       const taken = yield* readTakenRefs(refs);
-      const openKinds = yield* readers.listOpenKindsByThread(refs, MAX_ENTITY_SIGNALS);
+      const openKinds = yield* signals.listOpenKindsByThread(refs, MAX_ENTITY_SIGNALS);
       const fieldValues: ReadonlyMap<string, EntityFieldValues> = yield* withSql(
         readFieldValues(refs, environment.activeEntityKinds),
       );
-      const offers = yield* readers.readWorkflowOffers(
-        refs.map((ref) => readers.buildOfferTarget(entities.get(ref)!)),
+      const offers = yield* offerReads.readWorkflowOffers(
+        refs.map((ref) => buildWorkflowOfferTarget(entities.get(ref)!)),
         environment.kindSources ?? [],
       );
       const taskIds = present.flatMap((row) =>
         row.task_id === null ? [] : [uuidToString(row.task_id)],
       );
-      const liveWorkflows = yield* readers.listLiveWorkflowsOfTasks(taskIds, MAX_LIVE_WORKFLOWS);
+      const liveWorkflows = yield* runs.listLiveWorkflowsOfTasks(taskIds, MAX_LIVE_WORKFLOWS);
       // Every ask is of a kind the registry declares (`askingKinds`), so it has a noun.
       const nouns = new Map(environment.signalKinds.map((kind) => [kind.kind, kind.noun]));
       const activePluginIds = new Set(environment.activePluginIds);
@@ -806,7 +737,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
 
       // A read of some refs looks at those things only, and only the first page
       // counts the whole list: a next page or a refs read ranks nothing for it.
-      const matched = buildMatched(environment, filter, undefined, query.refs);
+      const matched = buildMatchedEntities(environment, filter, undefined, query.refs);
       const isFirstPage = query.cursor === undefined && query.refs === undefined;
       const where: CompiledSql =
         query.refs === undefined ? buildKeyset(list.order, tuple) : { sql: "1", params: [] };
@@ -826,12 +757,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       const last = pageRows.at(-1);
       const nextCursor =
         more && last !== undefined && query.refs === undefined
-          ? encodeCursor(
-              hash,
-              list.order === "newest"
-                ? [last.upd, last.ref]
-                : [last.grp, last.grp === 0 ? last.oldest_ask! : last.upd, last.ref],
-            )
+          ? encodeCursor(hash, buildSortTuple(list.order, last))
           : undefined;
 
       const { things, offerSets } = yield* hydrate(environment, pageRows);
@@ -864,7 +790,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
    */
   const countInbox = (environment: InboxEnvironment): Effect.Effect<InboxCounts, SqlError> =>
     Effect.gen(function* () {
-      const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
+      const eligible = buildEligibleEntities(environment);
       const [counted] = yield* runStatement<{
         readonly waiting: number;
         readonly newest_arrival: number | null;
@@ -895,7 +821,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
       const facetFields = listFacetFields(declared);
       const saved = listSavedQueries(environment.savedQueries);
       const everything: CompiledSql = { sql: "1", params: [] };
-      const matched = buildMatched(environment, everything);
+      const matched = buildMatchedEntities(environment, everything);
 
       // Every saved query and every pin is one `SUM` over the eligible things.
       const compileCount = (
@@ -928,7 +854,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         ),
       );
       const columns = [...savedCounts, ...pinCounts];
-      const eligible = buildEligibleEntities(environment.now, environment.askingKinds);
+      const eligible = buildEligibleEntities(environment);
       const [counted] = yield* runStatement<Record<string, number | null>>(
         sql,
         `WITH ${eligible.sql}
@@ -1102,7 +1028,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
         },
         ["list"],
       );
-      const matched = buildMatched(environment, filter);
+      const matched = buildMatchedEntities(environment, filter);
       const prefix = `${escapeLike(query.prefix)}%`;
       const sourceSql = buildSourceOfKindSql("m");
       const declared = fields.filter(
@@ -1158,25 +1084,8 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
                 ]),
           ];
         }
-      } else if (query.key === "from") {
-        tuples = `SELECT a.asker AS value, a.asker AS label, ${sourceSql} AS source, m.ref AS ref
-          FROM matched m JOIN asks a ON a.ref = m.ref WHERE a.asker IS NOT NULL
-          UNION
-          SELECT json_extract(e.person, '$.name'), json_extract(e.person, '$.name'), ${sourceSql}, m.ref
-          FROM matched m JOIN external_entities e ON e.ref = m.ref
-          WHERE m.oldest_ask IS NULL AND json_extract(e.person, '$.name') IS NOT NULL`;
-      } else if (query.key === "source") {
-        tuples = `SELECT ${sourceSql} AS value, ${sourceSql} AS label, ${sourceSql} AS source, m.ref AS ref FROM matched m`;
-      } else if (query.key === "kind") {
-        tuples = `SELECT m.kind AS value, e.noun AS label, ${sourceSql} AS source, m.ref AS ref
-          FROM matched m JOIN external_entities e ON e.ref = m.ref`;
-      } else if (query.key === "signal") {
-        tuples = `SELECT s.kind AS value, s.kind AS label, ${sourceSql} AS source, m.ref AS ref
-          FROM matched m JOIN live_signals s ON s.ref = m.ref`;
-      } else if (query.key === "account") {
-        tuples = `SELECT c.label AS value, c.label AS label, ${sourceSql} AS source, m.ref AS ref
-          FROM matched m JOIN external_entity_observations o ON o.ref = m.ref AND ${OBSERVING_SQL}
-            JOIN connections c ON c.id = o.connection_id`;
+      } else if (isCoreKey(query.key)) {
+        tuples = CORE_KEYS[query.key].values;
       }
       if (tuples === undefined) return { values: [] };
 
@@ -1243,4 +1152,4 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
     });
 
   return { queryInbox, countInbox, readInboxOutline, suggestInboxValues };
-};
+});

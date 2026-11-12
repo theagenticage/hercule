@@ -26,21 +26,11 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { MAX_CONTEXT_DEPTH, MAX_CONTEXT_PARENTS } from "@hercule/contract";
 import { OPEN_THREAD_REFS_SQL } from "../signals";
-import { LIVE_TASK_LINKS_SQL, buildLiveTaskLinksSql } from "../tasks";
+import { LIVE_TASK_LINKS_SQL } from "../tasks";
 import { CURRENT_PART_OF_SQL, WALK_STATE_ROOM } from "./claim-graph";
 import { CURRENT_LINKED_SQL } from "./entity-links";
 import { buildWorkRecordCondition } from "./entity-records";
-import type { CompiledSql } from "./inbox-predicates";
-
-/**
- * The refs that concern the user: some Connection's inventory reports a
- * concern for them. Every question below starts from this one query, so a
- * thing that is on the Inbox is also kept, read and suggested.
- *
- * Open signals are not in it. They answer each question their own way (see the
- * top of this file).
- */
-export const CONCERNED_REFS_SQL = `SELECT ref FROM external_entity_observations WHERE concerns <> '[]'`;
+import { buildEligibleEntities, CONCERNED_REFS_SQL, type InboxMembership } from "./inbox-relation";
 
 /**
  * The refs the daily sweep keeps a record for, and keeps whatever sits above
@@ -63,131 +53,6 @@ export const RETAINED_ROOT_REFS_SQL = `
   SELECT ref FROM task_entity_links
   UNION
   ${OPEN_THREAD_REFS_SQL}`;
-
-/** The `taken` table of `buildAskTables`: see there. It reads the `live_links` table. */
-const TAKEN_SQL = `taken AS MATERIALIZED (
-    SELECT l.ref, l.taken_at FROM live_links l
-    WHERE l.position = 1 AND l.taken_at IS NOT NULL)`;
-
-/**
- * Builds the common table expressions that say what a thing asks: the one
- * definition of "live", "taken" and "asking", shared by the reads of the whole
- * Inbox and the read of one page's asks. As SQL text to put after `WITH`, with
- * `?` placeholders in this order: the read clock `now`, the JSON array of refs
- * (only with `onlyRefs`), then the JSON array of the asking signal kinds.
- *
- * - `live_links`: the live Task links, each ref's active Task at `position =
- *   1`.
- * - `taken`: for each ref whose active Task the user took on, when that
- *   happened. It reads `task_entity_links.taken_at`. Only Take on and Add to
- *   Work set it, on the Task they make and on a Task something else made (a
- *   hand-off, a signal, an event, a session, a workflow action). Those other
- *   ways never set it themselves.
- * - `live_signals`: the open signals that are not snoozed at `now`.
- * - `asks`: the live signals of an asking kind that nobody took. An ask is
- *   taken when the user took the thing on after it was raised, so it stays
- *   out of the list until a newer one arrives.
- * - `ask_summary`: per ref, how many asks, and when the oldest and the newest
- *   were raised.
- *
- * With `onlyRefs`, only the links and signals of the refs in the `page_refs`
- * table that the text defines are read, so the cost follows the refs and not
- * the whole Inbox. The answers for those refs are the same as without it.
- */
-const buildAskTables = (onlyRefs: boolean): string => `
-  read_clock(now) AS (SELECT ?),
-  ${onlyRefs ? "page_refs(ref) AS (SELECT value FROM json_each(?))," : ""}
-  live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs ? "l.ref IN (SELECT ref FROM page_refs)" : "1")}),
-  ${TAKEN_SQL},
-  live_signals AS MATERIALIZED (
-    SELECT s.thread_ref AS ref, s.id, s.kind, s.asker, s.created_at,
-      s.kind IN (SELECT value FROM json_each(?)) AS asking
-    FROM signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id
-    WHERE s.status = 'open' AND s.thread_ref IS NOT NULL
-      AND ${onlyRefs ? "s.thread_ref IN (SELECT ref FROM page_refs) AND" : ""}
-      (z.until IS NULL OR z.until <= (SELECT now FROM read_clock))),
-  asks AS MATERIALIZED (
-    SELECT ls.ref, ls.id, ls.kind, ls.asker, ls.created_at
-    FROM live_signals ls LEFT JOIN taken t ON t.ref = ls.ref
-    WHERE ls.asking = 1 AND (t.taken_at IS NULL OR ls.created_at >= t.taken_at)),
-  ask_summary AS MATERIALIZED (
-    SELECT ref, COUNT(*) AS ask_count, MIN(created_at) AS oldest_ask, MAX(created_at) AS newest_ask
-    FROM asks GROUP BY ref)`;
-
-/**
- * The common table expressions behind every read of the Inbox, as SQL text
- * with two `?` placeholders: the read clock `now`, then the JSON array of the
- * asking signal kinds. `buildEligibleEntities` binds them. They are
- * `buildAskTables` over every ref, and:
- *
- * - `eligible`: the entities on the Inbox. A full record of a work kind that
- *   concerns the user, has a live Task or holds a live signal; and is not
- *   dismissed, or has an ask raised after the dismissal. Access, lifecycle,
- *   stale and whether the kind is still declared do not matter: a thing keeps
- *   its last known facts. It carries the active Task (`task_id`) and the
- *   summary of its asks (`ask_count`, `oldest_ask`, `newest_ask`, null for no
- *   asks).
- */
-const buildEligibleSql = (onlyRefs: boolean): string => `${buildAskTables(onlyRefs)},
-  eligible AS (
-    SELECT e.*, l.task_id AS task_id, a.ask_count, a.oldest_ask, a.newest_ask
-    FROM external_entities e
-    LEFT JOIN live_links l ON l.ref = e.ref AND l.position = 1
-    LEFT JOIN ask_summary a ON a.ref = e.ref
-    WHERE ${buildWorkRecordCondition("e")}
-      ${onlyRefs ? "AND e.ref IN (SELECT ref FROM page_refs)" : ""}
-      AND (e.dismissed_at IS NULL OR a.newest_ask > e.dismissed_at)
-      AND (e.ref IN (${CONCERNED_REFS_SQL}) OR l.task_id IS NOT NULL
-           OR e.ref IN (SELECT ref FROM live_signals)))`;
-
-/**
- * Builds the common table expressions of the eligible entities with their
- * parameters, to put after `WITH`. `now` decides which snoozes have ended;
- * `askingKinds` are the signal kinds that ask the user for a move
- * (`listAskingKinds`). With `onlyRefs`, only those refs are looked at (and
- * the `page_refs` table is defined), so a read of some things does not rank
- * the whole Inbox. A ref is eligible or not the same way either way.
- */
-export const buildEligibleEntities = (
-  now: string,
-  askingKinds: ReadonlyArray<string>,
-  onlyRefs?: ReadonlyArray<string>,
-): CompiledSql =>
-  onlyRefs === undefined
-    ? { sql: buildEligibleSql(false), params: [now, JSON.stringify(askingKinds)] }
-    : {
-        sql: buildEligibleSql(true),
-        params: [now, JSON.stringify(onlyRefs), JSON.stringify(askingKinds)],
-      };
-
-/**
- * Builds the common table expressions `live_links` and `taken` for the refs of
- * one page only, with their parameters, to put after `WITH`. `taken` means what
- * it means in `buildAskTables`, and the answer for these refs is the same as in
- * `buildEligibleEntities`. The signals are not read.
- */
-export const buildTakenOfRefs = (refs: ReadonlyArray<string>): CompiledSql => ({
-  sql: `live_links AS MATERIALIZED (${buildLiveTaskLinksSql("l.ref IN (SELECT value FROM json_each(?))")}),
-  ${TAKEN_SQL}`,
-  params: [JSON.stringify(refs)],
-});
-
-/**
- * Builds the common table expressions `live_links`, `taken`, `live_signals`,
- * `asks` and `ask_summary` for the refs of one page only, with their
- * parameters, to put after `WITH`. They mean what they mean in
- * `buildEligibleEntities` (same definitions, `buildAskTables`) but read only
- * the links and signals of `refs`, so a page's asks do not rebuild the
- * Inbox's membership.
- */
-export const buildAsksOfRefs = (
-  refs: ReadonlyArray<string>,
-  now: string,
-  askingKinds: ReadonlyArray<string>,
-): CompiledSql => ({
-  sql: buildAskTables(true),
-  params: [now, JSON.stringify(refs), JSON.stringify(askingKinds)],
-});
 
 /**
  * The SQL that finds the refs Hercule wants a Connection to read, as a list of
@@ -261,11 +126,10 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
    */
   const readEligibleRefs = (
     refs: ReadonlyArray<string>,
-    now: string,
-    askingKinds: ReadonlyArray<string>,
+    membership: InboxMembership,
   ): Effect.Effect<ReadonlyMap<string, { readonly asks: boolean }>, SqlError> => {
     if (refs.length === 0) return Effect.succeed(new Map());
-    const eligible = buildEligibleEntities(now, askingKinds, refs);
+    const eligible = buildEligibleEntities(membership, refs);
     return Effect.map(
       sql.unsafe<{ readonly ref: string; readonly ask_count: number | null }>(
         `WITH ${eligible.sql} SELECT ref, ask_count FROM eligible`,
@@ -299,57 +163,75 @@ export const makeInboxPopulation = (sql: SqlClient.SqlClient) => {
     (rows) => rows[0]!.last,
   );
 
+  /**
+   * Runs `write`, which changes what the Inbox holds of `refs`, and returns
+   * its result. A ref arrives, and takes a number of the arrival counter
+   * stamped at `membership.now`, when after the write it is on the Inbox and
+   * either it was not held before (not on the Inbox, not concerning the user),
+   * or it has an ask now that it had none before. So a thing that came back
+   * after a dismissal arrives, and so does a thing that begins to ask. A concern
+   * that joins a thing a signal holds, or a second ask, is no new arrival. A
+   * thing that stays off the Inbox, such as a dismissed one, takes none.
+   *
+   * It looks at the Inbox before `write` runs, and runs in the caller's
+   * transaction. Announces nothing.
+   */
+  const recordArrivalsAfter = <A, E, R>(
+    refs: ReadonlyArray<string>,
+    membership: InboxMembership,
+    write: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | SqlError, R> =>
+    Effect.gen(function* () {
+      const eligibleBefore = yield* readEligibleRefs(refs, membership);
+      const concerned = yield* listConcernedRefs(refs);
+      const written = yield* write;
+      const eligibleAfter = yield* readEligibleRefs(refs, membership);
+      for (const ref of refs) {
+        const after = eligibleAfter.get(ref);
+        if (after === undefined) continue;
+        const before = eligibleBefore.get(ref);
+        const wasHeld = before !== undefined || concerned.has(ref);
+        if (wasHeld && !(after.asks && before?.asks !== true)) continue;
+        yield* sql`
+          UPDATE external_entities
+          SET arrival_sequence = ${yield* takeArrivalSequence}, updated_at = ${membership.now}
+          WHERE ref = ${ref}`;
+      }
+      return written;
+    });
+
   return {
-    /**
-     * Returns which of `refs` are eligible for the Inbox at `now`. One
-     * statement, none for no refs.
-     */
+    /** Returns which of `refs` are eligible for the Inbox in `membership`. One statement, none for no refs. */
     listEligibleRefs: (
       refs: ReadonlyArray<string>,
-      now: string,
-      askingKinds: ReadonlyArray<string>,
+      membership: InboxMembership,
     ): Effect.Effect<ReadonlySet<string>, SqlError> =>
-      Effect.map(readEligibleRefs(refs, now, askingKinds), (found) => new Set(found.keys())),
+      Effect.map(readEligibleRefs(refs, membership), (found) => new Set(found.keys())),
 
     /**
-     * Runs `write`, which changes what the Inbox holds of `refs`, and returns
-     * its result. A ref arrives, and takes a number of the arrival counter
-     * stamped at `now`, when after the write it is on the Inbox and either it
-     * was not held before (not on the Inbox, not concerning the user), or it
-     * has an ask now that it had none before. So a thing that came back after a
-     * dismissal arrives, and so does a thing that begins to ask. A concern that
-     * joins a thing a signal holds, or a second ask, is no new arrival. A thing
-     * that stays off the Inbox, such as a dismissed one, takes none.
+     * Runs `write`, an observation write that raises no signal, and records
+     * the arrivals it causes at `now` (see `recordArrivalsAfter`).
      *
-     * Both the write of observations and a raised signal arrive through this
-     * one rule. It looks at the Inbox before `write` runs, and runs in the
-     * caller's transaction. `askingKinds` are the kinds that ask
-     * (`listAskingKinds`): a write that raises no signal may pass none.
-     * Announces nothing.
+     * No signal is raised, so no ask begins and which kinds ask cannot change
+     * who arrives: a dismissed thing is back, or not, both before and after the
+     * write. The rule is therefore evaluated with no asking kinds.
      */
-    recordArrivalsAfter: <A, E, R>(
+    recordArrivalsAfterObservations: <A, E, R>(
       refs: ReadonlyArray<string>,
       now: string,
-      askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E | SqlError, R> =>
-      Effect.gen(function* () {
-        const eligibleBefore = yield* readEligibleRefs(refs, now, askingKinds);
-        const concerned = yield* listConcernedRefs(refs);
-        const written = yield* write;
-        const eligibleAfter = yield* readEligibleRefs(refs, now, askingKinds);
-        for (const ref of refs) {
-          const after = eligibleAfter.get(ref);
-          if (after === undefined) continue;
-          const before = eligibleBefore.get(ref);
-          const wasHeld = before !== undefined || concerned.has(ref);
-          if (wasHeld && !(after.asks && before?.asks !== true)) continue;
-          yield* sql`
-            UPDATE external_entities
-            SET arrival_sequence = ${yield* takeArrivalSequence}, updated_at = ${now}
-            WHERE ref = ${ref}`;
-        }
-        return written;
-      }),
+      recordArrivalsAfter(refs, { now, askingKinds: [] }, write),
+
+    /**
+     * Runs `write`, which writes an open signal on the thread `ref`, and
+     * records the arrival it causes (see `recordArrivalsAfter`). `membership`
+     * names the kinds that ask, so a signal that begins an ask is an arrival.
+     */
+    recordArrivalAfterSignal: <A, E, R>(
+      ref: string,
+      membership: InboxMembership,
+      write: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E | SqlError, R> => recordArrivalsAfter([ref], membership, write),
   };
 };

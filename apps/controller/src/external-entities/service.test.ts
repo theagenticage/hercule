@@ -276,7 +276,7 @@ const run = <A>(
                 complete: false,
                 observed: group,
                 actor: "plugin:acme",
-                environment: { now: at, activePluginIds: ["acme"], askingKinds: [] },
+                environment: { now: at, activePluginIds: ["acme"] },
               }),
             );
           }
@@ -630,7 +630,6 @@ describe("takeOn", () => {
               environment: {
                 now: new Date().toISOString(),
                 activePluginIds: ["acme"],
-                askingKinds: [],
               },
             }),
           );
@@ -703,7 +702,6 @@ describe("takeOn", () => {
                   environment: {
                     now: new Date().toISOString(),
                     activePluginIds: ["acme"],
-                    askingKinds: [],
                   },
                 }),
                 Effect.andThen(Deferred.succeed(holding, undefined), Deferred.await(release)),
@@ -761,7 +759,6 @@ describe("addToWork", () => {
             environment: {
               now: new Date().toISOString(),
               activePluginIds: ["acme"],
-              askingKinds: [],
             },
           }),
         );

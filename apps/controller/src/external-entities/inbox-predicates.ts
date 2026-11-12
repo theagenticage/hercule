@@ -16,7 +16,6 @@
  */
 import {
   CORE_INBOX_FIELD_KEYS,
-  CORE_INBOX_FIELDS,
   interpretClauseValue,
   type ClauseInterpretation,
   type EntityFieldType,
@@ -24,15 +23,19 @@ import {
 } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
 import type { ActiveEntityKind } from "./entity-records";
-
-/** A value bound to a `?` of a compiled expression. */
-export type SqlValue = string | number | Uint8Array;
-
-/** A SQL expression and the values its `?` placeholders take, in order. */
-export interface CompiledSql {
-  readonly sql: string;
-  readonly params: ReadonlyArray<SqlValue>;
-}
+import {
+  buildSourceOfKindSql,
+  CORE_KEYS,
+  isCoreKey,
+  joinConditions,
+  OBSERVING_SQL,
+  parseSourceOfKind,
+  READABLE_RECORD_SQL,
+  readCoreKeyType,
+  UUID_TEXT,
+  type CompiledSql,
+  type CoreKeyContext,
+} from "./inbox-relation";
 
 /**
  * What `compileInboxFilter` returns: the expression, or why the query cannot
@@ -79,145 +82,31 @@ export interface InboxFilterInput {
 /** The most words of free text one query may hold. */
 const MAX_TEXT_WORDS = 12;
 
-/** Builds the SQL of the plugin id of the row `alias`: what its `kind` has before the slash. */
-export const buildSourceOfKindSql = (alias: string): string =>
-  `substr(${alias}.kind, 1, instr(${alias}.kind, '/') - 1)`;
-
-/** Returns the plugin id a qualified kind starts with. */
-export const parseSourceOfKind = (kind: string): string => kind.slice(0, kind.indexOf("/"));
-
 const NO_MATCH: CompiledSql = { sql: "0", params: [] };
-
-/**
- * Joins expressions with `AND` or `OR`, each in parentheses, and their
- * parameters in order. A part that is always true (`1`) leaves an `AND` out,
- * a part that is always false (`0`) leaves an `OR` out, and the opposite part
- * decides the whole.
- */
-const join = (operator: "AND" | "OR", parts: ReadonlyArray<CompiledSql>): CompiledSql => {
-  const neutral = operator === "AND" ? "1" : "0";
-  const decisive = operator === "AND" ? "0" : "1";
-  if (parts.some((part) => part.sql === decisive)) return { sql: decisive, params: [] };
-  const kept = parts.filter((part) => part.sql !== neutral);
-  if (kept.length === 0) return { sql: neutral, params: [] };
-  if (kept.length === 1) return kept[0]!;
-  return {
-    sql: kept.map((part) => `(${part.sql})`).join(` ${operator} `),
-    params: kept.flatMap((part) => part.params),
-  };
-};
-
-export const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * The condition that the observation row `o` is a Connection observing its
- * thing: it can read it now, or it reports a concern for it. A Connection that
- * only tried and was refused does not observe it.
- */
-export const OBSERVING_SQL = `(o.access = 'ok' OR o.concerns <> '[]')`;
 
 /** True when a Connection of this account observes the thing. */
 const OBSERVED_BY_SQL = `EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = e.ref AND o.connection_id = ? AND ${OBSERVING_SQL})`;
-
-/**
- * Some Connection reads the record `t` now: the readability rule for a title
- * that belongs to another record, which is restricted data otherwise.
- */
-export const READABLE_RECORD_SQL = `EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = t.ref AND o.access = 'ok')`;
 
 /** Escapes the characters `LIKE` treats as patterns, for `ESCAPE '\\'`. */
 export const escapeLike = (word: string): string =>
   word.replace(/[\\%_]/g, (match) => `\\${match}`);
 
-/** Returns an ISO time `seconds` before `now`, or undefined when that is not a time. */
-const computeTimeBefore = (now: string, seconds: number): string | undefined => {
-  const moment = new Date(Date.parse(now) - seconds * 1000);
-  return Number.isNaN(moment.getTime()) ? undefined : moment.toISOString();
-};
-
-/** Compiles `is` on a boolean core key: true needs the condition to hold, false that it does not. */
-const compileBoolean = (value: boolean, condition: string): CompiledSql => ({
-  sql: value ? condition : `NOT (${condition})`,
-  params: [],
-});
-
-/** Compiles a clause on a core key, or returns the sentence that says why it cannot be. */
-const compileCoreClause = (
-  clause: InboxClause,
-  now: string,
-  signalKinds: InboxFilterInput["signalKinds"],
-): CompiledSql | string => {
-  const type = CORE_INBOX_FIELDS.find((field) => field.key === clause.key)?.type;
-  if (type === undefined) return `${clause.key} is not a core field`;
-  const reading = interpretClauseValue(clause.key, type, clause.op, clause.value);
-  if (!reading.ok) return reading.reason;
-  const value = reading.value;
-  switch (clause.key) {
-    case "source":
-      return { sql: `${buildSourceOfKindSql("e")} = ? COLLATE NOCASE`, params: [String(value)] };
-    case "kind":
-      return {
-        sql: `(e.kind = ? OR e.noun = ? COLLATE NOCASE OR substr(e.kind, instr(e.kind, '/') + 1) = ? COLLATE NOCASE)`,
-        params: [String(value), String(value), String(value)],
-      };
-    case "account": {
-      const text = String(value);
-      const byId = UUID_TEXT.test(text);
-      return {
-        sql: `EXISTS (SELECT 1 FROM external_entity_observations o JOIN connections c ON c.id = o.connection_id
-          WHERE o.ref = e.ref AND ${OBSERVING_SQL}
-            AND (${byId ? "c.id = ? OR " : ""}c.label = ? COLLATE NOCASE))`,
-        params: byId ? [uuidFromString(text), text] : [text],
-      };
-    }
-    case "from":
-      return {
-        sql: `(EXISTS (SELECT 1 FROM asks a WHERE a.ref = e.ref AND a.asker = ? COLLATE NOCASE)
-          OR (e.ask_count IS NULL AND json_extract(e.person, '$.name') = ? COLLATE NOCASE))`,
-        params: [String(value), String(value)],
-      };
-    case "waiting": {
-      const cutoff = computeTimeBefore(now, Number(value));
-      if (cutoff === undefined) return `waiting ${String(clause.value)} is too long ago`;
-      // The wait is the oldest open ask's, so waiting over N seconds means it began before the cutoff.
-      return {
-        sql:
-          clause.op === "over"
-            ? `e.oldest_ask IS NOT NULL AND e.oldest_ask < ?`
-            : `e.oldest_ask IS NOT NULL AND e.oldest_ask > ?`,
-        params: [cutoff],
-      };
-    }
-    case "asks":
-      return compileBoolean(value as boolean, "e.ask_count IS NOT NULL");
-    case "held":
-      return compileBoolean(value as boolean, "e.task_id IS NOT NULL");
-    case "mine":
-      return compileBoolean(
-        value as boolean,
-        "EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = e.ref AND o.owned_by_you = 1)",
-      );
-    case "signal": {
-      const text = String(value);
-      const lowered = text.toLowerCase();
-      const namedByNoun = signalKinds
-        .filter((entry) => entry.noun.toLowerCase() === lowered)
-        .map((entry) => entry.kind);
-      return {
-        sql: `EXISTS (SELECT 1 FROM live_signals s WHERE s.ref = e.ref
-          AND (s.kind = ? OR substr(s.kind, instr(s.kind, '/') + 1) = ? COLLATE NOCASE
-               OR s.kind IN (SELECT value FROM json_each(?))))`,
-        params: [text, text, JSON.stringify(namedByNoun)],
-      };
-    }
-    default:
-      return `${clause.key} is not a core field`;
-  }
-};
-
 /** The condition on one stored field row `f` of the thing `e`, with the key as its first parameter. */
 const buildFieldRowSql = (condition: string): string =>
   `EXISTS (SELECT 1 FROM external_entity_fields f WHERE f.ref = e.ref AND f.key = ? AND ${condition})`;
+
+/** Compiles a clause on a core key, or returns the sentence that says why it cannot be. */
+const compileCoreClause = (clause: InboxClause, context: CoreKeyContext): CompiledSql | string => {
+  const reading = interpretClauseValue(
+    clause.key,
+    readCoreKeyType(clause.key)!,
+    clause.op,
+    clause.value,
+  );
+  return reading.ok
+    ? CORE_KEYS[clause.key as keyof typeof CORE_KEYS].filter(reading.value, clause.op, context)
+    : reading.reason;
+};
 
 /** Why a clause cannot hold for one declared field: its operator is wrong, or its value does not fit. */
 interface FieldRefusal {
@@ -358,7 +247,7 @@ const compileDeclaredClause = (
   // operator that no declaration of the key takes is a mistake, and refused.
   const wrongOperator = refusals.find((refusal) => refusal.cause === "operator");
   if (alternatives.length === 0 && wrongOperator !== undefined) return wrongOperator.reason;
-  return alternatives.length === 0 ? NO_MATCH : join("OR", alternatives);
+  return alternatives.length === 0 ? NO_MATCH : joinConditions("OR", alternatives);
 };
 
 /**
@@ -388,12 +277,11 @@ const compileTie = (tie: {
 
 /** Compiles one clause with the source and account it is tied to. */
 const compileClause = (clause: InboxClause, input: InboxFilterInput): CompiledSql | string => {
-  const isCore = (CORE_INBOX_FIELD_KEYS as ReadonlyArray<string>).includes(clause.key);
-  const body = isCore
-    ? compileCoreClause(clause, input.now, input.signalKinds)
+  const body = isCoreKey(clause.key)
+    ? compileCoreClause(clause, { now: input.now, signalKinds: input.signalKinds })
     : compileDeclaredClause(clause, input.fields, input.now);
   if (typeof body === "string") return body;
-  return join("AND", [...compileTie(clause), body]);
+  return joinConditions("AND", [...compileTie(clause), body]);
 };
 
 /** Compiles the free text: every word must appear in the title, the identifier or a text field. */
@@ -402,7 +290,7 @@ const compileText = (text: string): CompiledSql | string => {
   if (words.length > MAX_TEXT_WORDS) {
     return `the text has ${String(words.length)} words, and the most is ${String(MAX_TEXT_WORDS)}`;
   }
-  return join(
+  return joinConditions(
     "AND",
     words.map((word): CompiledSql => {
       const pattern = `%${escapeLike(word)}%`;
@@ -435,7 +323,7 @@ export const compileInboxFilter = (input: InboxFilterInput): Compilation => {
   const text = compileText(input.text);
   if (typeof text === "string") return { problem: text, part: "text" };
   parts.push(text);
-  return join("AND", parts);
+  return joinConditions("AND", parts);
 };
 
 /**

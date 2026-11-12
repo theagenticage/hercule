@@ -91,7 +91,7 @@ import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
-import type { InboxEnvironment, InboxRailSettings } from "./inbox-query";
+import { externalEntityInbox, type InboxEnvironment, type InboxRailSettings } from "./inbox-query";
 import {
   externalEntityRepository,
   type EntityReadEnvironment,
@@ -204,6 +204,7 @@ const describeUndoRefusal = (reason: TaskUndoRefusal): string => {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const entities = yield* externalEntityRepository;
+  const inbox = yield* externalEntityInbox;
   const taskRows = yield* taskRepository;
   const tasks = yield* TaskService;
   const resources = yield* resourceRepository;
@@ -684,7 +685,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("workflow.query");
         yield* requireGrant("connection.query");
         yield* requireGrant("run.query");
-        return yield* entities.queryInbox(yield* readInboxEnvironment, query);
+        return yield* inbox.queryInbox(yield* readInboxEnvironment, query);
       }),
 
     /**
@@ -695,7 +696,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
-        return yield* entities.countInbox(yield* readInboxEnvironment);
+        return yield* inbox.countInbox(yield* readInboxEnvironment);
       }),
 
     /**
@@ -716,7 +717,7 @@ const make = Effect.gen(function* () {
                 browseFolded: stored["inbox.browseFolded"] ?? [],
               }))
             : { pins: [], browseFolded: [] };
-        return yield* entities.readInboxOutline(yield* readInboxEnvironment, own);
+        return yield* inbox.readInboxOutline(yield* readInboxEnvironment, own);
       }),
 
     /**
@@ -731,7 +732,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
         yield* requireGrant("connection.query");
-        return yield* entities.suggestInboxValues(yield* readInboxEnvironment, query);
+        return yield* inbox.suggestInboxValues(yield* readInboxEnvironment, query);
       }),
 
     /**
