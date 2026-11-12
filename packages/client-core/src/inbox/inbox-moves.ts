@@ -9,6 +9,7 @@
  */
 import { MAX_INBOX_MOVED_THINGS, type InboxThing, type WorkflowOffer } from "@hercule/contract";
 import { decideHandMove, type CardOffers } from "./card-hand-off";
+import { findHolder } from "./inbox-holder";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
 export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask";
@@ -34,9 +35,11 @@ const QUOTED_TITLE_LENGTH = 44;
 const quoteTitle = (title: string): string =>
   `“${title.length > QUOTED_TITLE_LENGTH ? `${title.slice(0, QUOTED_TITLE_LENGTH - 2)}…` : title}”`;
 
-/** Returns who has the thing, as a sentence's subject: its first live workflow, else the user. Used for a thing the user took on. */
-const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows">): string =>
-  thing.liveWorkflows[0] === undefined ? "You have" : `${thing.liveWorkflows[0].name} has`;
+/** Returns who has the thing, as a sentence's subject (see `findHolder`). Used for a thing the user took on. */
+const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">): string => {
+  const holder = findHolder(thing);
+  return holder?.kind === "colleague" ? `${holder.name} has` : "You have";
+};
 
 const OFFLINE = "You are offline, so that was not done. Try again when the connection is back.";
 

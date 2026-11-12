@@ -18,8 +18,12 @@ export type CardFact =
   | { readonly form: "bars"; readonly text: string; readonly level: number }
   | { readonly form: "count" | "word" | "date" | "money"; readonly text: string };
 
-/** What a card draws, slot by slot. A slot with nothing to say is absent. */
-export interface CardFace {
+/**
+ * What the open card draws, slot by slot. A slot with nothing to say is absent. It is not the
+ * `CardFace` of a row of the Inbox (`@hercule/contract`), which holds the field values a kind
+ * declares for its row.
+ */
+export interface OpenCardFace {
   /** The plugin whose mark the card shows. */
   readonly pluginId: string;
   /** The word for one, such as "Pull request", for a screen reader. */
@@ -66,7 +70,7 @@ const describeFact = (fact: EntityFact): CardFact => {
  * title already says what requests are. Anything with a tone, or with no
  * person to name, keeps its full sentence.
  */
-const decideSentence = (card: EntityRecord): CardFace["sentence"] => {
+const decideSentence = (card: EntityRecord): OpenCardFace["sentence"] => {
   const reason = card.reason;
   if (reason === undefined) return undefined;
   const person = card.person?.name;
@@ -82,7 +86,7 @@ const decideWhose = (card: EntityRecord): string | undefined => {
 };
 
 /** Returns what the generic card draws for `card`. */
-export const decideCardFace = (card: EntityRecord): CardFace => {
+export const decideOpenCardFace = (card: EntityRecord): OpenCardFace => {
   const status =
     card.status !== undefined && (card.card === "rich" || card.status.norm !== true)
       ? card.status

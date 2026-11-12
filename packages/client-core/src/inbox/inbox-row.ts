@@ -7,6 +7,7 @@
 import type { EntityFieldValue, EntityStatus, InboxOrder, InboxThing } from "@hercule/contract";
 import { listAvailableHandOffs, type CardOffers } from "./card-hand-off";
 import { describeWaitSince, measureSpan, type Span, type WaitLevel } from "./card-wait";
+import { findHolder } from "./inbox-holder";
 
 /**
  * Whoever holds a thing's Task. The user is drawn as a monogram of `name`; a
@@ -142,21 +143,13 @@ const readFieldText = (field: EntityFieldValue | undefined, now: Date): string |
 /** Returns an age as it follows "ago": "1d ago", or "just now" for less than a minute. */
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
-/**
- * Returns who has the thing: the first live workflow as a colleague's face,
- * else the user when they took the thing on, else `undefined`. A Task made by
- * a signal or a hand-off is not the user's, so it shows no holder mark.
- */
+/** Returns the holder mark of a row: see `findHolder` for who has the thing. */
 const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
-  const [workflow] = thing.liveWorkflows;
-  if (workflow !== undefined) {
-    return {
-      kind: "colleague",
-      faceSeed: workflow.workflowId,
-      words: `${workflow.name} has it`,
-    };
-  }
-  return thing.takenOn ? { kind: "you", name: userName, words: "You took it on" } : undefined;
+  const holder = findHolder(thing);
+  if (holder === undefined) return undefined;
+  return holder.kind === "colleague"
+    ? { kind: "colleague", faceSeed: holder.workflowId, words: `${holder.name} has it` }
+    : { kind: "you", name: userName, words: "You took it on" };
 };
 
 /** Returns the wait of the oldest open ask, or `undefined` when the thing asks nothing. */
