@@ -183,6 +183,8 @@ const NO_SELECTION: ReadonlySet<string> = new Set();
 const NO_FACETS: readonly InboxFacet[] = [];
 
 interface Read {
+  /** The visit (list shown) that was current when the read was issued. */
+  readonly visit: number;
   readonly controller: AbortController;
   readonly ticket: ReadTicket;
   readonly refs: ReadonlySet<string>;
@@ -269,10 +271,21 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   function startRead(refs: readonly string[] = []): Read {
     seq += 1;
     return {
+      visit: visitId,
       controller: new AbortController(),
       ticket: { seq, gen: pushGen },
       refs: new Set(refs),
     };
+  }
+
+  /**
+   * Returns the state a finished read applies to, or null when the read no
+   * longer applies: it was cancelled, or it was issued for the list that was
+   * shown before the current one. A read of the list left behind never
+   * touches the one that replaced it.
+   */
+  function acceptRead(read: Read): VisitState<Row, Query> | null {
+    return !read.controller.signal.aborted && read.visit === visitId ? state : null;
   }
 
   function cancelRowReads(): void {
@@ -300,6 +313,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       (page) => {
         if (read.controller.signal.aborted || opening !== current) return;
         opening = null;
+        cancelAll();
         visitId += 1;
         isShowPending = false;
         viewport = { first: 0, last: 0 };
@@ -328,9 +342,10 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     refreshing = read;
     reader.refresh(query, held, read.controller.signal).then(
       (reply) => {
-        if (read.controller.signal.aborted || state === null) return;
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
         refreshing = null;
-        setState(applyRefresh(state, { ...reply, asked: held }, read.ticket));
+        setState(applyRefresh(accepted, { ...reply, asked: held }, read.ticket));
         if (isShowPending) takeInArrivals();
         readStaleRows();
       },
@@ -366,8 +381,9 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     reader.readRows(current.query, stale, read.controller.signal).then(
       (rows) => {
         rowReads.delete(read);
-        if (read.controller.signal.aborted || state === null) return;
-        setState(applyRowsRead(state, { rows, asked: stale }, read.ticket));
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
+        setState(applyRowsRead(accepted, { rows, asked: stale }, read.ticket));
       },
       () => {
         rowReads.delete(read);
@@ -384,9 +400,10 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     nextPage = read;
     reader.readNext(query, after, read.controller.signal).then(
       (page) => {
-        if (read.controller.signal.aborted || state === null) return;
+        const accepted = acceptRead(read);
+        if (accepted === null) return;
         nextPage = null;
-        setState(applyNextPage(state, { ...page, after }, read.ticket));
+        setState(applyNextPage(accepted, { ...page, after }, read.ticket));
       },
       () => {
         // The next time the viewport nears the end reads this page again.

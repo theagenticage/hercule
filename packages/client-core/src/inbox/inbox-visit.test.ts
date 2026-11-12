@@ -160,6 +160,22 @@ describe("opening a list", () => {
     expect(refsOf(visit)).toEqual(["new"]);
   });
 
+  it("never lets a row read of the list left behind change the list that replaced it", async () => {
+    const { fake, visit } = await opened(rows("x"));
+    visit.pushArrived();
+    visit.open("list-2");
+    // The old list is still shown while the new one opens, so its viewport can start a read.
+    visit.viewportChanged(0, 0);
+    expect(fake.count("rows")).toBe(1);
+    fake.open("first").resolve(firstPage(rows("x")));
+    await settle();
+    expect(fake.open("rows").signal.aborted).toBe(true);
+    fake.open("rows").resolve([]);
+    await settle();
+    expect(visit.getSnapshot().query).toBe("list-2");
+    expect(refsOf(visit)).toEqual(["x"]);
+  });
+
   it("fails when the first page cannot be read, and reads again when opened again", async () => {
     const fake = fakeReader();
     const visit = createInboxVisit(fake.reader);
