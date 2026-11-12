@@ -1,7 +1,3 @@
-"use no memo";
-// The Inbox chunk has a size budget (spec 17 §What the Inbox costs). This file draws what is
-// shown rarely or rarely changes, so the React Compiler's cache for it would cost more bytes
-// than the renders it saves.
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import type { OpenCardWords } from "@hercule/client-core/inbox";
