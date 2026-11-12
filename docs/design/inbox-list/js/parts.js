@@ -7,13 +7,24 @@
   // ---- The undo line, the app's own: what just happened, and Undo ----
   window.Undo = (function () {
     var timer = 0;
+    /**
+     * Shows the undo line: what happened, a note, the move's action and Undo. `opts.entry` is the move on
+     * the undo stack the line speaks for, so the line can say when that move's answer is sent. When the
+     * words do not fit, the buttons drop their key hints and the action keeps only its key; a line with
+     * no buttons wraps instead.
+     */
     function show(text, opts) {
       var el = document.getElementById("undo");
       el.innerHTML = '<span class="undo-text">' + D.esc(text) + "</span>" + (opts.note ? '<span class="undo-note">' + D.esc(opts.note) + "</span>" : "") +
-        (opts.action ? '<button type="button" class="undo-line-button" data-undo-act aria-keyshortcuts="G">' + D.esc(opts.action.label) + '<kbd aria-hidden="true">' + opts.action.key + "</kbd></button>" : "") +
+        (opts.action ? '<button type="button" class="undo-line-button" data-undo-act aria-keyshortcuts="G" aria-label="' + D.esc(opts.action.label) + '" title="' + D.esc(opts.action.label) + '"><span class="undo-act-label">' + D.esc(opts.action.label) + '</span><kbd aria-hidden="true">' + opts.action.key + "</kbd></button>" : "") +
         (opts.undo ? '<button type="button" class="undo-line-button" data-undo aria-keyshortcuts="Meta+Z">' + D.icon("undo", 14) + 'Undo<kbd aria-hidden="true">⌘Z</kbd></button>' : "");
+      el._entry = opts.entry || null;
+      el.classList.remove("is-tight");
+      el.classList.toggle("is-wrap", !opts.undo && !opts.action);
       el.classList.add("is-on");
       el.removeAttribute("inert");
+      var words = el.querySelector(".undo-text");
+      if (words.scrollWidth > words.clientWidth + 1) el.classList.add("is-tight");
       var spoken = [text, opts.note, opts.undo ? "Command Z undoes it" : ""].filter(Boolean).map(function (x) { return x.replace(/[.\s]+$/, ""); }).join(". ") + ".";
       Announce.say(spoken);
       clearTimeout(timer);
@@ -42,7 +53,23 @@
       if (e.target.closest("[data-undo]")) Moves.undo();
       if (e.target.closest("[data-undo-act]")) { var l = Moves.last(); Moves.goTo(l && l.action ? l.action.task : undefined); }
     });
-    return { show: show, hide: hide };
+    /** Checks whether the line is showing this move and is held by the pointer or the focus. */
+    function holds(entry) {
+      var el = document.getElementById("undo");
+      return el._entry === entry && el.classList.contains("is-on") && (el.matches(":hover") || el.contains(document.activeElement));
+    }
+    /** Says on the line that this move's answer went, and takes Undo away, if the line still shows it. */
+    function markSent(entry, words) {
+      var el = document.getElementById("undo");
+      if (el._entry !== entry || !el.classList.contains("is-on")) return;
+      var had = el.contains(document.activeElement);
+      el.querySelectorAll("[data-undo], .undo-note").forEach(function (n) { n.remove(); });
+      el.insertAdjacentHTML("beforeend", '<span class="undo-note">' + D.esc(words) + "</span>");
+      Announce.say(words);
+      if (had) App.focusCurrent();
+      if (!el.matches(":hover")) { clearTimeout(timer); timer = setTimeout(hide, 3000); }
+    }
+    return { show: show, hide: hide, holds: holds, markSent: markSent };
   })();
 
   // ---- One polite live region, always in the tree, for what a screen reader user would otherwise miss ----

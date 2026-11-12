@@ -24,7 +24,7 @@ window.Moves = (function () {
   function push(entry) {
     stack.push(entry);
     if (s().offline) { s().outbox = (s().outbox || 0) + 1; Bar.draw(s()); }
-    say(entry.say, { undo: true, action: entry.action, note: s().offline ? "Waits until you’re back online." : entry.note });
+    say(entry.say, { undo: true, action: entry.action, entry: entry, note: s().offline ? "Waits until you’re back online." : entry.note });
   }
   function last() { return stack[stack.length - 1] || null; }
   function undo() {
@@ -38,6 +38,8 @@ window.Moves = (function () {
 
   function setScope(scope) {
     var st = s();
+    // A list picked under 900px is a list to see, so the pane over it slides away first.
+    if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
     st.scope = scope;
     st.anchor = null;
     st.search = { text: "", clauses: [] };
@@ -155,7 +157,7 @@ window.Moves = (function () {
     var finish = function () { if (!cancelled) redraw({ leave: "taken" }); };
     var chain = row ? Flights.handChain(row, t, offer.w.name, finish) : (finish(), null);
     push({
-      say: "Handed " + quote(t.title) + " to " + offer.w.name,
+      say: "Handed to " + offer.w.name + ": " + quote(t.title),
       action: { label: "Go to the Task", key: "G", task: t.title },
       undo: function () {
         cancelled = true;
@@ -245,13 +247,13 @@ window.Moves = (function () {
     holdPlace();
     Model.gone.add(x.id);
     redraw({ leave: "dismiss" });
-    push({ say: "Not related. Hercule won’t suggest this pair again.", undo: function () { Model.gone.delete(x.id); redraw({ enter: "return" }); } });
+    push({ say: "Not related. Hercule won’t suggest this pair again.", undo: function () { Model.gone.delete(x.id); s().focus = r.key; redraw({ enter: "return" }); } });
   }
   function dismissProposal(r) {
     holdPlace();
     Model.gone.add(r.item.id);
     redraw({ leave: "dismiss" });
-    push({ say: "Dismissed the Proposal " + quote(r.item.title), undo: function () { Model.gone.delete(r.item.id); redraw({ enter: "return" }); } });
+    push({ say: "Dismissed the Proposal " + quote(r.item.title), undo: function () { Model.gone.delete(r.item.id); s().focus = r.key; redraw({ enter: "return" }); } });
   }
   function accept(r, thread) {
     var x = r.item;
@@ -263,7 +265,7 @@ window.Moves = (function () {
     push({
       say: "Accepted: a Task in the backlog, " + quote(x.title),
       action: { label: "Go to the Task", key: "G", task: x.title },
-      undo: function () { Model.gone.delete(x.id); r.things.forEach(function (t) { delete t.held; }); redraw({ enter: "return" }); },
+      undo: function () { Model.gone.delete(x.id); r.things.forEach(function (t) { delete t.held; }); s().focus = r.key; redraw({ enter: "return" }); },
     });
   }
 
@@ -299,7 +301,18 @@ window.Moves = (function () {
     };
     push(entry);
     // After the undo line's eight seconds the answer is sent, and from then on ⌘Z says so instead.
-    if (external) setTimeout(function () { if (!s().offline) entry.sent = Kinds.SOURCES[Model.sourceOf(f.t)].name; }, 8000);
+    // While the line is held under the pointer or the focus, the answer waits, so the Undo on it always
+    // works; when it goes, the line says so and drops Undo.
+    if (external) {
+      var where = Kinds.SOURCES[Model.sourceOf(f.t)].name;
+      var send = function () {
+        if (stack.indexOf(entry) < 0 || s().offline) return;
+        if (Undo.holds(entry)) { setTimeout(send, 500); return; }
+        entry.sent = where;
+        Undo.markSent(entry, "Sent to " + where + ".");
+      };
+      setTimeout(send, 8000);
+    }
   }
   function markDone(sigId) {
     var f = findSignal(sigId);
@@ -345,6 +358,7 @@ window.Moves = (function () {
     var st = s();
     if (!st.pending.length) return;
     var fresh = st.pending.splice(0);
+    if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
     fresh.forEach(function (t) { t.fresh = true; Model.add(t); });
     redraw({ enter: "arrive", scrolls: true });
     // New things take their place in the saved query's order, so the list goes to the first of them:

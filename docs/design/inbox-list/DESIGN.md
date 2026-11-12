@@ -299,6 +299,11 @@ Each is a choice the map left open, made for the best design. Each can be turned
 43. **Under 900px with the pane open**, J, K and the moves keep the focus in the pane, and F6 treats the list and the pane as one place, whichever shows.
 44. **After a move, the next current row stays where your eyes are**: a row that travels away with a re-sorted group is passed over for the next one that stays.
 45. **Tokens that do not fit fold into +N whole**, every one if need be; only the scope token shortens with an ellipsis.
+46. **Holding the undo line holds the answer.** While the pointer or the focus is on the line, an answer waits to be sent, so its Undo always works; when it goes, the line says "Sent to GitHub." and Undo leaves it.
+47. **A space after part of a value completes it** to the value the menu offers first (`team:Check ` gives `team:Checkout`), unless a value goes on past the space.
+48. **With nothing typed, no suggestion is highlighted**: ↩ goes to the results and ↓ reaches the suggestions, so ↩ never adds a filter you did not pick.
+49. **Under 900px the list under the open pane is inert**, and every move that is about the list (picking a list, `.`, F) slides the pane away first.
+50. **The undo line puts the thing's title last**, "Handed to Review PR: “…”", so a narrow line cuts the title, never who has it. When the words do not fit, the buttons drop their key hints and the action keeps only its key; a line with nothing to press wraps.
 
 ## Proposed changes to #1119
 
@@ -334,6 +339,8 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **Layout**: tokens that could shrink were never seen to overflow, so they were cut instead of folded; the search hint was chosen before the offline pill took its room; with nothing current, ? was pushed off the window and the search stretched (the list now takes the pane's room and the bar keeps its columns, and the pane fades out); link pairs and the pane's meta line cut words or started a line with "·".
 - **Motion**: an accepted suggestion's own row flew into the group and landed on another thing's place (only a thing's own row flies now); the list jumped in one frame on T and on `.` (the scroll is smooth while rows move, and the next current row is one that stays put); ⌘Z showed the returning row's words over the row leaving its place (it lies under the list now, like a drawer).
 - **Keyboard**: H then a quick E dismissed a whole group; under 900px J and E sent the focus to a row hidden under the pane, and F6 was stuck; the undo line covered the selection bar's × and, under 900px, the pane's moves; a value with a space broke the search; ⌘Z did not make the restored thing current; the focus jumped off a token's × and fell to the page after `/` Esc or when the undo line went; F6 left the scope menu open; ⌫ and Esc hints that did nothing; the hand-off menu's "Change" could not be reached and did nothing (it is the app's account picker now, a Tab away).
+
+**Round five** checked round four's list and found little, but some of it mattered: ⌘Z after accepting a suggested link flew a member onto the suggestion's row, and the new group and member came in over rows still moving; the pane's fade-out never showed (the copy kept the class that hides the pane); a held undo line went on offering Undo after its answer was sent; ↩ in an empty search added `source:`; under 900px Tab, Narrow, picking a list and `.` still reached rows under the pane; ⌘Z after a triage move left the neighbour current; at 200% zoom the keys sheet and Narrow ran off the window; the pane's hand-off button took its name from the face. Also fixed: link pairs whose identifier shortened, undo lines that cut the important words, the account picker inside a menu, the pin star 2px under the 24px target, digits in the scope menu.
 
 ## Tried and dropped
 

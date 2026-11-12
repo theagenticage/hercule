@@ -144,7 +144,7 @@
 }
 .sx-chip b {
   min-width: 0;
-  max-width: 140px;
+  max-width: 220px;
   overflow: hidden;
   color: var(--ink);
   font-weight: var(--w-medium);
@@ -385,10 +385,32 @@ body > .flight {
 .undo-line-button kbd {
   margin-left: 2px;
 }
+/* A narrow line keeps its words: the buttons drop their key hints, and the action keeps only its key. */
+.undo-line.is-tight [data-undo] kbd,
+.undo-line.is-tight .undo-act-label {
+  display: none;
+}
+.undo-line.is-tight [data-undo-act] kbd {
+  margin-left: 0;
+}
+/* A line with nothing to press, such as a refusal, wraps rather than losing its instruction. */
+.ib .undo-line.is-wrap {
+  height: auto;
+  min-height: 36px;
+  padding-block: 8px;
+  white-space: normal;
+}
+.undo-line.is-wrap .undo-text {
+  overflow: visible;
+}
 .ib .keys-sheet {
   top: 54px;
   right: 14px;
   width: 380px;
+  /* A short window (or 200% zoom) scrolls the sheet rather than cutting its last keys off. */
+  max-height: calc(100% - 66px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .keys-sheet h2:focus {
   outline: none;

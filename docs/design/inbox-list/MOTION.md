@@ -53,7 +53,7 @@ After a move, the current row is measured where it will rest. When it would be o
 |---|---|---|
 | 0 | The data | The links are written; the group opens and becomes current |
 | 0 | Each linked thing | Its old row is lifted onto the flight layer; its shadow grows in over 160ms; it loses its tick and takes its new row's width less the member's indent, so its columns land on the row's columns. It flies on `travel`, measured without its scale and tilt, so its mark lands exactly on the member's mark. As it lands the member row appears under it, and the copy's shadow sinks and the copy fades in 120ms |
-| 0 | The group's row | Appears in place from 98.5% on `hand`, over the rows around it |
+| 0 | The group's row | Appears in place from 98.5% on `hand`, under the rows still moving past it, which uncover it |
 | 0 | Rows that change order | Carry the list's ground while they cross, and the current row carries its own fill while the puck waits |
 | ~420ms | Rest | The group is open and current |
 
@@ -61,7 +61,9 @@ After a move, the current row is measured where it will rest. When it would be o
 
 Undo flies each member back to its own row the same way.
 
-**Accepting a suggested link** (L on its row): the suggestion's row fades where it is in 110ms, and each of the two things flies from its own row into the group, as with L. A suggestion is about the things, never one of them, so its row never flies.
+**Accepting a suggested link** (L on its row): the suggestion's row fades where it is in 110ms, and each of the two things flies from its own row into the group, as with L. A suggestion is about the things, never one of them, so its row never flies, and ⌘Z never flies a thing onto it.
+
+A group row, or a member, that comes in where rows are still moving lies under the list like a drawer's members: the moving rows carry the list's ground over it and uncover it as they pass.
 
 ### Hand-off
 

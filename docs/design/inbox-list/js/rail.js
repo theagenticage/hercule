@@ -137,8 +137,7 @@ window.Rail = (function () {
       if (r) {
         Moves.setScope(JSON.parse(r.dataset.scope));
         // Having picked what to see, the hands go to the list.
-        var cur = App.el.list.querySelector('[data-key="' + App.state.focus + '"]');
-        if (cur) cur.focus({ preventScroll: true });
+        App.focusCurrent();
       }
     });
     host.addEventListener("keydown", function (e) {

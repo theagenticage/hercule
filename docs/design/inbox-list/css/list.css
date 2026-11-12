@@ -189,6 +189,21 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* A suggested pair: a quoted title shortens, an identifier and the "and" never do. */
+.row-title--pair {
+  display: flex;
+}
+.row-title--pair > span {
+  white-space: pre;
+}
+.row-title--pair > .pt-fix {
+  flex: none;
+}
+.row-title--pair > .pt-fit {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .row-time {
   flex: none;
   font-size: var(--t-12);
@@ -769,6 +784,10 @@ html.is-carrying .row-acts,
     linear-gradient(color-mix(in oklab, var(--ink) 60%, transparent), color-mix(in oklab, var(--ink) 60%, transparent)) 3px 50% / 2px calc(100% - 28px) no-repeat,
     linear-gradient(var(--row-fill), var(--row-fill)),
     var(--bg);
+}
+/* A current row that is still coming in stays under the rows moving over it. */
+.rows.is-crossing:not(.keeps-puck) .row.is-current.is-under {
+  z-index: 0;
 }
 .rows.is-crossing.keeps-puck .row.is-current {
   --row-fill: transparent;

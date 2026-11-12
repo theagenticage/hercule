@@ -69,17 +69,23 @@ window.Pane = (function () {
   }
   // In a narrow pane each move keeps its icon and its name moves to the tooltip, rather than being cut.
   var MOVE_ICONS = { thread: "compose", take: "tasks", accept: "check", link: "link", dismiss: "close" };
-  function move(id, label, key, extra, keepWords) {
-    var words = label.replace(/<[^>]+>/g, "");
+  function move(id, label, key, extra, keepWords, name, attrs) {
+    var words = name || label.replace(/<[^>]+>/g, "");
     var ic = MOVE_ICONS[id] && !keepWords ? '<span class="pn-move-ic">' + D.icon(MOVE_ICONS[id], 14) + "</span>" : "";
-    return '<button type="button" class="btn btn--sm pn-move' + (ic ? " has-ic" : "") + (extra || "") + '" data-move="' + id + '" aria-keyshortcuts="' + key + '" title="' + D.esc(words + " (" + key + ")") + '">' + ic + '<span class="pn-move-l">' + label + "</span>" + kbd(key) + "</button>";
+    return '<button type="button" class="btn btn--sm pn-move' + (ic ? " has-ic" : "") + (extra || "") + '" data-move="' + id + '" aria-keyshortcuts="' + key + '" title="' + D.esc(words + " (" + key + ")") + '"' + (name ? ' aria-label="' + D.esc(name) + '"' : "") + (attrs || "") + ">" + ic + '<span class="pn-move-l">' + label + "</span>" + kbd(key) + "</button>";
   }
 
-  function handLabel(t) {
+  /**
+   * Returns the hand-off move for a thing, or "" when no workflow takes it. With one workflow it names
+   * that workflow, "Hand to Review PR"; with several it opens the hand-off menu. The face is decoration,
+   * so the button's name never comes from it.
+   */
+  function handMove(t) {
     var offers = Model.offersFor(t).filter(function (o) { return !o.off; });
-    if (!offers.length) return null;
-    if (offers.length === 1) return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">' + D.esc(offers[0].w.name) + "</span>";
-    return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">Hand to…</span>';
+    if (!offers.length) return "";
+    var one = offers.length === 1;
+    var label = '<span class="pn-faces" aria-hidden="true">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">' + (one ? D.esc(offers[0].w.name) : "Hand to…") + "</span>";
+    return move("hand", label, "H", " pn-move--hand", false, one ? "Hand to " + offers[0].w.name : "Hand off…", one ? "" : ' aria-haspopup="menu"');
   }
 
   function thingPane(t) {
@@ -112,11 +118,10 @@ window.Pane = (function () {
       html += '<section class="pn-sec"><h3 class="pn-h">' + 'What happened</h3><ol class="ph">' + t.history.slice().reverse().map(function (h) { return "<li><time>" + D.ago(h[0]) + "</time><span>" + D.esc(h[1]) + "</span></li>"; }).join("") + "</ol></section>";
     }
     html += "</div>";
-    var hand = handLabel(t);
     html += footer(
       move("thread", "Thread", "N") +
       (t.held ? "" : move("take", "Take on", "T")) +
-      (hand && !t.held ? move("hand", hand, "H", " pn-move--hand") : "") +
+      (t.held ? "" : handMove(t)) +
       '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="link" title="Link to… (L)" aria-label="Link to another thing" aria-keyshortcuts="L">' + D.icon("link", 16) + '</button><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss (E)" aria-label="Dismiss" aria-keyshortcuts="E">' + D.icon("archive", 16) + "</button>"
     );
     return html;

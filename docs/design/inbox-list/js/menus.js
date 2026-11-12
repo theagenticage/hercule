@@ -32,10 +32,13 @@ window.Menus = (function () {
     var offers = Model.offersFor(t);
     var ok = offers.filter(function (o) { return !o.off; });
     var off = offers.filter(function (o) { return o.off; });
-    el.innerHTML = '<p class="hand-menu-heading">Hand to</p>' + ok.map(function (o, i) {
+    // The workflows are the menu; the account picker sits after it, outside the menu, which may hold
+    // only its items.
+    el.innerHTML = '<p class="hand-menu-heading" id="hand-h">Hand to</p><div role="menu" aria-labelledby="hand-h">' + ok.map(function (o, i) {
       return '<button type="button" role="menuitem" tabindex="-1" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '" aria-label="' + D.esc(o.w.name + ". " + o.line) + '" aria-keyshortcuts="' + (i + 1) + '"><span aria-hidden="true">' + D.face(o.w.name, "idle", 28) + '</span><span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? '<kbd aria-hidden="true">' + (i + 1) + "</kbd>" : "") + "</button>";
-    }).join("") + '<label class="hand-account hand-acct"><span>as</span><select aria-label="Account to act as"><option>northwind-bot</option><option>northwind-release</option></select></label>' +
-      (off.length ? '<i class="hand-menu-line"></i>' + off.map(function (o) { return '<div role="menuitem" aria-disabled="true" tabindex="-1" class="hand-row">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "");
+    }).join("") +
+      (off.length ? '<i class="hand-menu-line" role="separator"></i>' + off.map(function (o) { return '<div role="menuitem" aria-disabled="true" tabindex="-1" class="hand-row">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "") +
+      '</div><label class="hand-account hand-acct"><span>as</span><select aria-label="Account to act as"><option>northwind-bot</option><option>northwind-release</option></select></label>';
     el.hidden = false;
     var row = App.el.list.querySelector('[data-id="' + t.id + '"] .row-time');
     place(el, button && button.getBoundingClientRect ? button : row || App.el.pane);
@@ -110,6 +113,15 @@ window.Menus = (function () {
     }
     if (k === "ArrowDown" || k === "ArrowUp") { var ni = Math.max(0, Math.min(items.length - 1, at + (k === "ArrowDown" ? 1 : -1))); mark(ni); if (items[ni]) items[ni].focus({ preventScroll: true }); return true; }
     if (k === "Tab") return false;
+    // The scope menu's entries show their digits, and the digits pick them, as in the rail.
+    if (pop.id === "scope-pop" && /^[1-8]$/.test(k)) {
+      pop.hidden = true;
+      var sb1 = document.getElementById("scope-btn");
+      if (sb1) sb1.setAttribute("aria-expanded", "false");
+      Moves.setScope(k === "8" ? { triage: 1 } : { saved: Kinds.SAVED[+k - 1].id });
+      App.focusCurrent();
+      return true;
+    }
     if (k === "Enter" && items[at]) { var keepOpen = items[at].matches("[data-fold], [data-more], [data-nf], [data-nback]"); items[at].click(); if (keepOpen) setTimeout(function () { var again = pop.querySelectorAll(".menu-pick, [data-scope], [data-fold], [data-more]"); if (again[Math.min(at, again.length - 1)]) again[Math.min(at, again.length - 1)].classList.add("is-active"); }, 0); return true; }
     return true;
   }

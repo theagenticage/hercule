@@ -573,6 +573,69 @@ for (const w of [1024, 1120]) {
   await c.close();
 }
 
+// ---- Round-five regressions ----
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "/");
+  await key(p, "Enter");
+  await expect(p, "↩ in an empty search field adds no token", () => App.state.search.clauses.length === 0 && !document.getElementById("sx-input").value);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=suggestion");
+  await p.focus('[data-key="t:link-6251"]');
+  await key(p, "l");
+  await settle(p);
+  await p.keyboard.press("Meta+z");
+  await p.waitForTimeout(60);
+  await expect(p, "⌘Z on an accepted link never flies a member onto the suggestion's row", () => document.querySelector('[data-key="t:link-6251"]').style.opacity !== "0");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=triage");
+  await p.focus('[data-key="t:prop-kp"]');
+  await key(p, "e");
+  await settle(p, 400);
+  await p.keyboard.press("Meta+z");
+  await settle(p, 400);
+  await expect(p, "⌘Z on a dismissed Proposal makes it current again", () => App.state.focus === "t:prop-kp");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=pr");
+  await expect(p, "the pane's hand-off button is named for the hand-off, not the face", () => { const b = document.querySelector('#pane [data-move="hand"]'); return !b || /^Hand (to |off)/.test(b.getAttribute("aria-label") || ""); });
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:pr-6230", { keyboard: true }));
+  await key(p, "Enter");
+  await settle(p, 300);
+  const box = await p.evaluate(() => { const r = document.getElementById("undo").getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; });
+  await p.mouse.move(box.x, box.y);
+  await p.waitForTimeout(9000);
+  await expect(p, "a held undo line holds the answer: Undo still shows and nothing is sent", () => !!document.querySelector("#undo [data-undo]") && !Moves.last().sent);
+  await p.mouse.move(5, 5);
+  await p.waitForTimeout(800);
+  await expect(p, "once let go, the answer is sent and Undo goes from the line", () => !document.querySelector("#undo [data-undo]") && !!Moves.last().sent);
+  await p.close();
+}
+{
+  const c = await browser.newContext({ viewport: { width: 880, height: 700 } });
+  const p = await c.newPage();
+  p.on("pageerror", (e) => fail(`stacked inert: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven");
+  await p.waitForSelector("html[data-ready]");
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "Enter");
+  await settle(p, 400);
+  await expect(p, "under 900px the list under the open pane is inert", () => document.querySelector(".ib-list").inert === true);
+  await key(p, "Escape");
+  await settle(p, 300);
+  await expect(p, "and comes back when the pane slides away", () => document.querySelector(".ib-list").inert === false);
+  await c.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

@@ -4,7 +4,10 @@ window.Bar = (function () {
   "use strict";
   var K = Kinds, D = Draw;
   var input, chips, menu, field, scopeBtn, scopePop;
-  var active = 0, items = [];
+  // The highlighted suggestion, or -1 for none: with nothing typed none is highlighted, so ↩ goes to
+  // the results and only ↓ reaches the suggestions.
+  var active = -1, items = [];
+  function firstActive() { return input.value.trim() ? 0 : -1; }
 
   function tokenField(token) { return Object.keys(K.FIELDS).find(function (k) { return K.FIELDS[k].token === token; }); }
 
@@ -63,7 +66,7 @@ window.Bar = (function () {
         (it.n != null ? '<span class="sx-n">' + D.num(it.n) + "</span>" : "") + "</div>";
     }).join("") + '<p class="sx-foot"><kbd>↩</kbd> add <kbd>↓</kbd> to the results <kbd>⌫</kbd> remove the last <kbd>Esc</kbd> leave, keeping the search</p>';
     input.setAttribute("aria-expanded", "true");
-    input.setAttribute("aria-activedescendant", "sx-o" + active);
+    if (active >= 0) input.setAttribute("aria-activedescendant", "sx-o" + active); else input.removeAttribute("aria-activedescendant");
     var r = field.getBoundingClientRect();
     menu.style.left = r.left + "px";
     menu.style.top = r.bottom + 6 + "px";
@@ -78,14 +81,23 @@ window.Bar = (function () {
   }
 
   /**
-   * Checks whether a value typed after `field:` is finished. A space ends it, unless a value the field
-   * holds goes on past that space ("Checkout" while "Checkout revamp" exists), so a value with spaces
-   * can be typed out.
+   * Returns the value a space after `field:value` finishes, or null when the space is part of the value.
+   * - A value the field holds goes on past the space ("Checkout" while "Checkout revamp" exists): null,
+   *   so a value with spaces can be typed out.
+   * - The typed value is one the field holds, or no value starts with it (a threshold, a new word): it
+   *   is taken as typed.
+   * - It starts values the field holds ("Check"): the most common of them, as the menu offers first.
    */
-  function isFinished(key, value) {
-    if (!/\s$/.test(value) || !value.trim()) return false;
-    var v = value.trim().toLowerCase() + " ";
-    return !pool().some(function (t) { var x = Model.readField(t, key); return x != null && String(x).toLowerCase().indexOf(v) === 0; });
+  function finishValue(key, value) {
+    if (!/\s$/.test(value) || !value.trim()) return null;
+    var typed = value.trim(), low = typed.toLowerCase();
+    var counts = new Map();
+    pool().forEach(function (t) { var x = Model.readField(t, key); if (x != null) counts.set(String(x), (counts.get(String(x)) || 0) + 1); });
+    var held = Array.from(counts.keys());
+    if (held.some(function (x) { return x.toLowerCase().indexOf(low + " ") === 0; })) return null;
+    if (held.some(function (x) { return x.toLowerCase() === low; })) return typed;
+    var starts = held.filter(function (x) { return x.toLowerCase().indexOf(low) === 0; }).sort(function (a, b) { return counts.get(b) - counts.get(a); });
+    return starts[0] || typed;
   }
 
   /**
@@ -108,7 +120,8 @@ window.Bar = (function () {
       var value = text.slice(c.from, i + 1 < starts.length ? starts[i + 1].at : text.length);
       var last = i === starts.length - 1;
       // Only the last clause can still be being typed; an empty one before another is dropped.
-      if (value.trim() && (!last || final || isFinished(c.key, value))) st.search.clauses.push({ key: c.key, value: value.trim() });
+      var done = !last || final ? value.trim() : finishValue(c.key, value);
+      if (value.trim() && done) st.search.clauses.push({ key: c.key, value: done });
       else if (last) { open = text.slice(c.at); return; }
       taken = true;
     });
@@ -132,12 +145,12 @@ window.Bar = (function () {
     var st = App.state;
     if (!it) return;
     // A picked field or value replaces only what it completes; free text typed before it stays.
-    if (it.kind === "field") { input.value = input.value.replace(/\S*$/, K.FIELDS[it.key].token + ":"); active = 0; drawMenu(); return; }
+    if (it.kind === "field") { input.value = input.value.replace(/\S*$/, K.FIELDS[it.key].token + ":"); active = firstActive(); drawMenu(); return; }
     if (it.kind === "value") {
       st.search.clauses.push({ key: it.key, value: String(it.value) });
       input.value = input.value.replace(/(^|\s)[a-z]+:.*$/i, "$1");
       absorb(false);
-      active = 0;
+      active = firstActive();
       apply();
       menu.hidden = true;
       return;
@@ -275,6 +288,8 @@ window.Bar = (function () {
     var r = button.getBoundingClientRect();
     pop.style.left = Math.max(8, r.right - 280) + "px";
     pop.style.top = r.bottom + 6 + "px";
+    // Never taller than the room under it: a short window scrolls the menu instead of cutting it.
+    pop.style.maxHeight = Math.min(420, innerHeight - r.bottom - 18) + "px";
     pop.hidden = false;
     var focusFirst = function () { var f = pop.querySelector(".menu-pick"); if (f) { f.classList.add("is-active"); f.focus({ preventScroll: true }); } };
     focusFirst();
@@ -293,12 +308,15 @@ window.Bar = (function () {
     chips = document.getElementById("sx-chips");
     menu = document.getElementById("sx-menu");
     field = document.getElementById("sx");
-    input.addEventListener("focus", function () { field.classList.add("is-focus"); drawChips(); drawMenu(); });
+    // A hint measured before the theme's font has loaded is measured in the fallback font, so the
+    // hint is fitted again once fonts arrive.
+    document.fonts.addEventListener("loadingdone", function () { fitPlaceholder(); });
+    input.addEventListener("focus", function () { field.classList.add("is-focus"); active = firstActive(); drawChips(); drawMenu(); });
     input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) menu.hidden = true; }, 120); });
     // The scope token shows while the focus is anywhere in the field, its tokens' buttons too.
     field.addEventListener("focusout", function () { setTimeout(function () { if (!field.contains(document.activeElement)) drawChips(); }, 120); });
     input.addEventListener("input", function () {
-      active = 0;
+      active = firstActive();
       absorb(false);
       apply();
       drawMenu();
@@ -310,7 +328,7 @@ window.Bar = (function () {
         if (menu.hidden || active >= items.length - 1) toList(); else { active++; drawMenu(); }
         e.preventDefault();
       }
-      else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); drawMenu(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { active = Math.max(active < 0 ? -1 : 0, active - 1); drawMenu(); e.preventDefault(); }
       else if (e.key === "Enter") {
         // ↩ takes the highlighted suggestion; a typed value is taken as it is only when nothing is offered.
         var m = /^([a-z]+):(.+)$/i.exec(input.value.trim());

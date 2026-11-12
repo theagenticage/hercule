@@ -94,6 +94,12 @@ window.List = (function () {
     };
   }
 
+  /** Returns one end of a suggested pair's title: an identifier, which never shortens, or a quoted title, which does. */
+  function pairPart(t) {
+    var id = D.identifier(t);
+    return id ? '<span class="pt-fix">' + D.esc(id) + "</span>" : '<span class="pt-fit">“' + D.esc(t.title) + "”</span>";
+  }
+
   function triageRow(r) {
     var x = r.item;
     var srcs = [];
@@ -111,7 +117,7 @@ window.List = (function () {
     return {
       cls: "row row--triage" + (r.lastTriage ? " is-last-triage" : ""),
       attrs: { "data-triage": x.id, "data-id": a.id },
-      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 16) + '</span><span class="row-l1"><span class="row-title">' + D.esc((D.identifier(a) || "“" + a.title + "”") + " and " + (D.identifier(b) || "“" + b.title + "”")) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>' + D.esc(x.why) + '</span><span class="row-where row-where--group"><span class="row-marks">' + D.mark(Model.sourceOf(a), 12) + D.mark(Model.sourceOf(b), 12) + "</span></span></span>" + acts([["link", "Link them (L)", D.icon("link", 14)], ["dismiss", "Not related (E)", D.icon("close", 14)]]),
+      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 16) + '</span><span class="row-l1"><span class="row-title row-title--pair">' + pairPart(a) + '<span class="pt-fix"> and </span>' + pairPart(b) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>' + D.esc(x.why) + '</span><span class="row-where row-where--group"><span class="row-marks">' + D.mark(Model.sourceOf(a), 12) + D.mark(Model.sourceOf(b), 12) + "</span></span></span>" + acts([["link", "Link them (L)", D.icon("link", 14)], ["dismiss", "Not related (E)", D.icon("close", 14)]]),
       label: "Hercule suggests a link, " + D.agoWords(x.at) + ": " + a.title + " belongs with " + (D.identifier(b) ? D.identifier(b) + ", " : "") + b.title + ". L links them, E says not related",
     };
   }
@@ -212,8 +218,9 @@ window.List = (function () {
     var b = Motion.body(node);
     var fade = function (delay, ms) { node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms || 120, delay: delay || 0, easing: "ease-out", fill: "backwards" }); };
     if (how === "unfold") { node.classList.add("is-under"); setTimeout(function () { node.classList.remove("is-under"); }, 420); return; }
-    // A row coming back lies under the list, like a drawer's members: the rows after it part off it.
-    var under = how === "return" || how === "grow";
+    // A row coming back, or a group appearing where rows are still moving, lies under the list like a
+    // drawer's members: the moving rows, carrying the list's ground, pass over it and uncover it.
+    var under = how === "return" || how === "grow" || how === "link";
     node.classList.add(under ? "is-under" : "is-entering");
     var done = function () { b.clear(); node.classList.remove("is-entering", "is-under"); };
     if (how === "return") { b.set({ x: 28 }); b.to({ x: 0 }, "travel", { done: done }); fade(0, 140); }
@@ -318,7 +325,7 @@ window.List = (function () {
       Motion.flip(olds.filter(function (n) { return newKeys.has(n.dataset.key); }), function () { patch(host, s); }, { spring: "hand", stagger: function () { return waits ? CLOSE_DELAY : 0; } });
       var added = Array.prototype.filter.call(host.children, function (n) { return !oldKeys.has(n.dataset.key); });
       ghosts.forEach(function (x) {
-        var to = x.flies && added.find(function (n) { return n.dataset.id === x.id; });
+        var to = x.flies && added.find(function (n) { return n.dataset.id === x.id && !n.dataset.triage; });
         if (to) { added.splice(added.indexOf(to), 1); shared(x.g, to, opts.carried && opts.carried.id !== x.id); }
         else exit(x.g, opts.leave, x.caught);
       });

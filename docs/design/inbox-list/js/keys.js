@@ -166,7 +166,7 @@ window.Keys = (function () {
     if (!inPlace) {
       var inRail = t.closest && t.closest("#rail, #scope-pop");
       if (e.key === "Escape" && t.closest && t.closest("#keys")) { sheet(false); e.preventDefault(); return; }
-      if (e.key === "Escape" && !(t.closest && t.closest(".ib-bar, input"))) { var cur0 = App.el.list.querySelector("[tabindex='0']"); if (cur0) { cur0.focus(); e.preventDefault(); } return; }
+      if (e.key === "Escape" && !(t.closest && t.closest(".ib-bar, input"))) { if (App.state.focus) { App.focusCurrent(); e.preventDefault(); } return; }
       var reach = (e.key === "?" || e.key === "/") && !(t.closest && t.closest("input, textarea"));
       var digit = inRail && /^[1-8]$/.test(e.key);
       if (!reach && !digit && !((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")) return;
@@ -210,7 +210,12 @@ window.Keys = (function () {
     else if (lower === "g") Moves.goTo();
     else if (lower === "n") Moves.run("thread");
     else if (lower === "o") { var c0 = App.currentRow(); if (c0 && c0.thing) Moves.say("Opening " + (Draw.identifier(c0.thing) || "it") + " in " + Kinds.SOURCES[Model.sourceOf(c0.thing)].name + "…"); }
-    else if (lower === "f") { var nb = document.querySelector("[data-narrow]"); if (nb) Bar.narrow(nb); }
+    else if (lower === "f") {
+      // Narrow belongs to the list's head, so under 900px the pane over the list slides away first.
+      if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
+      var nb = document.querySelector("[data-narrow]");
+      if (nb) Bar.narrow(nb);
+    }
     else if (k === "[" || k === "]") section(k === "]" ? 1 : -1);
     else if (k === " ") { var sc = document.querySelector("#pane .pn-scroll"); if (sc) sc.scrollBy({ top: (e.shiftKey ? -1 : 1) * sc.clientHeight * 0.8, behavior: Motion.isReduced() ? "auto" : "smooth" }); }
     else if (k === "Enter") primaryAnswer();

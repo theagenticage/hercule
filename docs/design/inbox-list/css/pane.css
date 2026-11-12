@@ -50,6 +50,12 @@
   letter-spacing: -0.005em;
   overflow-wrap: anywhere;
 }
+/* The title takes the focus when the pane opens over the list. Its ring stands off the words, in the
+   pane's side room, so it reads as a frame and not as a box drawn on the letters. */
+.pn-title:focus-visible {
+  outline-offset: 6px;
+  border-radius: var(--r-sm);
+}
 .pn-id {
   color: var(--faint);
   font-weight: var(--w-regular);

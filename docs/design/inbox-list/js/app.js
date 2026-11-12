@@ -86,7 +86,8 @@ window.App = (function () {
     var ae = document.activeElement;
     // Where the focus was decides whether the new current row takes it: from the list always, and from
     // the pane or the selection bar when the control it was on is gone.
-    var was = !el.list ? null : el.list.contains(ae) ? "list" : el.pane.contains(ae) || document.getElementById("selbar").contains(ae) ? "pane" : null;
+    // A move made with nothing focused (the last row gone, then ⌘Z) counts as made from the list.
+    var was = !el.list ? null : el.list.contains(ae) || (opts.flip && ae === document.body) ? "list" : el.pane.contains(ae) || document.getElementById("selbar").contains(ae) ? "pane" : null;
     var before = state.focus;
     var oldRows = state.rows || [];
     state.rows = buildFlat();
@@ -163,7 +164,7 @@ window.App = (function () {
     copy.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
     copy.setAttribute("aria-hidden", "true");
     copy.inert = true;
-    Object.assign(copy.style, { position: "absolute", left: r.left - at.left + "px", top: r.top - at.top + "px", width: r.width + "px", height: r.height + "px", zIndex: 4, pointerEvents: "none" });
+    Object.assign(copy.style, { display: "flex", position: "absolute", left: r.left - at.left + "px", top: r.top - at.top + "px", width: r.width + "px", height: r.height + "px", zIndex: 4, pointerEvents: "none" });
     el.ib.appendChild(copy);
     copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: "ease-out", fill: "forwards" }).finished.then(function () { copy.remove(); });
   }
@@ -201,11 +202,17 @@ window.App = (function () {
   // Under 900px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
   var stacked = matchMedia("(max-width: 899px)");
   function isStacked() { return stacked.matches; }
+  /**
+   * Opens or closes the pane over the list (under 900px) and puts the focus on what then shows. While
+   * the pane covers the list, the list is inert, so neither Tab nor a click reaches a hidden row.
+   */
   function setPaneOpen(on) {
     el.ib.classList.toggle("is-pane-open", !!on);
-    if (on) { var t = el.pane.querySelector(".pn-title"); if (t) { t.tabIndex = -1; t.focus({ preventScroll: true }); } }
-    else { var cur = el.list.querySelector('[data-key="' + state.focus + '"]'); if (cur) cur.focus({ preventScroll: true }); }
+    syncCover();
+    focusCurrent();
   }
+  function syncCover() { el.list.closest(".ib-list").inert = isStacked() && isPaneOpen(); }
+  stacked.addEventListener("change", syncCover);
 
   function focusRow(key, opts) {
     if (!key) return;
