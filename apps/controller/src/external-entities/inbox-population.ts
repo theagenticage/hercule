@@ -26,7 +26,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { MAX_CONTEXT_DEPTH, MAX_CONTEXT_PARENTS } from "@hercule/contract";
 import { OPEN_THREAD_REFS_SQL } from "../signals";
-import { LIVE_TASK_LINKS_SQL } from "../tasks";
+import { LIVE_TASK_LINKS_SQL, buildLiveTaskLinksSql } from "../tasks";
 import { CURRENT_PART_OF_SQL, WALK_STATE_ROOM } from "./claim-graph";
 import { CURRENT_LINKED_SQL } from "./entity-links";
 import { buildWorkRecordCondition } from "./entity-records";
@@ -65,23 +65,58 @@ export const RETAINED_ROOT_REFS_SQL = `
   ${OPEN_THREAD_REFS_SQL}`;
 
 /**
- * The common table expressions behind every read of the Inbox, as SQL text
- * with two `?` placeholders: the read clock `now`, then the JSON array of the
- * asking signal kinds. `buildEligibleEntities` binds them.
+ * Builds the common table expressions that say what a thing asks: the one
+ * definition of "live", "taken" and "asking", shared by the reads of the whole
+ * Inbox and the read of one page's asks. As SQL text to put after `WITH`, with
+ * `?` placeholders in this order: the read clock `now`, the JSON array of refs
+ * (only with `onlyRefs`), then the JSON array of the asking signal kinds.
  *
  * - `live_links`: the live Task links, each ref's active Task at `position =
  *   1`.
- * - `taken`: for each ref whose active Task the user made or joined by taking
- *   the thing on (Take on or Add to Work), when that happened. The Task's
- *   first provenance entry for the ref then carries no run, signal, event or
- *   merge: a hand-off's carries its run, a Task made from a signal or an event
- *   carries those.
+ * - `taken`: for each ref whose active Task the user made by taking the thing
+ *   on (Take on or Add to Work), when that happened. It reads
+ *   `task_entity_links.taken_on`, which only that move sets: a hand-off, a Task
+ *   made from a signal or an event, and a link written by an agent session or
+ *   a workflow action leave it 0.
  * - `live_signals`: the open signals that are not snoozed at `now`.
  * - `asks`: the live signals of an asking kind that nobody took. An ask is
  *   taken when the user took the thing on after it was raised, so it stays
  *   out of the list until a newer one arrives.
  * - `ask_summary`: per ref, how many asks, and when the oldest and the newest
  *   were raised.
+ *
+ * With `onlyRefs`, only the links and signals of the refs in the `page_refs`
+ * table that the text defines are read, so the cost follows the refs and not
+ * the whole Inbox. The answers for those refs are the same as without it.
+ */
+const buildAskTables = (onlyRefs: boolean): string => `
+  read_clock(now) AS (SELECT ?),
+  ${onlyRefs ? "page_refs(ref) AS (SELECT value FROM json_each(?))," : ""}
+  live_links AS MATERIALIZED (${buildLiveTaskLinksSql(onlyRefs ? "l.ref IN (SELECT ref FROM page_refs)" : "1")}),
+  taken AS MATERIALIZED (
+    SELECT l.ref, l.linked_at AS taken_at FROM live_links l
+    WHERE l.position = 1 AND l.taken_on = 1),
+  live_signals AS MATERIALIZED (
+    SELECT s.thread_ref AS ref, s.id, s.kind, s.asker, s.created_at,
+      s.kind IN (SELECT value FROM json_each(?)) AS asking
+    FROM signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id
+    WHERE s.status = 'open' AND s.thread_ref IS NOT NULL
+      AND ${onlyRefs ? "s.thread_ref IN (SELECT ref FROM page_refs) AND" : ""}
+      (z.until IS NULL OR z.until <= (SELECT now FROM read_clock))),
+  asks AS MATERIALIZED (
+    SELECT ls.ref, ls.id, ls.kind, ls.asker, ls.created_at
+    FROM live_signals ls LEFT JOIN taken t ON t.ref = ls.ref
+    WHERE ls.asking = 1 AND (t.taken_at IS NULL OR ls.created_at >= t.taken_at)),
+  ask_summary AS MATERIALIZED (
+    SELECT ref, COUNT(*) AS ask_count, MIN(created_at) AS oldest_ask, MAX(created_at) AS newest_ask
+    FROM asks GROUP BY ref)`;
+
+/**
+ * The common table expressions behind every read of the Inbox, as SQL text
+ * with two `?` placeholders: the read clock `now`, then the JSON array of the
+ * asking signal kinds. `buildEligibleEntities` binds them. They are
+ * `buildAskTables` over every ref, and:
+ *
  * - `eligible`: the entities on the Inbox. A full record of a work kind that
  *   concerns the user, has a live Task or holds a live signal; and is not
  *   dismissed, or has an ask raised after the dismissal. Access, lifecycle,
@@ -90,29 +125,7 @@ export const RETAINED_ROOT_REFS_SQL = `
  *   summary of its asks (`ask_count`, `oldest_ask`, `newest_ask`, null for no
  *   asks).
  */
-const ELIGIBLE_ENTITIES_SQL = `
-  read_clock(now) AS (SELECT ?),
-  live_links AS MATERIALIZED (${LIVE_TASK_LINKS_SQL}),
-  taken AS MATERIALIZED (
-    SELECT l.ref, l.linked_at AS taken_at FROM live_links l
-    WHERE l.position = 1 AND EXISTS (
-      SELECT 1 FROM task_provenance p
-      WHERE p.task_id = l.task_id AND p.ref = l.ref AND p.at = l.linked_at
-        AND p.run_id IS NULL AND p.signal_id IS NULL AND p.event_id IS NULL
-        AND p.merged_task_id IS NULL)),
-  live_signals AS MATERIALIZED (
-    SELECT s.thread_ref AS ref, s.id, s.kind, s.asker, s.created_at,
-      s.kind IN (SELECT value FROM json_each(?)) AS asking
-    FROM signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id
-    WHERE s.status = 'open' AND s.thread_ref IS NOT NULL
-      AND (z.until IS NULL OR z.until <= (SELECT now FROM read_clock))),
-  asks AS MATERIALIZED (
-    SELECT ls.ref, ls.id, ls.kind, ls.asker, ls.created_at
-    FROM live_signals ls LEFT JOIN taken t ON t.ref = ls.ref
-    WHERE ls.asking = 1 AND (t.taken_at IS NULL OR ls.created_at >= t.taken_at)),
-  ask_summary AS MATERIALIZED (
-    SELECT ref, COUNT(*) AS ask_count, MIN(created_at) AS oldest_ask, MAX(created_at) AS newest_ask
-    FROM asks GROUP BY ref),
+const ELIGIBLE_ENTITIES_SQL = `${buildAskTables(false)},
   eligible AS (
     SELECT e.*, l.task_id AS task_id, a.ask_count, a.oldest_ask, a.newest_ask
     FROM external_entities e
@@ -135,6 +148,23 @@ export const buildEligibleEntities = (
 ): CompiledSql => ({
   sql: ELIGIBLE_ENTITIES_SQL,
   params: [now, JSON.stringify(askingKinds)],
+});
+
+/**
+ * Builds the common table expressions `live_links`, `taken`, `live_signals`,
+ * `asks` and `ask_summary` for the refs of one page only, with their
+ * parameters, to put after `WITH`. They mean what they mean in
+ * `buildEligibleEntities` (same definitions, `buildAskTables`) but read only
+ * the links and signals of `refs`, so a page's asks do not rebuild the
+ * Inbox's membership.
+ */
+export const buildAsksOfRefs = (
+  refs: ReadonlyArray<string>,
+  now: string,
+  askingKinds: ReadonlyArray<string>,
+): CompiledSql => ({
+  sql: buildAskTables(true),
+  params: [now, JSON.stringify(refs), JSON.stringify(askingKinds)],
 });
 
 /**
