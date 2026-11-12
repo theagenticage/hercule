@@ -11,7 +11,9 @@ import * as Schema from "effect/Schema";
 import {
   CORE_INBOX_FIELD_KEYS,
   CORE_INBOX_FIELDS,
+  findClauseListProblem,
   interpretClauseValue,
+  listClauseValues,
   MAX_SAVED_QUERIES_PER_PLUGIN,
   PluginError,
   SavedQuery,
@@ -64,16 +66,20 @@ const findClauseProblem = (
   if (type === undefined) {
     return `the clause key "${clause.key}" is neither one of the Inbox's own keys (${CORE_INBOX_FIELD_KEYS.join(", ")}) nor a field the plugin declares. Use one of those keys.`;
   }
-  const reading = interpretClauseValue(clause.key, type, clause.op, clause.value);
-  if (!reading.ok) return `the clause on "${clause.key}" is wrong: ${reading.reason}`;
-  if (clause.key === "kind" || clause.key === "signal") {
-    const qualified = `${pluginId}/${String(clause.value)}`;
-    const isSignal = clause.key === "signal";
-    const known = isSignal
-      ? context.signalKinds.has(qualified)
-      : context.entityKinds.some((kind) => kind.word === qualified);
-    if (!known) {
-      return `the clause on "${clause.key}" names "${String(clause.value)}", which the plugin does not declare as ${isSignal ? "a signal kind" : "an entity kind"}. Write the word of one of the plugin's own ${isSignal ? "signal" : "entity"} kinds, without the plugin's id.`;
+  const listProblem = findClauseListProblem(clause.key, clause.op, clause.value);
+  if (listProblem !== undefined) return `the clause on "${clause.key}" is wrong: ${listProblem}`;
+  for (const value of listClauseValues(clause.value)) {
+    const reading = interpretClauseValue(clause.key, type, clause.op, value);
+    if (!reading.ok) return `the clause on "${clause.key}" is wrong: ${reading.reason}`;
+    if (clause.key === "kind" || clause.key === "signal") {
+      const qualified = `${pluginId}/${String(value)}`;
+      const isSignal = clause.key === "signal";
+      const known = isSignal
+        ? context.signalKinds.has(qualified)
+        : context.entityKinds.some((kind) => kind.word === qualified);
+      if (!known) {
+        return `the clause on "${clause.key}" names "${String(value)}", which the plugin does not declare as ${isSignal ? "a signal kind" : "an entity kind"}. Write the word of one of the plugin's own ${isSignal ? "signal" : "entity"} kinds, without the plugin's id.`;
+      }
     }
   }
   return undefined;
@@ -140,7 +146,12 @@ export const decodeSavedQueries = (
         order: query.order,
         clauses: query.clauses.map((clause) =>
           clause.key === "kind" || clause.key === "signal"
-            ? { ...clause, value: `${manifest.id}/${String(clause.value)}` }
+            ? {
+                ...clause,
+                value: Array.isArray(clause.value)
+                  ? clause.value.map((value) => `${manifest.id}/${String(value)}`)
+                  : `${manifest.id}/${String(clause.value)}`,
+              }
             : clause,
         ),
       });

@@ -16,8 +16,11 @@
  */
 import {
   CORE_INBOX_FIELD_KEYS,
+  findClauseListProblem,
   interpretClauseValue,
+  listClauseValues,
   type ClauseInterpretation,
+  type ClauseValue,
   type EntityFieldType,
   type InboxClause,
 } from "@hercule/plugin-host";
@@ -95,8 +98,14 @@ export const escapeLike = (word: string): string =>
 const buildFieldRowSql = (condition: string): string =>
   `EXISTS (SELECT 1 FROM external_entity_fields f WHERE f.ref = e.ref AND f.key = ? AND ${condition})`;
 
+/** A clause that is compared with one value: the list of a clause is split before compiling. */
+type OneValueClause = Omit<InboxClause, "value"> & { readonly value: ClauseValue };
+
 /** Compiles a clause on a core key, or returns the sentence that says why it cannot be. */
-const compileCoreClause = (clause: InboxClause, context: CoreKeyContext): CompiledSql | string => {
+const compileCoreClause = (
+  clause: OneValueClause,
+  context: CoreKeyContext,
+): CompiledSql | string => {
   const reading = interpretClauseValue(
     clause.key,
     readCoreKeyType(clause.key)!,
@@ -121,7 +130,7 @@ interface FieldRefusal {
  * the field does not declare.
  */
 const compileFieldCondition = (
-  clause: InboxClause,
+  clause: OneValueClause,
   field: DeclaredInboxField,
   now: string,
 ): CompiledSql | FieldRefusal | undefined => {
@@ -200,7 +209,7 @@ const compileFieldCondition = (
  * with `OR`. A kind whose declaration cannot hold the clause never matches.
  */
 const compileDeclaredClause = (
-  clause: InboxClause,
+  clause: OneValueClause,
   fields: ReadonlyArray<DeclaredInboxField>,
   now: string,
 ): CompiledSql | string => {
@@ -275,13 +284,30 @@ const compileTie = (tie: {
   return conditions;
 };
 
-/** Compiles one clause with the source and account it is tied to. */
-const compileClause = (clause: InboxClause, input: InboxFilterInput): CompiledSql | string => {
-  const body = isCoreKey(clause.key)
+/** Compiles a clause that has one value, without the source and account it is tied to. */
+const compileSingleClause = (
+  clause: OneValueClause,
+  input: InboxFilterInput,
+): CompiledSql | string =>
+  isCoreKey(clause.key)
     ? compileCoreClause(clause, { now: input.now, signalKinds: input.signalKinds })
     : compileDeclaredClause(clause, input.fields, input.now);
-  if (typeof body === "string") return body;
-  return joinConditions("AND", [...compileTie(clause), body]);
+
+/**
+ * Compiles one clause with the source and account it is tied to. A clause with
+ * a list of values holds when any one of the values does, so each value
+ * compiles as a clause of its own and the results are joined with `OR`.
+ */
+const compileClause = (clause: InboxClause, input: InboxFilterInput): CompiledSql | string => {
+  const listProblem = findClauseListProblem(clause.key, clause.op, clause.value);
+  if (listProblem !== undefined) return listProblem;
+  const alternatives: Array<CompiledSql> = [];
+  for (const value of listClauseValues(clause.value)) {
+    const compiled = compileSingleClause({ ...clause, value }, input);
+    if (typeof compiled === "string") return compiled;
+    alternatives.push(compiled);
+  }
+  return joinConditions("AND", [...compileTie(clause), joinConditions("OR", alternatives)]);
 };
 
 /** Compiles the free text: every word must appear in the title, the identifier or a text field. */

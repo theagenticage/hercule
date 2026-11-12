@@ -668,6 +668,23 @@ describe("the clauses of a query", () => {
     expect(await query({ key: "from", op: "is", value: "nobody" })).toEqual([]);
   });
 
+  it("matches a thing that has any one of the values of a clause's list", async () => {
+    // `a` has only a review request open and `b` only a note, so each is in the list for one value.
+    expect(await query({ key: "signal", op: "is", value: [REVIEW, NOTE] })).toEqual(["a", "b"]);
+    expect(await query({ key: "signal", op: "is", value: [REVIEW, "acme/ghost"] })).toEqual(["a"]);
+    expect(await query({ key: "priority", op: "is", value: ["p1", "p2", "p3"] })).toEqual([
+      "a",
+      "b",
+    ]);
+    // The list is one clause among the others: all of them must still hold.
+    expect(
+      await query([
+        { key: "signal", op: "is", value: [REVIEW, NOTE] },
+        { key: "asks", op: "is", value: true },
+      ]),
+    ).toEqual(["a"]);
+  });
+
   it("measures the wait of the oldest ask against the read clock", async () => {
     // The ask is about two days old at the read.
     expect(await query({ key: "waiting", op: "over", value: 86_400 })).toEqual(["a"]);
@@ -1261,6 +1278,35 @@ describe("signals by noun, readable records and plugin saved queries", () => {
     expect(found.page).toEqual(["a"]);
     expect(found.counted).toBe(1);
     expect(found.everything).toBe(2);
+  });
+
+  it("lists, in a saved query on a list of signal kinds, a thing that has only one of them", async () => {
+    const found = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a" });
+        const b = yield* insertTicket({ key: "b" });
+        yield* insertTicket({ key: "c" });
+        yield* raise(a, REVIEW, 2);
+        yield* raise(b, NOTE, 2);
+        const saved = {
+          id: "acme/either",
+          source: "acme",
+          name: "Either",
+          order: "newest" as const,
+          clauses: [{ key: "signal", op: "is", value: [REVIEW, NOTE] } satisfies InboxClause],
+        };
+        const withQuery = environment(9, { savedQueries: [saved] });
+        const outline = yield* inbox.readInboxOutline(withQuery, { pins: [], browseFolded: [] });
+        return {
+          page: refsOf(
+            yield* inbox.readFirstPage(withQuery, { list: { savedQuery: "acme/either" } }),
+          ),
+          counted: outline.savedQueries.find((query) => query.id === "acme/either")!.count,
+        };
+      }),
+    );
+    expect([...found.page].sort()).toEqual(["a", "b"]);
+    expect(found.counted).toBe(2);
   });
 
   it("labels the pin of an enum value by the value's label", async () => {

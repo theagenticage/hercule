@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { EntityFieldType } from "./entities";
 import {
+  findClauseListProblem,
   interpretClauseValue,
+  listClauseValues,
   splitClauseWord,
   splitSearchValue,
   type ClauseValue,
@@ -64,6 +66,31 @@ describe("the clause value grammar", () => {
     expect(interpretClauseValue("waiting", "age", "is", "2d")).toMatchObject({
       reason: 'waiting takes "over" or "under", not "is", such as waiting>2d.',
     });
+  });
+
+  it.each<{
+    op: InboxClauseOperator;
+    operand: ClauseValue | ReadonlyArray<ClauseValue>;
+    values: ReadonlyArray<ClauseValue>;
+    refused: boolean;
+  }>([
+    { op: "is", operand: "a", values: ["a"], refused: false },
+    { op: "is", operand: ["a", "b"], values: ["a", "b"], refused: false },
+    { op: "over", operand: 5, values: [5], refused: false },
+    { op: "over", operand: [5, 6], values: [5, 6], refused: true },
+    { op: "under", operand: ["1d"], values: ["1d"], refused: true },
+  ])(
+    "reads $operand with $op as $values (refused: $refused)",
+    ({ op, operand, values, refused }) => {
+      expect(listClauseValues(operand)).toEqual(values);
+      expect(findClauseListProblem("key", op, operand) !== undefined).toBe(refused);
+    },
+  );
+
+  it("says what to write when a list does not fit the operator", () => {
+    expect(findClauseListProblem("size", "over", [1, 2])).toBe(
+      'size takes a list of values only with "is", not "over". Give one value, or use "is".',
+    );
   });
 
   it.each([

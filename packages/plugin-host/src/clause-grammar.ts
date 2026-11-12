@@ -23,6 +23,17 @@ export type InboxClauseOperator = "is" | "over" | "under";
 /** The value of a clause: raw text as typed, or a value already read for its field. */
 export type ClauseValue = string | number | boolean;
 
+/** The most values the list form of a clause's `is` holds. */
+export const MAX_CLAUSE_VALUES = 8;
+
+/**
+ * What a clause is compared with: one value, or for `is` a short list that
+ * means "any of these". The list is the grammar of the saved queries a plugin
+ * declares and of the API. Neither the CLI's `--clause` nor the Inbox search
+ * field produces one: they type a single value.
+ */
+export type ClauseOperand = ClauseValue | ReadonlyArray<ClauseValue>;
+
 /** A clause cut into its parts, before any field says what the value means. */
 export interface RawClause {
   readonly key: string;
@@ -32,6 +43,25 @@ export interface RawClause {
 
 /** Seconds in each unit a duration takes. */
 export const DURATION_UNIT_SECONDS = { s: 1, m: 60, h: 3600, d: 86_400, w: 604_800 } as const;
+
+/** Returns the values a clause is compared with: its one value, or each value of its list. */
+export const listClauseValues = (operand: ClauseOperand): ReadonlyArray<ClauseValue> =>
+  typeof operand === "object" ? operand : [operand];
+
+/**
+ * Returns the sentence that says why a clause cannot take a list of values, or
+ * undefined when it can. A list is "any of these", so it only fits `is`;
+ * `over` and `under` compare with one number. A clause with one value is
+ * always fine.
+ */
+export const findClauseListProblem = (
+  key: string,
+  op: InboxClauseOperator,
+  operand: ClauseOperand,
+): string | undefined =>
+  typeof operand === "object" && op !== "is"
+    ? `${key} takes a list of values only with "is", not "${op}". Give one value, or use "is".`
+    : undefined;
 
 /** The operators a clause on a field of this type takes. */
 export const CLAUSE_OPERATORS_BY_TYPE: Readonly<

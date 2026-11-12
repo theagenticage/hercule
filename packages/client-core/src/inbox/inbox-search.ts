@@ -193,12 +193,13 @@ export function listInboxSuggestions(
 export function describeInboxClause(clause: InboxClause, fields: readonly InboxField[]): string {
   const { key, op, value } = clause;
   if (typeof value === "boolean") return `${key}:${value ? "yes" : "no"}`;
-  if (op === "is") return `${key}:${value}`;
+  // A list of values (which only a saved query has) reads as `a,b`.
+  if (op === "is") return `${key}:${String(value)}`;
   const sign = op === "over" ? ">" : "<";
   if (typeof value === "number" && findField(fields, key)?.type === "age") {
     return `${key}:${sign}${formatDuration(value)}`;
   }
-  return `${key}:${sign}${value}`;
+  return `${key}:${sign}${String(value)}`;
 }
 
 function findField(fields: readonly InboxField[], key: string): InboxField | undefined {
