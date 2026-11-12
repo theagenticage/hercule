@@ -18,6 +18,7 @@
  * again is already held and is ignored. A row skipped shows up when the list is
  * read again from its first page.
  */
+import { replaceEqualDeep } from "@tanstack/query-core";
 import type { InboxFacet, InboxOrder } from "@hercule/contract";
 
 export interface InboxVisitRow {
@@ -150,11 +151,6 @@ export function pickWindow<Row>(
   return rows.slice(start, start + HELD_WINDOW);
 }
 
-/** Returns the refs a refresh must carry besides the window: rows hidden by a dismissal, whose return it confirms. */
-export function listHiddenRefs(state: VisitState<InboxVisitRow, unknown>): readonly string[] {
-  return [...state.hidden.keys()];
-}
-
 /**
  * Settles the hidden rows against a read: a dismissal confirmed before the
  * read was issued is over once the read covered the row, whether the row is
@@ -228,7 +224,7 @@ export function applyRefresh<Row extends InboxVisitRow, Query>(
     const next = found.get(row.ref);
     if (next !== undefined) {
       freshAt.set(row.ref, ticket.gen);
-      return [next];
+      return [replaceEqualDeep(row, next)];
     }
     if (!asked.has(row.ref)) return [row];
     freshAt.delete(row.ref);
@@ -250,8 +246,8 @@ export function applyRefresh<Row extends InboxVisitRow, Query>(
       arrivals: unheld.filter((row) => !slidIn(row)),
       firstPageRefs: firstPage.rows.map((row) => row.ref),
       total: firstPage.total,
-      order: firstPage.order,
-      facets: firstPage.facets ?? state.facets,
+      order: replaceEqualDeep(state.order, firstPage.order),
+      facets: replaceEqualDeep(state.facets, firstPage.facets ?? state.facets),
       freshAt,
       hidden,
     },
@@ -604,7 +600,8 @@ function withRows<Row extends InboxVisitRow, Query>(
 ): VisitState<Row, Query> {
   const shown = new Set(rows.map((row) => row.ref));
   const oldRefs = state.rows.map((row) => row.ref);
-  const selection = new Set([...state.selection].filter((ref) => shown.has(ref)));
+  const kept = [...state.selection].filter((ref) => shown.has(ref));
+  const selection = kept.length === state.selection.size ? state.selection : new Set(kept);
   const anchor = state.anchor !== null && shown.has(state.anchor) ? state.anchor : null;
   let current = state.current;
   if (current === null || !shown.has(current)) {

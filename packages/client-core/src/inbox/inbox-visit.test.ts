@@ -235,6 +235,29 @@ describe("a refresh", () => {
     expect(visit.getSnapshot().arrivals).toBe(0);
   });
 
+  it("keeps the row objects and the snapshot when a refresh brings equal copies", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    const before = visit.getSnapshot();
+    let notified = 0;
+    visit.subscribe(() => (notified += 1));
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a"), row("b"), row("c")]);
+    expect(visit.getSnapshot()).toBe(before);
+    expect(notified).toBe(0);
+  });
+
+  it("gives a new object only to the rows whose content changed", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    const [a, b, c] = visit.getSnapshot().rows;
+    visit.pushArrived();
+    await answerRefresh(fake, [row("a"), row("b", "new title"), row("c")]);
+    const after = visit.getSnapshot().rows;
+    expect(after[0]).toBe(a);
+    expect(after[1]).not.toBe(b);
+    expect(after[1]!.title).toBe("new title");
+    expect(after[2]).toBe(c);
+  });
+
   it("drops a held row that is in neither part of the reply, and updates one that is in the second", async () => {
     const { fake, visit } = await opened(rows("a", "b", "c", "d"));
     visit.pushArrived();

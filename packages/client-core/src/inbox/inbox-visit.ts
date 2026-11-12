@@ -29,7 +29,6 @@ import {
   applySelectionChange,
   applyUndo,
   confirmHidden,
-  listHiddenRefs,
   listMoveTargets,
   moveCurrent,
   pickWindow,
@@ -179,6 +178,10 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
 /** The next page is read when the viewport comes within this many rows of the end. */
 const NEAR_END_ROWS = 20;
 
+/** Shared so the snapshot of a visit that holds nothing keeps the same objects. */
+const NO_SELECTION: ReadonlySet<string> = new Set();
+const NO_FACETS: readonly InboxFacet[] = [];
+
 interface Read {
   readonly controller: AbortController;
   readonly ticket: ReadTicket;
@@ -204,34 +207,48 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   let isShowPending = false;
   let lastChange: InboxVisitChange | null = null;
   const listeners = new Set<() => void>();
-  let snapshot = buildSnapshot();
+  let snapshot = buildSnapshot(null);
 
-  function buildSnapshot(): InboxVisitSnapshot<Row, Query> {
+  /** Builds the snapshot; its `rows` array is `previous`'s when every row is the same object. */
+  function buildSnapshot(
+    previous: InboxVisitSnapshot<Row, Query> | null,
+  ): InboxVisitSnapshot<Row, Query> {
     const failed = opening !== null && opening.read === null;
+    const shown =
+      state === null
+        ? []
+        : state.rows.map((row) => {
+            const override = state!.overrides.get(row.ref);
+            return override?.from === row ? override.to : row;
+          });
+    const isSameRows =
+      previous !== null &&
+      previous.rows.length === shown.length &&
+      previous.rows.every((row, index) => row === shown[index]);
     return {
       status: failed ? "failed" : state === null ? "loading" : "ready",
       error: opening?.error,
       query: state?.query ?? null,
-      rows:
-        state === null
-          ? []
-          : state.rows.map((row) => {
-              const override = state!.overrides.get(row.ref);
-              return override?.from === row ? override.to : row;
-            }),
+      rows: isSameRows ? previous.rows : shown,
       arrivals: state?.arrivals.length ?? 0,
       current: state?.current ?? null,
-      selection: state?.selection ?? new Set(),
+      selection: state?.selection ?? NO_SELECTION,
       anchor: state?.anchor ?? null,
       total: state?.total,
       order: state?.order,
-      facets: state?.facets ?? [],
+      facets: state?.facets ?? NO_FACETS,
       lastChange,
     };
   }
 
+  /** Rebuilds the snapshot and tells the listeners, unless nothing the screen draws changed. */
   function commit(): void {
-    snapshot = buildSnapshot();
+    const next = buildSnapshot(snapshot);
+    const isUnchanged = (Object.keys(next) as (keyof typeof next)[]).every((key) =>
+      Object.is(next[key], snapshot[key]),
+    );
+    if (isUnchanged) return;
+    snapshot = next;
     for (const listener of [...listeners]) listener();
   }
 
@@ -249,13 +266,13 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     commit();
   }
 
-  function issue(): ReadTicket {
-    seq += 1;
-    return { seq, gen: pushGen };
-  }
-
   function startRead(refs: readonly string[] = []): Read {
-    return { controller: new AbortController(), ticket: issue(), refs: new Set(refs) };
+    seq += 1;
+    return {
+      controller: new AbortController(),
+      ticket: { seq, gen: pushGen },
+      refs: new Set(refs),
+    };
   }
 
   function cancelRowReads(): void {
@@ -304,7 +321,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     const query = state.query;
     cancelRowReads();
     const held = [
-      ...listHiddenRefs(state),
+      ...state.hidden.keys(),
       ...pickWindow(state.rows, viewport.first, viewport.last).map((row) => row.ref),
     ].slice(0, HELD_WINDOW);
     const read = startRead(held);

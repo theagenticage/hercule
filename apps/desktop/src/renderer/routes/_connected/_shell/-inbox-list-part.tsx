@@ -15,6 +15,7 @@ import {
   describeInboxClause,
   describeInboxRow,
   findAccountLabel,
+  type InboxRowView,
   type InboxScope,
 } from "@hercule/client-core/inbox";
 import { CORE_SAVED_QUERY_IDS, type InboxClause, type InboxOrder } from "@hercule/contract";
@@ -53,6 +54,36 @@ const ORDER_WORDS: Readonly<Record<InboxOrder, string>> = {
 const SELECTION_BAR_RESERVE = 30;
 
 const NO_ROWS: ReadonlyArray<InboxListRow> = [];
+
+/** The view last described for a row, kept while the row, the order, the minute and the user's name stay the same. */
+const viewsByRow = new WeakMap<
+  InboxListRow,
+  { order: InboxOrder; nowTime: number; userName: string; view: InboxRowView }
+>();
+
+/**
+ * Returns the view of `row`, the same object as last time when nothing it
+ * draws changed, so a row that did not change is not drawn again.
+ */
+function describeStableRow(
+  row: InboxListRow,
+  order: InboxOrder,
+  now: Date,
+  userName: string,
+): InboxRowView {
+  const kept = viewsByRow.get(row);
+  if (
+    kept !== undefined &&
+    kept.order === order &&
+    kept.nowTime === now.getTime() &&
+    kept.userName === userName
+  ) {
+    return kept.view;
+  }
+  const view = describeInboxRow(row, { order, now, userName, offers: row.offers });
+  viewsByRow.set(row, { order, nowTime: now.getTime(), userName, view });
+  return view;
+}
 
 const NO_REFS: ReadonlyArray<string> = [];
 
@@ -200,14 +231,7 @@ export function InboxListPart({
   const views =
     snapshot.order === undefined
       ? []
-      : rows.map((thing) =>
-          describeInboxRow(thing, {
-            order: snapshot.order!,
-            now,
-            userName: username,
-            offers: thing.offers,
-          }),
-        );
+      : rows.map((thing) => describeStableRow(thing, snapshot.order!, now, username));
 
   const empty: InboxEmptyState | null = (() => {
     if (isReady && rows.length === 0 && arrivalCount > 0) {
