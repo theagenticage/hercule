@@ -198,6 +198,7 @@ Division of labour in one line: **core clock, plugin numbers.**
 interface EventSourceContribution {
   // ...the fields above, plus:
   signalKinds?: SignalKindDeclaration[]        // the kinds of Signal this source's events can raise; none when left out
+  savedQueries?: SavedQuery[]                  // added 2026-11-12 (#1122): named Inbox lists, at most 4 per plugin; none when left out
 }
 
 interface EventKindDeclaration {
@@ -210,6 +211,8 @@ interface SignalKindDeclaration {
   word: string                                 // "review-requested"; identified as "github/review-requested"
   label: string                                // "Review requested"
   description: string                          // one line for the user, shown in Settings > Intake
+  noun: string                                 // added 2026-11-12 (#1122), required: one signal of the kind in a sentence; singular, lower case, 1 to 40 characters: "review request"
+  asks: boolean                                // added 2026-11-12 (#1122), required: an open signal of this kind asks the user for a move, so its thing is one someone waits on the user for
   from: string[]                               // the event kinds the rule reads
   rule: string                                 // CEL over `event`; returns "yes", "no" or "undecided"
   guidance: string                             // what the Screener reads when the rule returns "undecided"
@@ -219,6 +222,21 @@ interface SignalKindDeclaration {
   matchFields: { name: string; label: string; path: string }[]  // what an Ignore Rule may match on; `path` is CEL over `event`
   ends: SignalEndDeclaration[]                 // the events that end an open signal of this kind
   build(event: Event, ctx: SignalBuildContext): Effect<SignalDraft, PluginError>
+}
+
+interface SavedQuery {                         // added 2026-11-12 (#1122)
+  word: string                                 // "review-requests"; identified as "github/review-requests"
+  name: string                                 // 1 to 40 characters, the rail's row: "Review requests"
+  order: "waiting" | "newest"
+  clauses: InboxClause[]                       // at most 8, all required
+}
+
+interface InboxClause {                        // the one clause shape of the Inbox: saved queries, Browse, Narrow and the search
+  key: string                                  // a core key (below) or a field the plugin declares
+  op: "is" | "over" | "under"
+  value: string | number | boolean
+  source?: string                              // ties the clause to one source; a plugin's own clauses leave it out
+  connectionId?: string                        // ties the clause to one account; a plugin's own clauses leave it out
 }
 
 interface SignalEndDeclaration {
@@ -404,7 +422,9 @@ interface EntityLookupContext { credentials(): Effect<Record<string, string>, Co
   - **A field with `facet.values` holds a ref, not a name.** The plugin reports `fields.project = "linear:project:<workspace id>/<project id>"`, and ingest refuses a value that does not start with that kind's `refPrefix`. Such a field must be of type `text`. On read, the core shows the title of the stored record. A ref with no stored record shows no value. A rename at the source changes nothing here, and two projects with one title stay two values.
   - **The Card Face names three slots,** each a key of a declared field. The status glyph and the identifier come from `status` and `identifier` as before. A slot whose field has no value on a thing is left out. A kind with no `face` draws the generic card.
   - **The host validates these at load** and refuses the source, naming the kind, for: a duplicate field key in a kind, or more than 16 fields; a `facet` on a type other than `text`, `person` or `enum`; a `facet.values` that names no context kind (`pace: "context"`) of the same source, or on a field that is not `text`; a `face` on a context kind; a face slot that names no declared field; `place` or `context` on a type other than `text`, `person` or `enum`; `fact` on a type other than `number` or `money`; a `plural` over 40 characters; a `lasting` that is not a whole number from 0 to 3; an `enum` with no values, more than 32, or a repeated value; a `money` currency that is not three capital letters; and one key declared by two kinds of one source with declarations that are not deeply equal, so one key has one meaning per source. The host qualifies `facet.values` to `<pluginId>/<word>`, as it does `home`.
-  - **Not here yet.** A plugin's saved queries arrive with [#1122](https://github.com/theagenticage/hercule/issues/1122), because they are written in its query shape. A plugin's entity blocks for the detail pane (fields, trend and code, and the lookup that serves them) arrive with [#1123](https://github.com/theagenticage/hercule/issues/1123).
+  - *(Added 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* **Reserved field keys.** The Inbox answers nine keys on every source: `source`, `kind`, `account`, `from`, `waiting`, `asks`, `held`, `mine` and `signal`. A field with one of these keys is refused at load, with the kind and the key named, because a clause with that key could not mean the plugin's field.
+  - *(Added 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* **Saved queries.** A source may declare `savedQueries`, at most 4 for the whole plugin: named lists the Inbox's rail shows after the core's own ([./20-external-entities.md](./20-external-entities.md#8-the-inbox)). A query is `{ word, name, order, clauses }`, written in the Inbox's one clause shape, `InboxClause`, which lives in `@hercule/plugin-host` because the contract imports that package and a plugin cannot import the contract. The host qualifies `word` to `<pluginId>/<word>`. A clause's `key` is a reserved key or the key of a field one of the plugin's kinds declares, and its operator fits the type: `is` for `text`, `person`, `enum` (a string) and `bool` (a boolean), `over` and `under` for `number`, `money` and `age` (a number; for `age` and `waiting`, seconds). The value of a `kind` or `signal` clause is the plain word of one of the plugin's own entity or signal kinds, qualified by the host. The host refuses the source, naming the query, for: an unknown key, an operator or value that does not fit, a `kind` or `signal` word the plugin does not declare, a `source` or `connectionId` on a clause (a plugin cannot know a Connection), more than 8 clauses, a name over 40 characters, a repeated word, and a fifth query in the plugin. The host lists a plugin's queries beside its entity kinds, whatever the plugin's status.
+  - **Not here yet.** A plugin's entity blocks for the detail pane (fields, trend and code, and the lookup that serves them) arrive with [#1123](https://github.com/theagenticage/hercule/issues/1123).
 - **The manifest's `mark`** gains optional `hue` and `solid` beside it, for a mark drawn in a declared hue.
 - *(Added 2026-11-10, [#1105](https://github.com/theagenticage/hercule/issues/1105).)* **A plugin colour is one type for the mark and for a status icon,** `withPluginColor` in `@hercule/plugin-host`. A plugin declares at most one of:
   - `hue`, an angle from 0 to 360. The apps draw it at the lightness and strength of the theme, so no plugin's colour is louder than a name or unreadable in any theme.
@@ -720,7 +740,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* **`hostApi` is 6.** ~~`hostApi` is 5.~~ `modelArgument` moves from the provider entry of a harness's `runs` onto each account kind in it, and is required there. A harness plugin built against 5 is refused at load. The reason is in [./06-providers.md](./06-providers.md) section 2.
 - *(Amended 2026-10-31, [#940](https://github.com/theagenticage/hercule/issues/940).)* **`hostApi` is 7.** ~~`hostApi` is 6.~~ `catalogSource` is now `{ kind: "harness-probe", harnessId }` or `{ kind: "provider-api", url, headers }`, where `url` and `headers` follow the rules of `keyCheck`: the controller reads the catalog with the account's key, and the plugin passes `parseCatalogBody` beside the definition when it registers the provider (`ProviderRegistrationOptions`). A usage parser may also return `expiresAt` (absent: the body says nothing about expiry; `null`: the credential does not expire). A plugin built against 6 is refused at load ([./06-providers.md](./06-providers.md) sections 16 and 18).
 - *(Amended 2026-11-03, [#985](https://github.com/theagenticage/hercule/issues/985).)* **`hostApi` is 8.** ~~`hostApi` is 7.~~ `HarnessDefinition` gains a required `releaseSource`, `{ kind: "npm", package }`, the place where the harness's releases are published. A harness plugin built against 7 declares none, so it is refused at load ([./06-providers.md](./06-providers.md) section 2).
-- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **External Entities add to the host contract and leave `hostApi` at 8.** A new capability name, `entities`, and the optional `entityKinds` and `entityLookup` on an event source, `IngestContext.entities`, and `hue` and `solid` on the manifest's `mark` are all new optional facets, so by the rules above a plugin built against 8 loads and runs unchanged. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `relations.linkedUrls` and `texts` on an observation are optional too, and so stay at 8. A plugin that requests `entities` has it granted, and one that does not gets no `entities` member on its context. *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* `plural`, `lasting`, `fields` and `face` on a kind, and a boolean in an observation's `fields`, are additive too, so `hostApi` stays 8.
+- *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* **External Entities add to the host contract and leave `hostApi` at 8.** A new capability name, `entities`, and the optional `entityKinds` and `entityLookup` on an event source, `IngestContext.entities`, and `hue` and `solid` on the manifest's `mark` are all new optional facets, so by the rules above a plugin built against 8 loads and runs unchanged. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `relations.linkedUrls` and `texts` on an observation are optional too, and so stay at 8. A plugin that requests `entities` has it granted, and one that does not gets no `entities` member on its context. *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* `plural`, `lasting`, `fields` and `face` on a kind, and a boolean in an observation's `fields`, are additive too, so `hostApi` stays 8. *(Added 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* `savedQueries` on an event source is optional and stays at 8. A signal kind's `noun` and `asks` are required with no fallback, but `hostApi` stays 8 as in #1121: every plugin is built in this repository, and a plugin that declares a signal kind without them is refused at load with a message that names the kind.
 
 ## 10. Connections and plugin-defined connection types
 

@@ -50,6 +50,8 @@ const buildKind = (kind: string, probe: BuildProbe): RegisteredSignalKind => ({
   word: kind.slice("acme/".length),
   label: "Asked",
   description: "Someone asked.",
+  noun: "question",
+  asks: true,
   from: ["acme.asked"],
   rule: '"yes"',
   guidance: "Raise it.",
