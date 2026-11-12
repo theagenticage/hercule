@@ -126,6 +126,7 @@ import signalThreadIndex from "./0115-signal-thread-index";
 import entityHandoffs from "./0116-entity-handoffs";
 import stageFacts from "./0117-stage-facts";
 import initiativesAndBlockers from "./0118-initiatives-and-blockers";
+import entityFields from "./0120-entity-fields";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -246,6 +247,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [116, "entity-handoffs", Effect.succeed(entityHandoffs)],
   [117, "stage-facts", Effect.succeed(stageFacts)],
   [118, "initiatives-and-blockers", Effect.succeed(initiativesAndBlockers)],
+  [120, "entity-fields", Effect.succeed(entityFields)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

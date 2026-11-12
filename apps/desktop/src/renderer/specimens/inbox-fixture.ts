@@ -663,6 +663,8 @@ export const INBOX_OPEN_CARD: InboxOpenCardRecords = (() => {
   const detail: ExternalEntityDetail = {
     ...card,
     kindAvailable: true,
+    fields: [],
+    face: null,
     // The places above the ticket, and the target of its link: a link's far end is a place of the detail, drawn with its title and status.
     places: [
       ...PLACES.filter((place) => [BETA, CHECKOUT].includes(place.ref)),

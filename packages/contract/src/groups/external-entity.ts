@@ -17,6 +17,8 @@ import {
   EntityRepository,
   MAX_ENTITY_EVIDENCE_KEY_LENGTH,
   MAX_ENTITY_FACTS,
+  MAX_ENTITY_FIELD_TEXT_LENGTH,
+  MAX_ENTITY_KIND_FIELDS,
   PluginId,
 } from "@hercule/plugin-host";
 import { Schema } from "effect";
@@ -568,6 +570,72 @@ export const Inbox = Schema.Struct({
 
 export type Inbox = Schema.Schema.Type<typeof Inbox>;
 
+const fieldValueIdentity = {
+  key: bounded(1, 64),
+  /** The label the kind declares, such as "Team". */
+  label: bounded(1, 40),
+};
+
+/**
+ * The value of one field a kind declares, read from what the source last
+ * reported. `type` is the declared type of the field.
+ *
+ * - `text`, `person`: a string. A `text` field whose facet lists the records
+ *   of a context kind also has `ref`, the ref of that record, and `text` is
+ *   the record's title.
+ * - `enum`: `value` is one of the declared values, and `text` is its label, or
+ *   the value itself when it has none.
+ * - `number`, `money` (`amount` in major units of `currency`), `bool`: as
+ *   reported.
+ * - `age`: `since` is the moment the age counts from. The client draws the age.
+ */
+export const EntityFieldValue = Schema.Union([
+  Schema.Struct({
+    ...fieldValueIdentity,
+    type: Schema.Literal("text"),
+    text: bounded(0, MAX_ENTITY_FIELD_TEXT_LENGTH),
+    ref: Schema.optionalKey(ExternalRef),
+  }),
+  Schema.Struct({
+    ...fieldValueIdentity,
+    type: Schema.Literal("person"),
+    text: bounded(0, MAX_ENTITY_FIELD_TEXT_LENGTH),
+  }),
+  Schema.Struct({
+    ...fieldValueIdentity,
+    type: Schema.Literal("enum"),
+    value: bounded(1, 64),
+    text: bounded(1, 64),
+  }),
+  Schema.Struct({ ...fieldValueIdentity, type: Schema.Literal("number"), number: Schema.Finite }),
+  Schema.Struct({
+    ...fieldValueIdentity,
+    type: Schema.Literal("money"),
+    amount: Schema.Finite,
+    currency: bounded(3, 3),
+  }),
+  Schema.Struct({ ...fieldValueIdentity, type: Schema.Literal("age"), since: Timestamp }),
+  Schema.Struct({ ...fieldValueIdentity, type: Schema.Literal("bool"), value: Schema.Boolean }),
+]);
+
+export type EntityFieldValue = Schema.Schema.Type<typeof EntityFieldValue>;
+
+/**
+ * What a card of a kind shows beyond the generic card, with the values filled
+ * in. A slot whose field has no value is left out.
+ *
+ * - `place`: the faint "where" at the end of the row, beside the identifier.
+ * - `context`: what a quiet row says after its status.
+ * - `fact`: a number or an amount a quiet row says.
+ */
+export const CardFace = Schema.Struct({
+  place: Schema.optionalKey(EntityFieldValue),
+  context: Schema.optionalKey(EntityFieldValue),
+  fact: Schema.optionalKey(EntityFieldValue),
+});
+
+export type CardFace = Schema.Schema.Type<typeof CardFace>;
+
 /**
  * What `read` returns: one full record of a work kind. `kindAvailable` is
  * false when the catalog no longer has an active kind: the card draws, its
@@ -576,6 +644,13 @@ export type Inbox = Schema.Schema.Type<typeof Inbox>;
 export const ExternalEntityDetail = Schema.Struct({
   ...entityFields,
   kindAvailable: Schema.Boolean,
+  /**
+   * The fields the thing's kind declares that have a value, in declaration
+   * order. Empty when the kind's plugin is not active.
+   */
+  fields: atMost(EntityFieldValue, MAX_ENTITY_KIND_FIELDS),
+  /** The card face of the thing's kind, or null for the generic card (no face declared, or its plugin is not active). */
+  face: Schema.NullOr(CardFace),
   /**
    * The records above this one and the targets of its links and hints, each
    * once. Its bound is the most ancestors plus the most links and hints, so no

@@ -88,6 +88,7 @@ const ticket = (
     sourceUpdatedAt: at(1),
     relations,
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of a place of `word` (project, initiative, milestone, team) with no card. */
@@ -111,6 +112,7 @@ const place = (
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 const pullRequest = (relations: Relations): ObservedEntity => ({
@@ -127,6 +129,7 @@ const pullRequest = (relations: Relations): ObservedEntity => ({
     sourceUpdatedAt: at(1),
     relations,
   },
+  fieldRows: [],
 });
 
 const forgeRepository = (): ObservedEntity => ({
@@ -140,6 +143,7 @@ const forgeRepository = (): ObservedEntity => ({
     concerns: [],
     sourceUpdatedAt: at(1),
   },
+  fieldRows: [],
 });
 
 const environment = (

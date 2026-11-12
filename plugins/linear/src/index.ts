@@ -56,7 +56,7 @@ export const linear: Plugin = {
     hostApi: HOST_API,
     capabilities: ["connections", "event-sources", "events", "entities"],
     configSchema: Schema.Struct({}),
-    mark: { paths: [LINEAR_MARK_PATH] },
+    mark: { paths: [LINEAR_MARK_PATH], hue: 268 },
   },
   register: (host) =>
     Effect.gen(function* () {

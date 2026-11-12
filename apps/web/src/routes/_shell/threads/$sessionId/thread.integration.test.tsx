@@ -1443,8 +1443,12 @@ describe("Thread: token tap", () => {
     await waitFor(() => {
       expect(screen.queryByText("half a paragraph")).toBeNull();
     });
-    expect(live.topics()).not.toContain(TAP);
-    expect(live.topics()).not.toContain(STREAM);
+    // Unsubscribing returns at once, but the Interrupt frame that ends the
+    // subscription is sent by a forked fiber a moment later.
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(TAP);
+      expect(live.topics()).not.toContain(STREAM);
+    });
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {

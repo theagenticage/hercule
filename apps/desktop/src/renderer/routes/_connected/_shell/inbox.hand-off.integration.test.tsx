@@ -437,6 +437,8 @@ const buildDetailAnswer = (
     body: {
       ...card,
       kindAvailable: true,
+      fields: [],
+      face: null,
       places: [PRICING],
       edges: [{ fromRef: card.ref, toRef: PRICING.ref }],
       links: [],

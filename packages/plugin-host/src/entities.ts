@@ -166,8 +166,131 @@ export const EntityReasonDeclaration = Schema.Struct({
 
 export type EntityReasonDeclaration = Schema.Schema.Type<typeof EntityReasonDeclaration>;
 
+/** The most fields one kind declares. */
+export const MAX_ENTITY_KIND_FIELDS = 16;
+
+/** The most values an `enum` field lists. */
+const MAX_ENUM_VALUES = 32;
+
+/** The types of field whose value needs no further declaration. */
+const PLAIN_FIELD_TYPES = ["text", "person", "number", "age", "bool"] as const;
+
+/**
+ * Builds the schema of one declared field. `facetValues` is the schema of
+ * `facet.values`: a plain word as a plugin writes it, or the qualified id the
+ * host stores.
+ *
+ * A field is read from the observation's `fields[key]` and nothing else is.
+ *
+ * - `text` and `person` hold a string, `number` a finite number, `bool` a
+ *   boolean, and `age` an ISO timestamp the age counts from.
+ * - `enum` holds one of its `values`, a closed set kept in the order listed.
+ * - `money` holds an amount in major units of its `currency`, an ISO 4217 code.
+ * - `facet` makes the field's values something Browse and Narrow list.
+ *   `plural` names them ("Teams"). `values` names a context kind of the same
+ *   source whose stored records are every value the source knows.
+ */
+const buildFieldDeclaration = <V extends Schema.Top>(facetValues: V) => {
+  const base = {
+    key: buildBoundedString(1, MAX_DECLARED_NAME_LENGTH).check(
+      Schema.isPattern(/^[A-Za-z0-9_-]+$/, {
+        message: "A field key may hold only letters, digits, - and _.",
+      }),
+    ),
+    label: buildBoundedString(1, 40),
+    facet: Schema.optionalKey(
+      Schema.Struct({
+        plural: buildBoundedString(1, 40),
+        values: Schema.optionalKey(facetValues),
+      }),
+    ),
+  };
+  return Schema.Union([
+    Schema.Struct({ ...base, type: Schema.Literals(PLAIN_FIELD_TYPES) }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("enum"),
+      values: Schema.Array(
+        Schema.Struct({
+          value: buildBoundedString(1, MAX_DECLARED_NAME_LENGTH),
+          label: Schema.optionalKey(buildBoundedString(1, 40)),
+        }),
+      ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_ENUM_VALUES)),
+    }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("money"),
+      currency: Schema.String.check(
+        Schema.isPattern(/^[A-Z]{3}$/, {
+          message: "A currency is an ISO 4217 code of three capital letters, such as EUR.",
+        }),
+      ),
+    }),
+  ]);
+};
+
+/** One field of a kind, as a plugin declares it. */
+export const EntityFieldDeclaration = buildFieldDeclaration(ContributionWord);
+
+export type EntityFieldDeclaration = Schema.Schema.Type<typeof EntityFieldDeclaration>;
+
+/** The type of a declared field: `text`, `person`, `enum`, `number`, `money`, `age` or `bool`. */
+export type EntityFieldType = EntityFieldDeclaration["type"];
+
+/** The types of field that can be a Facet: the values are words a person can name, so Browse can list them and a row can say them. */
+export const FACET_FIELD_TYPES: ReadonlyArray<EntityFieldType> = ["text", "person", "enum"];
+
+/** One field of a kind after the host qualified `facet.values`, as in `github/repository`. */
+export const QualifiedEntityFieldDeclaration = buildFieldDeclaration(QualifiedContributionId);
+
+export type QualifiedEntityFieldDeclaration = Schema.Schema.Type<
+  typeof QualifiedEntityFieldDeclaration
+>;
+
+/**
+ * What a card of a kind shows beyond the generic card. Each slot names the
+ * `key` of a declared field.
+ *
+ * - `place` is the faint "where" at the end of the row, beside the identifier.
+ * - `context` is what a quiet row says after its status.
+ * - `fact` is a number or an amount a quiet row says.
+ */
+export const CardFaceDeclaration = Schema.Struct({
+  place: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
+  context: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
+  fact: Schema.optionalKey(buildBoundedString(1, MAX_DECLARED_NAME_LENGTH)),
+});
+
+export type CardFaceDeclaration = Schema.Schema.Type<typeof CardFaceDeclaration>;
+
+/** The slots of a card face, in the order a card shows them. */
+export const CARD_FACE_SLOTS = ["place", "context", "fact"] as const;
+
+/**
+ * The types of field each slot of a card face can read. `place` and `context`
+ * say a word, so they take what a Facet takes. `fact` says an amount.
+ */
+export const CARD_FACE_SLOT_FIELD_TYPES: Readonly<
+  Record<(typeof CARD_FACE_SLOTS)[number], ReadonlyArray<EntityFieldType>>
+> = {
+  place: FACET_FIELD_TYPES,
+  context: FACET_FIELD_TYPES,
+  fact: ["number", "money"],
+};
+
 /** The fields of a kind declaration, apart from the ones that name another kind. */
 const kindFields = {
+  /** The word the UI uses for several, such as "Pull requests". */
+  plural: Schema.optionalKey(buildBoundedString(1, 40)),
+  /**
+   * How long a thing of this kind lasts, from 0 (briefest) to 3 (most lasting).
+   * A group of linked things is labelled with the title of its most lasting one.
+   */
+  lasting: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3 }))),
+  /** The fields an observation reports that Browse, Narrow and the card face read, in display order. */
+  fields: Schema.optionalKey(atMost(EntityFieldDeclaration, MAX_ENTITY_KIND_FIELDS)),
+  /** What the card shows beyond the generic card. Only a kind with a card has one. */
+  face: Schema.optionalKey(CardFaceDeclaration),
   /** How much room it deserves. Left out means rich. A context kind has no card. */
   card: Schema.optionalKey(Schema.Literals(["rich", "compact"])),
   /** The word the UI uses for one, such as "Pull request". */
@@ -225,12 +348,13 @@ export const EntityKindDeclaration = Schema.Struct({
 export type EntityKindDeclaration = Schema.Schema.Type<typeof EntityKindDeclaration>;
 
 /**
- * An entity kind after the host qualified it: `word`, `home` and `section`
- * start with the plugin's id, as in `github/pull-request`. This is what the
+ * An entity kind after the host qualified it: `word`, `home`, `section` and
+ * every field's `facet.values` start with the plugin's id, as in `github/pull-request`. This is what the
  * public API returns and what the core stores copies of.
  */
 export const QualifiedEntityKindDeclaration = Schema.Struct({
   ...EntityKindDeclaration.fields,
+  fields: Schema.optionalKey(atMost(QualifiedEntityFieldDeclaration, MAX_ENTITY_KIND_FIELDS)),
   word: QualifiedContributionId,
   home: Schema.optionalKey(QualifiedContributionId),
   section: Schema.optionalKey(QualifiedContributionId),
@@ -396,10 +520,16 @@ const optionalObservationFields = {
   texts: Schema.optionalKey(ObservationTexts),
 };
 
-/** Raw facts by name: the kind's templates and facts read from these. */
+/** Raw facts by name: the kind's templates, facts and declared fields read from these. A boolean is for a `bool` field. */
 const ObservationFieldValues = Schema.Record(
   buildBoundedString(1, MAX_ENTITY_FIELD_NAME_LENGTH),
-  Schema.NullOr(Schema.Union([buildBoundedString(0, MAX_ENTITY_FIELD_TEXT_LENGTH), Schema.Finite])),
+  Schema.NullOr(
+    Schema.Union([
+      buildBoundedString(0, MAX_ENTITY_FIELD_TEXT_LENGTH),
+      Schema.Finite,
+      Schema.Boolean,
+    ]),
+  ),
 ).check(Schema.isMaxProperties(MAX_ENTITY_FIELDS));
 
 /**

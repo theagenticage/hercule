@@ -1,6 +1,6 @@
 # External Entities
 
-*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md). Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033), slice 5: signals inside their entity, links, hints and the timeline. Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), slice 7: Facts, links by hand and the branch join, [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md).)*
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032), slice 4 of the Work overview map [#1026](https://github.com/theagenticage/hercule/issues/1026); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md). Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033), slice 5: signals inside their entity, links, hints and the timeline. Amended 2026-11-08, [#1035](https://github.com/theagenticage/hercule/issues/1035), slice 7: Facts, links by hand and the branch join, [ADR 0055](../adr/0055-facts-move-cards-through-editable-workflows.md). Amended 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121), Inbox slice 1: typed fields and Card Faces, [ADR 0058](../adr/0058-the-inbox-is-a-list-queried-on-the-controller-over-fields-plugins-declare.md).)*
 
 An **External Entity** is a durable record of an outside thing, such as a pull request, a ticket or an error. It is never a copy of the thing: it holds what a card needs to draw, and a poll keeps it true. The Inbox is the page that lists the ones that concern the user. "External Entity" is a word for code and docs. The UI says the kind's noun, "Pull request", and the word "entity" never reaches a screen.
 
@@ -55,6 +55,17 @@ Observations and claims key on the ref, not on the entity's id. A Connection can
 | `presented_by` | The Connection whose observation wrote the shared fields. Null when that Connection is deleted |
 | `dismissed_at`, `dismissed_by` | [Section 4.2](#42-dismissal) |
 | `arrival_sequence` | [Section 8.4](#84-counts-and-the-new-mark) |
+
+**Field value** (`external_entity_fields`). *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* One row per (`ref`, `key`), the primary key, holding the value of one declared field of a thing ([./05-plugins.md](./05-plugins.md#43-event-source)). It is a `WITHOUT ROWID` table with two columns for the value, and exactly one of them is set:
+
+| Declared type | Column | Encoding |
+|---|---|---|
+| `text`, `person`, `enum` | `text_value` | the string |
+| `number`, `money` | `number_value` | the number (a `money` amount in major units) |
+| `age` | `number_value` | the epoch milliseconds of the timestamp |
+| `bool` | `number_value` | 1 or 0 |
+
+Two partial indexes serve search and counts: (`key`, `text_value`) where `text_value` is not null, and (`key`, `number_value`) where `number_value` is not null. The table stores no type, because the declaration in memory knows it. It keys on the ref, not on the entity's id, like the timeline. The prune sweep deletes the rows of refs that have no entity ([section 4.3](#43-pruning)). A row is a shared field: [section 3](#3-shared-fields-and-presented_by).
 
 **Observation** (`external_entity_observations`). One row per (ref, Connection), the primary key. `concerns` (JSON array), `owned_by_you`, `access` (`ok`, `inaccessible`, `deleted`), `last_attempted_at`, `last_refreshed_at`, `next_attempt_at`, `attempt_count`. Deleting a Connection deletes its rows.
 
@@ -112,6 +123,7 @@ The shared fields are everything on the entity row that is not one Connection's 
 - On an equal `sourceUpdatedAt`, only the Connection that wrote the row last (`presented_by`) may change them. A source can change a fact without moving its update time, as GitHub's checks do, so the last writer must be able to, and two accounts must not take turns rewriting one row on every poll.
 - An older `sourceUpdatedAt` loses. An observation that loses still updates its own Connection's concerns, ownership and access.
 - **`presented_by` hands over.** On an equal `sourceUpdatedAt`, a Connection also may write, and becomes `presented_by`, when the current one is no longer usable: it is null, it cannot poll now, its plugin is not active, or its own `access` for this ref is not `ok`. So the first usable Connection to report takes over, and a card that reads fresh is really being kept fresh.
+- *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* **Field values are shared fields.** The field value rows ([section 1.1](#11-records)) are written only when the observation wins the shared write by the rules above, so an observation that loses changes none. A partial observation never touches them.
 - A partial observation never takes over a full record. A full observation promotes a partial one, whatever the old source time was.
 
 **`sourceRevision`.** A plugin may send the source's revision of a thing. An unchanged revision skips the shared facts only, and only when the reporter is the same Connection (`presented_by`) and `sourceUpdatedAt` is equal. It never skips concerns, access, ownership, rotation and freshness bookkeeping, or relations. A newer `sourceUpdatedAt` is stored even when the revision string happens to match, because a revision from one reporter is not a clock to compare with another's.
@@ -143,10 +155,10 @@ The shared fields are everything on the entity row that is not one Connection's 
 
 A daily sweep, in the shape of the runner-metrics prune, deletes:
 
-- entities with no concern, no link from any Task, no open signal on the ref, no path up from anything concerned or linked, no dismissal, and no change for 30 days; and
+- entities with no concern, no link from any Task, no open signal on the ref, no path up from anything concerned or linked, no dismissal, not a context record listed by any Connection's latest inventory *(added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121): a source that lists every project or repository keeps each of them, so a Facet can list them all. Work records are not kept this way: a call with `complete: false` also marks what it lists, so keeping them would stop them being pruned beyond a cut)*, and no change for 30 days; and
 - the observation rows of refs with no entity and no reason to be wanted.
 
-It also deletes the timeline rows of refs that have no entity. It keeps their claims: they are small, and they are history. A dismissal is never pruned, because a record that came back without it would undo "only Undo brings it back".
+It also deletes the timeline rows of refs that have no entity. *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* It deletes the field value rows of refs that have no entity too. It keeps their claims: they are small, and they are history. A dismissal is never pruned, because a record that came back without it would undo "only Undo brings it back".
 
 ## 5. What a poll reports
 
@@ -165,6 +177,7 @@ A plugin reads its whole inventory of one kind, then calls `reconcile({ kind, co
 - a parent or peer in `relations` that starts with `unresolved:`, which the core keeps for its own pending targets ([section 5.4](#54-addresses-and-texts)). The message tells the plugin to report a web address in `relations.linkedUrls` instead;
 - more than 64 `linkedUrls`, one that is not an `http` or `https` address, more than 3 `texts`, a text over 16 KiB or an `evidenceKey` over 128 characters. The bounds are checked before any recognizer is called;
 - a full observation of a work kind with no `url` or `lifecycle`;
+- *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* a field value of the wrong type for its declaration, or an `enum` value the kind does not declare, or a ref in a field with `facet.values` that does not start with that kind's `refPrefix` ([./05-plugins.md](./05-plugins.md#43-event-source)). The message names the ref, the field and the expected type. A `null` or missing value is not an error;
 - a status key or reason key that is not in the kind's table, or a template that names a missing field (`renderEntitySlots` fails);
 - a Connection that is deleted, disabled or no longer ingesting (`assertConnectionIngesting`, as `emit` does).
 
@@ -180,6 +193,7 @@ A plugin reads its whole inventory of one kind, then calls `reconcile({ kind, co
 **Rules:**
 
 - **Compare before writing.** Only a row whose facts or concerns changed is written, and only those announce. For the members of a complete inventory, a poll that changes nothing writes one scan row. That saving covers inventory members only. A wanted ref is outside the inventory and keeps its own `last_refreshed_at`.
+- *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* **Field values are written with the shared fields, and compared first.** `replaceFieldRows` reads the stored field rows of every ref it is given in one statement, never one per ref, compares them in memory with the values the observation reports and writes only the difference. A full observation that wins the shared write replaces the ref's whole set: rows for declared keys that have a value are written, and every other row of the ref is deleted. That drops a field the plugin stopped declaring and a field whose value became null. A partial observation never touches the rows. A change to field rows alone counts as a change of the entity: it is written and announced as a changed fact is. An unchanged `sourceRevision` skips the shared facts ([section 3](#3-shared-fields-and-presented_by)) but never this comparison, because a changed declaration with an unchanged revision must still add or drop rows. The comparison is also what keeps a quiet poll write-free. The same rules apply to `refresh`.
 - **A complete call is the whole kind.** It unlists what an earlier complete call listed and this one leaves out, so a plugin cannot split one kind over several complete calls: each call would unlist the others' refs, and the rows would change on every poll. A kind that can exceed `MAX_ENTITY_OBSERVATIONS` reports a stable subset in one complete call (GitHub sorts repositories by name and lists the first 2,000). The rest are not listed, so `listWanted` returns them for `refresh`.
 - **`complete: false`** updates what it was given and takes nothing away, and it does not move `last_complete_at`. It sets the Connection's `warning` to a fixed sentence saying the Inbox may be missing items. The system tells the user.
 - **No event and no signal.** `reconcile` emits none, so 300 existing pull requests never become 300 proposals or 300 runs.
@@ -189,7 +203,7 @@ A plugin reads its whole inventory of one kind, then calls `reconcile({ kind, co
 
 ### 5.2 The core renders; the plugin reports fields
 
-A plugin reports raw `fields` (`Record<string, string | number | null>`) and a status key. `renderEntitySlots(declaration, observation)` applies the kind table and the result is stored on the row.
+A plugin reports raw `fields` (`Record<string, string | number | boolean | null>`, boolean added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121)) and a status key. `renderEntitySlots(declaration, observation)` applies the kind table and the result is stored on the row.
 
 | Slot | How it is rendered |
 |---|---|
@@ -203,6 +217,16 @@ A plugin reports raw `fields` (`Record<string, string | number | null>`) and a s
 Fixed sets: status shapes `ring`, `dashed`, `quarter`, `half`, `most`, `fork`, `join`, `check`, `cross`, `hold`, `alert`; tones `quiet`, `active`, `attention`, `good`, `bad` (the colour kept for the person is out of a plugin's reach); fact forms `delta` (`+120 -30`), `count` (a whole number and a unit in the singular), `word`, `date`, `money`, `bars` (a level from 1 to 3); reason tones `plain`, `attention`, `good`, `bad`. A status may declare a Task `stage`, used by [section 9.3](#93-the-stage-a-new-task-starts-at).
 
 *(Added 2026-11-10, [#1105](https://github.com/theagenticage/hercule/issues/1105).)* **The stored statuses follow the plugins.** A status is copied onto a thing when the thing is observed, and a thing that stopped changing at its source, such as a merged pull request, is not observed again. So at boot, once the plugins are loaded, the core copies every loaded plugin's status tables, active or not, onto the stored things whose `status_key` they declare (`refreshStoredStatuses`). A thing whose stored status already matches is left alone, and the time the thing was updated stays as it is. A failure is logged and the boot goes on.
+
+#### Card Faces are drawn on read
+
+*(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* [ADR 0058](../adr/0058-the-inbox-is-a-list-queried-on-the-controller-over-fields-plugins-declare.md). This amends the rule above that a kind's words are copied onto the row when the thing is observed. **For the Card Face only, nothing is copied.** A face is drawn when the thing is read, from the stored field value rows ([section 1.1](#11-records)) and the declaration of the active kind held in memory.
+
+- **What is drawn.** `field-values.ts` in `external-entities` holds the meaning of a field and reads no database: it encodes an observation's declared fields to rows, decodes a stored row to a value, and draws the face. `entity-fields.ts` only stores and reads the rows. Given the active kind (or none) and the stored field rows of one ref, `decodeEntityFields` returns `{ fields, face }`. `fields` holds one value for each declared key that has a stored value, in the kind's declaration order: its `key`, `label` and a value shaped by its type (text, an enum's value and label, a number, a money amount with its currency, the timestamp an age counts from, a boolean). A field that names a context kind in `facet.values` also carries the `ref`, and its text is the title of that record. `face` holds the `place`, `context` and `fact` slots, each the value of the field it names. A slot whose field has no value is left out.
+- **Only declared keys.** A stored row for a key the kind no longer declares is ignored. It is deleted by the next full observation.
+- **A stale row is left out, never thrown on.** The core omits a stored value whose column or enum value does not fit the key's current declaration (a number where the field is now text, an enum value the kind no longer declares). The next observation rewrites it. Storage cannot catch every change: a stored number reads as `true` if the key becomes `bool`, and an amount keeps its number if the currency changes. So a plugin that changes a field's type, currency or meaning must use a new key.
+- **No active kind means the generic card.** When the plugin is inactive, or the kind is gone, the reply has `fields: []` and `face: null`, and the client draws the generic card from what this document stores on the row: title, identifier, status and noun. That is why those slots stay copied. A card therefore still draws after its plugin is gone, as ADR 0054 requires.
+- **The reads.** `externalEntity.read` gains `fields` and `face`, at the cost of one statement (`readFieldValues`, which reads many refs in the same one statement), the field rows of that ref, with the kind of its entity and the title of each readable record a ref-valued field names, and no network call. A ref-valued field shows the record's title only when some Connection can read that record ([section 1.3](#13-restricted-things), restricted things); otherwise the field is left out ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). `queryInbox` is unchanged in this slice. The Inbox's own reads over fields are [#1122](https://github.com/theagenticage/hercule/issues/1122)'s.
 
 An entity row holds only normalized fields, checked against the contract before they are stored. Entity text comes from outside: it is stored and drawn as plain text, never as Markdown or HTML.
 
@@ -621,6 +645,8 @@ The `externalEntity` topic is a mutable topic ([./14-web-app.md](./14-web-app.md
 | A plugin is enabled or disabled | `stale`, `kindAvailable` | `plugin` already pushes. The client maps it to the Inbox keys |
 
 A Task's summary reads the kind, identifier, title, status label and lifecycle of each thing the Task links ([./09-tasks.md](./09-tasks.md#task-summaries)). The write that changes one of those marks every live Task that links the ref dirty (`TaskService`'s marker, `makeSummaryDirtyMarker`), in the write's own transaction. A change to concerns, progress, dates or access alone marks nothing, so a busy poll does not cost a model call. The summary's input reads the facts through `externalEntityRepository.listLinkedEntityFacts`, one batched statement, never through the service.
+
+Renaming a context record announces only that record. A thing whose field points at it is not announced, so a list that shows their titles re-reads them ([#1122](https://github.com/theagenticage/hercule/issues/1122)).
 
 A poll that changes nothing announces nothing, so a quiet Inbox costs no read. Nothing is announced after a rolled-back transaction: the service publishes after commit.
 

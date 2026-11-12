@@ -724,6 +724,7 @@ const ticket = (name: string, relations?: ObservedRelations): ObservedEntity => 
     sourceUpdatedAt: OBSERVED_AT,
     ...(relations === undefined ? {} : { relations }),
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of a project: a place with a caption, so it can group. */
@@ -738,6 +739,7 @@ const projectPlace = (ref: string, title: string): ObservedEntity => ({
     concerns: [],
     sourceUpdatedAt: OBSERVED_AT,
   },
+  fieldRows: [],
 });
 
 const partOf = (...parents: ReadonlyArray<string>): ObservedRelations => ({
@@ -1059,6 +1061,7 @@ describe("the stack candidates of the board", () => {
       sourceUpdatedAt: OBSERVED_AT,
       relations: { complete: true, partOf: [], linked },
     },
+    fieldRows: [],
   });
 
   it("pairs the Task of a rich thing with the Tasks of the compact things it reports, and leaves a Task of an unrelated thing out", async () => {

@@ -2164,12 +2164,13 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           ),
           forwardEvent,
         ),
-        Stream.runForEach(
-          Stream.mergeAll(
-            adapters.map((adapter) => adapter.usageReports),
-            { concurrency: "unbounded" },
-          ),
-          forwardUsageReport,
+        // One consumer per adapter, with no merged stream between: a merge
+        // reads ahead into a buffer, so an adapter's report could be handled
+        // long after the adapter handed it over, possibly on a later connection.
+        Effect.forEach(
+          adapters,
+          (adapter) => Stream.runForEach(adapter.usageReports, forwardUsageReport),
+          { concurrency: "unbounded", discard: true },
         ),
       ],
       { concurrency: "unbounded", discard: true },

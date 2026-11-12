@@ -27,6 +27,11 @@ describe("EntityObservation", () => {
     expect(isAccepted(FULL)).toBe(true);
   });
 
+  it("accepts text, number, boolean and null field values, and refuses an object", () => {
+    expect(isAccepted({ ...FULL, fields: { a: "x", b: 1, c: true, d: null } })).toBe(true);
+    expect(isAccepted({ ...FULL, fields: { a: { nested: 1 } } })).toBe(false);
+  });
+
   it("accepts a context observation that has no url, lifecycle or status", () => {
     expect(isAccepted({ ...without("url", "lifecycle"), concerns: [] })).toBe(true);
   });

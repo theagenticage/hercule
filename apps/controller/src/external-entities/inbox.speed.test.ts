@@ -50,7 +50,6 @@ import {
   registerConnectionType,
   registerEventSource,
   type EntityKindDeclaration,
-  type EntityObservation,
   type Plugin,
 } from "@hercule/plugin-host";
 import { CurrentActor } from "../actor";
@@ -76,7 +75,7 @@ import { TaskService, TaskServiceLayer } from "../tasks";
 import { claimRepository } from "./claims";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import { ExternalEntityService, ExternalEntityServiceLayer } from "./service";
-import { renderEntitySlots } from "./slots";
+import { renderEntitySlots, type FullEntityObservation } from "./slots";
 
 /** Set to "1" by `pnpm test:speed`. */
 const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
@@ -277,7 +276,7 @@ interface Arrangement {
 }
 
 /** Builds the observation of card `n`, as a Connection reports it. */
-const buildCardObservation = (n: number): EntityObservation => {
+const buildCardObservation = (n: number): FullEntityObservation => {
   const sourceUpdatedAt = new Date(Date.parse(AT) + n * 60_000).toISOString();
   if (n % 3 === 0) {
     return {
@@ -314,7 +313,7 @@ const buildCardObservation = (n: number): EntityObservation => {
 };
 
 /** Builds the observations of the ten projects, each under one of two teams, and of the teams. */
-const buildPlaceObservations = (): ReadonlyArray<EntityObservation> => [
+const buildPlaceObservations = (): ReadonlyArray<FullEntityObservation> => [
   ...Array.from({ length: 10 }, (_, n) => ({
     kind: "project",
     ref: projectRef(n),
@@ -367,21 +366,22 @@ const seed = (arrangement: Arrangement) =>
         (inserted) => inserted.id,
       );
 
-    const render = (observation: EntityObservation) =>
+    const render = (observation: FullEntityObservation) =>
       Effect.map(
         renderEntitySlots(
           declarations.find((candidate) => candidate.word === `${PLUGIN}/${observation.kind}`)!,
-          observation as Parameters<typeof renderEntitySlots>[1],
+          observation,
         ),
         (slots): ObservedEntity => ({
           kind: `${PLUGIN}/${observation.kind}`,
           observation,
           slots,
+          fieldRows: [],
         }),
       );
 
     /** Stores what one Connection reports, one `reconcile` for each kind, as a poll does. */
-    const report = (connectionId: string, observations: ReadonlyArray<EntityObservation>) =>
+    const report = (connectionId: string, observations: ReadonlyArray<FullEntityObservation>) =>
       Effect.gen(function* () {
         const observed = yield* Effect.forEach(observations, render);
         const byKind = new Map<string, Array<ObservedEntity>>();

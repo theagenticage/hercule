@@ -41,6 +41,7 @@ const UNASSIGNED_TICKET: ObservedEntity = {
     concerns: [],
     sourceUpdatedAt: AT,
   },
+  fieldRows: [],
 };
 
 /** A project: a place, which has no card. */
@@ -55,6 +56,7 @@ const HARBOUR: ObservedEntity = {
     concerns: [],
     sourceUpdatedAt: AT,
   },
+  fieldRows: [],
 };
 
 const buildSignal = (id: string, threadRef: string): Signal => ({

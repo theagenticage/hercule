@@ -15,6 +15,9 @@
  *    links to (`entity-context.ts`), read for many issues per request. Then
  *    the host's wanted projects, initiatives, milestones and teams are read
  *    the same way as wanted issues.
+ * 4. The project listing: every project of the workspace, relations
+ *    included, in one complete call (`readProjectListing`). It runs last, so
+ *    a failing listing cannot stop the refreshes.
  *
  * The inventory does not use the Connection's watch filters. Those decide
  * which issues become events. The Inbox asks its own question: what is
@@ -31,7 +34,7 @@ import {
 } from "@hercule/plugin-host";
 import { readNewestPages, type LinearFailure } from "../api";
 import { OPEN_STATE_TYPES } from "../connection-type";
-import { ISSUE_KIND } from "../entity-kinds";
+import { ISSUE_KIND, PROJECT_KIND } from "../entity-kinds";
 import { buildIssueObservation, parseRef } from "../entity-reads";
 import type { WorkspaceBlock } from "../kinds";
 import { ApiIssue, ISSUE_FRAGMENT } from "../linear-objects";
@@ -40,6 +43,7 @@ import {
   buildParentObservation,
   PLACE_READS,
   readIssueContexts,
+  readProjectListing,
 } from "./entity-context";
 import { readIdentity } from "./identity";
 import { readIssuesById } from "./issues";
@@ -237,10 +241,11 @@ const refreshWantedPlaces = (
   });
 
 /**
- * Polls the `entities` feed once: reports the inventory, then refreshes what
- * the host wants read. Costs one request for the identity, one per page of
- * the inventory, one per 50 issues for their context, and when anything is
- * wanted one lookup per kind of thing (plus the context of wanted issues).
+ * Polls the `entities` feed once: reports the inventory and the projects, then
+ * refreshes what the host wants read. Costs one request for the identity, one
+ * per page of the inventory, one per 50 issues for their context, one per
+ * 50 projects of the workspace, and when anything is wanted one lookup per
+ * kind of thing (plus the context of wanted issues).
  * Never one request per issue. Fails as `callLinear` does, and with the
  * host's `PluginError` when it refuses what was reported. The inventory is
  * stored before the refresh starts, so a refresh that fails leaves it in
@@ -255,5 +260,13 @@ export const pollLinearEntities = (
     const parents = yield* reconcileInventory(authorization, entities, workspace, userId);
     yield* refreshWantedIssues(authorization, entities, workspace, userId, parents);
     yield* refreshWantedPlaces(authorization, entities, workspace);
+    // Last, so a failing project listing cannot stop the refreshes. It is one
+    // complete call: a second complete call for the kind would unlist what the
+    // first one listed.
+    yield* entities.reconcile({
+      kind: PROJECT_KIND,
+      complete: true,
+      observations: yield* readProjectListing(authorization, workspace),
+    });
     return {};
   });

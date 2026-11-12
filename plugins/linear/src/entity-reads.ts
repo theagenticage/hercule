@@ -9,7 +9,7 @@
 import { MAX_EVENT_TITLE_LENGTH, type EntityObservation } from "@hercule/plugin-host";
 import type { WorkspaceBlock } from "./kinds";
 import type { ApiIssue } from "./linear-objects";
-import { buildIssueRef } from "./ingest/events";
+import { buildIssueRef, buildProjectRef, buildTeamRef } from "./ingest/events";
 import { ISSUE_KIND } from "./entity-kinds";
 import { cutName, cutText } from "./text";
 
@@ -99,6 +99,14 @@ const decidePriorityLevel = (priority: number): number | null => {
   }
 };
 
+const PRIORITY_VALUE_BY_NUMBER: Readonly<Record<number, string>> = {
+  0: "none",
+  1: "urgent",
+  2: "high",
+  3: "medium",
+  4: "low",
+};
+
 /**
  * Builds the observation of an issue. `viewerId` decides `ownedByYou`;
  * `concerns` says why the issue concerns the user, and is empty for an issue
@@ -125,7 +133,12 @@ export const buildIssueObservation = (
     fields: {
       key: cutName(issue.identifier),
       assignee: issue.assignee === null ? null : cutName(issue.assignee.name),
-      priority: decidePriorityLevel(issue.priority),
+      team: buildTeamRef(workspace, issue.team.id),
+      project: issue.project === null ? null : buildProjectRef(workspace, issue.project.id),
+      status: cutName(issue.state.name),
+      priority: PRIORITY_VALUE_BY_NUMBER[issue.priority] ?? null,
+      // The kind's `bars` fact reads this level, not the priority itself.
+      priorityLevel: decidePriorityLevel(issue.priority),
       milestone:
         issue.projectMilestone === null
           ? null

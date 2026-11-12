@@ -32,9 +32,11 @@ import { taskRepository } from "../tasks";
 import {
   externalEntityRepository,
   type EntityWriteChanges,
+  type FullObservedEntity,
   type ObservedEntity,
   type ReconcileChanges,
 } from "./repository";
+import type { ActiveEntityKind } from "./entity-records";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
 type Repository = Effect.Success<typeof externalEntityRepository>;
@@ -85,7 +87,7 @@ interface ObservationOptions extends Partial<Omit<FullEntityObservation, "kind" 
 }
 
 /** Builds the observation of a ticket: compact, fast, concerning the user unless told otherwise. */
-const ticket = (name: string, options: ObservationOptions = {}): ObservedEntity => {
+const ticket = (name: string, options: ObservationOptions = {}): FullObservedEntity => {
   const { slots, ...rest } = options;
   return {
     kind: TICKET_KIND,
@@ -101,11 +103,12 @@ const ticket = (name: string, options: ObservationOptions = {}): ObservedEntity 
       sourceUpdatedAt: at(1),
       ...rest,
     },
+    fieldRows: [],
   };
 };
 
 /** Builds the observation of an epic: rich, slow. */
-const epic = (name: string, options: Partial<FullEntityObservation> = {}): ObservedEntity => ({
+const epic = (name: string, options: Partial<FullEntityObservation> = {}): FullObservedEntity => ({
   kind: EPIC_KIND,
   slots: EPIC_SLOTS,
   observation: {
@@ -119,10 +122,11 @@ const epic = (name: string, options: Partial<FullEntityObservation> = {}): Obser
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of the project: a place with no concern. */
-const project = (options: Partial<FullEntityObservation> = {}): ObservedEntity => ({
+const project = (options: Partial<FullEntityObservation> = {}): FullObservedEntity => ({
   kind: PROJECT_KIND,
   slots: PROJECT_SLOTS,
   observation: {
@@ -134,6 +138,7 @@ const project = (options: Partial<FullEntityObservation> = {}): ObservedEntity =
     sourceUpdatedAt: at(1),
     ...options,
   },
+  fieldRows: [],
 });
 
 /** Builds a partial observation of a ticket: only its kind, ref and title. */
@@ -892,6 +897,105 @@ describe("partial records", () => {
       links: [],
       conflicts: [],
     });
+  });
+
+  it("reads the fields and the card face of a stored entity, and none while its kind is inactive", async () => {
+    const kind: ActiveEntityKind = {
+      kind: TICKET_KIND,
+      noun: "Ticket",
+      refPrefix: TICKET_PREFIX,
+      fields: [
+        {
+          key: "project",
+          label: "Project",
+          type: "text",
+          facet: { plural: "Projects", values: PROJECT_KIND },
+        },
+        { key: "estimate", label: "Estimate", type: "number" },
+      ],
+      face: { place: "project", fact: "estimate" },
+    };
+    const details = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [project()], { minutes: 2, kind: PROJECT_KIND });
+        yield* sql`
+          INSERT INTO external_entity_fields (ref, key, text_value, number_value)
+          VALUES (${ticketRef("t1")}, 'project', ${PROJECT}, NULL),
+                 (${ticketRef("t1")}, 'estimate', NULL, 5)`;
+        const rows = yield* sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM external_entities WHERE ref = ${ticketRef("t1")}`;
+        const id = uuidToString(rows[0]!.id);
+        const read = (activeEntityKinds: ReadonlyArray<ActiveEntityKind>) =>
+          repository.readEntity(id, {
+            ...environment(3),
+            activeKinds: new Set([TICKET_KIND]),
+            activeEntityKinds,
+          });
+        return { active: yield* read([kind]), inactive: yield* read([]) };
+      }),
+    );
+    const project1 = {
+      key: "project",
+      label: "Project",
+      type: "text",
+      text: "Harbour",
+      ref: PROJECT,
+    };
+    const estimate = { key: "estimate", label: "Estimate", type: "number", number: 5 };
+    expect(Option.getOrThrow(details.active)).toMatchObject({
+      fields: [project1, estimate],
+      face: { place: project1, fact: estimate },
+    });
+    expect(Option.getOrThrow(details.inactive)).toMatchObject({ fields: [], face: null });
+  });
+
+  it("shows no project field and no face context once no Connection can read the project", async () => {
+    const kind: ActiveEntityKind = {
+      kind: TICKET_KIND,
+      noun: "Ticket",
+      refPrefix: TICKET_PREFIX,
+      fields: [
+        {
+          key: "project",
+          label: "Project",
+          type: "text",
+          facet: { plural: "Projects", values: PROJECT_KIND },
+        },
+      ],
+      face: { context: "project" },
+    };
+    const details = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(ACCOUNT_A, [ticket("t1")], { minutes: 1 });
+        yield* reconcile(ACCOUNT_A, [project()], { minutes: 2, kind: PROJECT_KIND });
+        yield* sql`
+          INSERT INTO external_entity_fields (ref, key, text_value, number_value)
+          VALUES (${ticketRef("t1")}, 'project', ${PROJECT}, NULL)`;
+        const rows = yield* sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM external_entities WHERE ref = ${ticketRef("t1")}`;
+        const id = uuidToString(rows[0]!.id);
+        const read = (minutes: number) =>
+          repository.readEntity(id, {
+            ...environment(minutes),
+            activeKinds: new Set([TICKET_KIND]),
+            activeEntityKinds: [kind],
+          });
+        const readable = yield* read(3);
+        yield* Effect.flatMap(
+          repository.reportMissing({
+            connectionId: ACCOUNT_A,
+            ref: PROJECT,
+            reason: "inaccessible",
+            environment: environment(4),
+          }),
+          (changes) => named(sql, changes),
+        );
+        return { readable, restricted: yield* read(5) };
+      }),
+    );
+    expect(Option.getOrThrow(details.readable).fields).toHaveLength(1);
+    expect(Option.getOrThrow(details.restricted)).toMatchObject({ fields: [], face: {} });
   });
 });
 
@@ -1718,6 +1822,8 @@ describe("pruning", () => {
         yield* reconcile(ACCOUNT_A, [ticket("concerned", { relations })], {
           minutes: 25 * 24 * 60,
         });
+        // A project the inventory still lists is kept, so "orphan" leaves it too.
+        yield* reconcile(ACCOUNT_A, [project()], { minutes: 25 * 24 * 60, kind: PROJECT_KIND });
         yield* repository.reportMissing({
           connectionId: ACCOUNT_B,
           ref: ticketRef("ghost"),

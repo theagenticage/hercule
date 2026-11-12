@@ -658,6 +658,7 @@ const place = (
     sourceUpdatedAt: OBSERVED_AT,
     relations: { complete: true, partOf, linked: [] },
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of ticket `n`, part of one of 10 projects. */
@@ -682,6 +683,7 @@ const ticket = (n: number): ObservedEntity => ({
     sourceUpdatedAt: OBSERVED_AT,
     relations: { complete: true, partOf: [projectRef(1 + (n % 10))], linked: [] },
   },
+  fieldRows: [],
 });
 
 /**

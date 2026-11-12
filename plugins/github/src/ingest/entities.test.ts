@@ -429,8 +429,10 @@ describe("the entities feed's inventory", () => {
       ownedByYou: true,
       fields: {
         number: 1,
-        repo: "acme/storefront-web",
+        repo: "github:repo:acme/storefront-web",
         author: "octocat",
+        checks: "passing",
+        review: null,
         diff: "+120 -30",
         files: 4,
       },
@@ -470,6 +472,64 @@ describe("the entities feed's inventory", () => {
     expect(full(reconciledKind(reported, "pull-request").observations[0]).status).toBe(status);
   });
 
+  it.each([
+    ["no checks", { commits: { nodes: [] } }, null],
+    [
+      "passing checks",
+      { commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
+      "passing",
+    ],
+    [
+      "errored checks",
+      { commits: { nodes: [{ commit: { statusCheckRollup: { state: "ERROR" } } }] } },
+      "failing",
+    ],
+    [
+      "running checks",
+      { commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
+      "pending",
+    ],
+  ])("reports %s as the checks field %s", async (_, overrides, checks) => {
+    const stub = stubGraphql({
+      [OPENED]: searchPages([{ nodes: [pullRequestNode(1, overrides)] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    expect(full(reconciledKind(reported, "pull-request").observations[0]).fields["checks"]).toBe(
+      checks,
+    );
+  });
+
+  it.each([
+    ["no review required", null, null],
+    ["an approval", "APPROVED", "approved"],
+    ["changes requested", "CHANGES_REQUESTED", "changes"],
+    ["a review still needed", "REVIEW_REQUIRED", "required"],
+  ])("reports %s as the review field %s", async (_, reviewDecision, review) => {
+    const stub = stubGraphql({
+      [OPENED]: searchPages([{ nodes: [pullRequestNode(1, { reviewDecision })] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    expect(full(reconciledKind(reported, "pull-request").observations[0]).fields["review"]).toBe(
+      review,
+    );
+  });
+
+  it("reports the repository field as the ref of the repository record, in the case the record uses", async () => {
+    const stub = stubGraphql({
+      [OPENED]: searchPages([{ nodes: [pullRequestNode(1)] }]),
+    });
+
+    const { reported } = await pollEntitiesFeed(stub);
+
+    const [pullRequest] = reconciledKind(reported, "pull-request").observations.map(full);
+    const repositories = reconciledKind(reported, "repository").observations;
+    expect(repositories.map((repository) => repository.ref)).toEqual([pullRequest!.fields["repo"]]);
+  });
+
   it("owns every issue the assigned search finds, even when the user is past the assignees read", async () => {
     const stub = stubGraphql({
       [ASSIGNED]: searchPages([
@@ -494,7 +554,7 @@ describe("the entities feed's inventory", () => {
     expect(issues[0]).toMatchObject({
       fields: {
         number: 1,
-        repo: "acme/storefront-web",
+        repo: "github:repo:acme/storefront-web",
         assignee: "octocat",
         labels: "bug, checkout",
       },

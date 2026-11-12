@@ -89,13 +89,43 @@ import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
 import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
-import type { EntitySlots, StoredEntityStatus } from "./slots";
+import type { EntitySlots, FullEntityObservation, StoredEntityStatus } from "./slots";
+import {
+  deleteOrphanedFields,
+  readFieldValues,
+  replaceFieldRows,
+  type FieldSet,
+} from "./entity-fields";
+import type { EncodedField } from "./field-values";
 import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from "./timeline";
 
 export type { EntityEnvironment } from "./entity-records";
 
 /** How long a record nothing needs is kept before the sweep deletes it. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface ObservedEntityBase {
+  readonly kind: string;
+  readonly slots: EntitySlots;
+  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
+  readonly recognized?: RecognizedEvidence;
+}
+
+/**
+ * A full observation with the encoded values of the kind's declared fields
+ * (`encodeObservedFields`), empty when no field has a value. Storing it
+ * replaces the stored fields with them.
+ */
+export interface FullObservedEntity extends ObservedEntityBase {
+  readonly observation: FullEntityObservation;
+  readonly fieldRows: ReadonlyArray<EncodedField>;
+}
+
+/** A partial observation. It never touches the stored fields, so it carries none. */
+export interface PartialObservedEntity extends ObservedEntityBase {
+  readonly observation: Extract<EntityObservation, { readonly partial: true }>;
+  readonly fieldRows?: undefined;
+}
 
 /**
  * One thing a Connection read, ready to store. `kind` is the qualified kind.
@@ -105,13 +135,7 @@ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
  * known): only the noun, caption, home, section and status are stored from
  * them.
  */
-export interface ObservedEntity {
-  readonly kind: string;
-  readonly observation: EntityObservation;
-  readonly slots: EntitySlots;
-  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
-  readonly recognized?: RecognizedEvidence;
-}
+export type ObservedEntity = FullObservedEntity | PartialObservedEntity;
 
 /** What a write changed, so it can be announced once the transaction commits. Both lists are sorted by ref, each once. */
 export interface EntityWriteChanges {
@@ -315,9 +339,17 @@ const compareSourceTimes = (
   return left < stored ? -1 : left > stored ? 1 : 0;
 };
 
-/** What to do with the shared columns of one entity row. */
+/**
+ * What to do with the shared columns of one entity row.
+ *
+ * - `rejected`: the observation lost, so nothing it reports is stored.
+ * - `unchanged`: the observation was accepted and the shared columns already
+ *   hold what it reports. Its field values are still compared and stored.
+ * - `insert` and `update`: the observation was accepted and changes the row.
+ */
 type SharedWrite =
-  | { readonly action: "none" }
+  | { readonly action: "rejected" }
+  | { readonly action: "unchanged" }
   | { readonly action: "insert"; readonly values: SharedValues }
   | {
       readonly action: "update";
@@ -327,17 +359,25 @@ type SharedWrite =
     };
 
 /**
+ * Returns whether the observation was accepted, so that the values it
+ * reports (shared columns and field rows) may be stored. Only `rejected`
+ * is not.
+ */
+const isAccepted = (write: SharedWrite): boolean => write.action !== "rejected";
+
+/**
  * Decides how one observation changes the shared columns of its entity.
  *
  * - No row yet: insert it.
- * - A full row and a partial observation: change nothing.
+ * - A full row and a partial observation: rejected.
  * - A partial row and a full observation: the full one replaces everything.
- * - Otherwise the newer `sourceUpdatedAt` wins and the older loses. On an
- *   equal time, the reporter wins when it is the presenter, or the presenter
- *   is gone or cannot keep the row fresh. Then the reporter becomes the
- *   presenter, even if every fact is the same.
- * - An equal time from the presenter with the same, known `sourceRevision`
- *   changes nothing: the facts are covered.
+ * - Otherwise the newer `sourceUpdatedAt` wins and the older is rejected. On
+ *   an equal time, the reporter wins when it is the presenter, or the
+ *   presenter is gone or cannot keep the row fresh. Then the reporter becomes
+ *   the presenter, even if every fact is the same. An equal time from another
+ *   presenter is rejected.
+ * - An equal time from the presenter with the same, known `sourceRevision` is
+ *   accepted and `unchanged`: the facts are covered.
  */
 const decideSharedWrite = (input: {
   readonly existing: PresentedEntityRow | undefined;
@@ -356,20 +396,20 @@ const decideSharedWrite = (input: {
       },
     };
   }
-  if (existing.completeness === "full" && incomingIsPartial) return { action: "none" };
+  if (existing.completeness === "full" && incomingIsPartial) return { action: "rejected" };
   const isPresenter =
     existing.presented_by !== null && uuidToString(existing.presented_by) === reporterId;
   const promotes = existing.completeness === "partial" && !incomingIsPartial;
   if (!promotes) {
     const order = compareSourceTimes(incoming.source_updated_at, existing.source_updated_at);
-    if (order < 0) return { action: "none" };
+    if (order < 0) return { action: "rejected" };
     if (order === 0) {
       const mayWrite =
         isPresenter || existing.presented_by === null || existing.presenter_usable === 0;
-      if (!mayWrite) return { action: "none" };
+      if (!mayWrite) return { action: "rejected" };
       const revision = incoming.source_revision;
       if (isPresenter && revision != null && revision === existing.source_revision) {
-        return { action: "none" };
+        return { action: "unchanged" };
       }
     }
   }
@@ -380,7 +420,7 @@ const decideSharedWrite = (input: {
   ) as Partial<SharedValues>;
   const takesOver = !isPresenter;
   return Object.keys(changes).length === 0 && !takesOver
-    ? { action: "none" }
+    ? { action: "unchanged" }
     : { action: "update", changes, takesOver };
 };
 
@@ -532,6 +572,9 @@ const make = Effect.gen(function* () {
   const workflowOfferReads = yield* makeWorkflowOfferReads;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
+
+  /** Runs an effect of the field table with this repository's database client. */
+  const withSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   // -------------------------------------------------------------------------
   // Reading rows in batches
@@ -789,6 +832,7 @@ const make = Effect.gen(function* () {
       // of an existing entity can be news: a first sight is a baseline, and a
       // rejected observation writes nothing.
       const sourceChanges: Array<EntityChangeRecord> = [];
+      const acceptedFieldSets: Array<FieldSet> = [];
       for (const entry of observed) {
         const ref = entry.observation.ref;
         const existing = before.entities.get(ref);
@@ -799,6 +843,11 @@ const make = Effect.gen(function* () {
           incomingIsPartial,
           reporterId: input.connectionId,
         });
+        // The field rows are shared fields too: only an accepted full
+        // observation replaces them, whether or not its columns changed.
+        if (isAccepted(write) && entry.fieldRows !== undefined) {
+          acceptedFieldSets.push({ ref, fields: entry.fieldRows });
+        }
         if (write.action === "insert") yield* insertEntity(ref, write.values, connection, now);
         else if (write.action === "update") {
           yield* updateEntity(ref, write, connection, now);
@@ -814,6 +863,15 @@ const make = Effect.gen(function* () {
       }
 
       yield* timeline.recordEntityChanges(sourceChanges, now);
+
+      // A change to the field rows alone is a change of the entity: it is
+      // dated and announced like a changed fact.
+      const fieldChangedRefs = yield* withSql(replaceFieldRows(acceptedFieldSets));
+      if (fieldChangedRefs.length > 0) {
+        yield* sql`
+          UPDATE external_entities SET updated_at = ${now}
+          WHERE ref IN (SELECT value FROM json_each(${refsJson(fieldChangedRefs)}))`;
+      }
 
       // What a thing reports while it is not yet a full record is part of what
       // it arrived with, so the links it joins then are not news.
@@ -879,6 +937,7 @@ const make = Effect.gen(function* () {
               afterWrite.observations.get(ref) ?? [],
             ),
         ),
+        ...fieldChangedRefs,
         ...claimChanges.changedRefs,
       ]);
       // The Tasks below a ref whose claims changed are found with the walk
@@ -1477,6 +1536,9 @@ const make = Effect.gen(function* () {
           [buildWorkflowOfferTarget(row)],
           environment.kindSources ?? [],
         );
+        const fieldValues = (yield* withSql(
+          readFieldValues([row.ref], environment.activeEntityKinds),
+        )).get(row.ref)!;
         return Option.some({
           ...buildEntityFields({
             row,
@@ -1489,6 +1551,7 @@ const make = Effect.gen(function* () {
             latestChange: context.latestChanges.get(row.ref),
           }),
           kindAvailable: environment.activeKinds.has(row.kind as string),
+          ...fieldValues,
           places: context.places,
           edges: context.edges,
           links: entityLinks,
@@ -1878,6 +1941,7 @@ const make = Effect.gen(function* () {
             AND ref NOT IN (${sql.literal(OPEN_THREAD_REFS_SQL)})
           RETURNING ref`;
         yield* timeline.deleteOrphanedChanges();
+        yield* withSql(deleteOrphanedFields());
         return { entities: entities.length, observations: observations.length };
       }),
   };

@@ -91,6 +91,7 @@ const ticket = (
       title: `Ticket ${name}`,
       ...rest,
     },
+    fieldRows: [],
   };
 };
 
@@ -98,6 +99,7 @@ const epic = (name: string): ObservedEntity => ({
   kind: EPIC_KIND,
   slots: EPIC_SLOTS,
   observation: { ...baseObservation, kind: "epic", ref: epicRef(name), title: `Epic ${name}` },
+  fieldRows: [],
 });
 
 const project: ObservedEntity = {
@@ -111,6 +113,7 @@ const project: ObservedEntity = {
     concerns: [],
     sourceUpdatedAt: at(1),
   },
+  fieldRows: [],
 };
 
 const environment = (minutes: number) => ({ now: at(minutes), activePluginIds: [PLUGIN] });
