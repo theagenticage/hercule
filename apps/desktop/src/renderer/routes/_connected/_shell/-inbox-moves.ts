@@ -21,7 +21,7 @@
  * - A refused move says why on the undo line, and nothing is sent: the choice
  *   of what may be moved is `planInboxMove`.
  */
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
@@ -29,6 +29,7 @@ import {
   TAKE_ON_UNDONE,
   NO_SOURCE_ADDRESS,
   applyInboxMove,
+  buildHandedThing,
   decideHandMove,
   decideMoveTargets,
   describeHandOffUndo,
@@ -57,7 +58,7 @@ import type { Gesture, UndoAnswer } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
 import type { SidebarFlight } from "../../../app/motion/sidebar-flight";
-import { flyHandedMarkToWork } from "../../../screens/inbox/inbox-hand-off-motion";
+import { flyHandedMarkToWork, rollHandedRow } from "../../../screens/inbox/inbox-hand-off-motion";
 import type { HeldInboxList } from "./-inbox-held-list";
 
 /** The key every Inbox move runs under, so one move waits for the one before it. */
@@ -93,6 +94,19 @@ export interface InboxMoves {
    * Work.
    */
   readonly handOff: (ref: string, offer: WorkflowOffer, connectionId: string | undefined) => void;
+  /**
+   * Hands the one thing the move is for (see `dismiss`: the selection, else
+   * the current row) to `offer`, after the same check the H key makes. The
+   * pane's workflow rows use it, so they refuse a selection of several
+   * things with the same reason as H.
+   */
+  readonly handOffTarget: (offer: WorkflowOffer, connectionId: string | undefined) => void;
+  /**
+   * Returns `thing` as it reads while its hand-off is on its way: the
+   * workflow has it. Returns `thing` itself when it was not handed, or the
+   * list has been read since. The list draws its rows through it.
+   */
+  readonly readHandedThing: (thing: InboxThing) => InboxThing;
   /** Goes to the Task of the one thing the move is for, or says it has none. */
   readonly goToTask: (hoveredRef?: string) => void;
   /** Opens the current thing at its source, or says it has no address. */
@@ -141,6 +155,18 @@ export const useInboxMoves = ({
   useLayoutEffect(() => {
     latest.current = { held, isOffline, openTask, onMoved };
   });
+  // The things handed and what they read as meanwhile. An entry applies only to the very thing it
+  // was made for, so the next read of the list, which brings a new thing, ends it.
+  const [handed, setHanded] = useState<ReadonlyMap<string, { from: InboxThing; to: InboxThing }>>(
+    new Map(),
+  );
+  const putHandedBack = (ref: string): void => {
+    setHanded((before) => {
+      const next = new Map(before);
+      next.delete(ref);
+      return next;
+    });
+  };
   // The things whose hand-off the controller has not answered, so a second H waits for the first.
   const handing = useRef(new Set<string>());
 
@@ -327,6 +353,11 @@ export const useInboxMoves = ({
     }
     handing.current.add(ref);
     const flight: SidebarFlight = flyHandedMarkToWork(ref);
+    // The row draws the workflow having the thing as the chain starts, and keeps it until the list is read.
+    const handedThing = buildHandedThing(thing, offer);
+    const roll = rollHandedRow(ref, () => {
+      setHanded((before) => new Map(before).set(ref, { from: thing, to: handedThing }));
+    });
     showMove([ref], false);
     // What the hand-off ends stays ended, whatever Undo does.
     const endedKinds = thing.openKinds.filter((kind) => offer.answers.includes(kind));
@@ -343,7 +374,8 @@ export const useInboxMoves = ({
     const gesture: Gesture<CardMover> = {
       words: joinGestureWords(words),
       undo: () => {
-        // Undo during the chain stops the mark where it is: Work receives nothing.
+        // Undo during the chain stops the roll and the mark where they are: Work receives nothing.
+        roll.cancel();
         flight.cancel();
         return reverseMove.mutateAsync(async () => {
           if (!(await wasHanded)) throw new Error(NOT_SAVED);
@@ -354,7 +386,10 @@ export const useInboxMoves = ({
           const text = describeHandOffUndo(result, offer.name, endedKinds);
           // Stopped and too-late are the controller's final answers, not failures: the line says
           // them in its own words, and the row stays as it is.
-          if (isHandOffTakenBack(result)) showUndo([ref]);
+          if (isHandOffTakenBack(result)) {
+            putHandedBack(ref);
+            showUndo([ref]);
+          }
           return result.outcome === "stopped"
             ? {
                 text,
@@ -373,11 +408,18 @@ export const useInboxMoves = ({
       },
       (error: unknown) => {
         handing.current.delete(ref);
+        roll.cancel();
         flight.cancel();
+        putHandedBack(ref);
         if (!isCurrent()) return;
         say(describeInboxHandOffFailure(thing, offer.name, readReason(error)));
       },
     );
+  };
+
+  const handOffTarget = (offer: WorkflowOffer, connectionId: string | undefined): void => {
+    const thing = readAllowedTargets("handOff", undefined)?.[0];
+    if (thing !== undefined) handOff(thing.ref, offer, connectionId);
   };
 
   const startHandOff = (hoveredRef?: string): InboxThing | null => {
@@ -413,6 +455,11 @@ export const useInboxMoves = ({
     takeOn,
     startHandOff,
     handOff,
+    handOffTarget,
+    readHandedThing: (thing) => {
+      const entry = handed.get(thing.ref);
+      return entry?.from === thing ? entry.to : thing;
+    },
     goToTask,
     openAtSource,
     say: (text) => {

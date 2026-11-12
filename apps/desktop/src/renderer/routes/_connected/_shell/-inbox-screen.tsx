@@ -26,6 +26,7 @@ import type { RailEntry, RailFacetScope } from "../../../screens/inbox/inbox-rai
 import type { InboxSearchHandle } from "../../../screens/inbox/inbox-search";
 import { InboxOfflinePill, InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import { useInboxPaneWidth } from "../../../screens/inbox/use-inbox-pane-width";
+import { useInboxClock } from "./-inbox-clock";
 import { useHeldInboxList } from "./-inbox-held-list";
 import { InboxHandMenuPart } from "./-inbox-hand-part";
 import { InboxListPart } from "./-inbox-list-part";
@@ -41,7 +42,6 @@ import {
   EVERYTHING_QUERY_ID,
   buildInboxList,
   buildInboxQuery,
-  formatInboxClock,
   isSearching,
   nameInboxScope,
 } from "./-inbox-scope";
@@ -69,6 +69,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
+  const formatClock = useInboxClock(client);
   const offlineSince = useOfflineSince(live);
   const [scope, setScope] = useState<RailEntry>(DEFAULT_INBOX_SCOPE);
   const [search, setSearch] = useState<InboxSearch>(EMPTY_INBOX_SEARCH);
@@ -258,6 +259,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
         <InboxRailPart
           client={client}
           current={isSearching(search) ? null : scope}
+          isLoading={held.status === "loading"}
           onPick={openScope}
           onSearchMore={searchMore}
         />
@@ -287,6 +289,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
           scopeTitle={scopeTitle}
           search={search}
           rowActions={rowActions}
+          readHandedThing={moves.readHandedThing}
           focusRequest={listFocusRequest}
           headingFocusRequest={headingFocusRequest}
           undoLine={
@@ -337,7 +340,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
                 void navigate({ to: "/work", search: { task: taskId } });
               },
               onHandOff: (offer, connectionId) => {
-                moves.handOff(currentThing.ref, offer, connectionId);
+                moves.handOffTarget(offer, connectionId);
               },
               onClose: () => {
                 setIsPaneOpen(false);
@@ -348,9 +351,7 @@ export function InboxScreen({ controller }: { readonly controller: SavedControll
         )
       }
       offlinePill={
-        offlineSince === null ? null : (
-          <InboxOfflinePill sinceLabel={formatInboxClock(offlineSince)} />
-        )
+        offlineSince === null ? null : <InboxOfflinePill sinceLabel={formatClock(offlineSince)} />
       }
       isPaneShown={currentThing !== undefined || held.status === "loading"}
       isPaneOpen={isPaneOpen}

@@ -65,6 +65,7 @@ import type {
   HandoffLeg,
   Harness,
   InboxQuery,
+  InboxValueQuery,
   IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
@@ -1582,7 +1583,8 @@ async function mountShellSpecimen(
             return answer === "never" ? new Promise(() => undefined) : answerJson(answer);
           }
           if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
-            return answerJson({ values: [] });
+            const query = JSON.parse(await new Request(url, init).text()) as InboxValueQuery;
+            return answerJson(inbox.answerValues(query));
           }
           const detail = inbox.details.get(url.slice(url.lastIndexOf("/") + 1));
           return (init?.method ?? "GET") === "GET" &&

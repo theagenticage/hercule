@@ -12,6 +12,7 @@ import { buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
 import type { HandOffUndo } from "@hercule/contract";
 import {
   buildErrorBody,
+  neverAnswer,
   setVisibility,
   stubElementSize,
   stubIntersectionObserver,
@@ -390,12 +391,31 @@ describe("the hand-off", () => {
     await user.keyboard("j");
     await user.keyboard("j");
     await user.keyboard("h");
-    await waitForUndoLine("No workflow takes tickets yet.");
+    await waitForUndoLine("No workflow can take this ticket yet.");
     await user.keyboard("x");
     await user.keyboard("k");
     await user.keyboard("x");
 
     await user.keyboard("h");
+
+    await waitForUndoLine("Hand-off takes one thing at a time.");
+    expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
+  });
+
+  it("refuses a selection of several things from the pane's workflow rows, as H does", async () => {
+    const { user, calls } = await open(handable);
+    await user.keyboard("x");
+    await user.keyboard("j");
+    await user.keyboard("x");
+
+    const row = await within(document.getElementById("inbox-pane")!).findByRole("button", {
+      name: /Review PR/,
+    });
+    // A pane that has just opened takes no pointer for a moment.
+    await waitFor(() => {
+      expect(document.querySelector("[data-arming]")).toBeNull();
+    });
+    await user.click(row);
 
     await waitForUndoLine("Hand-off takes one thing at a time.");
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
@@ -427,6 +447,33 @@ describe("the hand-off", () => {
     );
 
     await waitForUndoLine(words);
+  });
+
+  it("shows the workflow having the thing at once, and puts the row back when the hand-off is refused", async () => {
+    const { user } = await open(handable, {
+      [handOffPath(SLOTS.id)]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Review PR already works on its Task."),
+      },
+    });
+    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR has it");
+
+    await user.keyboard("h");
+
+    await waitForUndoLine("was not handed to Review PR");
+    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR has it");
+  });
+
+  it("draws the row as handed while the controller has not answered", async () => {
+    const { user } = await open(handable, {
+      [handOffPath(SLOTS.id)]: neverAnswer,
+    });
+
+    await user.keyboard("h");
+
+    await waitFor(() => {
+      expect(getRow(SLOTS.title).getAttribute("aria-label")).toContain("Review PR has it");
+    });
   });
 
   it("says why the controller refused a hand-off", async () => {

@@ -2,8 +2,9 @@
 import { MAX_INBOX_MOVED_THINGS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { NO_OFFERS } from "./card-hand-off";
-import { buildInboxThing, buildWorkflowOffer } from "./cards.testing";
+import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
 import {
+  buildHandedThing,
   describeInboxDismissal,
   describeInboxDismissalFailure,
   describeInboxHandOff,
@@ -59,7 +60,7 @@ describe("planInboxMove", () => {
       planInboxMove({ move: "handOff", things: [held], ...online, offers: oneOffer }).kind,
     ).toBe("go");
     expect(reasonOf(planInboxMove({ move: "handOff", things: [thing], ...online }))).toBe(
-      "No workflow takes tickets yet.",
+      "No workflow can take this ticket yet.",
     );
   });
 
@@ -107,5 +108,37 @@ describe("what the undo line says", () => {
     expect(describeInboxDismissalFailure([thing, held], "the controller is busy")).toBe(
       "2 things were not dismissed, so they are back: the controller is busy. Try again.",
     );
+  });
+});
+
+describe("buildHandedThing", () => {
+  const asking = buildInboxThing("4", {
+    asks: [buildInboxAsk("a1")],
+    askCount: 1,
+    askKinds: ["acme/review-requested"],
+    waitingSince: "2026-11-01T09:00:00.000Z",
+  });
+
+  it("takes the asks the workflow answers away, so the thing no longer waits and the workflow has it", () => {
+    const handed = buildHandedThing(
+      asking,
+      buildWorkflowOffer("Review PR", ["acme/review-requested"]),
+    );
+
+    expect(handed.asks).toEqual([]);
+    expect(handed.askCount).toBe(0);
+    expect(handed.waitingSince).toBeUndefined();
+    expect(handed.liveWorkflows.map((workflow) => workflow.name)).toEqual(["Review PR"]);
+  });
+
+  it("keeps the asks the workflow does not answer, and the wait they hold", () => {
+    const handed = buildHandedThing(
+      asking,
+      buildWorkflowOffer("Repair the build", ["acme/failed"]),
+    );
+
+    expect(handed.asks).toHaveLength(1);
+    expect(handed.waitingSince).toBe(asking.waitingSince);
+    expect(handed.liveWorkflows.map((workflow) => workflow.name)).toEqual(["Repair the build"]);
   });
 });

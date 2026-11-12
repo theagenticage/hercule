@@ -8,7 +8,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
-import { setVisibility, stubElementSize, stubIntersectionObserver } from "../../../app/testing";
+import {
+  neverAnswer,
+  setVisibility,
+  stubElementSize,
+  stubIntersectionObserver,
+} from "../../../app/testing";
 import {
   BASKET,
   COUNTS,
@@ -19,6 +24,7 @@ import {
   readQueries,
   readRowTitles,
   request,
+  QUERY_PATH,
 } from "./inbox.testing";
 
 beforeEach(() => {
@@ -159,5 +165,43 @@ describe("the Inbox screen", () => {
     });
     await openInbox(clear);
     expect(await screen.findByRole("heading", { name: "All clear" })).toBeTruthy();
+  });
+
+  it("draws the rail's count bars while the first page is on its way", async () => {
+    await openInbox(defaultInbox(), { [QUERY_PATH]: neverAnswer });
+
+    await waitFor(() => {
+      expect(document.querySelector(".ib-rail-count-skeleton")).not.toBeNull();
+    });
+  });
+
+  it("writes the time a source stopped being readable as a 24-hour clock time", async () => {
+    const inbox = defaultInbox();
+    inbox.counts = {
+      ...COUNTS,
+      failing: [{ source: "github", since: "2026-11-11T09:12:00.000Z" }],
+    };
+    await openInbox(inbox);
+
+    const line = await screen.findByText(/can’t be read since/);
+
+    expect(line.textContent).toMatch(/since \d{2}:\d{2}\./);
+  });
+
+  it("offers the values of the field being typed", async () => {
+    const { calls } = await openInbox(defaultInbox(), {
+      "POST /api/v1/external-entities/inbox/values": () => ({
+        body: { values: [{ value: "Checkout", label: "Checkout", count: 3, source: "github" }] },
+      }),
+    });
+    await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+
+    await userEvent.type(screen.getByRole("combobox"), "team:");
+
+    expect(await screen.findByRole("option", { name: /team:Checkout/, hidden: true })).toBeTruthy();
+    expect(calls.find((call) => call.path.endsWith("/inbox/values"))?.body).toMatchObject({
+      key: "team",
+      list: { savedQuery: "waits" },
+    });
   });
 });

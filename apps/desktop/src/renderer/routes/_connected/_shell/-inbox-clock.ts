@@ -1,7 +1,14 @@
 import { useCallback } from "react";
-import { findNextAgeChange } from "@hercule/client-core";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import {
+  findNextAgeChange,
+  formatClock,
+  resolveDisplayTimezone,
+  type HerculeClient,
+} from "@hercule/client-core";
 import type { InboxThing } from "@hercule/contract";
 import { NEVER, useClockValue } from "../../../app/age-clock";
+import { settingsQuery } from "../../../app/queries";
 
 /**
  * Returns the time the rows' waits and ages are written at, and draws again
@@ -28,4 +35,15 @@ export const useInboxNow = (things: ReadonlyArray<InboxThing>): Date => {
   );
   const reading = useClockValue("", things.length > 0, findNextChange, (now) => now.getTime());
   return new Date(reading);
+};
+
+/**
+ * Returns a function that writes a time as a clock time such as "09:12", in
+ * the timezone the user's settings choose, like every other screen's clock
+ * times. The Inbox uses it for the offline pill and a failing source.
+ */
+export const useInboxClock = (client: HerculeClient): ((at: Date | string) => string) => {
+  const { data: settings } = useSuspenseQuery(settingsQuery(client));
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
+  return (at) => formatClock(new Date(at), timezone) ?? "";
 };

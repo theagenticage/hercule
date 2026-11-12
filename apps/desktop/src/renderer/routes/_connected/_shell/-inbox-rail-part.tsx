@@ -9,7 +9,7 @@ import {
 } from "../../../screens/inbox/inbox-rail";
 import { describeInboxRail } from "../../../screens/inbox/inbox-rail-props";
 import { inboxCountQuery, pluginsQuery, settingsQuery } from "../../../app/queries";
-import { formatInboxClock } from "./-inbox-scope";
+import { useInboxClock } from "./-inbox-clock";
 
 type Pin = { source: string; connectionId?: string; key: string; value: string };
 
@@ -25,20 +25,26 @@ const isSameValue = (a: RailValue, b: RailValue): boolean =>
  * source (`inbox.browseFolded`) and pinning a value (`inbox.pins`). A save
  * reads the counts again, because their reply carries what the rail draws.
  *
+ * `isLoading` draws the count bars while the list's first read is pending, as
+ * the drawing does. The counts themselves are shell data and are always read.
+ *
  * `current` is the entry the list is on, or `null` while a search narrows it.
  */
 export function InboxRailPart({
   client,
   current,
   onPick,
+  isLoading,
   onSearchMore,
 }: {
   readonly client: HerculeClient;
   readonly current: RailEntry | null;
   readonly onPick: (entry: RailEntry) => void;
+  readonly isLoading: boolean;
   readonly onSearchMore: (facet: RailFacetScope) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
+  const formatClock = useInboxClock(client);
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const save = useMutation({
@@ -53,13 +59,13 @@ export function InboxRailPart({
       await queryClient.invalidateQueries({ queryKey: queryKeys.inboxCount() });
     },
   });
-  const rail = describeInboxRail(counts, plugins, formatInboxClock);
+  const rail = describeInboxRail(counts, plugins, formatClock);
   return (
     <InboxRail
       {...rail}
       plugins={plugins}
       current={current}
-      loading={false}
+      loading={isLoading}
       onPick={onPick}
       onToggleFold={(source) => {
         const folded = counts.sources

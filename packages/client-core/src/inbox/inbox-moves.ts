@@ -7,7 +7,7 @@
  * puts the title of the thing last (`title`), so a line that is too narrow
  * cuts the title and never the words before it.
  */
-import { MAX_INBOX_MOVED_THINGS, type InboxThing } from "@hercule/contract";
+import { MAX_INBOX_MOVED_THINGS, type InboxThing, type WorkflowOffer } from "@hercule/contract";
 import { decideHandMove, type CardOffers } from "./card-hand-off";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
@@ -90,12 +90,34 @@ export const planInboxMove = ({
           "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
         );
       return decideHandMove(offers).kind === "none"
-        ? refuse(`No workflow takes ${thing.noun.toLowerCase()}s yet.`)
+        ? refuse(`No workflow can take this ${thing.noun.toLowerCase()} yet.`)
         : GO;
     case "goToTask":
       if (!isOne) return refuse("Go to its Task takes one thing at a time.");
       return thing.taskId === undefined ? refuse("This has no Task yet. T takes it on.") : GO;
   }
+};
+
+/**
+ * Returns `thing` as it reads once `offer` has it: the workflow is live on it,
+ * and the asks the workflow answers are gone. A thing left with no ask has no
+ * wait, so its row shows who has it. The row shows this at once, until the
+ * next read of the list says what the controller made of the hand-off.
+ */
+export const buildHandedThing = (thing: InboxThing, offer: WorkflowOffer): InboxThing => {
+  const askKinds = thing.askKinds.filter((kind) => !offer.answers.includes(kind));
+  const liveWorkflows = [
+    { workflowId: offer.workflowId, name: offer.name },
+    ...thing.liveWorkflows,
+  ];
+  if (askKinds.length > 0) {
+    const asks = thing.asks.filter((ask) => !offer.answers.includes(ask.kind));
+    return { ...thing, asks, askKinds, liveWorkflows };
+  }
+  // A thing with no ask waits for nobody, so its row has no wait to show.
+  const unwaiting: { -readonly [Key in keyof InboxThing]: InboxThing[Key] } = { ...thing };
+  delete unwaiting.waitingSince;
+  return { ...unwaiting, asks: [], askCount: 0, askKinds, liveWorkflows };
 };
 
 /** Returns the words for the line after `things` were dismissed. One thing shows its title. */

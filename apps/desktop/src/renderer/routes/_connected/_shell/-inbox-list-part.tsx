@@ -9,7 +9,7 @@ import {
   listCardOffers,
   type InboxSearch,
 } from "@hercule/client-core/inbox";
-import type { InboxClause, InboxOrder } from "@hercule/contract";
+import type { InboxClause, InboxOrder, InboxThing } from "@hercule/contract";
 import { inboxCountQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxList } from "../../../screens/inbox/inbox-list";
 import { InboxListHead } from "../../../screens/inbox/inbox-list-head";
@@ -25,12 +25,11 @@ import {
   type InboxEmptyState,
 } from "../../../screens/inbox/inbox-states";
 import type { HeldInboxList } from "./-inbox-held-list";
-import { useInboxNow } from "./-inbox-clock";
+import { useInboxClock, useInboxNow } from "./-inbox-clock";
 import {
   EVERYTHING_INBOX_SCOPE,
   EVERYTHING_QUERY_ID,
   buildInboxList,
-  formatInboxClock,
   isSearching as isSearchNarrowing,
 } from "./-inbox-scope";
 
@@ -76,6 +75,7 @@ export function InboxListPart({
   scopeTitle,
   search,
   rowActions,
+  readHandedThing,
   focusRequest,
   headingFocusRequest,
   undoLine,
@@ -90,6 +90,8 @@ export function InboxListPart({
   readonly scopeTitle: string;
   readonly search: InboxSearch;
   readonly rowActions: InboxRowActions;
+  /** Returns a thing as its row reads while a hand-off of it is on its way. */
+  readonly readHandedThing: (thing: InboxThing) => InboxThing;
   readonly focusRequest: number;
   /** Rises when a move left nothing current: the focus then goes to the empty state's heading. */
   readonly headingFocusRequest: number;
@@ -102,6 +104,7 @@ export function InboxListPart({
 }): JSX.Element {
   const navigate = useNavigate();
   const counts = useSuspenseQuery(inboxCountQuery(client)).data;
+  const formatClock = useInboxClock(client);
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const [narrowAnchor, setNarrowAnchor] = useState<HTMLElement | null>(null);
@@ -135,7 +138,7 @@ export function InboxListPart({
     held.order === undefined
       ? []
       : rows.map((thing) =>
-          describeInboxRow(thing, {
+          describeInboxRow(readHandedThing(thing), {
             order: held.order!,
             now,
             userName: username,
@@ -216,7 +219,7 @@ export function InboxListPart({
         <InboxFailingSource
           key={source.source}
           sourceName={namePlugin(source.source, plugins)}
-          sinceLabel={formatInboxClock(source.since)}
+          sinceLabel={formatClock(source.since)}
           onOpenConnections={() => {
             void navigate({ to: "/settings/connections" });
           }}

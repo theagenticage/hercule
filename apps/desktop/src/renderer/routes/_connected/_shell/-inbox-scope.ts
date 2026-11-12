@@ -70,7 +70,3 @@ export const nameInboxScope = (scope: RailEntry, counts: InboxCounts): string =>
   }
   return value.value;
 };
-
-/** Returns a time as the reader's clock writes it, such as "08:40", for the offline pill and a failing source. */
-export const formatInboxClock = (at: Date | string): string =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

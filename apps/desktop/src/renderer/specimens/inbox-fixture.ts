@@ -20,6 +20,8 @@ import type {
   InboxFacet,
   InboxPage,
   InboxQuery,
+  InboxValueQuery,
+  InboxValues,
   InboxThing,
   PluginDetail,
 } from "@hercule/contract";
@@ -402,20 +404,22 @@ const passes = (item: Item, clause: NonNullable<InboxQuery["clauses"]>[number]):
   return tag !== undefined && String(clause.value).toLowerCase() === tag.toLowerCase();
 };
 
+/** Returns the fixture's items in `list`, as the controller picks them before a search narrows them. */
+const pickItems = (list: InboxQuery["list"]): ReadonlyArray<Item> => {
+  if ("savedQuery" in list) {
+    return list.savedQuery === "everything"
+      ? ITEMS
+      : list.savedQuery === "github/review-requests"
+        ? ITEMS.filter((item) => item.thing.askKinds.includes(REVIEW))
+        : ITEMS.filter((item) => item.lists.includes(list.savedQuery));
+  }
+  return ITEMS.filter((item) => passes(item, list.browse));
+};
+
 /** Plays the controller's `queryInbox` over the fixture's things. */
 export const answerInboxQuery = (query: InboxQuery): InboxPage => {
   const { list } = query;
-  let items: ReadonlyArray<Item>;
-  if ("savedQuery" in list) {
-    items =
-      list.savedQuery === "everything"
-        ? ITEMS
-        : list.savedQuery === "github/review-requests"
-          ? ITEMS.filter((item) => item.thing.askKinds.includes(REVIEW))
-          : ITEMS.filter((item) => item.lists.includes(list.savedQuery));
-  } else {
-    items = ITEMS.filter((item) => passes(item, list.browse));
-  }
+  let items = pickItems(list);
   items = items.filter((item) => (query.clauses ?? []).every((clause) => passes(item, clause)));
   const words = (query.text ?? "").trim().toLowerCase();
   if (words !== "") items = items.filter((item) => item.thing.title.toLowerCase().includes(words));
@@ -453,6 +457,15 @@ const tally = (items: ReadonlyArray<Item>, key: keyof Tags): InboxFacet["values"
   return [...counts]
     .toSorted((a, b) => b[1] - a[1])
     .map(([value, count]) => ({ value, label: value, count }));
+};
+
+/** Plays the controller's `suggestInboxValues`: the values of a tag among the list's items, most common first. */
+export const answerInboxValues = (query: InboxValueQuery): InboxValues => {
+  const prefix = query.prefix.toLowerCase();
+  const values = tally(pickItems(query.list), query.key as keyof Tags).filter((value) =>
+    value.label.toLowerCase().startsWith(prefix),
+  );
+  return { values: values.map((value) => ({ ...value, source: "tidewatch" })) };
 };
 
 /** Builds what the pane reads for `thing`: a plain detail with no signals. */
@@ -503,6 +516,8 @@ export interface InboxRecords {
   readonly counts: InboxCounts;
   /** Answers one page read. `"never"` plays a controller that has not answered yet, which draws the loading shapes. */
   readonly answer: (query: InboxQuery) => InboxPage | "never";
+  /** Answers the read of a field's values, which the search offers as it is typed. */
+  readonly answerValues: (query: InboxValueQuery) => InboxValues;
   /** What the pane reads for a thing, by id. */
   readonly details: ReadonlyMap<string, ExternalEntityDetail>;
   /** Whether the live connection is down, which draws the offline pill. */
@@ -532,6 +547,7 @@ export interface InboxScene {
 const BASE: InboxRecords = {
   counts: buildInboxWorldCounts(),
   answer: answerInboxQuery,
+  answerValues: answerInboxValues,
   details: DETAILS,
 };
 
@@ -581,10 +597,9 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     records: BASE,
     play: async (page) => {
       await waitFor(page, ".ib-row");
-      await typeSearch(page, "team:Checkout waiting:>2h ");
-      // The field gives the results the room, as a user's Return would.
-      (page.activeElement as HTMLElement | null)?.blur();
-      await nextFrame();
+      await typeSearch(page, "team:Checkout waiting:>2h team:");
+      // The field keeps the focus, with the values of the open clause offered under it.
+      await waitFor(page, '[role="option"]');
     },
   },
   {
