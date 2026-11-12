@@ -54,8 +54,11 @@ import {
   summarizeTokens,
   type MeasuredFragment,
   type MeasuredGlyphPair,
+  rankElements,
+  type MetricSummary,
   type MetricValues,
 } from "./ui-summary.ts";
+import type { MetricElement, MetricElements } from "./ui-ratchet.ts";
 
 /** The scale the metrics are measured at. 2x would only repeat 1x with finer pixels. */
 export const METRICS_SCALE = 1;
@@ -235,7 +238,8 @@ async function waitForPageToSettle(page: Page): Promise<void> {
  * and a measure taken in between differs from run to run. So it waits two
  * frames, measures, and repeats until two measures in a row are the same.
  * Fails when the page does not settle within 20 measures, which means the
- * numbers could not be repeated.
+ * numbers could not be repeated. The element lists (clipped texts, overlaps)
+ * come from the last of the settled measures.
  */
 async function measureSettledClipping(page: Page, probe: PageProbe): Promise<ClippingFacts> {
   let previous: ClippingFacts | undefined;
@@ -319,7 +323,7 @@ async function removeFocusFromPage(page: Page): Promise<void> {
 
 /**
  * Focuses each target that lies wholly in the window, as a keyboard user
- * does, and returns how many show no focus ring: the focus did not land, or
+ * does, and returns the ones that show no focus ring: the focus did not land, or
  * the pixels around the target did not change enough from an unfocused
  * capture of the page. Every control is checked on its own, because a
  * component can style its focus differently in one place than in another.
@@ -333,15 +337,15 @@ async function removeFocusFromPage(page: Page): Promise<void> {
  * the control before it) and one small screenshot of the clip around it.
  * Leaves the page with nothing focused.
  */
-async function countTargetsWithoutFocusRing(
+async function listTargetsWithoutFocusRing(
   page: Page,
   camera: Camera,
   probe: PageProbe,
   targets: ReadonlyArray<ProbeTarget>,
-): Promise<number> {
+): Promise<MetricSummary> {
   await removeFocusFromPage(page);
   const unfocused = await camera.capture();
-  let missing = 0;
+  const missing: MetricElement[] = [];
   let hasFocusedTarget = false;
   for (const target of targets) {
     if (!target.inWindow) continue;
@@ -353,10 +357,13 @@ async function countTargetsWithoutFocusRing(
       const clipped = await camera.capture(clip);
       hasRing = checkFocusRing(unfocused, clipped, clip, target.box, METRICS_SCALE).visible;
     }
-    if (!hasRing) missing += 1;
+    if (!hasRing) missing.push({ element: target.element, contribution: 1 });
   }
   if (hasFocusedTarget) await probe.blurTarget();
-  return missing;
+  return {
+    values: { "focus.missing": missing.length },
+    elements: missing.length === 0 ? {} : { "focus.missing": rankElements(missing, "sum") },
+  };
 }
 
 /**
@@ -376,17 +383,19 @@ async function measureGlyphPairs(camera: Camera, probe: PageProbe): Promise<Meas
 
 /**
  * Checks the borders and marks that `variant`'s screen names in
- * `nonTextParts` against the golden, and returns how many fail. Fails when a
- * selector matches nothing visible: the screen changed and its list did not.
+ * `nonTextParts` against the golden, and returns the ones that fail, each named
+ * by its selector and its place in the matches, with the share of the required
+ * contrasting pixels it reached as its contribution (the lowest first). Fails
+ * when a selector matches nothing visible: the screen changed and its list did not.
  */
-async function countFailingNonTextParts(
+async function listFailingNonTextParts(
   probe: PageProbe,
   golden: DecodedImage,
   variant: UiVariant,
-): Promise<number> {
+): Promise<MetricSummary> {
   const parts = variant.screen.nonTextParts;
   const boxesPerPart = await probe.measureParts(parts.map(({ selector }) => selector));
-  let failing = 0;
+  const failing: MetricElement[] = [];
   parts.forEach(({ selector, kind }, index) => {
     const boxes = boxesPerPart[index]!;
     if (boxes.length === 0) {
@@ -394,11 +403,22 @@ async function countFailingNonTextParts(
         `The non-text selector "${selector}" of the screen ${variant.screen.name} matches nothing visible. Fix nonTextParts in scripts/ui-screens.ts.`,
       );
     }
-    for (const box of boxes) {
-      if (!checkNonTextPart(golden, box, kind, METRICS_SCALE).passes) failing += 1;
-    }
+    boxes.forEach((box, position) => {
+      const result = checkNonTextPart(golden, box, kind, METRICS_SCALE);
+      if (!result.passes) {
+        failing.push({
+          element: `${selector} (match ${String(position + 1)} of ${String(boxes.length)})`,
+          contribution:
+            result.requiredPixels === 0 ? 0 : result.qualifyingPixels / result.requiredPixels,
+        });
+      }
+    });
   });
-  return failing;
+  failing.sort((a, b) => a.contribution - b.contribution);
+  return {
+    values: { "nonText.failing": failing.length },
+    elements: failing.length === 0 ? {} : { "nonText.failing": failing },
+  };
 }
 
 /**
@@ -410,16 +430,19 @@ async function measureComposerBoundary(
   probe: PageProbe,
   golden: DecodedImage,
   variant: UiVariant,
-): Promise<MetricValues> {
+): Promise<MetricSummary> {
   const hasComposer = variant.screen.nonTextParts.some(
     ({ selector }) => selector === COMPOSER_SELECTOR,
   );
-  if (!hasComposer) return {};
+  if (!hasComposer) return { values: {}, elements: {} };
   const [boxes] = await probe.measureParts([COMPOSER_SELECTOR]);
+  const ratio = Math.min(
+    ...(boxes ?? []).map((box) => measureBoundaryContrast(golden, box, METRICS_SCALE)),
+  );
+  // The composer is named by its selector, which is the one element the value comes from.
   return {
-    "nonText.composerBoundary": Math.min(
-      ...(boxes ?? []).map((box) => measureBoundaryContrast(golden, box, METRICS_SCALE)),
-    ),
+    values: { "nonText.composerBoundary": ratio },
+    elements: { "nonText.composerBoundary": [{ element: COMPOSER_SELECTOR, contribution: ratio }] },
   };
 }
 
@@ -435,6 +458,8 @@ export interface PageTimings {
 export interface PageMeasurement {
   /** Metric keys (`<theme>/<screen>/<metric>`, and the theme's tokens and the run's own keys on the pages that measure them) to numbers. */
   readonly values: MetricValues;
+  /** The elements behind each key of `values` that has any, keyed the same way, worst first. See `MetricSummary`. */
+  readonly elements: MetricElements;
   readonly timings: PageTimings;
 }
 
@@ -484,11 +509,16 @@ export async function measurePage(
   const prefix = `${variant.theme}/${variant.screen.name}/`;
   const dark = isDarkTheme(variant.theme);
   const values: MetricValues = {};
-  const add = (metrics: MetricValues, suffix = ""): void => {
-    for (const [name, value] of Object.entries(metrics)) {
-      values[`${prefix}${name}${suffix}`] = value;
+  const elements: Record<string, ReadonlyArray<MetricElement>> = {};
+  const addWithPrefix = (keyPrefix: string, summary: MetricSummary, suffix = ""): void => {
+    for (const [name, value] of Object.entries(summary.values)) {
+      values[`${keyPrefix}${name}${suffix}`] = value;
+    }
+    for (const [name, list] of Object.entries(summary.elements)) {
+      elements[`${keyPrefix}${name}${suffix}`] = list;
     }
   };
+  const add = (summary: MetricSummary, suffix = ""): void => addWithPrefix(prefix, summary, suffix);
   const timings = { contrast: 0, focus: 0, resilience: 0, other: 0 };
   const startedAt = performance.now();
   let mark = startedAt;
@@ -525,25 +555,22 @@ export async function measurePage(
   add(summarizeDiscipline(discipline));
   lap("other");
 
-  add({ "nonText.failing": await countFailingNonTextParts(probe, golden, variant) });
+  add(await listFailingNonTextParts(probe, golden, variant));
   add(await measureComposerBoundary(probe, golden, variant));
 
   const targets = await probe.collectTargets();
   add(summarizeTargets(targets));
   lap("other");
-  add({ "focus.missing": await countTargetsWithoutFocusRing(page, camera, probe, targets) });
+  add(await listTargetsWithoutFocusRing(page, camera, probe, targets));
   lap("focus");
 
   if (variant.screen.name === "thread-long") {
     add(summarizeProse(await probe.measureProse()));
   }
   if (isFirstScreen(variant)) {
-    for (const [name, value] of Object.entries(summarizeTokens(await probe.resolveThemeTokens()))) {
-      values[`${variant.theme}/tokens/${name}`] = value;
-    }
+    addWithPrefix(`${variant.theme}/tokens/`, summarizeTokens(await probe.resolveThemeTokens()));
     if (variant.theme === RUN_WIDE_THEME) {
-      const glyphs = summarizeGlyphs(await measureGlyphPairs(camera, probe));
-      for (const [name, value] of Object.entries(glyphs)) values[`run/${name}`] = value;
+      addWithPrefix("run/", summarizeGlyphs(await measureGlyphPairs(camera, probe)));
     }
   }
   await camera.release();
@@ -570,5 +597,5 @@ export async function measurePage(
     await waitForPageToSettle(page);
   }
   lap("resilience");
-  return { values, timings };
+  return { values, elements, timings };
 }

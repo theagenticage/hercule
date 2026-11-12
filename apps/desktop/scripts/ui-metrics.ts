@@ -14,6 +14,9 @@
  * - `golden-diff/<theme>/<screen>.png`, for each screenshot whose pixels differ
  *   from its golden: the differing pixels in magenta over the dimmed golden;
  * - `metrics.json`, every number of the run, keyed `<theme>/<screen>/<metric>`;
+ * - `elements.json`, keyed the same way: the elements behind each number, worst
+ *   first, each with its contribution. The report lists the first five under
+ *   each worse number, so the cause is named and not only counted;
  * - `report.md`, the verdict, the targets, the goldens, and a table per theme.
  *
  * It prints the report and how long the run took. The exit code is 0 when no
@@ -24,12 +27,13 @@
  *
  * When a number is worse, the way to accept it is to run with
  * `--write-baseline`, commit the file and give the reason in the pull request.
- * `--write-baseline` writes the baseline from this run and exits with 0.
- * When a golden differs, the way to accept it is `--write-goldens`: it
- * records the screenshots as the goldens, writing only those whose pixels
- * changed, and prints which. Look at every changed golden before committing
- * it. `--write-goldens` does not skip the check of the numbers. There is no
- * other way to skip a check.
+ * `--write-baseline` writes the baseline from this run. It still checks the
+ * goldens, so the exit code is 1 when a golden differs. When a golden differs,
+ * the way to accept it is `--write-goldens`: it records the screenshots as the
+ * goldens, writing only those whose pixels changed, and prints which. Look at
+ * every changed golden before committing it. `--write-goldens` does not skip
+ * the check of the numbers, so when the numbers are worse too, pass both flags
+ * in one run: `--write-goldens --write-baseline` records both and exits with 0.
  *
  * `--themes <theme,theme,...>` measures only those themes, so that CI can run
  * the themes in parallel shards (.github/workflows/ci.yml). A shard compares
@@ -37,8 +41,27 @@
  * the first theme of ALL_THEMES (RUN_WIDE_THEME in scripts/ui-screens.ts),
  * which measures them. Likewise a shard compares only the goldens of its
  * themes, and checks `provenance.json`. Together the shards check every key
- * and every golden. A shard cannot write the baseline or the goldens:
- * `--write-baseline` and `--write-goldens` need a full run.
+ * and every golden.
+ *
+ * `--screens <name,name,...>` measures only those screens (the names in
+ * UI_SCREENS, scripts/ui-screens.ts), for use while coding. It combines with
+ * `--themes`. The theme tokens and the `run/...` keys are measured on the first
+ * screen only, so they are compared only when that screen is selected
+ * (selectBaselineForRun in scripts/ui-ratchet.ts). The goldens compared are
+ * those of the selected themes and screens.
+ *
+ * `--no-goldens` skips the pixel comparison. It is a diagnostic for running on
+ * the host, where the pixels may differ from the linux/amd64 goldens, for
+ * example `--screens inbox --no-goldens`. The report says the goldens were not
+ * checked. A run with `--screens`, `--no-goldens` or both is never the check
+ * before a pull request: that is the full run. On the host, the pixel-based
+ * numbers (contrast, clipping) can differ from the linux/amd64 baseline, so a
+ * difference there is a hint, and the full run in the container decides.
+ *
+ * A partial run (`--themes` or `--screens`) cannot write the baseline or the
+ * goldens, because the files would drop the entries of what was not measured.
+ * `--no-goldens` cannot be combined with either write flag. They need a full
+ * run with the goldens checked.
  *
  * One exception to the type scale is measured, not hidden: the four "Aa" of
  * Settings > Appearance's Text size control are drawn at 12, 13, 14 and 15 px
@@ -81,10 +104,18 @@ import {
   compareWithBaseline,
   formatBaseline,
   formatReport,
+  type MetricElements,
   parseBaseline,
-  selectBaselineForThemes,
+  selectBaselineForRun,
 } from "./ui-ratchet.ts";
-import { GLASS_PERCENTS, listUiVariants, parseThemeList, type UiVariant } from "./ui-screens.ts";
+import {
+  GLASS_PERCENTS,
+  listUiVariants,
+  parseScreenList,
+  parseThemeList,
+  UI_SCREENS,
+  type UiVariant,
+} from "./ui-screens.ts";
 import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 
 const outputDir = fileURLToPath(new URL("../out/ui-metrics/", import.meta.url));
@@ -100,10 +131,17 @@ const WRITE_GOLDENS_FLAG = "--write-goldens";
 /** The option that measures only some themes, one shard of a CI run. */
 const THEMES_OPTION = "--themes";
 
+/** The option that measures only some screens, for use while coding. */
+const SCREENS_OPTION = "--screens";
+
+/** The flag that skips the pixel comparison with the goldens. */
+const NO_GOLDENS_FLAG = "--no-goldens";
+
 /** What to do when a number is worse, or a baseline is missing, in the words the run prints. */
 const HOW_TO_ACCEPT =
   "To accept the numbers as they are, run `pnpm --filter @hercule/desktop ui:metrics --write-baseline`, " +
-  "commit apps/desktop/ui-metrics.baseline.json, and give the reason in the pull request body.";
+  "commit apps/desktop/ui-metrics.baseline.json, and give the reason in the pull request body. " +
+  "If the goldens changed too, pass `--write-goldens --write-baseline` in the same run.";
 
 /**
  * Returns the metric values of every measured page in one record. Fails when
@@ -118,6 +156,12 @@ function mergeMeasurements(measurements: ReadonlyArray<PageMeasurement>): Record
     }
   }
   return merged;
+}
+
+/** Returns the elements of every measured page in one record, keyed like the metric values and sorted by key, because the pages finish in any order. */
+function mergeElements(measurements: ReadonlyArray<PageMeasurement>): MetricElements {
+  const entries = measurements.flatMap(({ elements }) => Object.entries(elements));
+  return Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 /** Returns the line that says where the time went, summed over all pages (the pages run in parallel, so the sums are larger than the run's time). */
@@ -147,48 +191,67 @@ function readPlaywrightVersion(): string {
 
 /**
  * Parses the command line. Returns whether to write the baseline, whether to
- * write the goldens, and the themes to measure (all of them without
- * `--themes`). Fails on an unknown argument, a bad theme list, and on
- * `--write-baseline` or `--write-goldens` together with `--themes`, because
- * files written from some themes would drop the entries of the others.
+ * write the goldens, whether to skip the goldens, and the themes and screens
+ * to measure (all of them without `--themes` and `--screens`). Fails on an
+ * unknown argument, a bad theme or screen list, `--no-goldens` together with a
+ * write flag, and a write flag together with `--themes` or `--screens`,
+ * because files written from part of the run would drop the entries of the
+ * rest.
  */
 function parseArguments(args: ReadonlyArray<string>): {
   readonly shouldWriteBaseline: boolean;
   readonly shouldWriteGoldens: boolean;
+  readonly shouldSkipGoldens: boolean;
   readonly themes: ReadonlyArray<string>;
+  readonly screens: ReadonlyArray<string>;
 } {
-  const options = `The options are ${WRITE_BASELINE_FLAG}, ${WRITE_GOLDENS_FLAG} and ${THEMES_OPTION} <theme,theme,...>.`;
+  const options = `The options are ${WRITE_BASELINE_FLAG}, ${WRITE_GOLDENS_FLAG}, ${NO_GOLDENS_FLAG}, ${THEMES_OPTION} <theme,theme,...> and ${SCREENS_OPTION} <name,name,...>.`;
   let shouldWriteBaseline = false;
   let shouldWriteGoldens = false;
+  let shouldSkipGoldens = false;
   let themes: ReadonlyArray<string> = ALL_THEMES;
-  let isShard = false;
+  let screens: ReadonlyArray<string> = UI_SCREENS.map((screen) => screen.name);
+  let isPartial = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === WRITE_BASELINE_FLAG) {
       shouldWriteBaseline = true;
     } else if (arg === WRITE_GOLDENS_FLAG) {
       shouldWriteGoldens = true;
+    } else if (arg === NO_GOLDENS_FLAG) {
+      shouldSkipGoldens = true;
     } else if (arg === THEMES_OPTION) {
       const value = args[++index];
       if (value === undefined)
         throw new Error(`${THEMES_OPTION} needs a list of themes. ${options}`);
       themes = parseThemeList(value);
-      isShard = true;
+      isPartial = true;
+    } else if (arg === SCREENS_OPTION) {
+      const value = args[++index];
+      if (value === undefined)
+        throw new Error(`${SCREENS_OPTION} needs a list of screens. ${options}`);
+      screens = parseScreenList(value);
+      isPartial = true;
     } else {
       throw new Error(`Unknown argument ${String(arg)}. ${options}`);
     }
   }
-  if (shouldWriteBaseline && isShard) {
+  if (shouldSkipGoldens && (shouldWriteBaseline || shouldWriteGoldens)) {
     throw new Error(
-      `${WRITE_BASELINE_FLAG} cannot be combined with ${THEMES_OPTION}: write the baseline from a full run, because a partial run would drop the keys of the other themes.`,
+      `${NO_GOLDENS_FLAG} cannot be combined with ${WRITE_BASELINE_FLAG} or ${WRITE_GOLDENS_FLAG}: it is a diagnostic mode on the host, and the files must be written from a full run that checks the goldens.`,
     );
   }
-  if (shouldWriteGoldens && isShard) {
+  if (shouldWriteBaseline && isPartial) {
     throw new Error(
-      `${WRITE_GOLDENS_FLAG} cannot be combined with ${THEMES_OPTION}: write the goldens from a full run, because a partial run would delete the goldens of the other themes.`,
+      `${WRITE_BASELINE_FLAG} cannot be combined with ${THEMES_OPTION} or ${SCREENS_OPTION}: write the baseline from a full run, because a partial run would drop the keys of what it did not measure.`,
     );
   }
-  return { shouldWriteBaseline, shouldWriteGoldens, themes };
+  if (shouldWriteGoldens && isPartial) {
+    throw new Error(
+      `${WRITE_GOLDENS_FLAG} cannot be combined with ${THEMES_OPTION} or ${SCREENS_OPTION}: write the goldens from a full run, because a partial run would delete the goldens of what it did not measure.`,
+    );
+  }
+  return { shouldWriteBaseline, shouldWriteGoldens, shouldSkipGoldens, themes, screens };
 }
 
 /**
@@ -198,7 +261,9 @@ function parseArguments(args: ReadonlyArray<string>): {
  * page cannot be measured.
  */
 async function runUiMetrics(): Promise<number> {
-  const { shouldWriteBaseline, shouldWriteGoldens, themes } = parseArguments(process.argv.slice(2));
+  const { shouldWriteBaseline, shouldWriteGoldens, shouldSkipGoldens, themes, screens } =
+    parseArguments(process.argv.slice(2));
+  const selectedScreens = UI_SCREENS.filter((screen) => screens.includes(screen.name));
 
   const startedAt = performance.now();
   await rm(outputDir, { recursive: true, force: true });
@@ -226,7 +291,7 @@ async function runUiMetrics(): Promise<number> {
     browser = await launchCaptureBrowser();
     chromiumVersion = browser.version();
     // Only the default glass level is loaded: glass 0 % is measured on the same page.
-    variants = listUiVariants().filter(
+    variants = listUiVariants(selectedScreens).filter(
       (variant) =>
         themes.includes(variant.theme) &&
         variant.scale === METRICS_SCALE &&
@@ -244,18 +309,25 @@ async function runUiMetrics(): Promise<number> {
   const current = mergeMeasurements(measurements);
   const metricsText = formatBaseline(current);
   await writeFile(join(outputDir, "metrics.json"), metricsText);
+  const elements = mergeElements(measurements);
+  await writeFile(join(outputDir, "elements.json"), `${JSON.stringify(elements, null, 2)}\n`);
 
   const goldensLocation: GoldensLocation = {
     goldensDir,
     screenshotsDir: outputDir,
     diffDir: join(outputDir, "golden-diff"),
     unmeasuredThemes: ALL_THEMES.filter((theme) => !themes.includes(theme)),
+    unmeasuredScreens: UI_SCREENS.map((screen) => screen.name).filter(
+      (name) => !screens.includes(name),
+    ),
     names: variants.map((variant) => buildGoldenName(variant.theme, variant.screen.name)),
   };
   const provenance = buildProvenance(chromiumVersion, readPlaywrightVersion());
   let goldensPassed = true;
   let goldensSection: string;
-  if (shouldWriteGoldens) {
+  if (shouldSkipGoldens) {
+    goldensSection = `## Goldens: not checked\n\n${NO_GOLDENS_FLAG} skipped the pixel comparison. This run does not show whether the screenshots equal their goldens.\n`;
+  } else if (shouldWriteGoldens) {
     goldensSection = formatGoldensRecording(await recordGoldens(goldensLocation, provenance));
   } else {
     const check = await checkGoldens(goldensLocation, provenance);
@@ -264,7 +336,8 @@ async function runUiMetrics(): Promise<number> {
   }
 
   const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-  const summary = `Measured ${themes.join(", ")}: ${String(measurements.length)} pages, ${String(Object.keys(current).length)} numbers, in ${seconds} s.\n${describeTimings(measurements)}\n`;
+  const scope = screens.length === UI_SCREENS.length ? "" : ` on ${screens.join(", ")}`;
+  const summary = `Measured ${themes.join(", ")}${scope}: ${String(measurements.length)} pages, ${String(Object.keys(current).length)} numbers, in ${seconds} s.\n${describeTimings(measurements)}\n`;
 
   if (shouldWriteBaseline) {
     await writeFile(baselineFile, metricsText);
@@ -272,6 +345,7 @@ async function runUiMetrics(): Promise<number> {
       current,
       compareWithBaseline(current, parseBaseline(metricsText)),
       checkTargets(current),
+      elements,
     )}\n${goldensSection}`;
     await writeFile(join(outputDir, "report.md"), report);
     process.stdout.write(`${report}\nWrote ${baselineFile}.\n${summary}`);
@@ -287,13 +361,20 @@ async function runUiMetrics(): Promise<number> {
   }
   // A full run compares the whole baseline, so a key that no run measures any
   // more is reported as missing rather than filtered away.
-  const comparedBaseline = isFullRun(themes) ? baseline : selectBaselineForThemes(baseline, themes);
+  const comparedBaseline = isFullRun(themes, screens)
+    ? baseline
+    : selectBaselineForRun(baseline, themes, screens);
   const ratchet = compareWithBaseline(current, comparedBaseline);
-  const report = `${formatReport(current, ratchet, checkTargets(current))}\n${goldensSection}`;
+  const report = `${formatReport(current, ratchet, checkTargets(current), elements)}\n${goldensSection}`;
   await writeFile(join(outputDir, "report.md"), report);
   process.stdout.write(`${report}\n${summary}`);
   if (!ratchet.passed) {
-    process.stderr.write(`The UI metrics got worse, or the keys changed. ${HOW_TO_ACCEPT}\n`);
+    process.stderr.write(
+      shouldWriteGoldens
+        ? "The UI metrics got worse, or the keys changed, so the goldens were recorded but the baseline was not. " +
+            "To record both in one run, pass `--write-goldens --write-baseline`; give the reason for the numbers in the pull request body.\n"
+        : `The UI metrics got worse, or the keys changed. ${HOW_TO_ACCEPT}\n`,
+    );
   }
   if (!goldensPassed) {
     process.stderr.write(
@@ -302,9 +383,24 @@ async function runUiMetrics(): Promise<number> {
     );
   }
   if (!ratchet.passed || !goldensPassed) return 1;
-  if (ratchet.better.length > 0) {
+  const notChecked = [
+    ...(screens.length === UI_SCREENS.length ? [] : ["only some screens were measured"]),
+    ...(shouldSkipGoldens ? ["the goldens were not checked"] : []),
+  ];
+  if (notChecked.length > 0) {
     process.stdout.write(
-      `${String(ratchet.better.length)} numbers are better than the baseline. Run \`pnpm --filter @hercule/desktop ui:metrics --write-baseline\` and commit the file, so the gain cannot be lost.\n`,
+      `The numbers pass, but this was not the full check: ${notChecked.join(" and ")}. ` +
+        "Run `pnpm --filter @hercule/desktop ui:metrics` without --screens and --no-goldens before a pull request.\n",
+    );
+  }
+  if (ratchet.better.length > 0) {
+    const howToKeep =
+      notChecked.length > 0
+        ? "A partial run cannot write the baseline. Write it from a full run (`pnpm --filter @hercule/desktop ui:metrics --write-baseline`, in the container with `ui:metrics:container` on a host that is not linux/amd64), and commit the file, so the gain cannot be lost. " +
+          "Pixel-based numbers (contrast, clipping) can differ on this host, so treat these as a hint until the full run confirms them."
+        : "Run `pnpm --filter @hercule/desktop ui:metrics --write-baseline` and commit the file, so the gain cannot be lost.";
+    process.stdout.write(
+      `${String(ratchet.better.length)} numbers are better than the baseline. ${howToKeep}\n`,
     );
   }
   return 0;
@@ -312,7 +408,10 @@ async function runUiMetrics(): Promise<number> {
 
 await runAndSetExitCode(runUiMetrics);
 
-/** Returns whether `themes` is every theme, which is a full run rather than a shard. */
-function isFullRun(themes: ReadonlyArray<string>): boolean {
-  return ALL_THEMES.every((theme) => themes.includes(theme));
+/** Returns whether `themes` is every theme and `screens` is every screen, which is a full run rather than a partial one. */
+function isFullRun(themes: ReadonlyArray<string>, screens: ReadonlyArray<string>): boolean {
+  return (
+    ALL_THEMES.every((theme) => themes.includes(theme)) &&
+    UI_SCREENS.every((screen) => screens.includes(screen.name))
+  );
 }

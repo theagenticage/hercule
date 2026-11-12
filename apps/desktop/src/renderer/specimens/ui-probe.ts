@@ -31,6 +31,7 @@ import {
   computeArea,
   computeLostShare,
   intersectRects,
+  isOnSpacingGrid,
   type ClippingAncestor,
 } from "./ui-probe-clipping";
 
@@ -530,9 +531,12 @@ function hasVisibleBox(element: Element, readFacts: ReadFacts): boolean {
 
 // ---------- Text ----------
 
+/** A text fragment before its element is named: `collectText` adds the name, and the other functions name only the elements they report. */
+type UnnamedFragment = Omit<TextFragment, "element">;
+
 /** A text fragment with the paragraph it belongs to, for the prose measure. */
 interface CollectedFragment {
-  readonly fragment: TextFragment;
+  readonly fragment: UnnamedFragment;
   /** The closest paragraph or list item of a message when the text is prose, else null. */
   readonly paragraph: Element | null;
   /**
@@ -1083,7 +1087,11 @@ function readPaintedTextFragments(): CollectedFragment[] {
  * inside an element of opacity 0 is not drawn, so it is left out.
  */
 export function collectText(): TextFragment[] {
-  return readPaintedTextFragments().map((collected) => collected.fragment);
+  const describe = createDescriber();
+  return readPaintedTextFragments().map(({ fragment, owner }) => ({
+    ...fragment,
+    element: describe(owner),
+  }));
 }
 
 // ---------- Hiding text and see-through groups ----------
@@ -1355,6 +1363,61 @@ function describeElement(element: Element): string {
   return [element.tagName.toLowerCase(), ...classes].join(".");
 }
 
+/** How many ancestors, with the element itself, `describeElementInContext` names. */
+const DESCRIBED_PATH_LENGTH = 3;
+
+/** How many characters of an element's text `describeElementInContext` shows. */
+const DESCRIBED_TEXT_LENGTH = 40;
+
+/** How many characters of an element's text are read before the spaces are collapsed: more than is shown, because spaces shrink. */
+const DESCRIBED_TEXT_READ_LENGTH = 200;
+
+/** Returns the text an element shows, for its description: the value or placeholder of a field, else its text content, on one line. */
+function readShownText(element: Element): string {
+  const text =
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value || element.placeholder
+      : (element.textContent ?? "");
+  // Cut before collapsing, so that a container with a long text does not cost a pass over all of it.
+  return text
+    .slice(0, DESCRIBED_TEXT_READ_LENGTH)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, DESCRIBED_TEXT_LENGTH);
+}
+
+/**
+ * Returns a name for an element that a person can find on the page: the tag
+ * and first two classes of the element and its two nearest ancestors (below
+ * the body), joined by " > ", then the first 40 characters of its text in
+ * quotes. The name uses no generated ids, so it is the same on every run.
+ */
+function describeElementInContext(element: Element): string {
+  const path: string[] = [];
+  for (
+    let current: Element | null = element;
+    current !== null && current !== document.body && path.length < DESCRIBED_PATH_LENGTH;
+    current = current.parentElement
+  ) {
+    path.unshift(describeElement(current));
+  }
+  const text = readShownText(element);
+  return text === "" ? path.join(" > ") : `${path.join(" > ")} "${text}"`;
+}
+
+/** Returns a function that names elements like `describeElementInContext` and builds each name once, because one element draws many lines. */
+function createDescriber(): (element: Element) => string {
+  const names = new Map<Element, string>();
+  return (element) => {
+    let name = names.get(element);
+    if (name === undefined) {
+      name = describeElementInContext(element);
+      names.set(element, name);
+    }
+    return name;
+  };
+}
+
 /** Returns every visible element of the page: it has a box, is not hidden, and the box touches the window. */
 function listVisibleElements(readFacts: ReadFacts): Element[] {
   const window_ = readWindowRect();
@@ -1474,6 +1537,12 @@ export function collectDiscipline(): DisciplineFacts {
     isSampleOrItsLabel(element) || isPiece(element);
   const visibleTypeSet = new Set(visible.filter((element) => !isExemptFromSizes(element)));
 
+  const describe = createDescriber();
+  const examples = {
+    fontSizes: new Map<string, string>(),
+    fontWeights: new Map<string, string>(),
+    radii: new Map<string, string>(),
+  };
   const fontSizes = new Set<number>();
   const fontWeights = new Set<number>();
   let pieceTextFragments = 0;
@@ -1482,17 +1551,28 @@ export function collectDiscipline(): DisciplineFacts {
       pieceTextFragments += 1;
       continue;
     }
-    fontWeights.add(fragment.fontWeight);
-    if (!isSample(owner)) fontSizes.add(fragment.fontSize);
+    if (!fontWeights.has(fragment.fontWeight)) {
+      fontWeights.add(fragment.fontWeight);
+      examples.fontWeights.set(String(fragment.fontWeight), describe(owner));
+    }
+    if (!isSample(owner) && !fontSizes.has(fragment.fontSize)) {
+      fontSizes.add(fragment.fontSize);
+      examples.fontSizes.set(String(fragment.fontSize), describe(owner));
+    }
   }
 
   const radii = new Set<string>();
   const spacingValues: number[] = [];
+  const offGridSpacing: Array<{ element: string; values: string[] }> = [];
   for (const element of visible) {
+    const offGrid: string[] = [];
     const style = readFacts(element).style;
     for (const longhand of RADIUS_LONGHANDS.slice(0, 4)) {
       const radius = style.getPropertyValue(longhand).trim();
-      if (!/^0(?:px|%)?(?: 0(?:px|%)?)?$/.test(radius)) radii.add(radius);
+      if (!/^0(?:px|%)?(?: 0(?:px|%)?)?$/.test(radius) && !radii.has(radius)) {
+        radii.add(radius);
+        examples.radii.set(radius, describe(element));
+      }
     }
     const styleMap = element.computedStyleMap();
     for (const property of SPACING_PROPERTIES) {
@@ -1501,8 +1581,10 @@ export function collectDiscipline(): DisciplineFacts {
       const value = styleMap.get(property);
       if (value instanceof CSSUnitValue && value.unit === "px" && value.value !== 0) {
         spacingValues.push(value.value);
+        if (!isOnSpacingGrid(value.value)) offGrid.push(`${property} ${String(value.value)}px`);
       }
     }
+    if (offGrid.length > 0) offGridSpacing.push({ element: describe(element), values: offGrid });
   }
 
   const offScaleFontSizes = new Set<string>();
@@ -1569,8 +1651,14 @@ export function collectDiscipline(): DisciplineFacts {
     offScaleFontSizes: [...offScaleFontSizes].sort(text),
     offTokenRadii: [...offTokenRadii].sort(text),
     spacingValues,
+    offGridSpacing,
     fixedSizeSamples: samples.length,
     pieceTextFragments,
+    examples: {
+      fontSizes: Object.fromEntries(examples.fontSizes),
+      fontWeights: Object.fromEntries(examples.fontWeights),
+      radii: Object.fromEntries(examples.radii),
+    },
   };
 }
 
@@ -1629,6 +1717,7 @@ export function collectTargets(): ProbeTarget[] {
   }
   const readFacts = createFactsReader();
   const targets: ProbeTarget[] = [];
+  const describe = createDescriber();
   for (const element of document.querySelectorAll(TARGET_SELECTOR)) {
     if (!hasVisibleBox(element, readFacts)) continue;
     if (element.closest('[inert], [aria-disabled="true"]') !== null) continue;
@@ -1649,6 +1738,7 @@ export function collectTargets(): ProbeTarget[] {
       name: nameTarget(element),
       inlineInProse: element.tagName === "A" && isInProse(element),
       inWindow: isSameRect(box, visibleBox),
+      element: describe(element),
     });
   }
   return targets;
@@ -1852,9 +1942,13 @@ export function removePerturbation(): void {
 export function measureClipping(): ClippingFacts {
   const readFacts = createFactsReader();
   const collected = readTextFragments(readFacts);
+  const describe = createDescriber();
   let clippedCharacters = 0;
-  for (const { fragment, lostShare } of collected) {
-    clippedCharacters += Math.round(fragment.length * lostShare);
+  const clippedTexts: Array<{ element: string; characters: number }> = [];
+  for (const { fragment, lostShare, owner } of collected) {
+    const characters = Math.round(fragment.length * lostShare);
+    clippedCharacters += characters;
+    if (characters > 0) clippedTexts.push({ element: describe(owner), characters });
   }
 
   // Sweep from left to right: a fragment can overlap only the fragments that start before it ends.
@@ -1865,9 +1959,13 @@ export function measureClipping(): ClippingFacts {
         !each.hasStandInBox &&
         readCoverage(readFacts, each) !== "hidden",
     )
-    .map(({ fragment }) => ({ sourceId: fragment.sourceId, box: fragment.visibleBox! }))
+    .map(({ fragment, owner }) => ({
+      sourceId: fragment.sourceId,
+      box: fragment.visibleBox!,
+      owner,
+    }))
     .sort((first, second) => first.box.left - second.box.left);
-  let overlappingPairs = 0;
+  const overlaps: Array<{ first: string; second: string; area: number }> = [];
   for (let first = 0; first < drawn.length; first++) {
     const one = drawn[first]!;
     for (let second = first + 1; second < drawn.length; second++) {
@@ -1875,10 +1973,16 @@ export function measureClipping(): ClippingFacts {
       if (other.box.left >= one.box.right) break;
       if (other.sourceId === one.sourceId) continue;
       const shared = intersectRects(one.box, other.box);
-      if (shared !== null && computeArea(shared) > OVERLAP_THRESHOLD_PX2) overlappingPairs++;
+      if (shared !== null && computeArea(shared) > OVERLAP_THRESHOLD_PX2) {
+        overlaps.push({
+          first: describe(one.owner),
+          second: describe(other.owner),
+          area: Math.round(computeArea(shared)),
+        });
+      }
     }
   }
-  return { clippedCharacters, overlappingPairs };
+  return { clippedCharacters, overlappingPairs: overlaps.length, clippedTexts, overlaps };
 }
 
 /**
@@ -1890,7 +1994,7 @@ export function measureClipping(): ClippingFacts {
  * is chosen among all lines of the paragraph, also those out of view.
  */
 export function measureProse(): ProseFacts {
-  const byParagraph = new Map<Element, TextFragment[]>();
+  const byParagraph = new Map<Element, UnnamedFragment[]>();
   for (const { fragment, paragraph } of readPaintedTextFragments()) {
     if (paragraph === null) continue;
     const group = byParagraph.get(paragraph);
@@ -1898,13 +2002,17 @@ export function measureProse(): ProseFacts {
     else group.push(fragment);
   }
 
+  const describe = createDescriber();
+  const paragraphs: Array<{ element: string; lines: number; meanCharactersPerLine: number }> = [];
   let lines = 0;
   let characters = 0;
-  for (const fragments of byParagraph.values()) {
+  for (const [paragraph, fragments] of byParagraph) {
+    let paragraphCharacters = 0;
+    let paragraphFullLines = 0;
     const sorted = [...fragments].sort(
       (first, second) => first.box.top - second.box.top || first.box.left - second.box.left,
     );
-    const paragraphLines: TextFragment[][] = [];
+    const paragraphLines: UnnamedFragment[][] = [];
     for (const fragment of sorted) {
       const current = paragraphLines.at(-1);
       if (
@@ -1921,11 +2029,21 @@ export function measureProse(): ProseFacts {
         (fragment) => fragment.visibleBox !== null && isSameRect(fragment.box, fragment.visibleBox),
       );
       if (!isFullyVisible) continue;
+      const lineCharacters = line.reduce((sum, fragment) => sum + fragment.length, 0);
       lines++;
-      characters += line.reduce((sum, fragment) => sum + fragment.length, 0);
+      characters += lineCharacters;
+      paragraphFullLines++;
+      paragraphCharacters += lineCharacters;
+    }
+    if (paragraphFullLines > 0) {
+      paragraphs.push({
+        element: describe(paragraph),
+        lines: paragraphFullLines,
+        meanCharactersPerLine: paragraphCharacters / paragraphFullLines,
+      });
     }
   }
-  return { lines, meanCharactersPerLine: lines === 0 ? null : characters / lines };
+  return { lines, meanCharactersPerLine: lines === 0 ? null : characters / lines, paragraphs };
 }
 
 /**
