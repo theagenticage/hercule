@@ -98,8 +98,10 @@
   transform: none;
 }
 /* The line never covers what it sits beside: it rises over the selection bar, and under 1032px
-   over the pane's moves while the pane lies over the list. */
-.ib:has(.ib-selbar[data-shown]) .undo-line {
+   over the pane's moves while the pane lies over the list. The bar comes first in the markup so a
+   sibling selector finds it: a `:has()` on `.ib` would make the browser style the whole page again
+   each time anything in the Inbox changes. */
+.ib .ib-selbar[data-shown] ~ .undo-line {
   bottom: 66px;
 }
 @media (max-width: 1031px) {

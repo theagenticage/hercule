@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -87,6 +88,8 @@ function describeStableRow(
 
 const NO_REFS: ReadonlyArray<string> = [];
 
+const NO_VIEWS: ReadonlyArray<InboxRowView> = [];
+
 /**
  * Returns how the rows move for the change the visit last made: whether the
  * rows that left slid aside (a dismissal), the rows an undo put back, and the
@@ -106,12 +109,29 @@ const readListMotion = (
   arriving: change?.kind === "arrived" ? change.refs : NO_REFS,
 });
 
-/** Renders a column that holds a state (the skeleton or an empty state) where the rows would be. */
-function ListState({ children, isBusy }: { children: JSX.Element; isBusy?: boolean }): JSX.Element {
+/**
+ * Renders a column that holds a state (the skeleton or an empty state) where
+ * the rows would be. With `isCentred` the state takes the column's whole
+ * height, which the empty and failed states need to centre themselves. It is
+ * a class and not a `:has()` rule in the stylesheet, because a `:has()` rule
+ * makes the browser check the column again each time a row is added to it.
+ */
+function ListState({
+  children,
+  isBusy,
+  isCentred,
+}: {
+  children: JSX.Element;
+  isBusy?: boolean;
+  isCentred?: boolean;
+}): JSX.Element {
   return (
     <div className="ib-list">
       <div className="ib-scroll">
-        <div className="ib-lines" aria-busy={isBusy === true ? "true" : undefined}>
+        <div
+          className={isCentred === true ? "ib-lines is-centred" : "ib-lines"}
+          aria-busy={isBusy === true ? "true" : undefined}
+        >
           {children}
         </div>
       </div>
@@ -192,7 +212,10 @@ export function InboxListPart({
   const handledHeadingRequest = useRef(headingFocusRequest);
   const isReady = snapshot.status === "ready";
   const rows = isReady ? snapshot.rows : NO_ROWS;
-  const now = useInboxNow(rows);
+  const reading = useInboxNow(rows);
+  // `useInboxNow` returns a new Date on each render; the views depend on the moment it holds.
+  const readingTime = reading.getTime();
+  const now = useMemo(() => new Date(readingTime), [readingTime]);
   const isNarrowed = isSearching(search);
   const arrivalCount = isReady ? snapshot.arrivals : 0;
   const isEmpty = isReady && rows.length === 0 && arrivalCount === 0;
@@ -228,10 +251,16 @@ export function InboxListPart({
     headingRef.current?.focus({ preventScroll: true });
   }, [headingFocusRequest]);
 
-  const views =
-    snapshot.order === undefined
-      ? []
-      : rows.map((thing) => describeStableRow(thing, snapshot.order!, now, username));
+  // One array for as long as the rows, the order, the minute and the user stay the same: the list
+  // takes a new array to be a change of rows, and a step with J changes none.
+  const order = snapshot.order;
+  const views = useMemo(
+    () =>
+      order === undefined
+        ? NO_VIEWS
+        : rows.map((thing) => describeStableRow(thing, order, now, username)),
+    [rows, order, now, username],
+  );
 
   const empty: InboxEmptyState | null = (() => {
     if (isReady && rows.length === 0 && arrivalCount > 0) {
@@ -337,7 +366,7 @@ export function InboxListPart({
         </ListState>
       )}
       {snapshot.status === "failed" && (
-        <ListState>
+        <ListState isCentred>
           <InboxReadFailed
             reason={readErrorMessage(snapshot.error)}
             onTryAgain={() => {
@@ -347,7 +376,7 @@ export function InboxListPart({
         </ListState>
       )}
       {empty !== null && (
-        <ListState>
+        <ListState isCentred>
           <InboxEmpty state={empty} isRising={isRising} headingRef={headingRef} />
         </ListState>
       )}

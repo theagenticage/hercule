@@ -1,3 +1,7 @@
+"use no memo";
+// The Inbox chunk has a size budget (spec 17 §What the Inbox costs). This file draws what is
+// shown rarely or rarely changes, so the React Compiler's cache for it would cost more bytes
+// than the renders it saves.
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import type { OpenCardWords } from "@hercule/client-core/inbox";
@@ -180,6 +184,7 @@ function OpenCardMoves({
  *   moves, or `null` when the card cannot be handed to a workflow.
  */
 export function OpenCardBody({
+  sheetKey,
   url,
   words,
   plugins,
@@ -193,6 +198,8 @@ export function OpenCardBody({
   linked,
   hand,
 }: {
+  /** Names the card the sheet shows. Another one starts the moves' arming again, as a new sheet does. */
+  readonly sheetKey: string;
   readonly url: string;
   readonly words: OpenCardWords;
   readonly plugins: readonly PluginIdentity[];
@@ -248,6 +255,7 @@ export function OpenCardBody({
       )}
       {linked}
       <OpenCardMoves
+        key={sheetKey}
         words={words}
         hand={hand}
         pluginName={pluginName}

@@ -5,7 +5,7 @@ import type {
   InboxRowTime,
   InboxRowView,
 } from "@hercule/client-core/inbox";
-import type { JSX, MouseEvent } from "react";
+import { memo, type JSX, type MouseEvent } from "react";
 import { buildLook, Face, UserAvatar } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
 import { ArrowIcon } from "../../icons/arrow";
@@ -176,8 +176,11 @@ function RowMoves({
  * The row is a tree item at level 1. `position` is its place among `size`
  * rows, one based, because a virtual list draws only some of them. Only the
  * current row is in the tab order.
+ *
+ * The row is memoized, so a render of the list draws again only the rows
+ * whose props changed. That holds only while `actions` keeps its identity.
  */
-export function InboxRow({
+export const InboxRow = memo(function InboxRow({
   view,
   plugins,
   position,
@@ -265,4 +268,4 @@ export function InboxRow({
       {actions === null ? null : <RowMoves view={view} actions={actions} />}
     </div>
   );
-}
+});

@@ -63,6 +63,28 @@ describe("InboxList", () => {
     ]);
   });
 
+  it("calls the actions of the latest render, though a row draws again only when its own props change", async () => {
+    const { actions, rerender } = renderList(3);
+    const later = buildInboxRowActions();
+    rerender(
+      <InboxList
+        listId="waits"
+        label="Someone waits on me"
+        rows={buildRows(3)}
+        plugins={TEST_PLUGINS}
+        currentRef="thing-0"
+        selection={new Set()}
+        actions={later}
+        onViewportChange={() => {}}
+      />,
+    );
+
+    await userEvent.click(screen.getAllByRole("treeitem")[1]!);
+
+    expect(actions.calls).toEqual([]);
+    expect(later.calls).toEqual([["pick", "thing-1"]]);
+  });
+
   it("draws no puck when no row is current", () => {
     const { container } = renderList(0, { currentRef: null });
     expect(container.querySelector(".ib-puck")?.hasAttribute("hidden")).toBe(true);
