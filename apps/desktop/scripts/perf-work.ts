@@ -361,9 +361,9 @@ export interface StepContext {
   readonly inspectorUrl: string;
 }
 
-/** Whether a request reads the Work board or the Inbox. */
+/** Whether a request reads the Work board or a page of the Inbox. */
 const isDeskRead = (request: RecordedRequest) =>
-  /\/tasks\/board$|\/external-entities\/inbox$/.test(request.url.pathname);
+  /\/tasks\/board$|\/external-entities\/inbox\/query$/.test(request.url.pathname);
 
 /**
  * Runs `step`, which makes `changes` changes, and returns what the page and
@@ -937,7 +937,7 @@ export function reportDeskLaunch(measured: DeskLaunch): void {
 }
 
 /** Presses `key` with the modifiers `modifiers` (CDP's bits: 1 Alt, 2 Ctrl, 4 Meta, 8 Shift), down and then up. */
-async function pressKeyWith(page: Inspector, key: string, code: string, modifiers: number) {
+export async function pressKeyWith(page: Inspector, key: string, code: string, modifiers: number) {
   for (const type of ["rawKeyDown", "keyUp"]) {
     await page.send("Input.dispatchKeyEvent", {
       type,
