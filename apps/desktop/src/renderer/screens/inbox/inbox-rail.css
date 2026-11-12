@@ -1,0 +1,269 @@
+/* The Inbox's rail. Rows sit on the sidebar's rhythm: 30px, the icon column 16px, the name at 34px
+   from the row's edge, counts at the end in tabular figures. Groups are told apart by space. */
+.ib-rail {
+  /* Project health: a shape and a colour, so it reads in grey too. At risk has a hue of its own,
+     between tomato and marigold, so it is never read as either. */
+  --health-on: var(--ok);
+  --health-risk: oklch(0.56 0.15 48);
+  --health-off: var(--fail-ink);
+
+  min-height: 0;
+  overflow-y: auto;
+  padding: 9px 10px 32px 14px;
+  border-right: 1px solid var(--divider);
+  scrollbar-width: thin;
+}
+[data-theme="orient-express"] .ib-rail,
+[data-theme="dark"] .ib-rail,
+[data-theme="nile"] .ib-rail,
+[data-theme="end-house"] .ib-rail,
+[data-theme="blue-train"] .ib-rail {
+  --health-risk: oklch(0.78 0.13 50);
+}
+.ib-rail [hidden] {
+  display: none;
+}
+
+.ib-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 12px;
+}
+.ib-rail-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 18px;
+  text-align: left;
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.ib-rail-row:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ib-rail-row[data-on] {
+  background: var(--selected);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ib-rail-row:focus-visible,
+.ib-rail-star:focus-visible,
+.ib-rail-more:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.ib-rail-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--faint);
+}
+.ib-rail-row:hover .ib-rail-icon,
+.ib-rail-row[data-on] .ib-rail-icon {
+  color: var(--muted);
+}
+.ib-rail-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ib-rail-account-suffix {
+  color: var(--faint);
+}
+.ib-rail-count {
+  min-width: 16px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.ib-rail-row[data-on] .ib-rail-count {
+  color: var(--muted);
+}
+/* A count still being read: a still bar, no shimmer, so a slow read costs no frames. */
+.ib-rail-count-skeleton {
+  display: inline-block;
+  width: 16px;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+
+/* A saved query's key, over its count under the pointer and on focus. */
+.ib-rail-key {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.ib-rail-row:hover .ib-rail-key,
+.ib-rail-row:focus-visible .ib-rail-key {
+  opacity: 1;
+}
+.ib-rail-row:has(.ib-rail-key):hover .ib-rail-count,
+.ib-rail-row:has(.ib-rail-key):focus-visible .ib-rail-count {
+  opacity: 0;
+}
+
+/* Headings: the sidebar's eyebrows. */
+.ib-rail-heading {
+  margin: 20px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 16px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* A pin or a value carries a star of its own, shown on hover and on focus, over the count. */
+.ib-rail-pair {
+  position: relative;
+}
+.ib-rail-star {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  translate: 0 -50%;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.ib-rail-pair:hover .ib-rail-star,
+.ib-rail-pair:focus-within .ib-rail-star {
+  opacity: 1;
+}
+.ib-rail-pair:hover .ib-rail-count,
+.ib-rail-pair:focus-within .ib-rail-count {
+  opacity: 0;
+}
+.ib-rail-star:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ib-rail-star[aria-pressed="true"] {
+  color: var(--muted);
+}
+.ib-rail-star[aria-pressed="true"] svg path {
+  fill: currentColor;
+}
+
+/* Browse: a source folds; its facets are quiet labels; values align with the source's name. */
+.ib-rail-source + .ib-rail-source {
+  margin-top: 1px;
+}
+.ib-rail-fold:has(.ib-rail-warning) {
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+}
+.ib-rail-fold .ib-rail-icon {
+  color: inherit;
+}
+/* The fold's chevron takes the mark's place under the pointer and on focus, so counts keep one column. */
+.ib-rail-chevron {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity var(--m-quick) var(--m-ease),
+    transform var(--m-base) var(--m-ease);
+}
+.ib-rail-chevron[data-open] {
+  transform: rotate(90deg);
+}
+.ib-rail-fold:hover .ib-rail-chevron,
+.ib-rail-fold:focus-visible .ib-rail-chevron {
+  opacity: 1;
+}
+.ib-rail-fold:hover .ib-rail-icon > svg:first-child,
+.ib-rail-fold:focus-visible .ib-rail-icon > svg:first-child {
+  opacity: 0;
+}
+.ib-rail-warning {
+  display: inline-grid;
+  color: var(--fail-ink);
+}
+.ib-rail-source-body {
+  padding-bottom: 8px;
+}
+.ib-rail-facet {
+  margin: 8px 0 2px;
+  padding-left: 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+}
+.ib-rail-account {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  height: 28px;
+  margin: 8px 0 0;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  line-height: 18px;
+}
+.ib-rail-value {
+  height: 28px;
+}
+.ib-rail-value[data-empty] .ib-rail-name {
+  color: var(--faint);
+}
+.ib-rail-more {
+  display: block;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 34px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  text-align: left;
+}
+.ib-rail-more:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ib-rail-health {
+  display: inline-grid;
+}
+.ib-rail-health[data-health="on-track"] {
+  color: var(--health-on);
+}
+.ib-rail-health[data-health="at-risk"] {
+  color: var(--health-risk);
+}
+.ib-rail-health[data-health="off-track"] {
+  color: var(--health-off);
+}
