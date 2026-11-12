@@ -34,7 +34,7 @@ export const buildSignalEntitiesDouble = (
           }),
         );
       }),
-    recordArrivalAfter: (ref, write) =>
+    recordArrivalAfter: (ref, _askingKinds, write) =>
       Effect.suspend(() => {
         calls.arrivals.push(ref);
         return write;

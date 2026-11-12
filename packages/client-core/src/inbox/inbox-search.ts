@@ -6,31 +6,13 @@
  * The list's scope (the saved query or Browse place being searched) is not part of this module:
  * nothing here can remove it.
  */
+import type { InboxClause, InboxCounts } from "@hercule/contract";
 
-// TODO(#1122): import from @hercule/contract
-export type InboxFieldType = "text" | "person" | "enum" | "number" | "money" | "age" | "bool";
-
-// TODO(#1122): import from @hercule/contract
 /** One field of the `InboxCounts.fields` reply: one per (source, key); core fields have no source. */
-export interface InboxField {
-  key: string;
-  label: string;
-  type: InboxFieldType;
-  source?: string;
-  values?: string[];
-  currency?: string;
-}
+export type InboxField = InboxCounts["fields"][number];
 
-// TODO(#1122): import from @hercule/contract
-/** One condition of the read. A typed token has no `source` and no `connectionId`: it is cross-source. */
-export interface InboxClause {
-  key: string;
-  op: "is" | "over" | "under";
-  /** A boolean for `bool` fields, seconds for `age` fields, a plain number for `number` and `money`. */
-  value: string | number | boolean;
-  source?: string;
-  connectionId?: string;
-}
+/** The type of a query field. */
+export type InboxFieldType = InboxField["type"];
 
 /** A value the server offers for a field, with how many things hold it. */
 export interface SuggestedValue {

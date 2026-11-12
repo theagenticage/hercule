@@ -163,6 +163,36 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
     hasAccount,
   });
 
+  /**
+   * Returns when the user last handed a thing of each kind to each workflow,
+   * from the hand-off history: a Task's provenance entries that name both a
+   * thing and the run the hand-off started. The key is `<workflow id>|<kind>`.
+   * One statement, none for no kinds.
+   */
+  const readLastHandedTimes = (
+    kinds: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+    kinds.length === 0
+      ? Effect.succeed(new Map())
+      : Effect.map(
+          sql<{
+            readonly workflow_id: Uint8Array;
+            readonly kind: string;
+            readonly last_at: string;
+          }>`
+            SELECT r.workflow_id AS workflow_id, e.kind AS kind, MAX(p.at) AS last_at
+            FROM task_provenance p
+              JOIN runs r ON r.id = p.run_id
+              JOIN external_entities e ON e.ref = p.ref
+            WHERE p.run_id IS NOT NULL AND p.ref IS NOT NULL AND r.workflow_id IS NOT NULL
+              AND e.kind IN (SELECT value FROM json_each(${JSON.stringify(kinds)}))
+            GROUP BY r.workflow_id, e.kind`,
+          (rows) =>
+            new Map(
+              rows.map((row) => [`${uuidToString(row.workflow_id)}|${row.kind}`, row.last_at]),
+            ),
+        );
+
   const indexKinds = (kindSources: ReadonlyArray<EntityKindSource>) =>
     new Map(kindSources.map((offered) => [offered.kind, offered]));
 
@@ -177,11 +207,12 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
      * offers to `MAX_ENTITY_OFFERS` (available first, each group by name),
      * Connections to `MAX_ACTING_CONNECTIONS` (oldest first). Nothing that
      * decides a handoff may read these lists; use `prepareHandoff`, which is
-     * not cut.
+     * not cut. Each offer carries `lastHandedAt`, when the user last handed a
+     * thing of its kind to its workflow.
      *
      * A constant number of statements however many targets there are: the
-     * acting Connections, the workflows with an entity or signal input and the Resources
-     * they name.
+     * acting Connections, the workflows with an entity or signal input, the
+     * Resources they name and the hand-off history.
      */
     readWorkflowOffers: (
       targets: ReadonlyArray<WorkflowOfferTarget>,
@@ -197,6 +228,9 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
         const remotes = yield* readWorkspaceRemotes(
           candidates.flatMap(({ workspace }) => listWorkspaceResourceIds(workspace)),
         );
+        const handed = yield* readLastHandedTimes([
+          ...new Set(targets.map((target) => target.kind)),
+        ]);
 
         const offerSetIds = new Map<string, string>();
         const offerSets: Record<string, ReadonlyArray<WorkflowOffer>> = {};
@@ -208,7 +242,10 @@ export const makeWorkflowOfferReads = Effect.gen(function* () {
           );
           const id = buildWorkflowOfferSetId(subject);
           offerSetIds.set(target.ref, id);
-          offerSets[id] ??= evaluateWorkflowOffers(candidates, subject, remotes);
+          offerSets[id] ??= evaluateWorkflowOffers(candidates, subject, remotes).map((offer) => {
+            const lastHandedAt = handed.get(`${offer.workflowId}|${target.kind}`);
+            return lastHandedAt === undefined ? offer : { ...offer, lastHandedAt };
+          });
         }
         return { offerSetIds, offerSets, actingConnections };
       }),

@@ -103,6 +103,7 @@ const run = <A, E>(
     findSignalKind: (kind) =>
       Effect.succeed(Option.fromNullishOr(kinds.find((known) => known.kind === kind))),
     status: () => Effect.succeed(Option.some({ _tag: "active" as const })),
+    listActiveEventSources: () => Effect.succeed([{ signalKinds: kinds }] as never),
   });
   const layer = SignalRaisesLayer.pipe(
     Layer.provide(entities.layer),
@@ -413,7 +414,7 @@ describe("reporting the arrival of a raised signal", () => {
     const failing = {
       layer: Layer.succeed(SignalEntities)({
         readByRefs: () => Effect.succeed(new Map()),
-        recordArrivalAfter: (_ref, write) =>
+        recordArrivalAfter: (_ref, _askingKinds, write) =>
           Effect.flatMap(write, () => Effect.die("the entity write failed")),
       }),
     };

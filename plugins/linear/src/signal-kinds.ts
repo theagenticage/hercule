@@ -372,7 +372,7 @@ export const LINEAR_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     label: "Assigned to you",
     description: "Someone assigned you an issue in Linear.",
     noun: "assignment",
-    asks: true,
+    asks: false,
     from: ["linear.assigned"],
     rule: '"yes"',
     guidance: "Someone assigned the user a Linear issue. It is always a signal.",

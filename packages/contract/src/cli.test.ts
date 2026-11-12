@@ -66,6 +66,7 @@ const HIDDEN = [
   "task.undoTryAgain",
   "task.readAttention",
   "externalEntity.countInbox",
+  "externalEntity.suggestInboxValues",
   "externalEntity.undoTakeOn",
 ];
 

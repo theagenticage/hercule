@@ -1,19 +1,19 @@
-/** Test cards for the Inbox, in the invented Northwind Market world. */
+/** Test cards and Inbox things, in the invented Northwind Market world. */
 import type {
   Connection,
   EntityPlace,
   EntitySignalLine,
-  Inbox,
-  InboxCard,
+  InboxThing,
   PluginDetail,
   WorkflowOffer,
 } from "@hercule/contract";
+import type { CardRecord } from "./card-face";
 
 /**
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
  * an `acme/project`, that was assigned to the user and observed on 1 November. `overrides` change any field.
  */
-export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): InboxCard => ({
+export const buildInboxCard = (id: string, overrides: Partial<CardRecord> = {}): CardRecord => ({
   id,
   ref: `acme:ticket:${id}`,
   kind: "acme/ticket",
@@ -37,11 +37,6 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   firstObservedAt: "2026-11-01T09:00:00.000Z",
   ancestors: [],
   contextComplete: true,
-  side: "ongoing",
-  signals: { openCount: 0, kinds: [] },
-  offerSetId: "none",
-  actingConnections: [],
-  liveWorkflows: [],
   ...overrides,
 });
 
@@ -49,7 +44,7 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
  * Returns a compact card of the invented `acme/review` kind: a fast-paced
  * request with a patience of 24 hours. `overrides` change any field.
  */
-export const buildRequestCard = (id: string, overrides: Partial<InboxCard> = {}): InboxCard =>
+export const buildRequestCard = (id: string, overrides: Partial<CardRecord> = {}): CardRecord =>
   buildInboxCard(id, {
     ref: `acme:review:${id}`,
     kind: "acme/review",
@@ -61,7 +56,6 @@ export const buildRequestCard = (id: string, overrides: Partial<InboxCard> = {})
     identifier: `#${id}`,
     title: `Review ${id}`,
     concerns: ["review-requested"],
-    side: "requests",
     ...overrides,
   });
 
@@ -118,23 +112,35 @@ export const buildWorkflowOffer = (
   ...(unavailable === undefined ? {} : { unavailable }),
 });
 
-/** Returns an Inbox of these cards, in this order, with the places and edges given. */
-export const buildInbox = (
-  cards: readonly InboxCard[],
-  context: Partial<
-    Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers" | "offerSets">
-  > = {},
-): Inbox => ({
-  cards,
-  places: [],
-  edges: [],
-  links: [],
-  hints: [],
-  peers: [],
-  offerSets: {},
-  counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
-  truncated: false,
-  ...context,
+/**
+ * Returns a row of the Inbox for a thing of the invented `acme/ticket` kind,
+ * with no asks and no Task. `overrides` change any field.
+ */
+export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {}): InboxThing => ({
+  id,
+  ref: `acme:ticket:${id}`,
+  kind: "acme/ticket",
+  noun: "Ticket",
+  source: "acme",
+  identifier: `ACME-${id}`,
+  title: `Ticket ${id}`,
+  url: `https://acme.example/${id}`,
+  lifecycle: "open",
+  access: "ok",
+  stale: false,
+  observedAt: "2026-11-05T09:00:00.000Z",
+  sourceUpdatedAt: "2026-11-05T09:00:00.000Z",
+  patience: 336,
+  face: null,
+  asks: [],
+  askCount: 0,
+  askKinds: [],
+  openKinds: [],
+  liveWorkflows: [],
+  offerSetId: "none",
+  actingConnections: [],
+  accounts: [],
+  ...overrides,
 });
 
 /**

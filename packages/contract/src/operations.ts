@@ -327,8 +327,15 @@ const TABLE = {
   // `run.query`, for the offers and the workflows running on a card's Task.
   "externalEntity.queryInbox": {
     requires: "task.read",
-    method: "GET",
-    path: "/api/v1/external-entities/inbox",
+    method: "POST",
+    path: "/api/v1/external-entities/inbox/query",
+  },
+  // Reads the values of one field among a list's things, so the service also
+  // checks `signal.query`, as `queryInbox` does.
+  "externalEntity.suggestInboxValues": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/inbox/values",
   },
   "externalEntity.countInbox": {
     requires: "task.read",
@@ -376,12 +383,12 @@ const TABLE = {
   "externalEntity.dismiss": {
     requires: "task.update",
     method: "POST",
-    path: "/api/v1/external-entities/:id/dismiss",
+    path: "/api/v1/external-entities/dismiss",
   },
   "externalEntity.restore": {
     requires: "task.update",
     method: "POST",
-    path: "/api/v1/external-entities/:id/restore",
+    path: "/api/v1/external-entities/restore",
   },
   "externalEntity.addToWork": {
     requires: "task.update",

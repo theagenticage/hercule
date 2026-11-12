@@ -408,25 +408,31 @@ const buildFields = (
   const fields = struct?.fields ?? struct?.schema?.fields;
   const ast = struct?.ast;
   if (ast?.propertySignatures === undefined) return [];
-  return ast.propertySignatures
-    .map((property) => [String(property.name), property.type] as const)
-    .filter(([name]) => !PAGE_FIELDS.has(name))
-    .flatMap(([name, type]) => {
-      const row = rows[name];
-      if (row === undefined) throw new Error(`${id}: ${name} has no row`);
-      if ("hidden" in row) return [];
-      // A field that takes named values is repeatable. As a bare word it
-      // would take every word after it, so the table is wrong.
-      if ("namedValues" in row && "positional" in row) {
-        throw new Error(`${id}: ${name} takes named values, so it must be a flag, not a bare word`);
-      }
-      if ("namedValues" in row && !isRecordOfText(type)) {
-        throw new Error(
-          `${id}: ${name} takes named values, but its schema is not a record of text`,
-        );
-      }
-      return [buildField(name, type, row, carriedIn, fields?.[name])];
-    });
+  return (
+    ast.propertySignatures
+      .map((property) => [String(property.name), property.type] as const)
+      // Only a query string pages by name. A payload field called `cursor`, such
+      // as the Inbox's, is an ordinary flag with its own row.
+      .filter(([name]) => carriedIn !== "query" || !PAGE_FIELDS.has(name))
+      .flatMap(([name, type]) => {
+        const row = rows[name];
+        if (row === undefined) throw new Error(`${id}: ${name} has no row`);
+        if ("hidden" in row) return [];
+        // A field that takes named values is repeatable. As a bare word it
+        // would take every word after it, so the table is wrong.
+        if ("namedValues" in row && "positional" in row) {
+          throw new Error(
+            `${id}: ${name} takes named values, so it must be a flag, not a bare word`,
+          );
+        }
+        if ("namedValues" in row && !isRecordOfText(type)) {
+          throw new Error(
+            `${id}: ${name} takes named values, but its schema is not a record of text`,
+          );
+        }
+        return [buildField(name, type, row, carriedIn, fields?.[name])];
+      })
+  );
 };
 
 /** Returns the payload schema, which is one level deeper: inside a map from media type to codec. */

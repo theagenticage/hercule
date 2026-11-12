@@ -1,10 +1,7 @@
 /** Tests the offers of a card, what a click on one ends, the card once handed, and the line after an undo. */
 import type { HandOffUndo } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { describeCardAloud } from "./card-aloud";
-import type { CardTime } from "./card-wait";
 import {
-  decideCardDraw,
   decideCardHolder,
   decideHandedSentence,
   decideHandMove,
@@ -17,7 +14,7 @@ import {
   partitionOffers,
   readOpenCardHandOff,
 } from "./card-hand-off";
-import { buildInbox, buildInboxCard, buildSignalLine, buildWorkflowOffer } from "./cards.testing";
+import { buildInboxThing, buildSignalLine, buildWorkflowOffer } from "./cards.testing";
 
 const review = buildWorkflowOffer("Review PR", ["github/review-requested"]);
 const fix = buildWorkflowOffer("Fix bug", ["github/checks-failed"]);
@@ -28,7 +25,7 @@ const sameRepoOnly = buildWorkflowOffer("Ship it", [], {
 
 describe("listCardOffers", () => {
   it("reads the set the card names and splits it, keeping the order", () => {
-    const card = buildInboxCard("1", { offerSetId: "set-a" });
+    const card = buildInboxThing("1", { offerSetId: "set-a" });
     expect(listCardOffers(card, { "set-a": [review, sameRepoOnly, fix] })).toEqual({
       available: [review, fix],
       unavailable: [sameRepoOnly],
@@ -36,17 +33,17 @@ describe("listCardOffers", () => {
   });
 
   it("gives a card whose set is missing no offers", () => {
-    expect(listCardOffers(buildInboxCard("1", { offerSetId: "gone" }), {})).toEqual(NO_OFFERS);
+    expect(listCardOffers(buildInboxThing("1", { offerSetId: "gone" }), {})).toEqual(NO_OFFERS);
   });
 
   it("gives every card of one set the same offers, so a card draws again only when its own set changes", () => {
     const set = [review, fix];
-    const first = listCardOffers(buildInboxCard("1", { offerSetId: "set-a" }), { "set-a": set });
-    const second = listCardOffers(buildInboxCard("2", { offerSetId: "set-a" }), {
+    const first = listCardOffers(buildInboxThing("1", { offerSetId: "set-a" }), { "set-a": set });
+    const second = listCardOffers(buildInboxThing("2", { offerSetId: "set-a" }), {
       "set-a": set,
       "set-b": [sameRepoOnly],
     });
-    const changed = listCardOffers(buildInboxCard("2", { offerSetId: "set-a" }), {
+    const changed = listCardOffers(buildInboxThing("2", { offerSetId: "set-a" }), {
       "set-a": [review],
     });
     expect(second).toBe(first);
@@ -108,45 +105,6 @@ describe("decideHandedSentence", () => {
   });
 });
 
-describe("decideCardDraw", () => {
-  const agent = { workflowId: "wf-agent-review", name: "Agent review" };
-  const time: CardTime = {
-    wait: { text: "2d", words: "Waiting 2 days", level: "fresh" },
-    trust: "Facts from 3 days ago",
-    signalAge: "4m",
-  };
-
-  it("draws the face and the time of a card nobody holds, with no holder", () => {
-    const draw = decideCardDraw(buildInboxCard("1", { title: "Fix the basket" }), time);
-    expect(draw).toMatchObject({ ...time, holder: undefined });
-    expect(draw.face.title).toBe("Fix the basket");
-  });
-
-  it("holds a card a Task has for the user", () => {
-    const card = buildInboxCard("1", { taskId: "task-1" });
-    expect(decideCardDraw(card, time).holder).toEqual({ kind: "you" });
-  });
-
-  it("gives a card a workflow is working on its colleague in the wait's place, and a sentence a screen reader reads", () => {
-    const card = buildInboxCard("1", {
-      title: "Fix the basket",
-      taskId: "task-1",
-      liveWorkflows: [agent],
-    });
-    const draw = decideCardDraw(card, time);
-    expect(draw).toMatchObject({
-      wait: null,
-      signalAge: undefined,
-      trust: time.trust,
-      holder: { kind: "colleague", workflow: agent },
-    });
-    expect(draw.face.sentence).toEqual({ text: "Agent review has it", tone: "plain" });
-    expect(describeCardAloud(draw.face, draw.wait, 0)).toBe(
-      "Ticket, ACME-1, Fix the basket, Agent review has it",
-    );
-  });
-});
-
 describe("decideCardHolder", () => {
   const agent = { workflowId: "wf-agent-review", name: "Agent review" };
   const other = { workflowId: "wf-other", name: "Other" };
@@ -169,19 +127,19 @@ describe("decideCardHolder", () => {
       { kind: "colleague", workflow: agent },
     ],
   ])("holds a card with %s", (_name, overrides, holder) => {
-    expect(decideCardHolder(buildInboxCard("1", overrides))).toEqual(holder);
+    expect(decideCardHolder(buildInboxThing("1", overrides))).toEqual(holder);
   });
 });
 
 describe("readOpenCardHandOff", () => {
   const bot = { id: "conn-bot", label: "northwind-bot" };
   const ava = { id: "conn-ava", label: "ava-northwind" };
-  const listed = buildInboxCard("1", {
+  const listed = buildInboxThing("1", {
     offerSetId: "set-a",
     actingConnections: [bot],
-    signals: { openCount: 1, kinds: ["github/mentioned"] },
+    openKinds: ["github/mentioned"],
   });
-  const inbox = buildInbox([listed], { offerSets: { "set-a": [review, sameRepoOnly] } });
+  const inbox = { offerSets: { "set-a": [review, sameRepoOnly] } };
   const detail = {
     kindAvailable: true,
     offers: [fix],

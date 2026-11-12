@@ -37,6 +37,7 @@ import { signalRepository } from "../signals/repository";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
+import { SettingsLayer } from "../settings";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
 import { renderEntitySlots, type FullEntityObservation } from "./slots";
 
@@ -186,8 +187,12 @@ interface Arranged {
   readonly countTasks: Effect.Effect<number, unknown>;
 }
 
+/** The list that holds every thing on the Inbox. */
+const EVERYTHING = { list: { savedQuery: "everything" } } as const;
+
 const buildLayer = (script: Script) =>
   ExternalEntityServiceLayer.pipe(
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(Layer.succeed(EntityLookups)(buildLookups(script))),
     Layer.provideMerge(
       TaskServiceLayer.pipe(
@@ -382,7 +387,7 @@ describe("takeOn", () => {
             grants: ALL.filter((grant) => grant !== missing),
           } as unknown as Actor;
           return Effect.all([
-            Effect.flip(Effect.provideService(service.queryInbox(), CurrentActor, actor)),
+            Effect.flip(Effect.provideService(service.queryInbox(EVERYTHING), CurrentActor, actor)),
             Effect.exit(Effect.provideService(service.read(id), CurrentActor, actor)),
           ]).pipe(Effect.map(([inbox, detail]) => ({ missing, inbox, detail })));
         });
@@ -707,7 +712,7 @@ describe("addToWork", () => {
           result,
           task: yield* tasks.read(result.taskId),
           followed,
-          inbox: yield* service.queryInbox(),
+          inbox: yield* service.queryInbox(EVERYTHING),
           stillThere: detail.concerns,
         };
       }),
@@ -715,8 +720,8 @@ describe("addToWork", () => {
     expect(result).toMatchObject({ created: true, stage: "building", followed: true });
     expect(task).toMatchObject({ stage: "building", title: "Ticket 9" });
     expect(followed).toEqual(["following"]);
-    expect(inbox.cards.map((card) => card.ref)).toEqual([ticketRef("9")]);
-    expect(inbox.cards[0]).toMatchObject({ side: "with-someone-else" });
+    expect(inbox.things.map((card) => card.ref)).toEqual([ticketRef("9")]);
+    expect(inbox.things[0]).toMatchObject({ taskId: task.id });
     expect(stillThere).toEqual(["following"]);
   });
 
@@ -946,10 +951,9 @@ describe("after a merge", () => {
             after: (yield* service.read(one)).taskId,
             taken: yield* service.takeOn(one),
             takenOther: yield* service.takeOn(two),
-            inbox: (yield* service.queryInbox()).cards.map((card) => [
+            inbox: (yield* service.queryInbox(EVERYTHING)).things.map((card) => [
               card.ref,
               card.taskId,
-              card.side,
             ]),
             links: yield* sql<{ readonly following: number; readonly linked_at: string }>`
               SELECT following, linked_at FROM task_entity_links
@@ -962,8 +966,8 @@ describe("after a merge", () => {
     expect(taken).toEqual({ taskId: before.survivorId, created: false });
     expect(takenOther).toEqual({ taskId: before.survivorId, created: false });
     expect(inbox).toEqual([
-      [ticketRef("1"), before.survivorId, "with-someone-else"],
-      [ticketRef("2"), before.survivorId, "with-someone-else"],
+      [ticketRef("1"), before.survivorId],
+      [ticketRef("2"), before.survivorId],
     ]);
     expect(links).toEqual([{ following: 1, linked_at: "2020-01-01T00:00:00.000Z" }]);
   });
@@ -1036,17 +1040,17 @@ describe("dismiss and restore", () => {
         Effect.gen(function* () {
           yield* report(connectionId, [buildObservation("1")]);
           const id = yield* entityId(ticketRef("1"));
-          const before = (yield* service.queryInbox()).cards.length;
-          yield* service.dismiss(id);
+          const before = (yield* service.queryInbox(EVERYTHING)).things.length;
+          yield* service.dismiss({ ids: [id] });
           const rows = yield* sql<{ readonly dismissed_by: string }>`
             SELECT dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
-          const dismissed = yield* service.queryInbox();
-          yield* service.restore(id);
+          const dismissed = yield* service.queryInbox(EVERYTHING);
+          yield* service.restore({ ids: [id] });
           return {
             before,
-            dismissed: dismissed.cards.length,
+            dismissed: dismissed.things.length,
             dismissedBy: rows[0]?.dismissed_by,
-            restored: (yield* service.queryInbox()).cards.length,
+            restored: (yield* service.queryInbox(EVERYTHING)).things.length,
           };
         }),
     );
@@ -1064,9 +1068,13 @@ describe("dismiss and restore", () => {
         yield* report(connectionId, [buildObservation("1")]);
         const id = yield* entityId(ticketRef("1"));
         return [
-          yield* Effect.flip(service.dismiss("0199e0e7-9999-7000-8000-000000000000")),
-          yield* Effect.flip(Effect.provideService(service.dismiss(id), CurrentActor, A_SESSION)),
-          yield* Effect.flip(Effect.provideService(service.restore(id), CurrentActor, A_SESSION)),
+          yield* Effect.flip(service.dismiss({ ids: ["0199e0e7-9999-7000-8000-000000000000"] })),
+          yield* Effect.flip(
+            Effect.provideService(service.dismiss({ ids: [id] }), CurrentActor, A_SESSION),
+          ),
+          yield* Effect.flip(
+            Effect.provideService(service.restore({ ids: [id] }), CurrentActor, A_SESSION),
+          ),
         ];
       }),
     );
@@ -1285,16 +1293,16 @@ describe("acting on a card that holds signals", () => {
         const first = yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
         const second = yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
         yield* service.takeOn(yield* entityId(ticketRef("1")));
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         return {
           expected: [first, second],
           open: yield* listOpenSignalIds(sql),
-          card: inbox.cards.find((candidate) => candidate.ref === ticketRef("1")),
+          card: inbox.things.find((candidate) => candidate.ref === ticketRef("1")),
         };
       }),
     );
     expect(found.open).toEqual(found.expected);
-    expect(found.card).toMatchObject({ side: "with-someone-else", signals: { openCount: 2 } });
+    expect(found.card).toHaveProperty("openKinds");
   });
 
   it("ends no signal when the card is dismissed, and a new signal leaves it dismissed", async () => {
@@ -1302,10 +1310,10 @@ describe("acting on a card that holds signals", () => {
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1")]);
         yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
-        yield* service.dismiss(yield* entityId(ticketRef("1")));
+        yield* service.dismiss({ ids: [yield* entityId(ticketRef("1"))] });
         yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
-        const inbox = yield* service.queryInbox();
-        return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.cards.length };
+        const inbox = yield* service.queryInbox(EVERYTHING);
+        return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.things.length };
       }),
     );
     expect(found).toEqual({ open: 2, cards: 0 });
@@ -1498,12 +1506,12 @@ describe("what a card offers", () => {
         yield* insertWorkflow(sql, "Disabled", { enabled: false });
         yield* insertWorkflow(sql, "Invalid", { invalid: true });
         yield* insertWorkflow(sql, "Other kind", { kinds: ["acme/epic"] });
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         const detail = yield* service.read(yield* entityId(ticketRef("1")));
         return { review, inbox, detail, second };
       }),
     );
-    const [first, other] = result.inbox.cards;
+    const [first, other] = result.inbox.things;
     expect(first!.offerSetId).toBe(other!.offerSetId);
     expect(result.inbox.offerSets).toEqual({
       [first!.offerSetId]: [
@@ -1537,9 +1545,9 @@ describe("what a card offers", () => {
         const webOnly = yield* insertWorkflow(sql, "Web only", {
           workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
         });
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         const setOf = (key: string) =>
-          inbox.cards.find((card) => card.ref === ticketRef(key))!.offerSetId;
+          inbox.things.find((card) => card.ref === ticketRef(key))!.offerSetId;
         return { webOnly, inbox, setOf };
       }),
     );
@@ -1741,14 +1749,14 @@ describe("what a card shows of the live work on its Task", () => {
         yield* on(taken.taskId, ship, "Ship")("completed", 3);
         yield* on(taken.taskId, review, "Review")("running", 4);
         yield* on(finishedOnly.taskId, ship, "Ship")("completed", 5);
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         return {
           ids: { review, plan },
-          cards: inbox.cards.map((card) => [card.ref, card.liveWorkflows] as const),
+          things: inbox.things.map((card) => [card.ref, card.liveWorkflows] as const),
         };
       }),
     );
-    expect(cards.cards).toEqual([
+    expect(cards.things).toEqual([
       [
         ticketRef("1"),
         [
@@ -1776,7 +1784,7 @@ describe("what a card shows of the live work on its Task", () => {
             minute: index,
           });
         }
-        return (yield* service.queryInbox()).cards[0]!.liveWorkflows;
+        return (yield* service.queryInbox(EVERYTHING)).things[0]!.liveWorkflows;
       }),
     );
     expect(live.map((workflow) => workflow.name)).toEqual(
