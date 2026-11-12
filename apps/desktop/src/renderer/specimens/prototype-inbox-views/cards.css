@@ -1,0 +1,217 @@
+/* PROTOTYPE, throwaway. The core's one card. Classes start with `cd-`. */
+.cd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  font: var(--type-summary);
+  color: var(--ink);
+}
+.cd.is-compact {
+  gap: 4px;
+  padding: 10px 12px;
+}
+.cd.is-settled {
+  opacity: 0.6;
+}
+.cd.is-selected {
+  box-shadow:
+    inset 0 0 0 2px var(--ink),
+    var(--shadow-1);
+}
+.cd.is-focused {
+  box-shadow:
+    inset 0 0 0 2px var(--focus),
+    var(--shadow-2);
+}
+.cd-head,
+.cd-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.cd-head > *,
+.cd-foot > * {
+  flex: none;
+}
+.cd-head > .cd-text,
+.cd-foot > .cd-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cd-push {
+  flex: 1 1 0 !important;
+  min-width: 0;
+}
+.cd-icon {
+  flex: none;
+}
+.cd-level {
+  color: var(--muted);
+}
+.cd-text.is-muted {
+  color: var(--muted);
+}
+.cd-text.is-strong {
+  font-weight: var(--w-bold);
+}
+.cd-text.is-bad {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.cd-text.is-good {
+  color: var(--ok);
+  font-weight: var(--w-medium);
+}
+.cd-id {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.cd-title {
+  font: var(--type-card);
+  font-size: var(--t-13);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-wrap: pretty;
+}
+.cd-title.is-regular {
+  font-weight: var(--w-regular);
+}
+.cd.is-compact .cd-title {
+  -webkit-line-clamp: 1;
+}
+.cd-body {
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cd-body.is-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  -webkit-line-clamp: 1;
+}
+.cd-body.is-quote {
+  padding-left: 10px;
+  border-left: 2px solid oklch(0.62 0.12 var(--cd-hue, 250) / 0.5);
+}
+.cd-body.is-bubble {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 12px 12px 12px 3px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+.cd-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.cd-time.is-long {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.cd-time.is-own {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.cd-time.is-over {
+  color: var(--fail-ink);
+  font-weight: var(--w-bold);
+}
+.cd-avatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
+.cd-avatar.is-square {
+  border-radius: 25%;
+}
+.cd-faces {
+  display: inline-flex;
+}
+.cd-faces .cd-avatar + .cd-avatar {
+  margin-left: -4px;
+  box-shadow: 0 0 0 1.5px var(--raised);
+}
+.cd-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.cd-count {
+  color: var(--muted);
+}
+.cd-count.is-good {
+  color: var(--ok);
+  font-weight: var(--w-medium);
+}
+.cd-count.is-bad {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.cd-count.is-brand {
+  color: oklch(0.5 0.15 var(--cd-hue, 250));
+  font-weight: var(--w-medium);
+}
+.cd-diff {
+  font: var(--type-meta);
+  font-family: var(--font-mono);
+}
+.cd-diff ins {
+  color: #1a7f37;
+  text-decoration: none;
+}
+.cd-diff del {
+  color: #cf222e;
+  text-decoration: none;
+}
+.cd-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.cd-spark-area {
+  fill: color-mix(in oklab, var(--fail) 16%, transparent);
+}
+.cd-spark-line {
+  fill: none;
+  stroke: var(--fail);
+  stroke-width: 1.4;
+}
+.cd-answers {
+  display: flex;
+  gap: 4px;
+}
+.cd-answers button {
+  height: 22px;
+  padding: 0 10px !important;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: var(--type-meta) !important;
+}
+.cd-answers button:hover {
+  background: var(--hover);
+}

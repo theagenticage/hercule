@@ -1,0 +1,204 @@
+/* PROTOTYPE, throwaway. Starting work. Classes start with `st-`. */
+.st-face {
+  display: inline-flex;
+  flex: none;
+}
+.st-start {
+  position: relative;
+  display: inline-flex;
+}
+.st-start-btn {
+  height: 24px;
+  padding: 0 9px !important;
+  border-radius: var(--r-pill);
+  background: var(--answer) !important;
+  color: var(--answer-fg) !important;
+  font: var(--type-meta) !important;
+  font-weight: var(--w-medium) !important;
+  white-space: nowrap;
+}
+.st-menu {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    var(--shadow-3);
+  text-align: left;
+}
+.st-menu-head,
+.st-menu-sub {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font: var(--type-meta);
+  font-weight: var(--w-bold);
+}
+.st-menu-sub {
+  margin-top: 4px !important;
+  border-top: 1px solid var(--divider);
+  padding-top: 8px;
+}
+.st-offer {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  gap: 1px 10px;
+  padding: 7px 10px !important;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.st-offer:not(:disabled):hover {
+  background: var(--hover);
+}
+.st-offer.is-off {
+  opacity: 0.55;
+}
+.st-offer-name {
+  font: var(--type-card);
+}
+.st-offer-does {
+  grid-column: 1;
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.st-offer-runs {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.st-bar {
+  position: fixed;
+  z-index: 9000;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px 0 16px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    var(--shadow-3);
+  font: var(--type-card);
+  white-space: nowrap;
+}
+.st-bar > button,
+.st-bar-menu > button {
+  height: 30px;
+  padding: 0 12px !important;
+  border-radius: var(--r-sm);
+}
+.st-bar > button:hover {
+  background: var(--hover);
+}
+.st-bar-primary {
+  background: var(--answer) !important;
+  color: var(--answer-fg) !important;
+  font-weight: var(--w-medium) !important;
+}
+.st-bar-menu {
+  position: relative;
+}
+.st-bar-menu .st-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
+}
+.st-bar-marks {
+  display: inline-flex;
+  gap: 3px;
+}
+.st-bar-keys {
+  color: var(--muted);
+  font: var(--type-meta);
+}
+.st-toasts {
+  position: fixed;
+  z-index: 9500;
+  right: 24px;
+  bottom: 78px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.st-toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 460px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--raised);
+  font: var(--type-card);
+  font-weight: var(--w-regular);
+  box-shadow: var(--shadow-3);
+}
+.st-toast button {
+  color: var(--you) !important;
+  font-weight: var(--w-bold) !important;
+}
+.st-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9600;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding-top: 14vh;
+  background: var(--scrim);
+}
+.st-palette {
+  width: 620px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    var(--shadow-3);
+  overflow: hidden;
+}
+.st-palette input {
+  width: 100%;
+  height: 52px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  background: none;
+  color: var(--ink);
+  font: var(--type-lane);
+  outline: none;
+}
+.st-palette ol {
+  padding: 6px !important;
+}
+.st-palette li button {
+  display: flex !important;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px !important;
+  border-radius: var(--r-sm);
+}
+.st-palette li button.is-on {
+  background: var(--selected);
+}
+.st-palette li b {
+  font: var(--type-card);
+}
+.st-palette li span {
+  color: var(--muted);
+  font: var(--type-meta);
+}
