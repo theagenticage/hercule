@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
-import {
-  buildInbox,
-  buildInboxCard,
-  buildInboxPlace,
-  buildSourceConnection,
-  buildSourcePlugin,
-} from "@hercule/client-core/inbox/testing";
 import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import openingSheetCss from "../screens/desk/opening-sheet.css?raw";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
@@ -293,8 +286,6 @@ describe("the drag regions", () => {
   });
 });
 
-const PRICING = buildInboxPlace("acme:project:pricing", "Pricing rules");
-
 /*
  * The shell's drag strip lies over the top 52px of the window, and a click on
  * a control in it drags the window unless the control, or an element around
@@ -339,41 +330,16 @@ describe("the controls that float over a screen", () => {
   it("are no part of the drag strip in the Inbox", async () => {
     stubApi({
       ...buildSidebarHandlers(SIDEBAR_FIXTURE),
-      "GET /api/v1/external-entities/inbox": {
-        body: buildInbox(
-          [
-            buildInboxCard("1", {
-              id: "01a1b576-c999-7000-8000-000000000001",
-              title: "Fix the basket rounding",
-              status: { shape: "ring", tone: "quiet", label: "Open" },
-              ancestors: [PRICING.ref],
-            }),
-          ],
-          { places: [PRICING] },
-        ),
-      },
       "GET /api/v1/external-entities/inbox/count": {
-        body: { onTheClock: 1, requests: 0, withSomeoneElse: 0, newestArrival: 1 },
-      },
-      "GET /api/v1/plugins": {
-        body: [
-          buildSourcePlugin("acme", "Acme", [
-            { word: "acme/ticket", connect: "Tickets, with their projects" },
-          ]),
-        ],
-      },
-      "GET /api/v1/connections": {
-        body: {
-          items: [buildSourceConnection("01a1b576-c999-7000-8000-000000000800", "acme/account")],
-        },
+        body: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
       },
     });
     await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
       path: "/inbox",
     });
-    await screen.findByText("Fix the basket rounding");
-    expect(document.querySelector(".inbox-desk .desk-toolbar")).not.toBeNull();
-    expect(findDraggableControls(".inbox-desk", ".inbox-scroll"), HOW_TO_FIX).toEqual([]);
+    await screen.findByRole("heading", { name: "Inbox" });
+    expect(document.querySelector(".inbox-frame .desk-toolbar")).not.toBeNull();
+    expect(findDraggableControls(".inbox-frame", ".inbox-page"), HOW_TO_FIX).toEqual([]);
   });
 
   it("are no part of the drag strip in an opened sheet, which can reach the top of the window", () => {

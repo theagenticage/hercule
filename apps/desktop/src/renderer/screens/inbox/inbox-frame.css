@@ -1,0 +1,7 @@
+/* The Inbox's page: the desk colour under the toolbar row that floats over its top. */
+.inbox-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--desk);
+}

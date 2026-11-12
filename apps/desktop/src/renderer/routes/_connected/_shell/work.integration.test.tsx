@@ -613,13 +613,12 @@ describe("the Work screen's keys", () => {
     const user = userEvent.setup();
     await openWork({
       handlers: {
-        "GET /api/v1/external-entities/inbox": { body: buildInbox([]) },
         "GET /api/v1/external-entities/inbox/count": { body: buildInbox([]).counts },
       },
     });
     await user.click(await screen.findByRole("link", { name: /^Inbox/ }));
     await waitFor(() => {
-      expect(document.querySelector(".inbox-desk")).not.toBeNull();
+      expect(document.querySelector(".inbox-frame")).not.toBeNull();
     });
 
     // The click leaves focus on the sidebar row, which is not the page.

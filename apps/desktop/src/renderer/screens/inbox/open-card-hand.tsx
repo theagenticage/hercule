@@ -13,7 +13,7 @@ const NUMBERED_ROWS = 3;
 
 /**
  * Renders the Hand to rows of the open card's moves, to sit in its ledger
- * before Take it:
+ * before Take on:
  *
  * - one row for each available workflow, with its face, its name, the line of
  *   what the hand-off would end (`describeHandOffEnds` over `openKinds`) and

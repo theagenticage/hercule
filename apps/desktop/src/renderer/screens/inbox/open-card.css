@@ -564,7 +564,7 @@ button.open-card-signal-row:focus-visible {
 /* The answers of the opened line, under it. They are the Intake ledger (`.ans`), drawn here as the
    moves under them are: one column for the names, left-aligned, and the descriptions in the moves'
    column. A row has 4px of padding before it, so the ledger starts 4px early and the name starts
-   where the words of the line do, which is where the text of "Take it" starts. The button that
+   where the words of the line do, which is where the text of "Take on" starts. The button that
    carries the name reaches 6px further left, as the drawing's filled move does, and the ledger
    reaches the sheet's 6px edge on the right, where the moves end. */
 .open-card-answers {

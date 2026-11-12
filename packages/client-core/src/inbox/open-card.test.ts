@@ -51,7 +51,7 @@ describe("decideOpenCard", () => {
     expect(words.reason).toEqual({ text: "Ines asked for your review", tone: "plain" });
   });
 
-  it("offers Take it and Dismiss on a card with no Task", () => {
+  it("offers Take on and Dismiss on a card with no Task", () => {
     const card = buildInboxCard("7");
 
     expect(decideOpenCard(card, NO_GRAPH, true, NOW).moves).toEqual({ _tag: "free" });

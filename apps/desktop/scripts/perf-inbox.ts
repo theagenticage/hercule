@@ -4,7 +4,7 @@
  *
  * GitHub cannot be reached offline, so the Inbox's world is written into the
  * stopped controller's database, in the shape the GitHub plugin reports it,
- * as the desktop end-to-end suite does (`e2e/desktop/inbox.test.ts`). The
+ * as the desktop end-to-end suite does. The
  * invented world is Northwind Market's (see `writeInboxWorld`):
  *
  * - one GitHub Connection that holds no token, so the controller never polls
@@ -18,25 +18,20 @@
  *
  * The launches (see `measureInbox`): a thread open, to compare with, and the
  * Inbox. Each is measured by `measureDeskLaunch` (see `perf-work.ts`), and
- * the Inbox launch then opens a card and lands a signal on another.
+ * the Inbox launch has no steps of its own yet.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
 import type { DatabaseSync } from "node:sqlite";
-import { setTimeout as sleep } from "node:timers/promises";
 import type { ThreadFixture } from "./perf-fixture.ts";
-import type { PageDriver } from "./perf-measures.ts";
 import {
   findIdleThreadId,
   measureDeskLaunch,
-  measureStep,
   openDeskScreenOnce,
-  printStep,
   reportDeskLaunch,
   traceFrames,
   type DeskLaunchPlan,
-  type StepContext,
 } from "./perf-work.ts";
 
 /** The Connection that presents every card. It holds no token, so it is never polled. */
@@ -306,72 +301,6 @@ function writeCardSignal(database: DatabaseSync, card: InboxCard, index: number,
     .run(toIdBytes(signalId), Number(event.lastInsertRowid));
 }
 
-/**
- * Writes one more open signal on the card `index` into the running
- * controller's database, and returns once it is written. The controller does
- * not know of it until something makes the Inbox read again. The landing step
- * raises a signal through the API for that: its `signal` push reads the Inbox
- * again, which finds the new signal on the card and lands it.
- */
-async function writeLandingSignal(databasePath: string, index: number): Promise<void> {
-  const { DatabaseSync: Database } = await import("node:sqlite");
-  const database = new Database(databasePath);
-  try {
-    database.exec("PRAGMA busy_timeout = 5000");
-    writeCardSignal(database, buildInboxCard(index), 10_000 + index, new Date().toISOString());
-  } finally {
-    database.close();
-  }
-}
-
-/** An expression that is true in the page once the Inbox has drawn its cards. */
-const INBOX_DRAWN = `document.querySelectorAll(".inbox-request, .inbox-row").length >= 50`;
-
-/**
- * The Inbox's own steps, after the steps every launch runs: open the card of
- * the first issue on screen and close it, then land a signal on the first
- * pull request in Requests.
- */
-async function measureInboxSteps(
-  context: StepContext,
-  driver: PageDriver,
-  fixture: ThreadFixture,
-): Promise<void> {
-  const firstRow = `document.querySelector(".inbox-row[data-card-id]")`;
-  const opening = await traceFrames(context.page, 1_200, async () => {
-    await driver.click(firstRow);
-    await driver.waitFor(`document.querySelector(".open-card") !== null`, "no card opened");
-  });
-  printFrames("Opening a card", opening);
-  const reads = await measureStep(context, 1, async () => {
-    await sleep(300);
-  });
-  printStep("the open card's reads, after it opened", reads, null);
-  await driver.pressKey("Escape");
-  await driver.waitFor(`document.querySelector(".open-card") === null`, "the card did not close");
-  await driver.waitForAnimationsToEnd();
-
-  // The landing: a signal on the first pull request, then a raised signal
-  // whose push makes the Inbox read again.
-  const firstRequest = await driver.evaluate<string | null>(
-    `document.querySelector(".inbox-request[data-card-id]")?.dataset.cardId ?? null`,
-  );
-  const index = Array.from({ length: INBOX_CARDS }, (_, each) => each).find(
-    (each) => buildInboxCard(each).id === firstRequest,
-  );
-  if (index === undefined) throw new Error("no pull request card is on screen to land on");
-  await writeLandingSignal(fixture.databasePath, index);
-  const landing = await traceFrames(context.page, 2_500, async () => {
-    await fixture.call("POST", "/signals/raise", {
-      kind: "fyi",
-      title: "The depot rota changed",
-      reason: "Raised by the perf script to make the Inbox read again.",
-      eventIds: [],
-    });
-  });
-  printFrames("A signal landing on a pull request's card", landing);
-}
-
 /** Prints what `traceFrames` measured, as one line under `name`. */
 export function printFrames(name: string, frames: Awaited<ReturnType<typeof traceFrames>>): void {
   console.log(
@@ -382,6 +311,9 @@ export function printFrames(name: string, frames: Awaited<ReturnType<typeof trac
       `animations ${String(frames.animations)} (${String(frames.animationsNotComposited)} not on the compositor)\n`,
   );
 }
+
+/** An expression that is true in the page once the Inbox has drawn its frame. */
+const INBOX_DRAWN = `document.querySelector(".inbox-frame") !== null`;
 
 /**
  * Measures the Inbox (see the top of this file): writes the world, then
@@ -402,13 +334,6 @@ export async function measureInbox(fixture: ThreadFixture, userDataDir: string):
   for (const plan of plans) {
     await fixture.prepareLaunch({ twoMinuteRow: false, writeDatabase: writeInboxWorld });
     await openDeskScreenOnce(userDataDir, plan);
-    reportDeskLaunch(
-      await measureDeskLaunch(
-        userDataDir,
-        fixture,
-        plan,
-        plan.path === "/inbox" ? measureInboxSteps : null,
-      ),
-    );
+    reportDeskLaunch(await measureDeskLaunch(userDataDir, fixture, plan, null));
   }
 }

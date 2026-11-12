@@ -32,8 +32,7 @@
  *
  * GitHub cannot be reached offline, so the entities and signals are written
  * into the scratch database while the controller is stopped, in the shape the
- * GitHub plugin reports them (see `e2e/desktop/inbox.test.ts`, which does the
- * same). The Connection holds no token, so the controller never polls it and
+ * GitHub plugin reports them. The Connection holds no token, so the controller never polls it and
  * the rows stay as written. The invented world is Northwind Market's web shop.
  *
  * No agent runs: the workflows are made of the built-in `wait` and
