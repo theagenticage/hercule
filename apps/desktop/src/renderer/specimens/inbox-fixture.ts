@@ -113,6 +113,7 @@ const pullRequest = (
     askKinds: [...new Set(asks.map((ask) => ask.kind))],
     openKinds: [...new Set(asks.map((ask) => ask.kind))],
     takenOn: false,
+    arrival: 0,
     ...(asks.length === 0
       ? {}
       : { waitingSince: hoursAgo(Math.max(...asks.map((ask) => ask.hours))) }),
@@ -156,6 +157,7 @@ const ticket = (
     askKinds: [],
     openKinds: [],
     takenOn: false,
+    arrival: 0,
     liveWorkflows: [],
     offerSetId: "none",
     actingConnections: [],
@@ -267,6 +269,7 @@ const ITEMS: ReadonlyArray<Item> = [
       askKinds: [REGRESSED],
       openKinds: [REGRESSED],
       takenOn: false,
+      arrival: 0,
       waitingSince: hoursAgo(1),
       accounts: [buildId(902)],
     },
@@ -281,6 +284,7 @@ const ITEMS: ReadonlyArray<Item> = [
     {
       taskId: buildId(800),
       takenOn: true,
+      arrival: 0,
       liveWorkflows: [{ workflowId: buildId(700), name: "Review PR" }],
     },
   ),

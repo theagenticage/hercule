@@ -181,6 +181,7 @@ export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {})
   askKinds: [],
   openKinds: [],
   takenOn: false,
+  arrival: 0,
   liveWorkflows: [],
   offerSetId: "none",
   actingConnections: [],

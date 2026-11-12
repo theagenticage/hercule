@@ -104,7 +104,7 @@ const join = (operator: "AND" | "OR", parts: ReadonlyArray<CompiledSql>): Compil
   };
 };
 
-const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * The condition that the observation row `o` is a Connection observing its

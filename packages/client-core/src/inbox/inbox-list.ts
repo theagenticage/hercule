@@ -24,6 +24,12 @@
 
 export interface InboxListRow {
   readonly ref: string;
+  /**
+   * The row's place in the controller's arrival sequence: opaque, and a larger
+   * number arrived later. The list uses it to tell a genuine arrival from a
+   * row that only slid into the first page.
+   */
+  readonly arrival: number;
 }
 
 /** A row the user handled: where it stood, so that undo can put it back. */
@@ -55,6 +61,12 @@ export interface InboxListState<Row extends InboxListRow> {
   readonly anchor: string | null;
   /** The refs of the latest first page in its rank, used to place arrivals on Show. */
   readonly firstPageRefs: readonly string[];
+  /**
+   * The highest `arrival` the list has shown: set when it starts, and raised
+   * by each page appended and by Show. A first-page row that is not held is
+   * an arrival when its own `arrival` is above this, whatever its rank.
+   */
+  readonly watermark: number;
   readonly handled: ReadonlyMap<string, HandledRow<Row>>;
   /**
    * Rows an undo just put back. The next refresh keeps them even when it did
@@ -82,6 +94,7 @@ export function startInboxList<Row extends InboxListRow>(
     selection: new Set(),
     anchor: null,
     firstPageRefs: firstPage.map((row) => row.ref),
+    watermark: highestArrival(firstPage),
     handled: new Map(),
     restored: new Set(),
   };
@@ -107,10 +120,12 @@ export interface InboxRefreshReply<Row extends InboxListRow> {
  *   unless an undo put it back since (see `restored`);
  * - a held row that was not asked for (a page appended meanwhile) is kept;
  * - a first-page row that is not held becomes an arrival, unless the first page
- *   has a next page and the row ranks after every held row of the first page.
- *   That row did not appear: it slid into the first page from the next one
- *   because a row above it left (a page holds at most 200 things). It is
- *   appended to the held rows quietly and not counted.
+ *   has a next page, the row ranks after every held row of the first page, and
+ *   its `arrival` is not above the list's `watermark`. That row did not appear:
+ *   it slid into the first page from the next one because a row above it left
+ *   (a page holds at most 200 things). It is appended to the held rows quietly
+ *   and not counted. Position alone is not evidence: a genuine arrival can
+ *   rank last too, and only its arrival number tells it apart.
  *
  * Rows the user dismissed are not brought back by a reply that still has them,
  * until a reply shows the server dropped them. A row that then comes back is a
@@ -136,15 +151,19 @@ export function applyInboxRefresh<Row extends InboxListRow>(
   );
   const lastHeldRank = reply.firstPage.findLastIndex((row) => heldRefs.has(row.ref));
   const isPastHeld = (row: Row) =>
-    reply.firstPageHasMore && lastHeldRank >= 0 && reply.firstPage.indexOf(row) > lastHeldRank;
+    reply.firstPageHasMore &&
+    lastHeldRank >= 0 &&
+    reply.firstPage.indexOf(row) > lastHeldRank &&
+    row.arrival <= state.watermark;
   const rows = [...kept, ...unheld.filter(isPastHeld)];
   const arrivals = unheld.filter((row) => !isPastHeld(row));
   const onFirstPage = new Set(reply.firstPage.map((row) => row.ref));
+  const arrivalRefs = new Set(arrivals.map((row) => row.ref));
   const handled = new Map<string, HandledRow<Row>>();
   for (const [ref, entry] of state.handled) {
     if (entry.awaitingServer) {
       handled.set(ref, onFirstPage.has(ref) ? entry : { ...entry, awaitingServer: false });
-    } else if (heldRefs.has(ref) || !onFirstPage.has(ref)) {
+    } else if (heldRefs.has(ref) || !onFirstPage.has(ref) || arrivalRefs.has(ref)) {
       handled.set(ref, entry);
     }
   }
@@ -189,6 +208,7 @@ export function applyInboxNextPage<Row extends InboxListRow>(
     {
       ...state,
       handled,
+      watermark: Math.max(state.watermark, highestArrival(added)),
       frontier: page.nextCursor,
       arrivals: state.arrivals.filter((row) => !addedRefs.has(row.ref)),
     },
@@ -236,7 +256,11 @@ export function showInboxArrivals<Row extends InboxListRow>(
   for (const row of state.rows) emit(row);
   const shown = new Set(state.arrivals.map((row) => row.ref));
   const first = rows.find((row) => shown.has(row.ref));
-  return { ...withRows({ ...state, arrivals: [] }, rows), current: first?.ref ?? state.current };
+  const watermark = Math.max(state.watermark, highestArrival(state.arrivals));
+  return {
+    ...withRows({ ...state, arrivals: [], watermark }, rows),
+    current: first?.ref ?? state.current,
+  };
 }
 
 /**
@@ -287,8 +311,10 @@ export function applyInboxMove<Row extends InboxListRow>(
 
 /**
  * Takes a move back and makes the topmost of its rows current. Rows that left
- * the list are put back at their old positions; rows that stayed, or came back
- * on their own since, are only made current, never added twice. Refs the list
+ * the list are put back at their old positions. A row that came back since and
+ * waits behind "N new" is taken out of the arrivals and put at its old position
+ * too, with its newest copy. Rows that stayed are only made current, never
+ * added twice. Refs the list
  * never held are ignored. The restored rows survive the next refresh even if
  * it was read before the undo (see `restored`).
  */
@@ -300,17 +326,22 @@ export function undoInboxMove<Row extends InboxListRow>(
   const entries = restoredRefs
     .flatMap((ref) => state.handled.get(ref) ?? [])
     .sort((a, b) => a.index - b.index);
+  const arrived = new Map(state.arrivals.map((row) => [row.ref, row]));
   const rows = [...state.rows];
   for (const { row, index } of entries) {
-    if (!held.has(row.ref)) rows.splice(Math.min(index, rows.length), 0, row);
+    if (!held.has(row.ref))
+      rows.splice(Math.min(index, rows.length), 0, arrived.get(row.ref) ?? row);
   }
+  const arrivals = state.arrivals.filter(
+    (row) => !entries.some((entry) => entry.row.ref === row.ref),
+  );
   const handled = new Map(state.handled);
   for (const { row } of entries) handled.delete(row.ref);
   const wanted = new Set(restoredRefs);
   const topmost = rows.find((row) => wanted.has(row.ref));
   if (topmost === undefined) return state;
   const restored = new Set(rows.filter((row) => wanted.has(row.ref)).map((row) => row.ref));
-  return { ...withRows({ ...state, handled, restored }, rows), current: topmost.ref };
+  return { ...withRows({ ...state, arrivals, handled, restored }, rows), current: topmost.ref };
 }
 
 /**
@@ -389,6 +420,10 @@ export function decideMoveTargets<Row extends InboxListRow>(
     return inSelection(hoveredRef) ? refs.filter(inSelection) : [hoveredRef];
   if (state.selection.size > 0) return refs.filter(inSelection);
   return state.current === null ? [] : [state.current];
+}
+
+function highestArrival(rows: readonly InboxListRow[]): number {
+  return rows.reduce((highest, row) => Math.max(highest, row.arrival), 0);
 }
 
 function selectRange(rows: readonly InboxListRow[], fromRef: string, toRef: string): Set<string> {

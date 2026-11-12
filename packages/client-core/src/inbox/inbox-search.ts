@@ -25,6 +25,12 @@ export interface InboxSearchContext {
   fields: readonly InboxField[];
   /** The server's suggested values, by field key. A key missing here has none. */
   suggestedValues: Readonly<Record<string, readonly SuggestedValue[]>>;
+  /**
+   * Ties the clauses typed from now on to one source, and to one account when
+   * `connectionId` is set. It is how "N more" on a Browse facet keeps the
+   * facet's source and account in the search it starts.
+   */
+  tie?: { readonly source: string; readonly connectionId?: string };
 }
 
 /** The state of the search field. Only the transitions below build one. */
@@ -121,7 +127,7 @@ export function takeInboxSuggestion(
     return absorbInput(search.clauses, input, context, false);
   }
   const field = findField(context.fields, suggestion.key);
-  const clause = field && buildClause(field, suggestion.value);
+  const clause = field && buildClause(field, suggestion.value, context.tie);
   if (!clause) return search;
   const start = findClauseStarts(search.input, context.fields).at(-1);
   const input = start ? search.input.slice(0, start.at) : search.input;
@@ -222,7 +228,16 @@ function isWholeValue(
  * Returns the clause for a typed value, or undefined when the value is not valid for the field:
  * a threshold on a number or age field, yes or no on a bool field, anything else on the others.
  */
-function buildClause(field: InboxField, typed: string): InboxClause | undefined {
+function buildClause(
+  field: InboxField,
+  typed: string,
+  tie: InboxSearchContext["tie"],
+): InboxClause | undefined {
+  const clause = buildUntiedClause(field, typed);
+  return clause === undefined || tie === undefined ? clause : { ...clause, ...tie };
+}
+
+function buildUntiedClause(field: InboxField, typed: string): InboxClause | undefined {
   const value = typed.trim();
   if (!value) return undefined;
   const key = field.key;
@@ -302,7 +317,7 @@ function absorbInput(
     const last = i === starts.length - 1;
     const value =
       last && !final ? finishTypedValue(raw, valuesOf(context, start.field.key)) : raw.trim();
-    const clause = value ? buildClause(start.field, value) : undefined;
+    const clause = value ? buildClause(start.field, value, context.tie) : undefined;
     if (clause) taken.push(clause);
     else if (last) openText = input.slice(start.at);
   });

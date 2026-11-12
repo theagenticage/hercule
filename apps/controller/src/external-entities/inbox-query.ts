@@ -40,7 +40,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
-import { uuidToString } from "../db";
+import { uuidFromString, uuidToString } from "../db";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
   deriveAccess,
@@ -59,6 +59,7 @@ import {
   escapeLike,
   listDeclaredInboxFields,
   OBSERVING_SQL,
+  UUID_TEXT,
   parseSourceOfKind,
   READABLE_RECORD_SQL,
   type CompiledSql,
@@ -744,6 +745,7 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
           takenOn: taken.has(page.ref),
           liveWorkflows: taskId === undefined ? [] : (liveWorkflows.get(taskId) ?? []),
           ...(row.dismissed_at === null ? {} : { dismissedAt: row.dismissed_at }),
+          arrival: row.arrival_sequence ?? 0,
           offerSetId: offers.offerSetIds.get(page.ref)!,
           actingConnections: offers.actingConnections.get(page.ref) ?? [],
           accounts,
@@ -1114,6 +1116,35 @@ export const makeInboxQueries = (sql: SqlClient.SqlClient, readers: InboxReaders
             declared.filter((field) => field.contextKind !== undefined).map((field) => field.kind),
           ),
         ];
+        // A facet of records also offers the records the account observes that
+        // no thing of the list holds. They have no `ref`, so they count 0.
+        const contextKinds = [...new Set(declared.flatMap((field) => field.contextKind ?? []))];
+        if (contextKinds.length > 0) {
+          tuples += `
+          UNION ALL
+          SELECT t.ref AS value, t.title AS label, ${buildSourceOfKindSql("t")} AS source,
+            NULL AS ref
+          FROM external_entities t
+          WHERE t.kind IN (SELECT value FROM json_each(?)) AND ${READABLE_RECORD_SQL}
+            ${
+              query.connectionId === undefined
+                ? ""
+                : `AND EXISTS (SELECT 1 FROM external_entity_observations o
+                    WHERE o.ref = t.ref AND o.connection_id = ? AND ${OBSERVING_SQL})`
+            }`;
+          tupleParams = [
+            ...tupleParams,
+            JSON.stringify(contextKinds),
+            ...(query.connectionId === undefined
+              ? []
+              : [
+                  // An id that is not a UUID matches no Connection.
+                  UUID_TEXT.test(query.connectionId)
+                    ? uuidFromString(query.connectionId)
+                    : new Uint8Array(),
+                ]),
+          ];
+        }
       } else if (query.key === "from") {
         tuples = `SELECT a.asker AS value, a.asker AS label, ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN asks a ON a.ref = m.ref WHERE a.asker IS NOT NULL

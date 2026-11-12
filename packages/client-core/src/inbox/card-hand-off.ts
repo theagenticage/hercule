@@ -9,13 +9,7 @@
  * name is made from the key by `nameSignalKind`, because the row holds no noun
  * for a kind it lists no ask of.
  */
-import type {
-  EntitySignalLine,
-  HandOffUndo,
-  InboxAsk,
-  InboxThing,
-  WorkflowOffer,
-} from "@hercule/contract";
+import type { HandOffUndo, InboxAsk, InboxThing, WorkflowOffer } from "@hercule/contract";
 import { nameSignalKind } from "../intake";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
@@ -195,39 +189,6 @@ export const rankHandOffs = (
 
 /** The asks of an Inbox row that a hand-off line talks about. */
 export type HandOffAsks = Pick<InboxThing, "asks" | "askCount" | "askKinds" | "openKinds">;
-
-/**
- * Returns the asks of `thing` as the hand-off line names them, read from the
- * signals of the pane's detail (`externalEntity.read`), which list every open
- * ask rather than the few a row carries.
- *
- * An ask is an open signal that is not snoozed and whose kind is one of the
- * thing's `askKinds`. The signals come oldest first and the asks go newest
- * first, as on a row. The detail's signal has no noun, so the noun comes from
- * a row ask of the same kind, else made from the kind's key.
- */
-export const readHandOffAsks = (
-  thing: HandOffAsks,
-  signals: readonly EntitySignalLine[],
-): HandOffAsks => {
-  const asks = signals
-    .filter(
-      (signal) =>
-        signal.status === "open" && !signal.snoozed && thing.askKinds.includes(signal.kind),
-    )
-    .toReversed()
-    .map((signal): InboxAsk => ({
-      id: signal.id,
-      kind: signal.kind,
-      noun:
-        thing.asks.find((ask) => ask.kind === signal.kind)?.noun ??
-        nameSignalKind(signal.kind).toLowerCase(),
-      ...(signal.asker === undefined ? {} : { asker: signal.asker }),
-      say: signal.say,
-      createdAt: signal.createdAt,
-    }));
-  return { ...thing, asks, askCount: asks.length };
-};
 
 /** Returns one ask as the line names it: "Mei’s review request", or "the failing checks" when no person raised it. */
 const nameAsk = (ask: InboxAsk): string =>

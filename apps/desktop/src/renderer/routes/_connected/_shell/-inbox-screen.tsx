@@ -39,7 +39,7 @@ import { useInboxMoves, type InboxMoveMotion } from "./-inbox-moves";
 import { useInboxKeys } from "./-use-inbox-keys";
 import { InboxPaneHeadPart, InboxPanePart } from "./-inbox-pane-part";
 import { InboxRailPart } from "./-inbox-rail-part";
-import { InboxSearchPart } from "./-inbox-search-part";
+import { InboxSearchPart, type SearchTie } from "./-inbox-search-part";
 import {
   DEFAULT_INBOX_QUERY_ID,
   EVERYTHING_INBOX_SCOPE,
@@ -102,6 +102,8 @@ export function InboxScreen({
   const formatClock = useInboxClock(client);
   const offlineSince = useOfflineSince(live);
   const [search, setSearch] = useState<InboxSearch>(EMPTY_INBOX_SEARCH);
+  // The source and account a "Search the other N" row tied the clause being typed to.
+  const [searchTie, setSearchTie] = useState<SearchTie | null>(null);
   const [paneWidth, setPaneWidth] = useInboxPaneWidth();
   const [isPaneOpen, setIsPaneOpen] = useState(false);
   const [isStacked, setIsStacked] = useState(false);
@@ -300,13 +302,26 @@ export function InboxScreen({
     onGoToTask: moves.goToTask,
     onDismiss: moves.dismiss,
   };
+  /**
+   * Starts a search in Everything for a value of the facet that the rail does
+   * not list. The clause being typed keeps the facet's source and account, so
+   * its suggestions and its results come from that account only.
+   */
   const searchMore = (facet: RailFacetScope): void => {
+    const tie = {
+      key: facet.key,
+      source: facet.source,
+      ...(facet.connectionId === undefined ? {} : { connectionId: facet.connectionId }),
+    };
+    setSearchTie(tie);
     setSearch(
       typeInboxSearch(EMPTY_INBOX_SEARCH, `${facet.key}:`, {
         fields: outline.fields,
         suggestedValues: {},
+        tie,
       }),
     );
+    widenToEverything();
     searchRef.current?.focus();
   };
   const widenToEverything = (): void => {
@@ -343,7 +358,12 @@ export function InboxScreen({
           isScopeEverything={scope.kind === "saved-query" && scope.id === EVERYTHING_QUERY_ID}
           search={search}
           resultsText={resultsText}
-          onChange={setSearch}
+          tie={searchTie}
+          onChange={(next) => {
+            setSearch(next);
+            // The tie ends with the clause it was made for.
+            if (next.open?.key !== searchTie?.key) setSearchTie(null);
+          }}
           onWiden={widenToEverything}
           onLeaveToResults={focusList}
           onLeave={focusList}

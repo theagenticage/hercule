@@ -50,6 +50,16 @@ describe("typing", () => {
     expect(search.input).toBe("");
   });
 
+  it("ties a clause to the source and account of the context", () => {
+    const tied = typeInboxSearch(EMPTY_INBOX_SEARCH, "team:Payments ", {
+      ...CONTEXT,
+      tie: { source: "linear", connectionId: "c1" },
+    });
+    expect(tied.clauses).toEqual([
+      { key: "team", op: "is", value: "Payments", source: "linear", connectionId: "c1" },
+    ]);
+  });
+
   it("keeps free text and searches it", () => {
     const search = type("login bug team:Payments ");
     expect(search.clauses).toHaveLength(1);

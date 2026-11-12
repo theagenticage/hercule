@@ -785,9 +785,10 @@ const make = Effect.gen(function* () {
       Effect.forEach(
         entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
         (ref) => sql<{ readonly ref: string }>`
-          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following, taken_at)
+          INSERT INTO task_entity_links
+            (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
           VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
-                  ${link.takenOn ? link.at : null})
+                  ${link.takenOn ? link.at : null}, ${link.takenOn ? link.actor : null})
           ON CONFLICT (task_id, ref) DO NOTHING
           RETURNING ref
         `,
@@ -1571,19 +1572,22 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Marks the link of the active Task of `ref` as taken at `at`, when the
-     * user has not taken it yet, and returns whether it changed. A link taken
-     * already keeps its first time. Returns false when the ref has no active
-     * Task.
+     * Marks the link of Task `taskId` to `ref` as taken at `at` by `by`, when
+     * it is not taken yet, and returns whether it changed. A link taken
+     * already keeps its first time and taker, and `linked_by` is never
+     * touched. The caller reads the Task in the same transaction, so the Task
+     * it marks is the Task it returns.
      */
-    markActiveLinkTaken: (ref: ExternalRef, at: string): Effect.Effect<boolean, SqlError> =>
+    markLinkTaken: (
+      taskId: string,
+      ref: ExternalRef,
+      at: string,
+      by: string,
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly ref: string }>`
-          UPDATE task_entity_links SET taken_at = ${at}
-          WHERE ref = ${ref} AND taken_at IS NULL
-            AND task_id = (
-              SELECT task_id FROM (${sql.literal(LIVE_TASK_LINKS_SQL)})
-              WHERE ref = ${ref} AND position = 1)
+          UPDATE task_entity_links SET taken_at = ${at}, taken_by = ${by}
+          WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref} AND taken_at IS NULL
           RETURNING ref`,
         (rows) => rows.length > 0,
       ),
@@ -2199,18 +2203,23 @@ const make = Effect.gen(function* () {
      * Moves the entity links of the Task `sourceId` to `targetId`, for a
      * merge. A ref that both Tasks link keeps one link: the older
      * `linked_at` (with the `linked_by` that came with it), the earlier
-     * `taken_at` of the two, and `following` if either link had it. The source is left with no links.
+     * `taken_at` of the two (with its `taken_by`), and `following` if either link had it. The source is left with no links.
      */
     moveEntityLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const source = uuidFromString(sourceId);
         yield* sql`
-          INSERT INTO task_entity_links (task_id, ref, linked_at, linked_by, following, taken_at)
-          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following, taken_at
+          INSERT INTO task_entity_links
+            (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
+          SELECT ${uuidFromString(targetId)}, ref, linked_at, linked_by, following, taken_at, taken_by
           FROM task_entity_links WHERE task_id = ${source}
           ON CONFLICT (task_id, ref) DO UPDATE SET
             linked_by = CASE WHEN excluded.linked_at < linked_at
                              THEN excluded.linked_by ELSE linked_by END,
+            taken_by = CASE WHEN taken_at IS NULL THEN excluded.taken_by
+                            WHEN excluded.taken_at IS NULL THEN taken_by
+                            WHEN excluded.taken_at < taken_at THEN excluded.taken_by
+                            ELSE taken_by END,
             taken_at = CASE WHEN taken_at IS NULL THEN excluded.taken_at
                             WHEN excluded.taken_at IS NULL THEN taken_at
                             ELSE MIN(taken_at, excluded.taken_at) END,

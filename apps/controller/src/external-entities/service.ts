@@ -54,6 +54,7 @@ import {
   type InboxValues,
   type InvalidState,
   type NotFound,
+  type Task,
   type TaskStage,
   type Unauthenticated,
   type Validation,
@@ -412,18 +413,41 @@ const make = Effect.gen(function* () {
    * asks raised before this moment stop asking. Changes nothing when the user
    * already took it on. Announces the entity (when its id is known) only when
    * something changed.
+   *
+   * Reads the active Task, marks its link and returns that same Task in one
+   * transaction, so the Task marked is the Task returned. Returns none when
+   * the ref has no active Task. A first read outside the transaction ends the
+   * common case of no Task without taking the writer.
    */
   const markActiveTaskTakenOn = (
     ref: string,
     entityId: string | undefined,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<Option.Option<Task>, SqlError> =>
+    Effect.flatMap(taskRows.findActiveTaskForRef(ref), (peek) =>
+      Option.isNone(peek)
+        ? Effect.succeed(peek)
+        : markActiveTaskTakenOnInTransaction(ref, entityId),
+    );
+
+  const markActiveTaskTakenOnInTransaction = (
+    ref: string,
+    entityId: string | undefined,
+  ): Effect.Effect<Option.Option<Task>, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const changed = yield* taskRows.markActiveLinkTaken(ref, yield* nowIso);
+        const active = yield* taskRows.findActiveTaskForRef(ref);
+        if (Option.isNone(active)) return active;
+        const changed = yield* taskRows.markLinkTaken(
+          active.value.id,
+          ref,
+          yield* nowIso,
+          yield* currentStamp,
+        );
         if (changed && entityId !== undefined) {
           yield* announceEntityChanges({ entityIds: [entityId], affectedTaskIds: [] });
         }
+        return active;
       }),
     );
 
@@ -468,9 +492,8 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const active = Option.getOrUndefined(yield* taskRows.findActiveTaskForRef(ref));
+        const active = Option.getOrUndefined(yield* markActiveTaskTakenOn(ref, record.id));
         if (active !== undefined) {
-          yield* markActiveTaskTakenOn(ref, record.id);
           return {
             entityId: record.id,
             taskId: active.id,
@@ -758,9 +781,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
         const record = yield* readTaskableEntityOrFail(id);
-        const active = yield* taskRows.findActiveTaskForRef(record.ref);
+        const active = yield* markActiveTaskTakenOn(record.ref, record.id);
         if (Option.isSome(active)) {
-          yield* markActiveTaskTakenOn(record.ref, record.id);
           return { taskId: active.value.id, created: false };
         }
         const preparation = yield* prepareEntityForTask(record.ref);
@@ -997,12 +1019,9 @@ const make = Effect.gen(function* () {
         // An existing Task wins before any read: a Task can link a ref Hercule
         // holds no record of (an agent's `--ref`, or older work), and the user
         // must get it back even when the source cannot be reached.
-        const active = yield* taskRows.findActiveTaskForRef(input.ref);
+        const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref: input.ref }));
+        const active = yield* markActiveTaskTakenOn(input.ref, known?.id);
         if (Option.isSome(active)) {
-          const known = Option.getOrUndefined(
-            yield* entities.readTaskableEntity({ ref: input.ref }),
-          );
-          yield* markActiveTaskTakenOn(input.ref, known?.id);
           return {
             ...(known === undefined ? {} : { id: known.id }),
             taskId: active.value.id,

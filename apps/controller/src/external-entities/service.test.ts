@@ -365,8 +365,12 @@ describe("takeOn", () => {
           );
           const first = yield* service.takeOn(id);
           const second = yield* service.takeOn(id);
-          const links = yield* sql<{ readonly taken_at: string | null }>`
-            SELECT taken_at FROM task_entity_links`;
+          const links = yield* sql<{
+            readonly task_id: Uint8Array;
+            readonly taken_at: string | null;
+            readonly taken_by: string | null;
+            readonly linked_by: string;
+          }>`SELECT task_id, taken_at, taken_by, linked_by FROM task_entity_links`;
           expect(yield* countTasks).toBe(1);
           expect(first.taskId).toBe(other.id);
           return { first, second, links };
@@ -376,6 +380,11 @@ describe("takeOn", () => {
     expect(second.created).toBe(false);
     expect(links).toHaveLength(1);
     expect(links[0]!.taken_at).not.toBeNull();
+    // The link that was marked is the Task the call returned, stamped with the user,
+    // and the link keeps its original author.
+    expect(uuidToString(links[0]!.task_id)).toBe(first.taskId);
+    expect(links[0]!.taken_by).toBe("user");
+    expect(links[0]!.linked_by).toBe("session:0190c000-0000-7000-8000-0000000000e1");
   });
 
   it("fails NotFound for an unknown id", async () => {

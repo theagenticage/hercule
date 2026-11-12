@@ -247,6 +247,54 @@ describe("the Inbox screen", () => {
     expect(line.textContent).toMatch(/last changed \d{2}:\d{2}\./);
   });
 
+  it('starts a search in Everything, tied to the facet\'s source and account, from its "Search the other" row', async () => {
+    const inbox = defaultInbox();
+    const { calls } = await openInbox({
+      ...inbox,
+      outline: {
+        ...OUTLINE,
+        sources: [
+          {
+            source: "acme",
+            count: 3,
+            folded: false,
+            accounts: [],
+            facets: [
+              {
+                source: "acme",
+                connectionId: "0199e0e7-0000-7000-8000-00000000000a",
+                key: "team",
+                label: "Team",
+                plural: "teams",
+                values: [{ value: "basket", label: "Basket", count: 1 }],
+                more: 4,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Search the other 4" }));
+    await userEvent.type(screen.getByRole("combobox"), "Payments ");
+
+    await waitFor(() => {
+      expect(readQueries(calls).at(-1)).toMatchObject({
+        list: { savedQuery: "everything" },
+        clauses: [
+          {
+            key: "team",
+            op: "is",
+            value: "Payments",
+            source: "acme",
+            connectionId: "0199e0e7-0000-7000-8000-00000000000a",
+          },
+        ],
+      });
+    });
+  });
+
   it("offers the values of the field being typed", async () => {
     const { calls } = await openInbox(defaultInbox(), {
       "POST /api/v1/external-entities/inbox/values": () => ({
