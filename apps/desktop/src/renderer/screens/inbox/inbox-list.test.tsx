@@ -127,6 +127,31 @@ describe("InboxList", () => {
     expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /thing-1/ }));
   });
 
+  it("leaves the scroll where the user put it when new row values arrive and the current row stays", () => {
+    const actions = buildInboxRowActions();
+    const draw = (rows: ReturnType<typeof buildRows>) => (
+      <InboxList
+        listId="waits"
+        label="Someone waits on me"
+        rows={rows}
+        plugins={TEST_PLUGINS}
+        currentRef="thing-0"
+        selection={new Set()}
+        actions={actions}
+        onViewportChange={() => {}}
+      />
+    );
+    const { rerender, container } = render(draw(buildRows(60)));
+    const scroll = container.querySelector<HTMLElement>(".ib-scroll")!;
+    Object.defineProperty(scroll, "clientHeight", { value: 600 });
+    const scrollTo = vi.fn();
+    scroll.scrollTo = scrollTo;
+    scroll.scrollTop = 1200;
+    rerender(draw(buildRows(60)));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scroll.scrollTop).toBe(1200);
+  });
+
   it("gives the hand-off menu its anchor: the row's hand-off button, else the row", () => {
     const handle = createRef<InboxListHandle>();
     const rows = [

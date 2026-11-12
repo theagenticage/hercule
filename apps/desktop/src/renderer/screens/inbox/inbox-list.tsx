@@ -178,12 +178,16 @@ export function InboxList({
   }));
 
   // The least scroll that brings the current row clear of both edges, with the fade at the foot counted out of the view.
+  // It runs when the current row or the sizes change, never because new copies of the rows arrived: the user may have scrolled away.
   const foot = FOOT_FADE_PX + reserve;
-  const rowsAtLastScroll = useRef(rows);
+  const rowsAtLastRender = useRef(rows);
+  const rowsChangedAtLastRender = useRef(false);
+  useLayoutEffect(() => {
+    rowsChangedAtLastRender.current = rowsAtLastRender.current !== rows;
+    rowsAtLastRender.current = rows;
+  });
   useLayoutEffect(() => {
     const scroll = scrollRef.current!;
-    const changed = rowsAtLastScroll.current !== rows;
-    rowsAtLastScroll.current = rows;
     if (selectedIndex < 0 || scroll.clientHeight === 0) return;
     const top = selectedIndex * rowHeight;
     const clear = scroll.clientHeight - foot;
@@ -191,12 +195,16 @@ export function InboxList({
     if (top < scroll.scrollTop) target = top;
     else if (top + rowHeight > scroll.scrollTop + clear) target = top + rowHeight - clear;
     if (target === null) return;
-    if (changed && !isMotionReduced() && typeof scroll.scrollTo === "function") {
+    if (
+      rowsChangedAtLastRender.current &&
+      !isMotionReduced() &&
+      typeof scroll.scrollTo === "function"
+    ) {
       scroll.scrollTo({ top: target, behavior: "smooth" });
     } else {
       scroll.scrollTop = target;
     }
-  }, [selectedIndex, rows, rowHeight, foot]);
+  }, [currentRef, selectedIndex, rowHeight, foot]);
 
   // Only a new request moves the focus, not a new current row.
   const handledFocusRequest = useRef(focusRequested);
