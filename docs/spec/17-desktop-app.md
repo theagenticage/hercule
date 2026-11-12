@@ -6365,6 +6365,28 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 - **Rows, only the rows in view are drawn: met.** 1,090 elements on the page against 6,482.
 - **Moves and motion, no frame over 2 ms of style and layout, no dropped frame: missed on most new steps.** Walking with J has 126 frames over 2 ms and 23 to 26 dropped frames, dismissing and undoing have a worst frame of 9.4 to 12.4 ms, and a signal landing has a worst frame of 2.8 to 2.9 ms. Only a new thing arriving (3.2 ms, one frame over 2 ms) is close. The old screen missed the same budget by more on the step both share, opening a card (54 ms against 9 ms).
 
+**After the fixes.** Later commits on the #1122 branch fixed the three misses. They were not measured back to back against the old screen again, so every number below is read against the "After" column above, not against "Before".
+
+- **Repeated reads on reload** (`d162d8678`): pushes that name the same read are gathered into one read per key, and every read starts after the pushes it covers. Counted by tests: 5 first pushes on reload give 1 read per key (was 5); one change pushed on two topics gives 1 read (was 2). A reload now reads each Inbox key about twice: the open read, plus one re-read after the subscriptions' first pushes, kept so no change between the two is lost. The old screen read 3 lists and 3 counts. The longest-read times were not measured again.
+- **Bundle** (`d162d8678`, `b792d23d0`): the Inbox chunk is 57,295 B gzipped, under the old screen's 58,348 B. To fit, five cold, static parts and three pane parts are compiled without React Compiler memoization (`"use no memo"`). They do not re-render on hot paths.
+- **Walking with J, dismiss and undo** (`b792d23d0`; Linux container, `perf --inbox-only`, load 0.4 to 1.2): three `:has()` rules restyled the whole page (920 elements) on every J. They are removed, the rows are memoized, and the pane keeps the previous detail drawn until the next read arrives.
+
+| Step | Before the fix | After the fix |
+|---|---|---|
+| Walk 50 rows: frames over 2 ms | 126 to 127 | 101 |
+| Walk 50 rows: worst frame | 16.5 ms | 8.0 ms |
+| Walk 50 rows: dropped frames | 23 to 26 | 0 (four of five runs) |
+| Walk 50 rows: usual style and layout | 3.4 ms | 2.2 ms |
+| Dismiss: worst frame | 9.4 to 9.6 ms | 4.6 ms |
+| Undo: worst frame | 11.5 to 12.4 ms | 5.7 ms |
+
+**Verdicts after the fixes:**
+
+- **Processes, idle, per streamed token, page read, rows drawn: met,** as above.
+- **Bundle, the Inbox chunk no bigger than the old one: met.** 57,295 B against 58,348 B.
+- **Reload reads: met on the number of requests, not shown on time.** A reload reads each key about twice, against 3 on the old screen. The longest read was not measured again.
+- **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). A follow-up ticket is to be filed.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
