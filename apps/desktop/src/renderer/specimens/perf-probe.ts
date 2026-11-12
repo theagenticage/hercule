@@ -84,6 +84,11 @@ Object.defineProperty(globalThis, "__REACT_DEVTOOLS_GLOBAL_HOOK__", {
 interface PendingTimer {
   readonly kind: "interval" | "timeout" | "frame";
   readonly delayMs: number;
+  /**
+   * When a timeout is due, from `performance.now()`. The page stops `Date`,
+   * so only the performance clock moves.
+   */
+  readonly dueAt: number;
 }
 
 const pending = new Map<string, PendingTimer>();
@@ -107,7 +112,8 @@ globalThis.setTimeout = ((handler: TimerHandler, delay = 0, ...rest: unknown[]) 
     delay,
     ...rest,
   );
-  pending.set(`t${String(id)}`, { kind: "timeout", delayMs: Number(delay) || 0 });
+  const delayMs = Number(delay) || 0;
+  pending.set(`t${String(id)}`, { kind: "timeout", delayMs, dueAt: performance.now() + delayMs });
   return id;
 }) as typeof setTimeout;
 globalThis.clearTimeout = (id?: number) => {
@@ -116,7 +122,7 @@ globalThis.clearTimeout = (id?: number) => {
 };
 globalThis.setInterval = ((handler: TimerHandler, delay = 0, ...rest: unknown[]) => {
   const id: number = native.setInterval(handler, delay, ...rest);
-  pending.set(`t${String(id)}`, { kind: "interval", delayMs: Number(delay) || 0 });
+  pending.set(`t${String(id)}`, { kind: "interval", delayMs: Number(delay) || 0, dueAt: 0 });
   return id;
 }) as typeof setInterval;
 globalThis.clearInterval = globalThis.clearTimeout;
@@ -125,7 +131,7 @@ globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
     pending.delete(`f${String(id)}`);
     callback(time);
   });
-  pending.set(`f${String(id)}`, { kind: "frame", delayMs: 0 });
+  pending.set(`f${String(id)}`, { kind: "frame", delayMs: 0, dueAt: 0 });
   return id;
 };
 globalThis.cancelAnimationFrame = (id: number): void => {
@@ -138,8 +144,9 @@ globalThis.cancelAnimationFrame = (id: number): void => {
  * yet run, or a timeout due within a second, such as a debounced read.
  */
 export function hasPendingWork(): boolean {
+  const soon = performance.now() + 1000;
   return [...pending.values()].some(
-    (timer) => timer.kind === "frame" || (timer.kind === "timeout" && timer.delayMs <= 1000),
+    (timer) => timer.kind === "frame" || (timer.kind === "timeout" && timer.dueAt <= soon),
   );
 }
 
