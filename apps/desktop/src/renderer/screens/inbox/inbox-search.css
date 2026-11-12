@@ -1,0 +1,225 @@
+/* The Inbox search field, over the list's column: the drawing's `.sx` (`docs/design/inbox-list/css/frame.css`
+   on the branch `prototype/inbox-list-hifi`) on the app's tokens. It sits in the list column's bar slot, so
+   its margin is the list's edge, `--list-pad`, which the list column defines. */
+.ib-sx {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 0 var(--list-pad, 12px);
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  color: var(--faint);
+  transition: box-shadow var(--m-quick) var(--m-ease);
+}
+.ib-sx[data-focus] {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  box-shadow:
+    inset 0 0 0 1px var(--composer-line),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  color: var(--muted);
+}
+.ib-sx-icon {
+  display: inline-grid;
+  flex: none;
+}
+.ib-sx input {
+  flex: 1;
+  min-width: 80px;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+}
+.ib-sx input::placeholder {
+  color: var(--faint);
+}
+.ib-sx-kbd {
+  flex: none;
+}
+.ib-sx[data-focus] .ib-sx-kbd,
+.ib-sx[data-chips] .ib-sx-kbd {
+  display: none;
+}
+
+/* Tokens keep their width, so one that does not fit is seen and folds into +N. Only the scope token
+   shortens its value with an ellipsis. */
+.ib-sx-chips {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.ib-sx-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 2px 0 7px;
+  border-radius: var(--r-xs);
+  background: var(--selected);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ib-sx-chip[hidden] {
+  display: none;
+}
+.ib-sx-chip-scope {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ib-sx-more {
+  flex: none;
+  color: var(--muted);
+}
+.ib-sx-chip b {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.ib-sx-chip button {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--faint);
+}
+.ib-sx-chip button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* The × is 18px to draw and 24px to hit. */
+.ib-sx-chip button::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+.ib-sx-probe {
+  position: absolute;
+  visibility: hidden;
+  font-size: var(--t-13);
+  white-space: pre;
+  pointer-events: none;
+}
+/* The results count, for assistive technology only. */
+.ib-sx-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The suggestions: a popover on the page, level with the field. `ib-sx-menu`'s `left`, `top` and `width`
+   are set by `inbox-search.tsx` when it opens. */
+.ib-sx-menu {
+  inset: auto;
+  margin: 0;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+.ib-sx-heading {
+  margin: 4px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ib-sx-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-align: left;
+}
+.ib-sx-item[data-active] {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ib-sx-key {
+  display: inline-grid;
+  color: var(--faint);
+}
+.ib-sx-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ib-sx-label code,
+.ib-sx-words {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.ib-sx-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ib-sx-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ib-sx-count {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ib-sx-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 8px 8px 2px;
+  border-top: 1px solid var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.ib-sx-foot kbd:not(:first-child) {
+  margin-left: 8px;
+}
