@@ -1,13 +1,13 @@
-/** Test cards for the Inbox, in the invented Northwind Market world. */
+/** Test cards and Inbox things, in the invented Northwind Market world. */
 import type {
   Connection,
-  EntityHint,
-  EntityLink,
-  EntityPeer,
   EntityPlace,
+  EntityRecord,
   EntitySignalLine,
-  Inbox,
-  InboxCard,
+  InboxAsk,
+  InboxCounts,
+  InboxOutline,
+  InboxThing,
   PluginDetail,
   WorkflowOffer,
 } from "@hercule/contract";
@@ -16,7 +16,10 @@ import type {
  * Returns a rich card of the invented `acme/ticket` kind, grouped under
  * an `acme/project`, that was assigned to the user and observed on 1 November. `overrides` change any field.
  */
-export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): InboxCard => ({
+export const buildInboxCard = (
+  id: string,
+  overrides: Partial<EntityRecord> = {},
+): EntityRecord => ({
   id,
   ref: `acme:ticket:${id}`,
   kind: "acme/ticket",
@@ -40,11 +43,6 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
   firstObservedAt: "2026-11-01T09:00:00.000Z",
   ancestors: [],
   contextComplete: true,
-  side: "ongoing",
-  signals: { openCount: 0, kinds: [] },
-  offerSetId: "none",
-  actingConnections: [],
-  liveWorkflows: [],
   ...overrides,
 });
 
@@ -52,7 +50,7 @@ export const buildInboxCard = (id: string, overrides: Partial<InboxCard> = {}): 
  * Returns a compact card of the invented `acme/review` kind: a fast-paced
  * request with a patience of 24 hours. `overrides` change any field.
  */
-export const buildRequestCard = (id: string, overrides: Partial<InboxCard> = {}): InboxCard =>
+export const buildRequestCard = (id: string, overrides: Partial<EntityRecord> = {}): EntityRecord =>
   buildInboxCard(id, {
     ref: `acme:review:${id}`,
     kind: "acme/review",
@@ -64,7 +62,6 @@ export const buildRequestCard = (id: string, overrides: Partial<InboxCard> = {})
     identifier: `#${id}`,
     title: `Review ${id}`,
     concerns: ["review-requested"],
-    side: "requests",
     ...overrides,
   });
 
@@ -87,52 +84,6 @@ export const buildInboxPlace = (
 });
 
 /**
- * Returns a link between two refs under the claim given: a `source` claim of
- * the invented `acme` plugin, or a `person` claim of the user.
- */
-export const buildInboxLink = (
-  fromRef: string,
-  toRef: string,
-  type: EntityLink["claim"]["type"] = "source",
-  hasPersonClaim: boolean = type === "person",
-): EntityLink => ({
-  fromRef,
-  toRef,
-  hasPersonClaim,
-  claim: type === "source" ? { type, plugin: "acme" } : { type, actor: "user" },
-});
-
-/** Returns a hint: `fromRef` mentions `toRef` in its description. */
-export const buildInboxHint = (fromRef: string, toRef: string): EntityHint => ({
-  fromRef,
-  toRef,
-  evidenceKey: "description",
-});
-
-/**
- * Returns a peer: a linked record with no card of its own, named by an
- * identifier made from its ref. `overrides` change any field, and
- * `withoutIdentifier` leaves the identifier out, as a source that has none does.
- */
-export const buildInboxPeer = (
-  ref: string,
-  overrides: Partial<EntityPeer> = {},
-  withoutIdentifier = false,
-): EntityPeer => {
-  const { identifier, ...rest } = {
-    ref,
-    kind: "acme/ticket",
-    noun: "Ticket",
-    identifier: ref.slice(ref.lastIndexOf(":") + 1).toUpperCase(),
-    title: `Peer ${ref}`,
-    yours: false,
-    restricted: false,
-    ...overrides,
-  };
-  return withoutIdentifier || identifier === undefined ? rest : { ...rest, identifier };
-};
-
-/**
  * Returns a signal line landed at `createdAt`, whose sentence is `say`. The
  * kind is the invented `acme/review-requested`. `overrides` change any field.
  */
@@ -153,6 +104,28 @@ export const buildSignalLine = (
 });
 
 /**
+ * Returns an open ask of the invented `acme/review-requested` kind, raised by
+ * `asker` ("Mei asked for your review"), or by nobody when `asker` is null.
+ * `overrides` change any field.
+ */
+export const buildInboxAsk = (
+  id: string,
+  asker: string | null = "Mei",
+  overrides: Partial<InboxAsk> = {},
+): InboxAsk => ({
+  id,
+  kind: "acme/review-requested",
+  noun: "review request",
+  ...(asker === null ? {} : { asker }),
+  say: {
+    say: asker === null ? "Review requested" : `${asker} asked for your review`,
+    tone: "plain",
+  },
+  createdAt: "2026-11-07T09:00:00.000Z",
+  ...overrides,
+});
+
+/**
  * Returns an available offer of the workflow `name` that answers the given
  * signal kinds. `unavailable` makes it one the card cannot be handed to.
  */
@@ -167,28 +140,54 @@ export const buildWorkflowOffer = (
   ...(unavailable === undefined ? {} : { unavailable }),
 });
 
-/** Returns an Inbox of these cards, in this order, with the places and edges given. */
-export const buildInbox = (
-  cards: readonly InboxCard[],
-  context: Partial<
-    Pick<Inbox, "places" | "edges" | "links" | "hints" | "peers" | "offerSets">
-  > = {},
-): Inbox => ({
-  cards,
-  places: [],
-  edges: [],
-  links: [],
-  hints: [],
-  peers: [],
-  offerSets: {},
-  counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
-  truncated: false,
-  ...context,
+/** Returns the sidebar's counts with nothing in them. `overrides` change any field. */
+export const buildInboxCounts = (overrides: Partial<InboxCounts> = {}): InboxCounts => ({
+  waiting: 0,
+  newestArrival: 0,
+  ...overrides,
 });
 
-/** Returns the ids of these cards, for a short comparison. */
-export const listCardIds = (cards: readonly { readonly card: InboxCard }[]): readonly string[] =>
-  cards.map((row) => row.card.id);
+/** Returns the Inbox's outline with nothing in it: no saved query counts anything. `overrides` change any field. */
+export const buildInboxOutline = (overrides: Partial<InboxOutline> = {}): InboxOutline => ({
+  savedQueries: [],
+  sources: [],
+  pins: [],
+  fields: [],
+  failing: [],
+  ...overrides,
+});
+
+/**
+ * Returns a row of the Inbox for a thing of the invented `acme/ticket` kind,
+ * with no asks and no Task. `overrides` change any field.
+ */
+export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {}): InboxThing => ({
+  id,
+  ref: `acme:ticket:${id}`,
+  kind: "acme/ticket",
+  noun: "Ticket",
+  source: "acme",
+  identifier: `ACME-${id}`,
+  title: `Ticket ${id}`,
+  url: `https://acme.example/${id}`,
+  access: "ok",
+  stale: false,
+  observedAt: "2026-11-05T09:00:00.000Z",
+  sourceUpdatedAt: "2026-11-05T09:00:00.000Z",
+  patience: 336,
+  face: null,
+  asks: [],
+  askCount: 0,
+  askKinds: [],
+  openKinds: [],
+  takenOn: false,
+  arrival: 0,
+  liveWorkflows: [],
+  offerSetId: "none",
+  actingConnections: [],
+  accounts: [],
+  ...overrides,
+});
 
 /**
  * Returns a plugin that declares the given kinds of card, such as

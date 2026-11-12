@@ -3,27 +3,16 @@
  * a click on one would end, what the card looks like once it is handed, and
  * the undo line after a hand-off is taken back.
  *
- * The colleague who has a card is a fact the controller reports on the card
- * (`InboxCard.liveWorkflows`), so a card drawn after leaving the Inbox and
- * coming back still shows who has it. A hand-off the user has just made
- * shows at once as an `InboxEdit` (see `card-moves.ts`) that puts the workflow
- * into that list before the controller answers.
+ * Kinds of signal are named in two ways. An ask the row lists carries the
+ * kind's declared noun ("review request"), and the lines that name asks use it.
+ * Where only kind keys are known (`openKinds`, the kinds a hand-off ended), the
+ * name is made from the key by `nameSignalKind`, because the row holds no noun
+ * for a kind it lists no ask of.
  */
-import type {
-  ActingConnection,
-  EntitySignalLine,
-  ExternalEntityDetail,
-  HandOffUndo,
-  Inbox,
-  InboxCard,
-  LiveWorkflow,
-  WorkflowOffer,
-} from "@hercule/contract";
+import type { HandOffUndo, InboxAsk, InboxThing, WorkflowOffer } from "@hercule/contract";
 import { nameSignalKind } from "../intake";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
-import { decideCardFace, type CardFace } from "./card-face";
-import type { CardTime } from "./card-wait";
 
 /** The workflows a card can be handed to, and the ones it could be if something changed. */
 export interface CardOffers {
@@ -53,7 +42,7 @@ const partitionedSets = new WeakMap<readonly WorkflowOffer[], CardOffers>();
  * compares its offers by identity draws again only when its own set changed.
  */
 export const listCardOffers = (
-  card: Pick<InboxCard, "offerSetId">,
+  card: Pick<InboxThing, "offerSetId">,
   offerSets: Readonly<Record<string, readonly WorkflowOffer[]>>,
 ): CardOffers => {
   const set = offerSets[card.offerSetId];
@@ -86,6 +75,7 @@ export const decideHandMove = ({ available }: CardOffers): HandMove => {
   return available.length === 1 ? { kind: "one", offer: first } : { kind: "several" };
 };
 
+/** Returns kind keys as a list of names made by `nameSignalKind`: "Review requested and Mentioned". */
 const listKindLabels = (kinds: readonly string[]): string =>
   formatNameList(kinds.map(nameSignalKind), "and");
 
@@ -94,7 +84,8 @@ const listKindLabels = (kinds: readonly string[]): string =>
  * and what it leaves: "Ends Review requested. Mentioned stays open."
  *
  * `openKinds` are the kinds of the signals the card holds open, snoozed ones
- * included (`card.signals.kinds`, or the kinds of the open card's open signals).
+ * included (`InboxThing.openKinds`, or the kinds of the open signals in the
+ * detail read of the card).
  */
 export const describeHandOffEnds = (
   offer: Pick<WorkflowOffer, "answers">,
@@ -106,115 +97,6 @@ export const describeHandOffEnds = (
   return left.length === 0
     ? ends
     : `${ends} ${listKindLabels(left)} ${left.length === 1 ? "stays" : "stay"} open.`;
-};
-
-/**
- * Returns the distinct kinds of the open signals among `lines`, snoozed ones
- * included, in the order they first appear. These are the `openKinds` of
- * `describeHandOffEnds` for an open card, which reads its signals as lines
- * (`ExternalEntityDetail.signals`) where a card in the list has them as
- * `signals.kinds`.
- */
-export const listOpenSignalKinds = (
-  lines: readonly Pick<EntitySignalLine, "kind" | "status">[],
-): readonly string[] => [
-  ...new Set(lines.filter((line) => line.status === "open").map((line) => line.kind)),
-];
-
-/**
- * Returns the sentence a handed card draws: "Agent review has it", in a plain
- * tone. The card's colleague names itself with the same words.
- */
-export const decideHandedSentence = (
-  workflow: LiveWorkflow,
-): { readonly text: string; readonly tone: "plain" } => ({
-  text: `${workflow.name} has it`,
-  tone: "plain",
-});
-
-/** Who stands where a card's wait was: the workflow working on it, or the user, who holds its Task. */
-export type CardHolder =
-  | { readonly kind: "colleague"; readonly workflow: LiveWorkflow }
-  | { readonly kind: "you" };
-
-/**
- * Returns who holds `card`: the first of its live workflows, which is the one
- * with the newest run, else the user when a Task holds it, else nobody.
- */
-export const decideCardHolder = (
-  card: Pick<InboxCard, "taskId" | "liveWorkflows">,
-): CardHolder | undefined => {
-  const [workflow] = card.liveWorkflows;
-  if (workflow !== undefined) return { kind: "colleague", workflow };
-  return card.taskId === undefined ? undefined : { kind: "you" };
-};
-
-/** What a card of the Inbox draws: its face and time, and who holds it. */
-export interface CardDraw extends CardTime {
-  readonly face: CardFace;
-  /** `undefined` for a card nobody holds, which draws its wait instead. */
-  readonly holder: CardHolder | undefined;
-}
-
-/**
- * Returns what `card` draws, given its `time`.
- *
- * - A card with a live workflow has its sentence replaced by
- *   `decideHandedSentence`, and no wait and no sentence age: the colleague
- *   stands in the wait's place, and the sentence's age would be about a
- *   signal the hand-off ended. A screen reader reads the sentence through
- *   `describeCardAloud`.
- * - A card a Task holds is held by the user, unless a workflow is working on
- *   it: a hand-off continues the Task, and the colleague holds the card then.
- */
-export const decideCardDraw = (card: InboxCard, time: CardTime): CardDraw => {
-  const face = decideCardFace(card);
-  const holder = decideCardHolder(card);
-  if (holder?.kind !== "colleague") return { ...time, face, holder };
-  return {
-    ...time,
-    wait: null,
-    signalAge: undefined,
-    face: { ...face, sentence: decideHandedSentence(holder.workflow) },
-    holder,
-  };
-};
-
-/**
- * What the open card can be handed to and what a hand-off would end: the
- * offers, the accounts it could act as, and the kinds of its open signals.
- */
-export interface OpenCardHandOff {
-  readonly offers: CardOffers;
-  readonly actingConnections: readonly ActingConnection[];
-  readonly openKinds: readonly string[];
-}
-
-/**
- * Returns the hand-off facts of an open card. The read of the card
- * (`detail`) is the source once it has answered. Until then they come from
- * the card as the Inbox lists it (`listed`), and from the Inbox's offer sets.
- * A card whose kind is not available, or an Inbox that has not answered, has
- * no offers.
- */
-export const readOpenCardHandOff = (
-  detail:
-    | Pick<ExternalEntityDetail, "kindAvailable" | "offers" | "actingConnections" | "signals">
-    | undefined,
-  listed: Pick<InboxCard, "offerSetId" | "actingConnections" | "signals"> | undefined,
-  inbox: Pick<Inbox, "offerSets"> | undefined,
-): OpenCardHandOff => {
-  const readOffers = (): CardOffers => {
-    if (inbox === undefined || detail?.kindAvailable === false) return NO_OFFERS;
-    if (detail !== undefined) return partitionOffers(detail.offers);
-    return listed === undefined ? NO_OFFERS : listCardOffers(listed, inbox.offerSets);
-  };
-  return {
-    offers: readOffers(),
-    actingConnections: detail?.actingConnections ?? listed?.actingConnections ?? [],
-    openKinds:
-      detail === undefined ? (listed?.signals.kinds ?? []) : listOpenSignalKinds(detail.signals),
-  };
 };
 
 /**
@@ -262,3 +144,155 @@ export const describeHandOffUndo = (
  * card as it is, because showing a reversal that did not happen would be a lie.
  */
 export const isHandOffTakenBack = (undo: HandOffUndo): boolean => undo.outcome === "undone";
+
+/** How well a workflow's hand-off fits the open asks of a thing: it ends all of them, some, or none. */
+export type HandOffFit = "all" | "some" | "none";
+
+/**
+ * Returns how many of the thing's open ask kinds `offer` ends. A thing with no
+ * asks has nothing to end, so every offer fits it equally ("all").
+ */
+export const decideHandOffFit = (
+  offer: Pick<WorkflowOffer, "answers">,
+  askKinds: readonly string[],
+): HandOffFit => {
+  const ended = askKinds.filter((kind) => offer.answers.includes(kind)).length;
+  if (ended === askKinds.length) return "all";
+  return ended === 0 ? "none" : "some";
+};
+
+const FIT_RANK: Readonly<Record<HandOffFit, number>> = { all: 0, some: 1, none: 2 };
+
+/**
+ * Returns `offers` best fit first, as a new list. The order is:
+ *
+ * 1. the offers that end every open ask, then those that end some, then none;
+ * 2. among equals, the one the user handed a thing of this kind to most recently;
+ * 3. then by name.
+ */
+export const rankHandOffs = (
+  offers: readonly WorkflowOffer[],
+  askKinds: readonly string[],
+): readonly WorkflowOffer[] => {
+  const readHandedAt = (offer: WorkflowOffer): number =>
+    offer.lastHandedAt === undefined ? -Infinity : Date.parse(offer.lastHandedAt);
+  return offers
+    .map((offer) => ({ offer, fit: FIT_RANK[decideHandOffFit(offer, askKinds)] }))
+    .toSorted(
+      (a, b) =>
+        a.fit - b.fit ||
+        readHandedAt(b.offer) - readHandedAt(a.offer) ||
+        a.offer.name.localeCompare(b.offer.name),
+    )
+    .map(({ offer }) => offer);
+};
+
+/** The asks of an Inbox row that a hand-off line talks about. */
+export type HandOffAsks = Pick<InboxThing, "asks" | "askCount" | "askKinds" | "openKinds">;
+
+/** Returns one ask as the line names it: "Mei’s review request", or "the failing checks" when no person raised it. */
+const nameAsk = (ask: InboxAsk): string =>
+  ask.asker === undefined ? `the ${ask.noun}` : `${ask.asker}’s ${ask.noun}`;
+
+/**
+ * Returns the line under a workflow in the hand-off menu, naming each ask it
+ * ends and each it leaves with the user: "Ends Mei’s review request. Leaves
+ * Omar’s mention with you."
+ *
+ * - A workflow that ends none says "Ends none of its asks."
+ * - A workflow that ends every ask has no "Leaves" part.
+ * - A row lists at most `MAX_INBOX_ASKS` asks, and the rest are counted ("and 3 more").
+ *   The kinds of all the asks say which side the uncounted ones fall on when the
+ *   workflow ends every kind or none of them. With a mix, the line says that
+ *   more asks are not named.
+ * - A thing with no asks has no names to give, so the line is the one built from
+ *   `openKinds` (`describeHandOffEnds`).
+ */
+export const describeHandOffAsks = (
+  offer: Pick<WorkflowOffer, "answers">,
+  thing: HandOffAsks,
+): string => describeHandOffAsksParts(offer, thing).line;
+
+/**
+ * Returns the line of `describeHandOffAsks` and, apart from it, the part that
+ * says what the workflow ends. The part is what a search by "what it does"
+ * matches, so the search never splits the English of the line.
+ */
+const describeHandOffAsksParts = (
+  offer: Pick<WorkflowOffer, "answers">,
+  thing: HandOffAsks,
+): { readonly line: string; readonly ends: string } => {
+  if (thing.askCount === 0) {
+    const line = describeHandOffEnds(offer, thing.openKinds);
+    return { line, ends: line };
+  }
+  const nameAll = (asks: readonly InboxAsk[], uncounted: number): string[] => [
+    ...new Set(asks.map(nameAsk)),
+    ...(uncounted > 0 ? [`${String(uncounted)} more`] : []),
+  ];
+  const uncounted = thing.askCount - thing.asks.length;
+  const fit = decideHandOffFit(offer, thing.askKinds);
+  const ended = nameAll(
+    thing.asks.filter((ask) => offer.answers.includes(ask.kind)),
+    fit === "all" ? uncounted : 0,
+  );
+  const left = nameAll(
+    thing.asks.filter((ask) => !offer.answers.includes(ask.kind)),
+    fit === "none" ? uncounted : 0,
+  );
+  const ends =
+    ended.length === 0 ? "Ends none of its asks." : `Ends ${formatNameList(ended, "and")}.`;
+  const parts = [ends];
+  if (left.length > 0) parts.push(`Leaves ${formatNameList(left, "and")} with you.`);
+  if (fit === "some" && uncounted > 0) parts.push(`${String(uncounted)} more asks are not named.`);
+  return { line: parts.join(" "), ends };
+};
+
+/** From this many available workflows, the hand-off menu has a field to find one by name. */
+export const HAND_OFF_FIND_FROM = 6;
+
+/** One workflow of the hand-off menu, with the line already written. */
+export interface HandOffChoice {
+  readonly offer: WorkflowOffer;
+  /** What a hand-off would end and leave, or why the workflow cannot take the thing. */
+  readonly line: string;
+  /**
+   * The part of `line` that says what the workflow ends, which a search by what
+   * the workflow does matches. Absent when the whole `line` counts, such as the
+   * reason an unavailable workflow cannot take the thing.
+   */
+  readonly ends?: string;
+}
+
+/**
+ * Returns the available workflows of `offers` best fit first, each with the
+ * line that names the asks it ends and leaves (`describeHandOffAsks`).
+ */
+export const listAvailableHandOffs = (
+  offers: CardOffers,
+  thing: HandOffAsks,
+): readonly HandOffChoice[] =>
+  rankHandOffs(offers.available, thing.askKinds).map((offer) => ({
+    offer,
+    ...describeHandOffAsksParts(offer, thing),
+  }));
+
+/**
+ * Returns the choices whose workflow name, or what the workflow does, holds
+ * `query`, ignoring case and the spaces around it. An empty query returns every
+ * choice.
+ *
+ * What a workflow does is what it ends (`ends`). The asks it leaves with the
+ * user are not matched, because every other workflow names them too, so
+ * matching them would match nearly everything.
+ */
+export const findHandOffs = (
+  choices: readonly HandOffChoice[],
+  query: string,
+): readonly HandOffChoice[] => {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return choices;
+  return choices.filter(({ offer, line, ends }) =>
+    `${offer.name} ${ends ?? line}`.toLowerCase().includes(wanted),
+  );
+};

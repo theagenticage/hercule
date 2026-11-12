@@ -54,7 +54,7 @@ Observations and claims key on the ref, not on the entity's id. A Connection can
 | `reason_templates` | *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A JSON copy of the kind's raw `reasons` table, `{ key: { say, tone } }`, made when the thing is observed as `concern_reasons` is. The sentence of a signal and the words of the timeline are built from it, so they read well after the plugin is gone. A shared field: only the accepted shared write sets it |
 | `presented_by` | The Connection whose observation wrote the shared fields. Null when that Connection is deleted |
 | `dismissed_at`, `dismissed_by` | [Section 4.2](#42-dismissal) |
-| `arrival_sequence` | [Section 8.4](#84-counts-and-the-new-mark) |
+| `arrival_sequence` | [Section 8.4](#84-counts-the-outline-and-the-new-mark) |
 
 **Field value** (`external_entity_fields`). *(Added 2026-11-12, [#1121](https://github.com/theagenticage/hercule/issues/1121).)* One row per (`ref`, `key`), the primary key, holding the value of one declared field of a thing ([./05-plugins.md](./05-plugins.md#43-event-source)). It is a `WITHOUT ROWID` table with two columns for the value, and exactly one of them is set:
 
@@ -149,7 +149,7 @@ The shared fields are everything on the entity row that is not one Connection's 
 
 ### 4.2 Dismissal
 
-`dismissed_at` and `dismissed_by` (an actor). A dismissed thing stays out of sight and keeps its history. A new signal or a new concern does not bring it back: only `externalEntity.restore` does. So there are no markers to compare. Dismissing tells the plugin nothing and ends no signal. A dismissal is never pruned.
+`dismissed_at` and `dismissed_by` (an actor). A dismissed thing stays out of sight and keeps its history. *(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* **An ask raised after the dismissal brings it back**, and `externalEntity.restore` does too. A new concern, an ask that was open when the thing was dismissed, and a signal of a kind that asks nothing do not ([section 8.1](#81-membership)). The dismissal is kept: the row says it came back (`dismissedAt`), and a second dismissal moves the cutoff to its own time: dismissing a thing that came back dismisses it again, from that moment, and announces the change. A thing that comes back is a new arrival ([section 8.4](#84-counts-the-outline-and-the-new-mark)). Dismissing tells the plugin nothing and ends no signal. A dismissal is never pruned.
 
 ### 4.3 Pruning
 
@@ -188,7 +188,7 @@ A plugin reads its whole inventory of one kind, then calls `reconcile({ kind, co
 3. Apply the shared-field rule of [section 3](#3-shared-fields-and-presented_by) in ref order.
 4. Apply each observation's `relations` ([section 6](#6-relation-claims)), whatever the shared-field outcome.
 5. With `complete: true`, empty this Connection's concerns and clear its `listed` mark for every ref of the kind it reported before and left out now. Retain access, ownership and the entity. Other Connections' concerns stay. Then write the scan row, `last_complete_at`.
-6. Raise `arrival_sequence` for the entities that qualify ([section 8.4](#84-counts-and-the-new-mark)).
+6. Raise `arrival_sequence` for the entities that qualify ([section 8.4](#84-counts-the-outline-and-the-new-mark)).
 
 **Rules:**
 
@@ -341,65 +341,62 @@ The walk down, for reparenting, is a separate statement with no limit: a notific
 
 ### 8.1 Membership
 
-A card is a **full record of a work kind**, not dismissed, with at least one of:
+*(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* A thing is on the Inbox when it is a **full record of a work kind** with at least one of:
 
 - a current concern;
 - an open signal that is not snoozed now ([section 8.5](#85-signals-inside-a-card));
-- a live linked Task.
+- a live linked Task;
 
-Context and partial records have no card. Membership is **one SQL predicate in the external-entities repository**, used by both `queryInbox` and `countInbox`, so the cards and the counts cannot disagree. The predicate does not filter on `lifecycle`, `access`, the Connection's state, the kind being active or `stale`: a card survives a lost token and keeps its last known facts. A snooze ends with time and nothing is written when it ends, so every read of the predicate takes the time of the read.
+and it is **not dismissed, or it has an ask raised after the dismissal** ([section 4.2](#42-dismissal)). Context and partial records are never on it. Membership is **one SQL definition in the external-entities domain** (`buildEligibleEntities`), used by every read of the Inbox: the page, the counts, the facets, the suggestions and the arrival recorder, so they cannot disagree. It does not filter on `lifecycle`, `access`, the Connection's state, the kind being active or `stale`: a thing survives a lost token and keeps its last known facts. A snooze ends with time and nothing is written when it ends, so every read takes the time of the read.
 
-The client's `layOutInbox` does not decide membership. It decides where a card lies on the page: which of its places surfaces, the first one in full, the others as a pointer, counted once ([./17-desktop-app.md](./17-desktop-app.md#inbox)).
+**An ask** is an open signal that is not snoozed, of a kind that asks the user for a move, that nobody has taken.
+
+- A kind asks when its plugin declares `asks: true` ([./05-plugins.md](./05-plugins.md)) and the plugin is active. The core's own kinds (proposal, offer, unsure, fyi) do not ask: Triage shows them. One function decides which kinds ask (`listAskingKinds`), so a later per-user setting slots in there.
+- **An ask is taken** when the user took the thing on, by Take on or Add to Work, after the ask was raised. The link of a Task to a ref records when the user took it on (`task_entity_links.taken_at`, null when they did not). Only Take on and Add to Work set it, and they set it in both cases: when they make the Task, and when they join a Task that something else made (a hand-off, a Task made from a signal or an event, a session). So a hand-off, a Task made from a signal and a Task made from an event do not take by themselves, and the user's Take on afterwards does. The take-on counts on the thing's active Task (the oldest live link). So Take on removes the thing from "Someone waits on me", and an ask raised after the take-on brings it back. After a hand-off, the asks its workflow answers are ended and the rest still ask. No existing link is marked taken when this is introduced: the evidence of an old Take on is ambiguous, and an ask is never hidden on a guess.
+
+The saved queries, the Browse clauses and the search narrow this set with the clauses of one vocabulary (`InboxClause`), compiled by one pure function (`inbox-predicates.ts`) into SQL with bound values.
 
 ### 8.2 Sides
 
-The server decides the `InboxSide` of a card:
-
-| Side | When |
-|---|---|
-| `with-someone-else` | The entity has a live Task |
-| `requests` | No live Task, and the kind's `card` is `compact` |
-| `ongoing` | No live Task, and the kind's `card` is `rich` |
-
-A client keeps each card's side for the length of a visit, so a card the user just took on keeps its place. The next visit puts it under `with-someone-else`. A rich card lies as a row on the surface of each of its homes (the ancestors of the kind named by its `home`), the second and later ones as a plain pointer, counted once. A rich card with no home lies on a surface of its source, named for the kind's plugin.
+*(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* **Retired.** The Inbox has no sides (`requests`, `ongoing`, `with-someone-else`) and no riding. It is one list per saved query, one row per thing. A card that a live Task holds is on "With Hercule" (`held`). Groups of linked things come back with [#1124](https://github.com/theagenticage/hercule/issues/1124).
 
 ### 8.3 Reading
 
-`externalEntity.queryInbox` returns the whole Inbox in one reply and a fixed number of statements, capped at `MAX_INBOX_CARDS` (1,000) with `truncated`:
+*(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* `externalEntity.queryInbox` returns **one page of a list**, in a fixed number of statements however many things the Inbox holds.
 
-1. every eligible card, oldest first by `firstObservedAt` then `id` (stable, never by activity), with only the fields riding, the counts and the page order need. This is the one place a read evaluates the membership, and everything below works from it;
-2. the direct confirmed links among those cards, one statement. From them the riding is decided once over every eligible card ([section 8.6](#86-what-rides)), and the counts are worked out ([section 8.4](#84-counts-and-the-new-mark)), so `countInbox` reads exactly these two statements and nothing more;
-3. the page: `selectInboxPage` chooses the cards in bundles ([section 8.6](#86-what-rides)), then one statement reads their entity rows;
-4. the signals of the cards on the page, one statement ([section 8.5](#85-signals-inside-a-card));
-5. `readContext` over the listed cards, once (one walk up);
-6. a batch read of the records, observations, Connections and scans of the cards and of every place their edges reach, and the latest change of each ([section 8.7](#87-what-changed-outside));
-7. the direct links of the cards on the page and, in three statements, the records at their far end that have no card (`peers`).
-8. *(Added 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* the offers ([section 8.8](#88-what-a-card-can-be-handed-to)): the Connections that can act on the cards on the page, the runnable workflows, and the Resources their workspaces name, one statement each, however many cards there are.
+- **The input** is `{ list, clauses?, text?, cursor?, refs? }`. `list` is the scope: `{ savedQuery }` (the core's `waits`, `mine`, `updates`, `with-hercule` and `everything`, then a plugin's, such as `github/review-requests`) or `{ browse: InboxClause }`. `clauses` (at most 12) and `text` (at most 200 characters, at most 12 words) are the search, and only narrow the scope. A clause is `{ key, op, value, source?, connectionId? }`: `op` is `is`, `over` or `under`; the key is a core key (`source`, `kind`, `account`, `from`, `waiting`, `asks`, `held`, `mine`, `signal`) or a field a source declares ([./05-plugins.md](./05-plugins.md)); a clause with a `source` or `connectionId` holds only for it. `is` on text, person and enum fields compares without regard to case (ASCII); on a facet of records it matches the stored ref or the record's title, but a title only while some Connection can read that record. `over` and `under` compare a number, an amount, or a duration in seconds (an `age` field, and `waiting`, the age of the oldest ask), measured against the one clock of the read. A key nobody declares, or a clause a key cannot take, fails `validation` with the sentence that says what to write. A value a source's type cannot hold does not match there.
+- **The page.** At most 200 `InboxThing`s, ordered `waiting` (things with an ask first, the oldest ask first, then the rest by the latest change) or `newest` (the latest change first), ties by ref. A Browse scope is ordered `waiting`. The page is a keyset: `nextCursor` carries a hash of the list, clauses, text and order beside the sort tuple, and a cursor of another query, or one that does not decode, fails `validation`. `total` counts the whole result. With `refs` (at most 200, never with a cursor) the reply holds only those of them that still belong, in the list's order: it is how a client refreshes rows beyond the first page.
+- **The first page** (no cursor, no `refs`) also carries `facets`: the values of the facet fields over the whole result, per source and, for a source with several accounts, per account, with counts, at most 30 values each and a `more` count.
+- **The statements.** One statement finds, filters, counts, orders and cuts the page; the first page carries the total, so an empty first page needs no second count. Then the details of the refs on the page alone, one statement each: the entity rows, the observations, the asks, the open signal kinds, the field values and card faces, the offers (including `lastHandedAt`: when the user last handed a thing of the kind to the workflow, from the hand-off records that were not taken back), and the workflows running on their Tasks. The first page adds the accounts and the facets. No count depends on the number of things.
+- **A thing** is lean: its ref, kind, noun, source, identifier, title, status, `access`, `stale`, `observedAt`, `sourceUpdatedAt`, `patience`, `face`, its `asks` (newest first, at most 3, each with its kind's noun, the asker and the finished sentence), `askCount` (all of them), `askKinds`, `openKinds` (every open signal's kind, snoozed ones too: what a hand-off ends), `waitingSince` (the oldest ask), its Task and `takenOn` (the user took the thing on, so the row may say that they have it), `liveWorkflows`, `dismissedAt` (only when it came back), `offerSetId` and `actingConnections`, and `accounts`. It leaves out what a row never draws, such as the lifecycle; the pane reads those and every ask from `externalEntity.read`. A page holds 200 things, so every field costs 200 times its size.
 
-`places` holds each record above a card once, so 300 cards do not repeat their repository. Its bound is `MAX_INBOX_PLACES`, the card limit plus `MAX_GRAPH_EDGES`. *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* `links` holds the direct links of the cards on the page, `hints` the pairs among them that only text holds together, and `peers` the records at their far end; the bounds are `MAX_INBOX_LINKS` and `MAX_INBOX_HINTS`, both `MAX_GRAPH_EDGES`, and `MAX_INBOX_PEERS`, their sum, and a read that reaches any of them sets `truncated`. A card gains `signals`, `ridesOn` and `latestChange`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* It also gains `offerSetId` and `actingConnections`, and the reply gains `offerSets`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* It also gains `liveWorkflows`: the workflows with a live run on the card's active Task, newest run first, at most `MAX_LIVE_WORKFLOWS`, empty when none. The client draws the card's colleague from the first one, so a card shows who has it however the user came to the Inbox, not only for the visit in which they handed it off.
+`externalEntity.suggestInboxValues` returns, for the search box, the values of one field among the things of a list (before the search), whose label starts with a prefix, most common first, at most 8. It works for text, person and enum fields and for the core keys `from`, `source`, `kind`, `signal` and `account`. A value that several sources hold is suggested once, with the summed count and the source that holds most of it. Signal kinds are matched and labelled by their noun ("review request"). A facet of records suggests only records some Connection can read. It names accounts, so it needs `connection.query` besides `task.read` and `signal.query`.
 
-Orders inside the page, and Group by and Filter, are the client's, over this reply: they cost no read and change no number.
+### 8.4 Counts, the outline and the new mark
 
-### 8.4 Counts and the new mark
+*(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* Two reads, because every screen needs the sidebar's number and only the Inbox needs the rail. Everything counts distinct things.
 
-`Inbox.counts` and `externalEntity.countInbox` return the same `InboxCounts`, from the same function. The counts come from SQL over all eligible rows, so they include cards past `MAX_INBOX_CARDS`.
+`externalEntity.countInbox` returns `{ waiting, newestArrival }` in one statement: how many things are in "Someone waits on me", and the highest `arrival_sequence` among them. It is shell data, read on every screen, with the grants `task.read` and `signal.query`.
 
-| Count | Meaning |
+`externalEntity.readInboxOutline` returns what the rail draws, in a fixed handful of statements, and only the Inbox screen reads it. It names accounts, so it needs `connection.query` too. The parts of `InboxOutline`:
+
+| Part | Meaning |
 |---|---|
-| `onTheClock` | The sidebar's number: distinct refs on the Inbox, not dismissed, with no live Task, of a kind with `pace: fast`, on either side of the page. An entity seen by two accounts, or for two concerns, counts once. Group, filter and order change no number |
-| `requests` | The small count beside Requests. It counts the Requests side only, not With someone else, and leaves out what rides on a lead ([section 8.6](#86-what-rides)). `onTheClock` keeps it: a thing that rides still has its clock |
-| `withSomeoneElse` | The count at the foot of the column |
-| `newestArrival` | The highest `arrival_sequence` among the rows counted in `onTheClock`. Opaque and ordered: a client compares it with the value it stored and never displays it |
+| `savedQueries` | Every saved query with its count, in one statement |
+| `sources` | One entry per source that holds things: its count, whether the user folded it (`inbox.browseFolded`), its accounts when more than one holds things, and, unless folded, its facets with up to 100 values each and `more`. A record of a facet's context kind that holds none of the user's things is listed with count 0, so every Linear project is there, but only a record some Connection can read and, in the facet of one account, only a record that account observes. A counted value whose record nobody can read is labelled "A team you cannot open", never with the ref or the title |
+| `pins` | Each of the user's `inbox.pins` with its current label (a readable record's title, an enum value's label, "A team you cannot open" for an unreadable record) and count; a value that names nothing keeps its text and count 0 |
+| `fields` | The query fields: one per source and key, and the core's own with no source (one table, `CORE_INBOX_FIELDS`, which the query compiler and the plugin load checks read too) |
+| `failing` | Sources with a Connection that needs signing in again or is in error, and `updatedAt`: when such a Connection was last changed (the latest sign of the failure the controller keeps, not when it began) |
 
-`arrival_sequence` comes from the counter table, never from `MAX() + 1`, and never from a time, so no clock is compared. A number is taken only when **a full, fast-paced, not dismissed entity with no live Task comes onto the Inbox in a `reconcile` or a `refresh`, with no concern from any Connection before**. A new concern is the usual cause. The concern union over all Connections is what counts, so these never take one:
+A session reads the outline with no pins and every source open, because both settings are the user's own.
 
-- a refresh of a thing that was already there, a change of facts, a summary, or a second signal on a card already there;
+`arrival_sequence` comes from the counter table, never from `MAX() + 1`, and never from a time, so no clock is compared. A number is taken when a thing **comes onto the Inbox** (it was not on it and concerned the user through no Connection), **when it comes back after a dismissal**, or **when it begins to ask** (it had no ask before), in a `reconcile`, a `refresh` or a raised signal, through `recordArrivalsAfter`: the Inbox is looked at before the write. So these never take one:
+
+- a refresh of a thing that was already there, a change of facts, a summary, or a second ask on a thing that already asks;
 - an Undo (`restore`), or a Task finishing;
 - a second Connection reporting a concern that is already present;
-- a concern joining a card that a live signal had already put on the Inbox;
+- a concern joining a thing that a live signal had already put on the Inbox;
 - a partial record becoming full when it already had concerns.
-
-A signal alone can bring a card onto the clock. That is an arrival too, taken once: `refresh` takes a number when it creates an entity that a live signal holds, and a raised signal takes one for an existing entity that was off the clock, through `SignalEntities.recordArrivalAfter` in the signal's own transaction. It is the same rule as for a write of observations: the Inbox is looked at before the write, and a card that was not on it, and concerned the user through no Connection, takes a number when the write puts it there as a full, fast-paced, not dismissed record with no live Task. A second signal, or one through a second Connection, finds the card on the Inbox and takes none.
 
 **The new mark.** The 6px dot shows when `newestArrival` is above the value this client acknowledged. When an Inbox reply is really shown, the client stores that reply's `newestArrival` in local storage, under controller and user. It stores the reply's value and never the time, so an arrival racing the visit stays newer than what was acknowledged.
 
@@ -416,14 +413,16 @@ A signal alone can bring a card onto the clock. That is an arrival too, taken on
   | Is the card on the Inbox? | An open signal that is not snoozed now puts it there ([section 8.1](#81-membership)). A snoozed signal does not, and shows in the card's lines marked so |
   | Is the record kept and read? | Any open signal, snoozed or not, stops the prune sweep and makes the ref wanted. A snoozed signal still needs its card to be current when it comes back |
 
-- **Dismissal holds.** A dismissed card stays out of sight whatever signals arrive ([section 4.2](#42-dismissal)). The signal stays open and shows on Intake, so it is not lost.
-- **A card's signals.** `InboxCard.signals` is `{ latest?, openCount }`. `openCount` counts the open signals that are not snoozed, and `latest` is the newest of them, by `createdAt` then `id`. A line (`EntitySignalLine`) holds the id, kind, title, asker, priority, status, time, the sentence (`say`), the `outcome` once the signal has ended and whether it is `snoozed`. It holds no blocks and no answers: opening a line reads `signal.read`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* `InboxCard.signals` also carries `kinds`: the distinct kinds of the card's open signals, snoozed ones included, sorted and bounded by `MAX_ENTITY_SIGNALS`. A handoff ends the open signals of the kinds its workflow answers, and snoozed ones are among them, so the menu needs every open kind to say what a click ends and what it leaves open ("Ends *Review requested*. Leaves the mention open.").
+- **Dismissal holds, except for a new ask.** A dismissed card stays out of sight whatever signals arrive, unless an ask is raised after the dismissal ([section 4.2](#42-dismissal)). The signal stays open and shows on Intake, so it is not lost.
+- **A card's signals.** *(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* An Inbox row carries the open asks (`InboxThing.asks`, `askCount`, `askKinds`, `openKinds`), not the old `InboxCard.signals`. Before it: `InboxCard.signals` was `{ latest?, openCount }`; `openCount` counted the open signals that are not snoozed, and `latest` was the newest of them, by `createdAt` then `id`. A line (`EntitySignalLine`) holds the id, kind, title, asker, priority, status, time, the sentence (`say`), the `outcome` once the signal has ended and whether it is `snoozed`. It holds no blocks and no answers: opening a line reads `signal.read`. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* `InboxCard.signals` also carries `kinds`: the distinct kinds of the card's open signals, snoozed ones included, sorted and bounded by `MAX_ENTITY_SIGNALS`. A handoff ends the open signals of the kinds its workflow answers, and snoozed ones are among them, so the menu needs every open kind to say what a click ends and what it leaves open ("Ends *Review requested*. Leaves the mention open.").
 - **The detail's signals.** `ExternalEntityDetail` gains `signals` (at most `MAX_ENTITY_SIGNALS`, 50), `openCount` (every open signal, snoozed ones included) and `signalCount` (open and resolved). The newest open signals are selected first, up to 50. The newest resolved ones fill any room left. The selected lines are returned in time order, oldest first, by `createdAt` then `id`. It is three statements, all served by that index and bounded by the limit however many signals the ref has: the two counts, the open lines, and the resolved lines (not read when the open ones fill the room). Open work is never hidden behind the word "older": a client says how many open lines it left out before it says how many resolved ones.
 - **The sentence.** The Inbox card's `reason` is the sentence of its latest live signal. A card with no live signal keeps the observation's own reason. One function builds the sentence for a card and for every line of its detail. It reads the entity's `reason_templates` under the signal kind's word (the part after `<plugin>/`, so `github/review-requested` reads `review-requested`) and fills `{person}` with the signal's `asker`. It falls back to the signal's title, with the tone `plain`, for a core kind, for a kind the entity stores no template for, and when the template needs a person the signal does not have. The result is cut at a word to the bound of `EntityReason.say`. The templates are stored, never read from the catalog at read time, so a sentence reads well after its plugin is gone.
-- **Arrival** is in [section 8.4](#84-counts-and-the-new-mark).
+- **Arrival** is in [section 8.4](#84-counts-the-outline-and-the-new-mark).
 - **Acting on a card ends no signal it did not answer.** `takeOn` and `dismiss` end none. The user marks each signal done from its line with `signal.markDone`, or answers it with `signal.act`. A signal is never a fact of the Task. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* A handoff answers the signals of the kinds its workflow lists in `answers`, and only those ([section 9.6](#96-hand-off-and-its-undo)). Your work follows the links: it shows a signal on the active Task of its ref only ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)).
 
 ### 8.6 What rides
+
+*(Amended 2026-11-12, [#1122](https://github.com/theagenticage/hercule/issues/1122).)* **Retired for now.** `riding.ts`, `ridesOn`, `selectInboxPage` and the rider counts are gone: the Inbox is a flat list until groups of linked things arrive with [#1124](https://github.com/theagenticage/hercule/issues/1124). What follows describes what was removed, and `peers`, `EntityLink` and `EntityHint` stay for `externalEntity.read`.
 
 *(Added 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)* A compact thing, such as a pull request, rides on a rich thing, such as its ticket, when the two have a direct link whose firmest claim is `source` or `person`. A hint joins nothing, and neither does sharing a repository or a project. `decideRiding(cards, links, now)` in `external-entities/riding.ts` is a pure function, and `queryInbox` and `countInbox` both call it, so the page and the counts cannot disagree.
 
@@ -432,7 +431,7 @@ A signal alone can bring a card onto the clock. That is an arrival too, taken on
 - Two rich things never ride on each other, and neither do two compact ones. Only a direct link counts, so a chain A to B to C joins only what touches the lead.
 - **Decided over every eligible card, before the page limit.** A dismissed card is not eligible, so it leads nothing, and what rode on it stands alone. `queryInbox` decides once and derives its counts from it, and `countInbox` makes the same two reads and the same decision.
 - **The page is chosen in bundles.** `selectInboxPage(refs, riding, limit)` walks the eligible cards in page order and takes the next lead, or card that rides on nothing, together with all its riders. It stops at the first bundle that does not fit in the room left. A rider never comes alone, because the counts leave out every rider, so a rider on a page without its lead would draw a Requests card the count did not include. So **a rider leaves the page with its cut lead**, and the page is never emptied by a lead it cannot fit: when the very first bundle is larger than the limit, it is cut to the limit, the lead and its oldest riders. `truncated` is true when any card was left off.
-- **`InboxCard.ridesOn`** is the ref of the lead, and the lead is always on the page with it. `counts.requests` leaves out every rider ([section 8.4](#84-counts-and-the-new-mark)).
+- **`InboxCard.ridesOn`** is the ref of the lead, and the lead is always on the page with it. `counts.requests` leaves out every rider ([section 8.4](#84-counts-the-outline-and-the-new-mark)).
 - **`peers`.** `EntityPeer` holds `ref`, `kind`, `noun`, `identifier`, `title`, `status`, `yours`, `restricted` and `latestChange`, *(Amended 2026-11-10, [#1105](https://github.com/theagenticage/hercule/issues/1105).)* and `url`, where the source shows the thing, so its row can open it in the browser, and an `id` when the record is a full record of a work kind, so its row can open. A restricted peer holds only `ref`, `kind`, `noun`, `restricted: true` and `yours: false`. A link target that has no record, because no Connection ever read it, is a restricted peer too when an active kind owns its ref (by `refPrefix`), so it draws as a locked row while that kind is active. When no active kind owns it, it has no peer.
 - **A link and a hint are two lists, and the controller decides which a pair is.** An `EntityLink` is a pair a source or a person claims, and names its claim's type (`source` or `person`) and its plugin or actor; an `EntityHint` is a pair only text holds together, with the `fromRef` whose text holds the reference and its `evidenceKey` (at most 128 characters), so a client can say "The description of #6263". A pair with a source's or a person's claim and a text claim is a link only, and a client never reads a claim's type to decide whether a pair joins. `hasPersonClaim` is true when a person also claims the pair, whatever the firmest claim is: a source's claim hides the person's one in `claim`, but the person can still take theirs back, and a client offers Unlink from this.
 
@@ -484,15 +483,17 @@ The group is `externalEntity` in `packages/contract`; the CLI spells it `hercule
 
 | Operation | Route | Grant | What it does |
 |---|---|---|---|
-| `externalEntity.queryInbox` | `GET /external-entities/inbox` | `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query` | The Inbox ([section 8.3](#83-reading)), with the offers ([section 8.8](#88-what-a-card-can-be-handed-to)) |
-| `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` and `signal.query` | `InboxCounts`, for the sidebar |
+| `externalEntity.queryInbox` | `POST /external-entities/inbox/query` | `task.read`, `signal.query`, `workflow.query`, `connection.query` and `run.query` | One page of an Inbox list ([section 8.3](#83-reading)), with the offers ([section 8.8](#88-what-a-card-can-be-handed-to)) |
+| `externalEntity.countInbox` | `GET /external-entities/inbox/count` | `task.read` and `signal.query` | `InboxCounts` (`{ waiting, newestArrival }`), for the sidebar |
+| `externalEntity.readInboxOutline` | `GET /external-entities/inbox/outline` | `task.read`, `signal.query` and `connection.query` | `InboxOutline`, for the rail ([section 8.4](#84-counts-the-outline-and-the-new-mark)) |
+| `externalEntity.suggestInboxValues` | `POST /external-entities/inbox/values` | `task.read`, `signal.query` and `connection.query` | The search's value suggestions ([section 8.3](#83-reading)) |
 | `externalEntity.read` | `GET /external-entities/:id` | `task.read`, `signal.query`, `workflow.query` and `connection.query` | One full record of a work kind, with its offers. `NotFound` for a partial or context record |
 | `externalEntity.takeOn` | `POST /external-entities/:id/take-on` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |
 | `externalEntity.undoTakeOn` | `POST /external-entities/:id/take-on/undo` | `task.update`, user only | [Section 9.2](#92-undo-of-a-take-or-an-add) |
 | `externalEntity.handOff` | `POST /external-entities/:id/hand-off` | `run.start`, user only | [Section 9.6](#96-hand-off-and-its-undo) |
 | `externalEntity.undoHandOff` | `POST /external-entities/handoffs/:runId/undo` | `run.write`, user only | [Section 9.6](#96-hand-off-and-its-undo) |
-| `externalEntity.dismiss` | `POST /external-entities/:id/dismiss` | `task.update`, user only | Sets `dismissed_at` and `dismissed_by` |
-| `externalEntity.restore` | `POST /external-entities/:id/restore` | `task.update`, user only | Undo of a dismissal |
+| `externalEntity.dismiss` | `POST /external-entities/dismiss` | `task.update`, user only | Sets `dismissed_at` and `dismissed_by` of up to 1,000 things, all or none |
+| `externalEntity.restore` | `POST /external-entities/restore` | `task.update`, user only | Undo of a dismissal, for the same ids |
 | `externalEntity.search` | `GET /external-entities/search` | `task.read` and `connection.query`, user only | [Section 10](#10-search-recognition-and-resolution) |
 | `externalEntity.listSuggestions` | `GET /external-entities/suggestions` | `task.read` | What the Add sheet lists before you type |
 | `externalEntity.addToWork` | `POST /external-entities/add-to-work` | `task.update`, user only | [Section 9.1](#91-take-on-and-add-to-work) |
@@ -515,7 +516,7 @@ Inside the final transaction the service revalidates the exact requested ref, fu
 
 **Tasks go through `TaskService`.** The tasks domain provides two user-only methods for this: one creates a Task linked to one ref inside the caller's transaction, and one deletes a Task only when it is untouched since creation. The entity domain never inserts a Task itself.
 
-- **`takeOn`** with an active Task returns that Task: a second click, or a second account, is idempotent. With none it creates a Task: the entity's title, the stage of [section 9.3](#93-the-stage-a-new-task-starts-at), priority `normal`, the project of [section 9.4](#94-the-project-of-a-task-taken-on), and provenance `{ ref }`, which writes the link. It returns `{ taskId, created }`. It fails `NotFound` for an unknown id. It writes nothing on the source.
+- **`takeOn`** with an active Task returns that Task: a second click, or a second account, is idempotent. When that Task was not taken on by the user yet (a hand-off, a session, a signal or an event made it), `takeOn` marks its link as taken at that moment and still answers `created: false` ([section 8.1](#81-membership)). With none it creates a Task: the entity's title, the stage of [section 9.3](#93-the-stage-a-new-task-starts-at), priority `normal`, the project of [section 9.4](#94-the-project-of-a-task-taken-on), and provenance `{ ref }`, which writes the link. It returns `{ taskId, created }`. It fails `NotFound` for an unknown id. It writes nothing on the source.
 - **`addToWork { ref, projectId? }`** with an active Task returns that Task with `created: false` before any read, even when Hercule holds no record of the ref (the reply then has no `id`). Otherwise, after `prepareEntityForTask`, it writes in one transaction: the observation that was read (which creates the entity when it is new), the Task as `takeOn` makes it (in `projectId` when given; an unknown Project is `NotFound`), and `following` on the link when the entity has no concern of its own. It returns `{ id?, taskId, created, stage, followed }`; `id` is absent only when an existing Task links a ref Hercule holds no record of. The line at the foot reads "Added to Exploring. Hercule now follows WEB-301." Adding is always one thing at a time.
 
 Outbound work uses no credential in this slice. Never pick credentials from whichever poll updated the card. *(Amended 2026-11-08, [#1034](https://github.com/theagenticage/hercule/issues/1034).)* A handoff starts a run that acts through a Connection, so it picks one by a rule and not by the last poll: the acting account of [section 8.8](#88-what-a-card-can-be-handed-to), chosen by the user or the oldest one.

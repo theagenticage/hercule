@@ -249,13 +249,13 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
   {
     name: "inbox",
     path: "inbox.html",
-    contentSelector: ".inbox-place .inbox-row",
+    contentSelector: ".ib-row",
     nonTextParts: [],
   },
   {
-    name: "inbox-open",
-    path: "inbox.html?open",
-    contentSelector: ".open-card .open-card-timeline",
+    name: "inbox-selection",
+    path: "inbox.html?state=selection",
+    contentSelector: ".ib-row",
     nonTextParts: [],
   },
   {

@@ -1,6 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
-import { applyInboxEdit, type InboxEdit } from "@hercule/client-core/inbox";
 import {
   applyCardMove,
   applyCardReturn,
@@ -9,7 +8,7 @@ import {
   type CardPlacement,
   type EndStage,
 } from "@hercule/client-core/work";
-import type { Inbox, WorkBoard, WorkCard } from "@hercule/contract";
+import type { WorkBoard, WorkCard } from "@hercule/contract";
 
 /** A card being put back: whether it went exactly where it was, and the request that moves it. */
 export interface PutBackRequest {
@@ -21,8 +20,7 @@ export interface PutBackRequest {
  * What the screen that is open lends to a gesture on the undo stack, so that
  * Undo shows its change through that screen's own list of pending changes. A
  * gesture outlives the screen that made it: leaving Work and coming back
- * opens a new screen with a new list. Work and the Inbox share the stack, so
- * each lends what the other's gestures need.
+ * opens a new screen with a new list.
  */
 export interface CardMover {
   /**
@@ -48,12 +46,6 @@ export interface CardMover {
     stage: EndStage,
     isUndoWanted: Promise<boolean>,
   ) => PutBackRequest | undefined;
-  /**
-   * Shows `edit` on the Inbox as the screen that is open draws it, and writes
-   * it into the cached Inbox. Resolves when it is written. A screen that is
-   * not the Inbox writes the cache alone, and the Inbox shows it when it opens.
-   */
-  readonly writeInboxEdit: (edit: InboxEdit) => Promise<void>;
 }
 
 /**
@@ -83,19 +75,6 @@ export const writeAnsweredChange = async <Read>(
   // Not awaited: the read can be slow, and the caller only needs the change written.
   void queryClient.invalidateQueries({ queryKey });
 };
-
-/**
- * Returns the way to write an Inbox edit into the cached Inbox alone, which a
- * screen that does not draw the Inbox uses, and which the Inbox uses to settle
- * an edit the controller answered. The Inbox reads the cache when it opens.
- * See `writeAnsweredChange` for how the cache is written.
- */
-export const buildCachedInboxWriter =
-  (queryClient: QueryClient): CardMover["writeInboxEdit"] =>
-  (edit) =>
-    writeAnsweredChange<Inbox>(queryClient, queryKeys.inbox(), (cached) =>
-      applyInboxEdit(cached, edit),
-    );
 
 /**
  * Returns the way a screen that does not draw the Work board puts a card

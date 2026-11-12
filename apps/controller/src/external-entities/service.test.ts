@@ -34,9 +34,10 @@ import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins
 import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
 import { signalRepository } from "../signals/repository";
-import { TaskService, TaskServiceLayer } from "../tasks";
+import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
+import { SettingsLayer } from "../settings";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
 import { renderEntitySlots, type FullEntityObservation } from "./slots";
 
@@ -186,8 +187,12 @@ interface Arranged {
   readonly countTasks: Effect.Effect<number, unknown>;
 }
 
+/** The list that holds every thing on the Inbox. */
+const EVERYTHING = { list: { savedQuery: "everything" } } as const;
+
 const buildLayer = (script: Script) =>
   ExternalEntityServiceLayer.pipe(
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(Layer.succeed(EntityLookups)(buildLookups(script))),
     Layer.provideMerge(
       TaskServiceLayer.pipe(
@@ -271,7 +276,7 @@ const run = <A>(
                 complete: false,
                 observed: group,
                 actor: "plugin:acme",
-                environment: { now: at, activePluginIds: ["acme"] },
+                environment: { now: at, activePluginIds: ["acme"], askingKinds: [] },
               }),
             );
           }
@@ -335,6 +340,53 @@ describe("takeOn", () => {
     expect(results[1]).toEqual({ taskId: results[0]!.taskId, created: false });
   });
 
+  it("takes on a Task that something else made, once, and keeps the first time", async () => {
+    const { first, second, links } = await run(
+      ({ service, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1")]);
+          const id = yield* entityId(ticketRef("1"));
+          const tasks = yield* taskRepository;
+          // A Task made some other way (a hand-off, a session): its link is not taken.
+          const other = yield* withTransaction(
+            sql,
+            tasks.insert({
+              title: "Made by a session",
+              description: "",
+              status: "open",
+              stage: "planned",
+              priority: "normal",
+              labels: [],
+              projectId: undefined,
+              provenance: [{ ref: ticketRef("1") }],
+              at: "2026-03-01T00:00:00.000Z",
+              actor: "session:0190c000-0000-7000-8000-0000000000e1",
+            }),
+          );
+          const first = yield* service.takeOn(id);
+          const second = yield* service.takeOn(id);
+          const links = yield* sql<{
+            readonly task_id: Uint8Array;
+            readonly taken_at: string | null;
+            readonly taken_by: string | null;
+            readonly linked_by: string;
+          }>`SELECT task_id, taken_at, taken_by, linked_by FROM task_entity_links`;
+          expect(yield* countTasks).toBe(1);
+          expect(first.taskId).toBe(other.id);
+          return { first, second, links };
+        }),
+    );
+    expect(first.created).toBe(false);
+    expect(second.created).toBe(false);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.taken_at).not.toBeNull();
+    // The link that was marked is the Task the call returned, stamped with the user,
+    // and the link keeps its original author.
+    expect(uuidToString(links[0]!.task_id)).toBe(first.taskId);
+    expect(links[0]!.taken_by).toBe("user");
+    expect(links[0]!.linked_by).toBe("session:0190c000-0000-7000-8000-0000000000e1");
+  });
+
   it("fails NotFound for an unknown id", async () => {
     const error = await run(({ service }) =>
       Effect.flip(service.takeOn("0199e0e7-9999-7000-8000-000000000000")),
@@ -382,7 +434,7 @@ describe("takeOn", () => {
             grants: ALL.filter((grant) => grant !== missing),
           } as unknown as Actor;
           return Effect.all([
-            Effect.flip(Effect.provideService(service.queryInbox(), CurrentActor, actor)),
+            Effect.flip(Effect.provideService(service.queryInbox(EVERYTHING), CurrentActor, actor)),
             Effect.exit(Effect.provideService(service.read(id), CurrentActor, actor)),
           ]).pipe(Effect.map(([inbox, detail]) => ({ missing, inbox, detail })));
         });
@@ -575,7 +627,11 @@ describe("takeOn", () => {
               connectionId,
               ref: ticketRef("1"),
               reason: "inaccessible",
-              environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+              environment: {
+                now: new Date().toISOString(),
+                activePluginIds: ["acme"],
+                askingKinds: [],
+              },
             }),
           );
           script.resolve = () => ({ missing: "inaccessible" });
@@ -644,7 +700,11 @@ describe("takeOn", () => {
                   connectionId,
                   ref: ticketRef("1"),
                   reason: "inaccessible",
-                  environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+                  environment: {
+                    now: new Date().toISOString(),
+                    activePluginIds: ["acme"],
+                    askingKinds: [],
+                  },
                 }),
                 Effect.andThen(Deferred.succeed(holding, undefined), Deferred.await(release)),
               ),
@@ -698,7 +758,11 @@ describe("addToWork", () => {
             complete: true,
             observed: [],
             actor: "plugin:acme",
-            environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+            environment: {
+              now: new Date().toISOString(),
+              activePluginIds: ["acme"],
+              askingKinds: [],
+            },
           }),
         );
         const id = yield* entityId(ticketRef("9"));
@@ -707,7 +771,7 @@ describe("addToWork", () => {
           result,
           task: yield* tasks.read(result.taskId),
           followed,
-          inbox: yield* service.queryInbox(),
+          inbox: yield* service.queryInbox(EVERYTHING),
           stillThere: detail.concerns,
         };
       }),
@@ -715,8 +779,8 @@ describe("addToWork", () => {
     expect(result).toMatchObject({ created: true, stage: "building", followed: true });
     expect(task).toMatchObject({ stage: "building", title: "Ticket 9" });
     expect(followed).toEqual(["following"]);
-    expect(inbox.cards.map((card) => card.ref)).toEqual([ticketRef("9")]);
-    expect(inbox.cards[0]).toMatchObject({ side: "with-someone-else" });
+    expect(inbox.things.map((card) => card.ref)).toEqual([ticketRef("9")]);
+    expect(inbox.things[0]).toMatchObject({ taskId: task.id });
     expect(stillThere).toEqual(["following"]);
   });
 
@@ -946,10 +1010,9 @@ describe("after a merge", () => {
             after: (yield* service.read(one)).taskId,
             taken: yield* service.takeOn(one),
             takenOther: yield* service.takeOn(two),
-            inbox: (yield* service.queryInbox()).cards.map((card) => [
+            inbox: (yield* service.queryInbox(EVERYTHING)).things.map((card) => [
               card.ref,
               card.taskId,
-              card.side,
             ]),
             links: yield* sql<{ readonly following: number; readonly linked_at: string }>`
               SELECT following, linked_at FROM task_entity_links
@@ -962,8 +1025,8 @@ describe("after a merge", () => {
     expect(taken).toEqual({ taskId: before.survivorId, created: false });
     expect(takenOther).toEqual({ taskId: before.survivorId, created: false });
     expect(inbox).toEqual([
-      [ticketRef("1"), before.survivorId, "with-someone-else"],
-      [ticketRef("2"), before.survivorId, "with-someone-else"],
+      [ticketRef("1"), before.survivorId],
+      [ticketRef("2"), before.survivorId],
     ]);
     expect(links).toEqual([{ following: 1, linked_at: "2020-01-01T00:00:00.000Z" }]);
   });
@@ -1036,17 +1099,17 @@ describe("dismiss and restore", () => {
         Effect.gen(function* () {
           yield* report(connectionId, [buildObservation("1")]);
           const id = yield* entityId(ticketRef("1"));
-          const before = (yield* service.queryInbox()).cards.length;
-          yield* service.dismiss(id);
+          const before = (yield* service.queryInbox(EVERYTHING)).things.length;
+          yield* service.dismiss({ ids: [id] });
           const rows = yield* sql<{ readonly dismissed_by: string }>`
             SELECT dismissed_by FROM external_entities WHERE id = ${uuidFromString(id)}`;
-          const dismissed = yield* service.queryInbox();
-          yield* service.restore(id);
+          const dismissed = yield* service.queryInbox(EVERYTHING);
+          yield* service.restore({ ids: [id] });
           return {
             before,
-            dismissed: dismissed.cards.length,
+            dismissed: dismissed.things.length,
             dismissedBy: rows[0]?.dismissed_by,
-            restored: (yield* service.queryInbox()).cards.length,
+            restored: (yield* service.queryInbox(EVERYTHING)).things.length,
           };
         }),
     );
@@ -1064,9 +1127,13 @@ describe("dismiss and restore", () => {
         yield* report(connectionId, [buildObservation("1")]);
         const id = yield* entityId(ticketRef("1"));
         return [
-          yield* Effect.flip(service.dismiss("0199e0e7-9999-7000-8000-000000000000")),
-          yield* Effect.flip(Effect.provideService(service.dismiss(id), CurrentActor, A_SESSION)),
-          yield* Effect.flip(Effect.provideService(service.restore(id), CurrentActor, A_SESSION)),
+          yield* Effect.flip(service.dismiss({ ids: ["0199e0e7-9999-7000-8000-000000000000"] })),
+          yield* Effect.flip(
+            Effect.provideService(service.dismiss({ ids: [id] }), CurrentActor, A_SESSION),
+          ),
+          yield* Effect.flip(
+            Effect.provideService(service.restore({ ids: [id] }), CurrentActor, A_SESSION),
+          ),
         ];
       }),
     );
@@ -1285,16 +1352,16 @@ describe("acting on a card that holds signals", () => {
         const first = yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
         const second = yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
         yield* service.takeOn(yield* entityId(ticketRef("1")));
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         return {
           expected: [first, second],
           open: yield* listOpenSignalIds(sql),
-          card: inbox.cards.find((candidate) => candidate.ref === ticketRef("1")),
+          card: inbox.things.find((candidate) => candidate.ref === ticketRef("1")),
         };
       }),
     );
     expect(found.open).toEqual(found.expected);
-    expect(found.card).toMatchObject({ side: "with-someone-else", signals: { openCount: 2 } });
+    expect(found.card).toHaveProperty("openKinds");
   });
 
   it("ends no signal when the card is dismissed, and a new signal leaves it dismissed", async () => {
@@ -1302,10 +1369,10 @@ describe("acting on a card that holds signals", () => {
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1")]);
         yield* raiseSignalOn(connectionId, ticketRef("1"), 1);
-        yield* service.dismiss(yield* entityId(ticketRef("1")));
+        yield* service.dismiss({ ids: [yield* entityId(ticketRef("1"))] });
         yield* raiseSignalOn(connectionId, ticketRef("1"), 2);
-        const inbox = yield* service.queryInbox();
-        return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.cards.length };
+        const inbox = yield* service.queryInbox(EVERYTHING);
+        return { open: (yield* listOpenSignalIds(sql)).length, cards: inbox.things.length };
       }),
     );
     expect(found).toEqual({ open: 2, cards: 0 });
@@ -1498,12 +1565,12 @@ describe("what a card offers", () => {
         yield* insertWorkflow(sql, "Disabled", { enabled: false });
         yield* insertWorkflow(sql, "Invalid", { invalid: true });
         yield* insertWorkflow(sql, "Other kind", { kinds: ["acme/epic"] });
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         const detail = yield* service.read(yield* entityId(ticketRef("1")));
         return { review, inbox, detail, second };
       }),
     );
-    const [first, other] = result.inbox.cards;
+    const [first, other] = result.inbox.things;
     expect(first!.offerSetId).toBe(other!.offerSetId);
     expect(result.inbox.offerSets).toEqual({
       [first!.offerSetId]: [
@@ -1537,9 +1604,9 @@ describe("what a card offers", () => {
         const webOnly = yield* insertWorkflow(sql, "Web only", {
           workspace: { kind: "primary", resourceId: yield* insertRepo(sql, WEB) },
         });
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         const setOf = (key: string) =>
-          inbox.cards.find((card) => card.ref === ticketRef(key))!.offerSetId;
+          inbox.things.find((card) => card.ref === ticketRef(key))!.offerSetId;
         return { webOnly, inbox, setOf };
       }),
     );
@@ -1741,14 +1808,14 @@ describe("what a card shows of the live work on its Task", () => {
         yield* on(taken.taskId, ship, "Ship")("completed", 3);
         yield* on(taken.taskId, review, "Review")("running", 4);
         yield* on(finishedOnly.taskId, ship, "Ship")("completed", 5);
-        const inbox = yield* service.queryInbox();
+        const inbox = yield* service.queryInbox(EVERYTHING);
         return {
           ids: { review, plan },
-          cards: inbox.cards.map((card) => [card.ref, card.liveWorkflows] as const),
+          things: inbox.things.map((card) => [card.ref, card.liveWorkflows] as const),
         };
       }),
     );
-    expect(cards.cards).toEqual([
+    expect(cards.things).toEqual([
       [
         ticketRef("1"),
         [
@@ -1776,7 +1843,7 @@ describe("what a card shows of the live work on its Task", () => {
             minute: index,
           });
         }
-        return (yield* service.queryInbox()).cards[0]!.liveWorkflows;
+        return (yield* service.queryInbox(EVERYTHING)).things[0]!.liveWorkflows;
       }),
     );
     expect(live.map((workflow) => workflow.name)).toEqual(

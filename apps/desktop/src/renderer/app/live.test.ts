@@ -407,3 +407,52 @@ describe("invalidateForPush for Intake's Done lists", () => {
     });
   });
 });
+
+describe("invalidateForPush for the Inbox's keys", () => {
+  it("cancels a read that is running and reads again, so the read starts after the push", async () => {
+    const queryClient = new QueryClient();
+    let version = 0;
+    let holdReads = false;
+    const startedWith: number[] = [];
+    const observer = new QueryObserver(queryClient, {
+      queryKey: queryKeys.inbox(),
+      queryFn: ({ signal }) => {
+        const seen = version;
+        startedWith.push(seen);
+        // While reads are held, a read ends only when it is cancelled.
+        return holdReads
+          ? new Promise<number>((_resolve, reject) => {
+              signal.addEventListener("abort", () => reject(new Error("cancelled")));
+            })
+          : Promise.resolve(seen);
+      },
+    });
+    observers.push(observer.subscribe(() => {}));
+    await waitFor(() => {
+      expect(queryClient.getQueryData(queryKeys.inbox())).toBe(0);
+    });
+
+    // A push starts a read that does not answer.
+    holdReads = true;
+    invalidateForPush(queryClient, "signal", [queryKeys.inbox()], {
+      ids: ["s-1"],
+      kind: "updated",
+    });
+    await waitFor(() => {
+      expect(startedWith).toEqual([0, 0]);
+    });
+
+    // A change is committed while that read runs, then its push arrives.
+    version = 1;
+    holdReads = false;
+    invalidateForPush(queryClient, "signal", [queryKeys.inbox()], {
+      ids: ["s-2"],
+      kind: "updated",
+    });
+
+    await waitFor(() => {
+      expect(startedWith).toEqual([0, 0, 1]);
+      expect(queryClient.getQueryData(queryKeys.inbox())).toBe(1);
+    });
+  });
+});

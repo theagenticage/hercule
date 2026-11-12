@@ -12,7 +12,8 @@ interface Puck {
 /**
  * Renders the view pill: a floating glass pill that names the place with
  * `title`, such as "Overview", and then holds its views as tabs of words, with
- * no icons. The selected tab sits on a puck that slides to the tab picked,
+ * no icons. A page whose own tab already names it, such as the Inbox's, gives
+ * no `title`, and the pill is only its tabs. The selected tab sits on a puck that slides to the tab picked,
  * and changes its width, on the `hand` spring.
  *
  * - `choices` are the tabs, left to right, as data, so a page with three
@@ -30,7 +31,7 @@ export function ViewPill<View extends string>({
   view,
   onPick,
 }: {
-  readonly title: string;
+  readonly title?: string;
   readonly label: string;
   readonly choices: ReadonlyArray<ViewChoice<View>>;
   readonly view: View;
@@ -66,7 +67,7 @@ export function ViewPill<View extends string>({
 
   return (
     <div className="pill">
-      <h1 className="pill-title">{title}</h1>
+      {title !== undefined && <h1 className="pill-title">{title}</h1>}
       <div className="view-tabs" ref={tabsRef}>
         <i className="view-tabs-puck" ref={puckRef} />
         <ViewSwitch

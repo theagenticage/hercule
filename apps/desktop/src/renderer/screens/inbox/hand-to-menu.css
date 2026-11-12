@@ -48,6 +48,41 @@
   background: var(--divider);
 }
 
+/* The find field of a long menu. The drawing's `.lt-field` (`docs/design/inbox-list/css/menus.css` on the branch
+   `prototype/inbox-list-hifi`): the field has the focus, so it draws no ring of its own, and the active row is
+   drawn as in a menu. */
+.hand-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0 2px 4px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--faint);
+}
+.hand-find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+}
+.hand-none {
+  margin: 8px 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The account picker sits under the workflows, set off from them by a line. */
+.hand-menu .hand-account {
+  margin: 4px 8px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--divider);
+}
+
 /* A workflow: its face, its name over its line, and the number key that picks it. */
 .hand-row {
   display: grid;

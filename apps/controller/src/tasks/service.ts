@@ -1106,6 +1106,7 @@ const make = Effect.gen(function* () {
       | "initiativeId"
       | "provenance"
       | "following"
+      | "takenOn"
     >,
     actor: string,
   ): Effect.Effect<Task, SqlError> =>
@@ -1562,6 +1563,7 @@ const make = Effect.gen(function* () {
             projectId: input.projectId,
             provenance: [{ ref: input.ref }],
             following: input.following,
+            takenOn: true,
           },
           yield* currentStamp,
         );

@@ -1,11 +1,22 @@
-/** Tests the menu of workflows a card can be handed to: its rows, its keys, and the account it acts as. */
+/** Tests the menu of workflows a thing can be handed to: its ranking, its keys, its find field, and the account it acts as. */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { partitionOffers } from "@hercule/client-core/inbox";
-import { buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
+import { buildInboxAsk, buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
 import type { ActingConnection } from "@hercule/contract";
 import { HandToMenu } from "./hand-to-menu";
+
+/** A thing Mei asked a review of and Omar mentioned: `askKinds` and `openKinds` are what the controller lists. */
+const THING = {
+  asks: [
+    buildInboxAsk("a1", "Mei", { kind: "github/review-requested" }),
+    buildInboxAsk("a2", "Omar", { kind: "github/mention", noun: "mention" }),
+  ],
+  askCount: 2,
+  askKinds: ["github/review-requested", "github/mention"],
+  openKinds: ["github/review-requested", "github/mention"],
+};
 
 const review = buildWorkflowOffer("Agent review", ["github/review-requested"]);
 const repair = buildWorkflowOffer("Repair the build", ["github/checks-failed"]);
@@ -34,7 +45,7 @@ const renderMenu = (
   render(
     <HandToMenu
       offers={options.offers ?? partitionOffers([review, repair, draft, shipIt])}
-      openKinds={["github/review-requested", "github/mention"]}
+      thing={THING}
       actingConnections={options.accounts ?? [BOT]}
       chosenConnectionId={options.chosenConnectionId}
       onChooseConnection={onChooseConnection}
@@ -51,14 +62,22 @@ describe("HandToMenu", () => {
     document.querySelector("[data-card-id]")?.remove();
   });
 
-  it("lists the available workflows with their line and number, then the others with why", () => {
+  it("ranks the workflows by fit, names the asks each ends and leaves, then lists the others with why", () => {
     renderMenu();
 
     const items = screen.getAllByRole("menuitem", { hidden: true });
+    // Agent review and Draft a change end Mei's ask and leave Omar's: they fit better than Repair, which ends none.
     expect(items.map((item) => within(item).getByText(/./, { selector: "b" }).textContent)).toEqual(
-      ["Agent review", "Repair the build", "Draft a change", "Ship it"],
+      ["Agent review", "Draft a change", "Repair the build", "Ship it"],
     );
-    expect(within(items[0]!).getByText("Ends Review requested. Mention stays open.")).toBeTruthy();
+    expect(
+      within(items[0]!).getByText("Ends Mei’s review request. Leaves Omar’s mention with you."),
+    ).toBeTruthy();
+    expect(
+      within(items[2]!).getByText(
+        "Ends none of its asks. Leaves Mei’s review request and Omar’s mention with you.",
+      ),
+    ).toBeTruthy();
     expect(items.slice(0, 3).map((item) => item.querySelector("kbd")?.textContent)).toEqual([
       "1",
       "2",
@@ -78,9 +97,10 @@ describe("HandToMenu", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await user.keyboard("{ArrowUp}{ArrowDown}{ArrowDown}{Enter}");
 
+    // Ranked: Agent review, Draft a change, Repair the build.
     expect(onHand.mock.calls.map(([id]) => id)).toEqual([
-      repair.workflowId,
       draft.workflowId,
+      repair.workflowId,
       review.workflowId,
     ]);
   });
@@ -146,5 +166,108 @@ describe("HandToMenu", () => {
     renderMenu({ accounts: [BOT] });
 
     expect(screen.queryByRole("combobox", { hidden: true })).toBeNull();
+  });
+
+  it("opens under the element it is given, its right edge level with that element's", () => {
+    const row = document.createElement("div");
+    const card = document.createElement("div");
+    card.setAttribute("data-card-id", "card-1");
+    card.getBoundingClientRect = () => new DOMRect(0, 900, 100, 50);
+    card.append(row);
+    document.body.append(card);
+    row.getBoundingClientRect = () => new DOMRect(100, 40, 400, 52);
+    render(
+      <HandToMenu
+        offers={partitionOffers([review])}
+        thing={THING}
+        actingConnections={[BOT]}
+        chosenConnectionId={undefined}
+        onChooseConnection={vi.fn()}
+        onHand={vi.fn()}
+        onClose={vi.fn()}
+        anchor={row}
+      />,
+    );
+
+    const menu = document.querySelector<HTMLElement>(".hand-menu")!;
+    // jsdom lays nothing out, so the menu is 0 wide: its right edge is the row's, at 500.
+    expect(menu.style.left).toBe("500px");
+    expect(menu.style.top).toBe("98px");
+    card.remove();
+  });
+
+  describe("with many workflows", () => {
+    // Ranked: the three that end one of the two asks first (by name), then the three that end none.
+    const many = [
+      buildWorkflowOffer("Review PR", ["github/review-requested"]),
+      buildWorkflowOffer("Answer a code question", ["github/mention"]),
+      buildWorkflowOffer("Security review", ["github/review-requested"]),
+      ...["Fix a failing check", "Split the pull request", "Write the release note"].map((name) =>
+        buildWorkflowOffer(name, []),
+      ),
+    ];
+
+    it("has no find field below six workflows", () => {
+      renderMenu({ offers: partitionOffers(many.slice(0, 5)) });
+
+      expect(screen.queryByRole("combobox", { name: "Hand to", hidden: true })).toBeNull();
+    });
+
+    it("has a find field with the focus, and 1 to 3 still pick while nothing is typed", async () => {
+      const { onHand } = renderMenu({ offers: partitionOffers(many) });
+      const field = screen.getByRole("combobox", { name: "Hand to", hidden: true });
+
+      expect(document.activeElement).toBe(field);
+      await userEvent.keyboard("2");
+
+      expect(onHand).toHaveBeenCalledExactlyOnceWith(many[0]!.workflowId);
+    });
+
+    it("finds by name or by what a workflow does, and picks from what is found", async () => {
+      const { onHand } = renderMenu({ offers: partitionOffers(many) });
+      const user = userEvent.setup();
+
+      await user.type(screen.getByRole("combobox", { name: "Hand to", hidden: true }), "rev");
+      expect(
+        screen
+          .getAllByRole("option", { hidden: true })
+          .map((option) => option.querySelector("b")?.textContent),
+      ).toEqual(["Review PR", "Security review"]);
+
+      await user.keyboard("{ArrowDown}{Enter}");
+      expect(onHand).toHaveBeenLastCalledWith(many[2]!.workflowId);
+
+      await user.clear(screen.getByRole("combobox", { name: "Hand to", hidden: true }));
+      await user.type(screen.getByRole("combobox", { name: "Hand to", hidden: true }), "ends omar");
+      expect(
+        screen
+          .getAllByRole("option", { hidden: true })
+          .map((option) => option.querySelector("b")?.textContent),
+      ).toEqual(["Answer a code question"]);
+    });
+
+    it("lets digits type once something is typed, and says when nothing matches", async () => {
+      const { onHand } = renderMenu({ offers: partitionOffers(many) });
+      const user = userEvent.setup();
+      const field = screen.getByRole<HTMLInputElement>("combobox", {
+        name: "Hand to",
+        hidden: true,
+      });
+
+      await user.type(field, "x2");
+      expect(field.value).toBe("x2");
+      expect(screen.getByText("No workflow by that name. Esc closes.")).toBeTruthy();
+      expect(onHand).not.toHaveBeenCalled();
+    });
+
+    it("keeps a workflow that cannot take the thing in the find, dimmed, with its reason", async () => {
+      renderMenu({ offers: partitionOffers([...many, shipIt]) });
+
+      await userEvent.type(screen.getByRole("combobox", { name: "Hand to", hidden: true }), "ship");
+
+      const [only] = screen.getAllByRole("option", { hidden: true });
+      expect(only?.getAttribute("aria-disabled")).toBe("true");
+      expect(within(only!).getByText("Ship it works on acme/web only")).toBeTruthy();
+    });
   });
 });

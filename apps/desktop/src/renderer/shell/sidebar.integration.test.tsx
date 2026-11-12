@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
+import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
 import type { Session } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -1096,13 +1097,13 @@ describe("the sidebar's faces", () => {
 
     /** Opens the Hercule face and returns the Inbox's link, with the Inbox's counts as `counts`. */
     const openInboxRow = async (counts: {
-      readonly onTheClock: number;
+      readonly waiting: number;
       readonly newestArrival: number;
     }) => {
       const app = await startSidebar({
         handlers: {
           [INBOX_COUNT_ROUTE]: {
-            body: { requests: 0, withSomeoneElse: 0, ...counts },
+            body: buildInboxCounts(counts),
           },
         },
       });
@@ -1111,8 +1112,8 @@ describe("the sidebar's faces", () => {
       return { ...app, link: within(nav).getByRole("link", { name: /^Inbox/ }) };
     };
 
-    it("shows the cards with a clock on them as a plain grey count", async () => {
-      const { link } = await openInboxRow({ onTheClock: 22, newestArrival: 0 });
+    it("shows the things someone waits on as a plain grey count", async () => {
+      const { link } = await openInboxRow({ waiting: 22, newestArrival: 0 });
       const count = link.querySelector(".count");
       expect(count?.textContent).toBe("22");
       expect(count?.classList.contains("count--you")).toBe(false);
@@ -1121,14 +1122,14 @@ describe("the sidebar's faces", () => {
     });
 
     it("hides the count at 0", async () => {
-      const { link } = await openInboxRow({ onTheClock: 0, newestArrival: 0 });
+      const { link } = await openInboxRow({ waiting: 0, newestArrival: 0 });
       expect(link.querySelector(".count")).toBeNull();
       expect(link.getAttribute("aria-label")).toBeNull();
     });
 
     it("shows one dot while an arrival is newer than the last one acknowledged, and none once it is acknowledged", async () => {
       acknowledgeInboxArrival(CONTROLLER_URL, "rogier", 4);
-      const { link } = await openInboxRow({ onTheClock: 3, newestArrival: 5 });
+      const { link } = await openInboxRow({ waiting: 3, newestArrival: 5 });
       expect(link.querySelectorAll(".nav-new")).toHaveLength(1);
       expect(link.getAttribute("aria-label")).toBe("Inbox, 3 waiting, something new");
 
@@ -1139,7 +1140,7 @@ describe("the sidebar's faces", () => {
     });
 
     it("shows no dot when nothing ever arrived", async () => {
-      const { link } = await openInboxRow({ onTheClock: 2, newestArrival: 0 });
+      const { link } = await openInboxRow({ waiting: 2, newestArrival: 0 });
       expect(link.querySelector(".nav-new")).toBeNull();
     });
   });

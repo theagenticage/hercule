@@ -92,7 +92,7 @@ const runWithEntities = <A>(
           complete: true,
           observed: [observed],
           actor: `plugin:${PLUGIN}`,
-          environment: { now: AT, activePluginIds: [PLUGIN] },
+          environment: { now: AT, activePluginIds: [PLUGIN], askingKinds: [] },
         });
       }
       return yield* body;
@@ -134,10 +134,12 @@ describe("the Signal Entities port", () => {
         const before = yield* readArrivals;
         yield* entities.recordArrivalAfter(
           TICKET,
+          [],
           signals.insert(buildSignal("0199e0e7-0005-7000-8000-000000000001", TICKET), []),
         );
         yield* entities.recordArrivalAfter(
           PROJECT,
+          [],
           signals.insert(buildSignal("0199e0e7-0005-7000-8000-000000000002", PROJECT), []),
         );
         return { before, after: yield* readArrivals };

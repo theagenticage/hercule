@@ -7,11 +7,10 @@
  */
 import type {
   EntityChange,
-  EntityPeer,
   EntityReason,
   EntitySignalLine,
   ExternalEntityDetail,
-  InboxCard,
+  InboxThing,
 } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
 import { readOtherRef } from "../desk/link-ends";
@@ -126,7 +125,7 @@ const isLive = (line: TimelineLine): boolean =>
  */
 export const buildOpenTimeline = (
   detail: TimelineSource,
-  cards: ReadonlyArray<InboxCard>,
+  cards: ReadonlyArray<InboxThing>,
 ): readonly TimelineLine[] => {
   const cardByRef = new Map(cards.map((card) => [card.ref, card]));
   const others = indexOtherThings(detail);
@@ -140,7 +139,7 @@ export const buildOpenTimeline = (
   ];
   for (const link of detail.links) {
     const card = cardByRef.get(readOtherRef(link, detail.ref));
-    const latest = card?.signals.latest;
+    const latest = card?.asks[0];
     if (card === undefined || latest === undefined) continue;
     lines.push({
       key: `linked:${card.id}:${latest.id}`,
@@ -169,33 +168,6 @@ export const buildOpenTimeline = (
     };
   });
 };
-
-/**
- * Returns the source of the timeline for a card the Inbox holds when its own
- * read has not answered yet: the card's newest signal alone.
- */
-export const buildListedTimelineSource = (card: InboxCard): TimelineSource => ({
-  ref: card.ref,
-  signals: card.signals.latest === undefined ? [] : [card.signals.latest],
-  timeline: [],
-  places: [],
-  peers: [],
-  links: [],
-});
-
-/**
- * Returns the id a link to a thing opens inside the sheet, by the thing's ref.
- * A thing opens when it has an id to read: a card of the page, or a peer that
- * is a full record. A card wins over a peer for a ref both hold.
- */
-export const buildWalkableIds = (
-  peers: ReadonlyArray<Pick<EntityPeer, "id" | "ref">>,
-  cards: ReadonlyArray<Pick<InboxCard, "id" | "ref">>,
-): ReadonlyMap<string, string> =>
-  new Map<string, string>([
-    ...peers.flatMap((peer) => (peer.id === undefined ? [] : [[peer.ref, peer.id] as const])),
-    ...cards.map((card) => [card.ref, card.id] as const),
-  ]);
 
 /** What a card's lines leave out: how many, and whether they are open work or only older, resolved lines. */
 export interface TimelineOverflow {

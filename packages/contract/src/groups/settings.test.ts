@@ -60,3 +60,32 @@ describe("the bounds on a user setting that holds a list", () => {
     ).toBe("Failure");
   });
 });
+
+describe("the Inbox rail settings", () => {
+  const pin = { source: "linear", key: "team", value: "Checkout" };
+
+  it("accepts pins and folded sources, with or without an account", () => {
+    const connectionId = "01963f0a-0000-7000-8000-000000000001";
+    expect(
+      decode(SettingsPatch)({
+        user: {
+          "inbox.pins": [pin, { ...pin, connectionId }],
+          "inbox.browseFolded": [{ source: "linear" }, { source: "linear", connectionId }],
+        },
+      })._tag,
+    ).toBe("Success");
+  });
+
+  it("rejects a list of 51 pins, and a pin without a value", () => {
+    const pins = Array.from({ length: 51 }, () => pin);
+    expect(decode(SettingsPatch)({ user: { "inbox.pins": pins } })._tag).toBe("Failure");
+    expect(
+      decode(SettingsPatch)({ user: { "inbox.pins": [{ source: "linear", key: "team" }] } })._tag,
+    ).toBe("Failure");
+    expect(
+      decode(SettingsPatch)({
+        user: { "inbox.browseFolded": Array.from({ length: 51 }, () => ({ source: "linear" })) },
+      })._tag,
+    ).toBe("Failure");
+  });
+});

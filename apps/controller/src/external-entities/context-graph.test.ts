@@ -21,6 +21,7 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { MAX_ENTITY_ANCESTORS } from "@hercule/contract";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
 import type { EntitySlots, FullEntityObservation } from "./slots";
 
@@ -152,7 +153,38 @@ const environment = (
 ) => ({
   now: at(minutes),
   activePluginIds,
+  askingKinds: [],
 });
+
+type Repository = Effect.Success<typeof externalEntityRepository>;
+
+/** Reads what lies above one thing, as a detail reads it, and the thing's own row on the Inbox. */
+const readAbove = (
+  repository: Repository,
+  startRef: string,
+  minutes: number,
+  active?: ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    const readEnvironment = environment(minutes, active);
+    const context = yield* repository.readContext({
+      starts: [startRef],
+      maxAncestors: MAX_ENTITY_ANCESTORS,
+      maxPlaces: MAX_ENTITY_ANCESTORS * 2,
+      environment: readEnvironment,
+    });
+    const inbox = yield* repository.queryInbox(
+      { ...readEnvironment, signalKinds: [], savedQueries: [], askingKinds: [] },
+      { list: { savedQuery: "everything" } },
+    );
+    return {
+      ancestors: context.ancestors.get(startRef) ?? [],
+      contextComplete: context.contextComplete.get(startRef),
+      places: context.places,
+      edges: context.edges,
+      thing: inbox.things.find((one) => one.ref === startRef),
+    };
+  });
 
 /** Runs `body` on a fresh migrated database with one Connection for each plugin, in one transaction. */
 const run = <A>(
@@ -271,15 +303,15 @@ describe("the places above a ticket of a deep tracker", () => {
     const outcome = await run((context) =>
       Effect.gen(function* () {
         yield* readTrackerGraph(context);
-        const before = yield* context.repository.queryInbox(environment(10));
+        const before = yield* readAbove(context.repository, TICKET, 10);
         // The ticket's own fields stay the same: only its parents change.
         const moved = yield* readTrackerGraph(context, { ticketParents: [LIGHTHOUSE] });
-        const after = yield* context.repository.queryInbox(environment(11));
+        const after = yield* readAbove(context.repository, TICKET, 11);
         return { before, moved, after };
       }),
     );
 
-    const card = outcome.before.cards.find((one) => one.ref === TICKET)!;
+    const card = outcome.before;
     expect(sorted(card.ancestors)).toEqual(
       sorted([PARENT_TICKET, HARBOUR, LAUNCH, LIGHTHOUSE, GROWTH, RELIABILITY, COMPANY, SHOP_TEAM]),
     );
@@ -305,7 +337,7 @@ describe("the places above a ticket of a deep tracker", () => {
 
     // The move reports the ticket as changed, though its own row is the same.
     expect(outcome.moved.changedRefs).toEqual([TICKET]);
-    const movedCard = outcome.after.cards.find((one) => one.ref === TICKET)!;
+    const movedCard = outcome.after;
     expect(sorted(movedCard.ancestors)).toEqual(sorted([LIGHTHOUSE, RELIABILITY, COMPANY]));
     expect(edgePairs(outcome.after.edges)).toEqual(
       sorted([
@@ -323,14 +355,14 @@ describe("what a place says of itself", () => {
     const outcome = await run((context) =>
       Effect.gen(function* () {
         yield* readTrackerGraph(context);
-        const reported = yield* context.repository.queryInbox(environment(10));
+        const reported = yield* readAbove(context.repository, TICKET, 10);
         yield* context.repository.reportMissing({
           connectionId: TRACKER_ACCOUNT,
           ref: HARBOUR,
           reason: "inaccessible",
           environment: environment(11),
         });
-        const closed = yield* context.repository.queryInbox(environment(12));
+        const closed = yield* readAbove(context.repository, TICKET, 12);
         return { reported, closed };
       }),
     );
@@ -368,24 +400,20 @@ describe("turning a plugin off", () => {
         yield* readTrackerGraph(context);
         yield* context.readForge(`${FORGE}/repository`, [forgeRepository()], 7);
         yield* context.readForge(PULL_REQUEST_KIND, [pullRequest(partOf(FORGE_REPOSITORY))], 8);
-        const running = yield* context.repository.queryInbox(environment(10));
-        const forgeOnly = yield* context.repository.queryInbox(environment(11, [FORGE]));
-        return { running, forgeOnly };
+        const running = yield* readAbove(context.repository, TICKET, 10);
+        const forgeOnly = yield* readAbove(context.repository, TICKET, 11, [FORGE]);
+        const forgeRequest = yield* readAbove(context.repository, PULL_REQUEST, 11, [FORGE]);
+        return { running, forgeOnly, forgeRequest };
       }),
     );
-    const cardOf = (inbox: typeof outcome.running, cardRef: string) =>
-      inbox.cards.find((one) => one.ref === cardRef)!;
+    expect(outcome.running.thing).toMatchObject({ stale: false });
+    expect(outcome.running.contextComplete).toBe(true);
 
-    expect(cardOf(outcome.running, TICKET)).toMatchObject({ stale: false, contextComplete: true });
-
-    const ticketCard = cardOf(outcome.forgeOnly, TICKET);
-    const runningCard = cardOf(outcome.running, TICKET);
+    const ticketCard = outcome.forgeOnly;
+    const runningCard = outcome.running;
     // The card and its parents are the ones that were drawn, now marked as not kept current.
-    expect(ticketCard).toMatchObject({
-      title: runningCard.title,
-      stale: true,
-      contextComplete: false,
-    });
+    expect(ticketCard.thing).toMatchObject({ title: runningCard.thing!.title, stale: true });
+    expect(ticketCard.contextComplete).toBe(false);
     expect(ticketCard.ancestors).toEqual(runningCard.ancestors);
     expect(outcome.forgeOnly.places.map((one) => one.ref).sort()).toEqual(
       outcome.running.places.map((one) => one.ref).sort(),
@@ -396,9 +424,7 @@ describe("turning a plugin off", () => {
     });
     expect(edgePairs(outcome.forgeOnly.edges)).toEqual(edgePairs(outcome.running.edges));
 
-    expect(cardOf(outcome.forgeOnly, PULL_REQUEST)).toMatchObject({
-      stale: false,
-      contextComplete: true,
-    });
+    expect(outcome.forgeRequest.thing).toMatchObject({ stale: false });
+    expect(outcome.forgeRequest.contextComplete).toBe(true);
   });
 });

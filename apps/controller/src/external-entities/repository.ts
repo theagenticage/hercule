@@ -27,12 +27,6 @@ import {
   MAX_ENTITY_HINTS,
   MAX_ENTITY_LINKS,
   MAX_ENTITY_SIGNALS,
-  MAX_INBOX_CARDS,
-  MAX_INBOX_HINTS,
-  MAX_INBOX_LINKS,
-  MAX_INBOX_PEERS,
-  MAX_INBOX_PLACES,
-  MAX_LIVE_WORKFLOWS,
   type EntityChange,
   type EntityConflict,
   type EntityLifecycle,
@@ -40,9 +34,8 @@ import {
   type EntityPlace,
   type EntityStatus,
   type ExternalEntityDetail,
-  type Inbox,
-  type InboxCard,
-  type InboxCounts,
+  type InboxQuery,
+  type InboxValueQuery,
   type SignalEntity,
   type TaskStage,
 } from "@hercule/contract";
@@ -82,13 +75,18 @@ import {
 } from "./entity-records";
 import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
-import { selectInboxPage } from "./riding";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
 import { makeWorkflowOfferReads, type WorkflowOfferTarget } from "./workflow-offer-reads";
-import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
+import {
+  buildEligibleEntities,
+  makeInboxPopulation,
+  RETAINED_ROOT_REFS_SQL,
+  WANTED_REFS_SQL,
+} from "./inbox-population";
+import { makeInboxQueries, type InboxEnvironment, type InboxRailSettings } from "./inbox-query";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
-import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
+import { buildDetailSignalFields } from "./signal-lines";
 import type { EntitySlots, FullEntityObservation, StoredEntityStatus } from "./slots";
 import {
   deleteOrphanedFields,
@@ -568,7 +566,7 @@ const make = Effect.gen(function* () {
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
-  const inbox = makeInboxPopulation(sql, linkReads);
+  const inbox = makeInboxPopulation(sql);
   const workflowOfferReads = yield* makeWorkflowOfferReads;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
@@ -636,6 +634,15 @@ const make = Effect.gen(function* () {
             WHERE o.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
           groupBy,
         );
+
+  const inboxQueries = makeInboxQueries(sql, {
+    readEntities,
+    readObservations,
+    listOpenKindsByThread: signals.listOpenKindsByThread,
+    listLiveWorkflowsOfTasks: runs.listLiveWorkflowsOfTasks,
+    readWorkflowOffers: workflowOfferReads.readWorkflowOffers,
+    buildOfferTarget: buildWorkflowOfferTarget,
+  });
 
   const readRefStates = (
     refs: ReadonlyArray<string>,
@@ -789,7 +796,12 @@ const make = Effect.gen(function* () {
       ...observed.map((entry) => entry.observation.ref),
       ...input.leaving,
     ]);
-    return inbox.recordArrivalsAfter(touched, now, writeObservations(input, observed, touched));
+    return inbox.recordArrivalsAfter(
+      touched,
+      now,
+      environment.askingKinds,
+      writeObservations(input, observed, touched),
+    );
   };
 
   /**
@@ -1012,9 +1024,6 @@ const make = Effect.gen(function* () {
   // The Inbox
   // -------------------------------------------------------------------------
 
-  /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
-  const buildRidesOn = (lead: string | undefined) => (lead === undefined ? {} : { ridesOn: lead });
-
   /**
    * Reads what lies above each of `starts`: their ancestors, the places those
    * ancestors draw, and the edges between them. Every reply that draws
@@ -1113,35 +1122,60 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sets an entity aside or brings it back, and stamps `actor` as the one who
-   * did. Returns none when there is no such entity, else its ref and whether
-   * the call changed it (asking for the state it already has changes nothing).
+   * Sets entities aside or brings them back, and stamps `actor` as the one who
+   * did. Returns the ids that name no entity when there are any, and then
+   * changes nothing. Otherwise returns, for each id, its ref and whether the
+   * call changed it. Restoring a thing that is not dismissed changes nothing.
+   * Dismissing always counts as a change and moves the dismissal to `now`,
+   * also for a thing that is dismissed already: a thing that came back on a
+   * new ask is dismissed again, and only asks raised after this moment bring
+   * it back. Two statements however many ids there are.
    */
-  const setDismissal = (
-    id: string,
+  const setDismissals = (
+    ids: ReadonlyArray<string>,
     change: { readonly dismissed: boolean; readonly actor: string; readonly now: string },
-  ): Effect.Effect<Option.Option<{ readonly ref: string; readonly changed: boolean }>, SqlError> =>
+  ): Effect.Effect<
+    | { readonly missing: ReadonlyArray<string> }
+    | {
+        readonly moved: ReadonlyArray<{
+          readonly id: string;
+          readonly ref: string;
+          readonly changed: boolean;
+        }>;
+      },
+    SqlError
+  > =>
     Effect.gen(function* () {
-      const key = uuidFromString(id);
-      const found = yield* sql<{ readonly ref: string; readonly dismissed_at: string | null }>`
-        SELECT ref, dismissed_at FROM external_entities WHERE id = ${key}`;
-      const row = found[0];
-      if (row === undefined) return Option.none();
-      if ((row.dismissed_at !== null) === change.dismissed) {
-        return Option.some({ ref: row.ref, changed: false });
+      const found = yield* sql<{
+        readonly id: Uint8Array;
+        readonly ref: string;
+        readonly dismissed_at: string | null;
+      }>`
+        SELECT id, ref, dismissed_at FROM external_entities
+        WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${JSON.stringify(ids)}))`;
+      const known = new Map(found.map((row) => [uuidToString(row.id), row]));
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length > 0) return { missing };
+      const moved = ids.map((id) => {
+        const row = known.get(id)!;
+        return { id, ref: row.ref, changed: change.dismissed || row.dismissed_at !== null };
+      });
+      const changed = moved.filter((entry) => entry.changed).map((entry) => entry.id);
+      if (changed.length > 0) {
+        const { actor, now } = change;
+        const changedJson = JSON.stringify(changed);
+        yield* change.dismissed
+          ? sql`
+              UPDATE external_entities
+              SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
+              WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${changedJson}))`
+          : sql`
+              UPDATE external_entities
+              SET dismissed_at = NULL, dismissed_by = NULL, restored_at = ${now},
+                  restored_by = ${actor}, updated_at = ${now}
+              WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${changedJson}))`;
       }
-      const { actor, now } = change;
-      yield* change.dismissed
-        ? sql`
-            UPDATE external_entities
-            SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
-            WHERE id = ${key}`
-        : sql`
-            UPDATE external_entities
-            SET dismissed_at = NULL, dismissed_by = NULL, restored_at = ${now},
-                restored_by = ${actor}, updated_at = ${now}
-            WHERE id = ${key}`;
-      return Option.some({ ref: row.ref, changed: true });
+      return { moved };
     });
 
   return {
@@ -1336,134 +1370,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the Inbox: every card up to `MAX_INBOX_CARDS`, oldest first by
-     * `(firstObservedAt, id)`, the places above them, the edges between those
-     * places, and the counts over all eligible cards.
-     *
-     * Riding is decided once over every eligible card, before the page limit
-     * (`decideRiding`), and the Requests count follows the same decision. The
-     * page is chosen in bundles (`selectInboxPage`): a lead comes with its
-     * riders and a rider never comes alone, so the page never draws a
-     * Requests card that the count left out, and it is never empty while
-     * cards exist. `links` are the direct links of the cards on the page and
-     * `peers` the records at their far end that have no card. If the page, the
-     * links or the peers hit their bound, `truncated` is set.
-     *
-     * Each card carries the id of its offer set and the Connections that can
-     * act on it. Cards that share a kind, a target repository and an
-     * acting-account state share one set in `offerSets`, evaluated once (see
-     * `readWorkflowOffers`).
-     *
-     * A constant number of statements however many cards there are: the
-     * eligible cards and their links (evaluating the membership once), the
-     * entity rows of the page, one walk up for every card, the records above
-     * them, the observations of cards and places together, the live signals
-     * and the open signal kinds, the offers (acting Connections, workflows,
-     * Resources), the links of the page, and the three reads of the peers.
+     * Returns one page of an Inbox list (see `makeInboxQueries`). Fails with
+     * `Validation` for a query that cannot be answered.
      */
-    queryInbox: (environment: EntityEnvironment): Effect.Effect<Inbox, SqlError> =>
-      Effect.gen(function* () {
-        const {
-          cards: eligibleCards,
-          riding,
-          counts,
-        } = yield* inbox.readInboxStanding(environment.now);
-        const page = selectInboxPage(
-          eligibleCards.map((card) => card.ref),
-          riding,
-          MAX_INBOX_CARDS,
-        );
-        const pageCards = eligibleCards.filter((card) => page.refs.has(card.ref));
-        const entityRows = yield* readEntities(pageCards.map((card) => card.ref));
-        const rows = pageCards.map((card) => ({ card, row: entityRows.get(card.ref)! }));
-        const cardsTruncated = page.truncated;
-        const pageRefs = page.refs;
-
-        // Cards come oldest first, so the older cards keep their context and
-        // a later one loses its farthest ancestors when the places run out.
-        const context = yield* readContext({
-          starts: rows.map(({ row }) => row.ref),
-          maxAncestors: MAX_ENTITY_ANCESTORS,
-          maxPlaces: MAX_INBOX_PLACES,
-          environment,
-        });
-        const activePluginIds = new Set(environment.activePluginIds);
-        const cardSignals = yield* signals.readLatestLiveSignals(
-          rows.map(({ row }) => row.ref),
-          environment.now,
-        );
-        const openKinds = yield* signals.listOpenKindsByThread(
-          rows.map(({ row }) => row.ref),
-          MAX_ENTITY_SIGNALS,
-        );
-        const offers = yield* workflowOfferReads.readWorkflowOffers(
-          rows.map(({ row }) => buildWorkflowOfferTarget(row)),
-          environment.kindSources ?? [],
-        );
-        const liveWorkflows = yield* runs.listLiveWorkflowsOfTasks(
-          pageCards.flatMap((card) => (card.taskId === null ? [] : [uuidToString(card.taskId)])),
-          MAX_LIVE_WORKFLOWS,
-        );
-
-        const cards = rows.map(({ card, row }): InboxCard => ({
-          ...buildEntityFields({
-            row,
-            observations: context.observations.get(row.ref) ?? [],
-            activePluginIds,
-            taskId: card.taskId === null ? undefined : uuidToString(card.taskId),
-            following: card.following,
-            ancestors: context.ancestors.get(row.ref)!,
-            contextComplete: context.contextComplete.get(row.ref)!,
-            latestChange: context.latestChanges.get(row.ref),
-          }),
-          side: card.side,
-          ...buildCardSignalFields(
-            cardSignals.get(row.ref),
-            openKinds.get(row.ref) ?? [],
-            row.reason_templates as string | null,
-          ),
-          ...buildRidesOn(riding.get(row.ref)),
-          offerSetId: offers.offerSetIds.get(row.ref)!,
-          actingConnections: offers.actingConnections.get(row.ref) ?? [],
-          liveWorkflows:
-            card.taskId === null ? [] : (liveWorkflows.get(uuidToString(card.taskId)) ?? []),
-        }));
-        const { places, edges } = context;
-
-        // Links and hints have one bound (`MAX_INBOX_HINTS` equals `MAX_INBOX_LINKS`).
-        const found = yield* linkReads.readLinksAndHintsOf([...pageRefs], MAX_INBOX_LINKS);
-        const links = found.links.slice(0, MAX_INBOX_LINKS);
-        const hints = found.hints.slice(0, MAX_INBOX_HINTS);
-        const farRefs = [
-          ...new Set(
-            [...links, ...hints].flatMap((pair) =>
-              [pair.fromRef, pair.toRef].filter((ref) => !pageRefs.has(ref)),
-            ),
-          ),
-        ];
-        const foundPeers = yield* linkReads.listPeers(
-          new Set(eligibleCards.map((card) => card.ref)),
-          farRefs,
-          environment.activeEntityKinds,
-        );
-        const peers = foundPeers.slice(0, MAX_INBOX_PEERS);
-        const truncated =
-          cardsTruncated ||
-          found.links.length > MAX_INBOX_LINKS ||
-          found.hints.length > MAX_INBOX_HINTS ||
-          foundPeers.length > MAX_INBOX_PEERS;
-        return {
-          cards,
-          places,
-          edges,
-          counts,
-          links,
-          hints,
-          peers,
-          offerSets: offers.offerSets,
-          truncated,
-        };
-      }),
+    queryInbox: (environment: InboxEnvironment, query: InboxQuery) =>
+      inboxQueries.queryInbox(environment, query),
 
     /**
      * Returns the offers and acting Connections of things, as the Inbox and
@@ -1492,9 +1403,16 @@ const make = Effect.gen(function* () {
      */
     listStackCandidates: linkReads.listStackCandidates,
 
-    /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
-    countInbox: (now: string): Effect.Effect<InboxCounts, SqlError> =>
-      Effect.map(inbox.readInboxStanding(now), (standing) => standing.counts),
+    /** Returns the counts of the Inbox for the sidebar (see `makeInboxQueries`). */
+    countInbox: (environment: InboxEnvironment) => inboxQueries.countInbox(environment),
+
+    /** Returns what the Inbox's rail draws (see `makeInboxQueries`). */
+    readInboxOutline: (environment: InboxEnvironment, settings: InboxRailSettings) =>
+      inboxQueries.readInboxOutline(environment, settings),
+
+    /** Returns the values of one field among the things of a list, for the search's suggestions. */
+    suggestInboxValues: (environment: InboxEnvironment, query: InboxValueQuery) =>
+      inboxQueries.suggestInboxValues(environment, query),
 
     /**
      * Returns one entity with the records above it and what it is linked to,
@@ -1563,7 +1481,7 @@ const make = Effect.gen(function* () {
           ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            yield* inbox.listEligibleRefs(linkedRefs, environment.now),
+            yield* inbox.listEligibleRefs(linkedRefs, environment.now, environment.askingKinds),
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
@@ -1745,7 +1663,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the things on the Inbox that have no live Task, for the sheet
-     * that lists suggestions: the eligible entities of `ELIGIBLE_ENTITIES_SQL`
+     * that lists suggestions: the eligible entities of `buildEligibleEntities`
      * that no live Task links. Oldest first by
      * `(firstObservedAt, id)`, at most `limit`. When `contextRef` is given,
      * only the things below it are considered, at any depth of current
@@ -1757,9 +1675,11 @@ const make = Effect.gen(function* () {
       readonly contextRef: string | undefined;
       readonly limit: number;
       readonly now: string;
-    }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> =>
-      Effect.map(
-        sql<{
+      readonly askingKinds: ReadonlyArray<string>;
+    }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> => {
+      const eligible = buildEligibleEntities(input.now, input.askingKinds);
+      return Effect.map(
+        sql.unsafe<{
           readonly ref: string;
           readonly kind: string;
           readonly noun: string;
@@ -1767,19 +1687,23 @@ const make = Effect.gen(function* () {
           readonly title: string;
           readonly url: string;
           readonly status: string | null;
-        }>`
-          WITH RECURSIVE ${inbox.buildEligibleEntities(input.now)},
-          walk_start(ref) AS (
-            SELECT value FROM json_each(${refsJson(input.contextRef === undefined ? [] : [input.contextRef])})
-          ),
-          ${sql.literal(WALK_DOWN_SQL)}
+        }>(
+          `WITH RECURSIVE ${eligible.sql},
+          walk_start(ref) AS (SELECT value FROM json_each(?)),
+          ${WALK_DOWN_SQL}
           SELECT e.ref, e.kind, e.noun, e.identifier, e.title, e.url, e.status
           FROM eligible e
           WHERE e.task_id IS NULL
-            AND (${input.contextRef === undefined ? 1 : 0} = 1
-                 OR e.ref IN (SELECT ref FROM walk_down))
+            AND (? = 1 OR e.ref IN (SELECT ref FROM walk_down))
           ORDER BY e.first_observed_at, e.id
-          LIMIT ${input.limit}`,
+          LIMIT ?`,
+          [
+            ...eligible.params,
+            refsJson(input.contextRef === undefined ? [] : [input.contextRef]),
+            input.contextRef === undefined ? 1 : 0,
+            input.limit,
+          ],
+        ),
         (rows) =>
           rows.map((row) => ({
             ref: row.ref,
@@ -1790,7 +1714,8 @@ const make = Effect.gen(function* () {
             url: row.url,
             status: parseStoredStatus(row.status).status,
           })),
-      ),
+      );
+    },
 
     /**
      * Returns what Hercule holds of each ref, for the marks of a search:
@@ -1852,36 +1777,22 @@ const make = Effect.gen(function* () {
     recordArrivalAfter: <A, E, R>(
       ref: string,
       now: string,
+      askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E | SqlError, R> => inbox.recordArrivalsAfter([ref], now, write),
+    ): Effect.Effect<A, E | SqlError, R> =>
+      inbox.recordArrivalsAfter([ref], now, askingKinds, write),
 
     /**
-     * Dismisses an entity: it leaves the Inbox and stays out, whatever a new
-     * concern or signal says, until `restore`. Returns none when there is no
-     * such entity, else its ref and whether this call changed it (dismissing a
-     * dismissed entity changes nothing).
+     * Dismisses entities: they leave the Inbox until `restore`, or until an
+     * ask is raised on one of them after this call. See `setDismissals` for
+     * what it returns.
      */
-    dismiss: (
-      id: string,
-      actor: string,
-      now: string,
-    ): Effect.Effect<
-      Option.Option<{ readonly ref: string; readonly changed: boolean }>,
-      SqlError
-    > => setDismissal(id, { dismissed: true, actor, now }),
+    dismiss: (ids: ReadonlyArray<string>, actor: string, now: string) =>
+      setDismissals(ids, { dismissed: true, actor, now }),
 
-    /**
-     * Undoes `dismiss`, and records who did. Returns none when there is no such
-     * entity, else its ref and whether this call changed it.
-     */
-    restore: (
-      id: string,
-      actor: string,
-      now: string,
-    ): Effect.Effect<
-      Option.Option<{ readonly ref: string; readonly changed: boolean }>,
-      SqlError
-    > => setDismissal(id, { dismissed: false, actor, now }),
+    /** Undoes `dismiss`, and records who did. See `setDismissals` for what it returns. */
+    restore: (ids: ReadonlyArray<string>, actor: string, now: string) =>
+      setDismissals(ids, { dismissed: false, actor, now }),
 
     /**
      * Deletes the records nothing needs, and returns how many it deleted. The

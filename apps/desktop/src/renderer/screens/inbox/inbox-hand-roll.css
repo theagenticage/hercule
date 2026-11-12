@@ -1,0 +1,21 @@
+/* The roll of a hand-off on its row (`inbox-hand-off-motion.ts`): the old wait and the old sentence lie in a clip over
+   the row, at the place they had, and roll up out of it while the new ones roll in. Every movement is a Web Animation
+   the script starts, so no stylesheet animates here, and nothing moves under Reduce motion. */
+.ib-roll-clip {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ib-roll-clip > * {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+/* A line clips the part that rolls in from below until it is in place. */
+.ib-row-l1[data-rolling],
+.ib-row-l2[data-rolling] {
+  overflow: hidden;
+}

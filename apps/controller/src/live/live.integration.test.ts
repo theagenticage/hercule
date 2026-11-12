@@ -650,7 +650,7 @@ describe("what an external entity subscription receives", () => {
           yield* Effect.promise(() => expectHeld(reader, 1, "externalEntity"));
 
           const dismissed = yield* Effect.promise(() =>
-            post(base, `/api/v1/external-entities/${entityId}/dismiss`, {}, token),
+            post(base, "/api/v1/external-entities/dismiss", { ids: [entityId] }, token),
           );
           expect(dismissed.status).toBe(200);
           expect(
@@ -663,7 +663,7 @@ describe("what an external entity subscription receives", () => {
           });
 
           const restored = yield* Effect.promise(() =>
-            post(base, `/api/v1/external-entities/${entityId}/restore`, {}, token),
+            post(base, "/api/v1/external-entities/restore", { ids: [entityId] }, token),
           );
           expect(restored.status).toBe(200);
           expect(

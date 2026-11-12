@@ -45,12 +45,19 @@ import {
   type EntityUnlinkResult,
   type ExternalEntityDetail,
   type Forbidden,
-  type Inbox,
   type InboxCounts,
+  type InboxOutline,
+  type InboxMove,
+  type InboxPage,
+  type InboxQuery,
+  type InboxValueQuery,
+  type InboxValues,
   type InvalidState,
   type NotFound,
+  type Task,
   type TaskStage,
   type Unauthenticated,
+  type Validation,
 } from "@hercule/contract";
 import {
   PluginError,
@@ -60,8 +67,17 @@ import {
 } from "@hercule/plugin-host";
 import { currentStamp, requireGrant, requireUserActor } from "../actor";
 import { nowIso, withTransaction } from "../db";
-import { EntityLookups, PluginHost, type EntityReporter, type LookupObservation } from "../plugins";
+import {
+  EntityLookups,
+  listAskingKinds,
+  PluginHost,
+  type EntityReporter,
+  type LookupObservation,
+  type RegisteredSavedQuery,
+  type RegisteredSignalKind,
+} from "../plugins";
 import { resourceRepository } from "../resources";
+import { Settings } from "../settings";
 import {
   ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
@@ -75,6 +91,7 @@ import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
+import type { InboxEnvironment, InboxRailSettings } from "./inbox-query";
 import {
   externalEntityRepository,
   type EntityReadEnvironment,
@@ -114,6 +131,10 @@ interface Catalog {
   readonly kinds: ReadonlyMap<string, CatalogKind>;
   /** What the offers need of the plugin of each active kind. */
   readonly kindSources: ReadonlyArray<EntityKindSource>;
+  /** The signal kinds of the active plugins. */
+  readonly signalKinds: ReadonlyArray<RegisteredSignalKind>;
+  /** The saved queries of the active plugins, in load order. */
+  readonly savedQueries: ReadonlyArray<RegisteredSavedQuery>;
 }
 
 /** What `prepareEntityForTask` read: nothing when the rows already held a full, readable record. */
@@ -190,6 +211,7 @@ const make = Effect.gen(function* () {
   const ingest = yield* ExternalEntityIngest;
   const host = yield* PluginHost;
   const claims = yield* claimRepository;
+  const settings = yield* Settings;
 
   /** Reads the entity kinds and plugins that are active now. */
   const readCatalog: Effect.Effect<Catalog> = Effect.map(
@@ -205,21 +227,36 @@ const make = Effect.gen(function* () {
         activePluginIds: [...new Set(sources.map((source) => source.pluginId))],
         kinds,
         kindSources: listEntityKindSources(sources),
+        signalKinds: sources.flatMap((source) => source.signalKinds),
+        savedQueries: sources.flatMap((source) => source.savedQueries),
       };
     },
   );
 
   /** Reads what the repository needs to tell whether a plugin and a kind are active, and the time. */
   const readEnvironment: Effect.Effect<EntityReadEnvironment> = Effect.gen(function* () {
+    return buildReadEnvironment(yield* readCatalog, yield* nowIso);
+  });
+
+  /** Builds the read environment from a catalog already read, at the time `now`. */
+  const buildReadEnvironment = (catalog: Catalog, now: string): EntityReadEnvironment => ({
+    now,
+    activePluginIds: catalog.activePluginIds,
+    activeKinds: new Set(catalog.kinds.keys()),
+    activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
+      buildActiveEntityKind(declaration),
+    ),
+    kindSources: catalog.kindSources,
+    askingKinds: listAskingKinds(catalog.signalKinds),
+  });
+
+  /** Reads what the Inbox's reads need beyond the database. The catalog is read once. */
+  const readInboxEnvironment: Effect.Effect<InboxEnvironment> = Effect.gen(function* () {
     const catalog = yield* readCatalog;
     return {
-      now: yield* nowIso,
-      activePluginIds: catalog.activePluginIds,
-      activeKinds: new Set(catalog.kinds.keys()),
-      activeEntityKinds: [...catalog.kinds.values()].map(({ declaration }) =>
-        buildActiveEntityKind(declaration),
-      ),
-      kindSources: catalog.kindSources,
+      ...buildReadEnvironment(catalog, yield* nowIso),
+      signalKinds: catalog.signalKinds,
+      savedQueries: catalog.savedQueries,
     };
   });
 
@@ -370,6 +407,50 @@ const make = Effect.gen(function* () {
    * The observation is stored through the repository's `refresh`, which never
    * changes a concern, so a later poll never empties what a Task follows.
    */
+  /**
+   * Marks the active Task of `ref` as taken on by the user, now, when it was
+   * made some other way (a hand-off, a session, a signal, an event), so the
+   * asks raised before this moment stop asking. Changes nothing when the user
+   * already took it on. Announces the entity (when its id is known) only when
+   * something changed.
+   *
+   * Reads the active Task, marks its link and returns that same Task in one
+   * transaction, so the Task marked is the Task returned. Returns none when
+   * the ref has no active Task. A first read outside the transaction ends the
+   * common case of no Task without taking the writer.
+   */
+  const markActiveTaskTakenOn = (
+    ref: string,
+    entityId: string | undefined,
+  ): Effect.Effect<Option.Option<Task>, SqlError> =>
+    Effect.flatMap(taskRows.findActiveTaskForRef(ref), (peek) =>
+      Option.isNone(peek)
+        ? Effect.succeed(peek)
+        : markActiveTaskTakenOnInTransaction(ref, entityId),
+    );
+
+  const markActiveTaskTakenOnInTransaction = (
+    ref: string,
+    entityId: string | undefined,
+  ): Effect.Effect<Option.Option<Task>, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const active = yield* taskRows.findActiveTaskForRef(ref);
+        if (Option.isNone(active)) return active;
+        const changed = yield* taskRows.markLinkTaken(
+          active.value.id,
+          ref,
+          yield* nowIso,
+          yield* currentStamp,
+        );
+        if (changed && entityId !== undefined) {
+          yield* announceEntityChanges({ entityIds: [entityId], affectedTaskIds: [] });
+        }
+        return active;
+      }),
+    );
+
   const makeTaskForEntity = (input: {
     readonly ref: string;
     readonly preparation: Preparation;
@@ -411,7 +492,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const active = Option.getOrUndefined(yield* taskRows.findActiveTaskForRef(ref));
+        const active = Option.getOrUndefined(yield* markActiveTaskTakenOn(ref, record.id));
         if (active !== undefined) {
           return {
             entityId: record.id,
@@ -447,29 +528,41 @@ const make = Effect.gen(function* () {
         : Effect.fail(createNotFoundError("no such external entity")),
     );
 
-  /** Sets a card aside or brings it back, as the user. Announces only when the card changed. */
-  const moveCard = (
-    id: string,
-    write: (now: string, actor: string) => ReturnType<typeof entities.dismiss>,
+  /**
+   * Sets things aside or brings them back, as the user, all or none in one
+   * transaction. Announces only the things that changed. Fails with
+   * `NotFound` naming an id that is unknown, and then changes nothing.
+   */
+  const moveThings = (
+    ids: InboxMove["ids"],
+    write: (
+      ids: ReadonlyArray<string>,
+      actor: string,
+      now: string,
+    ) => ReturnType<typeof entities.dismiss>,
   ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
     Effect.gen(function* () {
       yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
       const actor = yield* currentStamp;
       const now = yield* nowIso;
+      // A repeated id moves once.
+      const unique = [...new Set(ids)];
       yield* withTransaction(
         sql,
         Effect.gen(function* () {
-          const moved = yield* write(now, actor);
-          if (Option.isNone(moved)) {
-            return yield* Effect.fail(createNotFoundError("no such external entity"));
+          const result = yield* write(unique, actor, now);
+          if ("missing" in result) {
+            return yield* Effect.fail(
+              createNotFoundError(`no such external entity: ${result.missing.join(", ")}`),
+            );
           }
-          if (moved.value.changed) {
-            const active = yield* taskRows.findActiveTaskForRef(moved.value.ref);
-            yield* announceEntityChanges({
-              entityIds: [id],
-              affectedTaskIds: Option.isSome(active) ? [active.value.id] : [],
-            });
-          }
+          const changed = result.moved.filter((entry) => entry.changed);
+          if (changed.length === 0) return;
+          const active = yield* taskRows.listActiveTasksForRefs(changed.map((entry) => entry.ref));
+          yield* announceEntityChanges({
+            entityIds: changed.map((entry) => entry.id),
+            affectedTaskIds: [...new Set(active.map((task) => task.id))],
+          });
         }),
       );
       return {};
@@ -575,27 +668,70 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns the Inbox: the cards, the places above them, the edges between
-     * the places and the counts. Needs the grants `task.read` and `signal.query`, because cards show signal text,
-     * `workflow.query` and `connection.query`, because the offers name workflows and accounts,
-     * and `run.query`, because a card names the workflows running on its Task.
+     * Returns one page of an Inbox list: see `InboxPage`. Needs the grants
+     * `task.read` and `signal.query`, because rows show signal text,
+     * `workflow.query` and `connection.query`, because the offers name
+     * workflows and accounts, and `run.query`, because a row names the
+     * workflows running on its Task. Fails with `Validation` for an unknown
+     * list, a clause that cannot be answered, or a cursor of another query.
      */
-    queryInbox: (): Effect.Effect<Inbox, Unauthenticated | Forbidden | SqlError> =>
+    queryInbox: (
+      query: InboxQuery,
+    ): Effect.Effect<InboxPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
         yield* requireGrant("workflow.query");
         yield* requireGrant("connection.query");
         yield* requireGrant("run.query");
-        return yield* entities.queryInbox(yield* readEnvironment);
+        return yield* entities.queryInbox(yield* readInboxEnvironment, query);
       }),
 
-    /** Returns the counts of the Inbox, from the same definition as `queryInbox`. Needs the grants `task.read` and `signal.query`. */
+    /**
+     * Returns the counts of the Inbox for the sidebar: see `InboxCounts`.
+     * Needs the grants `task.read` and `signal.query`.
+     */
     countInbox: (): Effect.Effect<InboxCounts, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         yield* requireGrant("signal.query");
-        return yield* entities.countInbox((yield* readEnvironment).now);
+        return yield* entities.countInbox(yield* readInboxEnvironment);
+      }),
+
+    /**
+     * Returns what the Inbox's rail draws: see `InboxOutline`. The pins and
+     * folded sources are the user's own, so a session reads the outline with
+     * none pinned and every source open. Needs the grants `task.read`,
+     * `signal.query` and `connection.query`, because it names accounts.
+     */
+    readInboxOutline: (): Effect.Effect<InboxOutline, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        yield* requireGrant("connection.query");
+        const actor = yield* requireGrant("signal.query");
+        const own: InboxRailSettings =
+          actor._tag === "user"
+            ? yield* Effect.map(settings.allForUser(actor.userId), (stored) => ({
+                pins: stored["inbox.pins"] ?? [],
+                browseFolded: stored["inbox.browseFolded"] ?? [],
+              }))
+            : { pins: [], browseFolded: [] };
+        return yield* entities.readInboxOutline(yield* readInboxEnvironment, own);
+      }),
+
+    /**
+     * Returns the values of one field among the things of a list, for the
+     * search's suggestions. Needs the grants `task.read`, `signal.query` and
+     * `connection.query`, because the values of `account` are account labels.
+     */
+    suggestInboxValues: (
+      query: InboxValueQuery,
+    ): Effect.Effect<InboxValues, Unauthenticated | Forbidden | Validation | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
+        yield* requireGrant("connection.query");
+        return yield* entities.suggestInboxValues(yield* readInboxEnvironment, query);
       }),
 
     /**
@@ -624,7 +760,9 @@ const make = Effect.gen(function* () {
     /**
      * Returns the active Task of the entity, or makes one, and says which.
      * It is idempotent: a second click, or a second account, gets the same
-     * Task. A new Task has the entity's title, the stage its status declares
+     * Task. A Task that something else made (a hand-off, a session, a signal)
+     * is marked as taken on by the user, so the asks raised so far stop asking
+     * (`created` is false then). A new Task has the entity's title, the stage its status declares
      * (else `planned`), priority `normal`, and the Project that the entity's
      * repository points at when there is exactly one. Nothing is written at
      * the source.
@@ -643,8 +781,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
         const record = yield* readTaskableEntityOrFail(id);
-        const active = yield* taskRows.findActiveTaskForRef(record.ref);
-        if (Option.isSome(active)) return { taskId: active.value.id, created: false };
+        const active = yield* markActiveTaskTakenOn(record.ref, record.id);
+        if (Option.isSome(active)) {
+          return { taskId: active.value.id, created: false };
+        }
         const preparation = yield* prepareEntityForTask(record.ref);
         const made = yield* makeTaskForEntity({
           ref: record.ref,
@@ -683,20 +823,20 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Takes the card off the Inbox until `restore`, stamped with the user.
-     * Fails with `NotFound` for an unknown id. Dismissing a dismissed card
-     * changes nothing. User only.
+     * Takes things off the Inbox, as the user, all or none. An ask raised on
+     * one of them after this call brings it back. Fails with `NotFound` for
+     * an unknown id. Dismissing a dismissed thing changes nothing. User only.
      */
     dismiss: (
-      id: string,
+      move: InboxMove,
     ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      moveCard(id, (now, actor) => entities.dismiss(id, actor, now)),
+      moveThings(move.ids, entities.dismiss),
 
-    /** Brings a dismissed card back. Fails with `NotFound` for an unknown id. User only. */
+    /** Brings dismissed things back, all or none. Fails with `NotFound` for an unknown id. User only. */
     restore: (
-      id: string,
+      move: InboxMove,
     ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      moveCard(id, (now, actor) => entities.restore(id, actor, now)),
+      moveThings(move.ids, entities.restore),
 
     /**
      * Searches a source live, for the Add to Work sheet. Needs the grants
@@ -801,6 +941,7 @@ const make = Effect.gen(function* () {
           contextRef,
           limit: MAX_ENTITY_SUGGESTIONS + 1,
           now: environment.now,
+          askingKinds: environment.askingKinds,
         });
         const truncated = found.length > MAX_ENTITY_SUGGESTIONS;
         const rows = truncated ? found.slice(0, MAX_ENTITY_SUGGESTIONS) : found;
@@ -878,11 +1019,9 @@ const make = Effect.gen(function* () {
         // An existing Task wins before any read: a Task can link a ref Hercule
         // holds no record of (an agent's `--ref`, or older work), and the user
         // must get it back even when the source cannot be reached.
-        const active = yield* taskRows.findActiveTaskForRef(input.ref);
+        const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref: input.ref }));
+        const active = yield* markActiveTaskTakenOn(input.ref, known?.id);
         if (Option.isSome(active)) {
-          const known = Option.getOrUndefined(
-            yield* entities.readTaskableEntity({ ref: input.ref }),
-          );
           return {
             ...(known === undefined ? {} : { id: known.id }),
             taskId: active.value.id,
@@ -1014,5 +1153,5 @@ export class ExternalEntityService extends Context.Service<
 export const ExternalEntityServiceLayer: Layer.Layer<
   ExternalEntityService,
   never,
-  SqlClient.SqlClient | TaskService | EntityLookups | PluginHost
+  SqlClient.SqlClient | TaskService | EntityLookups | PluginHost | Settings
 > = Layer.effect(ExternalEntityService)(make).pipe(Layer.provide(ExternalEntityIngestLayer));

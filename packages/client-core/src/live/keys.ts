@@ -111,13 +111,15 @@ export const queryKeys = {
    */
   yourWork: (): LiveQueryKey => ["your-work"],
   /**
-   * The Inbox's one read (`externalEntity.queryInbox`): its cards, places and
-   * counts. Live topics: `externalEntity` reads it again on every push, and
-   * `task`, `signal`, `connection` and `plugin` too, because each can move a
-   * card in or out, or change what a card shows (see `buildQueryKeys`). A
-   * snooze running out is no push, so the snooze timer reads it again.
+   * The Inbox's page reads (`externalEntity.queryInbox`). With a query, the
+   * key of that query's pages; without one, the prefix of every page read,
+   * which is what a push invalidates. Live topics: `externalEntity` reads it
+   * again on every push, and `task`, `signal`, `connection` and `plugin` too,
+   * because each can move a thing in or out, or change what a row shows (see
+   * `buildQueryKeys`). A snooze running out is no push, so the snooze timer
+   * reads it again.
    */
-  inbox: (): LiveQueryKey => ["inbox"],
+  inbox: (query?: unknown): LiveQueryKey => (query === undefined ? ["inbox"] : ["inbox", query]),
   /**
    * The Inbox's counts alone (`externalEntity.countInbox`), which the sidebar
    * reads on every screen. It is apart from `inbox()` because the shell
@@ -125,6 +127,12 @@ export const queryKeys = {
    * for the same pushes.
    */
   inboxCount: (): LiveQueryKey => ["inbox-count"],
+  /**
+   * What the Inbox's rail draws (`externalEntity.readInboxOutline`). It is
+   * inside the `inbox()` prefix on purpose: every push that reads the pages
+   * again reads the outline again, and only the Inbox screen holds it.
+   */
+  inboxOutline: (): LiveQueryKey => ["inbox", "outline"],
   /**
    * One External Entity (`externalEntity.read`), as an open pane draws it;
    * without the id, the prefix of every entity read. Live topics: every

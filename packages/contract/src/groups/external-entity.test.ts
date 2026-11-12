@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { CardFace, EntityFieldValue } from "./external-entity";
+import { readShorthandDecoder } from "../shorthand";
+import { CardFace, EntityFieldValue, InboxQuery } from "./external-entity";
 
 const PROJECT_FIELD = {
   key: "project",
@@ -35,5 +36,25 @@ describe("CardFace", () => {
     const face = { place: PROJECT_FIELD };
     expect(Schema.decodeUnknownSync(CardFace)(face)).toEqual(face);
     expect(Schema.encodeSync(CardFace)(face)).toEqual(face);
+  });
+});
+
+describe("the typed clause word of `entity list --clause`", () => {
+  const decodeWord = readShorthandDecoder(InboxQuery.fields.clauses)!;
+
+  it("turns a unit into seconds only for over and under", () => {
+    expect(decodeWord("waiting>2d")).toEqual({ key: "waiting", op: "over", value: 172_800 });
+    expect(decodeWord("age<90m")).toEqual({ key: "age", op: "under", value: 5_400 });
+    // A team named 2d is a team, not a duration.
+    expect(decodeWord("team=2d")).toEqual({ key: "team", op: "is", value: "2d" });
+  });
+
+  it("reads true, false and plain numbers", () => {
+    expect(decodeWord("asks=true")).toEqual({ key: "asks", op: "is", value: true });
+    expect(decodeWord("size>1000")).toEqual({ key: "size", op: "over", value: 1000 });
+  });
+
+  it("refuses a word that is not a clause, with what to write", () => {
+    expect(() => decodeWord("nonsense")).toThrow(/Write key=value/);
   });
 });

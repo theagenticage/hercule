@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CARD_FACE_SLOTS,
+  CORE_INBOX_FIELD_KEYS,
   CARD_FACE_SLOT_FIELD_TYPES,
   FACET_FIELD_TYPES,
   type EntityFactDeclaration,
@@ -109,6 +110,9 @@ const findFieldProblem = (
   for (const field of fields) {
     if (types.has(field.key)) {
       return `its field "${field.key}" is declared twice. Give each field of a kind its own key.`;
+    }
+    if (CORE_INBOX_FIELD_KEYS.some((key) => key === field.key)) {
+      return `its field "${field.key}" has the key of one of the Inbox's own query fields (${CORE_INBOX_FIELD_KEYS.join(", ")}). Every source answers those, so a clause with that key could not mean your field. Give the field another key, such as "${field.key}-${field.type}".`;
     }
     types.set(field.key, field.type);
     if (field.facet !== undefined && !FACET_FIELD_TYPES.includes(field.type)) {

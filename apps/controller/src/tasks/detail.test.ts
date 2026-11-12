@@ -575,7 +575,7 @@ describe("the outside things a Task links", () => {
               complete: true,
               observed,
               actor: `plugin:${PLUGIN}`,
-              environment: { now: AT, activePluginIds: [PLUGIN] },
+              environment: { now: AT, activePluginIds: [PLUGIN], askingKinds: [] },
             });
           }
           const task = yield* tasks.insert({

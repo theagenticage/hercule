@@ -227,6 +227,33 @@ describe("what the github plugin registers", () => {
     }
   });
 
+  it("declares the review requests saved query on its own review-request signal kind", async () => {
+    const source = (await collectContributions(github)).sources[0]!;
+
+    expect(source.savedQueries).toEqual([
+      {
+        word: "review-requests",
+        name: "Review requests",
+        order: "waiting",
+        clauses: [{ key: "signal", op: "is", value: "review-requested" }],
+      },
+    ]);
+    expect(source.signalKinds?.map((kind) => kind.word)).toContain("review-requested");
+  });
+
+  it("says in every signal kind what one is called and whether it asks something of the user", async () => {
+    const signalKinds = (await collectContributions(github)).sources[0]!.signalKinds ?? [];
+
+    expect(signalKinds.map((kind) => [kind.word, kind.noun, kind.asks])).toEqual([
+      ["review-requested", "review request", true],
+      ["team-review-requested", "team review request", true],
+      ["mentioned", "mention", true],
+      ["assigned", "assignment", false],
+      ["changes-requested", "requested changes", true],
+      ["checks-failed", "failing checks", true],
+    ]);
+  });
+
   it("lets a Signal's answer run the five actions spec 05 lists, and no other", async () => {
     const actions = (await collectContributions(github)).actions;
 

@@ -1,8 +1,8 @@
 /** Tests what the generic card draws for a card, with invented kinds. */
 import type { EntityFact, EntityStatus } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { buildInboxCard, buildRequestCard, buildSignalLine } from "./cards.testing";
-import { decideAskingSentence, decideCardFace, readSentenceSignal } from "./card-face";
+import { buildInboxCard, buildRequestCard } from "./cards.testing";
+import { decideCardFace } from "./card-face";
 
 const TESSA = { name: "Tessa Hart" };
 const APPROVED: EntityStatus = { shape: "check", tone: "good", label: "Approved" };
@@ -124,86 +124,5 @@ describe("decideCardFace", () => {
     ])("writes %j as display strings", (fact, expected) => {
       expect(decideCardFace(buildInboxCard("1", { facts: [fact] })).facts).toEqual([expected]);
     });
-  });
-});
-
-describe("the sentence of a card with signals", () => {
-  const commented = buildSignalLine("s1", "Tessa commented", { asker: "Tessa Hart" });
-  const assigned = buildSignalLine("s2", "Assigned to you", { kind: "acme/assigned" });
-
-  it("draws the latest signal's sentence in place of the observation's reason", () => {
-    const card = buildInboxCard("1", {
-      reason: { say: "Assigned to you", tone: "plain" },
-      signals: { openCount: 2, kinds: [], latest: commented },
-    });
-    expect(decideCardFace(card).sentence).toEqual({ text: "Tessa commented", tone: "plain" });
-  });
-
-  it("keeps the tone of the latest signal", () => {
-    const failed = buildSignalLine("s3", "Checks failed", {
-      say: { say: "Checks failed", tone: "bad" },
-    });
-    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: failed } });
-    expect(decideCardFace(card).sentence).toEqual({ text: "Checks failed", tone: "bad" });
-  });
-
-  it("reduces a request's plain signal to the name of whoever it came from", () => {
-    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: commented } });
-    expect(decideCardFace(card).sentence).toEqual({ text: "Tessa Hart", tone: "plain" });
-  });
-
-  it("says nothing on a row that has only been assigned", () => {
-    const card = buildInboxCard("1", {
-      concerns: ["assigned"],
-      signals: { openCount: 1, kinds: [], latest: assigned },
-    });
-    expect(decideCardFace(card)).not.toHaveProperty("sentence");
-    expect(readSentenceSignal(card)).toBeUndefined();
-  });
-
-  it.each([
-    ["a second open signal", { openCount: 2, kinds: [], latest: assigned }],
-    ["a signal that is not its concern", { openCount: 1, kinds: [], latest: commented }],
-  ])("says the latest signal on a row with %s", (_name, signals) => {
-    const card = buildInboxCard("1", { concerns: ["assigned"], signals });
-    expect(readSentenceSignal(card)).toBe(signals.latest);
-    expect(decideCardFace(card)).toHaveProperty("sentence");
-  });
-
-  it("keeps the assigned sentence of a request, which a request always shows", () => {
-    const card = buildRequestCard("1", {
-      concerns: ["assigned"],
-      signals: { openCount: 1, kinds: [], latest: assigned },
-    });
-    expect(readSentenceSignal(card)).toBe(assigned);
-  });
-});
-
-describe("decideAskingSentence", () => {
-  const failed = buildSignalLine("s1", "Checks failed", {
-    say: { say: "Checks failed", tone: "bad" },
-    asker: "Ines Duarte",
-  });
-
-  it("keeps the full sentence, and its tone on the user's own work", () => {
-    const card = buildRequestCard("1", {
-      yours: true,
-      signals: { openCount: 1, kinds: [], latest: failed },
-    });
-    expect(decideAskingSentence(card)).toEqual({ text: "Checks failed", tone: "bad" });
-  });
-
-  it("draws someone else's sentence plain, because their red stays in the status shape", () => {
-    const card = buildRequestCard("1", { signals: { openCount: 1, kinds: [], latest: failed } });
-    expect(decideAskingSentence(card)).toEqual({ text: "Checks failed", tone: "plain" });
-  });
-
-  it("falls back to the observation's reason, and to nothing", () => {
-    const reason = { say: "Ines asked for your review", tone: "plain" } as const;
-    expect(decideAskingSentence(buildRequestCard("1", { reason }))).toEqual({
-      text: "Ines asked for your review",
-      tone: "plain",
-    });
-    expect(decideAskingSentence(buildRequestCard("1"))).toBeUndefined();
   });
 });
