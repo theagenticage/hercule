@@ -1,5 +1,6 @@
 import { globSync, readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+import { WeighedShardSequencer } from "./scripts/test-shards.ts";
 
 /**
  * Seven projects: the React code of the web app and the UI library, everything
@@ -167,6 +168,8 @@ const templateDatabaseSetup = "apps/controller/src/db/template.global-setup.ts";
 
 export default defineConfig({
   test: {
+    // `--shard` splits the files by their recorded run time, not by name.
+    sequence: { sequencer: WeighedShardSequencer },
     projects: [
       {
         test: {

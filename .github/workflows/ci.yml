@@ -50,9 +50,46 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
 
+  # Hands every sharded test job the same recorded run times, so that their
+  # shards split the files the same way. `--shard` splits the files by these
+  # times (see `scripts/test-shards.ts`), so the shards take about as long as
+  # each other. Each shard of `test-node`, `test-react` and
+  # `desktop-e2e-linux` records the time of each of its files, and after a run
+  # on `main`, `test-shard-weights` saves them to the Actions cache. This job
+  # restores the newest save once. The shards must not restore it themselves:
+  # a save that lands between two shards' restores would give them different
+  # times, and a file could then run in two shards or in none, with no error.
+  # A file with no recorded time weighs the median of the others. With no
+  # save at all (GitHub deletes a cache entry that nothing restores for 7
+  # days), the shards get about the same number of files each, and this job
+  # warns.
+  test-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: restore
+        uses: actions/cache/restore@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}
+          restore-keys: test-shard-weights-
+      - if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          echo "::warning::No recorded test run times in the Actions cache: the test shards get about the same number of files each, not the same run time."
+          echo '{}' > test-shard-weights.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-shard-weights
+          path: test-shard-weights.json
+          retention-days: 3
+
   # The two halves of `pnpm test`. Each needs its own runtime (see
-  # `vitest.config.ts`), so each is its own job, split into shards.
+  # `vitest.config.ts`), so each is its own job, split into shards. Add a
+  # shard when the slowest one grows. The longest file sets a floor: the
+  # shard that holds it can never be shorter.
   test-node:
+    name: test-node (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -64,19 +101,47 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:node --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:node --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      # The run times of this shard's files, for `test-shard-weights`. The
+      # repository keeps artifacts for 3 days.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-node-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   test-react:
+    name: test-react (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:react --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:react --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-react-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   check:
     runs-on: ubuntu-latest
@@ -484,16 +549,11 @@ jobs:
   #
   # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
   # it is split over several runners, one per entry of `shard`, and the job
-  # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
-  # shard its files, balanced by the run times recorded in
-  # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. The target is a job of under 5 minutes; the spec's Testing
-  # section records what was measured. More shards finish sooner, but queue
-  # for runners and use more of them. Add a shard when the slowest one grows.
-  # Refresh the weights from a green run's reports with
-  # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
-  # refuses a run that is unfinished, failed or incomplete. Each shard uploads
-  # its Vitest report and its plan for that.
+  # finishes with its slowest shard. `--shard` splits the files by their
+  # recorded run times, as in `test-node` (see `test-plan`). The target is a
+  # job of under 5 minutes; the spec's Testing section records what was
+  # measured. More shards finish sooner, but queue for runners and use more
+  # of them. Add a shard when the slowest one grows.
   #
   # Each shard prepares itself: it installs the dependencies on the host,
   # which the container mounts, gets the container image, builds the compiled
@@ -504,6 +564,7 @@ jobs:
   # as the runner, about 100 MB, which takes seconds.
   desktop-e2e-linux:
     name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -515,24 +576,51 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/desktop-e2e-image
-      - name: Run this shard's tests
-        run: |
-          files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}" --record desktop-e2e-report/plan.json)
-          echo "$files"
-          pnpm test:desktop:container \
-            --reporter=default --reporter=json --outputFile.json=desktop-e2e-report/report.json \
-            $files
-      # The run times of this shard's files and the plan they ran under, which
-      # refresh the shard weights. The repository keeps artifacts for 3 days.
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      # The container mounts the checkout, so it reads the weights and
+      # writes the run times at the checkout's root.
+      - run: >-
+          pnpm test:desktop:container
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-e2e-report-${{ matrix.shard }}
-          path: |
-            desktop-e2e-report/report.json
-            desktop-e2e-report/plan.json
+          name: test-durations-desktop-${{ matrix.shard }}
+          path: test-durations.json
           retention-days: 3
           if-no-files-found: ignore
+
+  # Merges the run times that the shards of `test-node`, `test-react` and
+  # `desktop-e2e-linux` recorded into the weights `test-plan` handed out, and
+  # saves them to the Actions cache for the runs after this one. Only a push
+  # to `main` saves, as for the container image: every later run restores
+  # what is saved, and a pull request's save would be visible to that pull
+  # request alone. A suite with a failed or missing shard keeps the times it
+  # had (see `scripts/update-test-shard-weights.ts`). Runs on `main` take
+  # turns (see `concurrency`), so the saves land in push order.
+  test-shard-weights:
+    if: ${{ always() && github.event_name == 'push' && needs.test-plan.result == 'success' }}
+    needs: [test-plan, test-node, test-react, desktop-e2e-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-durations-*
+          path: test-durations
+      - run: bun run scripts/update-test-shard-weights.ts test-durations
+      - uses: actions/cache/save@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}-${{ github.run_attempt }}
 
   # Saves the container image of the end-to-end shards to the Actions cache,
   # so that the shards load it and do not build it. Only a push to `main` runs
