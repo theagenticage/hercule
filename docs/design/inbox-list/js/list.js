@@ -17,6 +17,7 @@ window.List = (function () {
     if (t.held) return '<span class="row-time row-time--held" title="' + D.esc(t.held.by === "you" ? "You took it on" : t.held.by + " has it") + '">' + (t.held.by === "you" ? D.you(18) : D.face(t.held.by, "working", 18)) + "</span>";
     var w = Model.waitOf(t);
     if (w != null && order === "newest" && D.waitTone(t) !== "over") w = null;
+    if (w == null && order === "waiting") return '<span class="row-time wait--fresh" aria-hidden="true"></span>';
     if (w != null) { var tone = D.waitTone(t); return '<span class="row-time wait--' + tone + '" title="Waiting ' + D.agoWords(w).replace(" ago", "") + (tone === "over" ? ", overdue" : tone === "due" ? ", due" : "") + '">' + D.ago(w) + "</span>"; }
     return '<span class="row-time wait--fresh" title="Updated ' + D.agoWords(t.updated) + '">' + D.ago(t.updated) + "</span>";
   }
@@ -81,14 +82,15 @@ window.List = (function () {
     var on = asking.length > 1 ? ' <span class="more" title="' + (asking.length - 1) + ' more ask in this group">+' + (asking.length - 1) + "</span>" : "";
     // The time is the one of the member that placed the group, so the column reads in the list's order.
     var time = timeSlot(best || g.lead, s.built ? s.built.order : "waiting");
-    var picked = g.members.every(function (m) { return s.selection.has(m.id); });
+    // Picked when every member the list's query holds is selected (X picks those; ⇧X picks all).
+    var picked = (r.hits || g.members).every(function (m) { return s.selection.has(m.id); });
     return {
       cls: "row row--group" + (r.open ? " is-open" : "") + (g.members.length > 7 ? " is-large" : "") + (picked ? " is-picked" : ""),
-      attrs: { "data-group": g.lead.id, "aria-expanded": String(r.open) },
+      attrs: { "data-group": g.lead.id, "aria-expanded": String(!!r.open) },
       html: '<span class="row-lead"><span class="row-fold" data-fold-group>' + D.icon("chevron-right", 14) + '</span><span class="row-tick' + (picked ? " is-on" : "") + '" aria-hidden="true" data-tick>' + D.icon("check", 12) + '</span></span><span class="row-l1"><span class="row-title">' + D.esc(g.label) + "</span>" + time + "</span>" +
         '<span class="row-glyph row-glyph--link">' + D.icon("link", 14) + '</span><span class="row-l2"><span class="row-why">' + why + on + '</span><span class="row-where row-where--group"><span class="row-marks">' + marks.map(function (m) { return D.mark(m, 12); }).join("") + '</span><span class="row-id">' + g.members.length + " things</span></span></span>" + acts([["thread", "Start a thread on all " + g.members.length + " (N)", D.icon("compose", 14)], ["take", "Take on (T)", D.icon("tasks", 14)], ["dismiss", "Dismiss all " + g.members.length + " (E)", D.icon("archive", 14)]]),
-      label: "Linked group, " + g.members.length + " things: " + g.label + ". " + why.replace(/<[^>]+>/g, "") + (asking.length > 1 ? ", and " + (asking.length - 1) + " more ask" : ""),
-      selected: g.members.every(function (m) { return s.selection.has(m.id); }),
+      label: "Linked group, " + g.members.length + " things in " + marks.map(function (m) { return K.SOURCES[m].name; }).join(", ") + ": " + g.label + ". " + why.replace(/<[^>]+>/g, "") + (asking.length > 1 ? ", and " + (asking.length - 1) + " more ask" : "") + (best && Model.waitOf(best) != null ? ". Waiting " + D.agoWords(Model.waitOf(best)).replace(" ago", "") : ""),
+      selected: picked,
     };
   }
 
@@ -102,15 +104,15 @@ window.List = (function () {
         cls: "row row--triage" + (r.lastTriage ? " is-last-triage" : ""),
         attrs: { "data-triage": x.id },
         html: '<span class="row-lead row-lead--face">' + D.face(x.by, "idle", 16) + '</span><span class="row-l1"><span class="row-title">' + D.esc(x.title) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Proposal</b>' + D.esc(x.by) + " made it from " + r.things.length + ' things</span><span class="row-where row-where--group"><span class="row-marks">' + marks + "</span></span></span>" + acts([["accept", "Accept (T)", D.icon("check", 14)], ["thread", "Accept and start a thread (N)", D.icon("compose", 14)], ["dismiss", "Dismiss (E)", D.icon("close", 14)]]),
-        label: "Proposal from " + x.by + ": " + x.title + ". Made from " + r.things.length + " things. T accepts, N accepts and starts a thread, E dismisses",
+        label: "Proposal from " + x.by + ", " + D.agoWords(x.at) + ": " + x.title + ". Made from " + r.things.length + " things. T accepts, N accepts and starts a thread, E dismisses",
       };
     }
     var a = r.things[0], b = r.things[1];
     return {
       cls: "row row--triage" + (r.lastTriage ? " is-last-triage" : ""),
-      attrs: { "data-triage": x.id },
-      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 16) + '</span><span class="row-l1"><span class="row-title">' + D.esc(a.title) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>With ' + D.mark(Model.sourceOf(b), 12) + '<span class="row-ref">' + D.esc(D.identifier(b) || "") + "</span> " + D.esc(b.title) + "</span>" + where(a) + "</span>" + acts([["link", "Link them (L)", D.icon("link", 14)], ["dismiss", "Not related (E)", D.icon("close", 14)]]),
-      label: "Hercule suggests a link: " + a.title + " belongs with " + (D.identifier(b) ? D.identifier(b) + ", " : "") + b.title + ". L links them, E says not related",
+      attrs: { "data-triage": x.id, "data-id": a.id },
+      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 16) + '</span><span class="row-l1"><span class="row-title">' + D.esc((D.identifier(a) || "“" + a.title + "”") + " and " + (D.identifier(b) || "“" + b.title + "”")) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>' + D.esc(x.why) + '</span><span class="row-where row-where--group"><span class="row-marks">' + D.mark(Model.sourceOf(a), 12) + D.mark(Model.sourceOf(b), 12) + "</span></span></span>" + acts([["link", "Link them (L)", D.icon("link", 14)], ["dismiss", "Not related (E)", D.icon("close", 14)]]),
+      label: "Hercule suggests a link, " + D.agoWords(x.at) + ": " + a.title + " belongs with " + (D.identifier(b) ? D.identifier(b) + ", " : "") + b.title + ". L links them, E says not related",
     };
   }
 
@@ -171,7 +173,11 @@ window.List = (function () {
     }
     var n = s.scope.triage ? built.rows.length : built.count;
     var order = Kinds.ORDER_WORDS[built.order] || "";
-    hostHead.innerHTML = '<div class="lh-title"' + (tip ? ' title="' + D.esc(tip) + '"' : "") + ">" + pre + "<h2>" + D.esc(title) + "</h2>" + post + '<span class="lh-n">' + D.num(n) + '</span></div><div class="lh-tools"><span class="lh-order">' + order + '</span><button type="button" class="lh-narrow tool" data-narrow aria-haspopup="menu">' + D.icon("filter", 14) + "<b>Narrow</b></button></div>";
+    // Arrivals wait in a pill beside the count, in the head: it covers no row and moves none.
+    if (s.pending.length) order = '<button type="button" class="newbar" data-newbar title="Show what is new (.)" aria-keyshortcuts="."><span data-new-n>' + s.pending.length + ' new</span><span class="newbar-show">Show<kbd class="kbd-dot" aria-hidden="true">.</kbd></span></button>';
+    var had = !!hostHead.querySelector("[data-newbar]");
+    hostHead.innerHTML = '<div class="lh-title"' + (tip ? ' title="' + D.esc(tip) + '"' : "") + ">" + pre + "<h2>" + D.esc(title) + "</h2>" + post + '<span class="lh-n">' + D.num(n) + '</span></div><div class="lh-tools"><span class="lh-order">' + order + '</span><button type="button" class="lh-narrow tool" data-narrow aria-haspopup="menu" aria-expanded="false" aria-keyshortcuts="F">' + D.icon("filter", 14) + "<b>Narrow</b></button></div>";
+    if (s.pending.length && !had) Live.showBar(hostHead.querySelector("[data-newbar]"));
   }
 
   // ---- Motion for a redraw: what leaves, what stays, what arrives, and what moves between places ----
@@ -185,47 +191,65 @@ window.List = (function () {
    * (CLOSE_DELAY), so no words read through other words. Dismiss also slides it 28px aside.
    */
   var CLOSE_DELAY = 70;
-  function exit(ghost, how) {
+  function exit(ghost, how, caught) {
     if (Motion.isReduced()) { ghost.remove(); return; }
     var b = Motion.body(ghost);
-    if (how === "dismiss") b.to({ x: b.value.x + 28 }, "travel");
-    else if (how === "taken") b.to({ s: 0.985 }, "hand");
-    ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 110, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" }).finished.then(function () { Motion.body(ghost).clear(); ghost.remove(); });
+    // A row caught halfway into place keeps going there while it fades, and fades faster.
+    var goal = caught ? { x: caught.x, y: caught.y } : {};
+    if (how === "dismiss") goal.x = (caught ? caught.x : b.value.x) + 28;
+    if (how === "taken") goal.s = 0.985;
+    if (Object.keys(goal).length) b.to(goal, how === "dismiss" ? "travel" : "hand");
+    ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: caught ? 60 : 110, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" }).finished.then(function () { Motion.body(ghost).clear(); ghost.remove(); });
   }
 
+  /**
+   * Brings a new row in. Opacity is a short fade of its own, never a spring, so no words read through
+   * other words. Unfolding is a drawer: the members lie in place under the list, and the rows below the
+   * group, carrying the list's ground, slide down off them.
+   */
   function enter(node, how, i) {
     if (Motion.isReduced()) return;
     var b = Motion.body(node);
+    var fade = function (delay, ms) { node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms || 120, delay: delay || 0, easing: "ease-out", fill: "backwards" }); };
+    if (how === "unfold") { node.classList.add("is-under"); setTimeout(function () { node.classList.remove("is-under"); }, 420); return; }
     node.classList.add("is-entering");
     var done = function () { b.clear(); node.classList.remove("is-entering"); };
-    if (how === "unfold") { b.set({ y: -8, o: 0 }); b.to({ y: 0, o: 1 }, "hand", { delay: i * 18, done: done }); }
-    else if (how === "return") { b.set({ x: 28, o: 0 }); b.to({ x: 0, o: 1 }, "travel", { done: done }); }
-    else if (how === "arrive") { b.set({ y: -20, o: 0 }); b.to({ y: 0, o: 1 }, "travel", { delay: 220 + i * 40, done: done }); }
-    else { b.set({ s: 0.985, o: 0 }); b.to({ s: 1, o: 1 }, "hand", { done: done }); }
+    if (how === "return") { b.set({ x: 28 }); b.to({ x: 0 }, "travel", { done: done }); fade(0, 140); }
+    else if (how === "arrive") { b.set({ y: -20 }); b.to({ y: 0 }, "travel", { delay: 220 + i * 40, done: done }); fade(220 + i * 40, 160); }
+    else { b.set({ s: 0.985 }); b.to({ s: 1 }, "hand", { done: done }); fade(0, 120); }
   }
 
   /**
    * Flies a thing from where it was to its new row, as one object: the copy's mark and title land on
    * the new row's mark and title, then the new row takes over with no blink.
    */
-  function shared(ghost, target) {
+  function shared(ghost, target, quiet) {
     target.style.opacity = "0";
-    ghost.classList.add("is-flying");
-    // The copy takes its new row's width at once, so it never hangs past the list as it lands.
-    ghost.style.width = target.offsetWidth + "px";
+    ghost.classList.remove("is-picked", "is-over", "is-current");
+    var tick = ghost.querySelector(".row-tick");
+    if (tick) tick.classList.remove("is-on");
     var land = function () { target.style.opacity = ""; ghost.remove(); };
     if (Motion.isReduced()) { land(); return; }
-    var to = Motion.layoutRect(target), from = ghost.getBoundingClientRect();
     var toLead = target.querySelector(".row-lead"), fromLead = ghost.querySelector(".row-lead");
-    var dx = to.left - from.left, dy = to.top - from.top;
-    if (toLead && fromLead) {
-      var tl = toLead.getBoundingClientRect(), fl = fromLead.getBoundingClientRect();
-      var tr = target.getBoundingClientRect();
-      dx = (tl.left - tr.left + to.left) - fl.left;
-      dy = (tl.top - tr.top + to.top) - fl.top;
-    }
+    var indent = toLead && fromLead ? toLead.offsetLeft - fromLead.offsetLeft : 0;
+    // The copy loses its new row's indent from its width, so its columns land on the row's columns.
+    ghost.style.width = target.offsetWidth - indent + "px";
+    if (!quiet) {
+      ghost.classList.add("is-flying");
+      ghost.animate([{ boxShadow: "none" }, { boxShadow: getComputedStyle(ghost).boxShadow }], { duration: 160, easing: "cubic-bezier(.2,.8,.2,1)" });
+    } else ghost.classList.add("is-flying-quiet");
+    // Measured without the copy's scale and tilt, so it lands exactly, mark on mark.
+    var to = Motion.layoutRect(target), base = Motion.layoutRect(ghost);
     var b = Motion.body(ghost);
-    b.to({ x: b.value.x + dx, y: b.value.y + dy, r: 0, s: 1 }, "travel", { done: land });
+    var x = to.left + (toLead ? toLead.offsetLeft : 0) - (base.left + (fromLead ? fromLead.offsetLeft : 0));
+    var y = to.top - base.top;
+    b.to({ x: x, y: y, r: 0, s: 1 }, "travel", {
+      done: function () {
+        target.style.opacity = "";
+        // The shadow sinks into the row, and the copy fades off the row that is now under it.
+        ghost.animate([{ opacity: 1 }, { opacity: 0, boxShadow: "none" }], { duration: 120, easing: "ease-out", fill: "forwards" }).finished.then(function () { ghost.remove(); });
+      },
+    });
   }
 
   /** Moves the current row's fill and its edge under the current row, at once: the rows move under it. */
@@ -269,31 +293,35 @@ window.List = (function () {
         g.classList.remove("is-current", "is-moving", "is-lifted");
         g.removeAttribute("role");
         var from = Motion.body(n);
+        var caught = n.classList.contains("is-moving") ? { x: from.goal.x - from.value.x + Motion.body(g).value.x, y: from.goal.y - from.value.y + Motion.body(g).value.y } : null;
         if (!flies) { var gb = Motion.body(g); gb.speed = { x: from.speed.x, y: from.speed.y, s: 0, r: 0, o: 0, l: 0 }; }
-        return { id: n.dataset.id, g: g, flies: flies };
+        return { id: n.dataset.id, g: g, flies: flies, caught: caught };
       });
       // Rows that change order cross each other, so each carries the list's ground while it moves.
       var keptOld = olds.map(function (n) { return n.dataset.key; }).filter(function (k) { return newKeys.has(k); });
       var keptNew = s.rows.map(function (r) { return r.key; }).filter(function (k) { return oldKeys.has(k); });
-      var crossing = !!opts.link || keptOld.join("|") !== keptNew.join("|");
+      var crossing = !Motion.isReduced() && (!!opts.link || keptOld.join("|") !== keptNew.join("|"));
       host.classList.toggle("is-crossing", crossing);
       clearTimeout(host._crossing);
       if (crossing) host._crossing = setTimeout(function () { host.classList.remove("is-crossing"); }, 520);
-      var waits = ghosts.some(function (x) { return !x.flies; }) && !opts.link;
+      // The rows after a leaving row wait for it to fade, unless rows are still moving from the last move.
+      var busy = olds.some(function (n) { return n.classList.contains("is-moving"); });
+      var waits = ghosts.some(function (x) { return !x.flies; }) && !opts.link && !busy;
       Motion.flip(olds.filter(function (n) { return newKeys.has(n.dataset.key); }), function () { patch(host, s); }, { spring: "hand", stagger: function () { return waits ? CLOSE_DELAY : 0; } });
       var added = Array.prototype.filter.call(host.children, function (n) { return !oldKeys.has(n.dataset.key); });
       ghosts.forEach(function (x) {
         var to = x.flies && added.find(function (n) { return n.dataset.id === x.id; });
-        if (to) { added.splice(added.indexOf(to), 1); shared(x.g, to); }
-        else exit(x.g, opts.leave);
+        if (to) { added.splice(added.indexOf(to), 1); shared(x.g, to, opts.carried && opts.carried.id !== x.id); }
+        else exit(x.g, opts.leave, x.caught);
       });
-      added.forEach(function (n, i) { enter(n, opts.enter || (opts.link ? "link" : "unfold"), i); });
+      // The card in the hand stays on top of everything else in flight.
+      if (opts.carried && opts.carried.ghost.isConnected) flightLayer().appendChild(opts.carried.ghost);
+      var how = opts.enter || (opts.link ? "link" : "unfold");
+      added.forEach(function (n, i) { enter(n, how, i); });
+      host.classList.toggle("is-drawer", how === "unfold" && added.length > 0);
+      if (how === "unfold") setTimeout(function () { host.classList.remove("is-drawer"); }, 420);
     }
     placePuck(host, s);
-    var nb = document.getElementById("newbar");
-    var showBar = s.pending.length > 0;
-    if (showBar) nb.querySelector("[data-new-n]").textContent = s.pending.length + " new";
-    if (showBar === nb.hidden) Live.showBar(nb, showBar);
     Selection.draw(s);
   }
 
@@ -336,7 +364,7 @@ window.List = (function () {
         return;
       }
       st.anchor = key;
-      if (row.type === "more") { App.state.showAll.add(row.groupKey); Moves.redraw(); return; }
+      if (row.type === "more") { Keys.showMore(row); return; }
       if (row.type === "tmore") { Moves.setScope({ triage: 1 }); return; }
       if (e.target.closest("[data-fold-group]")) { Moves.toggleGroup(key); return; }
       App.focusRow(key);

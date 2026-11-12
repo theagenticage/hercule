@@ -135,7 +135,6 @@
   flex: none;
   color: var(--ink);
   font-weight: var(--w-medium);
-  font-variant-numeric: tabular-nums;
 }
 .td-chip-t {
   min-width: 0;
@@ -300,7 +299,6 @@
   margin-left: auto;
   color: var(--muted);
   font-weight: var(--w-medium);
-  font-variant-numeric: tabular-nums;
 }
 .td-card-title {
   display: -webkit-box;
@@ -447,4 +445,8 @@
 [data-theme="styles"] .scrim,
 :root:not([data-theme]) .scrim {
   background: oklch(0.3 0.02 165 / 0.32);
+}
+.td-sep {
+  color: var(--faint);
+  font-style: normal;
 }

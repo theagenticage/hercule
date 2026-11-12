@@ -63,6 +63,7 @@
 .rows {
   position: relative;
   z-index: 1;
+  container: rows / inline-size;
   display: flex;
   flex-direction: column;
   padding: 0 var(--list-pad) 96px;
@@ -515,32 +516,23 @@ html.is-carrying * {
   }
 }
 
-/* ---- The "N new" bar: arrivals wait behind it. It floats over the list and moves nothing. ---- */
+/* ---- The "N new" pill: in the list head, beside the count; it covers no row and moves none ---- */
 .newbar {
-  position: absolute;
-  top: 52px;
-  left: 50%;
-  z-index: 8;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  height: 30px;
-  translate: -50% 0;
-  padding: 0 6px 0 12px;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 10px;
   border-radius: var(--r-pill);
-  background: var(--glass-fill-raised);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--rim), var(--shadow-1);
   color: var(--ink);
   font-size: var(--t-12);
   font-weight: var(--w-medium);
-}
-.newbar[hidden] {
-  display: none;
+  white-space: nowrap;
 }
 .newbar:hover {
-  background: color-mix(in oklab, var(--ink) 4%, var(--glass-fill-raised));
+  background: color-mix(in oklab, var(--ink) 4%, var(--raised));
 }
 .newbar [data-new-n]::before {
   content: "";
@@ -555,11 +547,14 @@ html.is-carrying * {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
+  height: 20px;
   padding: 0 4px 0 8px;
   border-radius: var(--r-pill);
   background: var(--selected);
   color: var(--ink);
+}
+.newbar kbd {
+  color: var(--muted);
 }
 
 /* ---- The selection bar ---- */
@@ -758,4 +753,43 @@ html.is-carrying .row-acts,
   content: "";
   position: absolute;
   inset: -4px;
+}
+/* A drawer: new members lie under the list while the rows below slide down off them. */
+.row.is-under {
+  z-index: 0;
+}
+.rows.is-drawer .row.is-moving:not(.is-under) {
+  z-index: 2;
+  background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
+}
+/* While rows cross, the current row keeps its edge, and the keyboard ring rides on it. */
+.rows.is-crossing .row.is-current {
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--ink) 60%, transparent);
+}
+/* The keyboard's ring is drawn on the puck, so ring and fill are always one place. */
+.ib-scroll:has(.rows .row.is-current:focus-visible) .puck {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.rows:not(.is-crossing) .row.is-current:focus-visible {
+  box-shadow: none;
+}
+.rows.is-crossing .row.is-current:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* A narrow list leaves the place to the pane rather than cutting it to a stub. */
+@container rows (max-width: 440px) {
+  .row-place {
+    display: none;
+  }
+}
+.lh-title h2,
+.lh-n,
+.lh-order {
+  line-height: 16px;
+}
+.row--more .row-more-in {
+  padding-left: 0;
+}
+.row--more .ic {
+  width: 16px;
 }

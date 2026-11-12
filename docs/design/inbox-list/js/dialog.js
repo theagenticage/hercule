@@ -94,7 +94,7 @@ window.Dialog = (function () {
 
   function liveCard(t) {
     var w = D.statusWord(t);
-    return '<div class="td-card">' + '<p class="td-card-top">' + D.mark(Model.sourceOf(t), 14) + "<span>" + D.esc(K.SOURCES[Model.sourceOf(t)].name + " · " + D.noun(t)) + "</span>" + (D.identifier(t) ? "<b>" + D.esc(D.identifier(t)) + "</b>" : "") + '</p><p class="td-card-title">' + D.esc(t.title) + '</p><p class="td-card-st">' + (w ? D.glyph(t, 12) + "<span>" + D.esc(w) + "</span>" : "") + (t.fields.events != null ? '<span class="td-live" data-live-events>' + D.num(t.fields.events) + " events</span>" : "<span>" + D.esc(D.place(t)) + "</span>") + "</p></div>";
+    return '<div class="td-card">' + '<p class="td-card-top">' + D.mark(Model.sourceOf(t), 14) + "<span>" + D.esc(K.SOURCES[Model.sourceOf(t)].name + " · " + D.noun(t)) + "</span>" + (D.identifier(t) ? "<b>" + D.esc(D.identifier(t)) + "</b>" : "") + '</p><p class="td-card-title">' + D.esc(t.title) + '</p><p class="td-card-st">' + (w ? D.glyph(t, 12) + "<span>" + D.esc(w) + "</span>" + '<i class="td-sep">·</i>' : "") + (t.fields.events != null ? '<span class="td-live" data-live-events>' + D.num(t.fields.events) + " events</span>" : "<span>" + D.esc(D.place(t)) + "</span>") + "</p></div>";
   }
 
   function drawTranscript() {
@@ -250,13 +250,14 @@ window.Dialog = (function () {
       el.querySelectorAll(".td-cards, .td-ctx, .td-msg--you time").forEach(function (x) { x.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, delay: 90, easing: "ease-out", fill: "backwards" }); });
     }
     App.render({ flip: true, leave: "taken" });
-    Moves.push({ say: "Started a thread on " + quote(title), action: { label: "Open it", key: "G" }, undo: function () { things.forEach(function (t) { delete t.held; }); Moves.redraw({ enter: "return" }); }, undone: "Stopped the thread before it did anything." });
+    Moves.push({ say: "Started a thread on " + quote(title), action: { label: "Open it", key: "G", task: title }, undo: function () { things.forEach(function (t) { delete t.held; }); Moves.redraw({ enter: "return" }); }, undone: "Stopped the thread before it did anything." });
   }
   function quote(t) { return "“" + (t.length > 40 ? t.slice(0, 38) + "…" : t) + "”"; }
 
   function pickProject(name) {
     var proj = PROJECTS.find(function (x) { return x.name === name; });
     st.project = proj ? { project: proj, why: "you chose it" } : { project: NONE, why: "you chose to start it without code" };
+    st.edited = true;
     closePop();
     drawWriting();
   }
@@ -307,7 +308,7 @@ window.Dialog = (function () {
         if (ready) send.removeAttribute("aria-disabled"); else send.setAttribute("aria-disabled", "true");
         if (st.starter !== "own" && st.text !== writeMessage(st.starter, st.things)) { st.starter = "own"; el.querySelectorAll("[data-starter]").forEach(function (b) { b.setAttribute("aria-checked", String(b.dataset.starter === "own")); }); }
       }
-      if (e.target.matches("[data-title]")) st.title = e.target.value;
+      if (e.target.matches("[data-title]")) { st.title = e.target.value; st.edited = true; }
     });
     el.addEventListener("keydown", function (e) {
       if (e.key === "Tab") {

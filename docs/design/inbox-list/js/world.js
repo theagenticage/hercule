@@ -386,6 +386,11 @@ window.World = (function () {
     WORKFLOWS: WORKFLOWS,
     projects: function (load) { return load === "extreme" ? PROJECTS.concat(PROJECTS_EXTREME) : PROJECTS; },
     build: function (load) { return load === "light" ? buildLight() : load === "extreme" ? buildExtreme() : buildNormal(); },
-    arrivals: function () { return JSON.parse(JSON.stringify(ARRIVALS)); },
+    arrivals: function () {
+      return JSON.parse(JSON.stringify(ARRIVALS)).map(function (t) {
+        t.history = t.history || []; t.blocks = t.blocks || []; t.account = t.account || ACCOUNTS[Kinds.KINDS[t.kind].source][0];
+        return t;
+      });
+    },
   };
 })();

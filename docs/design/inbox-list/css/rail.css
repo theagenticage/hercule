@@ -155,6 +155,9 @@
   margin-top: 1px;
 }
 .rl-row--src {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+.rl-row--src:has(.rl-warn) {
   grid-template-columns: 16px minmax(0, 1fr) auto auto;
 }
 .rl-row--src .rl-ic {

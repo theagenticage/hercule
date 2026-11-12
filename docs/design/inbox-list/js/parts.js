@@ -42,14 +42,11 @@
 
   // ---- The "N new" bar: arrivals wait behind it, so the list holds still while you read ----
   window.Live = (function () {
-    function showBar(nb, on) {
-      if (on) {
-        nb.hidden = false;
-        if (!Motion.isReduced()) { var b = Motion.body(nb); b.set({ y: -14 }); b.to({ y: 0 }, "self"); nb.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" }); }
-      } else {
-        if (Motion.isReduced()) { nb.hidden = true; return; }
-        Motion.body(nb).to({ y: -10, o: 0 }, "hand", { done: function () { nb.hidden = true; Motion.body(nb).clear(); } });
-      }
+    /** Plays the "N new" pill's arrival in the list head: it grows from its centre, solid from the first frame. */
+    function showBar(nb) {
+      if (Motion.isReduced() || !nb) return;
+      nb.animate([{ transform: "scale(.9)", clipPath: "inset(0 30% round 999px)" }, { transform: "none", clipPath: "inset(0 round 999px)" }], { duration: 200, easing: "cubic-bezier(.2,.8,.2,1)" });
+      Array.prototype.forEach.call(nb.children, function (c) { c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, delay: 60, fill: "backwards" }); });
     }
     /** Brings things in the way the controller's live updates would: into the bar, never into the list. */
     function arrive(things) {
@@ -72,11 +69,11 @@
         if (!el.hidden && !el.dataset.leaving) {
           if (Motion.isReduced()) { el.hidden = true; return; }
           el.dataset.leaving = "1";
-          Motion.body(el).to({ y: 12, o: 0 }, "hand", { done: function () { el.hidden = true; delete el.dataset.leaving; Motion.body(el).clear(); } });
+          el.animate([{ transform: "none", clipPath: "inset(0 round 12px)" }, { transform: "translateY(4px) scale(.97)", clipPath: "inset(40% 30% round 12px)" }], { duration: 140, easing: "ease-in" }).finished.then(function () { el.hidden = true; delete el.dataset.leaving; });
         }
         return;
       }
-      if (el.dataset.leaving) { delete el.dataset.leaving; Motion.body(el).to({ y: 0, o: 1 }, "hand"); }
+      if (el.dataset.leaving) { delete el.dataset.leaving; el.getAnimations().forEach(function (a) { a.cancel(); }); }
       var wasHidden = el.hidden;
       el.innerHTML = '<span class="sb-n"><b>' + n + "</b> selected</span>" +
         '<button type="button" class="sb-act" data-move="link"' + (n < 2 ? ' aria-disabled="true" title="Select one more to link"' : ' title="Link them"') + ">Link<kbd>L</kbd></button>" +
@@ -85,7 +82,10 @@
         '<button type="button" class="sb-act" data-move="dismiss" title="Dismiss all ' + n + '">Dismiss<kbd>E</kbd></button>' +
         '<i class="sb-line"></i><button type="button" class="icon-btn sb-clear" data-clear title="Clear the selection (Esc)" aria-label="Clear the selection">' + D.icon("close", 14) + "</button>";
       el.hidden = false;
-      if (wasHidden && !Motion.isReduced()) { var b = Motion.body(el); b.set({ y: 12, o: 0 }); b.to({ y: 0, o: 1 }, "hand"); }
+      if (wasHidden && !Motion.isReduced()) {
+        el.animate([{ transform: "translateY(6px) scale(.96)", clipPath: "inset(40% 30% round 12px)" }, { transform: "none", clipPath: "inset(0 round 12px)" }], { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" });
+        Array.prototype.forEach.call(el.children, function (c) { c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 80, delay: 60, fill: "backwards" }); });
+      }
     }
     document.addEventListener("click", function (e) {
       var bar = e.target.closest("#selbar");
@@ -137,11 +137,14 @@
       var to = workRow();
       if (!to || Motion.isReduced()) return;
       var target = to.querySelector("svg").getBoundingClientRect();
-      things.slice(0, 3).forEach(function (t, i) {
-        var m = App.el.list.querySelector('[data-id="' + t.id + '"] .mk');
-        if (!m) return;
+      var shown = things.map(function (t) { return App.el.list.querySelector('[data-id="' + t.id + '"] .mk'); }).filter(Boolean);
+      // A folded group has no member rows: its own marks fly instead.
+      if (!shown.length) { var cur = App.el.list.querySelector('[data-key="' + App.state.focus + '"]'); if (cur) shown = Array.prototype.slice.call(cur.querySelectorAll(".row-marks .mk")); }
+      shown.slice(0, 3).forEach(function (m, i) {
+        var t = things[i] || things[0];
         var from = m.getBoundingClientRect();
-        setTimeout(function () { Motion.fly(D.mark(Model.sourceOf(t), 16), from, target).then(function () { receive(to); }); }, i * 60);
+        var html = m.outerHTML;
+        setTimeout(function () { Motion.fly(html, from, target).then(function () { receive(to); }); }, i * 60);
       });
     }
     function receive(to) {
@@ -154,7 +157,15 @@
      * leaves when the mark lands. Both rolls are clipped to their line.
      */
     function handChain(row, t, who, finish) {
-      if (Motion.isReduced()) { finish(); return; }
+      var stopped = false;
+      var handle = {
+        cancel: function () {
+          stopped = true;
+          // Undo inside the chain: the mark in flight fades where it is, and Work receives nothing.
+          document.querySelectorAll("body > .flight").forEach(function (f) { f.getAnimations().forEach(function (a) { a.pause(); }); f.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: "forwards" }).finished.then(function () { f.remove(); }); });
+        },
+      };
+      if (Motion.isReduced()) { finish(); return handle; }
       var slot = row.querySelector(".row-time");
       var why = row.querySelector(".row-why");
       var face = document.createElement("span");
@@ -165,13 +176,15 @@
       var m = row.querySelector(".mk");
       var from = m ? m.getBoundingClientRect() : null;
       setTimeout(function () {
+        if (stopped) return;
         Motion.knock(head, 150);
         why.innerHTML = '<span class="roll"><span class="roll-a">' + why.innerHTML + '</span><span class="roll-b">' + D.esc(who) + " has it</span></span>";
         why.classList.add("is-rolling");
         var to = workRow();
-        if (from && to) Motion.fly(D.mark(Model.sourceOf(t), 16), from, to.querySelector("svg").getBoundingClientRect()).then(function () { receive(to); finish(); });
+        if (from && to) Motion.fly(D.mark(Model.sourceOf(t), 16), from, to.querySelector("svg").getBoundingClientRect()).then(function () { if (stopped) return; receive(to); finish(); });
         else finish();
       }, 170);
+      return handle;
     }
     return { toWork: toWork, handChain: handChain };
   })();

@@ -109,6 +109,7 @@
     <header>
       <h2>The pane: each ask with its own answers.</h2>
       <p>Where it is from, the title in full, then one section for each open signal, newest first and unfolded. A pull request that asks for your review and mentions you has two sections, and answering the mention never closes the review request. Each section has its own answers, the plugin's suggested one filled, and Done. Then the plugin's blocks: the change, the checks, the trend of an error, the messages of a mail. Then what it is linked to and what happened.</p>
+      <p><b>↩ is the open ask's suggested answer</b>, and nothing is final at once: an answer that acts on the source is held for the undo line's eight seconds before it is sent, so ⌘Z takes back every move the same way. <code>[</code> and <code>]</code> move between asks, Space scrolls the pane.</p>
     </header>
     <figure class="frame" data-q="scene=pr-second" aria-label="A pull request with two open signals"></figure>
     <div class="three">
@@ -187,8 +188,15 @@
 
   <section class="ch">
     <header>
+      <h2>Reviewed by a panel, twice and more.</h2>
+      <p>Four critics reviewed frozen copies, each apart: a visual designer, a motion designer who filmed every flow at real speed, an interaction designer who drove it by keyboard and counted keystrokes, and an accessibility reviewer who measured every text in all six themes and read the accessibility tree. Round one found 95 issues, from ↩ approving a pull request from a focused button to leaving rows showing words over words. Everything that mattered was fixed, and <code>tools/check.mjs</code> now drives those flows. The rounds are in <a href="DESIGN.md">DESIGN.md</a>.</p>
+    </header>
+  </section>
+
+  <section class="ch">
+    <header>
       <h2>Calls made, and proposals.</h2>
-      <p>The map left some questions open, and the drawing answers them: signals come before the plugin's blocks, triage keeps three rows at the top, large groups show five, ↩ is the open ask's suggested answer, and more. Each is listed in <a href="DESIGN.md">DESIGN.md</a> under "Calls made, for Rogier", with three proposed changes to #1119.</p>
+      <p>The map left some questions open, and the drawing answers them: signals come before the plugin's blocks, triage keeps three rows at the top, large groups show five, ↩ is the open ask's suggested answer, answers wait eight seconds before they are sent, single keys belong to the list and the pane, and more. Each is listed in <a href="DESIGN.md">DESIGN.md</a> under "Calls made, for Rogier", with four proposed changes to #1119.</p>
     </header>
   </section>
 </div>

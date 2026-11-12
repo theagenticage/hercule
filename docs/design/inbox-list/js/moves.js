@@ -10,9 +10,12 @@ window.Moves = (function () {
   function redraw(opts) { App.render(Object.assign({ flip: true }, opts || {})); }
 
   /** Remembers the current row's position, so the row that takes its place becomes current after a move. */
+  /** Remembers the current row's place, and the rows after it in order, so the next one becomes current. */
   function holdPlace() {
-    var i = s().rows.findIndex(function (r) { return r.key === s().focus; });
+    var rows = s().rows;
+    var i = rows.findIndex(function (r) { return r.key === s().focus; });
     s().focusHint = i;
+    s().focusAfter = rows.slice(i + 1).map(function (r) { return r.key; }).concat(rows.slice(0, i).reverse().map(function (r) { return r.key; }));
   }
 
   function say(text, opts) { Undo.show(text, opts || {}); }
@@ -26,6 +29,7 @@ window.Moves = (function () {
   function undo() {
     var e = stack.pop();
     if (!e) { say("Nothing to undo."); return; }
+    if (e.sent) { say("Already sent to " + e.sent + ", so it can’t be taken back here. Answer again on " + e.sent + " if it needs changing."); return; }
     if (s().offline && s().outbox) { s().outbox--; Bar.draw(s()); }
     e.undo();
     say(e.undone || "Undone.", {});
@@ -72,6 +76,7 @@ window.Moves = (function () {
     var things = App.acted();
     if (!things.length) return;
     var isGroup = !s().selection.size && r && r.type === "group";
+    if (isGroup && s().movedAt && performance.now() - s().movedAt < 600) { s().movedAt = 0; say("The group " + quote(r.group.label) + " is under the keys now. E again dismisses all " + r.group.members.length + "."); return; }
     var outside = isGroup ? r.group.members.length - r.hits.length : 0;
     holdPlace();
     things.forEach(function (t) { Model.gone.add(t.id); });
@@ -95,7 +100,7 @@ window.Moves = (function () {
     things.forEach(function (t) { t.held = { by: "you", task: title, since: 0 }; });
     s().selection.clear();
     Flights.toWork(things);
-    redraw({ leave: "taken" });
+    redraw({ leave: "taken", keepPlace: true });
     push({
       say: "Took it on: a Task on Work, " + quote(title),
       action: { label: "Go to the Task", key: "G", task: title },
@@ -131,13 +136,17 @@ window.Moves = (function () {
     Rail.draw(App.el.rail, s());
     var c = document.querySelector("[data-inbox-count]");
     if (c) c.textContent = Model.countSaved("waits");
-    var finish = function () { if (!cancelled) redraw({ leave: "taken" }); };
-    if (row) Flights.handChain(row, t, offer.w.name, finish); else finish();
+    var key0 = App.state.focus;
+    // The place is taken again when the chain ends, from the rows as they are then.
+    var holdPlace0 = function () { if (App.state.focus === key0) holdPlace(); };
+    var finish = function () { if (!cancelled) { holdPlace0(); redraw({ leave: "taken", keepPlace: true }); } };
+    var chain = row ? Flights.handChain(row, t, offer.w.name, finish) : (finish(), null);
     push({
       say: "Handed " + quote(t.title) + " to " + offer.w.name,
       action: { label: "Go to the Task", key: "G", task: t.title },
       undo: function () {
         cancelled = true;
+        if (chain) chain.cancel();
         delete t.held;
         ended.forEach(function (sg) { sg.done = false; });
         redraw({ enter: "return" });
@@ -233,7 +242,7 @@ window.Moves = (function () {
     redraw({ leave: "taken" });
     push({
       say: "Accepted: a Task in the backlog, " + quote(x.title),
-      action: { label: "Go to the Task", key: "G" },
+      action: { label: "Go to the Task", key: "G", task: x.title },
       undo: function () { Model.gone.delete(x.id); r.things.forEach(function (t) { delete t.held; }); redraw({ enter: "return" }); },
     });
   }
@@ -261,12 +270,15 @@ window.Moves = (function () {
     holdPlace();
     f.s.done = true;
     redraw({ leave: "dismiss" });
-    push({
+    var entry = {
       say: words,
       note: external ? "Sends in 8s" : null,
       undo: function () { f.s.done = false; redraw({ enter: "return" }); },
       undone: external ? "Not sent. The ask is open again." : "The ask is open again.",
-    });
+    };
+    push(entry);
+    // After the undo line's eight seconds the answer is sent, and from then on ⌘Z says so instead.
+    if (external) setTimeout(function () { entry.sent = Kinds.SOURCES[Model.sourceOf(f.t)].name; }, 8000);
   }
   function markDone(sigId) {
     var f = findSignal(sigId);
@@ -314,11 +326,18 @@ window.Moves = (function () {
     var fresh = st.pending.splice(0);
     fresh.forEach(function (t) { t.fresh = true; Model.add(t); });
     redraw({ enter: "arrive" });
-    // New things take their place in the saved query's order, so the list goes to the first of them.
-    var first = App.el.list.querySelector(fresh.map(function (t) { return '[data-id="' + t.id + '"]'; }).join(","));
-    if (first) first.scrollIntoView({ block: "center", behavior: Motion.isReduced() ? "auto" : "smooth" });
+    // New things take their place in the saved query's order, so the list goes to the first of them:
+    // it becomes current first, then the list scrolls it to the middle, smoothly.
     var at = App.state.rows.find(function (r) { return r.thing && fresh.indexOf(r.thing) >= 0; });
-    if (at) App.focusRow(at.key);
+    if (at) {
+      App.state.focus = at.key;
+      List.markFocus(App.el.list, App.state, {});
+      Pane.draw(App.el.pane, App.state, {});
+      var el = App.el.list.querySelector('[data-key="' + at.key + '"]');
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "center", behavior: Motion.isReduced() ? "auto" : "smooth" });
+    }
+    Announce.say(fresh.length + (fresh.length === 1 ? " new thing is" : " new things are") + " in the list. The first is current.");
     setTimeout(function () { fresh.forEach(function (t) { t.fresh = false; }); }, 1800);
   }
 

@@ -13,7 +13,7 @@ window.Pane = (function () {
   function block(b) {
     switch (b.type) {
       case "text":
-        return '<section class="bk">' + (b.title ? "<h4>" + D.esc(b.title) + "</h4>" : "") + '<p class="bk-text">' + D.esc(b.text).replace(/`([^`]+)`/g, "<code>$1</code>") + "</p></section>";
+        return '<section class="bk">' + (b.title ? "<h3>" + D.esc(b.title) + "</h3>" : "") + '<p class="bk-text">' + D.esc(b.text).replace(/`([^`]+)`/g, "<code>$1</code>") + "</p></section>";
       case "messages":
         return '<ol class="bk bk-msgs">' + b.items.map(function (m) {
           return '<li class="' + (m.you ? "is-you" : "") + '"><span class="bk-av" aria-hidden="true">' + D.esc(m.author.split(/[\s,]/)[0][0]) + '</span><div><p class="bk-msg-head"><b>' + D.esc(m.author) + "</b><time>" + D.ago(m.at) + '</time></p><p class="bk-msg-text">' + D.esc(m.text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@you/g, '<span class="at-you">@you</span>') + "</p></div></li>";
@@ -21,17 +21,17 @@ window.Pane = (function () {
       case "change":
         return '<section class="bk bk-change"><p class="bk-branch">' + D.icon("branch", 14) + "<code>" + D.esc(b.head) + "</code>" + D.icon("arrow", 12) + "<code>" + D.esc(b.base) + '</code></p><p class="bk-diff"><span>' + b.files + ' files</span><span class="ins">+' + D.num(b.add) + '</span><span class="del">−' + D.num(b.del) + '</span><span class="bk-checks">' + D.esc(b.checks) + "</span></p></section>";
       case "checks":
-        return '<section class="bk"><h4>Checks</h4>' + b.rows.map(function (r) {
+        return '<section class="bk"><h3>Checks</h3>' + b.rows.map(function (r) {
           return '<div class="bk-check"><p class="is-' + r.state + '">' + D.icon(r.state === "failed" ? "close" : "clock", 13) + D.esc(r.name) + "</p>" + (r.log ? "<pre>" + r.log.map(D.esc).join("\n") + "</pre>" : "") + "</div>";
         }).join("") + '<p class="bk-fine">' + b.passed + " passed</p></section>";
       case "fields":
-        return '<section class="bk">' + (b.title ? "<h4>" + D.esc(b.title) + "</h4>" : "") + '<dl class="bk-fields">' + b.rows.map(function (r) { return "<div><dt>" + D.esc(r[0]) + "</dt><dd>" + D.esc(r[1]) + "</dd></div>"; }).join("") + "</dl></section>";
+        return '<section class="bk">' + (b.title ? "<h3>" + D.esc(b.title) + "</h3>" : "") + '<dl class="bk-fields">' + b.rows.map(function (r) { return "<div><dt>" + D.esc(r[0]) + "</dt><dd>" + D.esc(r[1]) + "</dd></div>"; }).join("") + "</dl></section>";
       case "trend":
         var max = Math.max.apply(null, b.values), w = 100 / (b.values.length - 1);
         var pts = b.values.map(function (v, i) { return (i * w).toFixed(2) + "," + (30 - (v / max) * 26).toFixed(2); }).join(" ");
-        return '<section class="bk"><h4>' + D.esc(b.caption) + '</h4><svg class="bk-trend" viewBox="0 0 100 32" preserveAspectRatio="none" aria-label="' + D.esc(b.caption) + ", rising to " + b.values[b.values.length - 1] + ' a day"><polyline points="' + pts + '" vector-effect="non-scaling-stroke"/></svg><p class="bk-axis"><span>14 days ago</span><span>' + D.num(b.values[b.values.length - 1]) + " today</span></p></section>";
+        return '<section class="bk"><h3>' + D.esc(b.caption) + '</h3><svg class="bk-trend" viewBox="0 0 100 32" preserveAspectRatio="none" aria-label="' + D.esc(b.caption) + ", rising to " + b.values[b.values.length - 1] + ' a day"><polyline points="' + pts + '" vector-effect="non-scaling-stroke"/></svg><p class="bk-axis"><span>14 days ago</span><span>' + D.num(b.values[b.values.length - 1]) + " today</span></p></section>";
       case "code":
-        return '<section class="bk">' + (b.title ? "<h4>" + D.esc(b.title) + "</h4>" : "") + '<pre class="bk-code">' + b.lines.map(D.esc).join("\n") + "</pre></section>";
+        return '<section class="bk">' + (b.title ? "<h3>" + D.esc(b.title) + "</h3>" : "") + '<pre class="bk-code">' + b.lines.map(D.esc).join("\n") + "</pre></section>";
       default:
         return '<p class="bk-fine">This part can\'t be shown here.</p>';
     }
@@ -53,7 +53,7 @@ window.Pane = (function () {
     var head = D.esc(D.saySignal(s, t));
     if (s.by && head.indexOf(D.esc(s.by)) === 0) head = "<b>" + D.esc(s.by) + "</b>" + head.slice(D.esc(s.by).length);
     var first = sig.answers[0];
-    return '<section class="sig' + (open ? " is-open" : "") + '" data-signal="' + s.id + '">' +
+    return '<section class="sig' + (open ? " is-open is-current-ask" : "") + '" data-signal="' + s.id + '">' +
       '<button type="button" class="sig-head" aria-expanded="' + open + '" data-sig-fold="' + s.id + '"><span class="sig-dot" aria-hidden="true"></span><span class="sig-say">' + head + '</span><time>' + D.ago(s.at) + '</time><span class="sig-chev">' + D.icon("chevron-down", 12) + "</span></button>" +
       '<div class="sig-body"' + (open ? "" : " inert") + '><div class="sig-in">' + (s.blocks || []).map(block).join("") + '<div class="sig-answers">' + answers + '</div><p class="sig-desc" aria-live="polite">' + D.esc(first ? fill(first.desc, v) : "Ends this ask here. " + v["{source}"] + " is not told.") + "</p></div></div></section>";
   }
@@ -61,30 +61,36 @@ window.Pane = (function () {
   function linkRow(l, t) {
     var o = l.other;
     var claim = l.claim.type === "source" ? l.claim.by + " reports this" : (l.claim.by === "you" ? "You linked this" : l.claim.by + " linked this");
-    return '<li class="pl-row" data-goto="' + o.id + '" role="button" tabindex="0">' + D.mark(Model.sourceOf(o), 14) + '<span class="pl-title">' + D.esc(o.title) + '</span><span class="pl-id">' + D.esc(D.identifier(o)) + '</span><span class="pl-claim">' + D.esc(claim) + (l.claim.type === "person" ? '<button type="button" class="pl-unlink" data-unlink="' + t.id + "|" + o.id + '">Unlink</button>' : "") + "</span></li>";
+    return '<li class="pl-row">' + D.mark(Model.sourceOf(o), 14) + '<button type="button" class="pl-title" data-goto="' + o.id + '">' + D.esc(o.title) + '</button><span class="pl-id">' + D.esc(D.identifier(o)) + '</span><span class="pl-claim">' + D.esc(claim) + (l.claim.type === "person" ? '<button type="button" class="pl-unlink" data-unlink="' + t.id + "|" + o.id + '" aria-label="Unlink ' + D.esc(D.identifier(o) || o.title) + '">Unlink</button>' : "") + "</span></li>";
   }
 
   function footer(moves) {
     return '<footer class="pn-foot">' + moves.replace('<span class="spacer"></span>', '<span class="pn-foot-end">') + (moves.indexOf('<span class="spacer"></span>') >= 0 ? "</span>" : "") + "</footer>";
   }
+  // In a narrow pane each move keeps its icon and its name moves to the tooltip, rather than being cut.
+  var MOVE_ICONS = { thread: "compose", take: "tasks", accept: "check", link: "link", dismiss: "close" };
   function move(id, label, key, extra) {
-    return '<button type="button" class="btn btn--sm pn-move' + (extra || "") + '" data-move="' + id + '" aria-keyshortcuts="' + key + '"><span class="pn-move-l">' + label + "</span>" + kbd(key) + "</button>";
+    var words = label.replace(/<[^>]+>/g, "");
+    var ic = MOVE_ICONS[id] ? '<span class="pn-move-ic">' + D.icon(MOVE_ICONS[id], 14) + "</span>" : "";
+    return '<button type="button" class="btn btn--sm pn-move' + (ic ? " has-ic" : "") + (extra || "") + '" data-move="' + id + '" aria-keyshortcuts="' + key + '" title="' + D.esc(words + " (" + key + ")") + '">' + ic + '<span class="pn-move-l">' + label + "</span>" + kbd(key) + "</button>";
   }
 
   function handLabel(t) {
     var offers = Model.offersFor(t).filter(function (o) { return !o.off; });
     if (!offers.length) return null;
-    if (offers.length === 1) return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + "</span>" + D.esc(offers[0].w.name);
-    return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + "</span>Hand to…";
+    if (offers.length === 1) return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">' + D.esc(offers[0].w.name) + "</span>";
+    return '<span class="pn-faces">' + D.face(offers[0].w.name, "idle", 18) + '</span><span class="pn-move-t">Hand to…</span>';
   }
 
   function thingPane(t) {
     var src = Model.sourceOf(t);
     var accounts = Model.accountsOf(src);
     var sigs = Model.openSignals(t).filter(function (s) { return !s.quiet; }).sort(function (a, b) { return a.at - b.at; });
-    var openId = openSig[t.id] || (sigs[0] && sigs[0].id);
+    var q = App.state.scope.saved ? K.SAVED.find(function (x) { return x.id === App.state.scope.saved; }).q : null;
+    var about = q && q.signal ? sigs.find(function (x) { return x.kind === q.signal; }) : null;
+    var openId = openSig[t.id] || (about || sigs[0] || {}).id;
     var st = D.statusWord(t);
-    var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.mark(src, 14) + "<span>" + D.esc(K.SOURCES[src].name) + " · " + D.esc(D.noun(t)) + " · " + D.esc(D.place(t)) + (accounts.length > 1 ? " · " + D.esc(t.account) : "") + '</span></p><span class="pn-tools"><a class="icon-btn icon-btn--sm pn-open" href="#" title="' + D.esc(K.SOURCES[src].open) + '" aria-label="' + D.esc(K.SOURCES[src].open) + '">' + D.icon("external", 14) + '</a><button type="button" class="icon-btn icon-btn--sm" data-pane-menu title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">' + D.icon("more", 16) + "</button></span></header>";
+    var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.mark(src, 14) + "<span>" + D.esc(K.SOURCES[src].name) + " · " + D.esc(D.noun(t)) +  " · " + D.esc(D.place(t)) + '</span></p><span class="pn-tools"><a class="icon-btn icon-btn--sm pn-open" href="#" title="' + D.esc(K.SOURCES[src].open) + '" aria-label="' + D.esc(K.SOURCES[src].open) + '">' + D.icon("external", 14) + '</a><button type="button" class="icon-btn icon-btn--sm" data-pane-menu title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">' + D.icon("more", 16) + "</button></span></header>";
     html += '<h2 class="pn-title">' + D.esc(t.title) + (D.identifier(t) ? ' <span class="pn-id">' + D.esc(D.identifier(t)) + "</span>" : "") + "</h2>";
     var meta = [];
     if (st) meta.push(D.glyph(t, 14) + "<span>" + D.esc(st) + "</span>");
@@ -92,6 +98,7 @@ window.Pane = (function () {
     else if (t.fields.assignee) meta.push("<span>" + (t.fields.assignee === "you" ? "Assigned to you" : D.esc(t.fields.assignee) + "’s") + "</span>");
     else if (t.fields.from) meta.push("<span>From " + D.esc(t.fields.from) + "</span>");
     if (t.fields.events != null) meta.push("<span>" + D.num(t.fields.events) + " events · " + D.num(t.fields.users) + " users</span>");
+    if (accounts.length > 1) meta.push('<span title="The account it is seen through">in ' + D.esc(t.account) + "</span>");
     html += '<p class="pn-meta">' + meta.join('<i class="sep">·</i>') + "</p>";
     if (t.held) html += '<p class="pn-held">' + (t.held.by === "you" ? D.you(20) : D.face(t.held.by, "working", 22)) + "<span><b>" + (t.held.by === "you" ? "Your Task" : D.esc(t.held.by) + " has it") + "</b>" + D.esc(t.held.task) + '</span><button type="button" class="btn btn--sm" data-move="goto">Go to the Task' + kbd("G") + "</button></p>";
     if (sigs.length) html += '<div class="sigs">' + sigs.map(function (s) { return signalSection(t, s, s.id === openId); }).join("") + "</div>";
@@ -107,7 +114,7 @@ window.Pane = (function () {
     html += "</div>";
     var hand = handLabel(t);
     html += footer(
-      move("thread", "Start a thread", "N") +
+      move("thread", "Thread", "N") +
       (t.held ? "" : move("take", "Take on", "T")) +
       (hand && !t.held ? move("hand", hand, "H", " pn-move--hand") : "") +
       '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="link" title="Link to… (L)" aria-label="Link to another thing" aria-keyshortcuts="L">' + D.icon("link", 16) + '</button><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss (E)" aria-label="Dismiss" aria-keyshortcuts="E">' + D.icon("archive", 16) + "</button>"
@@ -137,7 +144,7 @@ window.Pane = (function () {
       var claim = l[2].type === "source" ? l[2].by + " reports this" : (l[2].by === "you" ? "You linked these" : l[2].by + " linked these");
       return '<li><span class="pc-pair">' + D.mark(Model.sourceOf(a), 12) + D.esc(D.identifier(a) || a.title) + '<span class="pc-dash">—</span>' + D.mark(Model.sourceOf(b), 12) + D.esc(D.identifier(b) || b.title) + '</span><span class="pl-claim">' + D.esc(claim) + (l[2].type === "person" ? '<button type="button" class="pl-unlink" data-unlink="' + a.id + "|" + b.id + '">Unlink</button>' : "") + "</span></li>";
     }).join("") + "</ul></section></div>";
-    html += footer(move("thread", "Start a thread on all " + g.members.length, "N") + move("take", "Take on", "T") + '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="link" title="Link another thing to this group (L)" aria-label="Link another thing">' + D.icon("link", 16) + '</button><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss all ' + g.members.length + ' (E)" aria-label="Dismiss the group">' + D.icon("archive", 16) + "</button>");
+    html += footer(move("thread", "Thread on all " + g.members.length, "N") + move("take", "Take on", "T") + '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="link" title="Link another thing to this group (L)" aria-label="Link another thing">' + D.icon("link", 16) + '</button><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss all ' + g.members.length + ' (E)" aria-label="Dismiss the group">' + D.icon("archive", 16) + "</button>");
     return html;
   }
 
@@ -146,7 +153,7 @@ window.Pane = (function () {
     var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.face(x.by, "idle", 16) + "<span>Proposal from " + D.esc(x.by) + " · " + D.ago(x.at) + ' ago</span></p></header><h2 class="pn-title">' + D.esc(x.title) + '</h2><blockquote class="pn-why">' + D.esc(x.why) + "</blockquote>";
     html += '<section class="pn-sec pn-sec--first"><h3 class="pn-h">' + "From " + r.things.length + " things</h3>" + memberRows(r.things) + "</section>";
     html += '<section class="pn-sec"><h3 class="pn-h">' + 'The Task it makes</h3><p class="pn-task"><b>' + D.esc(x.title) + "</b><span>In the backlog of Payments · nobody on it until you start it</span></p></section></div>";
-    html += footer(move("accept", "Accept", "T", " btn--answer") + move("thread", "Accept and start a thread", "N") + '<span class="spacer"></span>' + move("dismiss", "Dismiss", "E", " btn--quiet"));
+    html += footer(move("accept", "Accept", "T", " btn--answer") + move("thread", "Accept with a thread", "N") + '<span class="spacer"></span>' + move("dismiss", "Dismiss", "E", " btn--quiet"));
     return html;
   }
 
@@ -164,16 +171,18 @@ window.Pane = (function () {
     var things = Array.from(s.selection).map(Model.byId).filter(Boolean);
     var srcs = [];
     things.forEach(function (m) { var n = K.SOURCES[Model.sourceOf(m)].name; if (srcs.indexOf(n) < 0) srcs.push(n); });
-    var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.icon("check", 14) + "<span>Selected · " + D.esc(srcs.join(", ")) + '</span></p></header><h2 class="pn-title">' + things.length + ' things selected</h2><p class="pn-meta"><span>X or ⌘-click adds and removes; ⇧ selects a range; Esc clears</span></p>';
+    var html = '<div class="pn-scroll"><header class="pn-head"><p class="pn-from">' + D.icon("check", 14) + "<span>Selected · " + D.esc(srcs.join(", ")) + '</span></p></header><h2 class="pn-title">' + (things.length === 1 ? "1 thing selected" : things.length + " things selected") + '</h2><p class="pn-meta"><span>X or ⌘-click adds and removes; ⇧ selects a range; Esc clears</span></p>';
     html += '<section class="pn-sec pn-sec--first">' + memberRows(things) + "</section></div>";
-    html += footer(move("link", "Link them", "L") + move("thread", "Start a thread", "N") + move("take", "Take on", "T") + '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss all ' + things.length + ' (E)" aria-label="Dismiss all ' + things.length + '">' + D.icon("archive", 16) + "</button>");
+    // The same four moves, in the same words, as the selection bar.
+    html += footer(move("link", "Link", "L") + move("thread", "Thread", "N") + move("take", "Take on", "T") + '<span class="spacer"></span><button type="button" class="icon-btn pn-icon" data-move="dismiss" title="Dismiss all ' + things.length + ' (E)" aria-label="Dismiss all ' + things.length + '" aria-keyshortcuts="E">' + D.icon("archive", 16) + "</button>");
     return html;
   }
 
   function draw(host, s, opts) {
     opts = opts || {};
     var r = App.currentRow();
-    var key = s.selection.size >= 2 ? "sel:" + Array.from(s.selection).sort().join(",") : r ? r.key : null;
+    var selPane = s.selection.size >= 2 || (s.selection.size === 1 && !(r && r.thing && s.selection.has(r.thing.id)));
+    var key = selPane ? "sel:" + Array.from(s.selection).sort().join(",") : r ? r.key : null;
     if (key === shownKey && !opts.force && !opts.walk && host.childElementCount) {
       // Same target: redraw in place without the walk, so an answer or a fold keeps the reader's place.
     }
@@ -181,7 +190,7 @@ window.Pane = (function () {
     var keep = key === shownKey && scroll ? scroll.scrollTop : 0;
     var html;
     if (s.loading) { host.innerHTML = '<div class="pn-skel" aria-hidden="true"><i style="width:46%"></i><i style="width:88%;height:16px;margin-top:10px"></i><i style="width:60%;height:16px"></i><i style="width:38%"></i><i style="width:100%;height:96px;margin-top:16px;border-radius:12px"></i><i style="width:100%;height:44px;margin-top:8px;border-radius:12px"></i></div>'; shownKey = null; return; }
-    if (s.selection.size >= 2) html = selectionPane(s);
+    if (selPane) html = selectionPane(s);
     else if (!r) html = "";
     else if (r.type === "group") html = groupPane(r);
     else if (r.type === "proposal") html = proposalPane(r);
@@ -211,6 +220,7 @@ window.Pane = (function () {
         var sec = f.closest(".sig");
         var opening = !sec.classList.contains("is-open");
         openSig[r.thing.id] = opening ? id : "__none";
+        if (opening) host.querySelectorAll(".sig").forEach(function (x) { x.classList.toggle("is-current-ask", x === sec); });
         Signals.fold(host, sec, opening);
         return;
       }
@@ -247,7 +257,20 @@ window.Pane = (function () {
     });
   }
 
-  return { draw: draw, start: start, block: block, memberRows: memberRows };
+  /** Makes one ask the pane's current one, unfolding it; ↩ answers it. */
+  function setAsk(id) {
+    var r = App.currentRow();
+    if (!r || !r.thing) return;
+    openSig[r.thing.id] = id;
+    var host = App.el.pane;
+    host.querySelectorAll(".sig").forEach(function (sec) {
+      var me = sec.dataset.signal === id;
+      sec.classList.toggle("is-current-ask", me);
+      if (me && !sec.classList.contains("is-open")) Signals.fold(host, sec, true);
+    });
+  }
+
+  return { draw: draw, start: start, block: block, memberRows: memberRows, setAsk: setAsk };
 })();
 
 // The fold of a signal section: its body grows on the hand spring, and the others stay as they are.

@@ -24,7 +24,10 @@
   font-size: var(--t-12);
 }
 .pn-from > span:last-child {
+  overflow: hidden;
   line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pn-tools {
   display: flex;
@@ -39,7 +42,7 @@
   color: var(--muted);
 }
 .pn-title {
-  margin: 10px 0 6px;
+  margin: 12px 0 8px;
   text-wrap: pretty;
   font-size: var(--t-18);
   font-weight: var(--w-bold);
@@ -194,7 +197,7 @@
 .bks:empty {
   display: none;
 }
-.bk h4 {
+.bk h3 {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: var(--t-12);
@@ -296,7 +299,8 @@
 }
 .bk-diff {
   display: flex;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  row-gap: 2px;
   gap: 10px;
   margin: 0;
   padding-left: 20px;
@@ -424,16 +428,22 @@
   margin: 0 -8px;
   padding: 6px 8px;
   border-radius: var(--r-sm);
-  cursor: pointer;
 }
 .pl-row:hover {
   background: var(--hover);
 }
 .pl-title {
   overflow: hidden;
+  color: var(--ink);
   font-size: var(--t-13);
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.pl-title:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 4px;
 }
 .pl-id {
   color: var(--faint);
@@ -624,8 +634,6 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pn-move--hand {
@@ -644,6 +652,22 @@
 .pn-faces {
   display: inline-flex;
   flex: none;
+}
+.pn-faces svg {
+  flex: none;
+  width: 18px;
+}
+.pn-move .pn-faces .cr {
+  margin-left: -2px;
+}
+.pn-move-ic {
+  display: none;
+  color: var(--muted);
+}
+.pn-move-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pn-faces > * + * {
   margin-left: -6px;
@@ -721,9 +745,33 @@
 .ib-pane {
   container: pane / inline-size;
 }
+/* Three widths. From 460px every move has its words and its key. From 400px the hand-off keeps its
+   face and its key, and its name goes to the tooltip. Under 400px each move is an icon. */
 @container pane (max-width: 459px) {
+  .pn-move--hand .pn-move-t {
+    display: none;
+  }
+}
+@container pane (max-width: 399px) {
   .pn-move kbd {
     display: none;
+  }
+}
+@container pane (max-width: 399px) {
+  .pn-move.has-ic {
+    width: 30px;
+    padding: 0;
+  }
+  .pn-move.has-ic .pn-move-ic {
+    display: inline-grid;
+    color: inherit;
+  }
+  .pn-move.has-ic .pn-move-l,
+  .pn-move--hand .pn-move-t {
+    display: none;
+  }
+  .pn-move--hand {
+    padding: 0 8px;
   }
 }
 .sig-answers .btn.is-pressed {
@@ -738,4 +786,55 @@
 .pl-unlink {
   min-height: 24px;
   padding: 0 4px;
+}
+.bk-diff > span {
+  white-space: nowrap;
+}
+/* The ask ↩ answers: its rim is the one drawn in ink. */
+.sig.is-current-ask {
+  box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 color-mix(in oklab, var(--ink) 60%, transparent), 0 1px 2px oklch(0 0 0 / 0.04);
+}
+.sig:not(.is-current-ask) .btn--answer {
+  background: var(--btn-fill);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  box-shadow: inset 0 0 0 1px var(--btn-rim), inset 0 1px 0 var(--glass-edge);
+}
+.sig:not(.is-current-ask) .btn--answer kbd {
+  display: none;
+}
+/* Lines on the 4px grid. */
+.pn-h,
+.bk h3,
+.pn-meta,
+.pm-why,
+.pl-claim,
+.pc li {
+  line-height: 16px;
+}
+.sig-head {
+  line-height: 18px;
+}
+.pm-id {
+  align-self: start;
+  margin-top: 1px;
+  line-height: 16px;
+}
+.pm-why .who {
+  font-weight: var(--w-regular);
+}
+.pc-pair {
+  display: block;
+}
+.pc-pair > * {
+  vertical-align: -2px;
+}
+.pc li .pl-claim {
+  min-width: 0;
+}
+.pc li:not(:hover):not(:focus-within) .pl-unlink {
+  display: none;
+}
+.reply textarea {
+  resize: none;
 }

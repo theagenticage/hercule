@@ -89,7 +89,6 @@
 .lt-id {
   color: var(--faint);
   font-size: var(--t-12);
-  font-variant-numeric: tabular-nums;
 }
 .lt-none {
   margin: 8px 10px;
@@ -180,4 +179,14 @@
 }
 .pane-menu .menu-pick kbd {
   margin-left: auto;
+}
+.pane-menu .menu-pick > span {
+  flex: 1;
+}
+.pane-menu .menu-pick small {
+  min-width: 44px;
+  text-align: right;
+}
+.pane-menu .menu-pick .ic {
+  flex: none;
 }

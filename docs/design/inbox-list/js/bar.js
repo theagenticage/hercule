@@ -130,7 +130,8 @@ window.Bar = (function () {
       return '<span class="sx-chip">' + (c.source ? D.mark(c.source, 12) : "") + "<span>" + D.esc(f.token) + ":</span><b>" + D.esc(c.value) + '</b><button type="button" data-unchip="' + i + '" aria-label="Remove ' + D.esc(f.token + ":" + c.value) + '">' + D.icon("close", 10) + "</button></span>";
     }).join("");
     field.classList.toggle("has-chips", st.search.clauses.length > 0);
-    input.placeholder = st.search.clauses.length ? "" : "Search, or type a field: team:, from:, waiting:>2d";
+    // The long hint only where it fits; a narrow field says less rather than cutting a word.
+    input.placeholder = st.search.clauses.length ? "" : field.offsetWidth > 420 ? "Search, or type a field: team:, from:, waiting:>2d" : field.offsetWidth > 260 ? "Search, or type team:, from:" : "Search";
   }
 
   function draw(st) {
@@ -165,6 +166,7 @@ window.Bar = (function () {
   function narrow(button) {
     var pop = document.getElementById("narrow");
     if (!pop.hidden) { closeNarrow(); return; }
+    pop.onfocusout = function (e) { if (!pop.contains(e.relatedTarget) && e.relatedTarget) closeNarrow(); };
     var st = App.state;
     var things = Model.find(st.scope.triage ? { saved: "all" } : st.scope, st.search);
     var bySource = {};
@@ -173,19 +175,20 @@ window.Bar = (function () {
       var html = '<p class="menu-h">Narrow what the list holds</p>';
       Object.keys(K.BROWSE).forEach(function (src) {
         if (!bySource[src]) return;
-        html += '<p class="nw-src">' + D.mark(src, 12) + D.esc(K.SOURCES[src].name) + "</p>";
+        html += '<div role="group" aria-label="' + D.esc(K.SOURCES[src].name) + '"><p class="nw-src" aria-hidden="true">' + D.mark(src, 12) + D.esc(K.SOURCES[src].name) + "</p>";
         K.BROWSE[src].forEach(function (f) {
-          html += '<button type="button" role="menuitem" class="menu-pick nw-f" data-nf="' + src + "|" + f.field + '"><span>' + D.esc(K.FIELDS[f.field].label) + "</span>" + D.icon("chevron-right", 12) + "</button>";
+          html += '<button type="button" role="menuitem" tabindex="-1" class="menu-pick nw-f" data-nf="' + src + "|" + f.field + '" aria-label="' + D.esc(K.SOURCES[src].name + " " + K.FIELDS[f.field].label.toLowerCase()) + '"><span>' + D.esc(K.FIELDS[f.field].label) + "</span>" + D.icon("chevron-right", 12) + "</button>";
         });
+        html += "</div>";
       });
       pop.innerHTML = html;
     };
     var drawValues = function (src, fieldKey) {
       var counts = new Map();
       bySource[src].forEach(function (t) { var v = t.fields[fieldKey]; if (v != null) counts.set(v, (counts.get(v) || 0) + 1); });
-      pop.innerHTML = '<button type="button" role="menuitem" class="menu-pick nw-back" data-nback>' + D.icon("chevron-left", 12) + "<span>" + D.esc(K.SOURCES[src].name) + " " + D.esc(K.FIELDS[fieldKey].label.toLowerCase()) + "</span></button><i class=\"menu-line\"></i>" +
+      pop.innerHTML = '<button type="button" role="menuitem" class="menu-pick nw-back" tabindex="-1" data-nback>' + D.icon("chevron-left", 12) + "<span>" + D.esc(K.SOURCES[src].name) + " " + D.esc(K.FIELDS[fieldKey].label.toLowerCase()) + "</span></button><i class=\"menu-line\"></i>" +
         Array.from(counts).sort(function (a, b) { return b[1] - a[1]; }).map(function (e) {
-          return '<button type="button" role="menuitem" class="menu-pick" data-nv="' + D.esc(JSON.stringify({ source: src, key: fieldKey, value: e[0] })) + '"><span>' + D.esc(e[0]) + "</span><small>" + D.num(e[1]) + "</small></button>";
+          return '<button type="button" role="menuitem" tabindex="-1" class="menu-pick" data-nv="' + D.esc(JSON.stringify({ source: src, key: fieldKey, value: e[0] })) + '"><span>' + D.esc(e[0]) + "</span><small>" + D.num(e[1]) + "</small></button>";
         }).join("");
     };
     drawFacets();
@@ -223,21 +226,24 @@ window.Bar = (function () {
     });
     input.addEventListener("keydown", function (e) {
       var st = App.state;
+      if (e.key === "F6" || e.key === "Tab") { menu.hidden = true; return; }
       if (e.key === "ArrowDown") {
         if (menu.hidden || active >= items.length - 1) toList(); else { active++; drawMenu(); }
         e.preventDefault();
       }
       else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); drawMenu(); e.preventDefault(); }
       else if (e.key === "Enter") {
+        // ↩ takes the highlighted suggestion; a typed value is taken as it is only when nothing is offered.
         var m = /^([a-z]+):(.+)$/i.exec(input.value.trim());
-        if (m && tokenField(m[1].toLowerCase())) { absorb(true); apply(); menu.hidden = true; }
-        else if (!menu.hidden && items[active] && items[active].kind !== "text") pick(items[active]);
+        if (!menu.hidden && items[active] && items[active].kind !== "text") pick(items[active]);
+        else if (m && tokenField(m[1].toLowerCase())) { absorb(true); apply(); menu.hidden = true; }
         else { absorb(true); apply(); toList(); }
         e.preventDefault();
       }
       else if (e.key === "Backspace" && !input.value) {
+        // ⌫ removes the last token; it widens the scope only while there is a query to widen.
         if (st.search.clauses.length) { st.search.clauses.pop(); apply(); drawMenu(); }
-        else if (!(st.scope.saved === "all")) { widen(); }
+        else if (st.search.text && st.scope.saved !== "all") widen();
         e.preventDefault();
       }
       else if (e.key === "Escape") {

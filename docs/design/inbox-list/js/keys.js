@@ -4,7 +4,7 @@ window.Keys = (function () {
   "use strict";
   var ROWS = [
     ["J  K", "Next and previous"],
-    ["X", "Select; ⇧J ⇧K or ⇧-click select a range; ⌘A all"],
+    ["X", "Select; ⇧X a whole group; ⇧J ⇧K or ⇧-click a range; ⌘A all"],
     ["↩", "The open ask’s suggested answer; on a group, unfold"],
     ["→  ←", "Unfold and fold a group"],
     ["[  ]", "The previous and next ask in the pane"],
@@ -17,6 +17,8 @@ window.Keys = (function () {
     ["G", "Go to its Task"],
     ["O", "Open it at its source"],
     ["/", "Search; F narrows"],
+    ["P", "Pin the Browse value in focus"],
+    ["F6", "The search, the rail, the list, the pane"],
     ["1 – 7", "Saved queries; 8 is Triage"],
     [".", "Show what is new"],
     ["Drag", "A row onto another links them"],
@@ -31,12 +33,25 @@ window.Keys = (function () {
     if (show) { sheetBack = document.activeElement; el.innerHTML = '<h2 tabindex="-1">Keys</h2><dl>' + ROWS.map(function (r) { return "<div><dt>" + r[0].split("  ").map(function (k) { return "<kbd>" + k + "</kbd>"; }).join(" ") + "</dt><dd>" + r[1] + "</dd></div>"; }).join("") + "</dl>"; }
     el.hidden = !show;
     document.querySelector("[data-help]").setAttribute("aria-expanded", String(show));
-    if (show) el.querySelector("h2").focus({ preventScroll: true });
+    if (show) {
+      el.querySelector("h2").focus({ preventScroll: true });
+      // The sheet closes when the focus leaves it, so nothing focused ever hides under it.
+      el.onfocusout = function (e) { if (!el.contains(e.relatedTarget)) sheet(false); };
+    }
     else if (sheetBack && sheetBack.isConnected) sheetBack.focus({ preventScroll: true });
   }
 
   /** Returns the thing ids a row stands for: a thing's own, or every member of a group. */
-  function idsOf(r) { return !r ? [] : r.thing ? [r.thing.id] : r.type === "group" ? r.group.members.map(function (m) { return m.id; }) : []; }
+  /**
+   * Returns the thing ids a row stands for: a thing's own, or a group's members that the list's query
+   * holds. With whole, every member of a group, also those the query leaves out (⇧X).
+   */
+  function idsOf(r, whole) {
+    if (!r) return [];
+    if (r.thing) return [r.thing.id];
+    if (r.type !== "group") return [];
+    return (whole ? r.group.members : r.hits || r.group.members).map(function (m) { return m.id; });
+  }
 
   /** Selects every row from the anchor to the current row, as mail apps and issue trackers do. */
   function selectRange(fromKey, toKey) {
@@ -53,6 +68,7 @@ window.Keys = (function () {
     var i = rows.findIndex(function (r) { return r.key === st.focus; });
     var next = rows[Math.max(0, Math.min(rows.length - 1, i + dir))];
     if (!next) return;
+    if (!extend) st.anchor = null;
     if (extend) {
       if (!st.anchor || !rows.some(function (r) { return r.key === st.anchor; })) st.anchor = st.focus;
       App.focusRow(next.key, { keyboard: true, dir: dir > 0 ? "down" : "up" });
@@ -68,25 +84,40 @@ window.Keys = (function () {
     if (!r) return;
     if (App.isStacked() && !App.isPaneOpen() && r.type !== "group" && r.type !== "more" && r.type !== "tmore") { App.setPaneOpen(true); return; }
     if (r.type === "group") return Moves.toggleGroup(r.key, true);
-    if (r.type === "more") { App.state.showAll.add(r.groupKey); Moves.redraw(); return; }
+    if (r.type === "more") { showMore(r); return; }
     if (r.type === "tmore") { Moves.setScope({ triage: 1 }); return; }
-    var btn = document.querySelector("#pane .sig.is-open .btn--answer") || document.querySelector("#pane .pn-foot .btn--answer");
+    var ask = document.querySelector("#pane .sig.is-current-ask") || document.querySelector("#pane .sig.is-open");
+    var btn = (ask && ask.querySelector(".btn--answer")) || document.querySelector("#pane .pn-foot .btn--answer");
     if (btn) { btn.click(); return; }
     // No suggested answer: put the focus on the open ask's first answer, so the next key chooses.
-    var first = document.querySelector("#pane .sig.is-open .sig-answers .btn");
-    if (first) { first.focus(); Moves.say("This ask has no suggested answer. Tab between its answers, and Space picks one."); }
+    var first = ask && ask.querySelector(".sig-answers .btn");
+    if (first) { first.focus(); Moves.say("This ask has no suggested answer. Tab between its answers, and Space picks one."); return; }
+    Moves.say("Nothing here asks you anything. N starts a thread on it, T takes it on.");
   }
 
-  /** Moves between the pane's ask sections: unfolds the next or previous one and puts the focus on it. */
+  /**
+   * Moves the pane's current ask to the next or previous section, unfolding it. The focus stays where it
+   * is, so the next ↩ answers that ask.
+   */
   function section(dir) {
     var secs = Array.prototype.slice.call(document.querySelectorAll("#pane .sig"));
     if (!secs.length) return;
-    var at = secs.findIndex(function (x) { return x.contains(document.activeElement); });
+    var at = secs.findIndex(function (x) { return x.classList.contains("is-current-ask"); });
     if (at < 0) at = secs.findIndex(function (x) { return x.classList.contains("is-open"); });
     var next = secs[Math.max(0, Math.min(secs.length - 1, at + dir))];
-    if (!next.classList.contains("is-open")) next.querySelector(".sig-head").click();
-    next.querySelector(".sig-head").focus();
+    Pane.setAsk(next.dataset.signal);
     next.scrollIntoView({ block: "nearest", behavior: Motion.isReduced() ? "auto" : "smooth" });
+    Announce.say(next.querySelector(".sig-say").textContent + ". Enter answers.");
+  }
+
+  /** Shows the rest of a large group, with the first newly shown member current. */
+  function showMore(r) {
+    var st = App.state;
+    var shown = st.rows.filter(function (x) { return x.type === "member" && x.group === r.group; }).length;
+    st.showAll.add(r.groupKey);
+    App.render({ flip: true });
+    var members = st.rows.filter(function (x) { return x.type === "member" && x.group === r.group; });
+    if (members[shown]) App.focusRow(members[shown].key, { keyboard: true });
   }
 
   /** Refuses a key on a triage row, naming the keys it takes. Returns true when it refused. */
@@ -113,16 +144,29 @@ window.Keys = (function () {
     if (Menus.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
     if (Dialog.isOpen()) return;
     var t = e.target;
-    // Single keys belong to the list and the pane. In the rail, the bar or a sheet they do nothing,
-    // so speech input and a stray key never act on a row nobody is looking at. Esc goes back to the list.
-    if (t.closest && t.closest("#rail, .ib-bar, #keys, #selbar, #undo")) {
-      if (e.key === "Escape" && !t.closest(".ib-bar")) { var cur0 = App.el.list.querySelector("[tabindex='0']"); if (cur0) { cur0.focus(); e.preventDefault(); } }
-      // ? and / still reach their sheet and the search from anywhere outside a field.
-      if ((e.key !== "?" && e.key !== "/") || t.closest("input")) return;
+    // Single keys belong to the list and the pane, and to the page itself when nothing has the focus.
+    // Anywhere else they do nothing (WCAG 2.1.4), so speech input or a stray key never acts on a row
+    // nobody is looking at. From the rail the digits still pick a saved query; Esc goes back to the
+    // list; / and ? reach the search and the keys from anywhere outside a field.
+    var inPlace = t === document.body || t === document.documentElement || (t.closest && t.closest("#rows, #pane"));
+    if (!inPlace) {
+      var inRail = t.closest && t.closest("#rail, #scope-pop");
+      if (e.key === "Escape" && t.closest && t.closest("#keys")) { sheet(false); e.preventDefault(); return; }
+      if (e.key === "Escape" && !(t.closest && t.closest(".ib-bar, input"))) { var cur0 = App.el.list.querySelector("[tabindex='0']"); if (cur0) { cur0.focus(); e.preventDefault(); } return; }
+      var reach = (e.key === "?" || e.key === "/") && !(t.closest && t.closest("input, textarea"));
+      var digit = inRail && /^[1-8]$/.test(e.key);
+      if (!reach && !digit && !((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")) return;
     }
     var typing = t.closest && t.closest("input, textarea, [contenteditable], select");
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !typing) { Moves.undo(); e.preventDefault(); return; }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing) { App.state.rows.forEach(function (r) { idsOf(r).forEach(function (id) { App.state.selection.add(id); }); }); App.render({}); e.preventDefault(); return; }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !typing) {
+      // ⌘A selects what the list shows: a group's members that the query holds, not the rest of it.
+      App.state.rows.forEach(function (r) { if (r.type !== "member") idsOf(r).forEach(function (id) { App.state.selection.add(id); }); });
+      App.render({});
+      Announce.say(App.state.selection.size + " selected.");
+      e.preventDefault();
+      return;
+    }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key;
     // A focused button or link outside the list answers ↩ and Space itself, as every button does.
@@ -133,11 +177,12 @@ window.Keys = (function () {
     if (lower === "j" || k === "ArrowDown") step(1, e.shiftKey);
     else if (lower === "k" || k === "ArrowUp") step(-1, e.shiftKey);
     else if (lower === "x") {
-      var r = App.currentRow(), ids = idsOf(r);
+      var r = App.currentRow(), ids = idsOf(r, e.shiftKey);
       var all = ids.length && ids.every(function (id) { return st.selection.has(id); });
       ids.forEach(function (id) { if (all) st.selection.delete(id); else st.selection.add(id); });
       st.anchor = st.focus;
       App.render({});
+      Announce.say((all ? "Unselected. " : "Selected. ") + st.selection.size + " selected in all.");
     }
     else if (lower === "l") Moves.linkKey();
     else if (lower === "e") {
@@ -169,7 +214,7 @@ window.Keys = (function () {
     else if (k === "Escape") {
       if (!document.getElementById("keys").hidden) sheet(false);
       else if (App.isStacked() && App.isPaneOpen()) App.setPaneOpen(false);
-      else if (st.selection.size) { st.selection.clear(); App.render({}); }
+      else if (st.selection.size) { st.selection.clear(); st.anchor = null; App.render({}); Announce.say("Selection cleared."); }
       else if (st.search.clauses.length || st.search.text) Bar.clear(true);
       else return;
     } else return;
@@ -182,7 +227,7 @@ window.Keys = (function () {
     document.addEventListener("pointerdown", function (e) { var el = document.getElementById("keys"); if (!el.hidden && !e.target.closest("#keys, [data-help]")) sheet(false); });
   }
 
-  return { start: start, sheet: sheet, selectRange: selectRange, idsOf: idsOf };
+  return { start: start, sheet: sheet, selectRange: selectRange, idsOf: idsOf, showMore: showMore };
 })();
 
 // The pane's edge: drag it, or focus it and use the arrows, to make the pane wider or narrower. While

@@ -233,7 +233,7 @@
 .scope-pop {
   display: none;
 }
-@media (max-width: 1099px) {
+@media (max-width: 1329px) {
   .ib {
     grid-template-columns: 0 minmax(0, 1fr) 0 clamp(320px, 42%, var(--pane-w));
   }
@@ -280,6 +280,9 @@
   visibility: hidden;
 }
 
+.pn-back {
+  display: none;
+}
 /* ---- Under 900px, or 200% zoom: the pane lies over the list, opened with ↩ or a click ---- */
 @media (max-width: 899px) {
   .ib {
@@ -288,7 +291,9 @@
   .ib-pane {
     position: absolute;
     z-index: 25;
-    top: var(--bar-h);
+    grid-column: 1 / -1;
+    grid-row: 2;
+    top: 0;
     right: 0;
     bottom: 0;
     width: min(420px, 100%);
@@ -306,16 +311,19 @@
     display: none;
   }
   .pn-back {
-    display: inline-flex !important;
+    display: inline-flex;
+  }
+  .ib-pill {
+    display: none;
   }
   .ib-bar .sx {
-    min-width: 0;
+    min-width: 140px;
+  }
+  .ib-scope {
+    max-width: 180px;
   }
   .ib .undo-line {
     --undo-line-x: 0px;
     max-width: calc(100% - 24px);
   }
-}
-.pn-back {
-  display: none !important;
 }

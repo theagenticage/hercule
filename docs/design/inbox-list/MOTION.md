@@ -26,7 +26,7 @@ Durations from the app: `--m-quick` 140ms, `--m-base` 220ms, `--m-slow` 360ms. O
 
 | Part | Motion |
 |---|---|
-| The puck | Jumps to the new current row in the same frame. It has a short 2px edge on its left, so the row is told by shape as well as by fill |
+| The puck | Jumps to the new current row in the same frame. It has a short 2px edge on its left, so the row is told by shape as well as by fill. The keyboard's focus ring is drawn on the puck too, so ring and fill are never in two places |
 | The pane | Swaps in the same frame, with no fade: it is the answer to the key, and a held J must never blank it |
 | The scroll | Moves only when the current row would leave the list, by the least distance |
 
@@ -37,6 +37,7 @@ Durations from the app: `--m-quick` 140ms, `--m-base` 220ms, `--m-slow` 360ms. O
 | 0 | The data | Changes; the puck stays where it is, under the row that will take the place |
 | 0 | The row's copy | Lies in a layer under the list. It fades out in 110ms; on dismiss it also slides 28px aside on `travel` |
 | 70ms | The rows after it | Close up on `hand`, from where they were, into the puck. By then the copy is almost gone |
+| | Quick moves | When rows are still moving from the last move, they close up at once, and a copy caught halfway keeps going to its place while it fades in 60ms |
 
 Undo plays it back: the row returns from 28px aside on `travel`, the others part on `hand`.
 
@@ -45,12 +46,12 @@ Undo plays it back: the row returns from 28px aside on `travel`, the others part
 | Time | Part | Motion |
 |---|---|---|
 | 0 | The data | The links are written; the group opens and becomes current |
-| 0 | Each linked thing | Its old row is lifted onto the flight layer with the carried shadow, takes its new row's width, and flies on `travel` so its mark and title land on the member row's mark and title. The member row appears as the copy lands |
+| 0 | Each linked thing | Its old row is lifted onto the flight layer; its shadow grows in over 160ms; it loses its tick and takes its new row's width less the member's indent, so its columns land on the row's columns. It flies on `travel`, measured without its scale and tilt, so its mark lands exactly on the member's mark. As it lands the member row appears under it, and the copy's shadow sinks and the copy fades in 120ms |
 | 0 | The group's row | Appears in place from 98.5% on `hand`, over the rows around it |
 | 0 | Rows that change order | Carry the list's ground while they cross, and the current row carries its own fill while the puck waits |
 | ~420ms | Rest | The group is open and current |
 
-**By drag**: a press that moves 6px lifts a copy at 102%, and its shadow grows in over 160ms. The row's place stays, at 32%. The copy follows the pointer one to one and leans up to 2.5° with its speed; held still for 90ms it stands up straight. The row under it lights with a 1.5px focus ring. **Letting go on it hands the carried copy itself to the link**, so it flies from under the pointer, with its tilt and speed, into the group. Esc, or letting go elsewhere, sends it home on `travel` with the speed the hand gave it.
+**By drag**: a press that moves 6px lifts a copy at 102%, and its shadow grows in over 160ms. The row's place stays, at 32%. The copy follows the pointer one to one and leans up to 2.5° with its speed; held still for 90ms it stands up straight. The row under it lights with a 1.5px focus ring. **Letting go on it hands the carried copy itself to the link**: the ring goes at once, and it flies from under the pointer with the speed the hand gave it, straightening, into the group, on top of everything. The row it was dropped on moves to its member place quietly, on the list's ground, with no shadow. Esc, or letting go elsewhere, sends it home on `travel` with the hand's speed.
 
 Undo flies each member back to its own row the same way.
 
@@ -64,16 +65,16 @@ Undo flies each member back to its own row the same way.
 | 170ms | The sentence | Rolls up to "Triage errors has it", clipped to its line |
 | 170ms | The mark | Flies from the row along an arc to Work in the sidebar, 420 to 760ms by distance |
 | On arrival | Work | Takes a small knock and an accent wash that fades over 640ms |
-| On arrival | The row | Leaves as above, or moves to its new place when the list still holds it (a held thing stays in "Errors on me", below what waits) |
+| On arrival | The row | Leaves as above, or moves to its new place when the list still holds it (a held thing stays in "Errors on me", below what waits). Either way the row after it in the old order becomes current, and stays in view |
 
-With several workflows the app's HandToMenu opens first, from 98% and 4px above, over 220ms, and closes in 120ms. ⌘Z during the chain stops it: the row stays, nothing leaves.
+With several workflows the app's HandToMenu opens first, from 98% and 4px above, over 220ms, and closes in 120ms. ⌘Z during the chain stops it: the mark in flight fades where it is in 120ms, Work receives nothing, and the row comes back as it was.
 
 ### Groups folding
 
 | Part | Motion |
 |---|---|
 | The chevron | Turns 90° over `--m-base` |
-| Members, unfolding | Come down 8px and fade in on `hand`, 18ms apart |
+| Members, unfolding | A drawer: the members lie in place under the list at full opacity, and the rows below the group, carrying the list's ground, slide down off them on `hand` |
 | Members, folding | Their copies fade under the list in 110ms; the rows under the group close up 70ms later |
 
 ### A signal section folding in the pane
@@ -104,10 +105,10 @@ Its body changes height on `hand` from its measured height, its chevron turns, a
 
 | Time | Part | Motion |
 |---|---|---|
-| 0 | The bar | Floats over the top of the list: it comes down 14px on `self` and fades in over 220ms. The list does not move |
+| 0 | The pill | Appears in the list head, beside the count, where it covers nothing: solid from the first frame, it grows from its centre over 200ms, and its words fade in over 80ms. The list does not move |
 | 0 | The sidebar's count | Ticks up 4px over 260ms |
 | `.` | The list | Scrolls to the first new row, which becomes current. The new rows come down 20px on `travel` 220ms later, 40ms apart, with a marigold wash that fades over 1.8s |
-| `.` | The bar | Rises 10px and fades on `hand` |
+| `.` | The pill | Leaves the head as the list's order words come back |
 
 ### The pane's edge
 

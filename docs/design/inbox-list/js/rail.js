@@ -79,7 +79,7 @@ window.Rail = (function () {
         var scope = browseScope(p.source, p.account, p.field, p.value);
         var n = Model.facetValues(p.source, p.field, p.account).find(function (v) { return v.value === p.value; });
         var accounts = Model.accountsOf(p.source);
-        var suffix = accounts.length > 1 && p.account ? '<span class="rl-acct-in"> · ' + D.esc(p.account) + "</span>" : "";
+        var suffix = p.account && (accounts.length > 1 || World.ACCOUNTS[p.source].length > 1) ? '<span class="rl-acct-in"> · ' + D.esc(p.account) + "</span>" : "";
         html += '<div class="rl-pair">' + row({ scope: scope, cls: "rl-row--pin" }, '<span class="rl-ic">' + D.mark(p.source, 16) + '</span><span class="rl-name">' + D.esc(p.value) + suffix + "</span>" + count(n ? n.n : 0), isOn(state, scope)) + star(p, true, p.value) + "</div>";
       });
       html += "</div>";

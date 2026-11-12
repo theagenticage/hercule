@@ -20,7 +20,7 @@
   <div class="ib" id="ib">
     <div class="ib-bar">
       <nav class="pill ib-pill" aria-label="Inbox views"><span class="ptab is-on" aria-current="page">Inbox</span><a class="ptab" href="#intake">Intake</a></nav>
-      <button type="button" class="tool ib-scope" id="scope-btn" aria-haspopup="menu" aria-expanded="false"><span>Someone waits on me</span></button>
+      <button type="button" class="tool ib-scope" id="scope-btn" aria-controls="scope-pop" aria-expanded="false"><span>Someone waits on me</span></button>
       <div class="sx" id="sx" role="search">
         <span class="sx-ic"></span>
         <span class="sx-chips" id="sx-chips"></span>
@@ -36,7 +36,6 @@
     <section class="ib-list" aria-label="The list">
       <div class="lh" id="list-head"></div>
       <div class="ib-failing" id="failing" role="status" hidden></div>
-      <button type="button" class="newbar" id="newbar" hidden><span data-new-n>3 new</span><span class="newbar-show">Show<kbd class="kbd-dot" aria-label="period">.</kbd></span></button>
       <div class="ib-scroll" id="list-scroll">
         <div class="leaving" id="leaving" aria-hidden="true"></div>
         <div class="puck" id="puck" aria-hidden="true" hidden></div>
@@ -47,7 +46,7 @@
     </section>
     <div class="edge" id="edge" role="separator" aria-orientation="vertical" aria-label="Resize the pane" aria-valuemin="360" aria-valuemax="640" aria-valuenow="420" tabindex="0"></div>
     <aside class="ib-pane" id="pane" aria-label="Detail"></aside>
-    <div class="undo-line" id="undo" role="status" inert></div>
+    <div class="undo-line" id="undo" inert></div>
     <section class="keys-sheet" id="keys" role="dialog" aria-label="Keys" hidden></section>
   </div>
 </main>
@@ -88,7 +87,7 @@
   Bar.start();
   App.boot();
   Rail.start(App.el.rail); List.start(App.el.list); Pane.start(App.el.pane); Dialog.start(); Drag.start(App.el.list); Keys.start(); Edge.start();
-  document.getElementById("newbar").addEventListener("click", Moves.showNew);
+  document.getElementById("list-head").addEventListener("click", function (e) { if (e.target.closest("[data-newbar]")) Moves.showNew(); });
   document.querySelector(".sx-ic").innerHTML = Draw.icon("search", 14);
   Scenes.after(new URLSearchParams(location.search).get("scene"));
   // The story page's buttons send a frame a move to show.

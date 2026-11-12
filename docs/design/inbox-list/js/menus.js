@@ -11,6 +11,7 @@ window.Menus = (function () {
     if (Motion.isReduced()) el.hidden = true;
     else el.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-2px) scale(.99)" }], { duration: 120, easing: "ease-in" }).finished.then(function () { if (!open || open.el !== el) el.hidden = true; });
     var back = open.back;
+    if (back && back.getAttribute && back.hasAttribute("aria-expanded")) back.setAttribute("aria-expanded", "false");
     open = null;
     if (back && back.focus) back.focus({ preventScroll: true });
   }
@@ -32,7 +33,7 @@ window.Menus = (function () {
     var ok = offers.filter(function (o) { return !o.off; });
     var off = offers.filter(function (o) { return o.off; });
     el.innerHTML = '<p class="hand-menu-heading">Hand to</p>' + ok.map(function (o, i) {
-      return '<button type="button" role="menuitem" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? "<kbd>" + (i + 1) + "</kbd>" : "") + "</button>";
+      return '<button type="button" role="menuitem" tabindex="-1" class="hand-row' + (i === 0 ? " is-active" : "") + '" data-hand-row="' + i + '" aria-label="' + D.esc(o.w.name + ". " + o.line) + '" aria-keyshortcuts="' + (i + 1) + '"><span aria-hidden="true">' + D.face(o.w.name, "idle", 28) + '</span><span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.line) + "</small></span>" + (i < 3 ? '<kbd aria-hidden="true">' + (i + 1) + "</kbd>" : "") + "</button>";
     }).join("") + '<p class="hand-acct">' + D.icon("connections", 12) + 'Acts as <b>northwind-bot</b><button type="button" class="link" data-hand-acct>Change</button></p>' +
       (off.length ? '<i class="hand-menu-line"></i>' + off.map(function (o) { return '<div role="menuitem" aria-disabled="true" tabindex="-1" class="hand-row">' + D.face(o.w.name, "idle", 28) + '<span class="hand-row-words"><b>' + D.esc(o.w.name) + "</b><small>" + D.esc(o.off) + "</small></span></div>"; }).join("") : "");
     el.hidden = false;
@@ -86,6 +87,15 @@ window.Menus = (function () {
   function popoverKey(e) {
     var pop = ["narrow", "scope-pop"].map(function (id) { return document.getElementById(id); }).find(function (el) { return el && !el.hidden; });
     if (!pop) return false;
+    // A menu handles keys only while the focus is in it; Tab leaves and closes it.
+    if (!pop.contains(document.activeElement) || e.key === "Tab") {
+      if (pop.id === "narrow") Bar.closeNarrow(); else { pop.hidden = true; var sb0 = document.getElementById("scope-btn"); if (sb0) sb0.setAttribute("aria-expanded", "false"); }
+      return false;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      var f = document.activeElement;
+      if (f && pop.contains(f) && f.matches("button")) { var keep = f.matches("[data-fold], [data-more], [data-nf], [data-nback]"); f.click(); if (keep) setTimeout(function () { var again = pop.querySelector(".menu-pick, [data-scope]"); if (again && !pop.contains(document.activeElement)) again.focus(); }, 0); return true; }
+    }
     var items = Array.prototype.slice.call(pop.querySelectorAll(".menu-pick, [data-scope], [data-fold], [data-more]"));
     var at = items.findIndex(function (b) { return b.classList.contains("is-active"); });
     var k = e.key;
@@ -106,6 +116,15 @@ window.Menus = (function () {
   /** Handles a key while a menu is open. Returns true when the menu took it. */
   function key(e) {
     if (!open) return popoverKey(e);
+    // A menu handles keys only while the focus is in it; Tab, or the focus going anywhere else, closes it.
+    if (e.key === "Tab" || !open.el.contains(document.activeElement)) { close(); return false; }
+    if (e.key === "Enter") {
+      var f = document.activeElement;
+      var all = Array.prototype.slice.call(open.el.querySelectorAll(open.kind === "hand" ? "[data-hand-row]" : open.kind === "pane" ? ".menu-pick" : "[data-lt]"));
+      var fi = all.indexOf(f);
+      if (fi >= 0) { open.pick(fi); return true; }
+      if (f && f.matches("button") && !f.matches("[data-hand-row]")) return false;
+    }
     var k = e.key;
     if (k === "Escape") { close(); return true; }
     var sel = open.kind === "hand" ? "[data-hand-row]" : open.kind === "pane" ? ".menu-pick" : "[data-lt]";
@@ -117,6 +136,7 @@ window.Menus = (function () {
       return true;
     }
     if (k === "Enter") { open.pick(open.active); return true; }
+    if (k === " ") return false;
     if (open.kind === "hand" && /^[1-9]$/.test(k)) { var n = +k - 1; if (n < Math.min(3, open.n)) open.pick(n); return true; }
     if (k === "Tab") return false;
     return open.kind === "hand" || open.kind === "pane";
@@ -129,8 +149,8 @@ window.Menus = (function () {
     var src = r && r.thing ? Kinds.SOURCES[Model.sourceOf(r.thing)] : null;
     var w = App.state.paneW;
     var widths = [["Narrow", 360], ["Default", 420], ["Wide", 560]];
-    el.innerHTML = (src ? '<button type="button" role="menuitem" class="menu-pick" data-pm="open">' + D.icon("external", 14) + "<span>" + D.esc(src.open) + '</span><kbd aria-hidden="true">O</kbd></button><i class="menu-line"></i>' : "") +
-      '<p class="menu-h">Pane width</p>' + widths.map(function (x) { return '<button type="button" role="menuitemradio" aria-checked="' + (w === x[1]) + '" class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join("");
+    el.innerHTML = (src ? '<button type="button" role="menuitem" tabindex="-1" class="menu-pick" data-pm="open">' + D.icon("external", 14) + "<span>" + D.esc(src.open) + '</span><kbd aria-hidden="true">O</kbd></button><i class="menu-line"></i>' : "") +
+      '<p class="menu-h">Pane width</p>' + widths.map(function (x) { return '<button type="button" role="menuitemradio" tabindex="-1" aria-checked="' + (w === x[1]) + '" class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join("");
     el.hidden = false;
     place(el, button);
     button.setAttribute("aria-expanded", "true");
@@ -140,7 +160,7 @@ window.Menus = (function () {
     el.onclick = function (e) {
       var o = e.target.closest("[data-pm]"), pw = e.target.closest("[data-pm-w]");
       if (o) { close(); Moves.say("Opening it at its source…"); }
-      if (pw) { close(); App.setPaneWidth(+pw.dataset.pmW); button.setAttribute("aria-expanded", "false"); }
+      if (pw) { close(); App.setPaneWidth(+pw.dataset.pmW); document.getElementById("edge").setAttribute("aria-valuenow", App.state.paneW); }
     };
   }
 

@@ -64,7 +64,7 @@ window.App = (function () {
       // While searching, a group whose hit is one of its members opens, so the hit is in sight.
       var searching = state.search.text || state.search.clauses.length;
       var isOpen = state.open.has(u.key) || (searching && u.hits.some(function (h) { return h !== g.lead; }));
-      flat.push({ key: u.key, type: "group", group: g, hits: u.hits, best: u.best, open: isOpen });
+      flat.push({ key: u.key, type: "group", group: g, hits: u.hits, best: u.best, open: !!isOpen });
       if (!isOpen) return;
       var hitIds = new Set(u.hits.map(function (h) { return h.id; }));
       // Members that answer the query first, then the rest, each by the saved query's order.
@@ -83,16 +83,29 @@ window.App = (function () {
 
   function render(opts) {
     opts = opts || {};
-    // Only a focus that was in the list is given back to its new current row.
-    var keep = el.list && el.list.contains(document.activeElement);
+    var ae = document.activeElement;
+    // Where the focus was decides whether the new current row takes it: from the list always, and from
+    // the pane or the selection bar when the control it was on is gone.
+    var was = !el.list ? null : el.list.contains(ae) ? "list" : el.pane.contains(ae) || document.getElementById("selbar").contains(ae) ? "pane" : null;
+    var before = state.focus;
     state.rows = buildFlat();
+    var after = state.focusAfter;
+    // A move that keeps its place: the row after the handled one, in the old order, becomes current,
+    // also when the handled thing is still in the list somewhere else.
+    if (state.focusHint != null && after && opts.keepPlace) {
+      var nextKey = after.find(function (k) { return state.rows.some(function (r) { return r.key === k; }); });
+      if (nextKey) state.focus = nextKey;
+    }
     if (!state.rows.some(function (r) { return r.key === state.focus; })) {
+      var found = after ? after.find(function (k) { return state.rows.some(function (r) { return r.key === k; }); }) : null;
       var hint = state.focusHint;
-      var at = hint != null && hint >= 0 ? state.rows[Math.min(hint, state.rows.length - 1)] : null;
+      var at = found ? state.rows.find(function (r) { return r.key === found; }) : hint != null && hint >= 0 ? state.rows[Math.min(hint, state.rows.length - 1)] : null;
       if (at && at.type === "more") at = state.rows[Math.max(0, state.rows.indexOf(at) - 1)];
       state.focus = at ? at.key : state.rows.length ? (state.rows.find(function (r) { return r.type !== "more"; }) || {}).key || null : null;
     }
+    if (state.focus !== before && state.focusHint != null) state.movedAt = performance.now();
     state.focusHint = null;
+    state.focusAfter = null;
     Rail.draw(el.rail, state);
     List.draw(el.list, el.listHead, state, opts);
     Pane.draw(el.pane, state, opts);
@@ -100,10 +113,13 @@ window.App = (function () {
     var n = Model.countSaved("waits");
     var c = document.querySelector("[data-inbox-count]");
     if (c) { c.textContent = n; c.style.display = n ? "" : "none"; }
-    // After a move the row under the keys is a new element: give it the focus, so the ring stays.
-    if (keep && (!document.activeElement || document.activeElement === document.body) && !Dialog.isOpen()) {
-      var cur = el.list.querySelector('[data-key="' + state.focus + '"]');
-      if (cur) cur.focus({ preventScroll: true });
+    var cur = el.list.querySelector('[data-key="' + state.focus + '"]');
+    if (!Dialog.isOpen() && cur) {
+      var now = document.activeElement;
+      if ((was === "list" && now !== cur) || (was === "pane" && (now === document.body || !now || !now.isConnected))) cur.focus({ preventScroll: true });
+      // The current row is never left out of sight.
+      var box = el.list.parentElement.getBoundingClientRect(), r = cur.getBoundingClientRect();
+      if (r.top < box.top || r.bottom > box.bottom) cur.scrollIntoView({ block: "nearest" });
     }
   }
 
@@ -119,8 +135,12 @@ window.App = (function () {
     return r.things || [];
   }
 
+  /** Sets the pane's width: 360 to 640, and never so wide that the list gets less than 400px. */
   function setPaneWidth(w) {
-    state.paneW = Math.round(Math.max(360, Math.min(640, w)));
+    var main = el.ib.getBoundingClientRect().width || innerWidth - 272;
+    var rail = matchMedia("(max-width: 1329px)").matches ? 0 : 240;
+    var max = Math.max(360, Math.min(640, main - rail - 400));
+    state.paneW = Math.round(Math.max(360, Math.min(max, w)));
     el.ib.style.setProperty("--pane-w", state.paneW + "px");
   }
 

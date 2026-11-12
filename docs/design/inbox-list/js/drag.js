@@ -54,12 +54,16 @@ window.Drag = (function () {
     document.documentElement.classList.remove("is-carrying");
     dropped = performance.now();
     if (c.target) c.target.classList.remove("is-drop");
+    c.ghost.classList.remove("is-over");
     var b = Motion.body(c.ghost);
     clearTimeout(c.relax);
     if (!cancel && c.target) {
       var targetId = c.target.dataset.id || c.target.dataset.group;
       c.row.classList.remove("is-lifted");
       // The carried copy itself flies into the group, from where it is, with its tilt and speed.
+      // It flies on with the speed the hand gave it.
+      b.speed.x = c.vx * 60;
+      b.speed.y = c.vy * 60;
       if (Moves.link([targetId, c.id], "drag", { id: c.id, ghost: c.ghost })) return;
       Moves.say("These are linked already.");
     }
@@ -74,7 +78,7 @@ window.Drag = (function () {
     host.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
       var row = e.target.closest("[data-key]");
-      if (!row || !row.dataset.id || e.target.closest("[data-tick], [data-fold-group], [data-row-act], button, a")) return;
+      if (!row || !row.dataset.id || row.classList.contains("row--triage") || e.target.closest("[data-tick], [data-fold-group], [data-row-act], button, a")) return;
       var x0 = e.clientX, y0 = e.clientY, started = false;
       var onMove = function (ev) {
         if (!started && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) { started = true; begin(ev, row); }

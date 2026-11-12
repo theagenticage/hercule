@@ -234,7 +234,7 @@ for (const load of ["light", "extreme"]) { const p = await open(`load=${load}`);
 {
   const p = await open("theme=whitehaven&scene=arrive");
   await settle(p, 1700);
-  await expect(p, "arrivals wait behind the bar", () => !document.getElementById("newbar").hidden && App.state.pending.length === 3 && !App.state.rows.some((r) => r.thing && r.thing.id === "pr-6281"));
+  await expect(p, "arrivals wait behind the bar", () => !!document.querySelector("[data-newbar]") && App.state.pending.length === 3 && !App.state.rows.some((r) => r.thing && r.thing.id === "pr-6281"));
   await key(p, ".");
   await settle(p, 900);
   await expect(p, ". shows them", () => App.state.pending.length === 0 && App.state.rows.some((r) => r.thing && r.thing.id === "pr-6281"));
@@ -264,11 +264,11 @@ for (const load of ["light", "extreme"]) { const p = await open(`load=${load}`);
 // ---- Round-one regressions ----
 {
   const p = await open("theme=whitehaven&scene=pr");
-  await p.focus('#pane [data-move="take"]');
+  await expect(p, "a folded ask's answers are out of reach", () => document.querySelector('#pane [data-signal="s2"] .sig-body').inert === true);
+  await p.focus('#pane [data-done="s3"]');
   await key(p, "Enter");
   await settle(p);
-  await expect(p, "↩ on a focused button runs that button, not the suggested answer", () => !Model.byId("pr-6244").signals.find((x) => x.kind === "mention").done);
-  await expect(p, "a folded ask's answers are out of reach", () => document.querySelector('#pane [data-signal="s2"] .sig-body').inert === true);
+  await expect(p, "↩ on a focused button runs that button, not the suggested answer", () => Model.byId("pr-6244").signals.find((x) => x.id === "s3").done && !Model.byId("pr-6244").signals.find((x) => x.id === "s2").done);
   await p.close();
 }
 {
@@ -324,6 +324,80 @@ for (const s of ["pr", "accounts", "selection", "reply", "proposal"]) {
   await settle(p, 300);
   await expect(p, `the pane footer fits (${s})`, () => { const f = document.querySelector("#pane .pn-foot"); return !f || f.scrollWidth <= f.clientWidth + 1; });
   await p.close();
+}
+
+// ---- Round-two regressions ----
+{
+  const p = await open("theme=whitehaven");
+  await expect(p, "a closed group says it is closed", () => document.querySelector('[data-key="g:shop-142"]').getAttribute("aria-expanded") === "false");
+  await key(p, "/");
+  await p.keyboard.type("team:Ch");
+  await settle(p, 200);
+  await key(p, "Enter");
+  await expect(p, "↩ on a half-typed value takes the highlighted value", () => App.state.search.clauses.length === 1 && App.state.search.clauses[0].value === "Checkout");
+  await key(p, "Backspace");
+  await key(p, "Backspace");
+  await expect(p, "⌫ with no query never changes the saved query", () => App.state.scope.saved === "waits");
+  await key(p, "Escape");
+  await p.focus(".side .nav-row");
+  await key(p, "e");
+  await key(p, "3");
+  await expect(p, "single keys do nothing from the sidebar", () => Model.gone.size === 0 && App.state.scope.saved === "waits");
+  await p.evaluate(() => App.focusRow("r:pr-6213"));
+  await key(p, "l");
+  await settle(p, 200);
+  await p.keyboard.press("Tab");
+  await expect(p, "Tab out of Link to… closes it", () => document.getElementById("linkto").hidden);
+  await key(p, "?");
+  await key(p, "Escape");
+  await expect(p, "Esc in the keys sheet closes it", () => document.getElementById("keys").hidden);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => { App.focusRow("r:gm-quote"); Moves.toggleSelect("gm-quote"); App.focusRow("r:pr-6230"); });
+  await expect(p, "one thing selected elsewhere gets the selection pane", () => /1 thing selected/.test(document.querySelector("#pane .pn-title").textContent));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:po-2291"));
+  await p.focus('[data-key="r:po-2291"]');
+  await key(p, "e");
+  await p.waitForTimeout(150);
+  const onGroup = await p.evaluate(() => App.currentRow() && App.currentRow().type === "group");
+  if (onGroup) { await key(p, "e"); await expect(p, "a quick E never dismisses a group that just came under the keys", () => !Model.gone.has("shop-142") && !Model.gone.has("pay-88")); }
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=new");
+  await settle(p, 300);
+  await key(p, ".");
+  await settle(p, 900);
+  await expect(p, ". makes the first new row current and puts it in view", () => { const r = App.currentRow(); const el = document.querySelector('[data-key="' + App.state.focus + '"]').getBoundingClientRect(); const box = document.getElementById("list-scroll").getBoundingClientRect(); return r && r.thing && ["pr-6281", "gm-crates2", "sl-2270"].includes(r.thing.id) && el.top >= box.top && el.bottom <= box.bottom; });
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=pr");
+  await expect(p, "the hand-off face is drawn whole", () => { const f = document.querySelector("#pane .pn-faces svg"); return !f || Math.round(f.getBoundingClientRect().width) === 18; });
+  await p.evaluate(() => App.setPaneWidth(640));
+  await expect(p, "the pane never squeezes the list under 400px", () => document.querySelector(".ib-list").getBoundingClientRect().width >= 399);
+  await p.close();
+}
+{
+  const ctx2 = await browser.newContext({ viewport: { width: 880, height: 700 } });
+  const p = await ctx2.newPage();
+  p.on("pageerror", (e) => fail(`stacked: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven");
+  await p.waitForSelector("html[data-ready]");
+  await p.evaluate(() => App.focusRow("r:pr-6213", { keyboard: true }));
+  await key(p, "Enter");
+  await settle(p, 400);
+  await expect(p, "under 900px ↩ slides the pane in over the list", () => { const r = document.getElementById("pane").getBoundingClientRect(); return r.width > 300 && r.right <= innerWidth + 1 && r.left >= 0; });
+  await key(p, "Escape");
+  await settle(p, 400);
+  await expect(p, "Esc slides it out and the row has the focus", () => !document.getElementById("ib").classList.contains("is-pane-open") && document.activeElement.dataset.key === "r:pr-6213");
+  await ctx2.close();
 }
 
 await browser.close();

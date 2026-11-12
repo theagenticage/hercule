@@ -57,7 +57,7 @@ And the ones rejected:
 - **The bar** is a subgrid of the three columns: the pill sits over the rail, the search over the list, and the keys button over the pane. The pill reads `Inbox | Intake`, as Work's reads `Overview | Office | Work`, because Intake stays a tab until #1048.
 - **The rail** is 240px on the page's ground, with a divider. The list is on the same ground. **The pane** is on `--surface`, a step lighter in the light themes and a step lifted in the dark ones, because it is for reading.
 - **The pane resizes** from 360 to 640px by its edge (drag, or focus it and use the arrows; a double click springs it back to 420). The rail does not resize.
-- **Under 1100px** the rail folds into a menu in the bar ("Someone waits on me ▾") that holds the same rail, and the pane takes at most 42% of the main area.
+- **Under 1330px** the rail folds into a menu in the bar ("Someone waits on me ▾") that holds the same rail. The pane never takes so much that the list gets less than 400px: its widest is the main area less the rail and 400.
 
 ## The rail
 
@@ -92,7 +92,7 @@ A row is two lines in 52px: 18 and 16 with 2 between and 8 above and below. Text
 |---|---|---|
 | Mark | The plugin's mark and hue | In the source's hue at the theme's mark strength, or in ink when the plugin declares none |
 | Title | The thing | The one medium weight in the row. One line, cut at the end; the pane shows all of it |
-| Time | What the list is ordered by | In a "Longest waiting first" list, the wait of the oldest open ask, against the patience of its kind: `fresh` and `recent` faint, `due` muted medium, `over` ink semibold. In a "Newest first" list, when it last changed, faint, and only an overdue wait shows instead. A group shows the time of the member that placed it, so the column always reads in order |
+| Time | What the list is ordered by | In a "Longest waiting first" list, the wait of the oldest open ask, against the patience of its kind: `fresh` and `recent` faint, `due` muted medium, `over` ink semibold; a thing that asks nothing has no time there. In a "Newest first" list, when it last changed, faint, and only an overdue wait shows instead. A group shows the time of the member that placed it, so the column always reads in order |
 | Glyph | The kind's status: a shape and a tone | The shape is one of the core's set. The tone is the source's hue, quiet, good or bad. A kind with no status leaves the slot empty |
 | Reason | The newest open ask, or what changed | The person's name in ink, the rest muted: "**Mei** asked for your review". `+1` says how many more asks there are. A thing that asks nothing says its status, its fact and its context, faint |
 | Where | The kind's `place` field and its identifier | Faint, at most 46% of the line, cut first. Beside a long identifier the place is left to the pane rather than cut to a stub. Identifiers are set in proportional figures, so `PO-2291` keeps its tight hyphen |
@@ -100,7 +100,7 @@ A row is two lines in 52px: 18 and 16 with 2 between and 8 above and below. Text
 
 - **Current row**: a puck under the list with the `--selected` fill and a short 2px edge on its left, so it is told by shape too. Rows move into it; it does not move with them. With the keyboard, a 2px focus ring inside the row.
 - **Hover**: the `--hover` fill, and the row's moves at its right end, over the wait and the place on their own ground: Start a thread, Take on, the hand-off's face, Dismiss. Each tooltip names its key. Over the mark, the mark makes way for a tick.
-- **Selected (X)**: the tick stays, filled in ink. A picked group shows the tick in its chevron's place. The fill stays for the current row alone.
+- **Selected (X)**: the tick stays, filled in ink. X on a group picks the members the list's query holds, ⇧X the whole group, and the group then shows the tick in its chevron's place. ⌘A picks what the list shows. The fill stays for the current row alone.
 - **Quiet**: a row that asks nothing has its reason faint.
 
 The list head says what the list is, its count, the saved query's order in words, and **Narrow**. The order belongs to the saved query ("Longest waiting first", "Newest first"), so there is no sort control.
@@ -121,7 +121,7 @@ Every set of things linked to each other, by a source or a person, is one group 
 Proposals and Hercule's link suggestions have their own rail entry, and the first three stand at the top of "Someone waits on me", over a hairline. More than three leave a row "8 more in Triage ›" that opens the entry.
 
 - **A Proposal row**: the face of the agent that made it in the mark column, its title, and "**Proposal** Triage made it from 3 things" with the things' marks on the right. Its pane says why, lists the things, and names the Task it makes. T accepts, N accepts and starts a thread, E dismisses.
-- **A link suggestion row**: Hercule's face, the first thing's title, and "**Link?** With ▣ SHOP-150 Delivery slots take four seconds…". Its pane asks "Do these belong together?", says why, and shows the pair. L links them, as the user's own links. E says "Not related", and Hercule never suggests the pair again.
+- **A link suggestion row**: Hercule's face, the pair as its title ("#6251 and SHOP-150", so no thing's title shows twice on the screen), and "**Link?**" with Hercule's reason, and the pair's marks on the right. Its pane asks "Do these belong together?", says why, and shows the pair. L links them, as the user's own links. E says "Not related", and Hercule never suggests the pair again.
 - The words "Proposal" and "Link?" are in the triage accent, marigold, the app's colour for what is addressed to you. Nothing else in the list is marigold.
 
 ## The pane
@@ -132,11 +132,11 @@ Top to bottom, each part only when it has something:
 2. **The title**, in full, 18/24 semibold, with its identifier faint after it. It wraps with `text-wrap: pretty`, so the identifier never sits alone.
 3. **The meta line**: the status glyph and word, who and when, and the declared facts.
 4. **Who has it**, when a Task holds it: the face or monogram, the Task, and "Go to the Task G".
-5. **One section per open signal**, newest first and unfolded, the others folded to one line (decision 16). Each section has a marigold dot, who asks what, and when; its own blocks (the message that mentions you, with the app's marigold rule); its answers, with the plugin's suggested answer filled and `↩` on it; Done, quiet, at the end; and under them the describe line of the answer under the pointer or the focus. An answer with a field opens its reply box inside the section.
+5. **One section per open signal**, the others folded to one line (decision 16). The one unfolded first is the ask the saved query is about (in Review requests, the review request), else the newest. The current ask, the one ↩ answers, has an ink edge; only its suggested answer is filled and carries ↩. `[` and `]` change the current ask while the focus stays in the list. Each section has a marigold dot, who asks what, and when; its own blocks (the message that mentions you, with the app's marigold rule); its answers, with the plugin's suggested answer filled and `↩` on it; Done, quiet, at the end; and under them the describe line of the answer under the pointer or the focus. An answer with a field opens its reply box inside the section.
 6. **The plugin's blocks**: text, messages, change, checks, fields, trend and code, at most eight. A type the app does not know draws "This part can't be shown here."
 7. **Linked**: what it is linked to, each with who claims it ("Linear reports this", "You linked this") and, for a person's link, Unlink on hover.
 8. **What happened**: the timeline, newest first.
-9. **The footer**: the core's moves. Start a thread (N), Take on (T), the hand-off (H: the workflow's face and name, or "Hand to…", cut at 150px), then Link (L) and Dismiss (E) as icon buttons at the end. The key chips show from 460px of pane; below that, the keys are in the tooltips and the keys sheet. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
+9. **The footer**: the core's moves, each with its key. Thread (N), Take on (T), the hand-off (H: the workflow's face, and from 460px its name), then Link (L) and Dismiss (E) as icon buttons at the end. Under 400px each move is an icon, with its name and key in the tooltip. The words are the selection bar's words. No move is filled: the one filled button on the pane is the suggested answer of the open ask. The ⋯ menu opens the thing at its source (O) and sets the pane's width (Narrow, Default, Wide), for anyone who cannot drag the edge.
 
 The pane of a group lists its members (each walks to the member), then how they are linked, each pair with its claim. Its footer has Start a thread on all, Take on, Link and Dismiss. It has no hand-off (decision 14), and H says why in the undo line.
 
@@ -204,7 +204,7 @@ N opens the app's glass dialog around the real composer of the new-thread screen
 | Nothing matches | What was searched, and "Clear the search Esc" |
 | Offline | One quiet pill in the bar: "Offline since 09:12 · 2 moves wait to be sent". Moves still work and wait in the outbox, so nothing dims, and each undo line says it waits |
 | A selection of two or more | The pane shows the selection: what is in it, and Link, Start a thread, Take on, Dismiss |
-| Under 900px, or 200% zoom | The pane lies over the list: ↩ or a click slides it in, Esc or "List" slides it out |
+| Under 900px, or 200% zoom | The pane lies over the whole width of the list: ↩ or a click slides it in, Esc or "List" slides it out, and the focus goes back to the row |
 | A source that can't be read | A line over the list naming it and what it means, with a way to Connections, and a mark on its row in Browse |
 | N new | A glass pill at the top of the list: a marigold dot, "3 new", "Show ." It holds back what arrived until you ask |
 | Light day | Five things; the list is short, nothing else changes |
@@ -266,7 +266,7 @@ Each is a choice the map left open, made for the best design. Each can be turned
 11. **Hand-off on a group or a selection** refuses in the undo line with the reason and what to do instead. No disabled button stands in the footer.
 12. **Selecting**: under the pointer the mark makes way for a tick, and a selected row keeps its tick.
 13. **Colours**: GitHub and Gmail without a hue; glyphs 14% quieter than marks; health in the app's green, attention and tomato; the triage accent in marigold.
-14. **Under 1100px** the rail becomes a menu in the bar.
+14. **Under 1330px** the rail becomes a menu in the bar, so the list keeps at least 400px.
 15. **The pane's link to the source** is an icon button with its words in the tooltip. "Open on GitHub" in words did not fit beside the provenance at 420px.
 16. **The pane on `--surface`**, a step off the list's ground.
 17. **Faces on triage rows**: the agent that made a Proposal, and Hercule for a link.
@@ -283,6 +283,10 @@ Each is a choice the map left open, made for the best design. Each can be turned
 28. **A selection gets the pane**: two or more selected, the pane shows them and what a selection can do.
 29. **Unsent words are kept**: closing the dialog keeps what was typed for those things, and N opens it again. A starter replaces your words through the field, so ⌘Z in the field brings them back. The last chip cannot be removed.
 30. **Under 900px** (and at 200% zoom) the pane lies over the list.
+31. **The focus follows the current row**: after any move from the list or the pane, the new current row takes the focus, and it is always scrolled into view. A move that keeps its place makes the next row in the old order current, even when the handled thing stays elsewhere in the list.
+32. **A group that just came under the keys** takes its own, fresh E: an E within 0.6s of the move says the group is there and does nothing.
+33. **Answers already sent** say so on ⌘Z: "Already sent to GitHub, so it can't be taken back here."
+34. **Arrivals** wait in a pill in the list head, beside the count, where they cover nothing.
 
 ## Proposed changes to #1119
 
@@ -304,6 +308,11 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **Visual**: the pane's footer ran off the window; the dialog's popovers were clipped, so "Choose a project" was a dead end; the time column contradicted the list's order; a picked group showed nothing; the triage disc was the loudest thing on screen; GitHub and Gmail marks outweighed the others; at risk read as marigold; the three column heads sat at three heights; identifiers looked spaced out. All fixed.
 - **Accessibility**: the list is now a tree with real selection, levels and full row names; folded asks are inert; the dialog is modal; the search and Link to… are comboboxes; the rail is one Tab stop; pins are reachable by keyboard; a live region speaks undo lines, arrivals and result counts; the pane can be resized without a drag; 200% zoom stacks the pane. Every text role already passed AA in all six themes.
 
+**Round two** checked every round-one finding (most fixed, some only partly) and found new ones, mostly where one move changes several things at once and where the width changes:
+
+- **Musts fixed**: unfolding a group showed words over words (now a drawer); a reorder after a hand-off could carry the current row off screen; under 900px and at 200% zoom the pane opened 1px wide; a dropped card read as a rejection (the target lifted over it, the green ring rode home, it landed 4px off); the list had no minimum width; the hand-off face was cut in half; the search's ↩ ignored the highlighted value; the pane could act on a selected thing it was not showing; ⌘Z could "un-send" an answer already sent; focus stayed on a stale row, so keys acted on another; closed groups reported "expanded"; menus acted on their first item wherever the focus was; single keys still acted from the sidebar.
+- **Should-fixes taken**: ↩ answers the ask the list is about; only the current ask is filled; `[` `]` keep the focus; ⌘A and X pick what the list shows; the next current row comes from the old order; the scope menu, Tab and Esc behave in every menu and sheet; the rail folds at 1330px; identifiers in the dialog and Link to… lose their spaced hyphens; lines on the 4px grid; the link suggestion names its pair.
+
 ## Tried and dropped
 
 - **Count and title in one cell.** A group's "14 things" sat after its label and was the first thing cut. It moved to the right of the second line, with the marks.
@@ -313,6 +322,9 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 - **"Hand-off takes one thing"** as a note in a group's footer. It wrapped to three lines and explained a refusal nobody had asked for.
 - **Eleven triage rows at the top** under the extreme load. Capped at three.
 - **"Named after PAY-88, its most lasting thing"** under a group's title. It explained the rule, not the group.
+- **New members fading in over the rows below.** Unfolding now opens like a drawer.
+- **The "N new" pill floating over the first row.** It covered the current row's title; it sits in the list head.
+- **A selection of one keeping the current row's pane.** The footer acted on the selection while the pane showed another thing.
 - **A fade on the pane when walking.** Held J kept it between 0 and 70% opacity. It swaps at once now.
 - **Leaving copies over the list.** They showed words over words; they lie under it now.
 - **The current row's fill on the row.** It jumped down to the next row and rode back up with it. The puck stays put.
