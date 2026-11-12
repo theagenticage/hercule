@@ -1,42 +1,7 @@
-/* The open card of the Inbox: the sheet a card or a place opens into, and the
-   veil behind it. It is the drawing's `css/open.css` (`docs/design/inbox/` on
+/* The body of the Inbox's pane: the open card's words (head, facts, timeline,
+   places, moves). It is the drawing's `css/open.css` (`docs/design/inbox/` on
    the branch `prototype/inbox-hifi`) on the app's tokens, with its `.o-*`
-   names written `.open-card-*`. The sheet itself (its bounds, its corner, its
-   paper) is `screens/desk/opening-sheet.css`. */
-
-/* A flat veil with no blur: paper in the light themes, the scrim in the dark
-   ones (`--veil`). It fades with the sheet and takes no pointer once the
-   sheet is folding. It has no z-index on purpose: `OpeningSheet` draws it
-   before the sheet, so the sheet lies above it and takes its own clicks. */
-.open-card-veil {
-  position: fixed;
-  inset: 0;
-  background: var(--veil);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--m-slow) var(--m-ease);
-}
-.open-card-veil[data-on] {
-  opacity: 1;
-  pointer-events: auto;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .open-card-veil[data-on] {
-    animation: open-card-veil-in var(--m-slow) var(--m-ease);
-  }
-}
-@keyframes open-card-veil-in {
-  from {
-    opacity: 0;
-  }
-}
-
-/* A sheet whose words are taller than the window scrolls inside itself: the
-   drawing's `.o-in { max-height: calc(100vh - 32px); overflow: auto }`. The
-   sheet's height is capped at the window's when it is measured. */
-.open-card-sheet .opening-content {
-  overflow-y: auto;
-}
+   names written `.open-card-*`. */
 
 /* The words of the sheet. Its width is set when the sheet is measured, and its
    height is the sheet's. The sheet is lighter than --faint was set for on the
@@ -52,31 +17,6 @@
   color: var(--ink);
 }
 .open-card kbd {
-  color: var(--ink);
-}
-
-/* The line at the top that goes back to what the sheet showed before. */
-.open-card-back {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: calc(100% - 58px);
-  margin: -4px 16px 6px 42px;
-  color: var(--muted);
-  font: var(--type-summary);
-  text-align: left;
-}
-.open-card-back svg {
-  flex: none;
-  transform: rotate(180deg);
-}
-.open-card-back span {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.open-card-back:hover {
   color: var(--ink);
 }
 
@@ -200,16 +140,6 @@
 .open-card-said[data-tone="good"] {
   color: var(--ok);
 }
-.open-card-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 8px;
-  padding: 0 16px 0 45px;
-  color: var(--faint);
-  font: var(--type-summary);
-}
-
 /* Part of, Yours here: a quiet heading and rows. */
 .open-card-section {
   margin-top: 8px;
@@ -219,63 +149,6 @@
   margin: 0 0 4px;
   color: var(--muted);
   font: var(--w-medium) var(--t-12) / var(--line-16) var(--font-ui);
-}
-
-/* A place's contents: the places inside it with how they stand, and under each the cards of this page. */
-.open-card-inner-list,
-.open-card-inner > ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.open-card-inner {
-  margin-top: 4px;
-}
-.open-card-inner > ul {
-  margin-left: 8px;
-}
-.open-card-inner-go,
-.open-card-card-go {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 26px;
-  padding: 0 4px;
-  border-radius: var(--r-xs);
-  font: var(--type-summary);
-  text-align: left;
-}
-.open-card-card-go {
-  min-height: 24px;
-}
-.open-card-inner-go:hover,
-.open-card-card-go:hover {
-  background: var(--hover);
-}
-.open-card-go-title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  color: var(--ink);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.open-card-inner-go .open-card-go-title {
-  font-weight: var(--w-medium);
-}
-.open-card-go-status {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-}
-.open-card-go-end {
-  flex: none;
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
-  white-space: pre;
 }
 
 /* The moves and the answers of an opened line (`.open-card-answers`) share one column for their names,
