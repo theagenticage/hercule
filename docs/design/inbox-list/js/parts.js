@@ -19,19 +19,29 @@
         (opts.action ? '<button type="button" class="undo-line-button" data-undo-act aria-keyshortcuts="G" aria-label="' + D.esc(opts.action.label) + '" title="' + D.esc(opts.action.label) + '"><span class="undo-act-label">' + D.esc(opts.action.label) + '</span><kbd aria-hidden="true">' + opts.action.key + "</kbd></button>" : "") +
         (opts.undo ? '<button type="button" class="undo-line-button" data-undo aria-keyshortcuts="Meta+Z">' + D.icon("undo", 14) + 'Undo<kbd aria-hidden="true">⌘Z</kbd></button>' : "");
       el._entry = opts.entry || null;
+      // A line kept where it rose (the list widened under it) is placed afresh; while hidden, with no
+      // transition, so it rises straight where it now belongs.
+      if (!el.classList.contains("is-on") && el.style.getPropertyValue("--undo-line-x")) {
+        el.style.transition = "none";
+        el.style.removeProperty("--undo-line-x");
+        void el.offsetWidth;
+        el.style.transition = "";
+      } else el.style.removeProperty("--undo-line-x");
       el.classList.remove("is-tight");
       el.classList.toggle("is-wrap", !opts.undo && !opts.action);
       el.classList.add("is-on");
       el.removeAttribute("inert");
-      // A line that does not fit shortens the thing's title first, to 12 letters at least; only then do
-      // the buttons drop their labels.
+      // A line that does not fit shortens the thing's title first, at a word, to 12 letters at least;
+      // then it leaves the title out ("Handed to Review PR"); only then do the buttons drop their labels.
       var words = el.querySelector(".undo-text");
       var fits = function () { return words.scrollWidth <= words.clientWidth + 1; };
       var quoted = /“([^”]*)”/.exec(text);
+      var atWord = function (s, n) { var t = s.slice(0, n), sp = t.lastIndexOf(" "); return (sp >= 8 ? t.slice(0, sp) : t).replace(/[\s,.:;–-]+$/, ""); };
       for (var keep = quoted ? quoted[1].replace(/…$/, "").length : 0; !fits() && keep > 12; ) {
         keep = Math.max(12, keep - 3);
-        words.textContent = text.replace(quoted[0], "“" + quoted[1].slice(0, keep).trimEnd() + "…”");
+        words.textContent = text.replace(quoted[0], "“" + atWord(quoted[1], keep) + "…”");
       }
+      if (!fits() && quoted) words.textContent = text.replace(/[:,]?\s*“[^”]*”/, "");
       if (!fits()) el.classList.add("is-tight");
       var spoken = [text, opts.note, opts.undo ? "Command Z undoes it" : ""].filter(Boolean).map(function (x) { return x.replace(/[.\s]+$/, ""); }).join(". ") + ".";
       Announce.say(spoken);
@@ -177,7 +187,8 @@
       }
       var title = App.scopeTitle();
       var line = s.scope.saved === "waits" ? D.esc(Model.countSaved("updates") + " things changed without asking anything. They are in ") + '<button type="button" class="link em-link" data-go-updates title="Updates (3)">Updates</button>.' : s.scope.triage ? "Hercule has nothing for you to decide." : "Nothing of yours here yet.";
-      el.innerHTML = '<div class="em"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
+      // The small sunrise waits, as the full one does, for the last row and the pane to go first.
+      el.innerHTML = '<div class="em" style="--sun-wait:240ms"><div class="em-sun em-sun--small">' + sunrise() + '</div><p class="em-title">' + (s.scope.saved === "waits" ? "Nobody waits on you" : "Nothing in " + D.esc(title)) + '</p><p class="em-line">' + line + "</p></div>";
     }
     document.addEventListener("click", function (e) {
       if (e.target.closest("[data-clear-search]")) Bar.clear(true);
@@ -282,7 +293,13 @@
       ta.addEventListener("input", function () { drafts[key] = ta.value; });
       ta.focus();
       // ⌘Z on a sent reply opens the box again, with the words and the focus in it.
-      var again = function () { var b = document.querySelector('#pane [data-answer="' + a.id + '"][data-sig="' + f.s.id + '"]'); if (b) open(b, f, a); };
+      var again = function () {
+        var b = document.querySelector('#pane [data-answer="' + a.id + '"][data-sig="' + f.s.id + '"]');
+        if (!b) return;
+        // Under 1032px the pane may have slid away since; it comes back, so the box is never typed into unseen.
+        if (App.isStacked() && !App.isPaneOpen()) App.setPaneOpen(true, true);
+        open(b, f, a);
+      };
       var send = function () { if (!ta.value.trim()) { ta.focus(); return; } Moves.settle(f, a.label.replace("…", "") + " sent to " + f.s.by + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true, again); };
       box.addEventListener("click", function (e) {
         if (e.target.closest("[data-reply-cancel]")) { box.remove(); button.classList.remove("is-pressed"); button.focus(); }

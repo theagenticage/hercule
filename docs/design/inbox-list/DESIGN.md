@@ -303,10 +303,14 @@ Each is a choice the map left open, made for the best design. Each can be turned
 47. **A space after part of a value completes it** to the value the menu offers first (`team:Check ` gives `team:Checkout`), unless a value goes on past the space.
 48. **With nothing typed, no suggestion is highlighted**: ↩ goes to the results and ↓ reaches the suggestions, so ↩ never adds a filter you did not pick.
 49. **Under 1032px the list under the open pane is inert**, and every move that is about the list (picking a list, `.`, F) slides the pane away first.
-50. **The undo line puts the thing's title last**, "Handed to Review PR: “…”", so a narrow line cuts the title, never who has it. When the words do not fit, the title shortens first, to 12 letters; only then do the buttons drop their key hints and the action keep only its key. A line with nothing to press wraps.
+50. **The undo line puts the thing's title last**, "Handed to Review PR: “…”", so a narrow line cuts the title, never who has it. When the words do not fit, the title shortens first, at a word, to 12 letters; then the title is left out ("Handed to Review PR"); only then do the buttons drop their key hints and the action keep only its key. A line with nothing to press wraps.
 51. **A row's own buttons act on that row.** With a selection elsewhere, hovering a row and pressing its Dismiss dismisses that row and keeps the selection; on a selected row they act on the selection, as the pane does.
 52. **Reply drafts are kept per ask**: closing the box or moving away keeps the words, and ⌘Z on a sent reply opens the box again with them.
 53. **The hand-off button says "Hand to…"** in its words and its name when several workflows fit, and says when its menu is open.
+54. **When nothing is current, the focus goes to the empty state**: its first button, or its heading. Under 1032px the pane over the list slides away first.
+55. **Leaving the search keeps a filter typed out in full** (`team:Checkout`, then Esc, ↓, Tab or a click), so the field never shows a filter that does not apply.
+56. **A link pair in the pane takes two lines**: the pair, then who linked it with Unlink beside it. Nothing moves when Unlink shows.
+57. **The bar keeps Inbox | Intake down to 900px**; only below that, or at 200% zoom, does the pill give way.
 
 ## Proposed changes to #1119
 
@@ -347,9 +351,12 @@ Each round reviewed a frozen copy under `/tmp` with four critics working apart: 
 
 **Round six** found that windows from 900 to 1031px wide squeezed the list under its 400px (the pane now lies over the list below 1032px, so half of a 1920px screen works); the pane's fade still did not show (the pane now fades with what it showed, then the list takes its room); pane link pairs cut identifiers at a 360px pane (who linked them now moves under the pair); cards flying back out of a group hung past the list's edge, with the group's hairline (they now fly box to box, their indent springing); a row's hover buttons acted on a selection elsewhere; ↩ after a typed token added a filter; ⌘Z on a sent reply lost its words; the hand-off button's words and name differed. All fixed and checked.
 
+**Round seven** found the edges of round six's changes: under 1032px, emptying the list from the open pane left the list inert behind an invisible pane; ⌘Z on a sent reply could open its box in a hidden pane, and the next keys ran moves; a group's pane could not be opened by keyboard under 1032px; the focus fell to the page when the list emptied; leaving the search dropped a typed filter silently; the undo line slid sideways on every appearance (its hidden state had no offset) and dropped in one frame when the selection bar left; hovering a pane pair moved the pairs below; the small sunrise drew before the pane had gone; the pill vanished from 900 to 1031px. All fixed and checked.
+
 ## Tried and dropped
 
 - **Shortening the last token with an ellipsis** when it alone did not fit. At 1024px it read `project: C…`, which says nothing; folding it into +N, with the tokens in its tooltip, says more.
+- **A pair and who linked it on one line, wrapping when too wide.** The wrapped words sat alone, as far from their pair as from the next, and Unlink appearing on hover made rows jump. Two lines for every pair is calmer.
 - **Clearing the rows beside the undo line** without moving the scroll padding. The current row could sit under the clear strip after a move; the list's scroll padding now keeps it above.
 
 - **Count and title in one cell.** A group's "14 things" sat after its label and was the first thing cut. It moved to the right of the second line, with the marks.

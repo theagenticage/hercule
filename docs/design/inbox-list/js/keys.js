@@ -83,6 +83,8 @@ window.Keys = (function () {
     var r = App.currentRow();
     if (!r) return;
     if (App.isStacked() && !App.isPaneOpen() && r.type !== "group" && r.type !== "more" && r.type !== "tmore") { App.setPaneOpen(true); return; }
+    // ↩ unfolds a group; on an unfolded group under 1032px it slides its pane in, as on a thing.
+    if (r.type === "group" && App.isStacked() && !App.isPaneOpen() && App.state.open.has(r.key)) { App.setPaneOpen(true); return; }
     if (r.type === "group") return Moves.toggleGroup(r.key, true);
     if (r.type === "more") { showMore(r); return; }
     if (r.type === "tmore") { Moves.setScope({ triage: 1 }); return; }

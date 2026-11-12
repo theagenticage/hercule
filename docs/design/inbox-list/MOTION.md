@@ -130,9 +130,13 @@ Dragged, the width follows the pointer one to one. The arrows step a target by 4
 
 The pane lies over the list and slides in from the right over `--m-base` on ↩ or a click; Esc slides it out and gives the focus back to the row.
 
+### The undo line
+
+It rises 10px into its place as it fades in, and sinks straight back when it goes: its hidden place is under its shown place, so it never slides sideways. A line already showing stays where it rose when the list widens under it; the next one centres on the wider list. When a move empties the selection, the line takes its place by the state after the move, so it does not drop when the selection bar leaves.
+
 ### The sunrise
 
-It waits 240ms for the last row to leave. Then the horizon draws outward over 700ms, Hercule's head rises through it over 1400ms, the rays draw from the middle outward from 420ms, and the words fade up at 600ms. It plays once.
+It waits 240ms for the last row to leave, and the small one waits as the full one does. Then the horizon draws outward over 700ms, Hercule's head rises through it over 1400ms, the rays draw from the middle outward from 420ms, and the words fade up at 600ms. It plays once.
 
 ## Reduced motion
 

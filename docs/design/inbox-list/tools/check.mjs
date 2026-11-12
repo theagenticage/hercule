@@ -681,6 +681,60 @@ for (const w of [960, 1024, 1100]) {
   await p.close();
 }
 
+// ---- Round-seven regressions ----
+{
+  const c = await browser.newContext({ viewport: { width: 1000, height: 760 } });
+  const p = await c.newPage();
+  p.on("pageerror", (e) => fail(`stacked last row: page error: ${e.message}`));
+  await p.goto(page0 + "?theme=whitehaven");
+  await p.waitForSelector("html[data-ready]");
+  await expect(p, "at 960 to 1031px the bar keeps Inbox | Intake", () => getComputedStyle(document.querySelector(".ib-pill")).display !== "none");
+  await key(p, "/");
+  await p.keyboard.type("Rotterdam");
+  await key(p, "Enter");
+  await settle(p, 300);
+  await key(p, "Enter");
+  await settle(p, 400);
+  await key(p, "e");
+  await settle(p, 700);
+  await expect(p, "under 1032px, when the pane's last row goes, the pane slides away and the empty state has the focus", () => !App.isPaneOpen() && !document.querySelector(".ib-list").inert && !!document.activeElement.closest("#empty"));
+  await c.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => { Model.live().forEach((t) => { if (Model.asks(t) && !t.held && t.id !== "gm-quote") Model.gone.add(t.id); }); Model.triage().forEach((x) => Model.gone.add(x.id)); App.render({}); App.focusRow("r:gm-quote", { keyboard: true }); });
+  await key(p, "e");
+  await settle(p, 600);
+  await expect(p, "when the last row goes, the focus goes to the empty state, not the page", () => !!document.activeElement.closest("#empty"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await key(p, "/");
+  await p.keyboard.type("team:Checkout");
+  await settle(p, 150);
+  await key(p, "Escape");
+  await settle(p, 200);
+  await expect(p, "leaving the search keeps a filter typed out in full", () => App.state.search.clauses.some((c) => c.key === "team" && c.value === "Checkout"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.evaluate(() => App.focusRow("r:gm-quote", { keyboard: true }));
+  await key(p, "t");
+  await settle(p, 400);
+  await expect(p, "at 1440 the undo line keeps its buttons' words", () => !document.getElementById("undo").classList.contains("is-tight"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=group");
+  const before = await p.evaluate(() => [...document.querySelectorAll("#pane .pc li")].map((l) => l.offsetHeight).join());
+  await p.hover("#pane .pc li");
+  await p.waitForTimeout(150);
+  await expect(p, "hovering a link pair moves nothing", (b) => [...document.querySelectorAll("#pane .pc li")].map((l) => l.offsetHeight).join() === b, before);
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");

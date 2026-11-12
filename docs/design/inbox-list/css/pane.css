@@ -481,23 +481,19 @@
 .pl-unlink:hover {
   color: var(--ink);
 }
-/* A pair and who linked it share a line while both fit whole; when they do not, who linked it moves
-   under the pair, so the pair's identifiers are never cut. */
+/* Each pair takes two lines: the pair, then who linked it with Unlink beside it, under the pair's first
+   name. The pair has the line's whole width, so identifiers are never cut, and nothing moves when
+   Unlink shows on hover: it keeps its room. */
 .pc li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 12px;
-  min-height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0;
+  padding: 4px 0;
   font-size: var(--t-12);
 }
-.pc li .pc-pair {
-  flex: 1 1 auto;
-}
 .pc li .pl-claim {
-  flex: none;
-  justify-content: flex-end;
-  margin-left: auto;
+  justify-content: flex-start;
+  padding-left: 17px;
 }
 .pc-pair {
   display: flex;
@@ -857,8 +853,8 @@
 .pc li .pl-claim {
   min-width: 0;
 }
-.pc li:not(:hover):not(:focus-within) .pl-unlink {
-  display: none;
+.pc li:focus-within .pl-unlink {
+  opacity: 1;
 }
 .reply textarea {
   resize: none;

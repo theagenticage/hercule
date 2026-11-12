@@ -134,7 +134,22 @@ window.App = (function () {
       var foot = Math.max(parseFloat(getComputedStyle(scroller).scrollPaddingBottom) || 0, opts.flip ? 96 : 28);
       var by = r.top < box.top + 4 ? r.top - box.top - 4 : r.top + r.height > box.bottom - foot ? r.top + r.height - box.bottom + foot : 0;
       if (by && !opts.scrolls) scroller.scrollBy({ top: by, behavior: opts.flip && !Motion.isReduced() ? "smooth" : "instant" });
+    } else if (!Dialog.isOpen() && paneless && !state.loading) {
+      // Nothing is current: the pane over the list (under 1032px) slides away, and the focus that was
+      // in the list or the pane goes to the empty state, its first button or else its heading.
+      if (isPaneOpen()) setPaneOpen(false, true);
+      var gone = was || document.activeElement === document.body || el.pane.contains(document.activeElement);
+      if (gone) focusEmpty();
     }
+  }
+
+  /** Puts the focus on the empty state: its first button, or else its heading. */
+  function focusEmpty() {
+    var empty = document.getElementById("empty");
+    var target = empty.hidden ? null : empty.querySelector("button") || empty.querySelector(".em-title");
+    if (!target) return;
+    if (!target.matches("button")) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
   }
 
   /**
@@ -170,6 +185,9 @@ window.App = (function () {
       el.pane.inert = false;
       if (paneFade !== fade) return;
       paneFade = null;
+      // A line already showing stays where it rose; only the next one centres on the wider list.
+      var line = document.getElementById("undo");
+      if (line.classList.contains("is-on")) line.style.setProperty("--undo-line-x", getComputedStyle(line).getPropertyValue("--undo-line-x"));
       el.ib.classList.add("is-paneless");
       fade.cancel();
       Pane.draw(el.pane, state, {});

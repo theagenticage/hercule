@@ -167,7 +167,10 @@ window.Menus = (function () {
     return open.kind === "hand" || open.kind === "pane";
   }
 
-  /** Opens the pane's ⋯ menu: open at the source, and the pane's width without a drag. */
+  /**
+   * Opens the pane's ⋯ menu: open at the source, and the pane's width without a drag. Under 1032px the
+   * pane lies over the list at its full width, so no width is offered.
+   */
   function paneMenu(button) {
     var el = document.getElementById("panemenu");
     var r = App.currentRow();
@@ -176,9 +179,9 @@ window.Menus = (function () {
     var widths = [["Narrow", 360], ["Default", 420], ["Wide", 560]];
     // The check sits on the width the pane really has; a width the window cannot give is not offered.
     var room = Math.max(360, Math.min(640, App.el.ib.getBoundingClientRect().width - (matchMedia("(max-width: 1329px)").matches ? 0 : 240) - 400));
-    el.innerHTML = (src ? '<button type="button" role="menuitem" tabindex="-1" class="menu-pick" data-pm="open">' + D.icon("external", 14) + "<span>" + D.esc(src.open) + '</span><kbd aria-hidden="true">O</kbd></button><i class="menu-line"></i>' : "") +
-      '<p class="menu-h">Pane width</p>' + widths.map(function (x) { var off = x[1] > room;
-        return '<button type="button" role="menuitemradio" tabindex="-1" aria-checked="' + (w === x[1]) + '"' + (off ? ' aria-disabled="true" title="The window is too narrow for it"' : "") + ' class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join("");
+    el.innerHTML = (src ? '<button type="button" role="menuitem" tabindex="-1" class="menu-pick" data-pm="open">' + D.icon("external", 14) + "<span>" + D.esc(src.open) + '</span><kbd aria-hidden="true">O</kbd></button>' + (App.isStacked() ? "" : '<i class="menu-line"></i>') : "") +
+      (App.isStacked() ? "" : '<p class="menu-h">Pane width</p>' + widths.map(function (x) { var off = x[1] > room;
+        return '<button type="button" role="menuitemradio" tabindex="-1" aria-checked="' + (w === x[1]) + '"' + (off ? ' aria-disabled="true" title="The window is too narrow for it"' : "") + ' class="menu-pick" data-pm-w="' + x[1] + '"><span>' + x[0] + "</span><small>" + x[1] + "px</small>" + (w === x[1] ? D.icon("check", 14) : "") + "</button>"; }).join(""));
     el.hidden = false;
     place(el, button);
     button.setAttribute("aria-expanded", "true");

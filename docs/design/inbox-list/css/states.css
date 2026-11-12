@@ -16,6 +16,9 @@
   max-width: 340px;
   text-align: center;
 }
+.em-title:focus-visible {
+  outline-offset: 4px;
+}
 .em-title {
   margin: 8px 0 0;
   font-size: var(--t-14);
@@ -326,6 +329,13 @@
   .pn-back {
     display: inline-flex;
   }
+  .ib .undo-line {
+    --undo-line-x: 0px;
+    max-width: calc(100% - 24px);
+  }
+}
+/* Under 900px, or 200% zoom, the bar makes room by losing the pill; Intake stays in the sidebar. */
+@media (max-width: 899px) {
   .ib-pill {
     display: none;
   }
@@ -334,10 +344,6 @@
   }
   .ib-scope {
     max-width: 180px;
-  }
-  .ib .undo-line {
-    --undo-line-x: 0px;
-    max-width: calc(100% - 24px);
   }
 }
 /* With nothing current there is nothing to read: the pane steps aside and the list takes its room. The

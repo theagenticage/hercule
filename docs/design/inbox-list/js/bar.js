@@ -136,8 +136,21 @@ window.Bar = (function () {
     st.search.text = words.join(" ");
   }
 
+  /**
+   * Takes a `field:value` typed out in full as a token when the field is left without ↩ (Esc, ↓ to the
+   * results, Tab, F6, a click elsewhere), so the field never shows a filter that does not apply.
+   */
+  function takeTyped() {
+    if (!/(^|\s)[a-z]+:\S/i.test(input.value)) return;
+    var before = App.state.search.clauses.length;
+    absorb(true);
+    // The current row stays when it still matches, so a click that left the field keeps its row.
+    if (App.state.search.clauses.length !== before) apply(true);
+  }
+
   /** Leaves the search for the list, keeping the query, with the first result current. */
   function toList() {
+    takeTyped();
     closeMenu();
     var first = App.state.rows.find(function (r) { return r.type !== "tmore" && r.type !== "more"; });
     if (first) App.focusRow(first.key, { keyboard: true });
@@ -163,9 +176,10 @@ window.Bar = (function () {
     toList();
   }
 
-  function apply() {
+  /** Runs the search and says how many match. The first result becomes current, unless `keepCurrent`. */
+  function apply(keepCurrent) {
     var st = App.state;
-    st.focus = null;
+    if (!keepCurrent) st.focus = null;
     App.render({});
     if (st.search.text || st.search.clauses.length) Announce.say(st.built.count + (st.built.count === 1 ? " thing matches" : " things match") + " in " + App.scopeTitle() + ".");
   }
@@ -315,7 +329,7 @@ window.Bar = (function () {
     // hint is fitted again once fonts arrive.
     document.fonts.addEventListener("loadingdone", function () { fitPlaceholder(); });
     input.addEventListener("focus", function () { field.classList.add("is-focus"); active = firstActive(); drawChips(); drawMenu(); });
-    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) closeMenu(); }, 120); });
+    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) { takeTyped(); closeMenu(); } }, 120); });
     // The scope token shows while the focus is anywhere in the field, its tokens' buttons too.
     field.addEventListener("focusout", function () { setTimeout(function () { if (!field.contains(document.activeElement)) drawChips(); }, 120); });
     input.addEventListener("input", function () {
@@ -327,7 +341,7 @@ window.Bar = (function () {
     });
     input.addEventListener("keydown", function (e) {
       var st = App.state;
-      if (e.key === "F6" || e.key === "Tab") { closeMenu(); return; }
+      if (e.key === "F6" || e.key === "Tab") { takeTyped(); closeMenu(); return; }
       if (e.key === "ArrowDown") {
         if (menu.hidden || active >= items.length - 1) toList(); else { active++; drawMenu(); }
         e.preventDefault();
@@ -350,6 +364,7 @@ window.Bar = (function () {
       else if (e.key === "Escape") {
         // The first Esc leaves the search and keeps the query; Esc in the list then clears it. With
         // nothing typed, Esc goes back to the current row.
+        takeTyped();
         closeMenu();
         if (st.search.text || st.search.clauses.length) toList(); else App.focusCurrent();
         e.preventDefault();
