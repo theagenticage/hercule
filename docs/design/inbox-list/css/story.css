@@ -1,0 +1,54 @@
+/* The story page. It reads on the same tokens as the window it describes. */
+html, body { height: auto; overflow: auto; background: var(--bg); }
+body { color: var(--ink); }
+.st { max-width: 1180px; margin: 0 auto; padding: 0 40px 120px; }
+.st-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 10px; height: 52px; margin: 0 -40px; padding: 0 40px; background: color-mix(in oklab, var(--bg) 88%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.st-top b { font-size: var(--t-13); font-weight: var(--w-bold); }
+.st-top small { color: var(--muted); font-size: var(--t-12); }
+.st-pick { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: var(--t-12); }
+.st-top select { height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-xs); background: var(--btn-fill); box-shadow: inset 0 0 0 1px var(--btn-rim); color: var(--ink); font: var(--type-summary); }
+.st-top a.btn { text-decoration: none; }
+.st-hero { padding: 72px 0 32px; max-width: 820px; }
+.st-hero h1 { margin: 0 0 14px; font-size: 40px; line-height: 46px; font-weight: var(--w-bold); letter-spacing: -0.022em; text-wrap: balance; }
+.st-hero p { margin: 0; color: var(--muted); font-size: 18px; line-height: 28px; text-wrap: pretty; }
+section.ch { margin-top: 88px; }
+.ch > header { max-width: 700px; margin-bottom: 24px; }
+.ch h2 { margin: 0 0 10px; font-size: 26px; line-height: 32px; font-weight: var(--w-bold); letter-spacing: -0.016em; text-wrap: balance; }
+.ch p, .ch li { color: var(--muted); font-size: 15px; line-height: 24px; text-wrap: pretty; }
+.ch p { margin: 0 0 10px; }
+.ch p b, .ch li b { color: var(--ink); font-weight: var(--w-medium); }
+.ch code { padding: 1px 5px; border-radius: 5px; background: var(--sunken); color: var(--ink); font-size: 13px; }
+.ch a { color: var(--ink); }
+.frame { position: relative; margin: 0; border-radius: 14px; overflow: hidden; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-soft), 0 2px 4px oklch(0 0 0 / 0.06), 0 24px 56px -24px oklch(0 0 0 / 0.32); }
+.frame iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
+.frame-cap { display: flex; justify-content: space-between; gap: 16px; margin: 10px 2px 0; color: var(--faint); font: var(--type-summary); }
+.frame-cap a { color: var(--muted); }
+.two, .three { display: grid; gap: 18px; margin-top: 18px; }
+.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.two.cap, .three.cap { margin-top: 8px; color: var(--faint); font: var(--type-summary); }
+.try { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 40px; }
+.pr { margin: 0; padding-left: 22px; }
+.pr li { margin-bottom: 8px; }
+.pr i { color: var(--faint); font-style: normal; font-size: 13px; }
+.rej { align-self: start; padding: 18px 20px; border-radius: 14px; background: var(--sunken); }
+.rej h3 { margin: 0 0 6px; font: var(--type-lane); }
+.rej ul { margin: 0; padding-left: 18px; }
+.anat { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; align-items: start; }
+.anat-list { padding: 12px 0; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.anat-list .rows { padding-bottom: 0; }
+.anat-keys { margin: 0; }
+.anat-keys div { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--divider); font-size: 13px; line-height: 19px; }
+.anat-keys dt { color: var(--ink); font-weight: var(--w-medium); }
+.anat-keys dd { margin: 0; color: var(--muted); }
+.sw { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.sw-cell { padding: 16px 18px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.sw-cell h4 { margin: 0 0 10px; color: var(--muted); font-size: var(--t-12); font-weight: var(--w-medium); }
+.sw-cell h4.sw-gap { margin-top: 16px; }
+.sw-cell p { display: flex; align-items: center; gap: 8px; margin: 0 0 7px; color: var(--ink); font-size: 13px; }
+.sw-cell p small { margin-left: auto; color: var(--faint); font-size: 11px; }
+.gal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 16px; }
+.gal a { color: var(--muted); font: var(--type-summary); text-decoration: none; }
+.gal img { display: block; width: 100%; margin-bottom: 6px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line-soft), 0 10px 26px -14px oklch(0 0 0 / 0.3); }
+@media (max-width: 900px) { .two, .three, .cols, .anat, .gal, .sw { grid-template-columns: minmax(0, 1fr); } }

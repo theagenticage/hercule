@@ -66,7 +66,7 @@ window.List = (function () {
     return {
       cls: "row row--triage" + (r.lastTriage ? " is-last-triage" : ""),
       attrs: { "data-triage": x.id },
-      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 18) + '</span><span class="row-l1"><span class="row-title">' + D.esc(a.title) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>Belongs with ' + D.mark(Model.sourceOf(b), 12) + '<span class="row-ref">' + D.esc(D.identifier(b) || b.title) + "</span>, Hercule thinks</span>" + where(a) + "</span>",
+      html: '<span class="row-lead row-lead--face">' + D.face("Hercule", "idle", 18) + '</span><span class="row-l1"><span class="row-title">' + D.esc(a.title) + '</span><span class="row-time wait--fresh">' + D.ago(x.at) + '</span></span><span class="row-glyph"></span><span class="row-l2"><span class="row-why"><b class="tri-word">Link?</b>With ' + D.mark(Model.sourceOf(b), 12) + '<span class="row-ref">' + D.esc(D.identifier(b) || "") + "</span> " + D.esc(b.title) + "</span>" + where(a) + "</span>",
       label: "Hercule suggests a link: " + a.title + " belongs with " + (D.identifier(b) || b.title),
     };
   }

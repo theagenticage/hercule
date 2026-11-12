@@ -39,8 +39,14 @@ window.Scenes = (function () {
     narrow: function (s) { App.setPaneWidth(360); },
   };
 
+  /** Calls fn with the element once it exists, checking each frame for up to two seconds. */
+  function when(sel, fn) {
+    var t0 = performance.now();
+    (function look() { var el = document.querySelector(sel); if (el) fn(el); else if (performance.now() - t0 < 2000) requestAnimationFrame(look); })();
+  }
+
   var AFTER = {
-    "pr-second": function () { var b = document.querySelector('#pane [data-sig-fold="s2"]'); if (b) b.click(); },
+    "pr-second": function () { when('#pane [data-sig-fold="s2"]', function (b) { b.click(); }); },
     hand: function () { App.state.open.add("g:shop-142"); App.render({}); App.focusRow("m:shop-142:pr-6244"); Moves.handOff(document.querySelector("#pane .pn-move--hand")); },
     linkto: function () { App.focusRow("r:pr-6213"); Moves.linkKey(); },
     narrowmenu: function () { var b = document.querySelector("[data-narrow]"); Bar.narrow(b); var f = document.querySelector('#narrow [data-nf="linear|project"]'); if (f) f.click(); },
@@ -49,10 +55,10 @@ window.Scenes = (function () {
     dialog: function () { App.focusRow("g:shop-142"); Moves.run("thread"); },
     "dialog-one": function () { App.focusRow("r:pr-1302"); Moves.run("thread"); },
     "dialog-unpicked": function () { App.focusRow("t:prop-kp"); Moves.run("thread"); },
-    "dialog-why": function () { App.focusRow("g:shop-142"); Moves.run("thread"); setTimeout(function () { document.querySelector('#dialog [data-why="project"]').click(); }, 50); },
-    "dialog-started": function () { App.focusRow("g:shop-142"); Moves.run("thread"); setTimeout(function () { document.querySelector("#dialog [data-send]").click(); }, 60); },
-    "dialog-context": function () { App.focusRow("g:shop-142"); Moves.run("thread"); setTimeout(function () { document.querySelector("#dialog [data-send]").click(); setTimeout(function () { document.querySelector("#dialog [data-ctx]").click(); }, 200); }, 60); },
-    reply: function () { App.focusRow("r:gm-quote"); setTimeout(function () { document.querySelector('#pane [data-answer="reply"]').click(); }, 30); },
+    "dialog-why": function () { App.focusRow("g:shop-142"); Moves.run("thread"); when('#dialog [data-why="project"]', function (b) { b.click(); }); },
+    "dialog-started": function () { App.focusRow("g:shop-142"); Moves.run("thread"); when("#dialog [data-send]", function (b) { b.click(); }); },
+    "dialog-context": function () { App.focusRow("g:shop-142"); Moves.run("thread"); when("#dialog [data-send]", function (b) { b.click(); when("#dialog [data-ctx]", function (c) { c.click(); }); }); },
+    reply: function () { App.focusRow("r:gm-quote"); when('#pane [data-answer="reply"]', function (b) { b.click(); }); },
     undo: function () { App.focusRow("r:pr-6230"); Moves.dismiss(); },
     arrive: function () { setTimeout(function () { Live.arrive(World.arrivals()); }, 1200); },
   };

@@ -86,6 +86,18 @@
   document.getElementById("newbar").addEventListener("click", Moves.showNew);
   document.querySelector(".sx-ic").innerHTML = Draw.icon("search", 14);
   Scenes.after(new URLSearchParams(location.search).get("scene"));
+  // The story page's buttons send a frame a move to show.
+  window.addEventListener("message", function (e) {
+    var m = e.data || {};
+    if (m.arrive) Live.arrive(World.arrivals());
+    if (m.show) Moves.showNew();
+    if (m.link) { App.focusRow("r:" + m.link[0]); App.state.selection.clear(); m.link.forEach(function (id) { App.state.selection.add(id); }); App.render({}); setTimeout(Moves.linkKey, 250); }
+    if (m.hand) { App.focusRow("r:" + m.hand); setTimeout(function () { Moves.handOff(); }, 200); }
+    if (m.dismiss) { App.focusRow("r:" + m.dismiss); setTimeout(Moves.dismiss, 200); }
+    if (m.fold) Moves.toggleGroup(m.fold);
+    if (m.thread) { App.focusRow(m.thread); setTimeout(function () { Moves.run("thread"); }, 200); }
+    if (m.undo) Moves.undo();
+  });
 </script>
 </body>
 </html>

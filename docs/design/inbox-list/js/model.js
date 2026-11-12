@@ -12,7 +12,8 @@ window.Model = (function () {
   function load(w) {
     world = w;
     byId = new Map(w.things.map(function (t) { return [t.id, t]; }));
-    gone = new Set();
+    // Cleared, never replaced: Model.gone is the same Set for the life of the page.
+    gone.clear();
   }
 
   function sourceOf(t) { return K.KINDS[t.kind].source; }

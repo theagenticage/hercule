@@ -86,7 +86,7 @@ for (const load of ["light", "extreme"]) { const p = await open(`load=${load}`);
   const at = await p.evaluate(() => App.state.rows.findIndex((r) => r.key === "r:gm-quote"));
   await key(p, "e");
   await settle(p);
-  await expect(p, "E dismisses", () => Model.gone.has("gm-quote"));
+  await expect(p, "E dismisses", () => Model.gone.has("gm-quote") && !App.state.rows.some((r) => r.key === "r:gm-quote") && !document.querySelector('#rows [data-key="r:gm-quote"]'));
   await expect(p, "the row that took its place is current", (i) => App.state.rows.findIndex((r) => r.key === App.state.focus) === i, at);
   await expect(p, "the undo line shows", () => document.getElementById("undo").classList.contains("is-on"));
   await p.click("#undo [data-undo]");

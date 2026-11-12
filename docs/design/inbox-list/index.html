@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Inbox, built to find things</title>
+<script src="../shared/page.js"></script>
+<link rel="stylesheet" href="vendor/app.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/rail.css">
+<link rel="stylesheet" href="css/list.css">
+<link rel="stylesheet" href="css/pane.css">
+<link rel="stylesheet" href="css/story.css">
+</head>
+<body>
+<div class="st">
+  <div class="st-top"><b>The Inbox</b><small>Hi-fi drawing for #1120 · from the map #1119</small>
+    <label class="st-pick">Theme <select id="theme"><option value="whitehaven">Whitehaven</option><option value="styles">Styles</option><option value="orient-express">Orient Express</option><option value="nile">Nile</option><option value="end-house">End House</option><option value="blue-train">Blue Train</option></select></label>
+    <a class="btn btn--sm" href="DESIGN.md">DESIGN.md</a><a class="btn btn--sm" href="MOTION.md">MOTION.md</a>
+    <a class="btn btn--sm btn--accent" href="desktop.html">Open the window</a>
+  </div>
+
+  <header class="st-hero">
+    <h1>A real inbox: built to find things, and to turn them into work.</h1>
+    <p>Everything out there that concerns you, from every source and every account, in one list you can scan in seconds. A rail of saved queries and each source's own structure on the left; rows built to read down, not across; and a pane that shows each ask with its own answers. Things that belong together are one group. Hercule proposes, you decide. Every move is one key.</p>
+  </header>
+
+  <figure class="frame" id="hero" data-q="" aria-label="The Inbox, live"></figure>
+  <figcaption class="frame-cap"><span>This frame is live. Walk it with J and K, select with X, press L, N, H, E or ?. Drag a row onto another.</span><a href="desktop.html">Open it full size</a></figcaption>
+
+  <section class="ch">
+    <header>
+      <h2>What the best inboxes taught us.</h2>
+      <p>Superhuman, Linear's inbox, HEY, Shortwave and Things were studied for what makes people love them. Ten principles were taken, and a few were turned down on purpose.</p>
+    </header>
+    <div class="cols">
+      <ol class="pr">
+        <li><b>Speed is the feature.</b> One key per move, an answer at once, and the next row comes under your hand. Every move has an undo, so nothing asks "are you sure?". <i>Superhuman</i></li>
+        <li><b>Rows built to scan.</b> Fixed slots: what and why on the left, how long and where on the right. <i>Linear, Superhuman</i></li>
+        <li><b>Colour is information.</b> On marks, status glyphs, project health and triage only. <i>Linear</i></li>
+        <li><b>Fixed lists, declared.</b> Nobody builds folders. <i>Things, Superhuman</i></li>
+        <li><b>The list holds still.</b> Arrivals wait behind a bar. <i>Things, HEY</i></li>
+        <li><b>Group by what is really related.</b> Links a source or a person made. <i>Linear</i></li>
+        <li><b>The machine proposes, the person decides.</b> <i>HEY, against Shortwave</i></li>
+        <li><b>Keys are learnt where they are used.</b> Every button shows its key. <i>Superhuman, Linear</i></li>
+        <li><b>Density for scanning, air for reading.</b> <i>Superhuman</i></li>
+        <li><b>Finishing is quiet.</b> A small sunrise, once. <i>Things</i></li>
+      </ol>
+      <div class="rej">
+        <h3>Turned down</h3>
+        <ul>
+          <li><b>Bold for unread.</b> The question is who waits on you, not what you have seen.</li>
+          <li><b>A snippet of the body.</b> Across sources it is noise. A row says the ask.</li>
+          <li><b>An avatar per row.</b> Faces are for colleagues.</li>
+          <li><b>Separate places by kind.</b> One rail, and a thing can be in several queries.</li>
+          <li><b>A screener, automatic bundles, celebration pictures, swipes.</b></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>A row you read down, not across.</h2>
+      <p>Two lines, 52 pixels. The left column holds the only two coloured shapes, the source's mark over the status glyph, so you can tell GitHub from Linear from Sentry down the whole list without reading a word. The title is the one medium weight. The second line says what asks you, with the person's name in ink. On the right, how long it has waited, measured against the patience of the ask, in ink and weight only, and where it lives.</p>
+    </header>
+    <div class="anat" id="anat"></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>The rail: saved queries, and each source's own structure.</h2>
+      <p>The core declares five saved queries and plugins add their own, such as GitHub's "Review requests". Nobody creates, renames or deletes one; each is a name and a query. Under them, Triage, then the values you pinned, then <b>Browse</b>: Linear's projects with their health, its teams and statuses; Sentry's teams, projects and levels; GitHub's repositories. A click adds the same clause the search would. A project with nothing of yours yet is still there, faint.</p>
+      <p><b>Several accounts.</b> When a source has two accounts holding things, Browse adds the account, and a value always belongs to one: Checkout in northwind and Checkout in northwind-labs stay two values.</p>
+    </header>
+    <div class="two">
+      <figure class="frame" data-q="scene=browse" aria-label="Browse: one Linear project"></figure>
+      <figure class="frame" data-q="scene=accounts" aria-label="Browse: Sentry with two accounts"></figure>
+    </div>
+    <div class="two cap"><span>Browse: Checkout revamp, at risk</span><span>Sentry, with two accounts</span></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Things that belong together are one group.</h2>
+      <p>Every set of things linked to each other, by a source or by a person, is drawn as one group, labelled with its most lasting thing's title. Closed, it is one row with the most pressing ask and the marks of its sources. Open, its members hang from the chevron on a hairline. Members the query does not hold stay, quieter, so the group is never torn apart. A long chain of links makes one large group: open, it shows five and "Show 9 more".</p>
+      <p><b>Linking is one move:</b> select with X and press L, or drag one row onto another. Each thing flies to its place in the group. ⌘Z takes the link back.</p>
+    </header>
+    <figure class="frame" id="groups" data-q="scene=group-open" aria-label="A linked group, open"></figure>
+    <div class="try">
+      <button class="btn btn--sm" data-to="groups" data-send='{"link":["pr-6213","pr-6230"]}'>Link #6213 and #6230 with L</button>
+      <button class="btn btn--sm" data-to="groups" data-send='{"fold":"g:shop-142"}'>Fold the group</button>
+      <button class="btn btn--sm" data-to="groups" data-send='{"undo":true}'>Undo</button>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Hercule proposes. You decide, with one key.</h2>
+      <p>Proposals and the links Hercule suggests have their own rail entry, and the first three stand at the top of "Someone waits on me". A Proposal shows the face of the agent that made it and the things it was made from. T accepts it, N accepts it and starts a thread, E dismisses it. A link suggestion asks "Do these belong together?": L links them, as your own links, and E says "Not related", so it is never suggested again.</p>
+    </header>
+    <div class="two">
+      <figure class="frame" data-q="scene=proposal" aria-label="A Proposal"></figure>
+      <figure class="frame" data-q="scene=suggestion" aria-label="A link Hercule suggests"></figure>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>The pane: each ask with its own answers.</h2>
+      <p>Where it is from, the title in full, then one section for each open signal, newest first and unfolded. A pull request that asks for your review and mentions you has two sections, and answering the mention never closes the review request. Each section has its own answers, the plugin's suggested one filled, and Done. Then the plugin's blocks: the change, the checks, the trend of an error, the messages of a mail. Then what it is linked to and what happened.</p>
+    </header>
+    <figure class="frame" data-q="scene=pr-second" aria-label="A pull request with two open signals"></figure>
+    <div class="three">
+      <figure class="frame" data-q="scene=linear" aria-label="A Linear issue"></figure>
+      <figure class="frame" data-q="scene=sentry" aria-label="A Sentry error"></figure>
+      <figure class="frame" data-q="scene=email" aria-label="An email"></figure>
+    </div>
+    <div class="three cap"><span>A Linear issue</span><span>A Sentry error that came back</span><span>An email that asks you</span></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Hand-off, as spec 17 has it.</h2>
+      <p>H hands one thing to a workflow: at once with one workflow, through the menu with several. The colleague rises into the wait's place, takes the weight, the sentence rolls to who has it, and the mark flies to Work. Then the row leaves. A group or a selection has no hand-off until workflows can take several things (#1128); H says so.</p>
+    </header>
+    <figure class="frame" id="hand" data-q="" aria-label="Hand-off"></figure>
+    <div class="try">
+      <button class="btn btn--sm" data-to="hand" data-send='{"hand":"sn-21c"}'>H on the Sentry error: one workflow</button>
+      <button class="btn btn--sm" data-to="hand" data-send='{"hand":"pr-6213"}'>H on #6213: the menu</button>
+      <button class="btn btn--sm" data-to="hand" data-send='{"undo":true}'>Undo</button>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>N: a dialog that looks like a thread.</h2>
+      <p>The app's glass dialog around the real composer of the new-thread screen. The Task's name at the top. Starters above the composer: Investigate, Fix, Draft a reply, Summarise, your own words. The things as chips inside it, because they travel as attachments. Under it, the project and the workspace, and one line saying why: only evidence picks a default. With no evidence, the project waits for you. ⌘↩ turns the dialog into the thread's first moments: the things as live cards, "Context sent with it" folded, and the agent reading them.</p>
+    </header>
+    <div class="two">
+      <figure class="frame" data-q="scene=dialog-why" aria-label="The thread dialog"></figure>
+      <figure class="frame" data-q="scene=dialog-started" aria-label="The thread's first moments"></figure>
+    </div>
+    <div class="two cap"><span>Writing, with the reason behind the project</span><span>The first moments, live</span></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Find anything: tokens, values with counts, and Narrow.</h2>
+      <p>The search knows each source's declared fields. Type <code>team:</code> and the values come with their counts; <code>events:&gt;1000</code> and <code>waiting:&gt;2d</code> take thresholds. Narrow offers the facets of what the list holds, and adds the same token.</p>
+    </header>
+    <div class="two">
+      <figure class="frame" data-q="scene=search,searchmenu" aria-label="Search"></figure>
+      <figure class="frame" data-q="scene=narrowmenu" aria-label="Narrow"></figure>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>The list holds still while you read.</h2>
+      <p>New things wait behind a bar at the top: "3 new · Show". Things you handle leave at once, and the row that takes their place comes under your hand.</p>
+    </header>
+    <figure class="frame" id="live" data-q="" aria-label="Arrivals"></figure>
+    <div class="try">
+      <button class="btn btn--sm" data-to="live" data-send='{"arrive":true}'>Three things arrive</button>
+      <button class="btn btn--sm" data-to="live" data-send='{"show":true}'>Show them</button>
+      <button class="btn btn--sm" data-to="live" data-send='{"dismiss":"gm-quote"}'>Dismiss the quote</button>
+      <button class="btn btn--sm" data-to="live" data-send='{"undo":true}'>Undo</button>
+    </div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Colour, with restraint.</h2>
+      <p>A source's hue on its mark and its status glyphs; project health in Browse; marigold for triage and for what is addressed to you; and the one suggested answer. Every surface is neutral. Rogier decides by eye.</p>
+    </header>
+    <div class="sw" id="swatches"></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Every state, in every theme.</h2>
+      <p>Pick a theme at the top. Each picture opens full size.</p>
+    </header>
+    <div class="gal" id="gal"></div>
+  </section>
+
+  <section class="ch">
+    <header>
+      <h2>Calls made, and proposals.</h2>
+      <p>The map left some questions open, and the drawing answers them: signals come before the plugin's blocks, triage keeps three rows at the top, large groups show five, ↩ is the open ask's suggested answer, and more. Each is listed in <a href="DESIGN.md">DESIGN.md</a> under "Calls made, for Rogier", with three proposed changes to #1119.</p>
+    </header>
+  </section>
+</div>
+<script src="vendor/faces.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/kinds.js"></script>
+<script src="js/world.js"></script>
+<script src="js/model.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/list.js"></script>
+<script src="screens/states.js"></script>
+<script src="js/story.js"></script>
+</body>
+</html>

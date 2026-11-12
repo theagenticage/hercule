@@ -84,11 +84,20 @@
   user-select: none;
   outline: none;
 }
+.row {
+  --row-fill: transparent;
+  background: var(--row-fill);
+}
 .row:hover {
-  background: var(--hover);
+  --row-fill: var(--hover);
 }
 .row.is-current {
-  background: var(--selected);
+  --row-fill: var(--selected);
+}
+/* A row on its way somewhere passes over others, so it carries the list's ground under its fill. */
+.row.is-moving {
+  z-index: 2;
+  background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
 }
 .rows:focus-visible .row.is-current,
 .row.is-current:focus-visible {
@@ -271,7 +280,7 @@
   color: var(--bg);
 }
 .row.is-picked:not(.is-current) {
-  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+  --row-fill: color-mix(in oklab, var(--ink) 3.5%, transparent);
 }
 
 /* ---- Groups: things linked to each other, by a source or a person ---- */
@@ -439,7 +448,7 @@
   opacity: 0.32;
 }
 .row.is-drop {
-  background: color-mix(in oklab, var(--focus) 10%, transparent);
+  --row-fill: color-mix(in oklab, var(--focus) 10%, transparent);
   box-shadow: inset 0 0 0 1.5px var(--focus);
 }
 html.is-carrying,
