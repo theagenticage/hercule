@@ -37,6 +37,39 @@ export const invalidateWithoutCancelling = (queryClient: QueryClient, queryKey: 
   }
 };
 
+/** The pushes of one key that wait for a shared read: its timer, per client. */
+const waitingPushes = new WeakMap<QueryClient, Map<string, ReturnType<typeof setTimeout>>>();
+
+/**
+ * Invalidates the queries under `queryKey` like `invalidateWithoutCancelling`,
+ * but `windowMs` later, and once for every push of that key that arrives in
+ * the meantime. One change often causes several pushes in a row (a signal's
+ * push, then its entity's), and a large read such as the Inbox's page would
+ * otherwise be read once for each. The window starts at the first push and
+ * does not move, so a long burst still reads every `windowMs`. Returns at once.
+ */
+export const invalidateWithoutCancellingSoon = (
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  windowMs: number,
+): void => {
+  let timers = waitingPushes.get(queryClient);
+  if (timers === undefined) {
+    timers = new Map();
+    waitingPushes.set(queryClient, timers);
+  }
+  const id = JSON.stringify(queryKey);
+  if (timers.has(id)) return;
+  const waiting = timers;
+  waiting.set(
+    id,
+    setTimeout(() => {
+      waiting.delete(id);
+      invalidateWithoutCancelling(queryClient, queryKey);
+    }, windowMs),
+  );
+};
+
 /** Invalidates one query for a push, as `invalidateWithoutCancelling` describes. */
 const readAfterPush = (queryClient: QueryClient, query: Query): void => {
   const watched = watchedReads.get(query);

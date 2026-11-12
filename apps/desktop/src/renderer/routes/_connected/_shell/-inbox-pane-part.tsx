@@ -69,6 +69,9 @@ export function InboxPaneHeadPart({
  * `externalEntity.read`, until the pane's own content replaces it. It shows
  * quiet shapes while the read is on its way, and says why when it fails.
  * Keyed by the thing, so the opened line of the timeline starts over for each.
+ * With `isActive` false (the pane lies over the list and is closed) nothing is
+ * read, so stepping through the list reads no thing the user does not see. What
+ * was read stays cached for the next time the pane shows it.
  *
  * Orchestrating: it owns the read and the choice of the open line.
  */
@@ -77,17 +80,19 @@ export function InboxPanePart({
   thing,
   offers,
   moves,
+  isActive,
 }: {
   readonly client: HerculeClient;
   readonly thing: InboxThing;
   /** The workflows the open thing can be handed to, which the pane's moves list. */
   readonly offers: CardOffers;
   readonly moves: InboxPaneMoves;
+  readonly isActive: boolean;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const detail = useQuery(entityQuery(client, thing.id));
+  const detail = useQuery({ ...entityQuery(client, thing.id), enabled: isActive });
   const record = detail.data;
   const lines = record === undefined ? [] : buildOpenTimeline(record, []);
   const now = useOpenCardClock(record, lines);

@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInboxCard, buildRequestCard } from "./cards.testing";
 import {
-  describeCardTime,
   describeCardTrust,
   describeCardWait,
   findNextCardTimeChange,
@@ -12,6 +11,12 @@ import {
 const NOW = new Date("2026-11-07T12:00:00.000Z");
 const hoursAgo = (hours: number): string =>
   new Date(NOW.getTime() - hours * 3_600_000).toISOString();
+
+/** Everything a card shows that depends on the time: the oracle for `findNextCardTimeChange`. */
+const describeCardTime = (card: Parameters<typeof describeCardWait>[0], now: Date) => ({
+  wait: describeCardWait(card, now),
+  trust: describeCardTrust(card, now),
+});
 
 describe("describeCardWait", () => {
   it.each([

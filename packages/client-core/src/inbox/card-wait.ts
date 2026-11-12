@@ -128,18 +128,6 @@ const countsWait = (card: EntityRecord): boolean =>
 export const isCardTimeDependent = (card: EntityRecord): boolean =>
   countsWait(card) || showsAgeOfFacts(card);
 
-/** Everything a card shows that depends on the time. */
-export interface CardTime {
-  readonly wait: CardWait | null;
-  readonly trust: string | undefined;
-}
-
-/** Returns the wait and the trust line of `card` at `now`. */
-export const describeCardTime = (card: EntityRecord, now: Date): CardTime => ({
-  wait: describeCardWait(card, now),
-  trust: describeCardTrust(card, now),
-});
-
 /** A moment so far off that no timer reaches it: the next change of a card that never changes by itself. */
 const NEVER = new Date(8.64e15);
 
@@ -170,8 +158,8 @@ const findNextWaitChange = (since: number, patienceHours: number, now: Date): nu
 };
 
 /**
- * Returns the first moment after `now` at which `describeCardTime` returns
- * something different for `card`, so a screen sets one timer for it and draws
+ * Returns the first moment after `now` at which `describeCardWait` or
+ * `describeCardTrust` returns something different for `card`, so a screen sets one timer for it and draws
  * the card only then. It is `NEVER` for a card that is not time dependent.
  * The earliest of these counts: the wait's text and level
  * (`findNextWaitChange`), and the age of the facts in the trust line, which

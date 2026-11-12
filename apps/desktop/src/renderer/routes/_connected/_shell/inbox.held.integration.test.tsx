@@ -193,6 +193,34 @@ describe("a push", () => {
     expect(readRowTitles()).toEqual([SLOTS.title, LOYALTY.title, BASKET.title]);
   });
 
+  it("reads the first page once for one push, and once for the signal push and entity push that one change causes", async () => {
+    const { inbox, live, calls } = await openWithPush();
+    const isFirstPage = (query: InboxQuery) =>
+      query.refs === undefined && query.cursor === undefined;
+    const countFirstPages = () => readQueries(calls).filter(isFirstPage).length;
+    const before = countFirstPages();
+    inbox.lists.waits = [SLOTS, BASKET];
+
+    act(() => {
+      live.pushInvalidation("externalEntity", [LOYALTY.id]);
+    });
+    await waitFor(() => {
+      expect(readRowTitles()).toEqual([SLOTS.title, BASKET.title]);
+    });
+    expect(countFirstPages() - before).toBe(1);
+
+    // A change to a thing's signals pushes the signal topic, then the entity topic.
+    act(() => {
+      live.pushInvalidation("signal", ["s1"]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(countFirstPages() - before).toBe(2);
+  });
+
   it("reads the first page again for the . key, and takes the arrivals in after it", async () => {
     const { inbox, live, calls } = await openWithPush();
     const arrival = request(4, "Bump the checkout SDK", "Noa");

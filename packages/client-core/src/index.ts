@@ -349,7 +349,7 @@ export {
   type RunInputValue,
 } from "./run-inputs";
 export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
-export { invalidateWithoutCancelling } from "./live/invalidation";
+export { invalidateWithoutCancelling, invalidateWithoutCancellingSoon } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isAnswerSendRunning, isMutationRunning } from "./mutation-running";
 export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";

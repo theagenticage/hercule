@@ -4,7 +4,7 @@
  * behind "N new", the rail changing the list, a typed token narrowing it, the
  * pane showing the current thing's detail, a next page, and the empty states.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
@@ -143,6 +143,61 @@ describe("the Inbox screen", () => {
     expect(calls.some((call) => call.path === `/api/v1/external-entities/${LOYALTY.id}`)).toBe(
       true,
     );
+  });
+
+  it("reads each thing for the pane once while walking, and reads none again when walking back", async () => {
+    const { calls, live } = await openInbox(defaultInbox());
+    await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+    // Let the live connection's own first read of everything pass, so it is not counted as a step.
+    await waitFor(() => {
+      expect(live.readTopics()).toContain("externalEntity");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const readsOf = (id: string) =>
+      calls.filter((call) => call.path === `/api/v1/external-entities/${id}`).length;
+    const stepTo = async (key: string, title: string) => {
+      await userEvent.keyboard(key);
+      await waitFor(() => {
+        expect(
+          within(document.getElementById("inbox-pane")!).getByRole("heading", { name: title }),
+        ).toBeTruthy();
+      });
+    };
+    screen.getByRole("treeitem", { name: /Cache delivery slot lookups/ }).focus();
+    const slotsBefore = readsOf(SLOTS.id);
+
+    await stepTo("j", LOYALTY.title);
+    await stepTo("j", BASKET.title);
+    await stepTo("k", LOYALTY.title);
+    await stepTo("k", SLOTS.title);
+
+    expect([SLOTS.id, LOYALTY.id, BASKET.id].map(readsOf)).toEqual([slotsBefore, 1, 1]);
+  });
+
+  it("reads no thing for a pane that lies over the list and is closed", async () => {
+    // Only the frame is told its width: the list's virtualizer measures itself.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        readonly callback: ResizeObserverCallback;
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+        observe(element: Element): void {
+          if (!element.classList.contains("ib")) return;
+          this.callback([{ contentRect: { width: 900 } } as ResizeObserverEntry], this);
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    const { calls } = await openInbox(defaultInbox());
+    await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
+    screen.getByRole("treeitem", { name: /Cache delivery slot lookups/ }).focus();
+    await userEvent.keyboard("j");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(calls.some((call) => call.path.startsWith("/api/v1/external-entities/ent"))).toBe(false);
   });
 
   it("reads the next page when the list nears its end, and holds it with the rest", async () => {

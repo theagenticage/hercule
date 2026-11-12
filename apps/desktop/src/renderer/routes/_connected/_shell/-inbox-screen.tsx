@@ -400,6 +400,7 @@ export function InboxScreen({
         ) : (
           <InboxPanePart
             key={currentThing.id}
+            isActive={!isStacked || isPaneOpen}
             client={client}
             thing={currentThing}
             offers={listCardOffers(currentThing, held.offerSets)}

@@ -91,6 +91,8 @@ export function startInboxList<Row extends InboxListRow>(
 export interface InboxRefreshReply<Row extends InboxListRow> {
   readonly listId: string;
   readonly firstPage: readonly Row[];
+  /** True when the first page has a next page, so a row can slide into it from there. */
+  readonly firstPageHasMore: boolean;
   /** The refs the `refs` reads asked for: every held row that was not on the new first page. */
   readonly askedRefs: readonly string[];
   /** The rows those reads returned. An asked ref missing here no longer belongs to the list. */
@@ -104,7 +106,11 @@ export interface InboxRefreshReply<Row extends InboxListRow> {
  * - a held row that was asked for and found in none has left, and is dropped,
  *   unless an undo put it back since (see `restored`);
  * - a held row that was not asked for (a page appended meanwhile) is kept;
- * - a first-page row that is not held becomes an arrival.
+ * - a first-page row that is not held becomes an arrival, unless the first page
+ *   has a next page and the row ranks after every held row of the first page.
+ *   That row did not appear: it slid into the first page from the next one
+ *   because a row above it left (a page holds at most 200 things). It is
+ *   appended to the held rows quietly and not counted.
  *
  * Rows the user dismissed are not brought back by a reply that still has them,
  * until a reply shows the server dropped them. A row that then comes back is a
@@ -122,12 +128,17 @@ export function applyInboxRefresh<Row extends InboxListRow>(
 
   const asked = new Set(reply.askedRefs);
   const heldRefs = new Set(state.rows.map((row) => row.ref));
-  const rows = state.rows.flatMap(
+  const kept = state.rows.flatMap(
     (row) => latest.get(row.ref) ?? (asked.has(row.ref) && !state.restored.has(row.ref) ? [] : row),
   );
-  const arrivals = reply.firstPage.filter(
+  const unheld = reply.firstPage.filter(
     (row) => !heldRefs.has(row.ref) && !state.handled.get(row.ref)?.awaitingServer,
   );
+  const lastHeldRank = reply.firstPage.findLastIndex((row) => heldRefs.has(row.ref));
+  const isPastHeld = (row: Row) =>
+    reply.firstPageHasMore && lastHeldRank >= 0 && reply.firstPage.indexOf(row) > lastHeldRank;
+  const rows = [...kept, ...unheld.filter(isPastHeld)];
+  const arrivals = unheld.filter((row) => !isPastHeld(row));
   const onFirstPage = new Set(reply.firstPage.map((row) => row.ref));
   const handled = new Map<string, HandledRow<Row>>();
   for (const [ref, entry] of state.handled) {

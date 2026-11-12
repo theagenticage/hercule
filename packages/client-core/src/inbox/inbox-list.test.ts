@@ -22,11 +22,12 @@ const refsOf = (state: InboxListState<Row>) => state.rows.map((r) => r.ref);
 const start = (...refs: string[]) => startInboxList("list-1", rows(...refs));
 
 /** A refresh whose `refs` reads asked for every held row not on the first page, and found `found`. */
-const refresh = (state: InboxListState<Row>, firstPage: Row[], found: Row[] = []) => {
+const refresh = (state: InboxListState<Row>, firstPage: Row[], found: Row[] = [], more = false) => {
   const onFirstPage = new Set(firstPage.map((r) => r.ref));
   return applyInboxRefresh(state, {
     listId: state.listId,
     firstPage,
+    firstPageHasMore: more,
     askedRefs: state.rows.map((r) => r.ref).filter((ref) => !onFirstPage.has(ref)),
     refsReads: found,
   });
@@ -36,6 +37,23 @@ const leaves = { leavesList: true };
 const stays = { leavesList: false };
 
 describe("refresh", () => {
+  it("appends a thing that slid in from the next page quietly, but counts one ranking above held rows", () => {
+    const refs = Array.from({ length: 300 }, (_, i) => `t${i}`);
+    let state = startInboxList("list-1", rows(...refs.slice(0, 200)), "cursor");
+    state = applyInboxMove(state, ["t0"], leaves);
+    const afterE = refresh(state, rows(...refs.slice(1, 201)), [], true);
+    expect(afterE.arrivals).toEqual([]);
+    expect(refsOf(afterE).at(-1)).toBe("t200");
+    expect(refsOf(afterE)).toHaveLength(200);
+    const withNew = refresh(afterE, rows("fresh", ...refs.slice(1, 201)), [], true);
+    expect(withNew.arrivals.map((r) => r.ref)).toEqual(["fresh"]);
+  });
+
+  it("counts a thing ranking last as an arrival when no next page exists", () => {
+    const state = refresh(start("a", "b"), rows("a", "b", "z"));
+    expect(state.arrivals.map((r) => r.ref)).toEqual(["z"]);
+  });
+
   it("updates a held row in place without re-sorting", () => {
     const state = refresh(start("a", "b", "c"), [row("c"), row("b", "new title"), row("a")]);
     expect(refsOf(state)).toEqual(["a", "b", "c"]);
@@ -58,6 +76,7 @@ describe("refresh", () => {
     const state = applyInboxRefresh(start("a", "b"), {
       listId: "list-1",
       firstPage: rows("a"),
+      firstPageHasMore: false,
       askedRefs: [],
       refsReads: [],
     });
@@ -75,6 +94,7 @@ describe("refresh", () => {
     const stale = applyInboxRefresh(state, {
       listId: "old",
       firstPage: [],
+      firstPageHasMore: false,
       askedRefs: ["a", "b"],
       refsReads: [],
     });
@@ -284,6 +304,7 @@ describe("undo after a refresh", () => {
     state = applyInboxRefresh(state, {
       listId: "list-1",
       firstPage: rows("b"),
+      firstPageHasMore: false,
       askedRefs: ["a"],
       refsReads: [],
     });

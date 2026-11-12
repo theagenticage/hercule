@@ -230,6 +230,7 @@ export function useHeldInboxList(client: HerculeClient, query: InboxQuery): Held
             list: applyInboxRefresh(before.list, {
               listId,
               firstPage: firstPage.things,
+              firstPageHasMore: firstPage.nextCursor !== undefined,
               askedRefs,
               refsReads: reads.flatMap((page) => page.things),
             }),

@@ -249,6 +249,19 @@ describe("Inbox", () => {
     await expect.poll(() => locateRow(page, ref).count()).toBe(0);
     await expect.poll(() => readWaitingCount(arranged)).toBe(waiting - 1);
     await page.locator(".undo-line.is-on").waitFor();
+    // The line is as wide as its content and centred on the list, not squeezed into half of it.
+    const box = await page.locator(".undo-line.is-on").evaluate((line) => {
+      const list = line.closest(".ib-list")!.getBoundingClientRect();
+      const own = line.getBoundingClientRect();
+      return {
+        width: own.width,
+        text: line.querySelector(".undo-text")!.getBoundingClientRect().width,
+        off: own.left + own.width / 2 - (list.left + list.width / 2),
+      };
+    });
+    expect(box.width).toBeGreaterThan(150);
+    expect(box.text).toBeGreaterThan(40);
+    expect(Math.abs(box.off)).toBeLessThan(1.5);
 
     await page.keyboard.press(`${PRIMARY_KEY}+z`);
     await expect.poll(() => locateRow(page, ref).count()).toBe(1);
