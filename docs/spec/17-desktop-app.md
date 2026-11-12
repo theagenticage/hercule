@@ -6385,7 +6385,7 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 - **Processes, idle, per streamed token, page read, rows drawn: met,** as above.
 - **Bundle, the Inbox chunk no bigger than the old one: met.** 57,295 B against 58,348 B.
 - **Reload reads: met on the number of requests, not shown on time.** A reload reads each key about twice, against 3 on the old screen. The longest read was not measured again.
-- **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). A follow-up ticket is to be filed.
+- **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"); [#1143](https://github.com/theagenticage/hercule/issues/1143) closes it.
 
 ## Slices
 
