@@ -49,6 +49,8 @@ import {
   type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
+  type InboxQuery,
+  type InboxValueQuery,
   type Input,
   type RunSummary,
   type Runner,
@@ -1056,6 +1058,53 @@ export const pluginsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.plugins(),
     queryFn: () => client.plugin.query(),
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads the first page of an Inbox list: `query` names the list, its search
+ * and no cursor. It is not shell data: only the Inbox screen reads it, and a
+ * live push on the Inbox's keys reads it again while the screen is open. The
+ * screen never draws this reply by itself: the held list takes it in (see
+ * `useHeldInboxList`), so a refetch cannot move a row under the user's eyes.
+ */
+export const inboxQuery = (client: HerculeClient, query: InboxQuery) =>
+  queryOptions({
+    queryKey: queryKeys.inbox(query),
+    queryFn: () => client.externalEntity.queryInbox({ payload: query }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads a page of an Inbox list that is not the first: the next page (a
+ * `cursor`) or the rows a refresh holds beyond the first page (`refs`). Each
+ * read is made once for the use that asked, so nothing is kept: a cached
+ * answer would be older than the first page it is compared with.
+ */
+export const inboxPartialPageQuery = (client: HerculeClient, query: InboxQuery) =>
+  queryOptions({
+    queryKey: queryKeys.inbox(query),
+    queryFn: () => client.externalEntity.queryInbox({ payload: query }),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+
+/**
+ * Reads the values of one field among the things of a list, for the search's
+ * suggestions. The key is under the Inbox's, so a push on the Inbox reads the
+ * values again. `input` is `undefined` while no clause is being typed, and
+ * then nothing is read. A newer input replaces an older one, which aborts.
+ */
+export const inboxValuesQuery = (client: HerculeClient, input: InboxValueQuery | undefined) =>
+  queryOptions({
+    queryKey: [...queryKeys.inbox(), "values", input ?? null],
+    queryFn:
+      input === undefined
+        ? skipToken
+        : ({ signal }) => client.externalEntity.suggestInboxValues({ payload: input }, { signal }),
+    retry: false,
+    ...LIVE_KEPT_READ_OPTIONS,
+    gcTime: 30_000,
   });
 
 /**

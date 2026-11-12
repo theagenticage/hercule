@@ -306,3 +306,28 @@ export function InboxEmpty({
     </div>
   );
 }
+
+/**
+ * Renders what the list shows when its first page could not be read: "The
+ * Inbox could not be read", the controller's `reason`, and a Try again button
+ * that calls `onTryAgain`.
+ */
+export function InboxReadFailed({
+  reason,
+  onTryAgain,
+}: {
+  readonly reason: string;
+  readonly onTryAgain: () => void;
+}): JSX.Element {
+  return (
+    <div className="ib-empty" role="alert">
+      <div className="ib-em">
+        <h2 className="ib-em-title">The Inbox could not be read</h2>
+        <p className="ib-em-line">{reason}</p>
+        <button type="button" className="btn btn--sm" onClick={onTryAgain}>
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}

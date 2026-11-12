@@ -7,7 +7,7 @@ import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { InboxEmpty, InboxFailingSource, InboxOfflinePill } from "./inbox-states";
+import { InboxEmpty, InboxFailingSource, InboxOfflinePill, InboxReadFailed } from "./inbox-states";
 import { InboxSelectionBar } from "./inbox-selection-bar";
 
 describe("InboxEmpty", () => {
@@ -158,5 +158,17 @@ describe("InboxSelectionBar", () => {
     const bar = document.querySelector(".ib-selbar");
     expect(bar?.hasAttribute("inert")).toBe(true);
     expect(bar?.textContent).toBe("2 selected");
+  });
+});
+
+describe("InboxReadFailed", () => {
+  it("says why the read failed and reads again from Try again", async () => {
+    const onTryAgain = vi.fn();
+    render(<InboxReadFailed reason="The controller did not answer." onTryAgain={onTryAgain} />);
+
+    expect(screen.getByRole("alert").textContent).toContain("The Inbox could not be read");
+    expect(screen.getByText("The controller did not answer.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onTryAgain).toHaveBeenCalledTimes(1);
   });
 });

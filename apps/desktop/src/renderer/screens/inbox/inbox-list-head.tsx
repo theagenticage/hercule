@@ -2,6 +2,7 @@ import type { PluginIdentity } from "@hercule/client-core";
 import type { JSX } from "react";
 import { FilterIcon } from "../../icons/filter";
 import { PluginMark } from "../../marks";
+import { InboxCountSkeleton } from "./inbox-states";
 import "./inbox-list.css";
 
 /** Writes a count with grouped digits: 1,204. */
@@ -13,11 +14,11 @@ const COUNT_FORMAT = new Intl.NumberFormat("en-GB");
  * - what the list is: `title` is a saved query's name, a Browse value, or
  *   "Search". A Browse value also gives the `mark` of its source and, when the
  *   source has several accounts, the `account`; `tooltip` spells it out;
- * - how many things it holds, `count`, in grouped tabular figures;
+ * - how many things it holds, `count`, in grouped tabular figures (a still bar while it is `null`);
  * - the order in words (`orderWords`, "Longest waiting first"). While
  *   `newCount` is above 0, the "N new" pill takes the words' place: it
  *   calls `onShowNew`, and the list below does not move;
- * - Narrow, which calls `onNarrow`. `narrowOpen` is whether its menu is open.
+ * - Narrow, which calls `onNarrow` with its button. `narrowOpen` is whether its menu is open.
  *
  * An `empty` list hides the order, the pill and Narrow, because there is
  * nothing to order or narrow. Under 400px of width the order words hide too.
@@ -42,13 +43,15 @@ export function InboxListHead({
   readonly mark?: string | undefined;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly account?: string | undefined;
-  readonly count: number;
+  /** How many things the list holds, or `null` while that is being read: a still bar draws instead. */
+  readonly count: number | null;
   readonly orderWords: string;
   readonly newCount: number;
   readonly empty: boolean;
   readonly narrowOpen: boolean;
   readonly onShowNew: () => void;
-  readonly onNarrow: () => void;
+  /** Called with the Narrow button, which the menu anchors to. */
+  readonly onNarrow: (anchor: HTMLElement) => void;
 }): JSX.Element {
   return (
     <div className="ib-head">
@@ -60,7 +63,9 @@ export function InboxListHead({
         )}
         <h2>{title}</h2>
         {account === undefined ? null : <span className="ib-head-account">{account}</span>}
-        <span className="ib-head-count">{COUNT_FORMAT.format(count)}</span>
+        <span className="ib-head-count">
+          {count === null ? <InboxCountSkeleton /> : COUNT_FORMAT.format(count)}
+        </span>
       </div>
       {empty ? null : (
         <div className="ib-head-tools">
@@ -86,7 +91,9 @@ export function InboxListHead({
             aria-haspopup="menu"
             aria-expanded={narrowOpen ? "true" : "false"}
             aria-keyshortcuts="F"
-            onClick={onNarrow}
+            onClick={(event) => {
+              onNarrow(event.currentTarget);
+            }}
           >
             <FilterIcon size={14} />
             <b>Narrow</b>
