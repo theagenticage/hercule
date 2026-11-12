@@ -10,6 +10,7 @@ window.App = (function () {
     search: { text: "", clauses: [] },
     focus: null, // the key of the current row
     selection: new Set(), // thing ids
+    anchor: null, // the row a ⇧-range starts from
     open: new Set(), // group keys that are unfolded
     showAll: new Set(), // large groups shown whole
     folded: new Set(), // the declared setting inbox.browseFolded
@@ -60,7 +61,9 @@ window.App = (function () {
       if (u.type === "tmore") { flat.push({ key: u.key, type: "tmore", n: u.n, lastTriage: true }); return; }
       if (u.type === "thing") { flat.push({ key: u.key, type: "thing", thing: u.thing }); return; }
       var g = u.group;
-      var isOpen = state.open.has(u.key);
+      // While searching, a group whose hit is one of its members opens, so the hit is in sight.
+      var searching = state.search.text || state.search.clauses.length;
+      var isOpen = state.open.has(u.key) || (searching && u.hits.some(function (h) { return h !== g.lead; }));
       flat.push({ key: u.key, type: "group", group: g, hits: u.hits, best: u.best, open: isOpen });
       if (!isOpen) return;
       var hitIds = new Set(u.hits.map(function (h) { return h.id; }));
@@ -70,7 +73,7 @@ window.App = (function () {
       });
       var limit = state.showAll.has(u.key) || members.length <= 7 ? members.length : 5;
       members.slice(0, limit).forEach(function (m, j) {
-        flat.push({ key: "m:" + g.lead.id + ":" + m.id, type: "member", thing: m, group: g, outside: !hitIds.has(m.id), last: j === limit - 1 && limit === members.length });
+        flat.push({ key: "m:" + g.lead.id + ":" + m.id, type: "member", thing: m, group: g, pos: j + 1, outside: !hitIds.has(m.id), last: j === limit - 1 && limit === members.length });
       });
       if (limit < members.length) flat.push({ key: "x:" + g.lead.id, type: "more", group: g, groupKey: u.key, n: members.length - limit });
     });
@@ -80,6 +83,8 @@ window.App = (function () {
 
   function render(opts) {
     opts = opts || {};
+    // Only a focus that was in the list is given back to its new current row.
+    var keep = el.list && el.list.contains(document.activeElement);
     state.rows = buildFlat();
     if (!state.rows.some(function (r) { return r.key === state.focus; })) {
       var hint = state.focusHint;
@@ -94,7 +99,12 @@ window.App = (function () {
     Bar.draw(state);
     var n = Model.countSaved("waits");
     var c = document.querySelector("[data-inbox-count]");
-    if (c) { c.textContent = n; c.hidden = n === 0; }
+    if (c) { c.textContent = n; c.style.display = n ? "" : "none"; }
+    // After a move the row under the keys is a new element: give it the focus, so the ring stays.
+    if (keep && (!document.activeElement || document.activeElement === document.body) && !Dialog.isOpen()) {
+      var cur = el.list.querySelector('[data-key="' + state.focus + '"]');
+      if (cur) cur.focus({ preventScroll: true });
+    }
   }
 
   function currentRow() { return state.rows.find(function (r) { return r.key === state.focus; }) || null; }
@@ -114,6 +124,15 @@ window.App = (function () {
     el.ib.style.setProperty("--pane-w", state.paneW + "px");
   }
 
+  // Under 900px (or at 200% zoom) the pane lies over the list: ↩ or a click opens it, Esc closes it.
+  var stacked = matchMedia("(max-width: 899px)");
+  function isStacked() { return stacked.matches; }
+  function setPaneOpen(on) {
+    el.ib.classList.toggle("is-pane-open", !!on);
+    if (on) { var t = el.pane.querySelector(".pn-title"); if (t) { t.tabIndex = -1; t.focus({ preventScroll: true }); } }
+    else { var cur = el.list.querySelector('[data-key="' + state.focus + '"]'); if (cur) cur.focus({ preventScroll: true }); }
+  }
+
   function focusRow(key, opts) {
     if (!key) return;
     state.focus = key;
@@ -121,5 +140,5 @@ window.App = (function () {
     Pane.draw(el.pane, state, { walk: opts && opts.dir });
   }
 
-  return { state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
+  return { isStacked: isStacked, setPaneOpen: setPaneOpen, isPaneOpen: function () { return el.ib.classList.contains("is-pane-open"); }, state: state, boot: boot, render: render, currentRow: currentRow, acted: acted, scopeTitle: scopeTitle, setPaneWidth: setPaneWidth, focusRow: focusRow, el: el };
 })();

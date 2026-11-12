@@ -7,6 +7,7 @@
   margin-bottom: 12px;
 }
 .rl-row {
+  position: relative;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
@@ -17,6 +18,7 @@
   border-radius: var(--r-sm);
   color: var(--muted);
   font-size: var(--t-13);
+  line-height: 18px;
   text-align: left;
   transition: background var(--dur-1), color var(--dur-1);
 }
@@ -54,8 +56,34 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-weight: var(--w-regular);
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+/* The triage accent on the count's words, not a disc: a disc is the sidebar's "Waiting on you". */
+.rl-n--triage {
+  color: var(--triage-ink);
+  font-weight: var(--w-medium);
+}
+.rl-row.is-on .rl-n--triage {
+  color: var(--triage-ink);
+}
+/* A saved query's key, shown under the pointer and on focus, over its count. */
+.rl-key {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  translate: 0 -50%;
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.rl-row:hover .rl-key,
+.rl-row:focus-visible .rl-key {
+  opacity: 1;
+}
+.rl-row:has(.rl-key):hover .rl-n,
+.rl-row:has(.rl-key):focus-visible .rl-n {
+  opacity: 0;
 }
 .rl-row.is-on .rl-n {
   color: var(--muted);
@@ -70,6 +98,7 @@
 /* Headings: the sidebar's eyebrows. */
 .rl-h {
   margin: 20px 8px 6px;
+  line-height: 16px;
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
@@ -77,14 +106,13 @@
   text-transform: uppercase;
 }
 
-/* Pins and values carry a star, shown on hover over the count. */
-.rl-row--pin,
-.rl-row--val {
+/* Pins and values carry a star of their own, shown on hover and on focus, over the count. */
+.rl-pair {
   position: relative;
 }
 .rl-star {
   position: absolute;
-  right: 4px;
+  right: 3px;
   top: 50%;
   translate: 0 -50%;
   display: inline-grid;
@@ -96,12 +124,17 @@
   opacity: 0;
   transition: opacity var(--m-quick) var(--m-ease);
 }
-.rl-row:hover .rl-star {
+.rl-pair:hover .rl-star,
+.rl-pair:focus-within .rl-star {
   opacity: 1;
 }
-.rl-row--val:hover .rl-n,
-.rl-row--pin:hover .rl-n {
+.rl-pair:hover .rl-n,
+.rl-pair:focus-within .rl-n {
   opacity: 0;
+}
+.rl-star:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 .rl-star:hover {
   background: var(--hover);
@@ -122,15 +155,29 @@
   margin-top: 1px;
 }
 .rl-row--src {
-  grid-template-columns: 16px minmax(0, 1fr) auto auto 12px;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
 }
 .rl-row--src .rl-ic {
+  position: relative;
   color: inherit;
 }
+/* The fold's chevron takes the mark's place under the pointer and on focus, so counts keep one column. */
 .rl-chev {
-  display: inline-grid;
-  color: var(--faint);
-  transition: transform var(--m-base) var(--m-ease);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--m-quick) var(--m-ease), transform var(--m-base) var(--m-ease);
+}
+.rl-row--src:hover .rl-chev,
+.rl-row--src:focus-visible .rl-chev {
+  opacity: 1;
+}
+.rl-row--src:hover .rl-ic > .mk,
+.rl-row--src:focus-visible .rl-ic > .mk {
+  opacity: 0;
 }
 .rl-src.is-open .rl-chev {
   transform: rotate(90deg);
@@ -144,10 +191,11 @@
 }
 .rl-facet {
   margin: 8px 0 2px;
-  padding-left: 34px;
+  padding-left: 8px;
   color: var(--faint);
-  font-size: var(--t-12);
-  line-height: 20px;
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
 }
 .rl-acct {
   display: grid;
@@ -157,9 +205,10 @@
   height: 28px;
   margin: 8px 0 0;
   padding: 0 8px;
-  color: var(--ink);
-  font-size: var(--t-12);
-  font-weight: var(--w-medium);
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  line-height: 18px;
 }
 .rl-acct .rl-ic {
   color: var(--faint);
@@ -176,6 +225,7 @@
   border-radius: var(--r-sm);
   color: var(--faint);
   font-size: var(--t-12);
+  line-height: 16px;
   text-align: left;
 }
 .rl-more:hover {
@@ -198,11 +248,13 @@
 }
 
 /* Marks: in the source's declared hue, or in ink. */
+/* A mark with no declared hue is drawn at the theme's mark lightness in grey, so no plugin is louder
+   than another, and none is louder than a name. */
 .mk {
   display: inline-grid;
   flex: none;
   place-items: center;
-  color: var(--mark-ink);
+  color: oklch(var(--mark-l) 0 0);
 }
 .mk svg {
   display: block;

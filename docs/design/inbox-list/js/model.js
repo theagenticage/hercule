@@ -136,7 +136,7 @@ window.Model = (function () {
     var rows = [];
     var searching = search && (search.text || search.clauses.length);
     if (scope.triage || (saved && saved.triage && !searching)) {
-      var tl = triageLive();
+      var tl = triageLive().slice().sort(function (a, b) { return a.at - b.at; });
       // At the top of a saved query, triage keeps three rows, so it never pushes the list below the fold.
       var cap = scope.triage ? tl.length : 3;
       tl.slice(0, cap).forEach(function (x) { rows.push({ type: x.type, key: "t:" + x.id, item: x, things: x.things.map(function (id) { return byId.get(id); }) }); });

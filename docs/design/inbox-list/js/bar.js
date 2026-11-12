@@ -45,16 +45,19 @@ window.Bar = (function () {
   function drawMenu() {
     var text = input.value.trim();
     var show = document.activeElement === input;
-    if (!show) { menu.hidden = true; return; }
+    var shut = function () { menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); };
+    if (!show) { shut(); return; }
     items = suggest(text);
-    if (!items.length) { menu.hidden = true; return; }
+    if (!items.length) { shut(); return; }
     active = Math.min(active, items.length - 1);
     menu.innerHTML = (text ? "" : '<p class="sx-h">Search by a field</p>') + items.map(function (it, i) {
-      return '<button type="button" role="option" class="sx-item' + (i === active ? " is-active" : "") + '" data-i="' + i + '">' +
+      return '<div role="option" id="sx-o' + i + '" aria-selected="' + (i === active) + '" class="sx-item' + (i === active ? " is-active" : "") + '" data-i="' + i + '">' +
         '<span class="sx-key">' + (it.kind === "text" ? D.icon("search", 14) : it.kind === "field" ? D.icon("filter", 14) : "") + "</span>" +
         "<span class=\"sx-label\">" + (it.kind === "text" ? "“" + D.esc(it.label) + "”" : "<code>" + D.esc(it.label) + "</code>") + (it.hint ? '<small>' + D.esc(it.hint) + "</small>" : "") + "</span>" +
-        (it.n != null ? '<span class="sx-n">' + D.num(it.n) + "</span>" : "") + "</button>";
-    }).join("") + '<p class="sx-foot"><kbd>↑</kbd><kbd>↓</kbd> choose <kbd>↩</kbd> add <kbd>⌫</kbd> remove the last <kbd>Esc</kbd> close</p>';
+        (it.n != null ? '<span class="sx-n">' + D.num(it.n) + "</span>" : "") + "</div>";
+    }).join("") + '<p class="sx-foot"><kbd>↩</kbd> add <kbd>↓</kbd> to the results <kbd>⌫</kbd> remove the last <kbd>Esc</kbd> leave, keeping the search</p>';
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-activedescendant", "sx-o" + active);
     var r = field.getBoundingClientRect();
     menu.style.left = r.left + "px";
     menu.style.top = r.bottom + 6 + "px";
@@ -62,37 +65,79 @@ window.Bar = (function () {
     menu.hidden = false;
   }
 
+  /**
+   * Turns every finished `field:value` in the field into a token, and returns what is left as free text.
+   * A half-typed field name (`even`, `events:`) is never used as free text. Any threshold works: `>500`.
+   */
+  function absorb(final) {
+    var st = App.state;
+    var words = input.value.split(/\s+/);
+    var lastWord = final ? null : words.pop();
+    var rest = [];
+    words.forEach(function (w) {
+      var m = /^([a-z]+):(.+)$/i.exec(w);
+      var key = m && tokenField(m[1].toLowerCase());
+      if (key) st.search.clauses.push({ key: key, value: m[2] });
+      else if (w) rest.push(w);
+    });
+    if (lastWord != null) rest.push(lastWord);
+    input.value = rest.join(" ");
+    var typed = rest.filter(function (w) { return !/:/.test(w) && !Object.keys(K.FIELDS).some(function (k) { return K.FIELDS[k].token.indexOf(w.toLowerCase()) === 0 && w.length >= 2 && rest[rest.length - 1] === w && !final; }); });
+    st.search.text = typed.join(" ").trim();
+  }
+
+  /** Leaves the search for the list, keeping the query, with the first result current. */
+  function toList() {
+    menu.hidden = true;
+    var first = App.state.rows.find(function (r) { return r.type !== "tmore" && r.type !== "more"; });
+    if (first) App.focusRow(first.key, { keyboard: true });
+    else { var b = document.querySelector("#empty button"); if (b) b.focus(); else input.blur(); }
+  }
+
   function pick(it) {
     var st = App.state;
     if (!it) return;
     if (it.kind === "field") { input.value = K.FIELDS[it.key].token + ":"; active = 0; drawMenu(); return; }
-    if (it.kind === "value") { st.search.clauses.push({ key: it.key, value: String(it.value) }); input.value = ""; st.search.text = ""; }
-    else { st.search.text = it.label; }
-    active = 0;
+    if (it.kind === "value") { st.search.clauses.push({ key: it.key, value: String(it.value) }); input.value = ""; st.search.text = ""; active = 0; apply(); menu.hidden = true; return; }
+    absorb(true);
     apply();
-    drawMenu();
+    toList();
   }
 
   function apply() {
     var st = App.state;
     st.focus = null;
     App.render({});
+    if (st.search.text || st.search.clauses.length) Announce.say(st.built.count + (st.built.count === 1 ? " thing matches" : " things match") + " in " + App.scopeTitle() + ".");
+  }
+
+  /** Widens the search to Everything, keeping the query. */
+  function widen() {
+    var st = App.state;
+    var keep = st.search;
+    st.scope = { saved: "all" };
+    st.search = keep;
+    apply();
+    drawMenu();
   }
 
   function drawChips() {
     var st = App.state;
-    chips.innerHTML = st.search.clauses.map(function (c, i) {
+    var searching = st.search.text || st.search.clauses.length || document.activeElement === input;
+    var scopeChip = searching && !(st.scope.saved === "all") ? '<span class="sx-chip sx-chip--scope" title="Searching in ' + D.esc(App.scopeTitle()) + '. ⌫ or × searches Everything.">in<b>' + D.esc(App.scopeTitle()) + '</b><button type="button" data-widen aria-label="Search Everything instead">' + D.icon("close", 10) + "</button></span>" : "";
+    chips.innerHTML = scopeChip + st.search.clauses.map(function (c, i) {
       var f = K.FIELDS[c.key];
       return '<span class="sx-chip">' + (c.source ? D.mark(c.source, 12) : "") + "<span>" + D.esc(f.token) + ":</span><b>" + D.esc(c.value) + '</b><button type="button" data-unchip="' + i + '" aria-label="Remove ' + D.esc(f.token + ":" + c.value) + '">' + D.icon("close", 10) + "</button></span>";
     }).join("");
     field.classList.toggle("has-chips", st.search.clauses.length > 0);
+    input.placeholder = st.search.clauses.length ? "" : "Search, or type a field: team:, from:, waiting:>2d";
   }
 
   function draw(st) {
     drawChips();
     var off = document.getElementById("offline");
     off.hidden = !st.offline;
-    if (st.offline) off.textContent = "Offline since 09:12 · moves wait until you’re back";
+    if (st.offline) off.textContent = "Offline since 09:12 · " + (st.outbox ? st.outbox + (st.outbox === 1 ? " move waits" : " moves wait") + " to be sent" : "moves wait until you’re back");
     document.documentElement.toggleAttribute("data-offline", !!st.offline);
     var scope = document.getElementById("scope-btn");
     if (scope) scope.querySelector("span").textContent = st.search.text || st.search.clauses.length ? "Search" : App.scopeTitle();
@@ -111,10 +156,15 @@ window.Bar = (function () {
   }
 
   // ---- Narrow: the facets of what the list holds, as menus ----
-  var narrowOpen = null;
+  var narrowFrom = null;
+  function closeNarrow() {
+    var pop = document.getElementById("narrow");
+    pop.hidden = true;
+    if (narrowFrom) { narrowFrom.setAttribute("aria-expanded", "false"); if (pop.contains(document.activeElement) || document.activeElement === document.body) narrowFrom.focus({ preventScroll: true }); }
+  }
   function narrow(button) {
     var pop = document.getElementById("narrow");
-    if (!pop.hidden) { pop.hidden = true; return; }
+    if (!pop.hidden) { closeNarrow(); return; }
     var st = App.state;
     var things = Model.find(st.scope.triage ? { saved: "all" } : st.scope, st.search);
     var bySource = {};
@@ -123,8 +173,9 @@ window.Bar = (function () {
       var html = '<p class="menu-h">Narrow what the list holds</p>';
       Object.keys(K.BROWSE).forEach(function (src) {
         if (!bySource[src]) return;
+        html += '<p class="nw-src">' + D.mark(src, 12) + D.esc(K.SOURCES[src].name) + "</p>";
         K.BROWSE[src].forEach(function (f) {
-          html += '<button type="button" class="menu-pick nw-f" data-nf="' + src + "|" + f.field + '">' + D.mark(src, 14) + "<span>" + D.esc(K.SOURCES[src].name) + " " + D.esc(K.FIELDS[f.field].label.toLowerCase()) + '</span><small>' + new Set(bySource[src].map(function (t) { return t.fields[f.field]; }).filter(Boolean)).size + "</small>" + D.icon("chevron-right", 12) + "</button>";
+          html += '<button type="button" role="menuitem" class="menu-pick nw-f" data-nf="' + src + "|" + f.field + '"><span>' + D.esc(K.FIELDS[f.field].label) + "</span>" + D.icon("chevron-right", 12) + "</button>";
         });
       });
       pop.innerHTML = html;
@@ -132,22 +183,26 @@ window.Bar = (function () {
     var drawValues = function (src, fieldKey) {
       var counts = new Map();
       bySource[src].forEach(function (t) { var v = t.fields[fieldKey]; if (v != null) counts.set(v, (counts.get(v) || 0) + 1); });
-      pop.innerHTML = '<button type="button" class="menu-pick nw-back" data-nback>' + D.icon("chevron-left", 12) + "<span>" + D.esc(K.SOURCES[src].name) + " " + D.esc(K.FIELDS[fieldKey].label.toLowerCase()) + "</span></button><i class=\"menu-line\"></i>" +
+      pop.innerHTML = '<button type="button" role="menuitem" class="menu-pick nw-back" data-nback>' + D.icon("chevron-left", 12) + "<span>" + D.esc(K.SOURCES[src].name) + " " + D.esc(K.FIELDS[fieldKey].label.toLowerCase()) + "</span></button><i class=\"menu-line\"></i>" +
         Array.from(counts).sort(function (a, b) { return b[1] - a[1]; }).map(function (e) {
-          return '<button type="button" class="menu-pick" data-nv="' + D.esc(JSON.stringify({ source: src, key: fieldKey, value: e[0] })) + '"><span>' + D.esc(e[0]) + "</span><small>" + D.num(e[1]) + "</small></button>";
+          return '<button type="button" role="menuitem" class="menu-pick" data-nv="' + D.esc(JSON.stringify({ source: src, key: fieldKey, value: e[0] })) + '"><span>' + D.esc(e[0]) + "</span><small>" + D.num(e[1]) + "</small></button>";
         }).join("");
     };
     drawFacets();
+    button.setAttribute("aria-expanded", "true");
+    narrowFrom = button;
     var r = button.getBoundingClientRect();
     pop.style.left = Math.max(8, r.right - 280) + "px";
     pop.style.top = r.bottom + 6 + "px";
     pop.hidden = false;
+    var focusFirst = function () { var f = pop.querySelector(".menu-pick"); if (f) { f.classList.add("is-active"); f.focus({ preventScroll: true }); } };
+    focusFirst();
     pop.onclick = function (e) {
       var f = e.target.closest("[data-nf]");
-      if (f) { var p = f.dataset.nf.split("|"); drawValues(p[0], p[1]); return; }
-      if (e.target.closest("[data-nback]")) { drawFacets(); return; }
+      if (f) { var p = f.dataset.nf.split("|"); drawValues(p[0], p[1]); focusFirst(); return; }
+      if (e.target.closest("[data-nback]")) { drawFacets(); focusFirst(); return; }
       var v = e.target.closest("[data-nv]");
-      if (v) { var c = JSON.parse(v.dataset.nv); App.state.search.clauses.push({ key: c.key, value: String(c.value), source: c.source }); pop.hidden = true; apply(); }
+      if (v) { var c = JSON.parse(v.dataset.nv); App.state.search.clauses.push({ key: c.key, value: String(c.value), source: c.source }); closeNarrow(); apply(); }
     };
     if (!Motion.isReduced()) Motion.animate(pop, [{ opacity: 0, transform: "translateY(-4px) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" });
   }
@@ -157,30 +212,49 @@ window.Bar = (function () {
     chips = document.getElementById("sx-chips");
     menu = document.getElementById("sx-menu");
     field = document.getElementById("sx");
-    input.addEventListener("focus", function () { field.classList.add("is-focus"); drawMenu(); });
-    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) menu.hidden = true; }, 120); });
+    input.addEventListener("focus", function () { field.classList.add("is-focus"); drawChips(); drawMenu(); });
+    input.addEventListener("blur", function () { field.classList.remove("is-focus"); setTimeout(function () { if (document.activeElement !== input) { menu.hidden = true; drawChips(); } }, 120); });
     input.addEventListener("input", function () {
       active = 0;
-      var v = input.value;
-      if (!/^[a-z]+:/i.test(v)) { App.state.search.text = v.trim(); apply(); }
+      if (/\s$/.test(input.value) && /\b[a-z]+:\S+\s$/i.test(input.value)) absorb(true);
+      else absorb(false);
+      apply();
       drawMenu();
     });
     input.addEventListener("keydown", function (e) {
       var st = App.state;
-      if (e.key === "ArrowDown") { active = Math.min(items.length - 1, active + 1); drawMenu(); e.preventDefault(); }
+      if (e.key === "ArrowDown") {
+        if (menu.hidden || active >= items.length - 1) toList(); else { active++; drawMenu(); }
+        e.preventDefault();
+      }
       else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); drawMenu(); e.preventDefault(); }
-      else if (e.key === "Enter") { pick(items[active]); e.preventDefault(); }
-      else if (e.key === "Backspace" && !input.value && st.search.clauses.length) { st.search.clauses.pop(); apply(); drawMenu(); }
+      else if (e.key === "Enter") {
+        var m = /^([a-z]+):(.+)$/i.exec(input.value.trim());
+        if (m && tokenField(m[1].toLowerCase())) { absorb(true); apply(); menu.hidden = true; }
+        else if (!menu.hidden && items[active] && items[active].kind !== "text") pick(items[active]);
+        else { absorb(true); apply(); toList(); }
+        e.preventDefault();
+      }
+      else if (e.key === "Backspace" && !input.value) {
+        if (st.search.clauses.length) { st.search.clauses.pop(); apply(); drawMenu(); }
+        else if (!(st.scope.saved === "all")) { widen(); }
+        e.preventDefault();
+      }
       else if (e.key === "Escape") {
-        if (input.value || st.search.clauses.length) { input.value = ""; clear(true); }
-        input.blur();
+        // The first Esc leaves the search and keeps the query; Esc in the list then clears it.
+        menu.hidden = true;
+        if (st.search.text || st.search.clauses.length) toList(); else input.blur();
         e.preventDefault();
       }
       e.stopPropagation();
     });
     menu.addEventListener("mousedown", function (e) { e.preventDefault(); });
     menu.addEventListener("click", function (e) { var b = e.target.closest("[data-i]"); if (b) pick(items[+b.dataset.i]); });
-    chips.addEventListener("click", function (e) { var b = e.target.closest("[data-unchip]"); if (b) { App.state.search.clauses.splice(+b.dataset.unchip, 1); apply(); } });
+    chips.addEventListener("click", function (e) {
+      if (e.target.closest("[data-widen]")) { widen(); return; }
+      var b = e.target.closest("[data-unchip]");
+      if (b) { App.state.search.clauses.splice(+b.dataset.unchip, 1); apply(); }
+    });
     document.getElementById("list-head").addEventListener("click", function (e) { var b = e.target.closest("[data-narrow]"); if (b) narrow(b); });
     var scopeBtn = document.getElementById("scope-btn"), scopePop = document.getElementById("scope-pop");
     scopeBtn.insertAdjacentHTML("beforeend", D.icon("chevron-down", 12));
@@ -195,9 +269,9 @@ window.Bar = (function () {
     document.addEventListener("pointerdown", function (e) {
       if (!scopePop.hidden && !e.target.closest("#scope-pop, #scope-btn")) { scopePop.hidden = true; scopeBtn.setAttribute("aria-expanded", "false"); }
       var pop = document.getElementById("narrow");
-      if (!pop.hidden && !e.target.closest("#narrow, [data-narrow]")) pop.hidden = true;
+      if (!pop.hidden && !e.target.closest("#narrow, [data-narrow]")) closeNarrow();
     });
   }
 
-  return { draw: draw, start: start, clear: clear, focus: function () { input.focus(); }, narrow: narrow };
+  return { closeNarrow: closeNarrow, widen: widen, draw: draw, start: start, clear: clear, focus: function () { input.focus(); }, narrow: narrow };
 })();

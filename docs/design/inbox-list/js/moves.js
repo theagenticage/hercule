@@ -16,10 +16,17 @@ window.Moves = (function () {
   }
 
   function say(text, opts) { Undo.show(text, opts || {}); }
-  function push(entry) { stack.push(entry); say(entry.say, { undo: true, action: entry.action }); }
+  /** Puts a move on the shared undo stack and says it. Offline, the move waits in the outbox, and the line says so. */
+  function push(entry) {
+    stack.push(entry);
+    if (s().offline) { s().outbox = (s().outbox || 0) + 1; Bar.draw(s()); }
+    say(entry.say, { undo: true, action: entry.action, note: s().offline ? "Waits until you’re back online." : entry.note });
+  }
+  function last() { return stack[stack.length - 1] || null; }
   function undo() {
     var e = stack.pop();
     if (!e) { say("Nothing to undo."); return; }
+    if (s().offline && s().outbox) { s().outbox--; Bar.draw(s()); }
     e.undo();
     say(e.undone || "Undone.", {});
   }
@@ -60,16 +67,18 @@ window.Moves = (function () {
   // ---- Dismiss: a thing, a whole group, or the selection, with one undo ----
   function dismiss() {
     var r = App.currentRow();
-    if (r && r.type === "link") return notRelated(r);
+    if (r && r.type === "link" && !s().selection.size) return notRelated(r);
     if (r && r.type === "proposal" && !s().selection.size) return dismissProposal(r);
     var things = App.acted();
     if (!things.length) return;
+    var isGroup = !s().selection.size && r && r.type === "group";
+    var outside = isGroup ? r.group.members.length - r.hits.length : 0;
     holdPlace();
     things.forEach(function (t) { Model.gone.add(t.id); });
     s().selection.clear();
     redraw({ leave: "dismiss" });
     push({
-      say: things.length === 1 ? "Dismissed " + quote(things[0].title) : "Dismissed " + things.length + " things",
+      say: isGroup ? "Dismissed the group " + quote(r.group.label) + ": " + things.length + " things" + (outside ? ", " + outside + " of them not in this list" : "") : things.length === 1 ? "Dismissed " + quote(things[0].title) : "Dismissed " + things.length + " things",
       undo: function () { things.forEach(function (t) { Model.gone.delete(t.id); }); redraw({ enter: "return" }); },
       undone: "Back in your Inbox.",
     });
@@ -89,7 +98,7 @@ window.Moves = (function () {
     redraw({ leave: "taken" });
     push({
       say: "Took it on: a Task on Work, " + quote(title),
-      action: { label: "Go to the Task", key: "G" },
+      action: { label: "Go to the Task", key: "G", task: title },
       undo: function () { things.forEach(function (t) { delete t.held; }); redraw({ enter: "return" }); },
       undone: "The Task is gone, and nothing had started.",
     });
@@ -114,21 +123,33 @@ window.Moves = (function () {
     var row = App.el.list.querySelector('[data-id="' + t.id + '"]');
     var ended = Model.openSignals(t).filter(function (sg) { return offer.w.ends.indexOf(sg.kind) >= 0; });
     holdPlace();
-    var finish = function () {
-      t.held = { by: offer.w.name, task: t.title, since: 0 };
-      ended.forEach(function (sg) { sg.done = true; });
-      redraw({ leave: "taken" });
-    };
+    var cancelled = false;
+    // The data changes first, so the counts are right at once and a second H refuses. The row leaves
+    // when the colleague's mark lands on Work.
+    t.held = { by: offer.w.name, task: t.title, since: 0 };
+    ended.forEach(function (sg) { sg.done = true; });
+    Rail.draw(App.el.rail, s());
+    var c = document.querySelector("[data-inbox-count]");
+    if (c) c.textContent = Model.countSaved("waits");
+    var finish = function () { if (!cancelled) redraw({ leave: "taken" }); };
     if (row) Flights.handChain(row, t, offer.w.name, finish); else finish();
     push({
       say: "Handed " + quote(t.title) + " to " + offer.w.name,
-      undo: function () { delete t.held; ended.forEach(function (sg) { sg.done = false; }); redraw({ enter: "return" }); },
+      action: { label: "Go to the Task", key: "G", task: t.title },
+      undo: function () {
+        cancelled = true;
+        delete t.held;
+        ended.forEach(function (sg) { sg.done = false; });
+        redraw({ enter: "return" });
+        var back = App.state.rows.find(function (x) { return x.thing && x.thing.id === t.id; });
+        if (back) App.focusRow(back.key);
+      },
       undone: "Took back " + offer.w.name + ". Nothing had started.",
     });
   }
 
   // ---- Link: the selection with L, a row dropped on another, or a suggestion accepted ----
-  function link(ids, how) {
+  function link(ids, how, carried) {
     var st = s();
     ids = ids.filter(function (id, i) { return ids.indexOf(id) === i; });
     if (ids.length < 2) return false;
@@ -144,7 +165,7 @@ window.Moves = (function () {
     st.open.add(gkey);
     st.selection.clear();
     st.focus = gkey;
-    redraw({ link: true });
+    redraw({ link: true, carried: carried });
     var names = ids.map(function (id) { var t = Model.byId(id); return D.identifier(t) || quote(t.title); });
     push({
       say: "Linked " + (names.length === 2 ? names[0] + " and " + names[1] : names.length + " things"),
@@ -162,7 +183,7 @@ window.Moves = (function () {
   function linkKey() {
     var st = s();
     var r = App.currentRow();
-    if (r && r.type === "link") return acceptLink(r);
+    if (r && r.type === "link" && !st.selection.size) return acceptLink(r);
     if (st.selection.size >= 2) return link(Array.from(st.selection), "key");
     if (st.selection.size === 1 && r && r.thing && !st.selection.has(r.thing.id)) return link([r.thing.id, Array.from(st.selection)[0]], "key");
     if (r && (r.thing || r.type === "group")) return Menus.linkTo(r.thing || r.group.lead);
@@ -228,15 +249,24 @@ window.Moves = (function () {
     if (!f) return;
     var a = Kinds.SIGNALS[f.s.kind].answers.find(function (x) { return x.id === answerId; });
     if (a.field) return Reply.open(button, f, a);
-    settle(f, a.label === "Approve" ? "Approved " + (D.identifier(f.t) || "it") + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name : a.label + ": done on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true);
+    settle(f, a.label === "Approve" ? "Approved " + (D.identifier(f.t) || "it") + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name : a.label + " " + (D.identifier(f.t) || quote(f.t.title)) + " on " + Kinds.SOURCES[Model.sourceOf(f.t)].name, true);
   }
   /** Closes one signal and says so. A thing whose last ask closed leaves a list of asks. */
+  /**
+   * Closes one signal and says so. An answer that acts on the source (Approve, Reply) is held for the
+   * undo line's eight seconds before it is sent, as mail apps hold a sent mail, so ⌘Z takes back every
+   * move the same way. A thing whose last ask closed leaves a list of asks.
+   */
   function settle(f, words, external) {
     holdPlace();
     f.s.done = true;
     redraw({ leave: "dismiss" });
-    if (external) say(words + ".", { note: "Done on the source, so ⌘Z can’t take it back." });
-    else push({ say: words, undo: function () { f.s.done = false; redraw({ enter: "return" }); } });
+    push({
+      say: words,
+      note: external ? "Sends in 8s" : null,
+      undo: function () { f.s.done = false; redraw({ enter: "return" }); },
+      undone: external ? "Not sent. The ask is open again." : "The ask is open again.",
+    });
   }
   function markDone(sigId) {
     var f = findSignal(sigId);
@@ -254,16 +284,23 @@ window.Moves = (function () {
     else say("It isn’t in this list. Everything (5) shows it.");
   }
 
-  function goTo() {
-    var t = App.acted()[0];
-    if (!t || !t.held) { say("This has no Task yet. T takes it on."); return; }
-    say("Going to " + quote(t.held.task) + " on Work…");
+  function goTo(task) {
+    if (typeof task !== "string") {
+      var t = App.acted()[0];
+      var recent = last();
+      // Right after a move that made a Task, G goes to that Task, wherever the current row now is.
+      if ((!t || !t.held) && recent && recent.action && recent.action.task && document.getElementById("undo").classList.contains("is-on")) task = recent.action.task;
+      else if (!t || !t.held) { say("This has no Task yet. T takes it on."); return; }
+      else task = t.held.task;
+    }
+    say("Going to " + quote(task) + " on Work…");
   }
 
   function run(name, button) {
     var r = App.currentRow();
     if (name === "thread") { if (r && r.type === "proposal") return accept(r, true); var th = App.acted(); if (th.length) Dialog.open(th, s().selection.size ? { type: "selection" } : r.type === "group" ? { type: "group", title: r.group.label } : { type: "thing" }); return; }
     if (name === "take" || name === "accept") return takeOn();
+    if (name === "hand" && button && button.closest && button.closest(".row-acts")) return handOff(button);
     if (name === "hand") return handOff(button);
     if (name === "link") return linkKey();
     if (name === "dismiss") return dismiss();
@@ -276,14 +313,18 @@ window.Moves = (function () {
     if (!st.pending.length) return;
     var fresh = st.pending.splice(0);
     fresh.forEach(function (t) { t.fresh = true; Model.add(t); });
-    var list = document.getElementById("list-scroll");
-    var go = function () { redraw({ enter: "arrive" }); setTimeout(function () { fresh.forEach(function (t) { t.fresh = false; }); }, 1600); };
-    if (list.scrollTop > 0) { list.scrollTo({ top: 0, behavior: Motion.isReduced() ? "auto" : "smooth" }); setTimeout(go, 260); } else go();
+    redraw({ enter: "arrive" });
+    // New things take their place in the saved query's order, so the list goes to the first of them.
+    var first = App.el.list.querySelector(fresh.map(function (t) { return '[data-id="' + t.id + '"]'; }).join(","));
+    if (first) first.scrollIntoView({ block: "center", behavior: Motion.isReduced() ? "auto" : "smooth" });
+    var at = App.state.rows.find(function (r) { return r.thing && fresh.indexOf(r.thing) >= 0; });
+    if (at) App.focusRow(at.key);
+    setTimeout(function () { fresh.forEach(function (t) { t.fresh = false; }); }, 1800);
   }
 
   return {
     setScope: setScope, toggleSelect: toggleSelect, toggleGroup: toggleGroup, dismiss: dismiss, takeOn: takeOn, handOff: handOff, handTo: handTo,
     link: link, linkKey: linkKey, unlink: unlink, answer: answer, settle: settle, markDone: markDone, reveal: reveal, run: run, undo: undo,
-    redraw: redraw, showNew: showNew, say: say, push: push, accept: accept, goTo: goTo, holdPlace: holdPlace,
+    redraw: redraw, showNew: showNew, last: last, say: say, push: push, accept: accept, goTo: goTo, holdPlace: holdPlace,
   };
 })();

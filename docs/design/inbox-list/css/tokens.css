@@ -25,7 +25,8 @@
 
   /* Project health in Browse. At risk takes the attention ink, never the colour kept for the person. */
   --health-on: var(--ok);
-  --health-risk: var(--attention-ink);
+  /* At risk has a hue of its own, between tomato and marigold, so it is never read as either. */
+  --health-risk: oklch(0.56 0.15 48);
   --health-off: var(--fail-ink);
 
   /* The pane: the reading surface, a step off the list's ground. */
@@ -42,4 +43,11 @@
 }
 .gl--source[style*="--src-h"] {
   color: oklch(var(--mark-l) calc(var(--mark-c) * 0.86) var(--src-h));
+}
+[data-theme="orient-express"],
+[data-theme="dark"],
+[data-theme="nile"],
+[data-theme="end-house"],
+[data-theme="blue-train"] {
+  --health-risk: oklch(0.78 0.13 50);
 }

@@ -62,6 +62,7 @@
 /* ---- Rows ---- */
 .rows {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   padding: 0 var(--list-pad) 96px;
@@ -91,13 +92,61 @@
 .row:hover {
   --row-fill: var(--hover);
 }
+/* The current row's fill is the puck under the list: it stays where it is while rows move into it. */
 .row.is-current {
+  --row-fill: transparent;
+}
+.puck {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: var(--list-pad);
+  right: var(--list-pad);
+  border-radius: var(--row-r);
+  background: var(--selected);
+  pointer-events: none;
+}
+/* The current row's edge: a short, straight bar, so the row is told by shape as well as by fill. */
+.puck::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 60%, transparent);
+}
+.puck[hidden] {
+  display: none;
+}
+/* Copies of rows that leave lie under the list, so the rows closing up pass over them. */
+.leaving {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+.leaving > .row {
+  background: transparent;
+}
+/* When rows cross each other (a link, a new order), a moving row carries the list's ground under its
+   fill, and the current row carries its own fill while the puck waits. */
+.rows.is-crossing .row.is-current {
   --row-fill: var(--selected);
 }
-/* A row on its way somewhere passes over others, so it carries the list's ground under its fill. */
-.row.is-moving {
+.ib-scroll:has(.rows.is-crossing) .puck {
+  opacity: 0;
+}
+.rows.is-crossing .row.is-moving {
   z-index: 2;
   background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
+}
+.row.is-entering {
+  z-index: 3;
 }
 .rows:focus-visible .row.is-current,
 .row.is-current:focus-visible {
@@ -185,7 +234,6 @@
 }
 .row-id {
   flex: none;
-  font-variant-numeric: tabular-nums;
 }
 .more {
   display: inline-block;
@@ -279,9 +327,7 @@
   box-shadow: none;
   color: var(--bg);
 }
-.row.is-picked:not(.is-current) {
-  --row-fill: color-mix(in oklab, var(--ink) 3.5%, transparent);
-}
+/* A picked row is told by its tick; the fill stays for the current row. */
 
 /* ---- Groups: things linked to each other, by a source or a person ---- */
 .row-fold {
@@ -314,9 +360,9 @@
 }
 .row-marks {
   display: inline-flex;
+  align-items: center;
   gap: 3px;
   margin-right: 8px;
-  vertical-align: -2px;
 }
 .row-where--group {
   align-items: center;
@@ -417,7 +463,7 @@
 .tri-word {
   margin-right: 8px;
   color: var(--triage-ink);
-  font-weight: var(--w-bold);
+  font-weight: var(--w-medium);
 }
 .row--triage .row-marks {
   margin-right: 6px;
@@ -430,10 +476,12 @@
 .row-ref {
   color: var(--ink);
 }
-.row--triage.is-last-triage {
+.row--triage.is-last-triage,
+.row--tmore.is-last-triage {
   margin-bottom: 9px;
 }
-.row--triage.is-last-triage::after {
+.row--triage.is-last-triage::after,
+.row--tmore.is-last-triage::after {
   content: "";
   position: absolute;
   left: var(--row-pad-x);
@@ -467,16 +515,17 @@ html.is-carrying * {
   }
 }
 
-/* ---- The "N new" bar: arrivals wait behind it ---- */
+/* ---- The "N new" bar: arrivals wait behind it. It floats over the list and moves nothing. ---- */
 .newbar {
-  position: sticky;
-  top: 4px;
-  z-index: 6;
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  z-index: 8;
   display: flex;
   align-items: center;
   gap: 10px;
   height: 30px;
-  margin: 0 auto 6px;
+  translate: -50% 0;
   padding: 0 6px 0 12px;
   border-radius: var(--r-pill);
   background: var(--glass-fill-raised);
@@ -525,10 +574,8 @@ html.is-carrying * {
   height: 40px;
   padding: 0 6px 0 14px;
   border-radius: var(--r-md);
-  background: var(--glass-fill-raised);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--rim), var(--shadow-3);
   white-space: nowrap;
   translate: -50% 0;
   max-width: calc(100% - 24px);
@@ -582,9 +629,30 @@ html.is-carrying * {
   color: var(--muted);
 }
 
-/* ---- Rolling words, for a hand-off's sentence ---- */
+/* ---- Rolling words, for a hand-off's sentence and its wait: each clipped to its own line ---- */
 .row-why.is-rolling {
+  height: var(--line-16);
   overflow: hidden;
+}
+.row-time--arriving {
+  display: block;
+  height: var(--line-18);
+  overflow: hidden;
+}
+.roll--slot {
+  align-items: flex-end;
+  animation-name: roll-up-slot;
+}
+.roll--slot .roll-a,
+.roll--slot .roll-b {
+  display: grid;
+  place-items: center end;
+  height: var(--line-18);
+}
+@keyframes roll-up-slot {
+  to {
+    transform: translateY(calc(-1 * var(--line-18)));
+  }
 }
 .roll {
   display: inline-flex;
@@ -620,4 +688,74 @@ html.is-carrying * {
 }
 .row--tmore .row-more-in {
   padding-left: 28px;
+}
+
+/* ---- Moves under the pointer: over the row's right end, on its own ground, so nothing reads through ---- */
+.row {
+  --row-solid: var(--bg);
+}
+.row:hover {
+  --row-solid: color-mix(in oklab, var(--ink) 5%, var(--bg));
+}
+.row.is-current {
+  --row-solid: color-mix(in oklab, var(--ink) 7%, var(--bg));
+}
+.row-acts {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 28px;
+  background: linear-gradient(to right, transparent, var(--row-solid) 24px);
+  opacity: 0;
+  pointer-events: none;
+  translate: 0 -50%;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.row:hover .row-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+html.is-carrying .row-acts,
+.flights .row-acts {
+  display: none;
+}
+.row-act {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+}
+.row-act:hover {
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+.row-act:active {
+  background: color-mix(in oklab, var(--ink) 12%, transparent);
+}
+.kbd-dot {
+  min-width: 18px;
+  text-align: center;
+  font-weight: var(--w-bold);
+}
+.rows.is-crossing .row.is-entering {
+  background: linear-gradient(var(--row-fill), var(--row-fill)), var(--bg);
+}
+/* A picked group shows the tick in its chevron's place. */
+.row--group.is-picked .row-fold,
+.row--group .row-lead:hover .row-fold {
+  opacity: 0;
+}
+.row--group .row-tick {
+  z-index: 1;
+}
+/* The tick's hit area reaches 24 by 24 around the 16px box. */
+.row-tick::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }

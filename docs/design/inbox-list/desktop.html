@@ -24,7 +24,7 @@
       <div class="sx" id="sx" role="search">
         <span class="sx-ic"></span>
         <span class="sx-chips" id="sx-chips"></span>
-        <input id="sx-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search, or type a field: team:, from:, waiting:>2d" aria-label="Search the Inbox" aria-controls="sx-menu" aria-autocomplete="list">
+        <input id="sx-input" type="text" role="combobox" aria-expanded="false" autocomplete="off" spellcheck="false" placeholder="Search, or type a field: team:, from:, waiting:>2d" aria-label="Search the Inbox" aria-controls="sx-menu" aria-autocomplete="list" aria-keyshortcuts="/">
         <kbd class="sx-kbd">/</kbd>
       </div>
       <div class="ib-end">
@@ -33,12 +33,14 @@
       </div>
     </div>
     <nav class="ib-rail" id="rail" aria-label="Saved queries, Triage and Browse"></nav>
-    <section class="ib-list" aria-label="Things">
+    <section class="ib-list" aria-label="The list">
       <div class="lh" id="list-head"></div>
       <div class="ib-failing" id="failing" role="status" hidden></div>
+      <button type="button" class="newbar" id="newbar" hidden><span data-new-n>3 new</span><span class="newbar-show">Show<kbd class="kbd-dot" aria-label="period">.</kbd></span></button>
       <div class="ib-scroll" id="list-scroll">
-        <button type="button" class="newbar" id="newbar" hidden><span data-new-n>3 new</span><span class="newbar-show">Show<kbd>.</kbd></span></button>
-        <div class="rows" id="rows" role="listbox" aria-label="Things" aria-multiselectable="true" tabindex="0"></div>
+        <div class="leaving" id="leaving" aria-hidden="true"></div>
+        <div class="puck" id="puck" aria-hidden="true" hidden></div>
+        <div class="rows" id="rows" role="tree" aria-label="Things in the list" aria-multiselectable="true"></div>
         <div class="empty" id="empty" hidden></div>
       </div>
       <div class="selbar" id="selbar" role="toolbar" aria-label="Selection" hidden></div>
@@ -51,12 +53,15 @@
 </main>
 </div></div>
 <div class="flights" id="flight" aria-hidden="true"></div>
+<div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
 <div class="hand-menu" id="handmenu" role="menu" aria-label="Hand to" hidden></div>
+<div class="pop popover-menu menu--tool narrow-menu pane-menu" id="panemenu" role="menu" aria-label="The pane" hidden></div>
 <div class="linkto pop" id="linkto" role="dialog" aria-label="Link to" hidden></div>
 <div class="pop popover-menu menu--tool narrow-menu" id="narrow" role="menu" aria-label="Narrow" hidden></div>
 <div class="sx-menu pop" id="sx-menu" role="listbox" aria-label="Search suggestions" hidden></div>
 <nav class="pop scope-pop" id="scope-pop" aria-label="Saved queries, Triage and Browse" hidden></nav>
 <div class="scrim" id="scrim" hidden></div>
+<div class="td-pop" id="td-pop" role="menu" aria-label="Why this default" hidden></div>
 <div class="pop glass-dialog td" id="dialog" role="dialog" aria-modal="true" aria-label="Start a thread" hidden></div>
 <script src="vendor/faces.js"></script>
 <script src="vendor/motion.js"></script>

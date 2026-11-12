@@ -261,6 +261,71 @@ for (const load of ["light", "extreme"]) { const p = await open(`load=${load}`);
   await p.close();
 }
 
+// ---- Round-one regressions ----
+{
+  const p = await open("theme=whitehaven&scene=pr");
+  await p.focus('#pane [data-move="take"]');
+  await key(p, "Enter");
+  await settle(p);
+  await expect(p, "↩ on a focused button runs that button, not the suggested answer", () => !Model.byId("pr-6244").signals.find((x) => x.kind === "mention").done);
+  await expect(p, "a folded ask's answers are out of reach", () => document.querySelector('#pane [data-signal="s2"] .sig-body').inert === true);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  await p.focus('#rail .rl-row.is-on');
+  await key(p, "e");
+  await expect(p, "E in the rail dismisses nothing", () => Model.gone.size === 0);
+  await expect(p, "the rail is one Tab stop", () => document.querySelectorAll('#rail [tabindex="0"]').length === 1);
+  await key(p, "/");
+  await p.keyboard.type("events:>500");
+  await key(p, "Enter");
+  await expect(p, "a typed token with any threshold becomes a token", () => App.state.search.clauses.some((c) => c.key === "events" && c.value === ">500"));
+  await key(p, "Escape");
+  await expect(p, "Esc leaves the search and keeps it", () => App.state.search.clauses.length === 1 && document.activeElement !== document.getElementById("sx-input"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=dialog-unpicked");
+  await settle(p, 400);
+  await p.keyboard.press("Control+Enter");
+  await settle(p, 300);
+  await expect(p, "with no project, ⌘↩ opens the project picker in view", () => { const m = document.getElementById("td-pop"); const r = m.getBoundingClientRect(); return !m.hidden && r.bottom <= innerHeight && r.top >= 0 && r.height > 40; });
+  await p.click('#td-pop [data-pick-project=""]');
+  await settle(p, 200);
+  await expect(p, "No project is a choice, and Send is ready", () => /No project/.test(document.querySelector("#dialog .lip").textContent) && document.querySelector("#dialog [data-send]").getAttribute("aria-disabled") !== "true");
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=sentry");
+  await key(p, "h");
+  await p.waitForTimeout(250);
+  await p.keyboard.press("Control+z");
+  await settle(p, 1400);
+  await expect(p, "undo inside the hand-off chain wins", () => !Model.byId("sn-21c").held && App.state.rows.some((r) => r.thing && r.thing.id === "sn-21c"));
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven");
+  const y0 = await p.evaluate(() => document.querySelector('#rows [data-key]').getBoundingClientRect().top);
+  await p.evaluate(() => Live.arrive(World.arrivals()));
+  await settle(p, 500);
+  await expect(p, "the N new bar moves no row", (y) => document.querySelector('#rows [data-key]').getBoundingClientRect().top === y, y0);
+  await p.close();
+}
+{
+  const p = await open("theme=whitehaven&scene=group");
+  await key(p, "x");
+  await expect(p, "a picked group shows its tick", () => getComputedStyle(document.querySelector('[data-key="g:shop-142"] .row-tick')).opacity === "1");
+  await p.close();
+}
+for (const s of ["pr", "accounts", "selection", "reply", "proposal"]) {
+  const p = await open("theme=end-house&scene=" + s);
+  await settle(p, 300);
+  await expect(p, `the pane footer fits (${s})`, () => { const f = document.querySelector("#pane .pn-foot"); return !f || f.scrollWidth <= f.clientWidth + 1; });
+  await p.close();
+}
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("All checks passed.");
