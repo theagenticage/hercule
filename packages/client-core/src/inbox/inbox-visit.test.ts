@@ -769,6 +769,19 @@ describe("moves", () => {
       expect(refsOf(visit)).toEqual(["a", "b"]);
     });
 
+    it("restores the row when the user comes back to the same list and undoes there", async () => {
+      const { fake, visit } = await opened(rows("a", "b"));
+      const receipt = confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.open("list-2");
+      await answerFirst(fake, rows("x"));
+      visit.open("list-1");
+      await answerFirst(fake, rows("b"));
+      visit.undo(receipt);
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+      expect(visit.getSnapshot().current).toBe("a");
+      expect(visit.getSnapshot().lastChange).toEqual({ kind: "restored", refs: ["a"] });
+    });
+
     it("does nothing for a receipt of another visit", async () => {
       const { fake, visit } = await opened(rows("a", "b"));
       const receipt = visit.move("dismissed", ["a"]);

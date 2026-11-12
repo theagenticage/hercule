@@ -58,7 +58,7 @@ export interface NextPage<Row> {
 /** What a move did to the rows, handed back to undo it. */
 export interface MoveReceipt<Row> {
   readonly id: number;
-  /** The visit the move was made in. An undo in another visit does nothing. */
+  /** The visit the move was made in. An undo in another visit does nothing, unless that visit shows the same list. */
   readonly visit: number;
   readonly refs: readonly string[];
   /** The rows the move touched with the place each had in the list, in list order. */

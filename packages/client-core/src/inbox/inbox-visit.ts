@@ -19,6 +19,7 @@
  * It draws nothing and times nothing: `lastChange` says what happened in
  * words (dismissed, restored, arrived) and the screen picks the motion.
  */
+import { replaceEqualDeep } from "@tanstack/query-core";
 import type { InboxFacet, InboxOrder } from "@hercule/contract";
 import {
   HELD_WINDOW,
@@ -206,6 +207,8 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   let refreshing: Read | null = null;
   let nextPage: (Read & { readonly after: string }) | null = null;
   const rowReads = new Set<Read>();
+  /** The list each move was made in, by receipt id, so an undo can find its list again. */
+  const receiptQueries = new Map<number, Query>();
   let isShowPending = false;
   let lastChange: InboxVisitChange | null = null;
   const listeners = new Set<() => void>();
@@ -412,9 +415,16 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     );
   }
 
-  /** Puts a move back and reads the restored rows afresh when they are in view. */
+  /**
+   * Puts a move back and reads the restored rows afresh when they are in view.
+   * A receipt of an earlier visit still applies when the list shown now is the
+   * same list (same query): the controller took the move back for that list.
+   */
   function putBack(receipt: MoveReceipt<Row>): void {
-    if (state === null || receipt.visit !== visitId) return;
+    if (state === null) return;
+    const madeIn = receiptQueries.get(receipt.id);
+    const isSameList = madeIn !== undefined && replaceEqualDeep(madeIn, state.query) === madeIn;
+    if (receipt.visit !== visitId && !isSameList) return;
     setState(applyUndo(state, receipt, seq), { kind: "restored", refs: receipt.refs });
     readStaleRows();
   }
@@ -458,6 +468,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       const applied = applyMove(before, { id, visit: visitId, kind, refs, show });
       const emptied =
         kind === "dismissed" && applied.state.rows.length === 0 && before.rows.length > 0;
+      receiptQueries.set(id, before.query);
       setState(applied.state, {
         kind: emptied ? "emptied-by-move" : kind,
         refs: applied.receipt.refs,
