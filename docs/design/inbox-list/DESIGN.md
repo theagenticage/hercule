@@ -330,7 +330,7 @@ The drawing keeps every decision. Five would read better changed:
 3. **Fog, group size**: settle it as "an open group shows up to seven members; past that five and Show N more; the pane lists all".
 4. **Decision 16, answers**: "an answer that acts on the source is held for the undo window before it is sent". This touches `signal.act` (spec 10 §9.4, spec 20): the controller, or the client, waits eight seconds, and ⌘Z cancels. It is what makes ↩ safe as the suggested answer's key.
 
-5. **Decision 2, "Someone waits on me"**: say what a hand-off does to it. Drawn: a thing handed to a workflow stays while an ask the workflow does not end is open (call 65). Today the drawing's query reads "asks, and nobody has it"; the map leaves it open, and without this rule Omar's mention would leave the list with the pull request handed to Review PR.
+5. **Decision 2, "Someone waits on me"**: define it over open signals alone: a thing is in it while a signal asking you is open on it, whatever Task or run it has. Spec 20 §9.6 already ends only the signals of the kinds a workflow `answers` ("A mention on the same pull request stays open on the card"); the list must not then hide the card because a Task has it. The drawing's first query did ("asks, and nobody has it"), so Omar's mention left the list with the pull request handed to Review PR. Drawn now as call 65.
 
 For spec 17's hand-off menu (HandToMenu), outside #1119: rank by fit (call 62), add the find field from six workflows (call 63), name each ask in the line ("Ends Mei’s review request. Leaves Omar’s mention with you."), and show several faces on the button (call 64). The menu was drawn unchanged until Rogier asked what happens with many workflows.
 
