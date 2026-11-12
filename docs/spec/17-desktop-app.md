@@ -1940,7 +1940,7 @@ Stated before the slice builds it ([Performance](#performance), as [ADR 0037](..
 | Rows | Only the rows in view are drawn, however long the list | The perf script's memory and frame rows |
 | Moves and motion | `transform` and `opacity` only, no frame over 2 ms of style and layout, no dropped frame | The perf script's frame collector |
 
-The measurement is recorded in [Measured](#measured), on Linux, with the commit of the "before" and of the "after" and the load of the machine, as [Platforms](#platforms) asks: a Linux reading is judged before against after, never against a Mac's budget. Where the new motion makes a frame row differ from the old screen's, the record says why.
+The measurement is recorded in [Measured](#measured), on Linux, with the commit of the "before" and of the "after" and the load of the machine, as [Platforms](#platforms) asks: a Linux reading is judged before against after, never against a Mac's budget. Where the new motion makes a frame row differ from the old screen's, the record says why. The record is [The new Inbox (#1122), measured before and after on Linux](#measured): it met the idle, per-token, process, page read and rows budgets, and missed the bundle budget by 1,922 B, the longest read of a page load and of a new Thread, and the frame budget of the new steps.
 
 ## The Hercule face
 
@@ -6286,6 +6286,84 @@ How it was measured:
 
 - **What a state icon costs on the wire:** GitHub's six icons are 235 to 676 characters of path data each, copied into the status of each thing that has one. A thing with no icon costs nothing.
 - **Not measured:** memory, launch time and idle wakeups in the packaged app. The change adds no process, timer, listener or read.
+
+**The new Inbox (#1122), measured before and after on Linux,** 2026-11-12 for [#1122](https://github.com/theagenticage/hercule/issues/1122), decision 27 of [#1119](https://github.com/theagenticage/hercule/issues/1119). It judges the rows of [What the Inbox costs](#what-the-inbox-costs). Nothing was measured on a Mac, as [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md) allows: the Mac's budgets of memory, wakeups and time are not judged ([Platforms](#platforms)), and a Linux reading is read before against after only.
+
+- **Machine:** AMD Ryzen 7 255, 16 threads, 27 GB, Linux 6.8.0-147, headless, in the desktop container (Xvfb), with the container's own Bun.
+- **Before:** `main` at `299111f77`, the old Inbox. **After:** `e29df2f03`, the head of the #1122 branch. Two clean detached checkouts, each built with `pnpm build:binary && pnpm build:desktop` and run with `pnpm --filter @hercule/desktop perf -- --inbox-only`, then `RUN_SPEED_TESTS=1` on `inbox.speed.test.ts`. The order was before, after, before, after, under the e2e lock, so each number below is a pair of runs (before 1 and 2, after 1 and 2).
+- **Load:** the machine was quiet. The 1-minute load average read 0.9 to 1.8 at the start of every run and 0.9 to 1.5 at its end, and the script printed 0.6 to 0.8 for the minute before each Inbox launch. An earlier attempt that ran at a load of 15 to 23 is not used.
+- **The two scenarios differ:** the script's steps follow the screen it measures. The old screen draws all 300 cards; the new one draws the rows in view. The rows below exist in both. The new screen's own steps are listed apart.
+
+**Rows in both scenarios** (300 things, 300 open signals; "before" and "after" show run 1 / run 2):
+
+| Row | Before | After |
+|---|---|---|
+| Processes | 4 | 4 |
+| Memory: renderer PSS | 147 / 146 MB | 118 / 117 MB |
+| Memory: PSS summed | 466 / 464 MB | 437 / 436 MB |
+| Memory: renderer working set | 198 / 197 MB | 168 / 169 MB |
+| Elements on the page | 6,482 / 6,480 | 1,090 / 1,091 |
+| Idle, visible, 60 s: reads | none | none |
+| Idle, visible: renderer | 0.3 / 0.4% CPU, 2.0 switches a second | 0.2 / 0.2% CPU, 2.0 switches a second |
+| Idle, hidden, 10 s: reads | none | none |
+| Idle, hidden: renderer | 0.1 / 0.0% CPU, 1.0 / 0.0 switches a second | 0.0 / 0.0% CPU, 1.0 switches a second |
+| Age clock fires while hidden | 0 | 0 |
+| 10 s of quiet, attached: reads, renderer main thread | none, 2.5 / 3.0 ms | none, 2.7 / 2.6 ms |
+| 4 agents streaming, visible: reads of the Inbox | none | none |
+| 4 agents streaming: renderer main thread, CPU, a second | 19.5 / 18.3 ms, 50 / 47 ms | 14.7 / 15.1 ms, 36 / 35 ms |
+| 2 agents streaming, hidden: renderer main thread, CPU, a second | 8.8 / 9.7 ms, 12 / 14 ms | 8.5 / 9.1 ms, 10 / 12 ms |
+| The window shown again: Inbox reads | none | none |
+| Opening a card: worst frame of style and layout | 54.5 / 53.6 ms, 3 / 5 frames over 2 ms | 9.3 / 9.4 ms, 2 frames over 2 ms |
+| Opening a card: dropped frames, longest task | 7 / 8, 69.4 / 68.3 ms | 3 / 3, 9.2 / 8.8 ms |
+| A signal landing: worst frame of style and layout | 2.36 / 1.13 ms | 2.77 / 2.92 ms |
+| A signal landing: dropped frames, longest task | 1 / 2, 5.9 / 5.9 ms | 0 / 0, 9.4 / 10.7 ms |
+| The page loaded again: Inbox reads | 3 reads of the list (1,326.8 kB), 3 counts (0.2 kB) | 6 pages (430.8 kB), 6 outlines (18.8 kB), 6 single things (10.2 kB), 6 counts (0.2 kB): 460 kB |
+| The page loaded again: longest Inbox read | 47 / 59 ms | 76 / 75 ms |
+| The page loaded again: renderer main thread, CPU, controller CPU | 316 / 313 ms, 560 / 560 ms, 230 / 320 ms | 243 / 245 ms, 440 / 430 ms, 310 / 290 ms |
+| A new Thread: Inbox reads | 1 list (442.3 kB), 1 count (0.1 kB) | 1 page (215.4 kB), 1 outline (3.1 kB), 1 single thing (1.7 kB), 1 count |
+| A new Thread: longest Inbox read | 27 / 28 ms | 38 / 37 ms |
+| A new Thread: renderer main thread, CPU | 38.0 / 42.0 ms, 130 / 120 ms | 32.8 / 26.2 ms, 80 / 40 ms |
+
+The first launch of each run, a thread open with no Inbox, is the same app code on both sides and reads the same to within 1 MB of PSS (summed 424 to 426 MB in all four runs), so the machine did not drift between runs. The `--inbox-only` output of this Linux run has no launch or first-draw row to compare.
+
+**Rows only the new screen has** (run 1 / run 2): walking 50 rows with J, 876 / 879 frames, 26 / 23 dropped, worst frame 16.6 / 16.5 ms, 126 to 127 frames over 2 ms; a new thing arriving live, 2 dropped, worst frame 3.2 ms; dismissing the first thing with E, 4 dropped, worst frame 9.4 / 9.6 ms; undoing the dismissal, 1 / 2 dropped, worst frame 11.5 / 12.4 ms.
+
+**Bundle,** gzipped with `Bun.gzipSync` as `scripts/check-bundle-budget.ts` does, in bytes:
+
+| Bundle | Before | After |
+|---|---|---|
+| Inbox route chunk, JS | 51,411 | 52,714 |
+| Inbox route chunk, CSS | 6,937 | 7,556 |
+| Chunks only the Inbox imports | none | none |
+| Inbox JS and CSS | 58,348 | 60,270 |
+| Desktop first screen (28 chunks before, 29 after) | 512.3 kB | 509.5 kB |
+| Web app first screen | 246.9 kB | 248.0 kB |
+| All renderer JavaScript (143 files before, 147 after) | 1,362,674 | 1,363,051 |
+| All renderer CSS (50 files) | 94,346 | 94,991 |
+| All renderer JavaScript and CSS | 1,457,020 | 1,458,042 |
+
+**Controller speed,** `inbox.speed.test.ts`, median of 25, run twice each (before 1 / 2, after 1 / 2). Before reads every card at once with `queryInbox`; after reads a page of at most 200 things:
+
+| Read | Before | After |
+|---|---|---|
+| 300 things, the list or the first page | 6.7 / 6.8 ms, 14 statements, 343,643 bytes (1,145 B a card) | 6.9 / 6.7 ms, 14 statements, 179,019 bytes at 200 rows (895 B a row) |
+| 300 things with 300 open signals and offers, the list or the page of waits | 9.1 / 9.4 ms, 15 statements, 461,826 bytes (1,539 B a card) | 5.5 / 5.7 ms, 13 statements, 137,426 bytes at 135 rows (1,018 B a row) |
+| 1,000 things | 30.0 / 29.1 ms, 15 statements, 1,528,147 bytes | 13.4 / 12.9 ms, 14 statements, 179,568 bytes |
+| 2,400 things | not measured | 28.3 / 27.1 ms, 14 statements, 180,372 bytes |
+| The sidebar count, 300 / 1,000 / 2,400 things | 0.94 / 3.55 / not measured ms, 2 statements | 0.42 / 1.53 / 3.68 ms, 1 statement |
+| The outline, 300 / 1,000 / 2,400 things | not a read of its own | 3.7 / 9.5 / 22.8 ms, 4 statements, 16.7 to 18.1 kB |
+| Rows, refresh and suggestions, 300 things | not a read of its own | 3.7 to 4.0 ms, 7.1 to 7.4 ms, 1.2 to 1.3 ms |
+
+**Verdicts:**
+
+- **The perf script's Inbox launch, no worse on every row: missed on two rows.** The longest Inbox read is slower on page load (76 / 75 ms against 47 / 59 ms, 17 to 29 ms more) and on a new Thread (38 / 37 ms against 27 / 28 ms, about 10 ms more). The page load also makes more requests: six pages, outlines, single things and counts, against three lists and three counts (the old screen's own repeat is [#1083](https://github.com/theagenticage/hercule/issues/1083); the new one doubles it). The bytes fall by about two thirds, and every other row is level or better: renderer memory 29 MB lower, renderer work on a page load 70 ms of main thread lower, opening a card 45 ms of worst frame lower.
+- **Idle, no timer, a push only when something changed: met.** No read in 60 s visible or 10 s hidden, no age clock fire, wakeups level with before.
+- **Per streamed token, none: met.** No Inbox read while agents stream, and the renderer's work a second while they stream is lower, not higher.
+- **Processes, none new: met.** 4 before, 4 after.
+- **Bundle, the Inbox chunk no bigger than the old one: missed by 1,922 bytes** (60,270 against 58,348 B, 3.3% more: 1,303 B of JavaScript and 619 B of CSS). No chunk is used only by the Inbox beyond the route chunk itself. The desktop first screen is not larger (2.8 kB smaller). The web app's first screen is 1.1 kB larger and stays under its 250 kB guide.
+- **Page read, a fixed number of statements, under 20 ms at 300 things, at most 200 things: met.** 12 to 15 statements at 300, 1,000 and 2,400 things, 5.5 to 6.9 ms at 300, at most 200 rows, 835 to 1,018 bytes a row against 1,145 to 1,539 a card. The count and the outline are timed apart, as the table asks.
+- **Rows, only the rows in view are drawn: met.** 1,090 elements on the page against 6,482.
+- **Moves and motion, no frame over 2 ms of style and layout, no dropped frame: missed on most new steps.** Walking with J has 126 frames over 2 ms and 23 to 26 dropped frames, dismissing and undoing have a worst frame of 9.4 to 12.4 ms, and a signal landing has a worst frame of 2.8 to 2.9 ms. Only a new thing arriving (3.2 ms, one frame over 2 ms) is close. The old screen missed the same budget by more on the step both share, opening a card (54 ms against 9 ms).
 
 ## Slices
 
