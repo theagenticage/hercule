@@ -17,9 +17,14 @@
  *   requests, elements restyled, React renders and elements of each step, and
  *   what stays pending while idle.
  *
- * It writes `apps/desktop/out/perf-counts/` (git-ignored): `counts.json`, every
- * count of the run, `report.md`, the report it prints, and the logs of the
- * build and the speed tests. It exits with 0 when no count is worse than the
+ * It writes `apps/desktop/out/perf-counts/` (git-ignored):
+ *
+ * - `counts.json`, every count of the run;
+ * - `report.md`, the report it prints;
+ * - `steps.json`, every request and every component's renders of each step;
+ * - the logs of the build and the speed tests.
+ *
+ * It exits with 0 when no count is worse than the
  * baseline and no key is missing on either side, and with 1 otherwise
  * (scripts/perf-counts-ratchet.ts says how counts are compared).
  *
@@ -169,14 +174,21 @@ async function measureScreenCounts(): Promise<{ counts: Record<string, number>; 
   } finally {
     await server.close();
   }
+  // Every request and every component's renders of each step, to compare two runs by.
+  await writeFile(join(outDir, "steps.json"), `${JSON.stringify(screens, null, 2)}\n`);
   const counts: Record<string, number> = {};
-  const notes: string[] = ["## What each step sent and rendered most"];
+  const notes: string[] = [
+    "## What each step sent and rendered most",
+    "Every component's renders are in `steps.json`, beside this report.",
+  ];
   for (const [screen, { steps, idle }] of Object.entries(screens)) {
     for (const [step, measured] of steps) {
       for (const metric of ["requests", "restyled", "renders", "rowRenders", "elements"] as const) {
         counts[`screens/${screen}/${step}/${metric}`] = measured[metric];
       }
-      const renders = measured.topRenders
+      const renders = Object.entries(measured.renderList)
+        .toSorted((a, b) => b[1] - a[1])
+        .slice(0, 5)
         .map(([name, count]) => `${name} ${String(count)}`)
         .join(", ");
       notes.push(

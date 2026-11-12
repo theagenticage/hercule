@@ -4,7 +4,14 @@ import { compareCounts } from "./perf-counts-ratchet.ts";
 describe("compareCounts", () => {
   it.each([
     ["one more request", "screens/inbox/J x50/requests", 49, 50],
-    ["one more render", "screens/work/open/renders", 335, 336],
+    ["one more element", "screens/work/open/elements", 674, 675],
+    ["renders past 5 %", "screens/inbox/J x50/renders", 1_880, 1_975],
+    [
+      "row renders past 5 renders",
+      "screens/inbox/E dismisses the current thing/rowRenders",
+      33,
+      39,
+    ],
     ["one more reply byte", "controller/board/board, 10 Tasks/bytes", 5118, 5119],
     ["a restyle count past 10 %", "screens/inbox/J x50/restyled", 15_800, 17_400],
     ["a small restyle count past 25 elements", "screens/inbox/open a card/restyled", 60, 86],
@@ -15,10 +22,18 @@ describe("compareCounts", () => {
     expect(comparison.passed).toBe(false);
   });
 
-  it("passes a restyle count within its tolerance, and reports a count that fell as better", () => {
+  it("passes restyles and renders within their tolerance, and reports a count that fell as better", () => {
     const comparison = compareCounts(
-      { "screens/inbox/J x50/restyled": 17_300, "screens/inbox/J x50/requests": 48 },
-      { "screens/inbox/J x50/restyled": 15_800, "screens/inbox/J x50/requests": 49 },
+      {
+        "screens/inbox/J x50/restyled": 17_300,
+        "screens/inbox/J x50/renders": 1_881,
+        "screens/inbox/J x50/requests": 48,
+      },
+      {
+        "screens/inbox/J x50/restyled": 15_800,
+        "screens/inbox/J x50/renders": 1_880,
+        "screens/inbox/J x50/requests": 49,
+      },
     );
 
     expect(comparison.worse).toEqual([]);

@@ -2,11 +2,19 @@
  * The comparison of the counts check (scripts/perf-counts.ts) with its
  * committed baseline, and the report it prints. Every count is better lower.
  *
- * A count is compared exactly, except the elements restyled in a step: how many
- * style recalculations a step's frames hold varies a little from run to run,
- * so a restyle count is worse only when it grew by more than 10 % of the
- * baseline, and at least 25 elements. A real regression, such as a `:has()`
- * rule that restyles every row on each key, grows it many times over.
+ * A count is compared exactly, with two exceptions that vary a little from
+ * run to run, most on a busy machine:
+ *
+ * - the elements restyled in a step, because how many style recalculations a
+ *   step's frames hold varies. One is worse only when it grew by more than
+ *   10 % of the baseline, and at least 25 elements.
+ * - the components rendered in a step, because React commits the answers that
+ *   arrive in one task together, and how the answers fall into tasks varies.
+ *   One is worse only when it grew by more than 5 % of the baseline, and at
+ *   least 5 renders.
+ *
+ * A real regression grows them many times over: a `:has()` rule that restyles
+ * every row on each key, or a row that renders on every change of the list.
  */
 
 /** A count that moved, with its baseline value and its value in this run. */
@@ -29,8 +37,11 @@ export interface CountsComparison {
 }
 
 /** Returns how much the count under `key` may grow over `baseline` before it is worse. */
-const findTolerance = (key: string, baseline: number): number =>
-  key.endsWith("/restyled") ? Math.max(25, baseline * 0.1) : 0;
+const findTolerance = (key: string, baseline: number): number => {
+  if (key.endsWith("/restyled")) return Math.max(25, baseline * 0.1);
+  if (key.endsWith("/renders") || key.endsWith("/rowRenders")) return Math.max(5, baseline * 0.05);
+  return 0;
+};
 
 /** Sorts strings by code unit order, so the output does not depend on the machine's locale. */
 const sortKeys = (keys: Iterable<string>): string[] =>

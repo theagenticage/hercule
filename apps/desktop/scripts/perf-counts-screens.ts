@@ -51,8 +51,8 @@ export interface StepCounts {
   readonly elements: number;
   /** The requests of the step, as `METHOD /path`, for the report. */
   readonly requestList: readonly string[];
-  /** The five components that rendered most, for the report. */
-  readonly topRenders: ReadonlyArray<readonly [string, number]>;
+  /** The renders of each component in the step, by name, for the report and `steps.json`. */
+  readonly renderList: Readonly<Record<string, number>>;
 }
 
 /** What the page keeps pending while idle. */
@@ -130,10 +130,7 @@ async function waitForSettled(page: Page, settled: string, name: string): Promis
 /** One event of a Chromium trace, as far as the check reads it. */
 interface TraceEvent {
   readonly name: string;
-  readonly args?: {
-    readonly elementCount?: number;
-    readonly data?: { readonly elementCount?: number };
-  };
+  readonly args?: { readonly elementCount?: unknown };
 }
 
 /** Starts a trace of the style recalculations in the page `cdp` is attached to. */
@@ -153,20 +150,22 @@ async function startStyleTrace(cdp: CDPSession): Promise<() => Promise<number>> 
     await cdp.send("Tracing.end");
     await complete;
     cdp.off("Tracing.dataCollected", collect);
-    return events
-      .filter((event) => event.name === "UpdateLayoutTree")
-      .reduce(
-        (total, event) => total + (event.args?.elementCount ?? event.args?.data?.elementCount ?? 0),
-        0,
-      );
+    let restyled = 0;
+    for (const event of events) {
+      if (event.name !== "UpdateLayoutTree") continue;
+      const count = event.args?.elementCount;
+      // A Chromium that stops reporting the count must fail the check, not read as no restyle.
+      if (typeof count !== "number") {
+        throw new Error(
+          `A style recalculation in the trace has no element count: ${JSON.stringify(event)}. ` +
+            "Chromium's trace format changed; update startStyleTrace in scripts/perf-counts-screens.ts.",
+        );
+      }
+      restyled += count;
+    }
+    return restyled;
   };
 }
-
-/** Returns the five largest entries of `renders`, largest first. */
-const listTopRenders = (renders: Record<string, number>) =>
-  Object.entries(renders)
-    .toSorted((a, b) => b[1] - a[1])
-    .slice(0, 5);
 
 /** An expression for the Inbox row at the 1-based `position` in the list, or null. */
 const inboxRowAt = (position: number): string =>
@@ -290,6 +289,27 @@ const WORK: ScreenPlan = {
 const SCREENS = { inbox: INBOX, work: WORK } as const;
 
 /**
+ * Checks that every counter saw the screen open: it sent requests, React
+ * rendered components and among them the screen's row component, and
+ * Chromium restyled elements. A later step may count zero, but the open never
+ * does. Fails naming the counter otherwise, so a renamed row component, a lost
+ * React hook or a changed trace cannot pass the check by counting nothing.
+ */
+function checkCounters(screen: string, plan: ScreenPlan, counts: StepCounts): void {
+  const broken = [
+    counts.requests === 0 ? "no request was counted" : "",
+    counts.renders === 0 ? "no React render was counted, so the probe's hook is not called" : "",
+    counts.rowRenders === 0
+      ? `no render of ${plan.rowComponent} was counted; if the row component was renamed, update rowComponent in scripts/perf-counts-screens.ts`
+      : "",
+    counts.restyled === 0 ? "no restyled element was counted in the trace" : "",
+  ].filter((problem) => problem !== "");
+  if (broken.length > 0) {
+    throw new Error(`The counts check cannot count ${screen} as it opens: ${broken.join("; ")}.`);
+  }
+}
+
+/**
  * Opens `screen` on the counts page at `pageUrl` in `page`, measures the open
  * and every step, and returns the counts. Fails when a step does not settle
  * or the app sends a request the fake controller does not answer.
@@ -323,18 +343,17 @@ async function measureScreen(
       );
     }
     const stepRequests = requestList.slice(requestsBefore);
-    steps.push([
-      name,
-      {
-        requests: stepRequests.length,
-        restyled,
-        renders: Object.values(probe.renders).reduce((total, count) => total + count, 0),
-        rowRenders: probe.renders[plan.rowComponent] ?? 0,
-        elements,
-        requestList: stepRequests,
-        topRenders: listTopRenders(probe.renders),
-      },
-    ]);
+    const counts: StepCounts = {
+      requests: stepRequests.length,
+      restyled,
+      renders: Object.values(probe.renders).reduce((total, count) => total + count, 0),
+      rowRenders: probe.renders[plan.rowComponent] ?? 0,
+      elements,
+      requestList: stepRequests,
+      renderList: probe.renders,
+    };
+    if (name === "open") checkCounters(screen, plan, counts);
+    steps.push([name, counts]);
   };
   await measure(
     "open",
