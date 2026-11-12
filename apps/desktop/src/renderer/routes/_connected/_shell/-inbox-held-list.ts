@@ -193,9 +193,10 @@ export function useHeldInboxList(client: HerculeClient, query: InboxQuery): Held
   }, [firstPage, firstPageReadAt, listId, queryClient, client, query]);
 
   const loadNextPage = (): void => {
-    const now = heldRef.current;
-    const after = now?.list.frontier;
-    if (now === null || now.listId !== listId || after === undefined) return;
+    // Read from this render, not from `heldRef`: a child's effect that asks for the next page runs
+    // before the ref is updated.
+    const after = current?.list.frontier;
+    if (after === undefined) return;
     if (nextPageAfter.current === after) return;
     nextPageAfter.current = after;
     queryClient.fetchQuery(inboxPartialPageQuery(client, { ...query, cursor: after })).then(
