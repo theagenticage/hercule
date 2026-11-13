@@ -172,7 +172,10 @@ export const listCalls = (calls: readonly Call[], route: string): readonly Call[
   calls.filter((call) => `${call.method} ${call.path}` === route);
 
 /** The timers of undo windows the test holds, by their handle, until it ends them. */
-const heldWindows = new Map<unknown, () => void>();
+const heldWindows = new Map<ReturnType<typeof setTimeout>, () => void>();
+
+/** The real `clearTimeout`, kept because `holdUndoWindow` replaces the global one. */
+let realClearTimeout: typeof clearTimeout = globalThis.clearTimeout;
 
 /**
  * Holds every undo window (the timer of `UNDO_WINDOW_MS`) open until
@@ -185,7 +188,7 @@ const heldWindows = new Map<unknown, () => void>();
 export const holdUndoWindow = (): void => {
   heldWindows.clear();
   const realSetTimeout = globalThis.setTimeout;
-  const realClearTimeout = globalThis.clearTimeout;
+  realClearTimeout = globalThis.clearTimeout;
   vi.spyOn(globalThis, "setTimeout").mockImplementation(((
     callback: () => void,
     delay?: number,
@@ -197,20 +200,24 @@ export const holdUndoWindow = (): void => {
     heldWindows.set(handle, callback);
     return handle;
   }) as typeof setTimeout);
-  vi.spyOn(globalThis, "clearTimeout").mockImplementation(((
-    handle?: Parameters<typeof clearTimeout>[0],
-  ) => {
-    heldWindows.delete(handle);
+  vi.spyOn(globalThis, "clearTimeout").mockImplementation((handle) => {
+    if (handle !== undefined) heldWindows.delete(handle);
     realClearTimeout(handle);
-  }) as typeof clearTimeout);
+  });
 };
 
-/** Ends every held undo window that Undo did not cancel, so the answers it held are sent. */
+/**
+ * Ends every held undo window that Undo did not cancel, so the answers it held
+ * are sent, and clears the real timers that parked them.
+ */
 export const endUndoWindow = async (): Promise<void> => {
-  const ended = [...heldWindows.values()];
+  const ended = [...heldWindows];
   heldWindows.clear();
+  for (const [handle] of ended) realClearTimeout(handle);
   await act(async () => {
-    for (const end of ended) end();
+    for (const [, end] of ended) end();
+    // Lets the promises the ended callbacks started settle before `act` returns.
+    await Promise.resolve();
   });
 };
 
