@@ -74,9 +74,12 @@ function SignalBlock({
   switch (block.type) {
     case "text":
       return (
-        <div className="b-words">
-          <Markdown text={block.markdown} inlineImages />
-        </div>
+        <section className="bk">
+          {block.title === undefined ? null : <h3>{block.title}</h3>}
+          <div className="b-words">
+            <Markdown text={block.markdown} inlineImages />
+          </div>
+        </section>
       );
     case "messages":
       return <MessagesBlockView block={block} timezone={timezone} />;

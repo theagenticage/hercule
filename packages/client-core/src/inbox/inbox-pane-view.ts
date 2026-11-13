@@ -7,7 +7,7 @@
 import type { EntityRecord, EntityStatus, ExternalEntityDetail } from "@hercule/contract";
 import { buildLinkedRows, type PlaceRow } from "../desk/relation-rows";
 import type { PluginName } from "../intake";
-import { formatAge } from "../threads/age";
+import { describeAge, formatAge } from "../threads/age";
 import { decideOpenCardFace, type CardFact } from "./card-face";
 
 /** One item of the meta line, in the order the line shows them. */
@@ -18,6 +18,8 @@ export type PaneMetaItem =
 
 /** What the meta line adds to the facts the record holds. */
 export interface PaneMetaContext {
+  /** The moment the "updated" age is counted back from. */
+  readonly now: Date;
   /** The account the thing is seen through, given only when the source has several. */
   readonly account?: string | undefined;
   /** Why a dismissed thing is back (`describeDismissalReturn`), when it is. */
@@ -25,18 +27,40 @@ export interface PaneMetaContext {
 }
 
 /**
+ * Returns the words about who the thing is to the user: "Assigned to you",
+ * "You opened it", or the name of the person it belongs to, such as "Mei’s".
+ * Returns `undefined` when the record names no one. An assignment shows here
+ * because a thing that only concerns the user, and asks nothing, has no ask
+ * section to say so.
+ */
+const describeWho = (record: EntityRecord): string | undefined => {
+  if (record.concerns.includes("assigned")) return "Assigned to you";
+  if (record.concerns.includes("opened")) return "You opened it";
+  if (record.person !== undefined && !record.yours) return `${record.person.name}’s`;
+  return undefined;
+};
+
+/**
  * Returns the items of the meta line of `record`: its status (left out for
- * the usual state of a request), its facts, "in <account>" and the words about
- * a dismissal that came back.
+ * the usual state of a request), who the thing is to the user and when the
+ * source last changed it, its facts, "in <account>" and the words about a
+ * dismissal that came back. The priority-bars fact is left out, because only
+ * the open card draws it.
  */
 export const describePaneMeta = (
   record: EntityRecord,
   context: PaneMetaContext,
 ): readonly PaneMetaItem[] => {
   const face = decideOpenCardFace(record);
+  const who = describeWho(record);
+  const updated = `Updated ${describeAge(record.sourceUpdatedAt, context.now)}`;
   return [
     ...(face.status === undefined ? [] : [{ kind: "status", status: face.status } as const]),
-    ...face.facts.map((fact) => ({ kind: "fact", fact }) as const),
+    ...(who === undefined ? [] : [{ kind: "words", words: who } as const]),
+    { kind: "words", words: updated } as const,
+    ...face.facts
+      .filter((fact) => fact.form !== "bars")
+      .map((fact) => ({ kind: "fact", fact }) as const),
     ...(context.account === undefined
       ? []
       : [{ kind: "words", words: `in ${context.account}` } as const]),

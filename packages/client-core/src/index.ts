@@ -370,7 +370,13 @@ export {
   type NotificationMark,
 } from "./notifications";
 export { parsePluginId } from "./plugin-id";
-export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
+export {
+  describeChecks,
+  describeDaysAgo,
+  formatBlocksAsText,
+  isKnownBlock,
+  UNKNOWN_BLOCK_TEXT,
+} from "./signal-blocks";
 export {
   buildHandlingLabels,
   buildInitials,

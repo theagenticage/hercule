@@ -764,7 +764,7 @@ describe("merging two cards", () => {
 
     expect(
       await screen.findByText(
-        'The merge did not happen, so "Label the pallets" is back on the board: The app closed before this was sent.',
+        'The merge did not happen, so "Label the pallets" is back on the board: The app closed before it was sent.',
       ),
     ).toBeTruthy();
     expect(getCard("Label the pallets")).toBeTruthy();

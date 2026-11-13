@@ -4,6 +4,8 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { namePlugin } from "@hercule/client-core";
 import {
   EMPTY_INBOX_SEARCH,
+  OPEN_AT_SOURCE_NEEDS_ONE_THING,
+  THING_NOT_IN_LIST,
   addInboxClause,
   nameInboxScope,
   typeInboxSearch,
@@ -178,12 +180,19 @@ export function InboxScreen({
     },
     onMoved: followMove,
   });
+  /** Makes `ref` the one thing the pane shows: ends a selection, and slides the pane over the list when it lies closed. */
+  const showThing = (ref: string): void => {
+    visit.select({ kind: "clear" });
+    visit.select({ kind: "focus", ref });
+    setIsPaneOpen(true);
+  };
   const answers = useInboxAnswers({
     client,
     scope: accountScope,
     visit,
     moves,
     isOffline: offlineSince !== null,
+    showThing,
   });
   // A hand-off from the keys or the pane's own button opens its menu under the pane's button while the pane shows.
   const openHandMenu = (thing: InboxListRow | null, ref: string | undefined): void => {
@@ -254,9 +263,7 @@ export function InboxScreen({
       case "openAtSource":
         // The pane shows the selection, not the current row, so O would open a thing the user is not looking at.
         if (isShowingSelection) {
-          moves.say(
-            "O opens one thing. Press Esc to clear the selection, then O on the thing you want.",
-          );
+          moves.say(OPEN_AT_SOURCE_NEEDS_ONE_THING);
         } else moves.openAtSource();
         return;
       case "showArrivals":
@@ -311,14 +318,12 @@ export function InboxScreen({
   const goToInPane = useStableCallback((ref: string) => {
     if (snapshot.rows.some((row) => row.ref === ref)) {
       visit.select({ kind: "focus", ref });
-    } else moves.say("That thing is not in this list.");
+    } else moves.say(THING_NOT_IN_LIST);
   });
   const handOffInPane = useStableCallback(() => {
     startHandOff(undefined);
   });
-  const walkInPane = useStableCallback((ref: string) => {
-    visit.select({ kind: "focus", ref });
-  });
+  const walkInPane = useStableCallback(showThing);
   const paneMoves: InboxPaneMoves = {
     onTakeOn: takeOnInPane,
     onDismiss: dismissInPane,

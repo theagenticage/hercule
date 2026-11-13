@@ -1,5 +1,6 @@
 import { useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import { namePlugin, type HerculeClient } from "@hercule/client-core";
 import {
   describeInboxRow,
@@ -89,6 +90,7 @@ function InboxSelectionPart({
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
+  const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const now = useInboxNow(members);
@@ -96,7 +98,13 @@ function InboxSelectionPart({
     describeInboxRow(row, { order, now, userName: username, offers: row.offers }),
   );
   return (
-    <InboxSelectionPane members={views} plugins={plugins} onWalk={onWalk} onDismiss={onDismiss} />
+    <InboxSelectionPane
+      members={views}
+      plugins={plugins}
+      platform={bridge.platform}
+      onWalk={onWalk}
+      onDismiss={onDismiss}
+    />
   );
 }
 
@@ -148,7 +156,9 @@ export function InboxPanePart({
   const [reply, setReply] = useState<PaneReply | null>(null);
   const asksRef = useRef<InboxPaneAsksHandle>(null);
   useImperativeHandle(ref, () => ({
-    answerCurrentAsk: () => asksRef.current?.answerCurrentAsk() ?? false,
+    answerCurrentAsk: () => {
+      asksRef.current?.answerCurrentAsk();
+    },
     stepAsk: (by) => {
       asksRef.current?.stepAsk(by);
     },

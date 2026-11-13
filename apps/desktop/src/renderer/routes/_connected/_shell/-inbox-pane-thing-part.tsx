@@ -13,11 +13,12 @@ import {
   describeDismissalReturn,
   describeHolderStrip,
   describePaneMeta,
+  describeUnreadable,
   findAccountLabel,
+  findRowHolder,
   listPaneAsks,
   listPaneHistory,
   listPaneLinks,
-  readHolder,
 } from "@hercule/client-core/inbox";
 import type { AccountScope } from "../../../app/account-scope";
 import {
@@ -115,7 +116,7 @@ export function InboxPaneThingPart({
   if (record === undefined) {
     return detail.isError ? (
       <p className="ib-pane-blocks-note">
-        {`This thing could not be read. ${readErrorMessage(detail.error)}`}
+        {describeUnreadable("thing", readErrorMessage(detail.error))}
       </p>
     ) : (
       <InboxPaneSkeleton />
@@ -125,11 +126,11 @@ export function InboxPaneThingPart({
   const isStale = detail.isPlaceholderData;
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const sourceName = namePlugin(thing.source, plugins);
-  const holder = readHolder(thing, username);
+  const holder = findRowHolder(thing, username);
   const holdingHeading = describeHolderStrip(thing);
-  // While the thing before's record is drawn, its title must not carry this thing's blocks.
   const paneAsks = listPaneAsks(record);
   const hasAsks = paneAsks.sections.length > 0 || paneAsks.hiddenOpenCount > 0;
+  // While the thing before's record is drawn, its title must not carry this thing's blocks.
   const paneBlocks: InboxPaneBlocks = isStale
     ? LOADING_BLOCKS
     : blocks.data !== undefined
@@ -149,6 +150,7 @@ export function InboxPaneThingPart({
         title={record.title}
         identifier={record.identifier}
         meta={describePaneMeta(record, {
+          now,
           account: findAccountLabel(
             outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
             thing.accounts,

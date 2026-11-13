@@ -27,8 +27,6 @@ const READY: AskSectionBody = {
     onOpenReply: vi.fn(),
     onCloseReply: vi.fn(),
     onDraftChange: vi.fn(),
-    onRetry: vi.fn(),
-    onDiscard: vi.fn(),
   },
 };
 
@@ -89,7 +87,7 @@ describe("InboxAskSection", () => {
 
   it("marks the current ask, and draws its blocks and answers", () => {
     const { container } = renderSection({ isOpen: true, isCurrent: true });
-    expect(container.querySelector(".sig")?.classList.contains("is-current-ask")).toBe(true);
+    expect(container.querySelector("section")?.getAttribute("aria-current")).toBe("true");
     expect(screen.getByText("Please look at the retry loop.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
   });
@@ -115,9 +113,9 @@ describe("InboxAskSection", () => {
 describe("InboxMoreAsks", () => {
   it("says how many asks are not shown, and nothing for none", () => {
     const { container, rerender } = render(<InboxMoreAsks count={3} />);
-    expect(container.textContent).toBe("3 more asks");
+    expect(container.textContent).toBe("3 more");
     rerender(<InboxMoreAsks count={1} />);
-    expect(container.textContent).toBe("1 more ask");
+    expect(container.textContent).toBe("1 more");
     rerender(<InboxMoreAsks count={0} />);
     expect(container.textContent).toBe("");
   });

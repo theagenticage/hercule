@@ -31,7 +31,11 @@
  */
 import { isRequestClosed, readErrorMessage } from "@hercule/client-core";
 import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
-import type { FailureReason } from "@hercule/client-core/work";
+import {
+  APP_CLOSED_BEFORE_SENT,
+  APP_CLOSED_WHILE_SENDING,
+  type FailureReason,
+} from "@hercule/client-core/work";
 import type { SessionRespondToQuestionInput } from "@hercule/contract";
 
 /** How long an intent stays `pending`, where Undo can still cancel it. */
@@ -252,12 +256,12 @@ const decideFailureReason = (
 
 const NOT_SENT: IntentFailure = {
   reason: "interrupted",
-  message: "The app closed before this was sent.",
+  message: APP_CLOSED_BEFORE_SENT,
 };
 
 const MAYBE_SENT: IntentFailure = {
   reason: "interrupted-while-sending",
-  message: "The app closed while this was being sent. It may have been sent.",
+  message: APP_CLOSED_WHILE_SENDING,
 };
 
 /**

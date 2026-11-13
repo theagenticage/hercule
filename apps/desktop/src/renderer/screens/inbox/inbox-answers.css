@@ -52,6 +52,14 @@
 .sig-failed > span {
   flex: 1 1 100%;
 }
+/* The words of an answer that cannot be sent again, kept so they can be copied. */
+.sig-failed-words {
+  flex: 1 1 100%;
+  color: var(--ink);
+  user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* The reply box of an answer with a field. */
 .sig-reply {

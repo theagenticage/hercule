@@ -749,12 +749,18 @@ export const externalEntityInbox = Effect.gen(function* () {
       const where = buildKeyset(list.order, tuple);
       const rows = yield* runStatement<PageRow>(
         sql,
+        // The inner select sorts and cuts the page first, so the Task title is
+        // looked up for the few rows of the page, not for every matched thing.
         `WITH ${matched.sql}
          SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
-                m.oldest_ask, m.upd, m.grp
-           ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
-         FROM matched m WHERE ${where.sql}
-         ORDER BY ${ORDER_BY[list.order]} LIMIT ?`,
+                m.oldest_ask, m.upd, m.grp${tuple === undefined ? ", m.total" : ""}
+         FROM (
+           SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+             ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
+           FROM matched m WHERE ${where.sql}
+           ORDER BY ${ORDER_BY[list.order]} LIMIT ?
+         ) m
+         ORDER BY ${ORDER_BY[list.order]}`,
         [...matched.params, ...where.params, MAX_INBOX_PAGE + 1],
       );
       const pageRows = rows.slice(0, MAX_INBOX_PAGE);
@@ -819,7 +825,11 @@ export const externalEntityInbox = Effect.gen(function* () {
         `WITH ${matched.sql}
          SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
                 m.oldest_ask, m.upd, m.grp
-         FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
+         FROM (
+           SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+           FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?
+         ) m
+         ORDER BY ${ORDER_BY[selection.list.order]}`,
         [...matched.params, MAX_INBOX_HELD_REFS],
       );
       return yield* hydrate(environment, rows);

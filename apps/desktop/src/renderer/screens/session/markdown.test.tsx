@@ -233,6 +233,7 @@ describe("Markdown", () => {
     expect(image?.getAttribute("src")).toBe("https://example.com/chart.png");
     expect(image?.getAttribute("alt")).toBe("retries per hour");
     expect(image?.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(image?.getAttribute("loading")).toBe("lazy");
     expect(container.querySelectorAll("img")).toHaveLength(1);
     expect(screen.getByRole("link", { name: "local" }).getAttribute("href")).toBe(
       "http://example.com/a.png",

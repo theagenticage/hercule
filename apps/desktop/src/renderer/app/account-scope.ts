@@ -25,6 +25,7 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { actOnSignal } from "./act-on-signal";
 import type { CardMover } from "./card-mover";
 import { createPendingCardMoves, type PendingCardMoves } from "./pending-card-moves";
 import {
@@ -115,23 +116,6 @@ const readAgainAfterChange = async (
 };
 
 /**
- * Reads again what a signal answer changes and waits for all: the detail of
- * its entity, the signal itself and the Inbox's list. A failed read is
- * ignored, as in `readAgainAfterChange`: the source already took the answer.
- */
-const readAgainAfterSignalAnswer = async (
-  queryClient: QueryClient,
-  entityId: string,
-  signalId: string,
-): Promise<void> => {
-  await Promise.allSettled(
-    [queryKeys.externalEntity(entityId), queryKeys.signal(signalId), queryKeys.inbox()].map(
-      (queryKey) => queryClient.invalidateQueries({ queryKey, refetchType: "active" }),
-    ),
-  );
-};
-
-/**
  * Returns the function that sends an intent to the controller and resolves
  * once the reads it changes have been refreshed. It rejects when the
  * controller refuses the intent or cannot be reached, and when the user has
@@ -159,16 +143,7 @@ const buildIntentSender =
         if (isCurrent()) await readAgainAfterChange(queryClient, intent.taskId, intent.intoTaskId);
         return;
       case "signal-answer":
-        await client.signal.act({
-          params: { id: intent.signalId },
-          payload:
-            intent.text === undefined
-              ? { actionId: intent.actionId }
-              : { actionId: intent.actionId, text: intent.text },
-        });
-        if (isCurrent()) {
-          await readAgainAfterSignalAnswer(queryClient, intent.entityId, intent.signalId);
-        }
+        await actOnSignal(client, queryClient, isCurrent, intent);
         return;
     }
   };

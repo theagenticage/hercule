@@ -560,7 +560,7 @@ describe("an intent found again after the app closed", () => {
       after.getSnapshot().find((each) => each.intentId === intentId)?.failure;
     expect(failureOf(stillPendingId)).toEqual({
       reason: "interrupted",
-      message: "The app closed before this was sent.",
+      message: "The app closed before it was sent.",
     });
     expect(failureOf(sendingId)?.reason).toBe("interrupted-while-sending");
     expect(failureOf(sendingId)?.message).toMatch(/may have been sent/);

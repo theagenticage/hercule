@@ -5,7 +5,7 @@
  * Done, the one quiet line for blocks that cannot be read, and the pane of a
  * selection.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildFakeInboxDetail } from "@hercule/client-core/inbox/testing";
@@ -21,6 +21,7 @@ import {
 import {
   LOYALTY,
   OUTLINE,
+  QUERY_PATH,
   SLOTS,
   buildThingId,
   defaultInbox,
@@ -148,7 +149,11 @@ const readUndoLine = (): string =>
 
 /** Returns the words of the ask that is current, which is the one that is unfolded. */
 const readCurrentAsk = (): string =>
-  document.querySelector(".sig.is-current-ask .sig-say")?.textContent ?? "";
+  document.querySelector('#inbox-pane [aria-current="true"] .sig-say')?.textContent ?? "";
+
+/** Returns the heads of the asks that are unfolded. */
+const listOpenAsks = (): HTMLElement[] =>
+  within(document.getElementById("inbox-pane")!).queryAllByRole("button", { expanded: true });
 
 /** Presses the undo key, directly, because user-event cannot run while the clock is faked. */
 const pressUndo = (): void => {
@@ -183,7 +188,7 @@ describe("the asks of a thing", () => {
     await open();
 
     expect(readCurrentAsk()).toBe("Omar mentioned you");
-    expect(document.querySelectorAll(".sig.is-open")).toHaveLength(1);
+    expect(listOpenAsks()).toHaveLength(1);
   });
 
   it("unfolds the ask of the saved query's kind first", async () => {
@@ -292,7 +297,7 @@ describe("a reply", () => {
   it("opens its box again with its words when Undo takes it back during the hold", async () => {
     const { calls } = await answerWithReturn(false);
     sendReply("Looks good to me");
-    expect(readUndoLine()).toMatch(/^Reply sent to Mei on .*\. Sends in 8s\.$/);
+    expect(readUndoLine()).toMatch(/^Reply to Mei on .*\. Sends in 8s\.$/);
     expect(screen.queryByRole("textbox")).toBeNull();
 
     pressUndo();
@@ -335,7 +340,7 @@ describe("Done", () => {
     });
     expect(callsTo(calls, MARK_DONE)[0]!.body).toEqual({ signalIds: [MENTION_ASK] });
     await waitFor(() => {
-      expect(readUndoLine()).toContain("can't be undone here");
+      expect(readUndoLine()).toContain("can’t be undone here");
     });
   });
 });
@@ -497,8 +502,10 @@ describe("a folded current ask", () => {
     await waitFor(() => {
       expect(readCurrentAsk()).toBe("Mei asked for your review");
     });
-    await user.click(document.querySelector(".sig.is-current-ask .sig-head")!);
-    expect(document.querySelectorAll(".sig.is-open")).toHaveLength(0);
+    await user.click(
+      document.querySelector<HTMLElement>('#inbox-pane [aria-current="true"] .sig-head')!,
+    );
+    expect(listOpenAsks()).toHaveLength(0);
   };
 
   it("is still where ] steps on from", async () => {
@@ -510,7 +517,7 @@ describe("a folded current ask", () => {
     await waitFor(() => {
       expect(readCurrentAsk()).toBe("Tessa mentioned you");
     });
-    expect(document.querySelectorAll(".sig.is-open")).toHaveLength(1);
+    expect(listOpenAsks()).toHaveLength(1);
   });
 
   it("is unfolded by Return, which answers nothing yet", async () => {
@@ -520,10 +527,229 @@ describe("a folded current ask", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".sig.is-open")).toHaveLength(1);
+      expect(listOpenAsks()).toHaveLength(1);
     });
     expect(readCurrentAsk()).toBe("Mei asked for your review");
     expect(readUndoLine()).not.toMatch(/Approve/);
     expect(callsTo(calls, ACT_REVIEW)).toHaveLength(0);
+  });
+});
+
+/** Makes the Inbox's frame report `width`, so a width under 760 stacks the pane over the list. Returns the way back. */
+const stubFrameWidth = (width: number): void => {
+  const before = globalThis.ResizeObserver;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(): void {
+        this.callback(
+          [{ contentRect: { width } } as ResizeObserverEntry],
+          this,
+        );
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  onTestFinished(() => {
+    vi.stubGlobal("ResizeObserver", before);
+  });
+};
+
+/** The outline whose waits list is about review requests, so the review ask is the current one. */
+const reviewOutline = (inbox: FakeInbox): void => {
+  inbox.outline = {
+    ...OUTLINE,
+    savedQueries: OUTLINE.savedQueries.map((query) =>
+      query.id === "waits" ? { ...query, signalKinds: [REVIEW_KIND] } : query,
+    ),
+  };
+};
+
+describe("an ask that was folded", () => {
+  it("does not keep another ask folded when it becomes the current one", async () => {
+    const state = { lines: [REVIEW_LINE, MENTION_LINE] };
+    const { live, user } = await open(undefined, {
+      [`GET /api/v1/external-entities/${SLOTS.id}`]: () => withAsks(SLOTS, state.lines),
+    });
+    await user.click(
+      document.querySelector<HTMLElement>('#inbox-pane [aria-current="true"] .sig-head')!,
+    );
+    expect(listOpenAsks()).toHaveLength(0);
+
+    // The folded ask is answered elsewhere and leaves: the ask that takes its place is drawn open.
+    state.lines = [REVIEW_LINE];
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+
+    await waitFor(() => {
+      expect(readCurrentAsk()).toBe("Mei asked for your review");
+    });
+    expect(listOpenAsks()).toHaveLength(1);
+  });
+});
+
+describe("a stacked pane that is closed", () => {
+  it("reads no ask while it is hidden, whatever the keys step to", async () => {
+    stubFrameWidth(500);
+    const inbox = defaultInbox();
+    const { calls } = await openInbox(inbox, askHandlers() as Parameters<typeof openInbox>[1]);
+    const user = userEvent.setup();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("button", { name: /^Approve/ });
+    await user.keyboard("{Escape}");
+
+    await user.keyboard("]");
+
+    expect(callsTo(calls, `GET /api/v1/signals/${REVIEW_ASK}`)).toHaveLength(0);
+  });
+});
+
+describe("an answer that was sent", () => {
+  it("shows its ask without answers at once, and reads no list itself", async () => {
+    const { calls } = await answerWithReturn();
+    const countReads = () =>
+      calls.filter(
+        (call) =>
+          `${call.method} ${call.path}` === QUERY_PATH ||
+          call.path === `/api/v1/external-entities/${SLOTS.id}`,
+      ).length;
+    const before = countReads();
+
+    await pass(HOLD_MS);
+    await pass(0);
+
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
+    expect(countReads()).toBe(before);
+  });
+});
+
+describe("a reply that Undo takes back", () => {
+  it("shows the box with its words and the cursor in it when a selection was made during the hold", async () => {
+    await answerWithReturn(false);
+    sendReply("Looks good to me");
+    fireEvent.keyDown(document.body, { key: "j", shiftKey: true });
+    await pass(0);
+    expect(
+      within(document.getElementById("inbox-pane")!).getByText("2 things selected"),
+    ).toBeTruthy();
+
+    pressUndo();
+    await pass(0);
+
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(box.value).toBe("Looks good to me");
+    expect(document.activeElement).toBe(box);
+    expect(screen.queryByText("2 things selected")).toBeNull();
+  });
+
+  it("opens the pane that lies closed over the list", async () => {
+    stubFrameWidth(500);
+    const inbox = defaultInbox();
+    reviewOutline(inbox);
+    await openInbox(inbox, askHandlers() as Parameters<typeof openInbox>[1]);
+    const user = userEvent.setup();
+    await user.keyboard("{Enter}");
+    await screen.findByText("Approves the pull request");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    sendReply("Looks good to me");
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    const pane = document.getElementById("inbox-pane")!;
+    expect(pane.hasAttribute("inert")).toBe(true);
+
+    pressUndo();
+    await pass(0);
+
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    expect(pane.hasAttribute("inert")).toBe(false);
+    expect(box.value).toBe("Looks good to me");
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("keeps the words typed in the box when it is closed and opened again", async () => {
+    const { user } = await open();
+    await user.click(document.querySelector<HTMLElement>("[data-answer='reply']")!);
+    await user.type(screen.getByRole("textbox"), "Half a thought");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    await user.click(document.querySelector<HTMLElement>("[data-answer='reply']")!);
+
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Half a thought");
+  });
+});
+
+describe("a selection in the pane", () => {
+  it("opens a member alone when its row is pressed", async () => {
+    const { user } = await open();
+    await user.keyboard("{Shift>}j{/Shift}");
+    const pane = document.getElementById("inbox-pane")!;
+    await within(pane).findByText("2 things selected");
+
+    await user.click(within(pane).getByRole("button", { name: new RegExp(SLOTS.title) }));
+
+    expect(
+      await within(pane).findByRole("heading", { name: new RegExp(SLOTS.title) }),
+    ).toBeTruthy();
+    expect(within(pane).queryByText("2 things selected")).toBeNull();
+  });
+});
+
+describe("answers that were not sent", () => {
+  const refused = {
+    [ACT_REVIEW]: { status: 409, body: buildErrorBody("invalid_state", "The source said no.") },
+  };
+
+  it("shows each one whichever ask is current, and offers Send again while its ask is open", async () => {
+    const opened = await open((inbox) => reviewOutline(inbox), refused);
+    await screen.findByText("Approves the pull request");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await pass(HOLD_MS);
+    await pass(0);
+    vi.useRealTimers();
+    await screen.findByRole("alert");
+
+    await opened.user.keyboard("[[");
+    await waitFor(() => {
+      expect(readCurrentAsk()).toBe("Omar mentioned you");
+    });
+
+    expect(screen.getByRole("alert").textContent).toMatch(/was not sent to/);
+    expect(screen.getByRole("button", { name: "Send again" })).toBeTruthy();
+  });
+
+  it("offers only Discard, and the words, once its ask is no longer open", async () => {
+    const state = { lines: [REVIEW_LINE, MENTION_LINE] };
+    const { live, user } = await open(reviewOutline, {
+      ...refused,
+      [`GET /api/v1/external-entities/${SLOTS.id}`]: () => withAsks(SLOTS, state.lines),
+    });
+    await screen.findByText("Approves the pull request");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    sendReply("Looks good to me");
+    await pass(HOLD_MS);
+    await pass(0);
+    vi.useRealTimers();
+    await screen.findByRole("alert");
+
+    state.lines = [MENTION_LINE];
+    act(() => {
+      live.pushInvalidation("externalEntity", [SLOTS.id]);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
+    });
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText("Looks good to me")).toBeTruthy();
+    await user.click(within(alert).getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -18,7 +18,7 @@ const member = (ref: string, title: string): InboxRowView => ({
   held: false,
 });
 
-const renderPane = (count: number) => {
+const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
   const onWalk = vi.fn();
   const onDismiss = vi.fn();
   const members = Array.from({ length: count }, (_, index) =>
@@ -28,6 +28,7 @@ const renderPane = (count: number) => {
     <InboxSelectionPane
       members={members}
       plugins={TEST_PLUGINS}
+      platform={platform}
       onWalk={onWalk}
       onDismiss={onDismiss}
     />,
@@ -52,6 +53,11 @@ describe("InboxSelectionPane", () => {
   it("writes one thing in the singular", () => {
     renderPane(1);
     expect(screen.getByRole("heading", { name: "1 thing selected" })).toBeTruthy();
+  });
+
+  it("names the click that adds a row after the platform's primary modifier", () => {
+    renderPane(2, "linux");
+    expect(screen.getByText(/^X or Ctrl-click adds and removes/)).toBeTruthy();
   });
 
   it("walks to a member when its row is pressed", async () => {

@@ -13,7 +13,12 @@ import type {
   MessagesBlock,
   ThreadMessage,
 } from "@hercule/contract";
-import { formatMessageTime, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "@hercule/client-core";
+import {
+  describeChecks,
+  formatMessageTime,
+  isKnownBlock,
+  UNKNOWN_BLOCK_TEXT,
+} from "@hercule/client-core";
 import { ArrowIcon } from "../../icons/arrow";
 import { BranchIcon } from "../../icons/branch";
 import { ClockIcon } from "../../icons/clock";
@@ -166,14 +171,6 @@ function Message({
     </li>
   );
 }
-
-/** Returns the summary of a change's checks, the worst first: "1 failing, 2 pending, 11 passed". */
-const describeChecks = (checks: NonNullable<ChangeBlock["checks"]>): string =>
-  [
-    ...(checks.failed > 0 ? [`${String(checks.failed)} failing`] : []),
-    ...(checks.pending > 0 ? [`${String(checks.pending)} pending`] : []),
-    ...(checks.passed > 0 ? [`${String(checks.passed)} passed`] : []),
-  ].join(", ");
 
 /** Renders a change: its branch pair, its size, and its checks' summary. */
 function ChangeBlockView({ block }: { readonly block: ChangeBlock }): JSX.Element {

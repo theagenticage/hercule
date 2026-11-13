@@ -8,28 +8,24 @@ import { useLayoutEffect, useRef, useState, type JSX } from "react";
 import type { SignalAction } from "@hercule/contract";
 import { DONE_ACTION_ID } from "@hercule/contract";
 import { trimAnswerEllipsis, type SignalAnswer } from "@hercule/client-core";
+import { describeDoneEffect } from "@hercule/client-core/inbox";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { DescribeLineText } from "../desk/signal-answers";
 import "./inbox-answers.css";
 
 /**
- * The answer the user chose on an ask and what became of it:
- *
- * - `held` and `sending`: on its way. The ask shows the answer as chosen and
- *   takes no other answer.
- * - `failed` and `interrupted`: not sent. `sentence` says why, and the ask
- *   offers to send it again or to discard it.
+ * The answer the user chose on an ask and what became of it. The ask takes no
+ * other answer meanwhile: `held` and `sending` are on their way, `unsent`
+ * failed or was left by a closed app and waits for Send again or Discard
+ * (`InboxUnsentAnswers`).
  */
-export type ChosenAnswer =
-  | { readonly actionId: string; readonly state: "held" | "sending" }
-  | {
-      readonly actionId: string;
-      readonly state: "failed" | "interrupted";
-      readonly sentence: string;
-    };
+export interface ChosenAnswer {
+  readonly actionId: string;
+  readonly state: "held" | "sending" | "unsent";
+}
 
-/** The reply box that is open on an ask, and the words in it. */
+/** The reply box that is open on an ask, and the words it opens with. It keeps the words itself from then on. */
 export interface OpenReply {
   readonly actionId: string;
   readonly draft: string;
@@ -47,9 +43,8 @@ export interface InboxAnswersProps {
   readonly onDone: () => void;
   readonly onOpenReply: (actionId: string) => void;
   readonly onCloseReply: () => void;
+  /** Tells the caller the words so far, to keep for when the box opens again. */
   readonly onDraftChange: (text: string) => void;
-  readonly onRetry: () => void;
-  readonly onDiscard: () => void;
 }
 
 /**
@@ -60,7 +55,8 @@ export interface InboxAnswersProps {
  * - Only the suggested answer of the current ask (`isCurrent`) is filled and
  *   shows ↩, because ↩ answers it.
  * - The answer in `chosen` draws as pressed while it is on its way, and every
- *   answer waits until it is sent, failed or discarded.
+ *   answer is inert while one is on its way and after one was not sent, until
+ *   the user sends it again or discards it.
  * - Pressing an answer with a text field calls `onOpenReply`; the box shows
  *   when `reply` names that answer. The words in it belong to the caller, so
  *   closing the box (Cancel or Esc) keeps them.
@@ -82,8 +78,6 @@ export function InboxAnswers({
   onOpenReply,
   onCloseReply,
   onDraftChange,
-  onRetry,
-  onDiscard,
 }: InboxAnswersProps): JSX.Element | null {
   const shown = answers.filter((answer) => answer.workflowId === null);
   const [describedId, setDescribedId] = useState<string | null>(null);
@@ -151,9 +145,10 @@ export function InboxAnswers({
       </div>
       {replyAnswer !== undefined && reply !== null && (
         <ReplyBox
+          key={replyAnswer.action.id}
           action={replyAnswer.action}
           isFilled={isCurrent}
-          draft={reply.draft}
+          initialDraft={reply.draft}
           sourceName={sourceName}
           isLocked={isWaiting}
           platform={platform}
@@ -164,22 +159,11 @@ export function InboxAnswers({
           onClose={closeReply}
         />
       )}
-      {chosen !== undefined && (chosen.state === "failed" || chosen.state === "interrupted") && (
-        <div className="sig-failed" data-state={chosen.state} role="alert">
-          <span>{chosen.sentence}</span>
-          <button type="button" className="btn btn--sm" onClick={onRetry}>
-            Send again
-          </button>
-          <button type="button" className="btn btn--sm btn--quiet" onClick={onDiscard}>
-            Discard
-          </button>
-        </div>
-      )}
       <p className="sig-desc" aria-live="polite">
         {described.action.id === DONE_ACTION_ID &&
         described.action.describeLine === undefined &&
         described.action.description === undefined ? (
-          `Ends this ask here. ${sourceName} is not told.`
+          describeDoneEffect(sourceName)
         ) : (
           <DescribeLineText action={described.action} />
         )}
@@ -197,7 +181,7 @@ export function InboxAnswers({
 function ReplyBox({
   action,
   isFilled,
-  draft,
+  initialDraft,
   sourceName,
   isLocked,
   platform,
@@ -207,7 +191,7 @@ function ReplyBox({
 }: {
   readonly action: SignalAction;
   readonly isFilled: boolean;
-  readonly draft: string;
+  readonly initialDraft: string;
   readonly sourceName: string;
   readonly isLocked: boolean;
   readonly platform: DesktopPlatform;
@@ -216,6 +200,8 @@ function ReplyBox({
   readonly onClose: () => void;
 }): JSX.Element {
   const input = useRef<HTMLTextAreaElement>(null);
+  // The words live here, so a keystroke renders this box and not the pane around it.
+  const [draft, setDraft] = useState(initialDraft);
   // The box opens with the cursor after the kept words: the user pressed the answer to write.
   useLayoutEffect(() => {
     const element = input.current;
@@ -239,6 +225,7 @@ function ReplyBox({
         value={draft}
         readOnly={isLocked}
         onChange={(event) => {
+          setDraft(event.target.value);
           onDraftChange(event.target.value);
         }}
         onKeyDown={(event) => {
@@ -268,5 +255,58 @@ function ReplyBox({
         </button>
       </div>
     </div>
+  );
+}
+
+/** One answer that was not sent, as `InboxUnsentAnswers` draws it. */
+export interface UnsentAnswer {
+  readonly id: string;
+  /** Says what happened and whether the source may have the answer. */
+  readonly sentence: string;
+  /** True when the app closed, which is quieter than a refusal. */
+  readonly isInterrupted: boolean;
+  /** The words typed in the reply box, when the answer had a reply. */
+  readonly words: string | undefined;
+  /** False when the ask is no longer open here: only Discard is offered, and the words stay to be copied. */
+  readonly canSendAgain: boolean;
+  readonly onSendAgain: () => void;
+  readonly onDiscard: () => void;
+}
+
+/**
+ * Renders each answer in `answers` that was not sent: what happened, then Send
+ * again and Discard. When an answer cannot be sent again, its words (if it had
+ * any) are shown instead, so the user can copy them. Draws nothing for none.
+ */
+export function InboxUnsentAnswers({
+  answers,
+}: {
+  readonly answers: ReadonlyArray<UnsentAnswer>;
+}): JSX.Element | null {
+  if (answers.length === 0) return null;
+  return (
+    <>
+      {answers.map((answer) => (
+        <div
+          key={answer.id}
+          className="sig-failed"
+          data-state={answer.isInterrupted ? "interrupted" : "failed"}
+          role="alert"
+        >
+          <span>{answer.sentence}</span>
+          {!answer.canSendAgain && answer.words !== undefined && (
+            <q className="sig-failed-words">{answer.words}</q>
+          )}
+          {answer.canSendAgain && (
+            <button type="button" className="btn btn--sm" onClick={answer.onSendAgain}>
+              Send again
+            </button>
+          )}
+          <button type="button" className="btn btn--sm btn--quiet" onClick={answer.onDiscard}>
+            Discard
+          </button>
+        </div>
+      ))}
+    </>
   );
 }

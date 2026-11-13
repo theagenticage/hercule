@@ -5,6 +5,7 @@
  */
 import type { JSX } from "react";
 import type { CodeBlock, FieldsBlock, TrendBlock } from "@hercule/contract";
+import { describeDaysAgo } from "@hercule/client-core";
 import "./inbox-blocks.css";
 
 /** The trend's drawing space is 100 wide and 32 high. The line runs between the top margin and the baseline. */
@@ -49,15 +50,6 @@ const buildTrendPoints = (points: TrendBlock["points"]): string => {
       return `${(index * step).toFixed(2)},${(TREND_BASELINE - height).toFixed(2)}`;
     })
     .join(" ");
-};
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Returns how long before `now` a timestamp was, in whole days, as words: "today", "yesterday", "14 days ago". */
-const describeDaysAgo = (timestamp: string, now: Date): string => {
-  const days = Math.max(0, Math.round((now.getTime() - new Date(timestamp).getTime()) / DAY_MS));
-  if (days === 0) return "today";
-  return days === 1 ? "yesterday" : `${String(days)} days ago`;
 };
 
 /**
