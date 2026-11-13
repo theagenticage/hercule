@@ -477,13 +477,14 @@ const replyInMode = (query: InboxQuery, first: InboxFirstPage): InboxReply => {
     case "first":
       return first;
     case "next":
-      return { mode: "next", things: [], offerSets };
+      return { mode: "next", things: [], groups: [], offerSets };
     case "refresh":
-      return { mode: "refresh", first, held: { things: [], offerSets } };
+      return { mode: "refresh", first, held: { things: [], groups: [], offerSets } };
     case "rows":
       return {
         mode: "rows",
         things: first.things.filter((thing) => query.held.includes(thing.ref)),
+        groups: [],
         offerSets,
       };
   }
@@ -494,11 +495,52 @@ const answerNothing = (query: InboxQuery): InboxReply =>
   replyInMode(query, {
     mode: "first",
     things: [],
+    groups: [],
     total: 0,
     order: "newest",
     facets: [],
     offerSets: {},
   });
+
+/** The refs of the things the group scenes link together: two pull requests and the issue they fix. */
+const GROUPED_REFS: ReadonlyArray<string> = [
+  "github:pull-request:acme/storefront-web#6213",
+  "github:pull-request:acme/storefront-web#6244",
+  "sentry:issue:storefront-1z9",
+];
+
+/**
+ * Returns `page` with the things of `GROUPED_REFS` that it holds drawn as one
+ * group, standing where the first of them stands, as the controller does. A
+ * page that holds fewer than two of them is returned as it is.
+ */
+const groupFirstPage = (page: InboxFirstPage): InboxFirstPage => {
+  const members = page.things.filter((thing) => GROUPED_REFS.includes(thing.ref));
+  const label = members[0];
+  if (label === undefined || members.length < 2) return page;
+  const others = page.things.filter((thing) => !members.includes(thing));
+  const at = page.things.indexOf(label);
+  const before = others.slice(0, at);
+  return {
+    ...page,
+    things: [...before, ...members, ...others.slice(at)],
+    groups: [
+      {
+        labelRef: label.ref,
+        label: label.title,
+        members: members.map((thing) => ({ id: thing.id, ref: thing.ref, matches: true })),
+        size: members.length,
+      },
+    ],
+  };
+};
+
+/** Plays `queryInbox` over the fixture's things, with the linked things grouped (the group scenes). */
+export const answerInboxQueryWithGroup = (query: InboxQuery): InboxReply => {
+  const reply = answerInboxQuery(query);
+  if (reply.mode === "first") return groupFirstPage(reply);
+  return reply.mode === "refresh" ? { ...reply, first: groupFirstPage(reply.first) } : reply;
+};
 
 /** Plays the controller's `queryInbox` over the fixture's things. */
 export const answerInboxQuery = (query: InboxQuery): InboxReply => {
@@ -522,6 +564,7 @@ export const answerInboxQuery = (query: InboxQuery): InboxReply => {
   return replyInMode(query, {
     mode: "first",
     things,
+    groups: [],
     total: things.length,
     order: isWaiting ? "waiting" : "newest",
     offerSets: OFFER_SETS,
@@ -763,6 +806,22 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       await typeSearch(page, "team:Checkout waiting:>2h team:");
       // The field keeps the focus, with the values of the open clause offered under it.
       await waitFor(page, '[role="option"]');
+    },
+  },
+  {
+    name: "group-closed",
+    records: { ...BASE, answer: answerInboxQueryWithGroup },
+    play: async (page) => {
+      await waitFor(page, ".ib-row--group");
+    },
+  },
+  {
+    name: "group-open",
+    records: { ...BASE, answer: answerInboxQueryWithGroup },
+    play: async (page) => {
+      const fold = await waitFor(page, ".ib-group-fold");
+      fold.click();
+      await waitFor(page, '[role="treeitem"][aria-level="2"]');
     },
   },
   {

@@ -44,6 +44,8 @@ const BASE = "POST /api/v1/external-entities";
 const DISMISS = `${BASE}/dismiss`;
 const RESTORE = `${BASE}/restore`;
 const takeOnPath = (id: string): string => `${BASE}/${id}/take-on`;
+const TAKE_ON_TOGETHER = `${BASE}/take-on`;
+const UNDO_TAKE_ON_TOGETHER = `${BASE}/take-on/undo`;
 const undoTakeOnPath = (id: string): string => `${BASE}/${id}/take-on/undo`;
 const handOffPath = (id: string): string => `${BASE}/${id}/hand-off`;
 const RUN_ID = "01a1b576-c999-7000-8000-000000000901";
@@ -416,18 +418,39 @@ describe("Take on", () => {
     await waitForUndoLine("A thread was started on the Task.");
   });
 
-  it("refuses a selection of several things, with the reason and what to do instead", async () => {
-    const { user, calls } = await open();
+  it("takes a selection of several things on as one Task, and Undo takes back what the call wrote", async () => {
+    const result = {
+      taskId: TASK_ID,
+      created: true,
+      added: [SLOTS.id, LOYALTY.id],
+      taken: [SLOTS.id, LOYALTY.id],
+      takenAt: "2026-11-13T10:00:00.000Z",
+    };
+    const { user, calls } = await open(undefined, {
+      [TAKE_ON_TOGETHER]: { body: result },
+      [UNDO_TAKE_ON_TOGETHER]: { body: { undone: true } },
+    });
     await user.keyboard("x");
     await user.keyboard("j");
     await user.keyboard("x");
 
     await user.keyboard("t");
 
-    await waitForUndoLine("Take on makes one Task for one thing.");
-    expect(readUndoLine()).toContain("Press Esc to clear the selection");
+    await waitForUndoLine("Took on, a Task on Work");
+    expect(callsTo(calls, TAKE_ON_TOGETHER)[0]?.body).toEqual({
+      ids: [SLOTS.id, LOYALTY.id],
+      title: SLOTS.title,
+    });
     expect(callsTo(calls, takeOnPath(SLOTS.id))).toHaveLength(0);
-    expect(callsTo(calls, takeOnPath(LOYALTY.id))).toHaveLength(0);
+
+    await user.click(
+      within(document.querySelector<HTMLElement>(".ib .undo-line")!).getByRole("button", {
+        name: /Undo/,
+      }),
+    );
+
+    await waitForUndoLine("The Task is gone, and nothing had started.");
+    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual(result);
   });
 });
 
@@ -526,7 +549,7 @@ describe("the hand-off", () => {
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
-  it("offers no hand-off in the pane of a selection of several things, only Dismiss", async () => {
+  it("offers no hand-off in the pane of a selection of several things, only Take on, Link and Dismiss", async () => {
     const { user, calls } = await open(handable);
     await user.keyboard("x");
     await user.keyboard("j");
@@ -534,6 +557,8 @@ describe("the hand-off", () => {
 
     const pane = document.getElementById("inbox-pane")!;
     expect(await within(pane).findByRole("button", { name: "Dismiss all 2" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Take on" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Link all 2" })).toBeTruthy();
     expect(within(pane).queryByRole("button", { name: /Hand to/ })).toBeNull();
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
@@ -660,7 +685,9 @@ describe("Go to its Task, Open at its source and the keys sheet", () => {
     await user.keyboard("?");
 
     const sheet = await screen.findByRole("dialog", { name: "Keys" });
-    expect(within(sheet).getByText("Dismiss, all of the selection at once")).toBeTruthy();
+    expect(
+      within(sheet).getByText("Dismiss, all of the selection or of the group at once"),
+    ).toBeTruthy();
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();

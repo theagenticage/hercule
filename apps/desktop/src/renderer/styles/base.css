@@ -196,6 +196,16 @@ kbd {
 .spacer {
   flex: 1;
 }
+/* The words only a screen reader gets, such as a live region's text. It takes no room and draws nothing. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .wordmark {
   font-family: var(--font-deco);
   font-feature-settings: normal;

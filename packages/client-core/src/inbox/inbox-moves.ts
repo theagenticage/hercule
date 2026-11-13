@@ -291,7 +291,7 @@ export const DISMISSAL_UNDONE = "Back in your Inbox.";
 
 /** Returns the sentence for a dismissal the controller refused: the things are back, and why. */
 export const describeInboxDismissalFailure = (
-  things: readonly InboxThing[],
+  things: ReadonlyArray<Pick<InboxThing, "title">>,
   reason: string,
 ): string =>
   things.length === 1
@@ -308,8 +308,10 @@ export const describeInboxTakeOn = (thing: InboxThing, created: boolean): InboxL
 export const TAKE_ON_UNDONE = "The Task is gone, and nothing had started.";
 
 /** Returns the sentence for a Take on the controller refused. */
-export const describeInboxTakeOnFailure = (thing: InboxThing, reason: string): string =>
-  `${quoteTitle(thing.title)} was not taken on: ${reason}. Try again.`;
+export const describeInboxTakeOnFailure = (
+  thing: Pick<InboxThing, "title">,
+  reason: string,
+): string => `${quoteTitle(thing.title)} was not taken on: ${reason}. Try again.`;
 
 /** Returns the words for the line after `thing` was handed to the workflow `workflowName`. */
 export const describeInboxHandOff = (thing: InboxThing, workflowName: string): InboxLineWords => ({
@@ -337,7 +339,7 @@ const nameThing = (thing: Pick<InboxThing, "identifier" | "title">): string =>
  * last, so a narrow line cuts the names and not the words before them.
  */
 export const describeInboxLink = (
-  things: readonly InboxThing[],
+  things: ReadonlyArray<Pick<InboxThing, "identifier" | "title">>,
   created: boolean,
 ): InboxLineWords => {
   if (!created) return { text: "These are linked already.", title: null };
@@ -355,8 +357,8 @@ export const LINK_UNDONE = "Unlinked. The sources were never told.";
  * line says the source still links them.
  */
 export const describeInboxUnlink = (
-  first: InboxThing,
-  second: InboxThing,
+  first: Pick<InboxThing, "identifier" | "title">,
+  second: Pick<InboxThing, "identifier" | "title">,
   result: EntityUnlinkResult,
 ): InboxLineWords => {
   if (!result.removed) return { text: "You had not linked these, so nothing changed", title: null };

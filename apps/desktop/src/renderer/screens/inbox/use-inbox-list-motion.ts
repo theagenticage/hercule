@@ -23,7 +23,7 @@
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
-import type { InboxRowView } from "@hercule/client-core/inbox";
+import type { InboxListEntry } from "./inbox-list-entry";
 
 /** How the rows that left in a change went: dismissed rows slide aside as they fade. */
 export type InboxLeaveHow = "dismiss" | "taken";
@@ -32,7 +32,7 @@ export type InboxLeaveHow = "dismiss" | "taken";
 export interface LeavingRow {
   /** Tells copies apart, because the same row may leave twice (dismiss, undo, dismiss). */
   readonly id: number;
-  readonly view: InboxRowView;
+  readonly entry: InboxListEntry;
   /** Where the row stood, in pixels from the top of the rows. */
   readonly top: number;
   readonly how: InboxLeaveHow;
@@ -70,10 +70,10 @@ export const FADE_EASING = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 /** What the last render drew, which the next change is told apart from. */
 interface DrawnRows {
   readonly listId: string;
-  readonly rows: ReadonlyArray<InboxRowView>;
+  readonly rows: ReadonlyArray<InboxListEntry>;
 }
 
-/** Collects the drawn rows' elements under `scroll`, by the reference of their thing. */
+/** Collects the drawn rows' elements under `scroll`, by the key of their entry. */
 const collectDrawnRows = (scroll: HTMLElement): Map<string, HTMLElement> =>
   new Map(
     [...scroll.querySelectorAll<HTMLElement>("[data-ref]")].flatMap((element) => {
@@ -151,7 +151,7 @@ export function useInboxListMotion({
   returning,
   arriving,
 }: {
-  readonly rows: ReadonlyArray<InboxRowView>;
+  readonly rows: ReadonlyArray<InboxListEntry>;
   readonly listId: string;
   readonly rowHeight: number;
   readonly scrollRef: RefObject<HTMLElement | null>;
@@ -177,8 +177,8 @@ export function useInboxListMotion({
     const scroll = scrollRef.current;
     if (scroll === null || isMotionReduced()) return;
 
-    const wasIndex = new Map(was.rows.map((view, index) => [view.ref, index] as const));
-    const nowIndex = new Map(rows.map((view, index) => [view.ref, index] as const));
+    const wasIndex = new Map(was.rows.map((entry, index) => [entry.key, index] as const));
+    const nowIndex = new Map(rows.map((entry, index) => [entry.key, index] as const));
     const elements = collectDrawnRows(scroll);
 
     // Rows still sliding from the last change are read before anything is written.
@@ -188,11 +188,11 @@ export function useInboxListMotion({
 
     const viewTop = scroll.scrollTop;
     const viewBottom = viewTop + scroll.clientHeight;
-    const left = was.rows.flatMap((view, index): LeavingRow[] => {
+    const left = was.rows.flatMap((entry, index): LeavingRow[] => {
       const top = index * rowHeight;
-      if (nowIndex.has(view.ref) || top + rowHeight <= viewTop || top >= viewBottom) return [];
+      if (nowIndex.has(entry.key) || top + rowHeight <= viewTop || top >= viewBottom) return [];
       nextId.current += 1;
-      return [{ id: nextId.current, view, top, how: leaveHow }];
+      return [{ id: nextId.current, entry, top, how: leaveHow }];
     });
     const closeUpDelay = left.length > 0 && !isBusy ? CLOSE_UP_DELAY_MS : 0;
 

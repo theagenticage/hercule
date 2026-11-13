@@ -71,12 +71,16 @@ function InboxSelectionPart({
   order,
   onWalk,
   onDismiss,
+  onTakeOn,
+  onLink,
 }: {
   readonly client: HerculeClient;
   readonly members: ReadonlyArray<InboxListRow>;
   readonly order: InboxOrder;
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
+  readonly onTakeOn: () => void;
+  readonly onLink: () => void;
 }): JSX.Element {
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
@@ -85,7 +89,14 @@ function InboxSelectionPart({
     describeInboxRow(row, { order, now, userName: username, offers: row.offers }),
   );
   return (
-    <InboxSelectionPane members={views} plugins={plugins} onWalk={onWalk} onDismiss={onDismiss} />
+    <InboxSelectionPane
+      members={views}
+      plugins={plugins}
+      onWalk={onWalk}
+      onTakeOn={onTakeOn}
+      onLink={onLink}
+      onDismiss={onDismiss}
+    />
   );
 }
 
@@ -114,6 +125,8 @@ export function InboxPanePart({
   ref,
   onWalk,
   onDismissSelection,
+  onTakeOnSelection,
+  onLinkSelection,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
@@ -129,6 +142,8 @@ export function InboxPanePart({
   readonly ref: Ref<InboxPaneHandle>;
   readonly onWalk: (ref: string) => void;
   readonly onDismissSelection: () => void;
+  readonly onTakeOnSelection: () => void;
+  readonly onLinkSelection: () => void;
 }): JSX.Element {
   // The ask the user chose last for each thing, and whether they folded it.
   const [chosenAsks, setChosenAsks] = useState<
@@ -157,6 +172,8 @@ export function InboxPanePart({
         order={order}
         onWalk={onWalk}
         onDismiss={onDismissSelection}
+        onTakeOn={onTakeOnSelection}
+        onLink={onLinkSelection}
       />
     );
   }

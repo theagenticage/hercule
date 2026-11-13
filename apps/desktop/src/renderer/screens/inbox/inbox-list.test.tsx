@@ -4,29 +4,54 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubElementSize } from "../../app/testing";
-import { InboxList, type InboxListHandle } from "./inbox-list";
+import { InboxList, type InboxListActions, type InboxListHandle } from "./inbox-list";
+import type { InboxListEntry } from "./inbox-list-entry";
 import { buildInboxRowActions, buildInboxRowView, TEST_PLUGINS } from "./inbox-row.testing";
 
-const buildRows = (count: number) =>
-  Array.from({ length: count }, (_, index) => buildInboxRowView(`thing-${String(index)}`));
+const buildRows = (count: number): InboxListEntry[] =>
+  Array.from({ length: count }, (_, index) => {
+    const view = buildInboxRowView(`thing-${String(index)}`);
+    return { kind: "thing", key: view.ref, view };
+  });
+
+/** Builds the callbacks of the list for a test: the rows' own, and the group lines' that record their calls too. */
+const buildListActions = () => {
+  const row = buildInboxRowActions();
+  const actions: InboxListActions & { readonly calls: typeof row.calls } = {
+    ...row,
+    onPickGroup: (key) => {
+      row.calls.push(["pick-group", key]);
+    },
+    onToggleGroupSelect: (key, whole) => {
+      row.calls.push([whole ? "toggle-group-whole" : "toggle-group", key]);
+    },
+    onToggleGroupOpen: (key) => {
+      row.calls.push(["open-group", key]);
+    },
+    onShowMore: (key) => {
+      row.calls.push(["more", key]);
+    },
+  };
+  return actions;
+};
 
 /** Renders the list over `count` rows. */
 const renderList = (
   count: number,
   props: {
-    readonly currentRef?: string | null;
+    readonly currentKey?: string | null;
     readonly selection?: ReadonlySet<string>;
     readonly onViewportChange?: (first: number, last: number) => void;
   } = {},
 ) => {
-  const actions = buildInboxRowActions();
+  const actions = buildListActions();
   const view = render(
     <InboxList
       listId="waits"
       label="Someone waits on me"
-      rows={buildRows(count)}
+      entries={buildRows(count)}
       plugins={TEST_PLUGINS}
-      currentRef={props.currentRef === undefined ? "thing-0" : props.currentRef}
+      currentKey={props.currentKey === undefined ? "thing-0" : props.currentKey}
       selection={props.selection ?? new Set()}
       actions={actions}
       onViewportChange={props.onViewportChange ?? (() => {})}
@@ -53,7 +78,7 @@ describe("InboxList", () => {
   });
 
   it("puts only the current row in the tab order and selects the rows of the selection", () => {
-    renderList(3, { currentRef: "thing-1", selection: new Set(["thing-2"]) });
+    renderList(3, { currentKey: "thing-1", selection: new Set(["thing-2"]) });
     const rows = screen.getAllByRole("treeitem");
     expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0, -1]);
     expect(rows.map((row) => row.getAttribute("aria-selected"))).toEqual([
@@ -65,14 +90,14 @@ describe("InboxList", () => {
 
   it("calls the actions of the latest render, though a row draws again only when its own props change", async () => {
     const { actions, rerender } = renderList(3);
-    const later = buildInboxRowActions();
+    const later = buildListActions();
     rerender(
       <InboxList
         listId="waits"
         label="Someone waits on me"
-        rows={buildRows(3)}
+        entries={buildRows(3)}
         plugins={TEST_PLUGINS}
-        currentRef="thing-0"
+        currentKey="thing-0"
         selection={new Set()}
         actions={later}
         onViewportChange={() => {}}
@@ -86,7 +111,7 @@ describe("InboxList", () => {
   });
 
   it("draws no puck when no row is current", () => {
-    const { container } = renderList(0, { currentRef: null });
+    const { container } = renderList(0, { currentKey: null });
     expect(container.querySelector(".ib-puck")?.hasAttribute("hidden")).toBe(true);
     expect(screen.queryAllByRole("treeitem")).toHaveLength(0);
   });
@@ -101,7 +126,7 @@ describe("InboxList", () => {
   });
 
   it("keeps the current row drawn when it is far from the view", () => {
-    renderList(2000, { currentRef: "thing-1500" });
+    renderList(2000, { currentKey: "thing-1500" });
     expect(screen.getByRole("treeitem", { name: /thing-1500/ }).tabIndex).toBe(0);
   });
 
@@ -128,15 +153,15 @@ describe("InboxList", () => {
   });
 
   it("moves the keyboard focus to the current row when a focus request comes", () => {
-    const actions = buildInboxRowActions();
+    const actions = buildListActions();
     const rows = buildRows(3);
     const draw = (focusRequest: number) => (
       <InboxList
         listId="waits"
         label="Someone waits on me"
-        rows={rows}
+        entries={rows}
         plugins={TEST_PLUGINS}
-        currentRef="thing-1"
+        currentKey="thing-1"
         selection={new Set()}
         actions={actions}
         focusRequest={focusRequest}
@@ -150,14 +175,14 @@ describe("InboxList", () => {
   });
 
   it("leaves the scroll where the user put it when new row values arrive and the current row stays", () => {
-    const actions = buildInboxRowActions();
+    const actions = buildListActions();
     const draw = (rows: ReturnType<typeof buildRows>) => (
       <InboxList
         listId="waits"
         label="Someone waits on me"
-        rows={rows}
+        entries={rows}
         plugins={TEST_PLUGINS}
-        currentRef="thing-0"
+        currentKey="thing-0"
         selection={new Set()}
         actions={actions}
         onViewportChange={() => {}}
@@ -176,21 +201,21 @@ describe("InboxList", () => {
 
   it("gives the hand-off menu its anchor: the row's hand-off button, else the row", () => {
     const handle = createRef<InboxListHandle>();
-    const rows = [
+    const rows: InboxListEntry[] = [
       buildInboxRowView("thing-0", {
         handOff: { kind: "one", name: "Review PR", faceSeed: "review" },
       }),
       buildInboxRowView("thing-1"),
-    ];
+    ].map((view) => ({ kind: "thing", key: view.ref, view }));
     render(
       <InboxList
         listId="waits"
         label="Someone waits on me"
-        rows={rows}
+        entries={rows}
         plugins={TEST_PLUGINS}
-        currentRef="thing-0"
+        currentKey="thing-0"
         selection={new Set()}
-        actions={buildInboxRowActions()}
+        actions={buildListActions()}
         onViewportChange={() => {}}
         handle={handle}
       />,

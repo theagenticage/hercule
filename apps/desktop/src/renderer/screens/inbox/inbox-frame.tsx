@@ -271,7 +271,7 @@ export function InboxFrame({
       style={style}
     >
       <div className="ib-bar">
-        <h1 className="ib-title">Inbox</h1>
+        <h1 className="visually-hidden">Inbox</h1>
         <div className="ib-pill">
           <ViewPill
             label="Inbox views"

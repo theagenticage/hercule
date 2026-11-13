@@ -52,6 +52,7 @@ import {
 
 export type { FirstPage, FoldChange, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
 export type { InboxMoveTarget };
+export type { GroupKey, InboxEntry, InboxGroupView } from "./inbox-groups";
 
 /**
  * How the visit reads. `Query` is opaque to the visit (the scope and search

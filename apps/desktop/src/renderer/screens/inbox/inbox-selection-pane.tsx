@@ -4,7 +4,12 @@ import type { InboxRowView } from "@hercule/client-core/inbox";
 import { CheckIcon } from "../../icons/check";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
-import { InboxPaneDismiss } from "./inbox-pane-footer";
+import {
+  InboxPaneDismissButton,
+  InboxPaneFootEnd,
+  InboxPaneLinkButton,
+  InboxPaneTakeOnButton,
+} from "./inbox-pane-footer";
 import "./inbox-pane-head.css";
 import "./inbox-pane-thing.css";
 import "./inbox-selection-pane.css";
@@ -34,22 +39,27 @@ export function InboxSelectionHead({
 
 /**
  * Renders the pane of a selection of things: "3 things selected", the hint
- * for the selection keys, one row for each `member` and a footer that holds
- * Dismiss only, named "Dismiss all 3".
+ * for the selection keys, one row for each `member` and a footer with Take on
+ * (one Task for all of them), Link (the things link to each other; one thing
+ * opens "Link to...") and Dismiss, named "Dismiss all 3".
  *
  * A member row is a button that calls `onWalk` with the member's reference,
- * so the pane walks to that thing. Taking on and handing off a selection are
- * not offered here: their keys say why in the undo line.
+ * so the pane walks to that thing. Handing off a selection is not offered
+ * here: its key says why in the undo line.
  */
 export function InboxSelectionPane({
   members,
   plugins,
   onWalk,
+  onTakeOn,
+  onLink,
   onDismiss,
 }: {
   readonly members: ReadonlyArray<InboxRowView>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onWalk: (ref: string) => void;
+  readonly onTakeOn: () => void;
+  readonly onLink: () => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
   const count = members.length;
@@ -96,7 +106,14 @@ export function InboxSelectionPane({
       </div>
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
-          <InboxPaneDismiss words={`Dismiss all ${String(count)}`} onDismiss={onDismiss} />
+          <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
+          <InboxPaneFootEnd>
+            <InboxPaneLinkButton
+              words={count === 1 ? "Link to another thing" : `Link all ${String(count)}`}
+              onLink={onLink}
+            />
+            <InboxPaneDismissButton words={`Dismiss all ${String(count)}`} onDismiss={onDismiss} />
+          </InboxPaneFootEnd>
         </div>
       </footer>
     </>

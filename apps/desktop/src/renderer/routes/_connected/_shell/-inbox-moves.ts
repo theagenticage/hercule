@@ -20,29 +20,49 @@
  *   called.
  * - A refused move says why on the undo line, and nothing is sent: the choice
  *   of what may be moved is `planInboxMove`.
+ * - A move acts on what `visit.targets` names: one thing, a whole group of
+ *   linked things, or the selection. A group is dismissed in one call with
+ *   one Undo, and taken on (like a selection of several things) as one Task.
+ *   Link and Unlink are not moves of the list: the rows stay where they are
+ *   and the visit is told to read again, which is what draws the new group.
  */
 import { useLayoutEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
   DISMISSAL_UNDONE,
-  TAKE_ON_UNDONE,
+  LINK_UNDONE,
+  NO_OFFERS,
   NO_SOURCE_ADDRESS,
+  TAKE_ON_UNDONE,
+  UNLINK_UNDONE,
   buildHandedThing,
+  buildLinkPairs,
+  buildTakeOnTogether,
   decideHandMove,
   describeHandOffUndo,
   describeInboxDismissal,
   describeInboxDismissalFailure,
+  describeInboxGroupDismissal,
   describeInboxHandOff,
   describeInboxHandOffFailure,
+  describeInboxLink,
   describeInboxTakeOn,
   describeInboxTakeOnFailure,
+  describeInboxTakeOnTogether,
+  describeInboxTakeOnTogetherUndone,
+  describeInboxUnlink,
   isHandOffTakenBack,
+  REFUSED_OFFLINE,
   planInboxMove,
+  type CardOffers,
   type InboxLineWords,
+  type InboxMoveKind,
+  type InboxMovePlan,
+  type InboxMoveTarget,
   type MoveReceipt,
 } from "@hercule/client-core/inbox";
-import type { WorkflowOffer } from "@hercule/contract";
+import type { InboxThing, WorkflowOffer } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import {
   buildCachedCardMover,
@@ -78,45 +98,151 @@ const useMoveRequest = <Variables, Result>(
     },
   });
 
+/** The two ends of a link, as `link` and `unlink` take them. */
+interface LinkPair {
+  readonly fromRef: string;
+  readonly toRef: string;
+}
+
+/** What linking some pairs did: the pairs whose link this call wrote, and the failure that stopped it, if any. */
+interface LinkOutcome {
+  readonly created: readonly LinkPair[];
+  readonly failure?: unknown;
+}
+
+/**
+ * Links `pairs` one after the other and returns the pairs this call wrote
+ * (the controller answers `created: false` for a pair the user had already
+ * linked). It stops at the first failure and returns it with what was written
+ * until then, so the caller can still offer to undo that.
+ */
+const linkEveryPair = async (
+  client: HerculeClient,
+  pairs: readonly LinkPair[],
+): Promise<LinkOutcome> => {
+  const created: LinkPair[] = [];
+  for (const pair of pairs) {
+    try {
+      const result = await client.externalEntity.link({ payload: pair });
+      if (result.created) created.push(pair);
+    } catch (failure) {
+      return { created, failure };
+    }
+  }
+  return { created };
+};
+
+/** Returns the things a target stands for that the list holds: the thing, the group's held members, the selection. */
+const readThings = (target: InboxMoveTarget<InboxListRow>): readonly InboxListRow[] =>
+  target.kind === "thing" ? [target.row] : target.rows;
+
+/** Returns the one thing a target is: a thing, or a selection of just one; `undefined` otherwise. */
+const readOnlyThing = (target: InboxMoveTarget<InboxListRow>): InboxListRow | undefined =>
+  target.kind === "thing"
+    ? target.row
+    : target.kind === "selection" && target.rows.length === 1
+      ? target.rows[0]
+      : undefined;
+
+/** Returns the workflows the target's first thing can be handed to; a group has none, as it is never handed. */
+const readOffers = (target: InboxMoveTarget<InboxListRow>): CardOffers =>
+  readThings(target)[0]?.offers ?? NO_OFFERS;
+
+/**
+ * Returns the words for the line after `target` was dismissed. A group counts
+ * the members of it that do not answer the list as being outside it.
+ */
+const describeDismissal = (
+  target: InboxMoveTarget<InboxListRow>,
+  entries: InboxListSnapshot["entries"],
+): InboxLineWords => {
+  if (target.kind !== "group") return describeInboxDismissal(readThings(target));
+  const head = entries.find(
+    (entry) => entry.kind === "head" && entry.group.labelRef === target.labelRef,
+  );
+  const matching = head?.kind === "head" ? head.group.matchingCount : target.members.length;
+  return describeInboxGroupDismissal(
+    target.label,
+    target.size,
+    Math.max(0, target.members.length - matching),
+  );
+};
+
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
 
-/** What `useInboxMoves` returns. */
+/** One end of a link, named the way a line about the link names it. */
+export type LinkedThing = Pick<InboxThing, "ref" | "identifier" | "title">;
+
+/**
+ * What "Link to..." opens with, when the user is linking one thing or one
+ * group and still has to pick the other end.
+ */
+export interface InboxLinkPick {
+  /** The thing it links from: the thing, or the member a group is named after. */
+  readonly from: LinkedThing;
+  /** How the popover names what is linked from: the thing's identifier, else its title; a group's label. */
+  readonly fromLabel: string;
+  /** The refs of a group's members, so the popover does not offer them. Empty for a thing. */
+  readonly memberRefs: readonly string[];
+  /** The key of the list line the popover opens under. */
+  readonly anchorKey: string;
+}
+
+/**
+ * What `useInboxMoves` returns. A move that takes `hoveredKey` acts on the
+ * list line whose own button was pressed (a thing's ref or a group's key), or
+ * on the selection when that line is in it. Without it the move acts on the
+ * selection, else the current line.
+ */
 export interface InboxMoves {
   /**
-   * Dismisses the things the move is for: the selection, else the current
-   * row, or with `hoveredRef` the row whose own button was pressed (the
-   * selection when that row is in it). They leave the list at once, in one
-   * call, with one Undo. A refusal says why on the undo line.
+   * Dismisses what the move is for. A thing, every member of a group or the
+   * selection leave the list at once, in one call, with one Undo. A refusal
+   * says why on the undo line.
    */
-  readonly dismiss: (hoveredRef?: string) => void;
+  readonly dismiss: (hoveredKey?: string) => void;
   /**
-   * Takes the one thing the move is for on as a Task (see `dismiss` for which
-   * thing). The current row moves on at once and the row stays until the list
-   * is read again.
+   * Takes what the move is for on as a Task. For one thing the current row
+   * moves on at once and the row stays until the list is read again. A group
+   * or a selection of several things become one Task.
    */
-  readonly takeOn: (hoveredRef?: string) => void;
+  readonly takeOn: (hoveredKey?: string) => void;
   /**
    * Starts a hand-off of the one thing the move is for. With one workflow
    * that fits, hands it at once and returns `null`. With several, returns the
    * thing, for the screen to open the menu of workflows over. A refusal says
    * why on the undo line and returns `null`.
    */
-  readonly startHandOff: (hoveredRef?: string) => InboxListRow | null;
+  readonly startHandOff: (hoveredKey?: string) => InboxListRow | null;
   /**
-   * Hands the one thing the move is for (see `dismiss`: the selection, else
-   * the current row, or with `hoveredRef` that row) to `offer`, as
-   * `connectionId` (or the account the controller picks), after the same
-   * check the H key makes: offline, a selection of several things and a thing
-   * no workflow takes are refused with their reason on the undo line. The
-   * current row moves on at once and the mark flies to Work.
+   * Hands the one thing the move is for to `offer`, as `connectionId` (or the
+   * account the controller picks), after the same check the H key makes:
+   * offline, a group, a selection of several things and a thing no workflow
+   * takes are refused with their reason on the undo line. The current row
+   * moves on at once and the mark flies to Work.
    */
   readonly handOff: (
-    hoveredRef: string | undefined,
+    hoveredKey: string | undefined,
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ) => void;
   /** Goes to the Task of the one thing the move is for, or says it has none. */
-  readonly goToTask: (hoveredRef?: string) => void;
+  readonly goToTask: (hoveredKey?: string) => void;
+  /**
+   * Starts a link of what the move is for. A selection of two or more things
+   * is linked at once (a star from the first) and `null` comes back. One
+   * thing, one selected thing or a group returns what "Link to..." opens with,
+   * for the screen to let the user pick the other end. A refusal says why on
+   * the undo line and returns `null`.
+   */
+  readonly startLink: (hoveredKey?: string) => InboxLinkPick | null;
+  /** Links `from` to `to`, the thing the user picked in "Link to...". */
+  readonly linkTo: (from: LinkedThing, to: LinkedThing) => void;
+  /**
+   * Removes the user's own link between `first` and `second`, with an Undo
+   * that links them again. The line says so when a source still links them.
+   */
+  readonly unlink: (first: LinkedThing, second: LinkedThing) => void;
   /** Opens the current thing at its source, or says it has no address. */
   readonly openAtSource: () => void;
   /** Says `text` on the undo line, with no Undo. */
@@ -200,36 +326,56 @@ export const useInboxMoves = ({
         payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
       }),
   );
+  const takeOnTogetherRequest = useMoveRequest(
+    scope,
+    (input: { readonly ids: string[]; readonly title: string }) =>
+      client.externalEntity.takeOnTogether({ payload: input }),
+  );
+  const linkRequest = useMoveRequest(scope, (pairs: readonly LinkPair[]) =>
+    linkEveryPair(client, pairs),
+  );
+  const unlinkRequest = useMoveRequest(scope, (pair: LinkPair) =>
+    client.externalEntity.unlink({ payload: pair }),
+  );
   // The reversals wait in the same line as the moves, so none overtakes another.
   const reverseMove = useMoveRequest(scope, (reverse: () => Promise<UndoAnswer | undefined>) =>
     reverse(),
   );
 
-  /** Returns the things a move is for, in list order: see `InboxVisit.targets`. */
-  const readTargets = (hoveredRef: string | undefined): InboxListRow[] => {
-    const wanted = new Set(visit.targets(hoveredRef));
-    return visit.getSnapshot().rows.filter((row) => wanted.has(row.ref));
-  };
-
-  /** Returns the things `move` may be made on, or says why not and returns `null`. */
-  const readAllowedTargets = (
-    move: Parameters<typeof planInboxMove>[0]["move"],
-    hoveredRef: string | undefined,
-  ): InboxListRow[] | null => {
-    const things = readTargets(hoveredRef);
-    const first = things[0];
-    if (first === undefined) return null;
+  /**
+   * Returns what `move` is for and what may be done with it, or says why not
+   * on the undo line and returns `null`. See `InboxVisit.targets` for what a
+   * move is for.
+   */
+  const planTarget = (
+    move: InboxMoveKind,
+    hoveredKey: string | undefined,
+  ): {
+    readonly target: InboxMoveTarget<InboxListRow>;
+    readonly plan: Exclude<InboxMovePlan, { kind: "refuse" }>;
+  } | null => {
+    const target = visit.targets(hoveredKey);
+    if (target === null) return null;
     const plan = planInboxMove({
       move,
-      things,
+      target,
       isOffline: latest.current.isOffline,
-      offers: first.offers,
+      offers: readOffers(target),
     });
     if (plan.kind === "refuse") {
       say(plan.reason);
       return null;
     }
-    return things;
+    return { target, plan };
+  };
+
+  /** Returns the one thing `move` is for, or `null` after saying why not. */
+  const readAllowedThing = (
+    move: InboxMoveKind,
+    hoveredKey: string | undefined,
+  ): InboxListRow | null => {
+    const planned = planTarget(move, hoveredKey);
+    return planned === null ? null : (readOnlyThing(planned.target) ?? null);
   };
 
   /** Tells the screen what is current once a move or an undo has changed the list. */
@@ -237,12 +383,21 @@ export const useInboxMoves = ({
     latest.current.onMoved(visit.getSnapshot());
   };
 
-  const dismiss = (hoveredRef?: string): void => {
-    const things = readAllowedTargets("dismiss", hoveredRef);
-    if (things === null) return;
-    const refs = things.map((thing) => thing.ref);
-    const ids = things.map((thing) => thing.id);
-    const words = describeInboxDismissal(things);
+  const dismiss = (hoveredKey?: string): void => {
+    const planned = planTarget("dismiss", hoveredKey);
+    if (planned === null) return;
+    const { target } = planned;
+    const things = readThings(target);
+    const ids =
+      target.kind === "group"
+        ? target.members.map((member) => member.id)
+        : things.map((thing) => thing.id);
+    const refs =
+      target.kind === "group"
+        ? target.members.map((member) => member.ref)
+        : things.map((thing) => thing.ref);
+    const words = describeDismissal(target, visit.getSnapshot().entries);
+    const failed = target.kind === "group" ? [{ title: target.label }] : things;
     const receipt = visit.move("dismissed", refs);
     tellMoved();
     const request = dismissRequest.mutateAsync(ids);
@@ -272,13 +427,81 @@ export const useInboxMoves = ({
       if (!isCurrent()) return;
       visit.failMove(receipt);
       tellMoved();
-      say(describeInboxDismissalFailure(things, readReason(error)));
+      say(describeInboxDismissalFailure(failed, readReason(error)));
     });
   };
 
-  const takeOn = (hoveredRef?: string): void => {
-    const things = readAllowedTargets("takeOn", hoveredRef);
-    const thing = things?.[0];
+  /**
+   * Takes the things of a group or of a selection of several on as one Task.
+   * The undo takes back what the call wrote, and is offered only when the
+   * call wrote something: a Task, a link to it or a taken mark.
+   */
+  const takeOnTogether = (
+    target: InboxMoveTarget<InboxListRow>,
+    together: { readonly ids: string[]; readonly title: string },
+  ): void => {
+    const refs =
+      target.kind === "group"
+        ? target.members.map((member) => member.ref)
+        : readThings(target).map((thing) => thing.ref);
+    const receipt = visit.move("taken", refs);
+    tellMoved();
+    const request = takeOnTogetherRequest.mutateAsync(together);
+    const wasChanged = request.then(
+      (result) => {
+        visit.confirmMove(receipt);
+        return result.created || result.added.length > 0 || result.taken.length > 0;
+      },
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: joinGestureWords(describeInboxTakeOnTogether(together.title, true)),
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasChanged)) throw new Error(NOT_SAVED);
+          const result = await request;
+          requireSignedIn(scope);
+          const outcome = await client.externalEntity.undoTakeOnTogether({ payload: result });
+          // The Task was touched since, so it stays and the line says why.
+          if (!outcome.undone) {
+            throw new Error(outcome.reason ?? "The Task has changed since you made it.");
+          }
+          if (!isCurrent()) return undefined;
+          visit.undo(receipt);
+          tellMoved();
+          return { text: describeInboxTakeOnTogetherUndone(result.created) };
+        }),
+    };
+    undoStack.reserve(gesture, wasChanged);
+    request.then(
+      async (result) => {
+        if (!isCurrent()) return;
+        const words = describeInboxTakeOnTogether(together.title, result.created);
+        say(
+          words.text,
+          (await wasChanged) ? gesture : undefined,
+          { label: "Go to the Task", act: () => latest.current.openTask(result.taskId) },
+          words.title ?? undefined,
+        );
+      },
+      (error: unknown) => {
+        if (!isCurrent()) return;
+        visit.failMove(receipt);
+        tellMoved();
+        say(describeInboxTakeOnFailure({ title: together.title }, readReason(error)));
+      },
+    );
+  };
+
+  const takeOn = (hoveredKey?: string): void => {
+    const planned = planTarget("takeOn", hoveredKey);
+    if (planned === null) return;
+    const together = buildTakeOnTogether(planned.target);
+    if (together !== null) {
+      takeOnTogether(planned.target, together);
+      return;
+    }
+    const thing = readOnlyThing(planned.target);
     if (thing === undefined) return;
     const receipt = visit.move("taken", [thing.ref]);
     tellMoved();
@@ -410,18 +633,17 @@ export const useInboxMoves = ({
   };
 
   const handOff = (
-    hoveredRef: string | undefined,
+    hoveredKey: string | undefined,
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ): void => {
-    const thing = readAllowedTargets("handOff", hoveredRef)?.[0];
-    if (thing !== undefined) sendHandOff(thing, offer, connectionId);
+    const thing = readAllowedThing("handOff", hoveredKey);
+    if (thing !== null) sendHandOff(thing, offer, connectionId);
   };
 
-  const startHandOff = (hoveredRef?: string): InboxListRow | null => {
-    const things = readAllowedTargets("handOff", hoveredRef);
-    const thing = things?.[0];
-    if (thing === undefined) return null;
+  const startHandOff = (hoveredKey?: string): InboxListRow | null => {
+    const thing = readAllowedThing("handOff", hoveredKey);
+    if (thing === null) return null;
     const move = decideHandMove(thing.offers);
     if (move.kind === "one") {
       sendHandOff(thing, move.offer, undefined);
@@ -430,9 +652,126 @@ export const useInboxMoves = ({
     return move.kind === "several" ? thing : null;
   };
 
-  const goToTask = (hoveredRef?: string): void => {
-    const taskId = readAllowedTargets("goToTask", hoveredRef)?.[0]?.taskId;
+  const goToTask = (hoveredKey?: string): void => {
+    const taskId = readAllowedThing("goToTask", hoveredKey)?.taskId;
     if (taskId !== undefined) latest.current.openTask(taskId);
+  };
+
+  /**
+   * Links `pairs` in the line of the moves and says what happened, with an Undo
+   * that unlinks only the pairs this call wrote. `named` are the things the
+   * line names. Afterwards the visit reads again, which is what draws the group.
+   */
+  const linkPairs = (pairs: readonly LinkPair[], named: readonly LinkedThing[]): void => {
+    const request = linkRequest
+      .mutateAsync(pairs)
+      .catch((error: unknown): LinkOutcome => ({ created: [], failure: error }));
+    const wasLinked = request.then(({ created }) => created.length > 0);
+    const gesture: Gesture<CardMover> = {
+      words: joinGestureWords(describeInboxLink(named, true)),
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasLinked)) throw new Error(NOT_SAVED);
+          const { created } = await request;
+          requireSignedIn(scope);
+          for (const pair of created) await client.externalEntity.unlink({ payload: pair });
+          visit.pushArrived();
+          return { text: LINK_UNDONE };
+        }),
+    };
+    undoStack.reserve(gesture, wasLinked);
+    // The request never rejects: its failure is folded into the outcome above.
+    void request.then(({ created, failure }) => {
+      if (!isCurrent()) return;
+      if (created.length > 0) visit.pushArrived();
+      if (failure !== undefined) {
+        say(
+          `The link did not save: ${readReason(failure)}. Try again.`,
+          created.length > 0 ? gesture : undefined,
+        );
+        return;
+      }
+      const words = describeInboxLink(named, created.length > 0);
+      say(
+        words.text,
+        created.length > 0 ? gesture : undefined,
+        undefined,
+        words.title ?? undefined,
+      );
+    });
+  };
+
+  const startLink = (hoveredKey?: string): InboxLinkPick | null => {
+    const planned = planTarget("link", hoveredKey);
+    if (planned === null) return null;
+    const { target, plan } = planned;
+    if (plan.kind === "go") {
+      linkPairs(buildLinkPairs(target), readThings(target));
+      return null;
+    }
+    const anchorKey = hoveredKey ?? visit.getSnapshot().current;
+    if (anchorKey === null) return null;
+    if (target.kind === "group") {
+      return {
+        from: { ref: target.labelRef, identifier: "", title: target.label },
+        fromLabel: target.label,
+        memberRefs: target.members.map((member) => member.ref),
+        anchorKey,
+      };
+    }
+    const thing = readOnlyThing(target);
+    if (thing === undefined) return null;
+    return {
+      from: thing,
+      fromLabel: thing.identifier !== "" ? thing.identifier : thing.title,
+      memberRefs: [],
+      anchorKey,
+    };
+  };
+
+  const linkTo = (from: LinkedThing, to: LinkedThing): void => {
+    if (latest.current.isOffline) {
+      say(REFUSED_OFFLINE);
+      return;
+    }
+    linkPairs([{ fromRef: from.ref, toRef: to.ref }], [from, to]);
+  };
+
+  const unlink = (first: LinkedThing, second: LinkedThing): void => {
+    if (latest.current.isOffline) {
+      say(REFUSED_OFFLINE);
+      return;
+    }
+    const pair = { fromRef: first.ref, toRef: second.ref };
+    const request = unlinkRequest.mutateAsync(pair);
+    const wasRemoved = request.then(
+      ({ removed }) => removed,
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: "Unlinked",
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasRemoved)) throw new Error(NOT_SAVED);
+          requireSignedIn(scope);
+          await client.externalEntity.link({ payload: pair });
+          visit.pushArrived();
+          return { text: UNLINK_UNDONE };
+        }),
+    };
+    undoStack.reserve(gesture, wasRemoved);
+    request.then(
+      (result) => {
+        if (!isCurrent()) return;
+        visit.pushArrived();
+        const words = describeInboxUnlink(first, second, result);
+        say(words.text, result.removed ? gesture : undefined, undefined, words.title ?? undefined);
+      },
+      (error: unknown) => {
+        if (!isCurrent()) return;
+        say(`The link was not removed: ${readReason(error)}. Try again.`);
+      },
+    );
   };
 
   const openAtSource = (): void => {
@@ -452,6 +791,9 @@ export const useInboxMoves = ({
     startHandOff,
     handOff,
     goToTask,
+    startLink,
+    linkTo,
+    unlink,
     openAtSource,
     say: (text) => {
       say(text);

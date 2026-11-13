@@ -1,5 +1,6 @@
 import type { PluginIdentity } from "@hercule/client-core";
 import {
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -12,7 +13,9 @@ import {
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { useVirtualLines } from "../use-virtual-lines";
-import type { InboxRowView } from "@hercule/client-core/inbox";
+import { InboxGroupMore } from "./inbox-group-more";
+import { InboxGroupRow } from "./inbox-group-row";
+import type { InboxListEntry } from "./inbox-list-entry";
 import { InboxRow, type InboxRowActions } from "./inbox-row";
 import {
   ASIDE_PX,
@@ -33,7 +36,22 @@ const FOOT_FADE_PX = 28;
 /** Reads a row's height from the page's CSS: 52px at the default Text size, and a pixel more per line for each step up. */
 const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-row" }).row;
 
-/** The names of the callbacks of `InboxRowActions`. */
+/** What a group's head and its "Show N more" line call back with. Each is given the group's key. */
+export interface InboxGroupActions {
+  /** The head was clicked: it becomes current. */
+  readonly onPickGroup: (key: string) => void;
+  /** The head's tick was pressed; `whole` (with Shift) selects every member and not only those that answer the query. */
+  readonly onToggleGroupSelect: (key: string, whole: boolean) => void;
+  /** The head's chevron was pressed: the group opens or closes. */
+  readonly onToggleGroupOpen: (key: string) => void;
+  /** "Show N more" was pressed. */
+  readonly onShowMore: (groupKey: string) => void;
+}
+
+/** Everything the list's lines call back with. */
+export type InboxListActions = InboxRowActions & InboxGroupActions;
+
+/** The names of the callbacks of `InboxListActions`. */
 const ROW_ACTION_NAMES = [
   "onPick",
   "onToggleSelect",
@@ -41,14 +59,18 @@ const ROW_ACTION_NAMES = [
   "onHandOff",
   "onGoToTask",
   "onDismiss",
-] as const satisfies ReadonlyArray<keyof InboxRowActions>;
+  "onPickGroup",
+  "onToggleGroupSelect",
+  "onToggleGroupOpen",
+  "onShowMore",
+] as const satisfies ReadonlyArray<keyof InboxListActions>;
 
 /**
  * Returns a set of row actions that never changes identity and calls the
  * latest `actions` given. The owner builds a new set on every render, and a
  * row (which is memoized) would draw again for each of them.
  */
-function useStableActions(actions: InboxRowActions): InboxRowActions {
+function useStableActions(actions: InboxListActions): InboxListActions {
   const latest = useRef(actions);
   useLayoutEffect(() => {
     latest.current = actions;
@@ -60,7 +82,7 @@ function useStableActions(actions: InboxRowActions): InboxRowActions {
           name,
           (...args: unknown[]) => (latest.current[name] as (...args: unknown[]) => void)(...args),
         ]),
-      ) as unknown as InboxRowActions,
+      ) as unknown as InboxListActions,
   );
   return stable;
 }
@@ -73,7 +95,78 @@ export interface InboxListHandle {
    * `null` when the row is not drawn (the list is virtual).
    */
   readonly findHandAnchor: (ref: string) => HTMLElement | null;
+  /**
+   * Returns the line with the key `key` (a thing's ref or a group's key), which
+   * "Link to..." opens under. Returns `null` when the line is not drawn.
+   */
+  readonly findRowAnchor: (key: string) => HTMLElement | null;
 }
+
+/**
+ * Renders one line of the list. With `actions` null it is an inert copy, such as
+ * one that fades out of the list. It is memoized: a step of the current entry
+ * draws again only the lines whose own props changed, which holds while
+ * `entry` and `actions` keep their identity.
+ */
+const InboxLineBody = memo(function InboxLineBody({
+  entry,
+  plugins,
+  position,
+  size,
+  isCurrent,
+  isSelected,
+  actions,
+}: {
+  readonly entry: InboxListEntry;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
+  readonly position: number;
+  readonly size: number;
+  readonly isCurrent: boolean;
+  readonly isSelected: boolean;
+  readonly actions: InboxListActions | null;
+}): JSX.Element {
+  switch (entry.kind) {
+    case "thing":
+    case "member":
+      return (
+        <InboxRow
+          view={entry.view}
+          plugins={plugins}
+          position={position}
+          size={size}
+          current={isCurrent}
+          selected={isSelected}
+          actions={actions}
+          {...(entry.kind === "member" ? { member: entry.member } : {})}
+        />
+      );
+    case "head":
+      return (
+        <InboxGroupRow
+          view={entry.view}
+          plugins={plugins}
+          isCurrent={isCurrent}
+          isOpen={entry.isOpen}
+          tick={entry.tick}
+          onPick={actions?.onPickGroup ?? NO_CALL}
+          onToggleSelect={actions?.onToggleGroupSelect ?? NO_CALL}
+          onToggleOpen={actions?.onToggleGroupOpen ?? NO_CALL}
+        />
+      );
+    case "more":
+      return (
+        <InboxGroupMore
+          groupKey={entry.groupKey}
+          hiddenCount={entry.hiddenCount}
+          isCurrent={isCurrent}
+          onShowMore={actions?.onShowMore ?? NO_CALL}
+        />
+      );
+  }
+});
+
+/** The callback of an inert copy, which no one can press. */
+const NO_CALL = (): void => {};
 
 /** Renders the copy of a row that left, which fades out under the list and then asks to be removed. */
 function LeavingCopy({
@@ -86,7 +179,7 @@ function LeavingCopy({
   readonly onGone: (id: number) => void;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
-  const { id, how } = leaving;
+  const { id, how, entry } = leaving;
   useLayoutEffect(() => {
     const element = ref.current!;
     if (isMotionReduced()) {
@@ -110,13 +203,13 @@ function LeavingCopy({
   }, [id, how, onGone]);
   return (
     <div ref={ref} className="ib-leaving-row" style={{ top: leaving.top }}>
-      <InboxRow
-        view={leaving.view}
+      <InboxLineBody
+        entry={entry}
         plugins={plugins}
         position={1}
         size={1}
-        current={false}
-        selected={false}
+        isCurrent={false}
+        isSelected={false}
         actions={null}
       />
     </div>
@@ -124,12 +217,14 @@ function LeavingCopy({
 }
 
 /**
- * Renders the Inbox list: the rows in the order given, as a tree of items at
- * level 1 with real selection.
+ * Renders the Inbox list: the entries in the order given, as a tree of items
+ * with real selection. An entry is a thing, a group's head, one of its
+ * members, or its "Show N more" line (`InboxListEntry`); each is one line of
+ * the same height.
  *
  * - The list is virtual (`useVirtualLines`): only the rows in view and a few
  *   past each edge are drawn, because every row is the same height.
- * - The current row (`currentRef`) is told by a puck under the rows: a fill
+ * - The current entry (`currentKey`) is told by a puck under the rows: a fill
  *   with a 2px edge on its left, and the focus ring when the keyboard holds
  *   the list. The puck jumps in the same frame as the current row, and the
  *   rows move into it. Only the current row is in the tab order.
@@ -144,7 +239,7 @@ function LeavingCopy({
  *   the list, and a new one shows at once.
  *
  * `onViewportChange` is called with the index of the first and of the last
- * row drawn in or near the view, each time either changes or the rows held
+ * entry drawn in or near the view, each time either changes or the rows held
  * grow, so the caller can read the rows around the view and the next page.
  * A change of `focusRequest` moves the keyboard focus to the current row.
  * `handle` receives the list's `InboxListHandle`.
@@ -152,9 +247,9 @@ function LeavingCopy({
 export function InboxList({
   listId,
   label,
-  rows,
+  entries,
   plugins,
-  currentRef,
+  currentKey,
   selection,
   actions,
   leaveHow,
@@ -168,11 +263,13 @@ export function InboxList({
   readonly listId: string;
   /** The list's name for assistive technology, such as "Someone waits on me". */
   readonly label: string;
-  readonly rows: ReadonlyArray<InboxRowView>;
+  readonly entries: ReadonlyArray<InboxListEntry>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly currentRef: string | null;
+  /** The key of the current entry. */
+  readonly currentKey: string | null;
+  /** The refs of the selected things. A head is ticked by its own `tick`. */
   readonly selection: ReadonlySet<string>;
-  readonly actions: InboxRowActions;
+  readonly actions: InboxListActions;
   readonly leaveHow?: InboxLeaveHow;
   readonly returning?: ReadonlyArray<string>;
   readonly arriving?: ReadonlyArray<string>;
@@ -187,15 +284,15 @@ export function InboxList({
   const focusRequested = focusRequest ?? 0;
   const rowHeight = useMeasuredAtTextSize(readRowHeight);
   const estimateSize = useCallback(() => rowHeight, [rowHeight]);
-  const items = rows.map((view, index) => ({ key: view.ref, view, index }));
+  const items = entries.map((entry, index) => ({ key: entry.key, entry, index }));
   const { lines, totalSize, firstDrawnIndex, lastDrawnIndex, selectedIndex } = useVirtualLines({
     items,
     scrollRef,
     estimateSize,
-    selectedKey: currentRef,
+    selectedKey: currentKey,
   });
   const { leavingRows, removeLeavingRow } = useInboxListMotion({
-    rows,
+    rows: entries,
     listId,
     rowHeight,
     scrollRef,
@@ -209,16 +306,18 @@ export function InboxList({
       const row = scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`);
       return row?.querySelector<HTMLElement>("[data-hand-anchor]") ?? row ?? null;
     },
+    findRowAnchor: (key) =>
+      scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(key)}"]`) ?? null,
   }));
 
   // The least scroll that brings the current row clear of both edges, with the fade at the foot counted out of the view.
   // It runs when the current row or the sizes change, never because new copies of the rows arrived: the user may have scrolled away.
   const foot = FOOT_FADE_PX + reserve;
-  const rowsAtLastRender = useRef(rows);
+  const rowsAtLastRender = useRef(entries);
   const rowsChangedAtLastRender = useRef(false);
   useLayoutEffect(() => {
-    rowsChangedAtLastRender.current = rowsAtLastRender.current !== rows;
-    rowsAtLastRender.current = rows;
+    rowsChangedAtLastRender.current = rowsAtLastRender.current !== entries;
+    rowsAtLastRender.current = entries;
   });
   useLayoutEffect(() => {
     const scroll = scrollRef.current!;
@@ -238,24 +337,24 @@ export function InboxList({
     } else {
       scroll.scrollTop = target;
     }
-  }, [currentRef, selectedIndex, rowHeight, foot]);
+  }, [currentKey, selectedIndex, rowHeight, foot]);
 
   // Only a new request moves the focus, not a new current row.
   const handledFocusRequest = useRef(focusRequested);
   useEffect(() => {
     if (focusRequested === handledFocusRequest.current) return;
     handledFocusRequest.current = focusRequested;
-    if (currentRef === null) return;
-    scrollRef.current!.querySelector<HTMLElement>(`[data-ref="${CSS.escape(currentRef)}"]`)?.focus({
+    if (currentKey === null) return;
+    scrollRef.current!.querySelector<HTMLElement>(`[data-ref="${CSS.escape(currentKey)}"]`)?.focus({
       preventScroll: true,
     });
-  }, [focusRequested, currentRef]);
+  }, [focusRequested, currentKey]);
 
   useEffect(() => {
     if (firstDrawnIndex !== undefined && lastDrawnIndex !== undefined) {
       onViewportChange(firstDrawnIndex, lastDrawnIndex);
     }
-  }, [firstDrawnIndex, lastDrawnIndex, rows.length, onViewportChange]);
+  }, [firstDrawnIndex, lastDrawnIndex, entries.length, onViewportChange]);
 
   return (
     <div className="ib-list">
@@ -282,14 +381,14 @@ export function InboxList({
               line.kind === "gap" ? (
                 <div key={line.key} role="presentation" style={{ height: line.height }} />
               ) : (
-                <InboxRow
+                <InboxLineBody
                   key={line.item.key}
-                  view={line.item.view}
+                  entry={line.item.entry}
                   plugins={plugins}
                   position={line.item.index + 1}
-                  size={rows.length}
-                  current={line.item.key === currentRef}
-                  selected={selection.has(line.item.key)}
+                  size={entries.length}
+                  isCurrent={line.item.key === currentKey}
+                  isSelected={selection.has(line.item.key)}
                   actions={rowActions}
                 />
               ),

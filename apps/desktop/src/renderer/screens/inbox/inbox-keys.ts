@@ -18,13 +18,17 @@ import { INBOX_PANE_ID } from "./inbox-pane-frame";
 /** What a key press asks the Inbox for. */
 export type InboxKeyAction =
   | { readonly kind: "step"; readonly by: 1 | -1; readonly extend: boolean }
-  | { readonly kind: "toggleSelect" }
+  /** X on the current line; `whole` (⇧X) on a group selects every member, not only those that answer the list. */
+  | { readonly kind: "toggleSelect"; readonly whole: boolean }
   | { readonly kind: "selectAll" }
   | { readonly kind: "stepBack" }
   | { readonly kind: "dismiss" }
   | { readonly kind: "takeOn" }
   | { readonly kind: "handOff" }
   | { readonly kind: "goToTask" }
+  | { readonly kind: "link" }
+  /** → opens the current group; ← closes it, or from a member goes to its group. */
+  | { readonly kind: "fold"; readonly fold: "open" | "close" }
   | { readonly kind: "openAtSource" }
   | { readonly kind: "showArrivals" }
   | { readonly kind: "pickList"; readonly index: number }
@@ -76,7 +80,7 @@ export interface InboxKeyPress {
 }
 
 /** The moves that never repeat: a held key must not dismiss a row after row, nor Return answer a thing after thing. */
-const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x", "enter"]);
+const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x", "l", "enter"]);
 
 /** The saved queries that have a digit: 1 to 7. The eighth place in the drawing is Triage, which is not built. */
 const LIST_DIGITS = /^[1-7]$/;
@@ -110,10 +114,12 @@ export const decideInboxKeyAction = (
   if ((key === "Enter" || key === " ") && press.isOnControl) return null;
   if (lower === "j" || key === "ArrowDown") return { kind: "step", by: 1, extend: press.shiftKey };
   if (lower === "k" || key === "ArrowUp") return { kind: "step", by: -1, extend: press.shiftKey };
+  if (key === "ArrowRight") return { kind: "fold", fold: "open" };
+  if (key === "ArrowLeft") return { kind: "fold", fold: "close" };
   if (LIST_DIGITS.test(key)) return { kind: "pickList", index: Number(key) - 1 };
   switch (lower) {
     case "x":
-      return { kind: "toggleSelect" };
+      return { kind: "toggleSelect", whole: press.shiftKey };
     case "e":
       return { kind: "dismiss" };
     case "t":
@@ -122,6 +128,8 @@ export const decideInboxKeyAction = (
       return { kind: "handOff" };
     case "g":
       return { kind: "goToTask" };
+    case "l":
+      return { kind: "link" };
     case "o":
       return { kind: "openAtSource" };
     case "f":
@@ -149,17 +157,23 @@ export type InboxKeyRow = readonly [keys: string, words: string];
  * and Esc follow on every page. Select all is ⌘A on a Mac and Ctrl A elsewhere.
  */
 export const buildInboxKeyRows = (platform: DesktopPlatform): readonly InboxKeyRow[] => [
-  ["J K ↓ ↑", "Next and previous thing"],
+  ["J K ↓ ↑", "Next and previous line"],
   ["⇧J ⇧K", "Select a range while moving"],
-  ["X", "Select, or unselect"],
+  ["→ ←", "Open and close a group; ← on a thing in a group goes to the group"],
+  ["X", "Select, or unselect. On a group: the things that match the list"],
+  ["⇧X", "On a group: select all its things"],
   [platform === "mac" ? "⌘A" : "Ctrl A", "Select every thing that is loaded"],
-  ["Return", "Open the pane when it lies over the list, else answer the open ask"],
+  [
+    "Return",
+    "Open a group, or show more of it; open the pane when it lies over the list, else answer the open ask",
+  ],
   ["[ ]", "The ask before and after, in the pane"],
   ["Space ⇧Space", "Scroll the pane by a page"],
-  ["E", "Dismiss, all of the selection at once"],
-  ["T", "Take on: a Task on Work"],
+  ["E", "Dismiss, all of the selection or of the group at once"],
+  ["T", "Take on: a Task on Work. A group or a selection becomes one Task"],
   ["H", "Hand off to an agent"],
   ["G", "Go to its Task"],
+  ["L", "Link the selected things, or pick a thing to link to"],
   ["O", "Open at its source"],
   ["/", "Search"],
   ["F", "Narrow"],

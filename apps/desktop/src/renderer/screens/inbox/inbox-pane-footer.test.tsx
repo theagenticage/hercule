@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { InboxPaneFooter } from "./inbox-pane-footer";
 
 const renderFooter = (props: Partial<Parameters<typeof InboxPaneFooter>[0]> = {}) => {
-  const calls = { onTakeOn: vi.fn(), onHandOff: vi.fn(), onDismiss: vi.fn() };
+  const calls = { onTakeOn: vi.fn(), onHandOff: vi.fn(), onLink: vi.fn(), onDismiss: vi.fn() };
   render(
     <InboxPaneFooter
       isTakenOn={false}
@@ -19,15 +19,17 @@ const renderFooter = (props: Partial<Parameters<typeof InboxPaneFooter>[0]> = {}
 };
 
 describe("InboxPaneFooter", () => {
-  it("offers Take on, the hand-off and Dismiss, and no Thread or Link", async () => {
+  it("offers Take on, the hand-off, Link and Dismiss, and no Thread", async () => {
     const calls = renderFooter();
     await userEvent.click(screen.getByRole("button", { name: "Take on" }));
     await userEvent.click(screen.getByRole("button", { name: "Hand to Review PR" }));
+    await userEvent.click(screen.getByRole("button", { name: "Link to another thing" }));
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(calls.onTakeOn).toHaveBeenCalledOnce();
     expect(calls.onHandOff).toHaveBeenCalledOnce();
+    expect(calls.onLink).toHaveBeenCalledOnce();
     expect(calls.onDismiss).toHaveBeenCalledOnce();
-    expect(screen.getAllByRole("button")).toHaveLength(3);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 
   it("leaves Take on out once the user has taken the thing on", () => {

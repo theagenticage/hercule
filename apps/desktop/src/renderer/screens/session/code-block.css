@@ -54,15 +54,6 @@
 .code-block-header .icon-btn[data-result="failed"] {
   color: var(--fail-ink);
 }
-/* The words only a screen reader gets: the result of a copy. */
-.code-block-status {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 /* Wrapped, a line breaks at the edge, and `overflow-wrap: anywhere` also
    lowers the minimum width of a token with no break in it, such as a long
    URL, which `break-word` would not. Unwrapped, the `pre` scrolls sideways.

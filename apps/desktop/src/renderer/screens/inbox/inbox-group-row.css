@@ -1,0 +1,154 @@
+/* Groups in the Inbox list: the head row of a group, the members that hang under it, and the line
+   "Show N more in this group". From the drawing's `css/list.css`, "Groups". They build on the
+   rows of `inbox-list.css`, which this file comes after. */
+
+/* ---- The head ---- */
+.ib-mark--link {
+  color: var(--faint);
+}
+/* The chevron is the second line's glyph: it turns a quarter turn when the group is open. */
+.ib-group-fold {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: -2px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    transform var(--m-base) var(--m-ease),
+    background var(--m-quick);
+}
+.ib-group-fold:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ib-group-fold:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.ib-row--group.is-open .ib-group-fold {
+  transform: rotate(90deg);
+}
+/* The chevron's hit area is 28 wide and fills the row from the second line's top to its foot: 24 tall,
+   directly under the tick's. */
+.ib-group-fold::after {
+  content: "";
+  position: absolute;
+  top: calc(2px - var(--text-size-step) / 2);
+  right: -2px;
+  bottom: calc(-6px - var(--text-size-step) / 2);
+  left: -6px;
+}
+/* The tick's hit area is 24 tall too, from the row's top to the chevron's, so the two never overlap. */
+.ib-row--group .ib-row-tick {
+  /* Above the chevron, whose own 20px box reaches 2px into the tick's area. */
+  z-index: 1;
+}
+.ib-row--group .ib-row-tick::after {
+  top: calc(-4px - var(--text-size-step) / 2);
+  bottom: calc(-3px - var(--text-size-step) / 2);
+}
+/* A group that is selected, or partly, shows its tick in place of the link. */
+.ib-row--group.is-picked .ib-mark {
+  opacity: 0;
+}
+.ib-row--group.is-picked .ib-row-tick {
+  opacity: 1;
+}
+.ib-row--group.is-open {
+  border-bottom-right-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+.ib-row-where--group {
+  align-items: center;
+}
+.ib-row-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 2px;
+  color: oklch(var(--mark-l) 0 0);
+}
+
+/* ---- The hairline: the members hang from the chevron, indented to the title ---- */
+.ib-row--member,
+.ib-group-more {
+  padding-left: calc(var(--row-pad-x) + 28px);
+  border-radius: 4px;
+}
+.ib-row--member.is-last {
+  border-bottom-right-radius: var(--row-r);
+  border-bottom-left-radius: var(--row-r);
+}
+.ib-row--member::before,
+.ib-group-more::before,
+.ib-row--group.is-open::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--row-pad-x) + 8px);
+  width: 1px;
+  background: var(--line);
+}
+/* From the head, the hairline starts under the chevron, which sits on the second line. */
+.ib-row--group.is-open::after {
+  top: calc(50% + 20px);
+  bottom: 0;
+}
+.ib-row--member::before {
+  top: 0;
+  bottom: 0;
+}
+/* The last member ends the hairline with a small elbow into its own row. */
+.ib-row--member.is-last::before {
+  bottom: auto;
+  height: calc(50% - 6px);
+}
+.ib-row--member.is-last::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 6px);
+  left: calc(var(--row-pad-x) + 8px);
+  width: 10px;
+  height: 6px;
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+}
+/* A member that does not answer the query is drawn quieter, so the group stays whole and the query still reads. */
+.ib-row--member.is-outside-query .ib-row-title {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.ib-row--member.is-outside-query .ib-row-why,
+.ib-row--member.is-outside-query .ib-row-time {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+
+/* ---- "Show N more in this group": a line of its own, on the hairline, which ends in its middle ---- */
+.ib-group-more {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
+  height: 32px;
+  border-top-right-radius: var(--row-r);
+  border-bottom-right-radius: var(--row-r);
+  color: var(--muted);
+  font-size: var(--t-12);
+  cursor: pointer;
+}
+.ib-group-more::before {
+  top: 0;
+  bottom: 50%;
+}
+.ib-group-more:hover {
+  color: var(--ink);
+}
+.ib-group-more-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

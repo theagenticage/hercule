@@ -1,0 +1,27 @@
+/* The surface of every menu that opens from the Inbox (`useInboxPopover`): glass on the app's tokens, on `body`'s top
+   layer. Each menu sets its own `left`, `top` and size. */
+.inbox-popover {
+  inset: auto;
+  margin: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .inbox-popover:popover-open {
+    animation: inbox-popover-arrive var(--m-base) var(--m-ease) both;
+  }
+}
+@keyframes inbox-popover-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}

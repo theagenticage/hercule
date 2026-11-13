@@ -169,7 +169,7 @@ const readWait = (thing: InboxThing, now: Date) => {
  * - In a "newest" list the moment the thing last changed shows, faint, and
  *   only an overdue wait shows in its place.
  */
-const decideTime = (
+export const decideTime = (
   thing: InboxThing,
   context: InboxRowContext,
   holder: InboxRowHolder | undefined,
@@ -199,9 +199,9 @@ const decideTime = (
  * - Any other thing that asks nothing says what it is, quietly: its status,
  *   its face's context and fact, or its noun when the face has none of these.
  */
-const decideReason = (
+export const decideReason = (
   thing: InboxThing,
-  context: InboxRowContext,
+  context: Pick<InboxRowContext, "now">,
   holder: InboxRowHolder | undefined,
 ): InboxRowReason => {
   const [newest] = thing.asks;
