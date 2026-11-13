@@ -5,14 +5,13 @@ import { namePlugin, type HerculeClient } from "@hercule/client-core";
 import {
   NO_PANE_ASK_CHOICE,
   describeInboxRow,
-  findAccountLabel,
   reducePaneAskChoice,
   readThingPlace,
   type InboxRowView,
 } from "@hercule/client-core/inbox";
 import type { InboxOrder } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
-import { inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
 import {
   InboxSelectionHead,
@@ -36,7 +35,7 @@ export interface InboxPaneHandle extends InboxPaneAsksHandle {
 
 /**
  * Renders the line at the start of the pane's head: for one thing, its source,
- * its kind and its place (left out when it has none), and the account when the source has several; for a
+ * its kind and its place (left out when it has none); for a
  * selection, which sources the selected things come from.
  */
 export function InboxPaneHeadPart({
@@ -49,17 +48,12 @@ export function InboxPaneHeadPart({
   /** The selected things when the pane shows a selection, else `null`. */
   readonly selection: ReadonlyArray<InboxListRow> | null;
 }): JSX.Element {
-  const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const now = useInboxNow([thing]);
   if (selection !== null) {
     const sourceNames = [...new Set(selection.map((row) => namePlugin(row.source, plugins)))];
     return <InboxSelectionHead sourceNames={sourceNames} />;
   }
-  const account = findAccountLabel(
-    outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
-    thing.accounts,
-  );
   const place = readThingPlace(thing, now);
   return (
     <InboxPaneHead
@@ -70,7 +64,6 @@ export function InboxPaneHeadPart({
         thing.noun,
         ...(place === undefined ? [] : [place]),
       ]}
-      account={account}
     />
   );
 }

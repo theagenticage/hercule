@@ -19,7 +19,3 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ib-pane-source-account {
-  flex: none;
-  color: var(--faint);
-}

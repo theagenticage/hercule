@@ -32,6 +32,24 @@ describe("describePaneMeta", () => {
     expect(words(describePaneMeta(theirs, { now: NOW }))).toEqual(["Mei’s", "Updated just now"]);
   });
 
+  it("words the author of a thing by what they did, and an assignee as before", () => {
+    const base: typeof detail = {
+      ...detail,
+      concerns: ["review-requested"],
+      person: { name: "zhang-jerry123" },
+    };
+    const authored: typeof detail = {
+      ...base,
+      fields: [{ key: "author", label: "Author", type: "person", text: "zhang-jerry123" }],
+    };
+    const assigned: typeof detail = {
+      ...base,
+      fields: [{ key: "assignee", label: "Assignee", type: "person", text: "zhang-jerry123" }],
+    };
+    expect(words(describePaneMeta(authored, { now: NOW }))[0]).toBe("zhang-jerry123 opened it");
+    expect(words(describePaneMeta(assigned, { now: NOW }))[0]).toBe("zhang-jerry123’s");
+  });
+
   it("leaves out the priority bars, which only the open card draws", () => {
     const urgent: typeof detail = { ...detail, facts: [{ form: "bars", level: 2 }] };
     expect(describePaneMeta(urgent, { now: NOW }).some((item) => item.kind === "fact")).toBe(false);

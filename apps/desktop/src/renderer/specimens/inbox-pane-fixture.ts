@@ -7,6 +7,9 @@
  * The content of pull request #6244 is the content of the same pull request in
  * the Inbox drawing (docs/design/inbox-list, js/world.js): Omar's mention and
  * Mei's review request, the change, the failing check and the description.
+ * Omar's message also holds a bulleted list with inline code and a long item,
+ * which the drawing does not: it keeps markdown inside a message from being
+ * laid out as the message itself.
  */
 import type {
   EntityBlocks,
@@ -140,7 +143,7 @@ const MENTION_MESSAGES: Readonly<
   "#6244": {
     author: "Omar Haddad",
     hours: 2,
-    text: "@you the delivery cost now rounds before VAT on the payment step. Is that what Finance asked for? See `delivery-cost.ts` line 88.",
+    text: "@you the delivery cost now rounds before VAT on the payment step. Is that what Finance asked for? See `delivery-cost.ts` line 88.\n\nWhat I checked:\n\n- `roundDelivery()` now runs before `applyVat()`, so a 4.995 delivery cost becomes 5.00 before the 21% is added.\n- The cart summary still rounds after VAT, which is a long sentence on purpose, so that it wraps onto a second line in the pane.",
   },
   "#6230": {
     author: "Kwame Mensah",
