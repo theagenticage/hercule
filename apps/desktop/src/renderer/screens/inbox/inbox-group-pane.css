@@ -1,6 +1,6 @@
 /* The pane of a group, besides what it shares with the pane of one thing (the title, the members, the
    footer): the linked pairs, and the "+n" chip on a member's second line. */
-.ib-pane-member-why .ib-group-more {
+.ib-pane-member-why .ib-pane-member-more {
   display: inline-block;
   margin-left: 4px;
   padding: 0 5px;

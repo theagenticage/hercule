@@ -5,6 +5,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -13,6 +14,9 @@ import {
 import { findBody, isMotionReduced, trackBody } from "../../app/motion";
 import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { useVirtualLines } from "../use-virtual-lines";
+import { createInboxDrag } from "./inbox-drag";
+import { buildEntryTops, readEntryHeight } from "./inbox-entry-tops";
+import type { DroppedCopy } from "./inbox-flights";
 import { InboxGroupMore } from "./inbox-group-more";
 import { InboxGroupRow } from "./inbox-group-row";
 import type { InboxListEntry } from "./inbox-list-entry";
@@ -26,6 +30,7 @@ import {
   type LeavingRow,
 } from "./use-inbox-list-motion";
 import "./inbox-list.css";
+import "./inbox-drag.css";
 
 /** The references of no rows, which stays one array so a list with none to name changes nothing. */
 const NO_ROWS: ReadonlyArray<string> = [];
@@ -46,6 +51,12 @@ export interface InboxGroupActions {
   readonly onToggleGroupOpen: (key: string) => void;
   /** "Show N more" was pressed. */
   readonly onShowMore: (groupKey: string) => void;
+  /**
+   * A row was dropped on another by hand: links the thing `fromKey` with the
+   * thing or group `toKey`. Returns whether a link was written; `false` sends the
+   * row home.
+   */
+  readonly onLinkThings: (fromKey: string, toKey: string) => Promise<boolean>;
 }
 
 /** Everything the list's lines call back with. */
@@ -63,6 +74,7 @@ const ROW_ACTION_NAMES = [
   "onToggleGroupSelect",
   "onToggleGroupOpen",
   "onShowMore",
+  "onLinkThings",
 ] as const satisfies ReadonlyArray<keyof InboxListActions>;
 
 /**
@@ -283,7 +295,14 @@ export function InboxList({
   const reserve = footReserve ?? 0;
   const focusRequested = focusRequest ?? 0;
   const rowHeight = useMeasuredAtTextSize(readRowHeight);
-  const estimateSize = useCallback(() => rowHeight, [rowHeight]);
+  const estimateSize = useCallback(
+    (item: { readonly entry: InboxListEntry }) => readEntryHeight(item.entry, rowHeight),
+    [rowHeight],
+  );
+  const tops = useMemo(() => buildEntryTops(entries, rowHeight), [entries, rowHeight]);
+  const flightsRef = useRef<HTMLDivElement>(null);
+  const carryRef = useRef<HTMLDivElement>(null);
+  const droppedRef = useRef<DroppedCopy | null>(null);
   const items = entries.map((entry, index) => ({ key: entry.key, entry, index }));
   const { lines, totalSize, firstDrawnIndex, lastDrawnIndex, selectedIndex } = useVirtualLines({
     items,
@@ -299,7 +318,21 @@ export function InboxList({
     leaveHow: leaveHow ?? "taken",
     returning: returning ?? NO_ROWS,
     arriving: arriving ?? NO_ROWS,
+    flightsRef,
+    droppedRef,
   });
+
+  // Carrying a row onto another links them. The gesture listens only while a row is pressed or held.
+  useEffect(
+    () =>
+      createInboxDrag({
+        scroll: scrollRef.current!,
+        carryLayer: carryRef.current!,
+        dropped: droppedRef,
+        linkRows: rowActions.onLinkThings,
+      }).destroy,
+    [rowActions],
+  );
 
   useImperativeHandle(handle, () => ({
     findHandAnchor: (ref) => {
@@ -319,14 +352,17 @@ export function InboxList({
     rowsChangedAtLastRender.current = rowsAtLastRender.current !== entries;
     rowsAtLastRender.current = entries;
   });
+  const currentTop = selectedIndex < 0 ? -1 : tops[selectedIndex]!;
+  const currentBottom = selectedIndex < 0 ? -1 : tops[selectedIndex + 1]!;
   useLayoutEffect(() => {
     const scroll = scrollRef.current!;
-    if (selectedIndex < 0 || scroll.clientHeight === 0) return;
-    const top = selectedIndex * rowHeight;
+    if (currentTop < 0 || scroll.clientHeight === 0) return;
+    const top = currentTop;
+    const bottom = currentBottom;
     const clear = scroll.clientHeight - foot;
     let target: number | null = null;
     if (top < scroll.scrollTop) target = top;
-    else if (top + rowHeight > scroll.scrollTop + clear) target = top + rowHeight - clear;
+    else if (bottom > scroll.scrollTop + clear) target = bottom - clear;
     if (target === null) return;
     if (
       rowsChangedAtLastRender.current &&
@@ -337,7 +373,7 @@ export function InboxList({
     } else {
       scroll.scrollTop = target;
     }
-  }, [currentKey, selectedIndex, rowHeight, foot]);
+  }, [currentKey, currentTop, currentBottom, foot]);
 
   // Only a new request moves the focus, not a new current row.
   const handledFocusRequest = useRef(focusRequested);
@@ -367,6 +403,7 @@ export function InboxList({
             aria-multiselectable="true"
             style={{ minHeight: totalSize }}
           >
+            <div ref={flightsRef} className="ib-flights" aria-hidden="true" inert />
             <div className="ib-leaving" aria-hidden="true" inert>
               {leavingRows.map((leaving) => (
                 <LeavingCopy
@@ -396,13 +433,18 @@ export function InboxList({
             <div
               className="ib-puck"
               hidden={selectedIndex < 0}
-              style={{ transform: `translateY(${String(selectedIndex * rowHeight)}px)` }}
+              style={{
+                height:
+                  selectedIndex < 0 ? undefined : tops[selectedIndex + 1]! - tops[selectedIndex]!,
+                transform: `translateY(${String(selectedIndex < 0 ? 0 : tops[selectedIndex]!)}px)`,
+              }}
               aria-hidden="true"
             />
           </div>
         </div>
       </div>
       <div className="ib-fade" style={{ height: foot }} aria-hidden="true" />
+      <div ref={carryRef} className="ib-carry" aria-hidden="true" inert />
     </div>
   );
 }

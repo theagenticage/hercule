@@ -41,7 +41,7 @@ const renderPart = (things: ReadonlyArray<ReturnType<typeof buildInboxThing>>) =
 };
 
 describe("InboxLinkToPart", () => {
-  it("reads Everything, shows at most eight things, and leaves out the thing and its group", async () => {
+  it("reads Everything, shows at most six things, and leaves out the thing and its group", async () => {
     const things = [
       buildInboxThing("from", { ref: "acme:ticket:from" }),
       buildInboxThing("member", { ref: "acme:ticket:member" }),
@@ -49,7 +49,7 @@ describe("InboxLinkToPart", () => {
     ];
     const { queryInbox } = renderPart(things);
     await waitFor(() => {
-      expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(8);
+      expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(6);
     });
     expect(screen.queryByText("Ticket from")).toBeNull();
     expect(screen.queryByText("Ticket member")).toBeNull();

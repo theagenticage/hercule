@@ -21,9 +21,10 @@ const GAP = 4;
 
 /**
  * The height the popover keeps clear below the window's top when it opens
- * near the bottom edge: the field, eight rows and the foot.
+ * near the bottom edge: its tallest, 287px (the field, six rows and a
+ * foot of one line at the width of a row), and 13px of margin.
  */
-const ROOM_BELOW = 340;
+const ROOM_BELOW = 300;
 
 /** The narrowest the popover is drawn, in pixels, for an anchor narrower than this. */
 const MIN_WIDTH = 320;

@@ -76,6 +76,7 @@ export function ReasonLine({ reason }: { readonly reason: InboxRowReason }): JSX
     <span className="ib-row-why">
       {reason.who === undefined ? null : <b className="ib-who">{reason.who} </b>}
       {reason.rest}
+      {reason.more > 0 ? " " : null}
       {reason.more > 0 ? (
         <span className="ib-more" title={`${String(reason.more)} more on it`}>
           +{reason.more}

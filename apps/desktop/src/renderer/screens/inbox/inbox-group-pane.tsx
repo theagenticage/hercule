@@ -120,7 +120,7 @@ export function InboxGroupPane({
                     {member.why.rest}
                     {member.why.more > 0 && (
                       <span
-                        className="ib-group-more"
+                        className="ib-pane-member-more"
                         title={`${String(member.why.more)} more on it`}
                       >
                         +{member.why.more}

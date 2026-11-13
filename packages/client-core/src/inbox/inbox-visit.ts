@@ -36,6 +36,7 @@ import {
   confirmHidden,
   listMoveTargets,
   listShownRows,
+  openLinkedGroup,
   moveCurrent,
   pickWindow,
   startVisit,
@@ -157,6 +158,16 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
   /** Tells the visit the controller changed: it reads the visible window again. */
   readonly pushArrived: () => void;
   /**
+   * Tells the visit the user just linked things: `refs` are the things the
+   * link joined. Reads like `pushArrived` does (cancelling the read in flight
+   * and reading again). When the first read issued after this call is
+   * accepted, the group that holds `refs` opens and becomes current, and its
+   * members that wait as arrivals are taken in as its rows, so they are never
+   * counted as "N new". When no group holds `refs`, that read changes nothing
+   * special. The intent applies once, and opening another list drops it.
+   */
+  readonly linkMade: (refs: readonly string[]) => void;
+  /**
    * Tells the visit which entries the user sees (indexes into `snapshot.entries`,
    * both ends included). Rows near the viewport that missed the latest push
    * are re-read, and the next page is read near the end.
@@ -272,6 +283,8 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   /** The ids of the moves that handled each row, oldest first, until the move is put back. */
   const claims = new Map<string, number[]>();
   let isShowPending = false;
+  /** The things the user linked, until the first read issued after the link applies. */
+  let pendingLink: { readonly refs: readonly string[] } | null = null;
   let lastChange: InboxVisitChange | null = null;
   const listeners = new Set<() => void>();
   let snapshot = buildSnapshot(null);
@@ -379,6 +392,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         cancelAll();
         visitId += 1;
         isShowPending = false;
+        pendingLink = null;
         viewport = { first: 0, last: 0 };
         lastChange = null;
         state = startVisit(
@@ -408,12 +422,17 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     ].slice(0, HELD_WINDOW);
     const read = startRead(held);
     refreshing = read;
+    const link = pendingLink;
     reader.refresh(query, held, read.controller.signal).then(
       (reply) => {
         const accepted = acceptRead(read);
         if (accepted === null) return;
         refreshing = null;
-        setState(applyRefresh(accepted, { ...reply, asked: held }, read.ticket));
+        const refreshed = applyRefresh(accepted, { ...reply, asked: held }, read.ticket);
+        if (link !== null && link === pendingLink) {
+          pendingLink = null;
+          setState(openLinkedGroup(refreshed, link.refs));
+        } else setState(refreshed);
         if (isShowPending) takeInArrivals();
         readStaleRows();
       },
@@ -521,10 +540,22 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     readStaleRows();
   }
 
+  /** Counts a change the controller made and reads again, cancelling the read in flight. */
+  function pushArrived(): void {
+    pushGen += 1;
+    if (opening === null) {
+      startRefresh();
+      return;
+    }
+    startFirstRead();
+    commit();
+  }
+
   return {
     open(query) {
       cancelAll();
       isShowPending = false;
+      pendingLink = null;
       opening = { query, read: null, error: undefined };
       startFirstRead();
       commit();
@@ -533,14 +564,10 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       cancelAll();
       opening = null;
     },
-    pushArrived() {
-      pushGen += 1;
-      if (opening === null) {
-        startRefresh();
-        return;
-      }
-      startFirstRead();
-      commit();
+    pushArrived,
+    linkMade(refs) {
+      if (opening === null && state !== null) pendingLink = { refs };
+      pushArrived();
     },
     viewportChanged(firstIndex, lastIndex) {
       if (state === null) return;

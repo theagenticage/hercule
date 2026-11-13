@@ -240,20 +240,19 @@ export function InboxScreen({
     openHandMenu(moves.startHandOff(ref), ref);
   };
   /**
-   * Opens "Link to..." for what the pick links from: under the pane's Link button
-   * when the pane shows (as for the hand-off menu), else under the line it is from.
+   * Opens "Link to..." under the line the pick links from, whether the keys or
+   * the pane's Link button asked for it. The line is scrolled into view first,
+   * so the popover has a line to sit under.
    */
-  const openLinkMenu = (pick: InboxLinkPick | null, ref: string | undefined): void => {
+  const openLinkMenu = (pick: InboxLinkPick | null): void => {
     if (pick === null) return;
-    const paneAnchor =
-      ref === undefined && isPaneVisible
-        ? document.getElementById(INBOX_PANE_ID)?.querySelector<HTMLElement>("[data-link-anchor]")
-        : null;
-    const anchor = paneAnchor ?? listRef.current?.findRowAnchor(pick.anchorKey);
-    if (anchor !== null && anchor !== undefined) setLinkMenu({ pick, anchor });
+    const anchor = listRef.current?.findRowAnchor(pick.anchorKey);
+    if (anchor === null || anchor === undefined) return;
+    anchor.scrollIntoView({ block: "nearest" });
+    setLinkMenu({ pick, anchor });
   };
   const startLink = (ref: string | undefined): void => {
-    openLinkMenu(moves.startLink(ref), ref);
+    openLinkMenu(moves.startLink(ref));
   };
   /**
    * Makes the line of `ref` current so the pane and the keys follow it, opening
@@ -473,6 +472,21 @@ export function InboxScreen({
     onShowMore: (groupKey) => {
       visit.fold({ kind: "showMore", key: `${groupKey}:more` });
     },
+    onLinkThings: async (fromKey, toKey) => {
+      const { entries } = visit.getSnapshot();
+      const readEnd = (key: string): LinkedThing | undefined => {
+        const entry = entries.find((candidate) => candidate.key === key);
+        if (entry?.kind === "head") {
+          return { ref: entry.group.labelRef, identifier: "", title: entry.group.label };
+        }
+        return entry?.kind === "thing" || entry?.kind === "member"
+          ? { ref: entry.row.ref, identifier: entry.row.identifier, title: entry.row.title }
+          : undefined;
+      };
+      const from = readEnd(fromKey);
+      const to = readEnd(toKey);
+      return from !== undefined && to !== undefined && (await moves.linkTo(to, from));
+    },
   };
   /**
    * Starts a search in Everything for a value of the facet that the rail does
@@ -667,7 +681,7 @@ export function InboxScreen({
               fromLabel={linkMenu.pick.fromLabel}
               memberRefs={linkMenu.pick.memberRefs}
               onLink={(_fromRef, to) => {
-                moves.linkTo(linkMenu.pick.from, to);
+                void moves.linkTo(linkMenu.pick.from, to);
               }}
               onClose={() => {
                 setLinkMenu(null);

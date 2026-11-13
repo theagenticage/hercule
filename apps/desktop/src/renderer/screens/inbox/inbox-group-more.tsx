@@ -37,7 +37,9 @@ export const InboxGroupMore = memo(function InboxGroupMore({
       }}
     >
       <span className="ib-group-more-in">
-        <PlusIcon size={12} />
+        <span className="ib-group-more-icon">
+          <PlusIcon size={12} />
+        </span>
         {label}
       </span>
     </div>

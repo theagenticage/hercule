@@ -62,7 +62,7 @@ export function InboxPaneDismissButton({
 
 /**
  * Renders the icon button of Link (L): `words` is its name, such as "Link another thing", and
- * `onLink` is called when it is pressed. It carries `data-link-anchor`, where "Link to..." anchors.
+ * `onLink` is called when it is pressed.
  */
 export function InboxPaneLinkButton({
   words,
@@ -78,10 +78,39 @@ export function InboxPaneLinkButton({
       title={`${words} (L)`}
       aria-label={words}
       aria-keyshortcuts="L"
-      data-link-anchor=""
       onClick={onLink}
     >
       <LinkIcon size={16} />
+    </button>
+  );
+}
+
+/**
+ * Renders Link (L) as a move of the footer's start, beside Take on, for the pane of a selection: the
+ * things it holds are linked to each other. It is an icon under 460px, like Take on. `words` is its
+ * accessible name, such as "Link all 3", and `onLink` is called when it is pressed.
+ */
+export function InboxPaneLinkMove({
+  words,
+  onLink,
+}: {
+  readonly words: string;
+  readonly onLink: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="btn btn--sm ib-pane-move has-icon"
+      title={`${words} (L)`}
+      aria-label={words}
+      aria-keyshortcuts="L"
+      onClick={onLink}
+    >
+      <span className="ib-pane-move-icon">
+        <LinkIcon size={14} />
+      </span>
+      <span className="ib-pane-move-label">Link</span>
+      <kbd aria-hidden="true">L</kbd>
     </button>
   );
 }

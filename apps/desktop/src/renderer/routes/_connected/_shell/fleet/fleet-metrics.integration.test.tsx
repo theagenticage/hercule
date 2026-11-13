@@ -356,6 +356,8 @@ describe("a machine's page", () => {
   it("reads nothing when a push names another machine only", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
     await settle(live);
+    // A read the page started late (its other sections load on their own) must not count as the push's.
+    await waitForQuiet(context);
     const before = calls.length;
 
     pushMetrics(live, [FORGE]);

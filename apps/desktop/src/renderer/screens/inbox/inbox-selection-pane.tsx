@@ -7,7 +7,7 @@ import { EntityStatusIcon } from "../desk/status-shape";
 import {
   InboxPaneDismissButton,
   InboxPaneFootEnd,
-  InboxPaneLinkButton,
+  InboxPaneLinkMove,
   InboxPaneTakeOnButton,
 } from "./inbox-pane-footer";
 import "./inbox-pane-head.css";
@@ -39,9 +39,9 @@ export function InboxSelectionHead({
 
 /**
  * Renders the pane of a selection of things: "3 things selected", the hint
- * for the selection keys, one row for each `member` and a footer with Take on
- * (one Task for all of them), Link (the things link to each other; one thing
- * opens "Link to...") and Dismiss, named "Dismiss all 3".
+ * for the selection keys, one row for each `member` and a footer with Link
+ * (the things link to each other; one thing opens "Link to..."), Take on (one
+ * Task for all of them) and, at the end, Dismiss, named "Dismiss all 3".
  *
  * A member row is a button that calls `onWalk` with the member's reference,
  * so the pane walks to that thing. Handing off a selection is not offered
@@ -106,12 +106,12 @@ export function InboxSelectionPane({
       </div>
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
+          <InboxPaneLinkMove
+            words={count === 1 ? "Link to another thing" : `Link all ${String(count)}`}
+            onLink={onLink}
+          />
           <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
           <InboxPaneFootEnd>
-            <InboxPaneLinkButton
-              words={count === 1 ? "Link to another thing" : `Link all ${String(count)}`}
-              onLink={onLink}
-            />
             <InboxPaneDismissButton words={`Dismiss all ${String(count)}`} onDismiss={onDismiss} />
           </InboxPaneFootEnd>
         </div>

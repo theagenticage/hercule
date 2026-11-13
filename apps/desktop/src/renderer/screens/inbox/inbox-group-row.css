@@ -18,9 +18,11 @@
   border-radius: 5px;
   color: var(--muted);
   cursor: pointer;
-  transition:
-    transform var(--m-base) var(--m-ease),
-    background var(--m-quick);
+  transition: background var(--m-quick);
+}
+/* The glyph turns, not the button: the button's hit area (its ::after) must stay where it is. */
+.ib-group-fold > svg {
+  transition: transform var(--m-base) var(--m-ease);
 }
 .ib-group-fold:hover {
   background: var(--hover);
@@ -30,7 +32,7 @@
   outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
-.ib-row--group.is-open .ib-group-fold {
+.ib-row--group.is-open .ib-group-fold > svg {
   transform: rotate(90deg);
 }
 /* The chevron's hit area is 28 wide and fills the row from the second line's top to its foot: 24 tall,
@@ -49,7 +51,7 @@
   z-index: 1;
 }
 .ib-row--group .ib-row-tick::after {
-  top: calc(-4px - var(--text-size-step) / 2);
+  top: calc(-5px - var(--text-size-step) / 2);
   bottom: calc(-3px - var(--text-size-step) / 2);
 }
 /* A group that is selected, or partly, shows its tick in place of the link. */
@@ -92,6 +94,8 @@
   left: calc(var(--row-pad-x) + 8px);
   width: 1px;
   background: var(--line);
+  /* The line crosses the chevron's hit area and must not take the press. */
+  pointer-events: none;
 }
 /* From the head, the hairline starts under the chevron, which sits on the second line. */
 .ib-row--group.is-open::after {
@@ -117,6 +121,7 @@
   border-bottom: 1px solid var(--line);
   border-left: 1px solid var(--line);
   border-bottom-left-radius: 5px;
+  pointer-events: none;
 }
 /* A member that does not answer the query is drawn quieter, so the group stays whole and the query still reads. */
 .ib-row--member.is-outside-query .ib-row-title {
@@ -151,4 +156,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* The plus sits in a 16px box, 6px left of the members' title column, so its centre is under the hairline's elbow. */
+  margin-left: -6px;
+}
+.ib-group-more-icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
 }

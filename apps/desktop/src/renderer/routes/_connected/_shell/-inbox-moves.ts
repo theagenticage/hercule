@@ -236,8 +236,12 @@ export interface InboxMoves {
    * the undo line and returns `null`.
    */
   readonly startLink: (hoveredKey?: string) => InboxLinkPick | null;
-  /** Links `from` to `to`, the thing the user picked in "Link to...". */
-  readonly linkTo: (from: LinkedThing, to: LinkedThing) => void;
+  /**
+   * Links `from` to `to`, the thing the user picked in "Link to..." or dropped a
+   * row on. Returns whether a link was written: `false` when the two were linked
+   * already, the call was refused or it failed, and the line says why.
+   */
+  readonly linkTo: (from: LinkedThing, to: LinkedThing) => Promise<boolean>;
   /**
    * Removes the user's own link between `first` and `second`, with an Undo
    * that links them again. The line says so when a source still links them.
@@ -662,7 +666,10 @@ export const useInboxMoves = ({
    * that unlinks only the pairs this call wrote. `named` are the things the
    * line names. Afterwards the visit reads again, which is what draws the group.
    */
-  const linkPairs = (pairs: readonly LinkPair[], named: readonly LinkedThing[]): void => {
+  const linkPairs = (
+    pairs: readonly LinkPair[],
+    named: readonly LinkedThing[],
+  ): Promise<boolean> => {
     const request = linkRequest
       .mutateAsync(pairs)
       .catch((error: unknown): LinkOutcome => ({ created: [], failure: error }));
@@ -683,7 +690,7 @@ export const useInboxMoves = ({
     // The request never rejects: its failure is folded into the outcome above.
     void request.then(({ created, failure }) => {
       if (!isCurrent()) return;
-      if (created.length > 0) visit.pushArrived();
+      if (created.length > 0) visit.linkMade(created.flatMap((pair) => [pair.fromRef, pair.toRef]));
       if (failure !== undefined) {
         say(
           `The link did not save: ${readReason(failure)}. Try again.`,
@@ -699,6 +706,7 @@ export const useInboxMoves = ({
         words.title ?? undefined,
       );
     });
+    return wasLinked;
   };
 
   const startLink = (hoveredKey?: string): InboxLinkPick | null => {
@@ -706,7 +714,7 @@ export const useInboxMoves = ({
     if (planned === null) return null;
     const { target, plan } = planned;
     if (plan.kind === "go") {
-      linkPairs(buildLinkPairs(target), readThings(target));
+      void linkPairs(buildLinkPairs(target), readThings(target));
       return null;
     }
     const anchorKey = hoveredKey ?? visit.getSnapshot().current;
@@ -729,12 +737,12 @@ export const useInboxMoves = ({
     };
   };
 
-  const linkTo = (from: LinkedThing, to: LinkedThing): void => {
+  const linkTo = (from: LinkedThing, to: LinkedThing): Promise<boolean> => {
     if (latest.current.isOffline) {
       say(REFUSED_OFFLINE);
-      return;
+      return Promise.resolve(false);
     }
-    linkPairs([{ fromRef: from.ref, toRef: to.ref }], [from, to]);
+    return linkPairs([{ fromRef: from.ref, toRef: to.ref }], [from, to]);
   };
 
   const unlink = (first: LinkedThing, second: LinkedThing): void => {

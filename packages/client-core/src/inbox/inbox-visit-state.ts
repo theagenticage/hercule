@@ -572,6 +572,45 @@ export function takeArrivals<Row extends InboxVisitRow, Query>(
 }
 
 /**
+ * Opens the group that now holds the linked `refs` and makes it current,
+ * because the user made that link and expects to see its result. The group's
+ * members that wait as arrivals (a thing picked from outside the list) are
+ * taken in as rows of the group and the watermark rises past them, so they
+ * never count as arrivals. The fold is an explicit choice, like the user's own
+ * click. Returns the same state when no group holds any of `refs` (the link
+ * was refused, or an earlier link already joined them but the group is gone).
+ */
+export function openLinkedGroup<Row extends InboxVisitRow, Query>(
+  state: VisitState<Row, Query>,
+  refs: readonly string[],
+): VisitState<Row, Query> {
+  const wanted = new Set(refs);
+  const overlap = (group: HeldGroup) =>
+    group.members.filter((member) => wanted.has(member.ref)).length;
+  const group = state.groups.reduce<HeldGroup | undefined>(
+    (best, candidate) =>
+      overlap(candidate) > (best === undefined ? 0 : overlap(best)) ? candidate : best,
+    undefined,
+  );
+  if (group === undefined) return state;
+  const memberRefs = new Set(group.members.map((member) => member.ref));
+  const taken = state.arrivals.filter((row) => memberRefs.has(row.ref));
+  const folds = new Map(state.folds);
+  folds.set(group.key, { ...state.folds.get(group.key), isOpen: true });
+  const opened = withRows(
+    state,
+    {
+      folds,
+      arrivals: state.arrivals.filter((row) => !memberRefs.has(row.ref)),
+      watermark: Math.max(state.watermark, highestArrival(taken)),
+    },
+    [...state.rows, ...taken],
+  );
+  const hasHead = buildStateEntries(opened, opened.rows).some((entry) => entry.key === group.key);
+  return hasHead ? { ...opened, current: group.key, anchor: null, landedOn: null } : opened;
+}
+
+/**
  * Applies a move to the rows the user handled, and returns what undo needs.
  * The current entry moves on at once when every row it stands for is handled:
  * to the next entry after it in the old order that stands for an unhandled

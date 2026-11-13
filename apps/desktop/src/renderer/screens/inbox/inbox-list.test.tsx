@@ -31,6 +31,10 @@ const buildListActions = () => {
     onShowMore: (key) => {
       row.calls.push(["more", key]);
     },
+    onLinkThings: (fromKey, toKey) => {
+      row.calls.push(["link", `${fromKey} ${toKey}`]);
+      return Promise.resolve(true);
+    },
   };
   return actions;
 };

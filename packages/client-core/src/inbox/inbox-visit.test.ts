@@ -1371,4 +1371,90 @@ describe("groups", () => {
     await answerRefreshGroups(fake, items.slice(0, 200), [], { stillIn: items.slice(200, 400) });
     expect(headOf(visit, "group:1")).toMatchObject({ labelRef: "t890", size: 2 });
   });
+
+  describe("a link the user made", () => {
+    it("opens the group of two held things and makes its head current", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), []);
+      visit.step(1);
+      visit.linkMade(["a", "b"]);
+      await answerRefreshGroups(fake, rows("a", "b", "c"), [group("a", ["a", "b"])]);
+      expect(keysOf(visit)).toEqual(["group:1", "a", "b", "c"]);
+      expect(headOf(visit, "group:1").isOpen).toBe(true);
+      expect(visit.getSnapshot().current).toBe("group:1");
+      expect(visit.getSnapshot().arrivals).toBe(0);
+    });
+
+    it("takes in a member the list did not hold, without counting an arrival", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.linkMade(["a", "z"]);
+      await answerRefreshGroups(
+        fake,
+        [row("z", "z", 5), ...rows("a", "b")],
+        [group("a", ["a", "z"])],
+      );
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(keysOf(visit)).toEqual(["group:1", "a", "z", "b"]);
+      expect(visit.getSnapshot().current).toBe("group:1");
+      visit.pushArrived();
+      await answerRefreshGroups(
+        fake,
+        [row("z", "z", 5), ...rows("a", "b")],
+        [group("a", ["a", "z"])],
+      );
+      expect(visit.getSnapshot().arrivals).toBe(0);
+    });
+
+    it("does not apply when a read issued before the link answers", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.pushArrived();
+      const early = fake.open("refresh");
+      visit.linkMade(["a", "b"]);
+      early.resolve({
+        firstPage: { ...firstPage(rows("a", "b")), groups: [group("a", ["a", "b"])] },
+        heldRows: [],
+      });
+      await settle();
+      expect(early.signal.aborted).toBe(true);
+      expect(visit.getSnapshot().entries.map((e) => e.kind)).toEqual(["thing", "thing"]);
+      await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "b"])]);
+      expect(headOf(visit, "group:1").isOpen).toBe(true);
+    });
+
+    it("applies on a later read when a push cancelled the one the link started", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.linkMade(["a", "b"]);
+      visit.pushArrived();
+      await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "b"])]);
+      expect(headOf(visit, "group:1").isOpen).toBe(true);
+    });
+
+    it("is dropped when another list opens", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.linkMade(["a", "b"]);
+      visit.open("list-2");
+      await answerFirst(fake, rows("a", "b", "c"));
+      visit.pushArrived();
+      await answerRefreshGroups(fake, rows("a", "b", "c"), [group("a", ["a", "b"])]);
+      expect(headOf(visit, "group:1").isOpen).toBe(false);
+    });
+
+    it("applies once: a later read leaves a group the user closed closed", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.linkMade(["a", "b"]);
+      await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "b"])]);
+      visit.fold({ kind: "close", key: "group:1" });
+      visit.pushArrived();
+      await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "b"])]);
+      expect(headOf(visit, "group:1").isOpen).toBe(false);
+    });
+
+    it("changes nothing special when no group holds the refs", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), []);
+      visit.step(1);
+      visit.linkMade(["a", "b"]);
+      await answerRefreshGroups(fake, rows("a", "b", "c"), []);
+      expect(keysOf(visit)).toEqual(["a", "b", "c"]);
+      expect(visit.getSnapshot().current).toBe("b");
+    });
+  });
 });

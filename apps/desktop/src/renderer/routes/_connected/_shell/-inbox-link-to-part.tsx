@@ -10,7 +10,7 @@ import { InboxLinkTo, type InboxLinkToResult } from "../../../screens/inbox/inbo
 const QUIET_MS = 150;
 
 /** How many results the popover shows at most. */
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 6;
 
 /**
  * Reads the first page of the Inbox's Everything list, narrowed by `text`
@@ -52,7 +52,7 @@ const linkToResultsQuery = (client: HerculeClient, text: string) =>
  *   `fromRef` are offered, because linking them changes nothing.
  * - The popover opens with the first page of Everything. Typing narrows it
  *   by text; the read waits for a short quiet, and sets no timer while
- *   nothing is typed. At most 8 things are shown.
+ *   nothing is typed. At most 6 things are shown.
  * - Picking a result calls `onLink(fromRef, to)`, with `to` the picked thing's
  *   ref, identifier and title so the caller can name it, and `onClose`. The link
  *   itself, and its undo, belong to the caller.

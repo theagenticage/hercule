@@ -64,6 +64,7 @@ import type {
   EventWithFacts,
   HandoffLeg,
   Harness,
+  InboxGroupQuery,
   InboxQuery,
   InboxValueQuery,
   IgnoreRuleWithCatches,
@@ -1579,6 +1580,14 @@ async function mountShellSpecimen(
             const query = JSON.parse(await new Request(url, init).text()) as InboxQuery;
             const answer = inbox.answer(query);
             return answer === "never" ? new Promise(() => undefined) : answerJson(answer);
+          }
+          if (
+            init?.method === "POST" &&
+            url.endsWith("/api/v1/external-entities/inbox/group") &&
+            inbox.answerGroup !== undefined
+          ) {
+            const query = JSON.parse(await new Request(url, init).text()) as InboxGroupQuery;
+            return answerJson(inbox.answerGroup(query));
           }
           if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
             const query = JSON.parse(await new Request(url, init).text()) as InboxValueQuery;
