@@ -128,6 +128,7 @@ import stageFacts from "./0117-stage-facts";
 import initiativesAndBlockers from "./0118-initiatives-and-blockers";
 import entityFields from "./0120-entity-fields";
 import linkTakenAt from "./0121-link-taken-at";
+import entityTakeOns from "./0122-entity-take-ons";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -250,6 +251,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [118, "initiatives-and-blockers", Effect.succeed(initiativesAndBlockers)],
   [120, "entity-fields", Effect.succeed(entityFields)],
   [121, "link-taken-at", Effect.succeed(linkTakenAt)],
+  [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

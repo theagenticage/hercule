@@ -1105,6 +1105,41 @@ const make = Effect.gen(function* () {
       return { moved };
     });
 
+  /** Reads the records of `key`'s ids or refs: see `readTaskableEntities` of the repository. */
+  const readTaskableEntities = (
+    key: { readonly ids: ReadonlyArray<string> } | { readonly refs: ReadonlyArray<string> },
+  ): Effect.Effect<ReadonlyArray<TaskableEntity>, SqlError> =>
+    Effect.gen(function* () {
+      const found =
+        "ids" in key
+          ? key.ids.length === 0
+            ? []
+            : yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE id IN ${sql.in(key.ids.map(uuidFromString))}`
+          : key.refs.length === 0
+            ? []
+            : yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE ref IN ${sql.in(key.refs)}`;
+      const observations = yield* readObservations(found.map((row) => row.ref));
+      return found.map((row): TaskableEntity => {
+        const own = observations.get(row.ref) ?? [];
+        const { status, stage } = parseStoredStatus(row.status as string | null);
+        return {
+          id: uuidToString(row.id),
+          ref: row.ref,
+          kind: (row.kind as string | null) ?? "",
+          completeness: row.completeness as "full" | "partial",
+          isWorkRecord: isWorkRecord(row),
+          title: (row.title as string | null) ?? "",
+          status,
+          stage,
+          targetRemote: readTargetRemote(row),
+          access: deriveAccess(own),
+          hasConcern: unionConcerns(own).length > 0,
+        };
+      });
+    });
+
   return {
     applyClaimChanges,
 
@@ -1559,31 +1594,18 @@ const make = Effect.gen(function* () {
     readTaskableEntity: (
       key: { readonly id: string } | { readonly ref: string },
     ): Effect.Effect<Option.Option<TaskableEntity>, SqlError> =>
-      Effect.gen(function* () {
-        const found =
-          "id" in key
-            ? yield* sql<EntityRow>`
-                SELECT * FROM external_entities WHERE id = ${uuidFromString(key.id)}`
-            : yield* sql<EntityRow>`
-                SELECT * FROM external_entities WHERE ref = ${key.ref}`;
-        const row = found[0];
-        if (row === undefined) return Option.none();
-        const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
-        const { status, stage } = parseStoredStatus(row.status as string | null);
-        return Option.some({
-          id: uuidToString(row.id),
-          ref: row.ref,
-          kind: (row.kind as string | null) ?? "",
-          completeness: row.completeness as "full" | "partial",
-          isWorkRecord: isWorkRecord(row),
-          title: (row.title as string | null) ?? "",
-          status,
-          stage,
-          targetRemote: readTargetRemote(row),
-          access: deriveAccess(observations),
-          hasConcern: unionConcerns(observations).length > 0,
-        });
-      }),
+      Effect.map(
+        readTaskableEntities("id" in key ? { ids: [key.id] } : { refs: [key.ref] }),
+        (records) => Option.fromNullishOr(records[0]),
+      ),
+
+    /**
+     * Returns the records of the entities found by their ids or by their
+     * refs, as `readTaskableEntity` reads one, in two statements however many
+     * there are. An id or a ref that has no record is left out, so the caller
+     * compares what it asked for with what came back.
+     */
+    readTaskableEntities: readTaskableEntities,
 
     /**
      * Returns the things on the Inbox that have no live Task, for the sheet

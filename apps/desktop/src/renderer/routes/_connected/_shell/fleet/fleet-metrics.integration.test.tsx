@@ -356,12 +356,17 @@ describe("a machine's page", () => {
   it("reads nothing when a push names another machine only", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
     await settle(live);
-    const before = calls.length;
+    // A read the page started late (its other sections load on their own) must not count as the push's.
+    await waitForQuiet(context);
+    // Only the reads a push can cause are counted: an unrelated read that starts late (the sidebar's, say) is not the push's.
+    const metricsBefore = readMetricsCalls(calls).length;
+    const runnerReadsBefore = countRunnerReads(calls);
 
     pushMetrics(live, [FORGE]);
     await waitForQuiet(context);
 
-    expect(calls).toHaveLength(before);
+    expect(readMetricsCalls(calls)).toHaveLength(metricsBefore);
+    expect(countRunnerReads(calls)).toBe(runnerReadsBefore);
   });
 
   it("reads once more, not once per push, when pushes arrive while it reads", async () => {

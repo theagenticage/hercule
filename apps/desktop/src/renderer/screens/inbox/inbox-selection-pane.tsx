@@ -9,7 +9,11 @@ import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CheckIcon } from "../../icons/check";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
-import { InboxPaneDismiss } from "./inbox-pane-footer";
+import {
+  InboxPaneDismissButton,
+  InboxPaneLinkMove,
+  InboxPaneTakeOnButton,
+} from "./inbox-pane-footer";
 import "./inbox-pane-head.css";
 import "./inbox-pane-thing.css";
 import "./inbox-selection-pane.css";
@@ -40,12 +44,14 @@ export function InboxSelectionHead({
 
 /**
  * Renders the pane of a selection of things: "3 things selected", the hint
- * for the selection keys, one row for each `member` and a footer that holds
- * Dismiss only, named "Dismiss all 3". `ref` is the element that scrolls.
+ * for the selection keys, one row for each `member` and a footer with Link
+ * (the things link to each other; one thing opens "Link to..."), Take on (one
+ * Task for all of them) and, at the end, Dismiss, named "Dismiss all 3".
+ * `ref` is the element that scrolls.
  *
  * A member row is a button that calls `onWalk` with the member's reference,
- * so the pane walks to that thing. Taking on and handing off a selection are
- * not offered here: their keys say why in the undo line.
+ * so the pane walks to that thing. Handing off a selection is not offered
+ * here: its key says why in the undo line.
  */
 export function InboxSelectionPane({
   members,
@@ -53,6 +59,8 @@ export function InboxSelectionPane({
   platform,
   ref,
   onWalk,
+  onTakeOn,
+  onLink,
   onDismiss,
 }: {
   readonly members: ReadonlyArray<InboxRowView>;
@@ -60,6 +68,8 @@ export function InboxSelectionPane({
   readonly platform: DesktopPlatform;
   readonly ref?: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
+  readonly onTakeOn: () => void;
+  readonly onLink: () => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
   const count = members.length;
@@ -104,7 +114,14 @@ export function InboxSelectionPane({
       </div>
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
-          <InboxPaneDismiss words={describeDismissAll(count)} onDismiss={onDismiss} />
+          <InboxPaneLinkMove
+            words={count === 1 ? "Link to another thing" : `Link all ${String(count)}`}
+            onLink={onLink}
+          />
+          <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
+          <span className="ib-pane-foot-end">
+            <InboxPaneDismissButton words={describeDismissAll(count)} onDismiss={onDismiss} />
+          </span>
         </div>
       </footer>
     </>

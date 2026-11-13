@@ -1,0 +1,69 @@
+/* "Link to...": the search for the thing to link another to. It is the drawing's `.linkto` (`docs/design/inbox-list/css/menus.css`
+   on the branch `prototype/inbox-list-hifi`) on the app's tokens. It is a popover (`inbox-popover.css`), and `inbox-link-to.tsx` sets its `left`, `top` and `width` when it opens. */
+.link-to {
+  padding: 6px;
+}
+
+/* The field has the focus, so it draws no ring of its own. */
+.link-to-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--faint);
+}
+.link-to-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+}
+
+.link-to-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 0;
+}
+.link-to-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.link-to-item.is-active {
+  background: var(--hover);
+}
+.link-to-title {
+  overflow: hidden;
+  font-size: var(--t-13);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-to-id {
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.link-to-none {
+  margin: 8px 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.link-to-foot {
+  margin: 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--divider);
+  color: var(--faint);
+  font-size: var(--t-12);
+}

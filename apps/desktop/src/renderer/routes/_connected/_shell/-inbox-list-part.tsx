@@ -14,17 +14,23 @@ import { namePlugin, readErrorMessage, type HerculeClient } from "@hercule/clien
 import {
   decideInboxEmpty,
   describeInboxClause,
+  describeInboxGroupRow,
   describeInboxRow,
   findAccountLabel,
+  type InboxEntry,
   type InboxRowView,
   type InboxScope,
 } from "@hercule/client-core/inbox";
 import { CORE_SAVED_QUERY_IDS, type InboxClause, type InboxOrder } from "@hercule/contract";
 import { inboxOutlineQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
-import { InboxList, type InboxListHandle } from "../../../screens/inbox/inbox-list";
+import {
+  InboxList,
+  type InboxListActions,
+  type InboxListHandle,
+} from "../../../screens/inbox/inbox-list";
+import type { InboxListEntry } from "../../../screens/inbox/inbox-list-entry";
 import { InboxListHead } from "../../../screens/inbox/inbox-list-head";
 import { InboxNarrowMenu, type NarrowFacet } from "../../../screens/inbox/inbox-narrow-menu";
-import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
 import { InboxSelectionBar } from "../../../screens/inbox/inbox-selection-bar";
 import {
   InboxEmpty,
@@ -88,7 +94,85 @@ function describeStableRow(
 
 const NO_REFS: ReadonlyArray<string> = [];
 
-const NO_VIEWS: ReadonlyArray<InboxRowView> = [];
+const NO_ENTRIES: ReadonlyArray<InboxListEntry> = [];
+
+/** The line last described for an entry, kept while the entry, the order, the minute and the user's name stay the same. */
+const linesByEntry = new WeakMap<
+  InboxEntry<InboxListRow>,
+  { order: InboxOrder; nowTime: number; userName: string; line: InboxListEntry }
+>();
+
+/**
+ * Returns the line the list draws for `entry`, the same object as last time
+ * when nothing it draws changed, so a line that did not change is not drawn
+ * again. A "more" line and the members' own views are described the way a lone
+ * row is.
+ */
+function describeStableEntry(
+  entry: InboxEntry<InboxListRow>,
+  order: InboxOrder,
+  now: Date,
+  userName: string,
+): InboxListEntry {
+  const kept = linesByEntry.get(entry);
+  if (
+    kept !== undefined &&
+    kept.order === order &&
+    kept.nowTime === now.getTime() &&
+    kept.userName === userName
+  ) {
+    return kept.line;
+  }
+  const line = describeEntry(entry, order, now, userName);
+  linesByEntry.set(entry, { order, nowTime: now.getTime(), userName, line });
+  return line;
+}
+
+function describeEntry(
+  entry: InboxEntry<InboxListRow>,
+  order: InboxOrder,
+  now: Date,
+  userName: string,
+): InboxListEntry {
+  switch (entry.kind) {
+    case "thing":
+      return {
+        kind: "thing",
+        key: entry.key,
+        view: describeStableRow(entry.row, order, now, userName),
+      };
+    case "member":
+      return {
+        kind: "member",
+        key: entry.key,
+        view: describeStableRow(entry.row, order, now, userName),
+        member: {
+          isQuiet: !entry.matches,
+          isLast: entry.isLast,
+          position: entry.position,
+          of: entry.of,
+        },
+      };
+    case "head": {
+      const { group } = entry;
+      return {
+        kind: "head",
+        key: entry.key,
+        view: describeInboxGroupRow(group, {
+          order,
+          now,
+          userName,
+          offers: group.placedBy.offers,
+        }),
+        isOpen: group.isOpen,
+        tick: group.tick,
+        unloadedCount: group.unloadedCount,
+      };
+    }
+    case "more":
+      return entry;
+  }
+}
 
 /**
  * Returns how the rows move for the change the visit last made: whether the
@@ -186,7 +270,7 @@ export function InboxListPart({
   readonly scope: InboxScope;
   readonly scopeTitle: string;
   readonly search: InboxNarrowing;
-  readonly rowActions: InboxRowActions;
+  readonly rowActions: InboxListActions;
   readonly focusRequest: number;
   /** Rises when a move left nothing current: the focus then goes to the empty state's heading. */
   readonly headingFocusRequest: number;
@@ -254,12 +338,13 @@ export function InboxListPart({
   // One array for as long as the rows, the order, the minute and the user stay the same: the list
   // takes a new array to be a change of rows, and a step with J changes none.
   const order = snapshot.order;
-  const views = useMemo(
+  const entries = snapshot.entries;
+  const lines = useMemo(
     () =>
       order === undefined
-        ? NO_VIEWS
-        : rows.map((thing) => describeStableRow(thing, order, now, username)),
-    [rows, order, now, username],
+        ? NO_ENTRIES
+        : entries.map((entry) => describeStableEntry(entry, order, now, username)),
+    [entries, order, now, username],
   );
 
   const empty: InboxEmptyState | null = (() => {
@@ -384,9 +469,9 @@ export function InboxListPart({
         <InboxList
           listId={JSON.stringify(snapshot.query)}
           label={isNarrowed ? "Search results" : scopeTitle}
-          rows={views}
+          entries={lines}
           plugins={plugins}
-          currentRef={snapshot.current}
+          currentKey={snapshot.current}
           selection={snapshot.selection}
           actions={rowActions}
           leaveHow={leaveHow}

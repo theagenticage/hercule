@@ -6,18 +6,15 @@ import {
 } from "@hercule/client-core/inbox";
 import { buildLook, Face } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
+import { LinkIcon } from "../../icons/link";
 import { TasksIcon } from "../../icons/tasks";
 import "./inbox-pane-footer.css";
 
 /** How many faces the hand-off button shows when several workflows fit. */
 const HAND_OFF_FACES = 3;
 
-/**
- * Renders the button that dismisses at the end of the pane's footer: an icon
- * with `words` as its name ("Dismiss", "Dismiss all 3") and the key E in its
- * tooltip. It calls `onDismiss` when pressed.
- */
-export function InboxPaneDismiss({
+/** Renders the icon button of Dismiss alone: `words` is its name and `onDismiss` is called when it is pressed. */
+export function InboxPaneDismissButton({
   words,
   onDismiss,
 }: {
@@ -25,25 +22,105 @@ export function InboxPaneDismiss({
   readonly onDismiss: () => void;
 }): JSX.Element {
   return (
-    <span className="ib-pane-foot-end">
-      <button
-        type="button"
-        className="icon-btn ib-pane-dismiss"
-        title={`${words} (E)`}
-        aria-label={words}
-        aria-keyshortcuts="E"
-        onClick={onDismiss}
-      >
-        <ArchiveIcon size={16} />
-      </button>
-    </span>
+    <button
+      type="button"
+      className="icon-btn ib-pane-dismiss"
+      title={`${words} (E)`}
+      aria-label={words}
+      aria-keyshortcuts="E"
+      onClick={onDismiss}
+    >
+      <ArchiveIcon size={16} />
+    </button>
+  );
+}
+
+/**
+ * Renders the icon button of Link (L): `words` is its name, such as "Link another thing", and
+ * `onLink` is called when it is pressed.
+ */
+export function InboxPaneLinkButton({
+  words,
+  onLink,
+}: {
+  readonly words: string;
+  readonly onLink: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="icon-btn ib-pane-foot-link"
+      title={`${words} (L)`}
+      aria-label={words}
+      aria-keyshortcuts="L"
+      onClick={onLink}
+    >
+      <LinkIcon size={16} />
+    </button>
+  );
+}
+
+/**
+ * Renders Link (L) as a move of the footer's start, beside Take on, for the pane of a selection: the
+ * things it holds are linked to each other. It is an icon under 460px, like Take on. `words` is its
+ * accessible name, such as "Link all 3", and `onLink` is called when it is pressed.
+ */
+export function InboxPaneLinkMove({
+  words,
+  onLink,
+}: {
+  readonly words: string;
+  readonly onLink: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="btn btn--sm ib-pane-move has-icon"
+      title={`${words} (L)`}
+      aria-label={words}
+      aria-keyshortcuts="L"
+      onClick={onLink}
+    >
+      <span className="ib-pane-move-icon">
+        <LinkIcon size={14} />
+      </span>
+      <span className="ib-pane-move-label">Link</span>
+      <kbd aria-hidden="true">L</kbd>
+    </button>
+  );
+}
+
+/**
+ * Renders the Take on button (T) of the footer. It is an icon under 460px,
+ * through the footer's container query. It calls `onTakeOn` when pressed.
+ */
+export function InboxPaneTakeOnButton({
+  onTakeOn,
+}: {
+  readonly onTakeOn: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="btn btn--sm ib-pane-move has-icon"
+      title="Take on (T)"
+      aria-label="Take on"
+      aria-keyshortcuts="T"
+      onClick={onTakeOn}
+    >
+      <span className="ib-pane-move-icon">
+        <TasksIcon size={14} />
+      </span>
+      <span className="ib-pane-move-label">Take on</span>
+      <kbd aria-hidden="true">T</kbd>
+    </button>
   );
 }
 
 /**
  * Renders the footer of the pane of one thing: the moves that work, Take on
- * (T), the hand-off (H), and Dismiss (E) as an icon at the end. No move is
- * filled.
+ * (T), the hand-off (H), and Link (L) and Dismiss (E) as icons at the end. No
+ * move is filled.
  *
  * - Take on is left out when `isTakenOn` is true: the user already holds the
  *   thing.
@@ -64,6 +141,7 @@ export function InboxPaneFooter({
   handAnchorRef,
   onTakeOn,
   onHandOff,
+  onLink,
   onDismiss,
 }: {
   readonly isTakenOn: boolean;
@@ -72,28 +150,14 @@ export function InboxPaneFooter({
   readonly handAnchorRef?: Ref<HTMLButtonElement>;
   readonly onTakeOn: () => void;
   readonly onHandOff: () => void;
+  readonly onLink: () => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
   const handName = handOff === null ? "" : describeHandOff(handOff);
   return (
     <footer className="ib-pane-foot-box">
       <div className="ib-pane-foot">
-        {!isTakenOn && (
-          <button
-            type="button"
-            className="btn btn--sm ib-pane-move has-icon"
-            title="Take on (T)"
-            aria-label="Take on"
-            aria-keyshortcuts="T"
-            onClick={onTakeOn}
-          >
-            <span className="ib-pane-move-icon">
-              <TasksIcon size={14} />
-            </span>
-            <span className="ib-pane-move-label">Take on</span>
-            <kbd aria-hidden="true">T</kbd>
-          </button>
-        )}
+        {!isTakenOn && <InboxPaneTakeOnButton onTakeOn={onTakeOn} />}
         {handOff !== null && (
           <button
             type="button"
@@ -122,7 +186,10 @@ export function InboxPaneFooter({
             <kbd aria-hidden="true">H</kbd>
           </button>
         )}
-        <InboxPaneDismiss words="Dismiss" onDismiss={onDismiss} />
+        <span className="ib-pane-foot-end">
+          <InboxPaneLinkButton words="Link to another thing" onLink={onLink} />
+          <InboxPaneDismissButton words="Dismiss" onDismiss={onDismiss} />
+        </span>
       </div>
     </footer>
   );

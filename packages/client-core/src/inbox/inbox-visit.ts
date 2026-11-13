@@ -20,22 +20,31 @@
  * words (dismissed, restored, arrived) and the screen picks the motion.
  */
 import { replaceEqualDeep } from "@tanstack/query-core";
-import type { InboxFacet, InboxOrder } from "@hercule/contract";
+import type { InboxFacet, InboxGroup, InboxOrder } from "@hercule/contract";
+import { keepUnchangedEntries, listSelectionRefs, type InboxEntry } from "./inbox-groups";
+import type { InboxMoveTarget } from "./inbox-moves";
 import {
   HELD_WINDOW,
+  applyFold,
   applyMove,
   applyNextPage,
   applyRefresh,
+  applyReveal,
   applyRowsRead,
   applySelectionChange,
   applyUndo,
+  buildStateEntries,
   confirmHidden,
   listMoveTargets,
+  listShownRows,
+  listUnloadedMembers,
+  openLinkedGroup,
   moveCurrent,
   pickWindow,
   startVisit,
   takeArrivals,
   type FirstPage,
+  type FoldChange,
   type InboxVisitRow,
   type MoveReceipt,
   type NextPage,
@@ -44,14 +53,17 @@ import {
   type VisitState,
 } from "./inbox-visit-state";
 
-export type { FirstPage, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
+export type { FirstPage, FoldChange, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
+export type { InboxMoveTarget };
+export type { InboxEntry, InboxGroupView } from "./inbox-groups";
 
 /**
  * How the visit reads. `Query` is opaque to the visit (the scope and search
  * of a list); the adapter maps it to the controller's request. Every read
  * takes an `AbortSignal` the visit aborts when the answer is no longer wanted.
  * `readFirst` and `refresh` carry the list's size, order and facets; the
- * replies of the others carry rows only.
+ * replies of the others carry rows only. Every reply carries the groups the
+ * rows belong to.
  */
 export interface InboxReader<Row extends InboxVisitRow, Query> {
   /** Reads the first page of the list. */
@@ -60,16 +72,25 @@ export interface InboxReader<Row extends InboxVisitRow, Query> {
   readNext(query: Query, after: string, signal: AbortSignal): Promise<NextPage<Row>>;
   /**
    * Reads the first page and, in the same reply, those of the `held` refs
-   * (at most 400) that still belong to the list. A held ref in neither has
-   * left the list.
+   * (at most 400) that still belong to the list, with the groups of those. A
+   * held ref in neither has left the list. A group may name members the visit
+   * does not hold; that is not leaving.
    */
   refresh(
     query: Query,
     held: readonly string[],
     signal: AbortSignal,
-  ): Promise<{ readonly firstPage: FirstPage<Row>; readonly heldRows: readonly Row[] }>;
-  /** Reads the `held` refs (at most 400) that still belong to the list. */
-  readRows(query: Query, held: readonly string[], signal: AbortSignal): Promise<readonly Row[]>;
+  ): Promise<{
+    readonly firstPage: FirstPage<Row>;
+    readonly heldRows: readonly Row[];
+    readonly heldGroups: readonly InboxGroup[];
+  }>;
+  /** Reads the `held` refs (at most 400) that still belong to the list, with their groups. */
+  readRows(
+    query: Query,
+    held: readonly string[],
+    signal: AbortSignal,
+  ): Promise<{ readonly rows: readonly Row[]; readonly groups: readonly InboxGroup[] }>;
 }
 
 /** What just happened to the rows, in words. The screen decides how that looks. */
@@ -102,12 +123,19 @@ export interface InboxVisitSnapshot<Row extends InboxVisitRow, Query> {
   readonly query: Query | null;
   /** The rows in visit order. A handed row is drawn as its hand-off copy. */
   readonly rows: readonly Row[];
+  /**
+   * What the list draws, in order: things, and for each group its head, its
+   * members when open, and a "Show N more" line. Keeps its identity (and the
+   * identity of each entry that is equal) across reads that change nothing.
+   */
+  readonly entries: readonly InboxEntry<Row>[];
   /** How many arrivals wait behind "N new". */
   readonly arrivals: number;
+  /** The key of the current entry: a thing's ref, a group's key, or a group's "more" key. */
   readonly current: string | null;
-  /** Refs of the selected rows: always a subset of `rows`. */
+  /** Refs of the selected rows: always a subset of `rows`. The selection never holds a group's key. */
   readonly selection: ReadonlySet<string>;
-  /** The row a range selection starts from, or null. */
+  /** The key of the entry a range selection starts from, or null. */
   readonly anchor: string | null;
   readonly total: number | undefined;
   readonly order: InboxOrder | undefined;
@@ -132,7 +160,17 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
   /** Tells the visit the controller changed: it reads the visible window again. */
   readonly pushArrived: () => void;
   /**
-   * Tells the visit which rows the user sees (indexes into `snapshot.rows`,
+   * Tells the visit the user just linked things: `refs` are the things the
+   * link joined. Reads like `pushArrived` does (cancelling the read in flight
+   * and reading again). When the first read issued after this call is
+   * accepted, the group that holds `refs` opens and becomes current, and its
+   * members that wait as arrivals are taken in as its rows, so they are never
+   * counted as "N new". When no group holds `refs`, that read changes nothing
+   * special. The intent applies once, and opening another list drops it.
+   */
+  readonly linkMade: (refs: readonly string[]) => void;
+  /**
+   * Tells the visit which entries the user sees (indexes into `snapshot.entries`,
    * both ends included). Rows near the viewport that missed the latest push
    * are re-read, and the next page is read near the end.
    */
@@ -164,13 +202,23 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
   readonly undo: (receipt: MoveReceipt<Row>) => void;
   /** Steps the current row by one (J, K), or with `extend` extends the selection (⇧J, ⇧K). */
   readonly step: (by: 1 | -1, extend?: boolean) => void;
-  /** Changes the selection or the current row. */
+  /** Changes the selection or the current entry. */
   readonly select: (change: SelectionChange) => void;
+  /** Opens, closes or expands a group (see `applyFold`). */
+  readonly fold: (change: FoldChange) => void;
   /**
-   * Returns the refs a move acts on, in displayed order: the selection or the
-   * current row, or with `hoveredRef` that row (the selection when it is in it).
+   * Makes the line of the thing `ref` current, first opening the group that
+   * hides it and showing all its members when the list does not draw it (see
+   * `applyReveal`). Returns false, and changes nothing, when the list holds no
+   * row for `ref`.
    */
-  readonly targets: (hoveredRef?: string) => string[];
+  readonly reveal: (ref: string) => boolean;
+  /**
+   * Returns what a move acts on (see `listMoveTargets`): the selection or the
+   * current entry, or with `hoveredKey` that entry (the selection when it is in it).
+   * Null when there is nothing.
+   */
+  readonly targets: (hoveredKey?: string) => InboxMoveTarget<Row> | null;
   readonly subscribe: (listener: () => void) => () => void;
   /** Returns the snapshot: the same object until something changed. */
   readonly getSnapshot: () => InboxVisitSnapshot<Row, Query>;
@@ -182,6 +230,29 @@ const NEAR_END_ROWS = 20;
 /** Shared so the snapshot of a visit that holds nothing keeps the same objects. */
 const NO_SELECTION: ReadonlySet<string> = new Set();
 const NO_FACETS: readonly InboxFacet[] = [];
+const NO_ENTRIES: readonly never[] = [];
+
+/**
+ * Returns the range of rows (indexes into `rows`) that the entries from
+ * `firstIndex` to `lastIndex` stand for, or `undefined` when none stands for a row.
+ * A head stands for all the held members of its group.
+ */
+function findViewedRowRange<Row extends InboxVisitRow>(
+  rows: readonly Row[],
+  entries: readonly InboxEntry<Row>[],
+  firstIndex: number,
+  lastIndex: number,
+): { first: number; last: number } | undefined {
+  const indexOf = new Map(rows.map((row, index) => [row.ref, index]));
+  const seen = entries
+    .slice(Math.max(0, firstIndex), lastIndex + 1)
+    .flatMap((entry) =>
+      entry.kind === "head" ? entry.group.rows.map((row) => row.ref) : listSelectionRefs(entry),
+    )
+    .flatMap((ref) => indexOf.get(ref) ?? []);
+  if (seen.length === 0) return undefined;
+  return { first: Math.min(...seen), last: Math.max(...seen) };
+}
 
 interface Read {
   /** The visit (list shown) that was current when the read was issued. */
@@ -191,10 +262,19 @@ interface Read {
   readonly refs: ReadonlySet<string>;
 }
 
+export interface InboxVisitOptions<Query> {
+  /** Returns the time in milliseconds. The visit starts no timer; it only asks the time of a move. Default: `performance.now`. */
+  readonly now?: () => number;
+  /** Tells whether a list has text or clauses to search for, so groups with a hit inside open. Default: never. */
+  readonly isSearch?: (query: Query) => boolean;
+}
+
 /** Creates a visit that reads through `reader`. It starts empty: call `open`. */
 export function createInboxVisit<Row extends InboxVisitRow, Query>(
   reader: InboxReader<Row, Query>,
+  options: InboxVisitOptions<Query> = {},
 ): InboxVisit<Row, Query> {
+  const now = options.now ?? (() => performance.now());
   let seq = 0;
   let pushGen = 0;
   let visitId = 0;
@@ -212,6 +292,8 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   /** The ids of the moves that handled each row, oldest first, until the move is put back. */
   const claims = new Map<string, number[]>();
   let isShowPending = false;
+  /** The things the user linked, until the first read issued after the link applies. */
+  let pendingLink: { readonly refs: readonly string[] } | null = null;
   let lastChange: InboxVisitChange | null = null;
   const listeners = new Set<() => void>();
   let snapshot = buildSnapshot(null);
@@ -221,13 +303,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     previous: InboxVisitSnapshot<Row, Query> | null,
   ): InboxVisitSnapshot<Row, Query> {
     const failed = opening !== null && opening.read === null;
-    const shown =
-      state === null
-        ? []
-        : state.rows.map((row) => {
-            const override = state!.overrides.get(row.ref);
-            return override?.from === row ? override.to : row;
-          });
+    const shown = state === null ? [] : listShownRows(state);
     const isSameRows =
       previous !== null &&
       previous.rows.length === shown.length &&
@@ -237,6 +313,10 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       error: opening?.error,
       query: state?.query ?? null,
       rows: isSameRows ? previous.rows : shown,
+      entries: keepUnchangedEntries(
+        previous?.entries ?? NO_ENTRIES,
+        state === null ? NO_ENTRIES : buildStateEntries(state, shown),
+      ),
       arrivals: state?.arrivals.length ?? 0,
       current: state?.current ?? null,
       selection: state?.selection ?? NO_SELECTION,
@@ -321,10 +401,17 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         cancelAll();
         visitId += 1;
         isShowPending = false;
+        pendingLink = null;
         viewport = { first: 0, last: 0 };
         lastChange = null;
-        state = startVisit(current.query, page, read.ticket);
+        state = startVisit(
+          current.query,
+          page,
+          read.ticket,
+          options.isSearch?.(current.query) ?? false,
+        );
         commit();
+        readStaleRows();
       },
       (error: unknown) => {
         if (read.controller.signal.aborted || opening !== current) return;
@@ -339,18 +426,28 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     if (state === null) return;
     const query = state.query;
     cancelRowReads();
+    // A dismissed group hides every member, so the hidden refs may outnumber the window.
+    // They take at most half of it and the rest are asked in the refreshes after.
+    const hidden = [...state.hidden.keys()].slice(0, HELD_WINDOW / 2);
     const held = [
-      ...state.hidden.keys(),
-      ...pickWindow(state.rows, viewport.first, viewport.last).map((row) => row.ref),
-    ].slice(0, HELD_WINDOW);
+      ...hidden,
+      ...pickWindow(state.rows, viewport.first, viewport.last)
+        .map((row) => row.ref)
+        .slice(0, HELD_WINDOW - hidden.length),
+    ];
     const read = startRead(held);
     refreshing = read;
+    const link = pendingLink;
     reader.refresh(query, held, read.controller.signal).then(
       (reply) => {
         const accepted = acceptRead(read);
         if (accepted === null) return;
         refreshing = null;
-        setState(applyRefresh(accepted, { ...reply, asked: held }, read.ticket));
+        const refreshed = applyRefresh(accepted, { ...reply, asked: held }, read.ticket);
+        if (link !== null && link === pendingLink) {
+          pendingLink = null;
+          setState(openLinkedGroup(refreshed, link.refs));
+        } else setState(refreshed);
         if (isShowPending) takeInArrivals();
         readStaleRows();
       },
@@ -371,24 +468,34 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     setState(takeArrivals(state), { kind: "arrived", refs });
   }
 
-  /** Reads the rows in the window that missed the latest push and that no read in flight covers. */
+  /**
+   * Reads the rows that are missing or old: the rows in the window that missed
+   * the latest push, then the members of the open groups that the visit holds no
+   * row for (so a group the page cut fills in). Asks about at most `HELD_WINDOW`
+   * refs and none that a read in flight covers.
+   */
   function readStaleRows(): void {
     if (state === null) return;
     const current = state;
     const covered = (ref: string): boolean =>
       [refreshing, ...rowReads].some((read) => read?.ticket.gen === pushGen && read.refs.has(ref));
-    const stale = pickWindow(current.rows, viewport.first, viewport.last)
-      .map((row) => row.ref)
-      .filter((ref) => (current.freshAt.get(ref) ?? -1) < pushGen && !covered(ref));
+    const isBeingRead = (ref: string): boolean => [...rowReads].some((read) => read.refs.has(ref));
+    const stale = [
+      ...pickWindow(current.rows, viewport.first, viewport.last)
+        .map((row) => row.ref)
+        .filter((ref) => (current.freshAt.get(ref) ?? -1) < pushGen && !covered(ref)),
+      ...listUnloadedMembers(current).filter((ref) => !isBeingRead(ref)),
+    ].slice(0, HELD_WINDOW);
     if (stale.length === 0) return;
     const read = startRead(stale);
     rowReads.add(read);
     reader.readRows(current.query, stale, read.controller.signal).then(
-      (rows) => {
+      (reply) => {
         rowReads.delete(read);
         const accepted = acceptRead(read);
         if (accepted === null) return;
-        setState(applyRowsRead(accepted, { rows, asked: stale }, read.ticket));
+        setState(applyRowsRead(accepted, { ...reply, asked: stale }, read.ticket));
+        readStaleRows();
       },
       () => {
         rowReads.delete(read);
@@ -409,6 +516,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         if (accepted === null) return;
         nextPage = null;
         setState(applyNextPage(accepted, { ...page, after }, read.ticket));
+        readStaleRows();
       },
       () => {
         // The next time the viewport nears the end reads this page again.
@@ -474,10 +582,22 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     readStaleRows();
   }
 
+  /** Counts a change the controller made and reads again, cancelling the read in flight. */
+  function pushArrived(): void {
+    pushGen += 1;
+    if (opening === null) {
+      startRefresh();
+      return;
+    }
+    startFirstRead();
+    commit();
+  }
+
   return {
     open(query) {
       cancelAll();
       isShowPending = false;
+      pendingLink = null;
       opening = { query, read: null, error: undefined };
       startFirstRead();
       commit();
@@ -486,19 +606,16 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       cancelAll();
       opening = null;
     },
-    pushArrived() {
-      pushGen += 1;
-      if (opening === null) {
-        startRefresh();
-        return;
-      }
-      startFirstRead();
-      commit();
+    pushArrived,
+    linkMade(refs) {
+      if (opening === null && state !== null) pendingLink = { refs };
+      pushArrived();
     },
     viewportChanged(firstIndex, lastIndex) {
-      viewport = { first: firstIndex, last: lastIndex };
       if (state === null) return;
-      if (lastIndex >= state.rows.length - 1 - NEAR_END_ROWS) readNextPage();
+      const entries = snapshot.entries;
+      viewport = findViewedRowRange(state.rows, entries, firstIndex, lastIndex) ?? viewport;
+      if (lastIndex >= entries.length - 1 - NEAR_END_ROWS) readNextPage();
       readStaleRows();
     },
     show() {
@@ -508,9 +625,17 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     },
     move(kind, refs, show) {
       const id = (receiptId += 1);
-      if (state === null) return { id, visit: visitId, refs: [], entries: [] };
+      if (state === null)
+        return {
+          id,
+          visit: visitId,
+          refs: [],
+          entries: [],
+          groups: [],
+          currentKey: null,
+        };
       const before = state;
-      const applied = applyMove(before, { id, visit: visitId, kind, refs, show });
+      const applied = applyMove(before, { id, visit: visitId, kind, refs, at: now(), show });
       const emptied =
         kind === "dismissed" && applied.state.rows.length === 0 && before.rows.length > 0;
       receiptQueries.set(id, before.query);
@@ -534,8 +659,19 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     select(change) {
       if (state !== null) setState(applySelectionChange(state, change));
     },
-    targets(hoveredRef) {
-      return state === null ? [] : listMoveTargets(state, hoveredRef);
+    fold(change) {
+      if (state === null) return;
+      setState(applyFold(state, change));
+      readStaleRows();
+    },
+    reveal(ref) {
+      if (state === null || !state.rows.some((row) => row.ref === ref)) return false;
+      setState(applyReveal(state, ref));
+      readStaleRows();
+      return true;
+    },
+    targets(hoveredKey) {
+      return state === null ? null : listMoveTargets(state, hoveredKey, now());
     },
     subscribe(listener) {
       listeners.add(listener);

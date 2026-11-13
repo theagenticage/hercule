@@ -327,18 +327,19 @@ export const answerFakeInboxQuery = (inbox: FakeInbox, query: InboxQuery): Inbox
   const heldThings = (refs: readonly string[]): InboxThing[] =>
     things.filter((thing) => refs.includes(thing.ref));
   if (query.mode === "rows") {
-    return { mode: "rows", things: heldThings(query.held), offerSets };
+    return { mode: "rows", things: heldThings(query.held), groups: [], offerSets };
   }
   const from = query.mode === "next" ? Number(query.after) : 0;
   const page = things.slice(from, from + inbox.pageSize);
   const next = from + inbox.pageSize;
   const nextCursor = next < things.length ? { nextCursor: String(next) } : {};
   if (query.mode === "next") {
-    return { mode: "next", things: page, ...nextCursor, offerSets };
+    return { mode: "next", things: page, groups: [], ...nextCursor, offerSets };
   }
   const first: InboxFirstPage = {
     mode: "first",
     things: page,
+    groups: [],
     total: things.length,
     order: name === "waits" ? "waiting" : "newest",
     facets: [],
@@ -352,6 +353,7 @@ export const answerFakeInboxQuery = (inbox: FakeInbox, query: InboxQuery): Inbox
     first,
     held: {
       things: heldThings(query.held).filter((thing) => !onFirstPage.has(thing.ref)),
+      groups: [],
       offerSets,
     },
   };

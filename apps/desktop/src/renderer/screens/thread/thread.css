@@ -45,16 +45,6 @@
 button.worked:hover b {
   color: var(--ink);
 }
-/* The words only a screen reader gets: a status line's label may count up
-   every second, so the live region holds a text that changes with the state. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 
 /* The agent's message the agent has started and not yet written a word of.
    A face and a meta line with nothing beside them would read as a response

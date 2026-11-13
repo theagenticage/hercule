@@ -16,12 +16,25 @@ import { TasksIcon } from "../../icons/tasks";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import "./inbox-list.css";
+import "./inbox-group-row.css";
 
 /** Which modifier keys were down on a click. The caller decides what they mean on this platform. */
 export interface InboxClickModifiers {
   readonly shiftKey: boolean;
   readonly metaKey: boolean;
   readonly ctrlKey: boolean;
+}
+
+/** How a row hangs under the head of an open group. */
+export interface InboxRowMember {
+  /** True when the member does not answer the list's query: it is drawn quieter, so the query still reads. */
+  readonly isQuiet: boolean;
+  /** True for the last line of the group, where the hairline that joins the members ends. */
+  readonly isLast: boolean;
+  /** The member's place among the group's members the list holds, from 1. */
+  readonly position: number;
+  /** How many members of the group the list holds. A member's `aria-setsize`: the group is the set, not the whole list. */
+  readonly of: number;
 }
 
 /** What a row calls back with, every one given the row's reference. */
@@ -53,7 +66,7 @@ function HolderFigure({ holder }: { readonly holder: InboxRowHolder }): JSX.Elem
 }
 
 /** Renders the first line's right end: the wait, the holder, or an empty slot that keeps the title's width. */
-function TimeFigure({ time }: { readonly time: InboxRowTime }): JSX.Element {
+export function TimeFigure({ time }: { readonly time: InboxRowTime }): JSX.Element {
   if (time.kind === "holder") return <HolderFigure holder={time.holder} />;
   if (time.kind === "none") return <span className="ib-row-time" aria-hidden="true" />;
   return (
@@ -64,11 +77,12 @@ function TimeFigure({ time }: { readonly time: InboxRowTime }): JSX.Element {
 }
 
 /** Renders the second line's sentence: the person in ink, the rest muted, the "+n" chip and the aside. */
-function ReasonLine({ reason }: { readonly reason: InboxRowReason }): JSX.Element {
+export function ReasonLine({ reason }: { readonly reason: InboxRowReason }): JSX.Element {
   return (
     <span className="ib-row-why">
       {reason.who === undefined ? null : <b className="ib-who">{reason.who} </b>}
       {reason.rest}
+      {reason.more > 0 ? " " : null}
       {reason.more > 0 ? (
         <span className="ib-more" title={`${String(reason.more)} more on it`}>
           +{reason.more}
@@ -175,8 +189,10 @@ function RowMoves({
  * called with the row's reference. With `actions` null the row is an inert
  * copy, such as one that fades out of the list: it has no buttons and no tick.
  *
- * The row is a tree item at level 1. `position` is its place among `size`
- * rows, one based, because a virtual list draws only some of them. Only the
+ * The row is a tree item at level 1, or at level 2 as a `member` of an open
+ * group: indented to the group's title, hanging from its chevron on a hairline. `position` is its place among `size`
+ * rows, one based, because a virtual list draws only some of them; a member's place is
+ * counted within its group instead (`member.position` of `member.of`). Only the
  * current row is in the tab order.
  *
  * The row is memoized, so a render of the list draws again only the rows
@@ -190,6 +206,7 @@ export const InboxRow = memo(function InboxRow({
   current,
   selected,
   actions,
+  member,
 }: {
   readonly view: InboxRowView;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -198,6 +215,7 @@ export const InboxRow = memo(function InboxRow({
   readonly current: boolean;
   readonly selected: boolean;
   readonly actions: InboxRowActions | null;
+  readonly member?: InboxRowMember | undefined;
 }): JSX.Element {
   const { reason, place, identifier } = view;
   const pick = (event: MouseEvent<HTMLDivElement>): void => {
@@ -214,14 +232,19 @@ export const InboxRow = memo(function InboxRow({
   if (current) classes.push("is-current");
   if (selected) classes.push("is-picked");
   if (reason.quiet) classes.push("is-quiet");
+  if (member !== undefined) {
+    classes.push("ib-row--member");
+    if (member.isLast) classes.push("is-last");
+    if (member.isQuiet) classes.push("is-outside-query");
+  }
   return (
     // The list owns the keyboard (J, K and the other keys of the screen). A click is the pointer's way to the same row.
     <div
       className={classes.join(" ")}
       role="treeitem"
-      aria-level={1}
-      aria-posinset={position}
-      aria-setsize={size}
+      aria-level={member === undefined ? 1 : 2}
+      aria-posinset={member === undefined ? position : member.position}
+      aria-setsize={member === undefined ? size : member.of}
       aria-selected={selected}
       aria-label={view.label}
       tabIndex={current ? 0 : -1}

@@ -21,6 +21,8 @@ const member = (ref: string, title: string): InboxRowView => ({
 const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
   const onWalk = vi.fn();
   const onDismiss = vi.fn();
+  const onTakeOn = vi.fn();
+  const onLink = vi.fn();
   const members = Array.from({ length: count }, (_, index) =>
     member(String(index + 1), `Thing ${String(index + 1)}`),
   );
@@ -30,10 +32,12 @@ const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
       plugins={TEST_PLUGINS}
       platform={platform}
       onWalk={onWalk}
+      onTakeOn={onTakeOn}
+      onLink={onLink}
       onDismiss={onDismiss}
     />,
   );
-  return { onWalk, onDismiss };
+  return { onWalk, onDismiss, onTakeOn, onLink };
 };
 
 describe("InboxSelectionPane", () => {
@@ -44,10 +48,14 @@ describe("InboxSelectionPane", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
-  it("offers Dismiss only", () => {
-    renderPane(2);
+  it("offers Take on, Link and Dismiss, and no hand-off", async () => {
+    const { onTakeOn, onLink } = renderPane(2);
     const footer = screen.getByRole("contentinfo");
-    expect(within(footer).getAllByRole("button")).toHaveLength(1);
+    expect(within(footer).getAllByRole("button")).toHaveLength(3);
+    await userEvent.click(within(footer).getByRole("button", { name: "Take on" }));
+    await userEvent.click(within(footer).getByRole("button", { name: "Link all 2" }));
+    expect(onTakeOn).toHaveBeenCalledOnce();
+    expect(onLink).toHaveBeenCalledOnce();
   });
 
   it("writes one thing in the singular", () => {

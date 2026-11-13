@@ -39,7 +39,23 @@ describe("decideInboxKeyAction", () => {
       by: 1,
       extend: false,
     });
-    expect(decide("x", "list")).toBe("toggleSelect");
+    expect(decideInboxKeyAction(press("x"), "list")).toEqual({
+      kind: "toggleSelect",
+      whole: false,
+    });
+    expect(decideInboxKeyAction(press("X", { shiftKey: true }), "list")).toEqual({
+      kind: "toggleSelect",
+      whole: true,
+    });
+    expect(decide("l", "list")).toBe("link");
+    expect(decideInboxKeyAction(press("ArrowRight"), "list")).toEqual({
+      kind: "fold",
+      fold: "open",
+    });
+    expect(decideInboxKeyAction(press("ArrowLeft"), "list")).toEqual({
+      kind: "fold",
+      fold: "close",
+    });
     expect(decide("e", "list")).toBe("dismiss");
     expect(decide("t", "list")).toBe("takeOn");
     expect(decide("h", "list")).toBe("handOff");
@@ -69,6 +85,8 @@ describe("decideInboxKeyAction", () => {
   it("acts on single keys only in the list, so the rail, the bar, menus and fields never move a row", () => {
     for (const place of ["rail", "bar", "overlay", "field", "outside"] as const) {
       expect(decide("e", place)).toBeNull();
+      expect(decide("l", place)).toBeNull();
+      expect(decide("ArrowRight", place)).toBeNull();
       expect(decide("j", place)).toBeNull();
     }
   });
@@ -100,6 +118,7 @@ describe("decideInboxKeyAction", () => {
 
   it("never repeats a move while a key is held, but walks while J is held", () => {
     expect(decide("e", "list", { repeat: true })).toBeNull();
+    expect(decide("l", "list", { repeat: true })).toBeNull();
     // Holding Return must not answer one thing after another.
     expect(decide("Enter", "list", { repeat: true })).toBeNull();
     expect(decide("Enter", "list")).toBe("activate");

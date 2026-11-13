@@ -53,6 +53,8 @@ export interface InboxPaneMoves {
   readonly onGoTo: (ref: string) => void;
   /** Starts the hand-off: hands at once with one workflow, else opens the menu under the button. */
   readonly onHandOff: () => void;
+  /** Starts the search for a thing to link this one to. */
+  readonly onLink: () => void;
 }
 
 /**
@@ -208,6 +210,7 @@ export function InboxPaneThingPart({
         handAnchorRef={handAnchorRef}
         onTakeOn={moves.onTakeOn}
         onHandOff={moves.onHandOff}
+        onLink={moves.onLink}
         onDismiss={moves.onDismiss}
       />
     </div>

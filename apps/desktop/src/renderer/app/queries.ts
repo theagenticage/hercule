@@ -1107,6 +1107,18 @@ export const inboxQuery = (client: HerculeClient, selection: InboxSelection) =>
   });
 
 /**
+ * Reads the group of linked things that the thing `ref` is in, in full, for
+ * the pane of a group (`externalEntity.readInboxGroup`). The key is under the
+ * Inbox's, so a push on the Inbox (a link, an unlink) reads it again.
+ */
+export const inboxGroupQuery = (client: HerculeClient, ref: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.inbox(), "group", ref],
+    queryFn: ({ signal }) => client.externalEntity.readInboxGroup({ payload: { ref } }, { signal }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the values of one field among the things of a list, for the search's
  * suggestions. The key is under the Inbox's, so a push on the Inbox reads the
  * values again. `input` is `undefined` while no clause is being typed, and

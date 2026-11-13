@@ -1,0 +1,97 @@
+/* The pane of a group, besides what it shares with the pane of one thing (the title, the members, the
+   footer): the linked pairs, and the "+n" chip on a member's second line. */
+.ib-pane-member-why .ib-pane-member-more {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--selected);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Each pair takes two lines: the pair, then who linked it with Unlink beside it, under the first name.
+   The pair has the whole line: marks and identifiers keep their size and only a title is cut. The second
+   line is always 24px, Unlink's target, and Unlink only fades in, so nothing moves when it shows. */
+.ib-group-pairs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ib-group-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 4px 0;
+  font-size: var(--t-12);
+}
+.ib-group-pair-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ib-group-pair-mark {
+  display: inline-flex;
+  flex: none;
+}
+.ib-group-pair-id {
+  flex: none;
+}
+.ib-group-pair-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The drawing's long dash between the two ends. It is drawn here, not typed in the markup, so no screen reader reads it. */
+.ib-group-pair-dash::before {
+  content: "\2014";
+}
+.ib-group-pair-dash {
+  flex: none;
+  margin: 0 4px;
+  color: var(--faint);
+}
+.ib-group-pair-claim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding-left: 17px;
+  color: var(--faint);
+  line-height: 16px;
+}
+.ib-group-unlink {
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+  opacity: 0;
+}
+.ib-group-pair:hover .ib-group-unlink,
+.ib-group-pair:focus-within .ib-group-unlink {
+  opacity: 1;
+}
+.ib-group-unlink:hover {
+  color: var(--ink);
+}
+.ib-group-unlink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.ib-group-cut {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}

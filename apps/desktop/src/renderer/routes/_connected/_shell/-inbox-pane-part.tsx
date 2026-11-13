@@ -87,6 +87,8 @@ function InboxSelectionPart({
   scrollRef,
   onWalk,
   onDismiss,
+  onTakeOn,
+  onLink,
 }: {
   readonly client: HerculeClient;
   readonly members: ReadonlyArray<InboxListRow>;
@@ -94,6 +96,8 @@ function InboxSelectionPart({
   readonly scrollRef: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
+  readonly onTakeOn: () => void;
+  readonly onLink: () => void;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
@@ -109,6 +113,8 @@ function InboxSelectionPart({
       platform={bridge.platform}
       ref={scrollRef}
       onWalk={onWalk}
+      onTakeOn={onTakeOn}
+      onLink={onLink}
       onDismiss={onDismiss}
     />
   );
@@ -139,6 +145,8 @@ export function InboxPanePart({
   ref,
   onWalk,
   onDismissSelection,
+  onTakeOnSelection,
+  onLinkSelection,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
@@ -154,6 +162,8 @@ export function InboxPanePart({
   readonly ref: Ref<InboxPaneHandle>;
   readonly onWalk: (ref: string) => void;
   readonly onDismissSelection: () => void;
+  readonly onTakeOnSelection: () => void;
+  readonly onLinkSelection: () => void;
 }): JSX.Element {
   const [choice, dispatchAskMove] = useReducer(reducePaneAskChoice, NO_PANE_ASK_CHOICE);
   const asksRef = useRef<InboxPaneAsksHandle>(null);
@@ -184,6 +194,8 @@ export function InboxPanePart({
         scrollRef={scrollRef}
         onWalk={onWalk}
         onDismiss={onDismissSelection}
+        onTakeOn={onTakeOnSelection}
+        onLink={onLinkSelection}
       />
     );
   }

@@ -31,9 +31,8 @@ import {
   listCalls,
   openWork,
   readBodies,
-  SHORT_WINDOW_MS,
-  shortenUndoWindow,
-  waitOutUndoWindow,
+  holdUndoWindow,
+  endUndoWindow,
   WEBSHOP,
 } from "./-work.testing";
 
@@ -595,7 +594,7 @@ describe("merging two cards", () => {
     const { calls } = await openMergeable();
     await screen.findByRole("button", { name: /^Label the pallets/ });
     focusCard("Label the pallets");
-    shortenUndoWindow();
+    holdUndoWindow();
 
     await user.keyboard("m");
     expect(screen.getByText(/^Pick the card to merge this into/)).toBeTruthy();
@@ -619,16 +618,14 @@ describe("merging two cards", () => {
     expect(document.querySelector(".work-desk")?.hasAttribute("data-merge-picking")).toBe(false);
     expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toHaveLength(0);
 
-    await waitFor(
-      () => {
-        expect(readBodies(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toEqual([
-          { intoTaskId: WEIGH.id },
-        ]);
-      },
-      { timeout: SHORT_WINDOW_MS * 2 },
-    );
+    await endUndoWindow();
+    await waitFor(() => {
+      expect(readBodies(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toEqual([
+        { intoTaskId: WEIGH.id },
+      ]);
+    });
     // The survivor stays where it was, and the source stays gone once the board is read again.
-    await waitOutUndoWindow();
+    await endUndoWindow();
     expect(screen.queryByRole("button", { name: /^Label the pallets/ })).toBeNull();
     expect(getCard("Weigh the parcels")).toBeTruthy();
   });
@@ -636,12 +633,12 @@ describe("merging two cards", () => {
   it("sends nothing, and the card comes back, when Undo is pressed in the window", async () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openMergeable();
-    shortenUndoWindow();
+    holdUndoWindow();
     await mergeLabelIntoWeigh(user);
     expect(screen.queryByRole("button", { name: /^Label the pallets/ })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /^Undo/ }));
-    await waitOutUndoWindow();
+    await endUndoWindow();
 
     expect(getCard("Label the pallets")).toBeTruthy();
     expect(
@@ -657,7 +654,7 @@ describe("merging two cards", () => {
     });
     await screen.findByRole("button", { name: /^Label the pallets/ });
     focusCard("Label the pallets");
-    shortenUndoWindow();
+    holdUndoWindow();
 
     await user.keyboard("m");
     await user.keyboard("{ArrowDown}");
@@ -673,7 +670,7 @@ describe("merging two cards", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Label the pallets/ })).toBeTruthy();
     expect(document.querySelector(".work-desk")?.hasAttribute("data-merge-picking")).toBe(false);
-    await waitOutUndoWindow();
+    await endUndoWindow();
     expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toHaveLength(0);
   });
 
@@ -699,10 +696,10 @@ describe("merging two cards", () => {
   it("brings the card back and shows the controller's words when task.merge is refused", async () => {
     const user = userEvent.setup({ delay: null });
     await openMergeable({ refusal: "Those Tasks have 20 labels together. Remove some first." });
-    shortenUndoWindow();
+    holdUndoWindow();
     await mergeLabelIntoWeigh(user);
 
-    await waitOutUndoWindow();
+    await endUndoWindow();
 
     expect(
       await screen.findByText(
@@ -760,7 +757,7 @@ describe("merging two cards", () => {
       ]),
     );
     const { calls } = await openMergeable();
-    shortenUndoWindow();
+    holdUndoWindow();
 
     expect(
       await screen.findByText(
@@ -768,7 +765,7 @@ describe("merging two cards", () => {
       ),
     ).toBeTruthy();
     expect(getCard("Label the pallets")).toBeTruthy();
-    await waitOutUndoWindow();
+    await endUndoWindow();
     expect(listCalls(calls, `POST /api/v1/tasks/${LABEL.id}/merge`)).toHaveLength(0);
   });
 

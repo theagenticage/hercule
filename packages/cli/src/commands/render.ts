@@ -64,6 +64,8 @@ import {
   type OpenRequest,
   type OperationId,
   type MintedPromotionToken,
+  type EntityLinkResult,
+  type InboxGroupDetail,
   type Post,
   type Resolution,
   type Run,
@@ -1143,6 +1145,25 @@ const renderTaskEntityLinked = (
   words: { readonly done: string; readonly nothing: string },
 ): ReadonlyArray<string> => [`task ${toIdTail(task.id)}: ${changed ? words.done : words.nothing}`];
 
+/**
+ * Returns the lines of `entity group`: the label, one line per member (the
+ * ref, then its title or "restricted"), then one line per link with who
+ * claims it. A cut group says so on the last line.
+ */
+const renderInboxGroup = (group: InboxGroupDetail): ReadonlyArray<string> => [
+  `group  ${group.label} (${String(group.members.length)} ${group.members.length === 1 ? "thing" : "things"})`,
+  ...group.members.map((member) =>
+    `  ${member.ref}  ${member.restricted ? "restricted" : (member.title ?? "")}`.trimEnd(),
+  ),
+  ...(group.links.length === 0 ? [] : ["links"]),
+  ...group.links.map((link) => {
+    const by = link.claim.type === "source" ? `source ${link.claim.plugin ?? ""}`.trim() : "you";
+    const also = link.claim.type === "source" && link.hasPersonClaim ? ", you too" : "";
+    return `  ${link.fromRef} - ${link.toRef}  ${by}${also}`;
+  }),
+  ...(group.complete ? [] : ["the group is larger than this reply: members or links were cut"]),
+];
+
 /** Returns the line printed after `discussion post`, with the new Post's full id. */
 const renderPosted = (post: Post): ReadonlyArray<string> => [
   `post ${post.id} added to discussion ${formatCell(post.discussionId)}`,
@@ -1464,6 +1485,15 @@ const VALUE_RENDERERS: Partial<
       done: "taken away and kept away",
       nothing: "does not link it, nothing changed",
     }),
+  "externalEntity.readInboxGroup": (value) => renderInboxGroup(value as InboxGroupDetail),
+  "externalEntity.link": (value) => {
+    const { created } = value as EntityLinkResult;
+    return [
+      created.length === 0
+        ? "Already linked. Nothing changed."
+        : `Linked ${String(created.length)}: ${created.join(", ")}.`,
+    ];
+  },
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),

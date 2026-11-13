@@ -16,7 +16,11 @@
 import type {
   Connection,
   EntityBlocks,
+  EntityLink,
+  EntityPeer,
   ExternalEntityDetail,
+  InboxGroupDetail,
+  InboxGroupQuery,
   InboxOutline,
   InboxFacet,
   InboxFirstPage,
@@ -477,13 +481,14 @@ const replyInMode = (query: InboxQuery, first: InboxFirstPage): InboxReply => {
     case "first":
       return first;
     case "next":
-      return { mode: "next", things: [], offerSets };
+      return { mode: "next", things: [], groups: [], offerSets };
     case "refresh":
-      return { mode: "refresh", first, held: { things: [], offerSets } };
+      return { mode: "refresh", first, held: { things: [], groups: [], offerSets } };
     case "rows":
       return {
         mode: "rows",
         things: first.things.filter((thing) => query.held.includes(thing.ref)),
+        groups: [],
         offerSets,
       };
   }
@@ -494,11 +499,172 @@ const answerNothing = (query: InboxQuery): InboxReply =>
   replyInMode(query, {
     mode: "first",
     things: [],
+    groups: [],
     total: 0,
     order: "newest",
     facets: [],
     offerSets: {},
   });
+
+/** The refs of the things the group scenes link together: two pull requests and the issue they fix. */
+const GROUPED_REFS: ReadonlyArray<string> = [
+  "github:pull-request:acme/storefront-web#6213",
+  "github:pull-request:acme/storefront-web#6244",
+  "sentry:issue:storefront-1z9",
+];
+
+/** The ticket that joins the group though no list holds it, so its row is drawn quieter. */
+const QUIET_GROUPED_REF = "tidewatch:ticket:shop-142";
+
+/** The pull requests the large group adds to the three above, so it holds more than seven things. */
+const LARGE_GROUP_EXTRAS: ReadonlyArray<Item> = Array.from({ length: 9 }, (_, index) =>
+  pullRequest(
+    30 + index,
+    7000 + index,
+    `Split the checkout form, part ${String(index + 1)}`,
+    [
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Mei",
+        say: "Mei asked for your review",
+        hours: 3 + index,
+      },
+    ],
+    "storefront-web",
+  ),
+);
+
+/** Returns the things `refs` name, in the order of `refs`. Fails when the fixture has none of one of them. */
+const findThings = (refs: ReadonlyArray<string>, extras: ReadonlyArray<Item>): InboxThing[] =>
+  refs.map((ref) => {
+    const found = [...ALL_THINGS, ...extras.map((item) => item.thing)].find(
+      (thing) => thing.ref === ref,
+    );
+    if (found === undefined) throw new Error(`The fixture has no thing ${ref}.`);
+    return found;
+  });
+
+/** What a group scene links: its members, the pairs between them, and what it adds to the first page. */
+interface GroupWorld {
+  /** The members the list's query holds, the first of them places the group. */
+  readonly refs: ReadonlyArray<string>;
+  /** The members the list's query does not hold. */
+  readonly quietRefs: ReadonlyArray<string>;
+  readonly extras: ReadonlyArray<Item>;
+  readonly links: ReadonlyArray<EntityLink>;
+}
+
+const SMALL_GROUP: GroupWorld = {
+  refs: GROUPED_REFS,
+  quietRefs: [QUIET_GROUPED_REF],
+  extras: [],
+  links: [
+    {
+      fromRef: QUIET_GROUPED_REF,
+      toRef: GROUPED_REFS[1]!,
+      claim: { type: "source", plugin: "tidewatch" },
+      hasPersonClaim: false,
+    },
+    {
+      fromRef: GROUPED_REFS[1]!,
+      toRef: GROUPED_REFS[2]!,
+      claim: { type: "person", actor: "user" },
+      hasPersonClaim: true,
+    },
+    {
+      fromRef: QUIET_GROUPED_REF,
+      toRef: GROUPED_REFS[0]!,
+      claim: { type: "person", actor: "user" },
+      hasPersonClaim: true,
+    },
+  ],
+};
+
+const LARGE_GROUP: GroupWorld = {
+  refs: [...GROUPED_REFS, ...LARGE_GROUP_EXTRAS.map((item) => item.thing.ref)],
+  quietRefs: [QUIET_GROUPED_REF],
+  extras: LARGE_GROUP_EXTRAS,
+  links: SMALL_GROUP.links,
+};
+
+/**
+ * Returns `page` with the things of `world` drawn as one group, standing where
+ * the first of them stands, as the controller does. The members the list's
+ * query does not hold come last, with `matches` false. A page that holds fewer
+ * than two of the members is returned as it is.
+ */
+const groupFirstPage = (page: InboxFirstPage, world: GroupWorld): InboxFirstPage => {
+  const heldRefs = [...world.refs, ...world.quietRefs];
+  const members = [
+    ...page.things.filter((thing) => world.refs.includes(thing.ref)),
+    ...world.extras.map((item) => item.thing),
+  ];
+  const label = members[0];
+  if (label === undefined || members.length < 2) return page;
+  const quiet = findThings(world.quietRefs, world.extras);
+  const others = page.things.filter((thing) => !heldRefs.includes(thing.ref));
+  const at = page.things.indexOf(label);
+  const before = others.slice(0, at);
+  return {
+    ...page,
+    things: [...before, ...members, ...quiet, ...others.slice(at)],
+    groups: [
+      {
+        labelRef: label.ref,
+        label: label.title,
+        members: [
+          ...members.map((thing) => ({ id: thing.id, ref: thing.ref, matches: true })),
+          ...quiet.map((thing) => ({ id: thing.id, ref: thing.ref, matches: false })),
+        ],
+        size: members.length + quiet.length,
+      },
+    ],
+  };
+};
+
+/** Plays `queryInbox` over the fixture's things, with the things of `world` grouped. */
+const answerInboxQueryWithWorld =
+  (world: GroupWorld) =>
+  (query: InboxQuery): InboxReply => {
+    const reply = answerInboxQuery(query);
+    if (reply.mode === "first") return groupFirstPage(reply, world);
+    return reply.mode === "refresh"
+      ? { ...reply, first: groupFirstPage(reply.first, world) }
+      : reply;
+  };
+
+/** Plays `queryInbox` over the fixture's things, with the linked things grouped (the group scenes). */
+export const answerInboxQueryWithGroup = answerInboxQueryWithWorld(SMALL_GROUP);
+
+/** Plays `queryInbox` with eleven linked things grouped, which is more than a group shows at once. */
+const answerInboxQueryWithLargeGroup = answerInboxQueryWithWorld(LARGE_GROUP);
+
+/** Builds the peer a group's pane lists for `thing`. */
+const buildPeer = (thing: InboxThing): EntityPeer => ({
+  id: thing.id,
+  ref: thing.ref,
+  kind: thing.kind,
+  noun: thing.noun,
+  identifier: thing.identifier,
+  title: thing.title,
+  url: thing.url,
+  ...(thing.status === undefined ? {} : { status: thing.status }),
+  yours: false,
+  restricted: false,
+});
+
+/** Plays `readInboxGroup` for the group of `world`, whichever of its members the read names. */
+const answerInboxGroupOf = (world: GroupWorld) => (): InboxGroupDetail => {
+  const things = findThings([...world.refs, ...world.quietRefs], world.extras);
+  return {
+    labelRef: things[0]!.ref,
+    label: things[0]!.title,
+    members: things.map(buildPeer),
+    links: [...world.links],
+    complete: true,
+  };
+};
 
 /** Plays the controller's `queryInbox` over the fixture's things. */
 export const answerInboxQuery = (query: InboxQuery): InboxReply => {
@@ -522,6 +688,7 @@ export const answerInboxQuery = (query: InboxQuery): InboxReply => {
   return replyInMode(query, {
     mode: "first",
     things,
+    groups: [],
     total: things.length,
     order: isWaiting ? "waiting" : "newest",
     offerSets: OFFER_SETS,
@@ -626,6 +793,8 @@ export interface InboxRecords {
   readonly signals: ReadonlyMap<string, Signal>;
   /** What the source shows of a thing, by the thing's id. `"fails"` plays a source that cannot be read. */
   readonly blocks: ReadonlyMap<string, EntityBlocks | "fails">;
+  /** Answers the read of the group a thing is in, for the pane of a group. The group scenes set it. */
+  readonly answerGroup?: (query: InboxGroupQuery) => InboxGroupDetail;
   /** Whether the live connection is down, which draws the offline pill. */
   readonly isOffline?: boolean;
   /** The selector of what the page draws last, when that is not a row or an empty state. */
@@ -739,6 +908,44 @@ const openPullRequest: Play = async (page) => {
   await settlePane(page);
 };
 
+/** The records of the group scenes: the list draws the linked things as one group. */
+const GROUP_RECORDS: InboxRecords = {
+  ...BASE,
+  answer: answerInboxQueryWithGroup,
+  answerGroup: answerInboxGroupOf(SMALL_GROUP),
+};
+
+/** The records of the scenes with a group of more than seven things. */
+const LARGE_GROUP_RECORDS: InboxRecords = {
+  ...BASE,
+  answer: answerInboxQueryWithLargeGroup,
+  answerGroup: answerInboxGroupOf(LARGE_GROUP),
+};
+
+/** Presses the chevron of the first group, which unfolds it, and waits for its members. */
+const unfoldGroup: Play = async (page) => {
+  const fold = await waitFor(page, ".ib-group-fold");
+  fold.click();
+  await waitFor(page, '[role="treeitem"][aria-level="2"]');
+};
+
+/** Presses the first group's row, as a click does, so the pane opens the group, and waits for its pairs. */
+const openGroupPane: Play = async (page) => {
+  const row = await waitFor(page, ".ib-row--group");
+  row.click();
+  await waitFor(page, ".ib-group-pairs");
+};
+
+/** Presses L on the row of pull request #6213, which opens "Link to..." for it, and waits for the results. */
+const pressLinkOnRow: Play = async (page) => {
+  await openRow(page, "#6213");
+  const row = findByText(page, ".ib-row", "#6213");
+  if (row === undefined) throw new Error("The list has no row with #6213.");
+  row.focus();
+  row.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+  await waitFor(page, ".link-to-item");
+};
+
 /** The states of the page, in the order the capture takes them. */
 export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
   { name: "waits", records: BASE, play: openPullRequest },
@@ -764,6 +971,44 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       // The field keeps the focus, with the values of the open clause offered under it.
       await waitFor(page, '[role="option"]');
     },
+  },
+  {
+    name: "group-closed",
+    records: GROUP_RECORDS,
+    play: async (page) => {
+      await waitFor(page, ".ib-row--group");
+    },
+  },
+  {
+    name: "group-open",
+    records: GROUP_RECORDS,
+    play: unfoldGroup,
+  },
+  {
+    name: "group-large",
+    records: LARGE_GROUP_RECORDS,
+    play: unfoldGroup,
+  },
+  {
+    name: "group-pane",
+    records: GROUP_RECORDS,
+    play: async (page) => {
+      await unfoldGroup(page);
+      await openGroupPane(page);
+    },
+  },
+  {
+    name: "group-large-pane",
+    records: LARGE_GROUP_RECORDS,
+    play: async (page) => {
+      await unfoldGroup(page);
+      await openGroupPane(page);
+    },
+  },
+  {
+    name: "link-to",
+    records: BASE,
+    play: pressLinkOnRow,
   },
   {
     name: "empty",

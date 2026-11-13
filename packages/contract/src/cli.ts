@@ -1471,6 +1471,10 @@ export const CLI = {
         flag: "after",
         help: "With --mode next: the nextCursor of the previous page of this same list and search. A cursor of another query is refused, and so is --after with any other mode.",
       },
+      // A smaller first page for the search box of the desktop app's Link to...
+      // dialog. A command line pages with --mode next, and `--limit` is a
+      // paging flag the CLI keeps for itself.
+      limit: { hidden: true },
       // The refs a client holds: a command line cannot name hundreds of them.
       held: { hidden: true },
     },
@@ -1489,6 +1493,17 @@ export const CLI = {
   // Exists only for the search box of the desktop app: it suggests values of a
   // field while the user types. A terminal types the value it knows.
   "externalEntity.suggestInboxValues": { hidden: true },
+  "externalEntity.readInboxGroup": {
+    command: "entity group",
+    help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Needs the grants `task.read` and `signal.query`. Fails with not_found when the thing is not on the Inbox.",
+    examples: [{ args: ["github:pr:acme/webshop#87"] }],
+    fields: {
+      ref: {
+        positional: true,
+        help: "The external ref of any thing in the group, as `hercule entity list` shows it.",
+      },
+    },
+  },
   "externalEntity.read": {
     command: "entity read",
     help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the fields its kind declares that have a value (`fields`, in declaration order) and the card face drawn from them (`face`, null for the generic card), the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
@@ -1522,6 +1537,36 @@ export const CLI = {
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.takeOnTogether": {
+    command: "entity take-on-together",
+    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns `taskId`, `created` (whether this call made the Task), `added` (how many things it linked to the Task), `taken` (how many links it marked as taken on by you) and `recordId` (which the controller keeps, so the call can be taken back). The title is not used when the things join a Task that already exists. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
+    examples: [
+      {
+        args: [
+          "1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c",
+          "2a4b6c8d-1e3f-7a40-8c11-0d5e6f7a8b9c",
+          "--title",
+          "Fix the login redirect",
+        ],
+      },
+    ],
+    fields: {
+      ids: {
+        positional: true,
+        placeholder: "id",
+        help: "An entity's full id, as `hercule entity list` shows it. A tail is not accepted. Give at least two. The first one gives the new Task its stage and Project.",
+      },
+      title: {
+        flag: "title",
+        help: "The title of the Task, when one is made. Ignored when the things join a Task that already exists.",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the things are on two or more different Tasks, or one is a place or cannot be read; the message says which. Take them on one at a time, or merge the Tasks first",
+    },
   },
   "externalEntity.handOff": {
     command: "entity hand-off",
@@ -1578,6 +1623,9 @@ export const CLI = {
   // remove the Task that a take-on or an add-to-work created. A terminal
   // removes a Task with `task delete`.
   "externalEntity.undoTakeOn": { hidden: true },
+  // Exists only for the undo line that follows `takeOnTogether`, as `undoTakeOn`
+  // does: it needs the `recordId` the call answered.
+  "externalEntity.undoTakeOnTogether": { hidden: true },
   "externalEntity.dismiss": {
     command: "entity dismiss",
     help: "Takes things off your Inbox, as you, all or none in one call. They keep their history and nothing is told to their source. An ask raised on a thing after you dismissed it brings it back; a new concern, an ask that was open when you dismissed it, or a signal that asks nothing does not. `hercule entity restore` brings them back at once. At most 1000 things.",
@@ -1672,13 +1720,22 @@ export const CLI = {
 
   "externalEntity.link": {
     command: "entity link",
-    help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing. Remove it with `hercule entity unlink`.",
+    help: "Links one thing from another system to one or more others, as your own claims, in one call. Linked tickets and pull requests show together on the Inbox and on Work. A thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on any source. All or none: if one target is not a ref, is the thing itself or is given twice, nothing is linked. Returns `created`, the targets this call linked; one you had linked already is left out and nothing changed for it. Remove links with `hercule entity unlink`. At most 1000 targets.",
     examples: [
       {
         args: [
           "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
           "--to",
           "github:pr:acme/webshop#87",
+        ],
+      },
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+          "--to",
+          "github:pr:acme/webshop#88",
         ],
       },
     ],
@@ -1688,16 +1745,20 @@ export const CLI = {
         placeholder: "ref",
         help: "The first thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it.",
       },
-      toRef: {
+      toRefs: {
         flag: "to",
-        help: "The second thing's external ref.",
+        help: "The external ref of a thing to link it to; repeat the flag for several.",
       },
     },
-    errors: { forbidden: USER_ONLY_FORBIDDEN },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "a target is the thing itself, is given twice, or is not a ref; the message says which. Nothing was linked",
+    },
   },
   "externalEntity.unlink": {
     command: "entity unlink",
-    help: "Removes your own link between two things, in either direction. Returns whether one was removed, and the firmest claim that still joins them, if a source or a mention is left: only your own link can be removed here. Nothing is written on either source.",
+    help: "Removes your own links between one thing and one or more others, in either direction, in one call. Returns one entry per target: whether a link was removed, and the firmest claim that still joins the two, if a source or a mention is left. Only your own link can be removed here. Nothing is written on any source. At most 1000 targets.",
     examples: [
       {
         args: [
@@ -1713,12 +1774,15 @@ export const CLI = {
         placeholder: "ref",
         help: "The first thing's external ref.",
       },
-      toRef: {
+      toRefs: {
         flag: "to",
-        help: "The second thing's external ref.",
+        help: "The external ref of a thing to unlink it from; repeat the flag for several.",
       },
     },
-    errors: { forbidden: USER_ONLY_FORBIDDEN },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state: "a target is given twice. Nothing was unlinked",
+    },
   },
 
   "ignoreRule.query": {

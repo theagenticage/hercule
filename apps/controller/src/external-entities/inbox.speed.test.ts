@@ -284,6 +284,19 @@ const seed = (things: number) =>
         json_extract(value, '$.ref')
       FROM json_each(${JSON.stringify(signalRows)})`;
 
+    // The user's own links join things in chains of three (1-2-3, 4-5-6, ...), so a
+    // read of the Inbox has about a third of its things in a group of three.
+    const links: Array<{ from: string; to: string }> = [];
+    for (let n = 1; n + 1 <= things; n++) {
+      if (n % 3 !== 0) links.push({ from: thingRef(n), to: thingRef(n + 1) });
+    }
+    yield* sql`
+      INSERT INTO external_entity_relation_claims
+        (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
+      SELECT json_extract(value, '$.from'), 'linked', json_extract(value, '$.to'), 'person', 'user',
+        '', 'current', ${AT}
+      FROM json_each(${JSON.stringify(links)})`;
+
     const tasks = yield* taskRepository;
     for (let n = 7; n <= things; n += 10) {
       yield* tasks.insert({

@@ -69,6 +69,7 @@ const HIDDEN = [
   "externalEntity.readInboxOutline",
   "externalEntity.suggestInboxValues",
   "externalEntity.undoTakeOn",
+  "externalEntity.undoTakeOnTogether",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -134,8 +135,10 @@ const COMMANDS: Record<string, string> = {
   "signal.lowerPriority": "signal lower-priority",
   "externalEntity.queryInbox": "entity list",
   "externalEntity.read": "entity read",
+  "externalEntity.readInboxGroup": "entity group",
   "externalEntity.readBlocks": "entity blocks",
   "externalEntity.takeOn": "entity take-on",
+  "externalEntity.takeOnTogether": "entity take-on-together",
   "externalEntity.handOff": "entity hand-off",
   "externalEntity.undoHandOff": "entity undo-hand-off",
   "externalEntity.dismiss": "entity dismiss",

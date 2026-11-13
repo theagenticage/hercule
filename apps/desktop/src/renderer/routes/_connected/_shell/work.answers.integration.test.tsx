@@ -26,10 +26,9 @@ import {
   getCard,
   listCalls,
   openWork,
-  SHORT_WINDOW_MS,
-  shortenUndoWindow,
+  holdUndoWindow,
   THREAD_ID,
-  waitOutUndoWindow,
+  endUndoWindow,
 } from "./-work.testing";
 
 // The board stops the paws of a working colleague whose card is out of view.
@@ -147,7 +146,7 @@ describe("answering a question from the details pane", () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openAsking();
     const pane = await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
 
     await user.click(within(pane).getByRole("button", { name: "The shop's" }));
 
@@ -165,12 +164,10 @@ describe("answering a question from the details pane", () => {
     );
     expect(listCalls(calls, RESPOND_PATH)).toHaveLength(0);
 
-    await waitFor(
-      () => {
-        expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
-      },
-      { timeout: SHORT_WINDOW_MS * 2 },
-    );
+    await endUndoWindow();
+    await waitFor(() => {
+      expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
+    });
     expect(listCalls(calls, RESPOND_PATH)[0]?.body).toEqual({
       requestId: ASKING_REQUEST_ID,
       answers: { Currency: "The shop's" },
@@ -187,7 +184,7 @@ describe("answering a question from the details pane", () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openAsking();
     await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
     // The pane ignores a Return pressed just as it showed the Task.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.activeElement).toBe(getCard("Refund emails show the wrong currency"));
@@ -195,19 +192,17 @@ describe("answering a question from the details pane", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Answered “The shop's”.")).toBeTruthy();
-    await waitFor(
-      () => {
-        expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
-      },
-      { timeout: SHORT_WINDOW_MS * 2 },
-    );
+    await endUndoWindow();
+    await waitFor(() => {
+      expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
+    });
   });
 
   it("sends the words the user typed, and sends nothing when Undo is pressed", async () => {
     const user = userEvent.setup({ delay: null });
     const { calls } = await openAsking();
     const pane = await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
 
     await user.type(within(pane).getByRole("textbox", { name: "Your answer" }), "Both{Enter}");
     await waitFor(() => {
@@ -216,7 +211,7 @@ describe("answering a question from the details pane", () => {
     expect(screen.getByText("Answered “Both”.")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /^Undo/ }));
-    await waitOutUndoWindow();
+    await endUndoWindow();
 
     expect(listCalls(calls, RESPOND_PATH)).toHaveLength(0);
     expect(screen.getByText("Put back: Answered “Both”.")).toBeTruthy();
@@ -232,13 +227,13 @@ describe("answering a question from the details pane", () => {
       attempt === 1 ? REFUSED_WHILE_AWAY : () => ANSWER_TAKEN,
     );
     const pane = await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
     await user.click(within(pane).getByRole("button", { name: "The shop's" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
-    await waitOutUndoWindow();
+    await endUndoWindow();
 
     await waitFor(() => {
       expect(getCard("Refund emails show the wrong currency").textContent).toContain(
@@ -265,9 +260,9 @@ describe("answering a question from the details pane", () => {
       attempt === 1 ? REFUSED_WHILE_AWAY : REFUSED_CLOSED,
     );
     const pane = await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
     await user.click(within(pane).getByRole("button", { name: "The shop's" }));
-    await waitOutUndoWindow();
+    await endUndoWindow();
     await waitFor(() => {
       expect(getCard("Refund emails show the wrong currency").textContent).toContain(
         "Which currency should win?",
@@ -284,7 +279,7 @@ describe("answering a question from the details pane", () => {
     ).toBeTruthy();
     expect(within(reopened).getByText("Your answer: “The shop's”")).toBeTruthy();
     expect(within(reopened).queryByRole("button", { name: "Send again" })).toBeNull();
-    await waitOutUndoWindow();
+    await endUndoWindow();
     expect(listCalls(calls, RESPOND_PATH)).toHaveLength(2);
 
     await user.click(within(reopened).getByRole("button", { name: "Discard" }));
@@ -296,11 +291,11 @@ describe("answering a question from the details pane", () => {
     const user = userEvent.setup({ delay: null });
     const { calls, router } = await openAsking();
     const pane = await openAskingPane(user);
-    shortenUndoWindow();
+    holdUndoWindow();
     await user.click(within(pane).getByRole("button", { name: "The shop's" }));
 
     await act(() => router.navigate({ to: "/" }));
-    await waitOutUndoWindow();
+    await endUndoWindow();
 
     await waitFor(() => {
       expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
@@ -325,14 +320,14 @@ describe("answering a question from the details pane", () => {
       ]),
     );
     const { calls } = await openAsking();
-    shortenUndoWindow();
+    holdUndoWindow();
 
     const pane = await openAskingPane(user);
 
     expect(within(pane).getByText("Your answer: “The shop's”")).toBeTruthy();
     expect(within(pane).getByText("The app closed before it was sent.")).toBeTruthy();
     expect(within(pane).getByRole("button", { name: "Send again" })).toBeTruthy();
-    await waitOutUndoWindow();
+    await endUndoWindow();
     expect(listCalls(calls, RESPOND_PATH)).toHaveLength(0);
   });
 });
