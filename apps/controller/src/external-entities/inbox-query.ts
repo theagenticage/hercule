@@ -71,7 +71,6 @@ import {
   buildInboxGroup,
   cutPage,
   decideGroups,
-  findUnitKey,
   type Group,
   type GroupsByRef,
 } from "./inbox-groups";
@@ -1016,7 +1015,7 @@ export const externalEntityInbox = Effect.gen(function* () {
       if (wanted.length === 0) return byUnit;
       const members = yield* readMembers(environment, selection, wanted);
       for (const member of members) {
-        const key = findUnitKey(groups, member.ref);
+        const key = groups.get(member.ref)?.labelRef ?? member.ref;
         const unitMembers = byUnit.get(key) ?? [];
         unitMembers.push(member);
         byUnit.set(key, unitMembers);

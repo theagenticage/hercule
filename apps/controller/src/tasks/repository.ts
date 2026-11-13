@@ -168,6 +168,13 @@ export interface TaskTraces {
   readonly joinRevision: number;
 }
 
+/** The times a Task's link to a ref holds: when it was written, and when the user took it on. */
+export interface LinkTimes {
+  readonly linkedAt: string;
+  /** Undefined for a link the user has not taken on. */
+  readonly takenAt: string | undefined;
+}
+
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
 export interface TrackedTask {
   readonly id: string;
@@ -1697,55 +1704,42 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns those of `refs` whose link to the live Task is marked taken at
-     * exactly `takenAt`. A link taken at another time, or never, is not
-     * returned. It reads one column of one row, so a take-on can tell that a
-     * link still holds the mark it wrote.
+     * Returns the `linked_at` and `taken_at` the live Task's links to `refs`
+     * hold now, one entry per link that exists (`takenAt` is `undefined` for a
+     * link not taken). A take-on reads them to record what it wrote, and its
+     * undo reads them to see that the links still hold it.
      */
-    listLinksTakenAt: (
+    readLinkTimes: (
       taskId: string,
       refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
-      takenAt: string,
-    ): Effect.Effect<ReadonlyArray<ExternalRef>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<ExternalRef, LinkTimes>, SqlError> =>
       Effect.map(
-        sql<{ readonly ref: string }>`
-          SELECT l.ref FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+        sql<{
+          readonly ref: string;
+          readonly linked_at: string;
+          readonly taken_at: string | null;
+        }>`
+          SELECT l.ref, l.linked_at, l.taken_at
+          FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
           WHERE l.task_id = ${uuidFromString(taskId)} AND tasks.deleted_at IS NULL
-            AND l.ref IN ${sql.in(refs)} AND l.taken_at = ${takenAt}`,
-        (rows) => rows.map((row) => row.ref),
+            AND l.ref IN ${sql.in(refs)}`,
+        (rows) =>
+          new Map(
+            rows.map(
+              (row) =>
+                [row.ref, { linkedAt: row.linked_at, takenAt: row.taken_at ?? undefined }] as const,
+            ),
+          ),
       ),
 
-    /**
-     * Returns those of `refs` whose link to the live Task was written at
-     * exactly `at` and is marked taken at exactly `at`: the links one
-     * take-on made, as opposed to an older link it only marked.
-     */
-    listLinksWrittenAt: (
-      taskId: string,
-      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
-      at: string,
-    ): Effect.Effect<ReadonlyArray<ExternalRef>, SqlError> =>
-      Effect.map(
-        sql<{ readonly ref: string }>`
-          SELECT l.ref FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
-          WHERE l.task_id = ${uuidFromString(taskId)} AND tasks.deleted_at IS NULL
-            AND l.ref IN ${sql.in(refs)} AND l.linked_at = ${at} AND l.taken_at = ${at}`,
-        (rows) => rows.map((row) => row.ref),
-      ),
-
-    /**
-     * Clears the taken mark (`taken_at` and `taken_by`) of the Task's links to
-     * `refs` that are marked taken at exactly `takenAt`, in one statement.
-     */
+    /** Clears the taken mark (`taken_at` and `taken_by`) of the Task's links to `refs`, in one statement. */
     clearLinksTaken: (
       taskId: string,
       refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
-      takenAt: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE task_entity_links SET taken_at = NULL, taken_by = NULL
-            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}
-              AND taken_at = ${takenAt}`,
+            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}`,
       ),
 
     /** Returns those of `refs` that the Task, taken as it is, links, in one statement. */

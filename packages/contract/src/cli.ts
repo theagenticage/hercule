@@ -1540,7 +1540,7 @@ export const CLI = {
   },
   "externalEntity.takeOnTogether": {
     command: "entity take-on-together",
-    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns `taskId`, `created` (whether this call made the Task), `added` (the ids it linked to the Task), `taken` (the ids whose link it marked as taken on by you) and `takenAt` (when it marked them). The title is not used when the things join a Task that already exists. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
+    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns `taskId`, `created` (whether this call made the Task), `added` (how many things it linked to the Task), `taken` (how many links it marked as taken on by you) and `recordId` (which the controller keeps, so the call can be taken back). The title is not used when the things join a Task that already exists. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
     examples: [
       {
         args: [
@@ -1624,7 +1624,7 @@ export const CLI = {
   // removes a Task with `task delete`.
   "externalEntity.undoTakeOn": { hidden: true },
   // Exists only for the undo line that follows `takeOnTogether`, as `undoTakeOn`
-  // does: it needs the whole reply of the call it takes back.
+  // does: it needs the `recordId` the call answered.
   "externalEntity.undoTakeOnTogether": { hidden: true },
   "externalEntity.dismiss": {
     command: "entity dismiss",
@@ -1720,13 +1720,22 @@ export const CLI = {
 
   "externalEntity.link": {
     command: "entity link",
-    help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing, and the reply says so. Remove it with `hercule entity unlink`.",
+    help: "Links one thing from another system to one or more others, as your own claims, in one call. Linked tickets and pull requests show together on the Inbox and on Work. A thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on any source. All or none: if one target is not a ref, is the thing itself or is given twice, nothing is linked. Returns `created`, the targets this call linked; one you had linked already is left out and nothing changed for it. Remove links with `hercule entity unlink`. At most 1000 targets.",
     examples: [
       {
         args: [
           "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
           "--to",
           "github:pr:acme/webshop#87",
+        ],
+      },
+      {
+        args: [
+          "linear:issue:4f2a91c0-7d3b-4e58-9a16-0c5b2e8d7f31/b81d6a25-3c47-4f9e-a0d2-6e15f7c94b08",
+          "--to",
+          "github:pr:acme/webshop#87",
+          "--to",
+          "github:pr:acme/webshop#88",
         ],
       },
     ],
@@ -1736,16 +1745,20 @@ export const CLI = {
         placeholder: "ref",
         help: "The first thing's external ref, as `hercule entity search` or `hercule entity suggestions` shows it.",
       },
-      toRef: {
+      toRefs: {
         flag: "to",
-        help: "The second thing's external ref.",
+        help: "The external ref of a thing to link it to; repeat the flag for several.",
       },
     },
-    errors: { forbidden: USER_ONLY_FORBIDDEN },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "a target is the thing itself, is given twice, or is not a ref; the message says which. Nothing was linked",
+    },
   },
   "externalEntity.unlink": {
     command: "entity unlink",
-    help: "Removes your own link between two things, in either direction. Returns whether one was removed, and the firmest claim that still joins them, if a source or a mention is left: only your own link can be removed here. Nothing is written on either source.",
+    help: "Removes your own links between one thing and one or more others, in either direction, in one call. Returns one entry per target: whether a link was removed, and the firmest claim that still joins the two, if a source or a mention is left. Only your own link can be removed here. Nothing is written on any source. At most 1000 targets.",
     examples: [
       {
         args: [
@@ -1761,12 +1774,15 @@ export const CLI = {
         placeholder: "ref",
         help: "The first thing's external ref.",
       },
-      toRef: {
+      toRefs: {
         flag: "to",
-        help: "The second thing's external ref.",
+        help: "The external ref of a thing to unlink it from; repeat the flag for several.",
       },
     },
-    errors: { forbidden: USER_ONLY_FORBIDDEN },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state: "a target is given twice. Nothing was unlinked",
+    },
   },
 
   "ignoreRule.query": {

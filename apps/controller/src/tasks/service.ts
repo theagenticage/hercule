@@ -62,6 +62,7 @@ import {
   Validation,
   type ExternalRef,
   type Forbidden,
+  type EntityUndoTakeOnResult,
   type HandOffUndo,
   type ProvenanceEntry,
   type Task,
@@ -97,6 +98,7 @@ import {
   type EdgeWrite,
 } from "./blockers";
 import { handoffRecordRepository, type HandoffRecord } from "./handoff-records";
+import { takeOnRecordRepository, type TakeOnRecord } from "./take-on-records";
 import { entityFactRepository, type EntityLinkPair } from "./entity-facts";
 import { LinkedEntities } from "./linked-entities";
 import { makeLinkedFacts } from "./linked-facts";
@@ -109,6 +111,7 @@ import {
   type NewTask,
   type ProvenanceInput,
   type TaskEdit,
+  type LinkTimes,
   type TaskTraces,
   type TaskFailureState,
   type TaskOrder,
@@ -327,17 +330,14 @@ export type TaskUndoRefusal =
   /** The Task is at Done or Dropped, so it is no longer live work. */
   | "finished";
 
-/** Why `undoJoinedRefs` left the links in place. */
-export type JoinUndoRefusal =
-  /** There is no such Task, or it is deleted. */
-  | "task-gone"
-  /** A link is gone, or is no longer the one the take-on wrote. */
-  | "link-changed";
-
-/** The result of `undoJoinedRefs`. */
-export type JoinedRefsUndo =
+/** The result of `reverseTakeOn`: the Task was taken back, or why it stays. */
+export type TakeOnUndo =
   | { readonly undone: true }
-  | { readonly undone: false; readonly reason: JoinUndoRefusal };
+  | {
+      readonly undone: false;
+      /** `link-changed` is a link that is gone or holds a time the call did not write. */
+      readonly reason: TaskUndoRefusal | "link-changed";
+    };
 
 /** The result of `undoCreatedTask`. */
 export type CreatedTaskUndo =
@@ -477,6 +477,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tasks = yield* taskRepository;
   const handoffRecords = yield* handoffRecordRepository;
+  const takeOnRecords = yield* takeOnRecordRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const platformEvents = yield* PlatformEvents;
@@ -800,12 +801,11 @@ const make = Effect.gen(function* () {
     requestedId: string,
     patch: TaskPatch,
     actor: string,
-    writtenAt?: string,
   ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const at = writtenAt ?? (yield* nowIso);
+        const at = yield* nowIso;
         const before = yield* readLiveTaskOrFail(requestedId);
         // A merged id lands on the survivor, and everything below is about it.
         const id = before.id;
@@ -1340,6 +1340,46 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Takes back a Task that `createTaskLinkedToRefs` made, by soft-deleting
+   * it, but only when it links every one of `refs` and nothing has been added to it
+   * since: no Thread, no run, no link to another ref, no edit since it was
+   * created, and a stage that is not Done or Dropped. Otherwise it changes
+   * nothing and returns `{ undone: false, reason }`. The Task is read by its
+   * own id and is never replaced by the Task it was merged into: a merged
+   * Task is refused (`task-merged`), because the survivor now holds its
+   * work. The check and the delete are one write, so a Thread cannot join
+   * in between.
+   *
+   * Permission: the user only, with the grant `task.update`, as for
+   * `createTaskLinkedToRefs`. It fails with `Forbidden` for any other caller.
+   * It runs in the caller's transaction, or opens one.
+   */
+  const undoCreatedTask = (
+    id: Id,
+    refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+  ): Effect.Effect<CreatedTaskUndo, Unauthenticated | Forbidden | SqlError> =>
+    Effect.gen(function* () {
+      yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const found = yield* tasks.readTraces(id, refs);
+          if (Option.isNone(found)) return { undone: false, reason: "task-gone" } as const;
+          const traces = found.value;
+          const reason: TaskUndoRefusal | undefined =
+            findStandingRefusal(traces) ??
+            (traces.hasSession ? "has-thread" : undefined) ??
+            (traces.hasRun ? "has-run" : undefined) ??
+            findMadeTaskRefusal(traces);
+          if (reason !== undefined) return { undone: false, reason } as const;
+          // The Task was read live a moment ago, in this transaction.
+          yield* Effect.orDie(softDeleteTask(id));
+          return { undone: true } as const;
+        }),
+      );
+    });
+
   return {
     /**
      * Returns the Task an id stands for: the Task it was merged into, or the
@@ -1591,53 +1631,15 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /**
-     * Takes back a Task that `createTaskLinkedToRefs` made, by soft-deleting
-     * it, but only when it links every one of `refs` and nothing has been added to it
-     * since: no Thread, no run, no link to another ref, no edit since it was
-     * created, and a stage that is not Done or Dropped. Otherwise it changes
-     * nothing and returns `{ undone: false, reason }`. The Task is read by its
-     * own id and is never replaced by the Task it was merged into: a merged
-     * Task is refused (`task-merged`), because the survivor now holds its
-     * work. The check and the delete are one write, so a Thread cannot join
-     * in between.
-     *
-     * Permission: the user only, with the grant `task.update`, as for
-     * `createTaskLinkedToRefs`. It fails with `Forbidden` for any other caller.
-     * It runs in the caller's transaction, or opens one.
-     */
-    undoCreatedTask: (
-      id: Id,
-      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
-    ): Effect.Effect<CreatedTaskUndo, Unauthenticated | Forbidden | SqlError> =>
-      Effect.gen(function* () {
-        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const found = yield* tasks.readTraces(id, refs);
-            if (Option.isNone(found)) return { undone: false, reason: "task-gone" } as const;
-            const traces = found.value;
-            const reason: TaskUndoRefusal | undefined =
-              findStandingRefusal(traces) ??
-              (traces.hasSession ? "has-thread" : undefined) ??
-              (traces.hasRun ? "has-run" : undefined) ??
-              findMadeTaskRefusal(traces);
-            if (reason !== undefined) return { undone: false, reason } as const;
-            // The Task was read live a moment ago, in this transaction.
-            yield* Effect.orDie(softDeleteTask(id));
-            return { undone: true } as const;
-          }),
-        );
-      }),
+    undoCreatedTask,
 
     /**
      * Links the Task `taskId` to each of `refs` as the user taking them on
-     * together, and marks every one of them taken on, at one instant. Returns
-     * the Task, the refs this call linked (`added`), the refs whose link it
-     * marked taken (`taken`, which holds `added` and every ref the Task linked
-     * already that was not taken yet), and the instant (`takenAt`), all in the
-     * order of `refs`. A new link is written as `linkEntity` writes one
+     * together, and marks every one of them taken on. Returns the Task, the
+     * refs this call linked (`added`) and the refs whose link it marked taken
+     * (`taken`, which holds `added` and every ref the Task linked already
+     * that was not taken yet), both in the order of `refs`. `recordTakeOn`
+     * stores them. A new link is written as `linkEntity` writes one
      * (provenance entry, `task.updated` event, Facts, summary marked out of
      * date). A link that was taken already keeps its first time and taker.
      * `refs` has no repeats.
@@ -1654,7 +1656,6 @@ const make = Effect.gen(function* () {
         readonly task: Task;
         readonly added: ReadonlyArray<ExternalRef>;
         readonly taken: ReadonlyArray<ExternalRef>;
-        readonly takenAt: string;
       },
       Unauthenticated | Forbidden | NotFound | SqlError
     > =>
@@ -1667,101 +1668,137 @@ const make = Effect.gen(function* () {
             const task = yield* readLiveTaskOrFail(input.taskId);
             const linkedBefore = yield* tasks.listLinkedRefs(task.id, input.refs);
             const added = input.refs.filter((ref) => !linkedBefore.has(ref));
-            // One instant for the new links' `linked_at` and for `takenAt`, so
-            // `undoJoinedRefs` can tell a link this call wrote from an older one.
             const takenAt = yield* nowIso;
             // The refs are new here, so the write is not a no-op and cannot fail on the patch.
             const joined =
               added.length === 0
                 ? task
                 : yield* Effect.orDie(
-                    updateTask(
-                      task.id,
-                      { provenance: added.map((ref) => ({ ref })) },
-                      actor,
-                      takenAt,
-                    ),
+                    updateTask(task.id, { provenance: added.map((ref) => ({ ref })) }, actor),
                   );
             const marked = yield* tasks.markLinksTaken(task.id, input.refs, takenAt, actor);
             const taken = input.refs.filter((ref) => marked.has(ref));
             yield* announceEntitiesOfRefs(input.refs);
-            return { task: joined, added, taken, takenAt };
+            return { task: joined, added, taken };
           }),
         );
       }),
 
     /**
-     * Takes back what `joinTaskWithRefs` did, given what it returned: removes
-     * the links in `added` and clears the taken mark of the other links in
-     * `taken`. All checks run before any write, and one failed check refuses
-     * everything. It does so only when:
+     * Writes the record of a `takeOnTogether` call on the Task `taskId` and
+     * returns its id: whether the call made the Task, the links in `added`
+     * with the `linked_at` they hold, and the links in `taken` with the
+     * `taken_at` they hold. It reads those times from the links, so it must
+     * run in the transaction that wrote them, after the write. `reverseTakeOn`
+     * takes back exactly what the record holds.
      *
-     * - every ref in `added` is also in `taken`, as `joinTaskWithRefs` returns
-     *   them;
-     * - every ref in `taken` is still marked taken at exactly `takenAt` on the
-     *   Task (`TaskRepository.listLinksTakenAt`);
-     * - every ref in `added` is a link that was written at exactly `takenAt`
-     *   too (`TaskRepository.listLinksWrittenAt`), so a reply that names an
-     *   older link, forged or from a stale call, never deletes it.
+     * Permission: the user only, with the grant `task.update`.
+     */
+    recordTakeOn: (input: {
+      readonly taskId: Id;
+      readonly created: boolean;
+      readonly added: ReadonlyArray<ExternalRef>;
+      readonly taken: ReadonlyArray<ExternalRef>;
+    }): Effect.Effect<string, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const refs = [...new Set([...input.added, ...input.taken])];
+        const times = Arr.isReadonlyArrayNonEmpty(refs)
+          ? yield* tasks.readLinkTimes(input.taskId, refs)
+          : new Map<ExternalRef, LinkTimes>();
+        // A link the call wrote is read back in this transaction, so it exists.
+        return yield* takeOnRecords.insert(
+          {
+            taskId: input.taskId,
+            taskCreated: input.created,
+            linksAdded: input.added.map((ref) => ({ ref, at: times.get(ref)!.linkedAt })),
+            marksTaken: input.taken.map((ref) => ({ ref, at: times.get(ref)!.takenAt! })),
+          },
+          yield* nowIso,
+        );
+      }),
+
+    /** Returns the record of a `takeOnTogether` call, or none when no call has this id. */
+    readTakeOnRecord: (id: string): Effect.Effect<Option.Option<TakeOnRecord>, SqlError> =>
+      takeOnRecords.read(id),
+
+    /**
+     * Stores the answer of the Undo that took the `takeOnTogether` call
+     * `recordId` back, so a repeat of the Undo returns it. Only the user
+     * takes work back, so it fails with `Forbidden` for any other caller.
+     */
+    storeTakeOnUndo: (
+      recordId: string,
+      undo: EntityUndoTakeOnResult,
+    ): Effect.Effect<void, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        yield* takeOnRecords.storeUndo(recordId, undo, yield* nowIso);
+      }),
+
+    /**
+     * Takes back exactly what the record of a `takeOnTogether` call holds.
+     * All checks run before any write, and one failed check refuses
+     * everything and changes nothing.
      *
-     * Otherwise it changes nothing and returns `{ undone: false, reason }`:
-     * `task-gone` for a Task that does not exist or is deleted, `link-changed`
-     * for a reply that does not match the links, a link that is gone, or one
-     * that was marked again by something else.
+     * - A Task the call made is deleted by the rules of `undoCreatedTask`:
+     *   only while nothing was added to it since.
+     * - For a Task the call joined, the links in `linksAdded` are removed and
+     *   the taken mark of the other links in `marksTaken` is cleared. That
+     *   happens only while every one of those links still holds the time the
+     *   record has (`linked_at`, and `taken_at`), so a link removed and made
+     *   again, or taken again by something else, is refused as
+     *   `link-changed`. A Task that is gone is refused as `task-gone`.
      *
      * Removed links go as `unlinkEntity` removes them, with their Facts, but
-     * the refs are not recorded as unlinked by hand: an undo is not the user's
-     * decision to keep the thing away, so a scan may link it again.
+     * the refs are not recorded as unlinked by hand: an undo is not the
+     * user's decision to keep the thing away, so a scan may link it again.
      *
      * Permission: the user only, with the grant `task.update`. It runs in the
      * caller's transaction, or opens one.
      */
-    undoJoinedRefs: (input: {
-      readonly taskId: Id;
-      readonly added: ReadonlyArray<ExternalRef>;
-      readonly taken: Arr.NonEmptyReadonlyArray<ExternalRef>;
-      readonly takenAt: string;
-    }): Effect.Effect<JoinedRefsUndo, Unauthenticated | Forbidden | SqlError> =>
+    reverseTakeOn: (
+      record: TakeOnRecord,
+    ): Effect.Effect<TakeOnUndo, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const stage = yield* tasks.readStage(input.taskId);
+            const addedRefs = record.linksAdded.map(({ ref }) => ref);
+            const refs = [...new Set([...addedRefs, ...record.marksTaken.map(({ ref }) => ref)])];
+            if (!Arr.isReadonlyArrayNonEmpty(refs)) return { undone: true } as const;
+            if (record.taskCreated) {
+              const outcome = yield* undoCreatedTask(record.taskId, refs);
+              if (outcome.undone) yield* announceEntitiesOfRefs(refs);
+              return outcome;
+            }
+            const stage = yield* tasks.readStage(record.taskId);
             if (Option.isNone(stage)) return { undone: false, reason: "task-gone" } as const;
-            if (!input.added.every((ref) => input.taken.includes(ref))) {
-              return { undone: false, reason: "link-changed" } as const;
-            }
-            const stillTaken = yield* tasks.listLinksTakenAt(
-              input.taskId,
-              input.taken,
-              input.takenAt,
+            const times = yield* tasks.readLinkTimes(record.taskId, refs);
+            const holdsAdded = record.linksAdded.every(
+              ({ ref, at }) => times.get(ref)?.linkedAt === at,
             );
-            if (stillTaken.length !== input.taken.length) {
+            const holdsTaken = record.marksTaken.every(
+              ({ ref, at }) => times.get(ref)?.takenAt === at,
+            );
+            if (!holdsAdded || !holdsTaken)
               return { undone: false, reason: "link-changed" } as const;
-            }
-            if (Arr.isReadonlyArrayNonEmpty(input.added)) {
-              const stillWritten = yield* tasks.listLinksWrittenAt(
-                input.taskId,
-                input.added,
-                input.takenAt,
-              );
-              if (stillWritten.length !== input.added.length) {
-                return { undone: false, reason: "link-changed" } as const;
-              }
-            }
+
             const at = yield* nowIso;
-            const kept = input.taken.filter((ref) => !input.added.includes(ref));
-            if (Arr.isReadonlyArrayNonEmpty(input.added)) {
-              yield* tasks.removeLinks(input.taskId, input.added, at);
-              yield* facts.voidFactsOfRefs(input.taskId, input.added, at);
-              yield* linked.recordLandingFact(input.taskId);
-              if (!isFinishedStage(stage.value)) yield* markSummaryDirty(input.taskId);
+            const kept = record.marksTaken
+              .map(({ ref }) => ref)
+              .filter((ref) => !addedRefs.includes(ref));
+            if (Arr.isReadonlyArrayNonEmpty(addedRefs)) {
+              yield* tasks.removeLinks(record.taskId, addedRefs, at);
+              yield* facts.voidFactsOfRefs(record.taskId, addedRefs, at);
+              yield* linked.recordLandingFact(record.taskId);
+              if (!isFinishedStage(stage.value)) yield* markSummaryDirty(record.taskId);
             }
             if (Arr.isReadonlyArrayNonEmpty(kept))
-              yield* tasks.clearLinksTaken(input.taskId, kept, input.takenAt);
-            yield* announce({ _tag: "record", topic: "task", id: input.taskId, kind: "updated" });
-            yield* announceEntitiesOfRefs(input.taken);
+              yield* tasks.clearLinksTaken(record.taskId, kept);
+            yield* announce({ _tag: "record", topic: "task", id: record.taskId, kind: "updated" });
+            yield* announceEntitiesOfRefs(refs);
             return { undone: true } as const;
           }),
         );

@@ -50,9 +50,10 @@ describe("hercule task link and task unlink", () => {
 
 describe("hercule entity link", () => {
   it.each([
-    [true, "Linked."],
-    [false, "Already linked. Nothing changed."],
-  ] as const)("prints what the reply says when created is %s", (created, line) => {
+    [["github:pr:acme/webshop#87"], "Linked 1: github:pr:acme/webshop#87."],
+    [["github:pr:a/b#1", "github:pr:a/b#2"], "Linked 2: github:pr:a/b#1, github:pr:a/b#2."],
+    [[], "Already linked. Nothing changed."],
+  ] as const)("prints the targets the reply says were linked: %j", (created, line) => {
     const lines = renderHuman(
       { kind: "value", value: { created } },
       lookUpCommand("entity", "link"),

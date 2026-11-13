@@ -39,7 +39,7 @@ describe("readInboxGroup", () => {
       const linked = await post(
         base,
         "/api/v1/external-entities/links",
-        { fromRef: things[0]!.ref, toRef: things[1]!.ref },
+        { fromRef: things[0]!.ref, toRefs: [things[1]!.ref] },
         token,
       );
       expect(linked.status, await linked.clone().text()).toBe(200);

@@ -357,7 +357,7 @@ export const readSignal = async ({ base, token }: SetUpController, id: string): 
 /** Counts the rows of a table, for the tests that check a refusal wrote nothing. */
 export const countRows = (
   controller: SetUpController,
-  table: "tasks" | "runs" | "entity_handoffs" | "signals",
+  table: "tasks" | "runs" | "entity_handoffs" | "entity_take_ons" | "signals",
 ): Promise<number> =>
   runOnDatabase(
     controller,

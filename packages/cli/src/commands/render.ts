@@ -1486,9 +1486,14 @@ const VALUE_RENDERERS: Partial<
       nothing: "does not link it, nothing changed",
     }),
   "externalEntity.readInboxGroup": (value) => renderInboxGroup(value as InboxGroupDetail),
-  "externalEntity.link": (value) => [
-    (value as EntityLinkResult).created ? "Linked." : "Already linked. Nothing changed.",
-  ],
+  "externalEntity.link": (value) => {
+    const { created } = value as EntityLinkResult;
+    return [
+      created.length === 0
+        ? "Already linked. Nothing changed."
+        : `Linked ${String(created.length)}: ${created.join(", ")}.`,
+    ];
+  },
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),

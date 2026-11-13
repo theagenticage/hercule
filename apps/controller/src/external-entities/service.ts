@@ -652,7 +652,6 @@ const make = Effect.gen(function* () {
           )).map((record) => [record.ref, record] as const),
         );
         const checked = input.records.map((record) => stored.get(record.ref) ?? record);
-        const findIdOfRef = (ref: string) => checked.find((record) => record.ref === ref)!.id;
         const ids = checked.map((record) => record.id);
         const first = checked[0]!;
         if (shared.taskId === undefined) {
@@ -664,23 +663,29 @@ const make = Effect.gen(function* () {
             ...(projectId === undefined ? {} : { projectId }),
             following: false,
           });
-          yield* announceEntityChanges({ entityIds: ids, affectedTaskIds: [] });
-          return {
+          const recordId = yield* tasks.recordTakeOn({
             taskId: task.id,
             created: true,
-            added: ids,
-            taken: ids,
-            takenAt: task.createdAt,
-          };
+            added: refs,
+            taken: refs,
+          });
+          yield* announceEntityChanges({ entityIds: ids, affectedTaskIds: [] });
+          return { taskId: task.id, created: true, recordId, added: ids.length, taken: ids.length };
         }
         const joined = yield* tasks.joinTaskWithRefs({ taskId: shared.taskId, refs });
+        const recordId = yield* tasks.recordTakeOn({
+          taskId: joined.task.id,
+          created: false,
+          added: joined.added,
+          taken: joined.taken,
+        });
         yield* announceEntityChanges({ entityIds: ids, affectedTaskIds: [] });
         return {
           taskId: joined.task.id,
           created: false,
-          added: joined.added.map(findIdOfRef),
-          taken: joined.taken.map(findIdOfRef),
-          takenAt: joined.takenAt,
+          recordId,
+          added: joined.added.length,
+          taken: joined.taken.length,
         };
       }),
     );
@@ -1097,8 +1102,9 @@ const make = Effect.gen(function* () {
      * - Things on two or more different Tasks fail `InvalidState`, naming the
      *   Tasks.
      *
-     * The reply says what was written, so `undoTakeOnTogether` can take
-     * exactly that back. Fails with `NotFound` for an unknown id,
+     * The call stores a record of what it wrote, in the same transaction, and
+     * the reply names it (`recordId`) so `undoTakeOnTogether` can take exactly
+     * that back. Fails with `NotFound` for an unknown id,
      * `InvalidState` for the same thing twice, a place or a thing that could
      * not be read, and `Conflict` when a thing changed while the Task was being
      * made and the call should be repeated. User only.
@@ -1136,47 +1142,40 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Takes back a `takeOnTogether` call, given its reply, as far as is safe.
+     * Takes back the `takeOnTogether` call that wrote the record `recordId`,
+     * as far as is safe.
      *
      * - A Task the call made is deleted when nothing was added to it since
      *   (see `TaskService.undoCreatedTask`).
-     * - For a Task the call joined, the links in `added` are removed and the
-     *   taken mark of the other links in `taken` is cleared, each only while
-     *   the link still holds the time the call wrote (see
-     *   `TaskService.undoJoinedRefs`).
+     * - For a Task the call joined, the links it added are removed and the
+     *   taken mark it set on the other links is cleared, only while every one
+     *   of those links still holds the time the record has (see
+     *   `TaskService.reverseTakeOn`).
      *
-     * Otherwise changes nothing and says why in a sentence. Fails with
-     * `NotFound` for an unknown id. User only.
+     * Otherwise changes nothing and says why in a sentence. A call that wrote
+     * nothing has nothing to undo, and says so. A refusal is not
+     * stored, so a later call looks at the rows again. Once the call has been
+     * taken back, a repeat returns `{ undone: true }` and changes nothing.
+     * Fails with `NotFound` for an unknown record id. User only.
      */
     undoTakeOnTogether: (
       input: EntityUndoTakeOnTogetherInput,
     ): Effect.Effect<EntityUndoTakeOnResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
-        const readRefs = (ids: ReadonlyArray<string>) =>
-          Effect.map(readTaskableEntitiesOrFail(ids), (records) =>
-            records.map((record) => record.ref),
-          );
-        const takenRefs = yield* readRefs(input.taken);
-        const addedRefs = yield* readRefs(input.added);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const outcome = input.created
-              ? Arr.isReadonlyArrayNonEmpty(addedRefs)
-                ? yield* tasks.undoCreatedTask(input.taskId, addedRefs)
-                : undefined
-              : Arr.isReadonlyArrayNonEmpty(takenRefs)
-                ? yield* tasks.undoJoinedRefs({
-                    taskId: input.taskId,
-                    added: addedRefs,
-                    taken: takenRefs,
-                    takenAt: input.takenAt,
-                  })
-                : undefined;
-            if (outcome === undefined) {
+            const found = yield* tasks.readTakeOnRecord(input.recordId);
+            if (Option.isNone(found)) {
+              return yield* Effect.fail(createNotFoundError("no such take-on record"));
+            }
+            const record = found.value;
+            if (record.undo !== undefined) return record.undo;
+            if (record.linksAdded.length === 0 && record.marksTaken.length === 0) {
               return { undone: false, reason: "Nothing was written, so there is nothing to undo." };
             }
+            const outcome = yield* tasks.reverseTakeOn(record);
             if (!outcome.undone) {
               return {
                 undone: false,
@@ -1186,11 +1185,9 @@ const make = Effect.gen(function* () {
                     : describeUndoRefusal(outcome.reason),
               };
             }
-            yield* announceEntityChanges({
-              entityIds: [...new Set([...input.added, ...input.taken])],
-              affectedTaskIds: [],
-            });
-            return { undone: true };
+            const undone = { undone: true } as const;
+            yield* tasks.storeTakeOnUndo(record.id, undone);
+            return undone;
           }),
         );
       }),
@@ -1420,15 +1417,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Links two things as the user's own claim (a `person` claim, stamped with
-     * the user). The target may be a ref nobody has read: the next refresh
-     * reads it. The source is never told. Returns `created: true` when this call
-     * wrote the claim. Linking a pair the user already linked, in either
-     * direction, changes nothing and returns `created: false`.
+     * Links one thing to each of several as the user's own claims (`person`
+     * claims, stamped with the user), in one transaction, and announces the
+     * changed things once. A target may be a ref nobody has read: the next
+     * refresh reads it. The source is never told. Returns `created`, the
+     * targets whose claim this call wrote, in the order of `toRefs`. A target
+     * the user already linked to `fromRef`, in either direction, changes
+     * nothing and is left out.
      *
-     * Fails with `NotFound` when Hercule holds no record of `fromRef`, and
-     * with `InvalidState` when the two refs are the same or one is not a ref.
-     * User only.
+     * The whole input is checked before anything is written. Fails with
+     * `InvalidState` when a target is `fromRef` itself, is given twice, or
+     * when a ref is not a ref, and with `NotFound` when Hercule holds no
+     * record of `fromRef`. Then nothing changes. User only.
      */
     link: (
       input: EntityLinkInput,
@@ -1438,20 +1438,25 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
-        const { fromRef, toRef } = input;
-        if (fromRef === toRef) {
+        const { fromRef, toRefs } = input;
+        const notARef = [fromRef, ...toRefs].find(isPendingTarget);
+        if (notARef !== undefined) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `${notARef} is not a ref: "unresolved:" is reserved for the core's own use. Use the ref of the thing.`,
+            ),
+          );
+        }
+        if (toRefs.includes(fromRef)) {
           return yield* Effect.fail(
             createInvalidStateError(
               `${fromRef} cannot be linked to itself. Link it to another thing.`,
             ),
           );
         }
-        const notARef = [fromRef, toRef].find(isPendingTarget);
-        if (notARef !== undefined) {
+        if (new Set(toRefs).size !== toRefs.length) {
           return yield* Effect.fail(
-            createInvalidStateError(
-              `${notARef} is not a ref: "unresolved:" is reserved for the core's own use. Use the ref of the thing.`,
-            ),
+            createInvalidStateError("the same thing is named twice; name each thing once to link"),
           );
         }
         const actor = yield* currentStamp;
@@ -1462,7 +1467,7 @@ const make = Effect.gen(function* () {
             const changes = yield* claims.changePersonLink({
               change: "link",
               fromRef,
-              toRef,
+              toRefs,
               actor,
               now,
             });
@@ -1474,23 +1479,33 @@ const make = Effect.gen(function* () {
               );
             }
             yield* entities.applyClaimChanges(changes, now);
-            // Only a claim this call wrote changes a ref.
-            return { created: changes.changedRefs.length > 0 };
+            return {
+              created: changes.pairs.filter((pair) => pair.changed).map((pair) => pair.toRef),
+            };
           }),
         );
       }),
 
     /**
-     * Removes the user's own claim between two things, in either direction,
-     * and returns what is left. `removed` is false when the user made no link
-     * between them. A claim a source made, and a hint found in text, stay and
-     * are reported in `remaining`. User only.
+     * Removes the user's own claims between one thing and each of several, in
+     * either direction, in one transaction, and returns one entry per target
+     * in the order of `toRefs`: `removed` is false when the user made no link
+     * between the two, and `remaining` is the firmest claim still joining
+     * them. A claim a source made, and a hint found in text, stay. Fails with
+     * `InvalidState` when a target is given twice. User only.
      */
     unlink: (
       input: EntityLinkInput,
-    ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | SqlError> =>
+    ): Effect.Effect<EntityUnlinkResult, Unauthenticated | Forbidden | InvalidState | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_LINKS);
+        if (new Set(input.toRefs).size !== input.toRefs.length) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "the same thing is named twice; name each thing once to unlink",
+            ),
+          );
+        }
         const now = yield* nowIso;
         return yield* withTransaction(
           sql,
@@ -1498,12 +1513,15 @@ const make = Effect.gen(function* () {
             const changes = yield* claims.changePersonLink({
               change: "unlink",
               fromRef: input.fromRef,
-              toRef: input.toRef,
+              toRefs: input.toRefs,
             });
             yield* entities.applyClaimChanges(changes, now);
             return {
-              removed: changes.changedRefs.length > 0,
-              ...(changes.remaining === undefined ? {} : { remaining: changes.remaining }),
+              results: changes.pairs.map((pair) => ({
+                toRef: pair.toRef,
+                removed: pair.changed,
+                ...(pair.remaining === undefined ? {} : { remaining: pair.remaining }),
+              })),
             };
           }),
         );

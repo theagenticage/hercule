@@ -789,6 +789,7 @@ export {
   EntityUndoTakeOnInput,
   EntityUndoTakeOnResult,
   EntityUndoTakeOnTogetherInput,
+  EntityUnlinkedPair,
   EntityUnlinkResult,
   type CoreSavedQueryId,
   EntityBlocks,

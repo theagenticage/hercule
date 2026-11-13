@@ -1235,28 +1235,30 @@ export type EntityTakeOnTogetherInput = Schema.Schema.Type<typeof EntityTakeOnTo
 
 /**
  * What `takeOnTogether` returns: the one Task that now holds all the things,
- * whether this call made it, and what it wrote:
+ * whether this call made it, and the record of what the call wrote:
  *
- * - `added`: the things it linked to the Task. When it joined an existing
- *   Task, this leaves out the things the Task already linked.
- * - `taken`: the things whose link it marked as taken on by the user. It holds
+ * - `recordId`: pass it to `undoTakeOnTogether` to take the call back. The
+ *   controller keeps the record, so nothing else needs to be remembered.
+ * - `added`: how many things it linked to the Task. When it joined an
+ *   existing Task, this leaves out the things the Task already linked.
+ * - `taken`: how many links it marked as taken on by the user. It counts
  *   `added` and every thing the Task already linked that was not taken yet.
- * - `takenAt`: the time it wrote on those links.
  *
- * Pass the whole reply to `undoTakeOnTogether` to take the call back.
+ * A call that wrote nothing (`created` false, `added` and `taken` 0) still
+ * has a record, and its undo changes nothing.
  */
 export const EntityTakeOnTogetherResult = Schema.Struct({
   taskId: Id,
   created: Schema.Boolean,
-  added: atMost(Id, MAX_INBOX_MOVED_THINGS),
-  taken: atMost(Id, MAX_INBOX_MOVED_THINGS),
-  takenAt: Timestamp,
+  recordId: Id,
+  added: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_INBOX_MOVED_THINGS })),
+  taken: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_INBOX_MOVED_THINGS })),
 });
 
 export type EntityTakeOnTogetherResult = Schema.Schema.Type<typeof EntityTakeOnTogetherResult>;
 
-/** The input of `undoTakeOnTogether`: the reply of the `takeOnTogether` call to take back. */
-export const EntityUndoTakeOnTogetherInput = EntityTakeOnTogetherResult;
+/** The input of `undoTakeOnTogether`: the record of the `takeOnTogether` call to take back. */
+export const EntityUndoTakeOnTogetherInput = Schema.Struct({ recordId: Id });
 
 export type EntityUndoTakeOnTogetherInput = Schema.Schema.Type<
   typeof EntityUndoTakeOnTogetherInput
@@ -1465,29 +1467,47 @@ export const EntityAddToWorkResult = Schema.Struct({
 
 export type EntityAddToWorkResult = Schema.Schema.Type<typeof EntityAddToWorkResult>;
 
-/** The input of `link` and `unlink`: the two ends of the relationship. */
-export const EntityLinkInput = Schema.Struct({ fromRef: ExternalRef, toRef: ExternalRef });
+/**
+ * The input of `link` and `unlink`: one thing, and the things to link it to
+ * or to unlink it from, so a group is one call. At least one and at most
+ * `MAX_INBOX_MOVED_THINGS` targets, each once, none the same as `fromRef`.
+ */
+export const EntityLinkInput = Schema.Struct({
+  fromRef: ExternalRef,
+  toRefs: atMost(ExternalRef, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(1)),
+});
 
 export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
 
 /**
- * What `link` returns. `created` is true when this call wrote the user's own
- * claim, and false when the user had already linked the pair, in either
- * direction, so nothing changed. A caller that wants to undo the link removes
- * it only when `created` is true.
+ * What `link` returns. `created` lists the targets whose claim this call
+ * wrote, in the order of `toRefs`. A target the user had already linked to
+ * `fromRef`, in either direction, is left out: nothing changed for it. A
+ * caller that wants to undo the call unlinks only the targets in `created`.
  */
-export const EntityLinkResult = Schema.Struct({ created: Schema.Boolean });
+export const EntityLinkResult = Schema.Struct({
+  created: atMost(ExternalRef, MAX_INBOX_MOVED_THINGS),
+});
 
 export type EntityLinkResult = Schema.Schema.Type<typeof EntityLinkResult>;
 
 /**
- * What `unlink` returns. `removed` is false when the user had made no link
- * between the two. `remaining` is the firmest claim still joining them, when a
- * source or a text claim is left: only the user's own claim can be removed.
+ * What `unlink` returns for one target. `removed` is false when the user had
+ * made no link between the two. `remaining` is the firmest claim still
+ * joining them, when a source or a text claim is left: only the user's own
+ * claim can be removed.
  */
-export const EntityUnlinkResult = Schema.Struct({
+export const EntityUnlinkedPair = Schema.Struct({
+  toRef: ExternalRef,
   removed: Schema.Boolean,
   remaining: Schema.optionalKey(Schema.Literals(["source", "person", "text"])),
+});
+
+export type EntityUnlinkedPair = Schema.Schema.Type<typeof EntityUnlinkedPair>;
+
+/** What `unlink` returns: one entry per target of the input, in its order. */
+export const EntityUnlinkResult = Schema.Struct({
+  results: atMost(EntityUnlinkedPair, MAX_INBOX_MOVED_THINGS),
 });
 
 export type EntityUnlinkResult = Schema.Schema.Type<typeof EntityUnlinkResult>;
@@ -1619,12 +1639,14 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
     }),
     /**
-     * Takes back a `takeOnTogether` call, as far as is safe. A Task the call
-     * made is deleted only when nothing was added to it since, as for
-     * `undoTakeOn`. A Task the call joined loses the links in `added`
-     * and the taken mark that the call set on links that already existed, each
-     * only while the link still holds the time that call wrote. Otherwise
-     * nothing changes and `reason` says why. User only.
+     * Takes back the `takeOnTogether` call that wrote the record, as far as
+     * is safe. A Task the call made is deleted only when nothing was added to
+     * it since, as for `undoTakeOn`. A Task the call joined loses the links
+     * the call added and the taken mark it set on links that already
+     * existed, each only while the link still holds the time the record has.
+     * Otherwise nothing changes and `reason` says why. Once it succeeded, a
+     * repeat returns `{ undone: true }` and changes nothing. Fails `NotFound`
+     * for a record id the controller does not hold. User only.
      */
     HttpApiEndpoint.post("undoTakeOnTogether", "/external-entities/take-on/undo", {
       payload: EntityUndoTakeOnTogetherInput,
@@ -1691,10 +1713,14 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
     }),
     /**
-     * Links two things, as the user's own claim (`person`). The target may be a
-     * ref nobody has read yet; it is read on the next refresh. The source is
-     * never told. Answers whether this call wrote the claim. User only: a session
-     * cannot link.
+     * Links one thing to each of several, as the user's own claims
+     * (`person`), in one transaction. A target may be a ref nobody has read
+     * yet; it is read on the next refresh. The source is never told. Answers
+     * the targets whose claim this call wrote. The whole input is checked
+     * first, so one bad target (the thing itself, a repeated target, a ref
+     * that is not a ref) fails `InvalidState`, and an unknown `fromRef`
+     * fails `NotFound`, with nothing written. User only: a session cannot
+     * link.
      */
     HttpApiEndpoint.post("link", "/external-entities/links", {
       payload: EntityLinkInput,
@@ -1702,14 +1728,16 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
-     * Removes the user's own claim between two things, in either direction, and
-     * says what is left. A claim a source made stays. User only. The refs travel
-     * in a body because they hold `:`, `/` and `#`.
+     * Removes the user's own claim between one thing and each of several, in
+     * either direction, in one transaction, and says per target whether one
+     * was removed and what is left. A claim a source made stays. A target
+     * given twice fails `InvalidState`. User only.
+     * The refs travel in a body because they hold `:`, `/` and `#`.
      */
     HttpApiEndpoint.post("unlink", "/external-entities/links/remove", {
       payload: EntityLinkInput,
       success: EntityUnlinkResult,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

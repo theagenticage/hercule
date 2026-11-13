@@ -11,8 +11,8 @@
  *
  * - `applyObservedClaims` writes the parents, peers, addresses and texts that
  *   a batch of observations reports (see `observed-claims.ts`);
- * - `changePersonLink` writes or removes a person's own link between two
- *   things;
+ * - `changePersonLink` writes or removes a person's own links between one
+ *   thing and several others;
  * - `settlePendingTarget` gives a claim that waited for a read its ref, or
  *   postpones it.
  *
@@ -42,31 +42,43 @@ export type ClaimResolutionOutcome =
   /** A web address was recognized as a scoped thing. The claim stays pending under the new target. */
   | { readonly kind: "recognized"; readonly target: string };
 
-/** A person's change to the links between two things. */
+/** A person's change to the links between one thing and several others. */
 export type PersonLinkChange =
-  /** The actor claims that `fromRef` is linked to `toRef`. */
+  /** The actor claims that `fromRef` is linked to each of `toRefs`. */
   | {
       readonly change: "link";
       readonly fromRef: string;
-      readonly toRef: string;
+      readonly toRefs: ReadonlyArray<string>;
       readonly actor: string;
       readonly now: string;
     }
-  /** Removes every person claim between the two refs, in either direction. */
-  | { readonly change: "unlink"; readonly fromRef: string; readonly toRef: string };
+  /** Removes every person claim between `fromRef` and each of `toRefs`, in either direction. */
+  | { readonly change: "unlink"; readonly fromRef: string; readonly toRefs: ReadonlyArray<string> };
 
-/** What `changePersonLink` changed, and what a person needs to know of it. */
+/** What `changePersonLink` did for one target. */
+export interface PersonLinkPair {
+  readonly toRef: string;
+  /** True when a claim was written (`link`) or removed (`unlink`) for this target. */
+  readonly changed: boolean;
+  /**
+   * The firmest claim that still joins the two refs after an `unlink` (a
+   * source's or a hint), when one does.
+   */
+  readonly remaining: ClaimType | undefined;
+}
+
+/**
+ * What `changePersonLink` changed: one `ClaimChanges` for the whole call, so
+ * the caller applies and announces it once, and one entry per target.
+ */
 export interface PersonLinkChanges extends ClaimChanges {
   /**
    * False when a `link` found that Hercule holds no record of `fromRef`, so it
    * wrote nothing. Always true for an `unlink`.
    */
   readonly fromRefKnown: boolean;
-  /**
-   * The firmest claim that still joins the two refs after an `unlink` (a
-   * source's or a hint), when one does.
-   */
-  readonly remaining: ClaimType | undefined;
+  /** One entry per target, in the order of `toRefs`. Empty when `fromRefKnown` is false. */
+  readonly pairs: ReadonlyArray<PersonLinkPair>;
 }
 
 /** A pending claim that a lookup answered for, as stored. */
@@ -84,37 +96,36 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const graph = makeClaimGraph(sql);
 
-  /** Writes the person claim or removes the person claims between two refs. */
-  const changePersonLink = (change: PersonLinkChange): Effect.Effect<PersonLinkChanges, SqlError> =>
+  /** Writes the person claim between two refs, unless the actor made it already, and says whether it wrote. */
+  const writePersonLink = (
+    fromRef: string,
+    toRef: string,
+    actor: string,
+    now: string,
+  ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      const { fromRef, toRef } = change;
-      const changedRefs = [fromRef, toRef].sort();
-      if (change.change === "link") {
-        const { actor, now } = change;
-        const known = yield* sql<{ readonly id: Uint8Array }>`
-          SELECT id FROM external_entities WHERE ref = ${fromRef}`;
-        if (known.length === 0) {
-          return { ...NO_CLAIM_CHANGES, fromRefKnown: false, remaining: undefined };
-        }
-        const existing = yield* sql<{ readonly id: number }>`
-          SELECT id FROM external_entity_relation_claims
-          WHERE claim_type = 'person' AND relation = 'linked' AND actor = ${actor}
-            AND ((from_ref = ${fromRef} AND to_ref = ${toRef})
-              OR (from_ref = ${toRef} AND to_ref = ${fromRef}))
-          LIMIT 1`;
-        if (existing.length > 0) {
-          return { ...NO_CLAIM_CHANGES, fromRefKnown: true, remaining: undefined };
-        }
-        yield* sql`
-          INSERT INTO external_entity_relation_claims
-            (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
-             observed_revision, state, conflict_reason, observed_at)
-          VALUES (${fromRef}, 'linked', ${toRef}, 'person', NULL, ${actor}, '',
-                  NULL, 'current', NULL, ${now})`;
-        // A person's own link is not news from outside, so it is no new link.
-        return { ...NO_CLAIM_CHANGES, changedRefs, fromRefKnown: true, remaining: undefined };
-      }
+      const existing = yield* sql<{ readonly id: number }>`
+        SELECT id FROM external_entity_relation_claims
+        WHERE claim_type = 'person' AND relation = 'linked' AND actor = ${actor}
+          AND ((from_ref = ${fromRef} AND to_ref = ${toRef})
+            OR (from_ref = ${toRef} AND to_ref = ${fromRef}))
+        LIMIT 1`;
+      if (existing.length > 0) return false;
+      yield* sql`
+        INSERT INTO external_entity_relation_claims
+          (from_ref, relation, to_ref, claim_type, connection_id, actor, evidence_key,
+           observed_revision, state, conflict_reason, observed_at)
+        VALUES (${fromRef}, 'linked', ${toRef}, 'person', NULL, ${actor}, '',
+                NULL, 'current', NULL, ${now})`;
+      return true;
+    });
 
+  /** Removes the person claims between two refs and returns whether it removed any, and the firmest claim left. */
+  const removePersonLinks = (
+    fromRef: string,
+    toRef: string,
+  ): Effect.Effect<Pick<PersonLinkPair, "changed" | "remaining">, SqlError> =>
+    Effect.gen(function* () {
       const removed = yield* sql<{ readonly id: number }>`
         DELETE FROM external_entity_relation_claims
         WHERE claim_type = 'person' AND relation = 'linked'
@@ -127,13 +138,46 @@ const make = Effect.gen(function* () {
           AND ((c.from_ref = ${fromRef} AND c.to_ref = ${toRef})
             OR (c.from_ref = ${toRef} AND c.to_ref = ${fromRef}))`;
       return {
-        ...NO_CLAIM_CHANGES,
-        ...(removed.length > 0 ? { changedRefs } : {}),
-        fromRefKnown: true,
+        changed: removed.length > 0,
         remaining: CLAIM_TYPES_FIRMEST_FIRST.find((type) =>
           left.some((row) => row.claim_type === type),
         ),
       };
+    });
+
+  /**
+   * Writes the person claims from one ref to each of several, or removes the
+   * person claims between them. The caller has checked the refs, so the
+   * writes cannot fail one by one. A `link` finds out first whether Hercule
+   * holds a record of `fromRef`, and writes nothing when it holds none.
+   */
+  const changePersonLink = (change: PersonLinkChange): Effect.Effect<PersonLinkChanges, SqlError> =>
+    Effect.gen(function* () {
+      const { fromRef, toRefs } = change;
+      if (change.change === "link") {
+        const known = yield* sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM external_entities WHERE ref = ${fromRef}`;
+        if (known.length === 0) {
+          return { ...NO_CLAIM_CHANGES, fromRefKnown: false, pairs: [] };
+        }
+      }
+      const pairs: PersonLinkPair[] = [];
+      for (const toRef of toRefs) {
+        pairs.push(
+          change.change === "link"
+            ? {
+                toRef,
+                changed: yield* writePersonLink(fromRef, toRef, change.actor, change.now),
+                remaining: undefined,
+              }
+            : { toRef, ...(yield* removePersonLinks(fromRef, toRef)) },
+        );
+      }
+      // A person's own link is not news from outside, so it is no new link.
+      const changedRefs = [
+        ...new Set(pairs.filter((pair) => pair.changed).flatMap((pair) => [fromRef, pair.toRef])),
+      ].sort();
+      return { ...NO_CLAIM_CHANGES, changedRefs, fromRefKnown: true, pairs };
     });
 
   /**

@@ -122,10 +122,6 @@ const isBetterLabel = (
   return candidate.ref < best.ref;
 };
 
-/** Returns the key of the unit `ref` is in: the label ref of its group, or `ref` itself when it is in none. */
-export const findUnitKey = (groups: GroupsByRef, ref: string): string =>
-  groups.get(ref)?.labelRef ?? ref;
-
 /** A unit as the page cut sees it: its key and how many things it holds. */
 export interface PageUnit {
   readonly key: string;
@@ -166,10 +162,11 @@ export const cutPage = <Unit extends PageUnit>(
 };
 
 /**
- * Builds the `InboxGroup` of a reply from the members of `group`, given in the
- * list's order with whether each answers the query. The members that answer
- * come first, then the others, each part keeping the list's order, so the
- * first member is the one that places the group. The list is cut to
+ * Builds the `InboxGroup` of a reply from the members of `group`, given with
+ * whether each answers the query. The caller passes them already ordered:
+ * the members that answer first, then the others, each part in the list's
+ * order (the order the member read of the Inbox query returns), so the first
+ * member is the one that places the group. This keeps that order. The list is cut to
  * `MAX_INBOX_MOVED_THINGS` plus the most held members a `rows` reply can add
  * beyond that; `size` is the number of refs the group has, which
  * `members` may hold fewer of.
@@ -180,9 +177,6 @@ export const buildInboxGroup = (
 ): InboxGroup => ({
   labelRef: group.labelRef,
   label: group.label,
-  members: [
-    ...members.filter((member) => member.matches),
-    ...members.filter((member) => !member.matches),
-  ].slice(0, MAX_INBOX_MOVED_THINGS + MAX_INBOX_HELD_REFS),
+  members: members.slice(0, MAX_INBOX_MOVED_THINGS + MAX_INBOX_HELD_REFS),
   size: group.memberRefs.length,
 });

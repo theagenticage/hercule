@@ -1,12 +1,6 @@
 /** Tests how things on the Inbox form groups, how a group is named, and how a page is cut into units. */
 import { describe, expect, it } from "vitest";
-import {
-  buildInboxGroup,
-  cutPage,
-  decideGroups,
-  findUnitKey,
-  type GroupCandidate,
-} from "./inbox-groups";
+import { buildInboxGroup, cutPage, decideGroups, type GroupCandidate } from "./inbox-groups";
 
 const thing = (ref: string, createdAt = "2026-01-01T00:00:00.000Z", kind = "acme/ticket") =>
   ({ ref, kind, title: `Title ${ref}`, createdAt }) satisfies GroupCandidate;
@@ -85,14 +79,6 @@ describe("decideGroups", () => {
   });
 });
 
-describe("findUnitKey", () => {
-  it("is the label ref of a group, or the ref of a thing in none", () => {
-    const groups = decideGroups([thing("a"), thing("b")], [link("b", "a")], noKinds);
-    expect(findUnitKey(groups, "b")).toBe("a");
-    expect(findUnitKey(groups, "lone")).toBe("lone");
-  });
-});
-
 describe("cutPage", () => {
   const unit = (key: string, size: number) => ({ key, size });
 
@@ -131,12 +117,12 @@ describe("buildInboxGroup", () => {
     ).get(refs[0]!)!;
   const member = (ref: string, matches: boolean) => ({ id: `id-${ref}`, ref, matches });
 
-  it("lists the members that match first, then the others, each part in the order given", () => {
+  it("keeps the order the members are given in", () => {
     const built = buildInboxGroup(chain(["a", "b", "c", "d"]), [
-      member("c", false),
       member("a", true),
-      member("b", false),
       member("d", true),
+      member("c", false),
+      member("b", false),
     ]);
     expect(built.members.map((m) => m.ref)).toEqual(["a", "d", "c", "b"]);
     expect(built.size).toBe(4);
@@ -144,10 +130,10 @@ describe("buildInboxGroup", () => {
 
   it("lists the first 1000 members of a larger group and counts them all from the group", () => {
     const refs = Array.from({ length: 1005 }, (_, index) => `m${index}`);
-    const read = refs.slice(0, 1000).map((ref, index) => member(ref, index === 999));
+    const read = refs.slice(0, 1000).map((ref) => member(ref, true));
     const built = buildInboxGroup(chain(refs), read);
     expect(built.members).toHaveLength(1000);
-    expect(built.members[0]!.ref).toBe("m999");
+    expect(built.members[0]!.ref).toBe("m0");
     expect(built.size).toBe(1005);
   });
 });
