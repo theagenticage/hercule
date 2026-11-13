@@ -4089,6 +4089,8 @@ These rules keep the budgets:
 
 Measured on 2026-11-12 on Linux (the desktop container, a 16-core host at a load of about 20): the whole check took 22 to 23 s, the build, the speed tests and the browser each in parallel, and 40 s while the full test suite ran beside it. Runs in a row gave the same counts, apart from a few renders and restyles within the tolerances above. Three regressions planted together on the Inbox each stood out on J ×50: a `:has()` rule on the current row (110,693 elements restyled against 15,810), a prop that changes on every render of the list (2,632 row renders against 136), and a second read per thing in the pane (98 requests against 49).
 
+*(Added 2026-11-13, [#1146](https://github.com/theagenticage/hercule/issues/1146), decided by Rogier.)* **This is how a desktop change measures its cost.** Its pull request explains every count that went up; the report on the pull request is the record, and nothing is added to [Measured](#measured). `apps/desktop/AGENTS.md` holds the two lines an agent needs.
+
 **The full run is still needed** for what no count shows, on the platform its author has (see [Platforms](#platforms)):
 
 - a change to the process model, main, preload or the IPC contract;
