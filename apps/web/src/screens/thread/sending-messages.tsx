@@ -5,13 +5,15 @@
 import type { JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  holdsUserMessage,
+  isFirstSendingInput,
   readInputSender,
   splitQueuedInputs,
   splitSentText,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
-import { inputsQuery, sessionQuery } from "../../app/queries";
+import { inputsQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { MessageBubble } from "../bubble";
 import { useAttachmentImages } from "../use-attachment-images";
 import { AgentSentMessage } from "./agent-sent-message";
@@ -35,22 +37,35 @@ export function SendingMessages({
 }): JSX.Element | null {
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const inputs = useQuery(inputsQuery(client, sessionId)).data?.items ?? [];
+  const transcript = useQuery(transcriptQuery(client, sessionId)).data;
   const { sending } = splitQueuedInputs(session, inputs);
   if (sending.length === 0) return null;
+  const transcriptHoldsMessage = transcript !== undefined && holdsUserMessage(transcript);
   return (
     <div className="flex flex-col gap-2">
       {sending.map((input) => (
-        <SendingMessage key={input.id} input={input} />
+        <SendingMessage
+          key={input.id}
+          input={input}
+          isFirstMessage={isFirstSendingInput(transcriptHoldsMessage, sending, input)}
+        />
       ))}
     </div>
   );
 }
 
 /** Draws one message on its way into the session, with "sending…" under its bubble. */
-function SendingMessage({ input }: { readonly input: Input }): JSX.Element | null {
+function SendingMessage({
+  input,
+  isFirstMessage,
+}: {
+  readonly input: Input;
+  /** Whether the message is the session's first, the only one whose context block is read apart. */
+  readonly isFirstMessage: boolean;
+}): JSX.Element | null {
   const { images, observe } = useAttachmentImages(input.attachments);
   const senderSessionId = readInputSender(input);
-  const { text, context } = splitSentText(input.text, senderSessionId);
+  const { text, context } = splitSentText(input.text, isFirstMessage);
   if (text === "" && images.length === 0 && context === undefined) return null;
   const bubble = (
     <WithMessageContext context={context}>

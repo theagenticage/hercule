@@ -113,43 +113,43 @@ export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image."
 /** The message of the issue for a spawn with no text, no images and no context. */
 const EMPTY_SPAWN_PROMPT_MESSAGE = "A prompt needs text, an image, or context.";
 
+/** The fields of a payload that can carry a prompt: its text, its images and, on a spawn, its context. */
+interface PromptPayload {
+  readonly text?: string;
+  readonly prompt?: string;
+  readonly attachments?: ReadonlyArray<string>;
+  readonly context?: ReadonlyArray<unknown>;
+}
+
 /**
- * Builds the filter that refuses a prompt with no text and no images, and no
- * context when `contextCounts`. It checks `text` or `prompt`, whichever field
- * the payload names its text with. The issue points at that field, so a client
- * can show it where the user types the text.
+ * Returns the name of the field that holds the payload's text: `prompt` or
+ * `text`. An issue points at that field, so a client can show it where the
+ * user types the text.
  */
-const makeEmptyPromptFilter = (contextCounts: boolean) =>
-  Schema.makeFilter(
-    (payload: {
-      readonly text?: string;
-      readonly prompt?: string;
-      readonly attachments?: ReadonlyArray<string>;
-      readonly context?: ReadonlyArray<unknown>;
-    }) => {
-      const field = payload.prompt === undefined ? "text" : "prompt";
-      if (
-        (payload[field] ?? "").length > 0 ||
-        (payload.attachments?.length ?? 0) > 0 ||
-        (contextCounts && (payload.context?.length ?? 0) > 0)
-      )
-        return undefined;
-      return {
-        path: [field],
-        issue: contextCounts ? EMPTY_SPAWN_PROMPT_MESSAGE : EMPTY_PROMPT_MESSAGE,
-      };
-    },
-  );
+const findTextField = (payload: PromptPayload): "prompt" | "text" =>
+  payload.prompt === undefined ? "text" : "prompt";
+
+/** Checks that the payload has some text or at least one image. */
+const hasTextOrImage = (payload: PromptPayload): boolean =>
+  (payload[findTextField(payload)] ?? "").length > 0 || (payload.attachments?.length ?? 0) > 0;
 
 /**
  * Refuses a session prompt or input with no text and no images. One filter
  * serves every payload that carries `attachments`. `session.spawn` uses
  * `refuseEmptySpawnPrompt` instead, because it can also carry context.
  */
-export const refuseEmptyPrompt = makeEmptyPromptFilter(false);
+export const refuseEmptyPrompt = Schema.makeFilter((payload: PromptPayload) =>
+  hasTextOrImage(payload)
+    ? undefined
+    : { path: [findTextField(payload)], issue: EMPTY_PROMPT_MESSAGE },
+);
 
 /** Refuses a spawn with no text, no images and no context. */
-const refuseEmptySpawnPrompt = makeEmptyPromptFilter(true);
+const refuseEmptySpawnPrompt = Schema.makeFilter((payload: PromptPayload) =>
+  hasTextOrImage(payload) || (payload.context?.length ?? 0) > 0
+    ? undefined
+    : { path: [findTextField(payload)], issue: EMPTY_SPAWN_PROMPT_MESSAGE },
+);
 
 /**
  * The status of a session:

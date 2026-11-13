@@ -179,6 +179,8 @@ export interface TaskableEntity {
   readonly isWorkRecord: boolean;
   /** The kind's noun, such as "Pull request". Empty for a record that has none stored. */
   readonly noun: string;
+  /** Whether the kind draws a rich or a compact card. Undefined for a record that has none stored. */
+  readonly card: "rich" | "compact" | undefined;
   /** How the source names it, such as `SHOP-123`. Empty for a record that has none yet. */
   readonly identifier: string;
   /** Empty for a record that has no title yet. */
@@ -1135,6 +1137,7 @@ const make = Effect.gen(function* () {
           completeness: row.completeness as "full" | "partial",
           isWorkRecord: isWorkRecord(row),
           noun: (row.noun as string | null) ?? "",
+          card: (row.card as "rich" | "compact" | null) ?? undefined,
           identifier: (row.identifier as string | null) ?? "",
           title: (row.title as string | null) ?? "",
           status,

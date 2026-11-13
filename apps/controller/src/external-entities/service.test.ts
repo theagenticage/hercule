@@ -2692,7 +2692,7 @@ describe("the prompt context of things", () => {
         };
       }),
     );
-    expect(origins.group).toEqual({ kind: "group", label: "Ticket 1" });
+    expect(origins.group).toEqual({ kind: "group", labelRef: ticketRef("1") });
     expect(origins.subset).toEqual({ kind: "selection" });
     expect(origins.superset).toEqual({ kind: "selection" });
     expect(origins.unlinked).toEqual({ kind: "selection" });
@@ -2742,7 +2742,7 @@ describe("the prompt context of things", () => {
     ]);
   });
 
-  it("gives a thing no Connection can read only its ref and id, whole or partial, and a readable partial record what its rows hold", async () => {
+  it("gives a place no Connection can read only its ref and id, and a full record that lost access, or a readable partial record, what its rows hold", async () => {
     const block = await run((arranged) =>
       Effect.gen(function* () {
         const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
@@ -2758,29 +2758,36 @@ describe("the prompt context of things", () => {
         return yield* service.buildPromptContext(ids, { kind: "selection" });
       }),
     );
-    const [, restricted, partial, restrictedPartial] = block.split("\n");
-    expect(restricted).toMatch(new RegExp(`^1\\. ${ticketRef("1")} · [0-9a-f-]{36}$`));
+    const [, lostAccess, partial, place] = block.split("\n");
+    expect(lostAccess).toMatch(
+      new RegExp(`^1\\. ${ticketRef("1")} · “Ticket 1” · Todo · [0-9a-f-]{36}$`),
+    );
     expect(partial).toMatch(new RegExp(`^2\\. ${ticketRef("2")} · “Ticket 2” · [0-9a-f-]{36}$`));
-    expect(restrictedPartial).toMatch(new RegExp(`^3\\. ${ticketRef("3")} · [0-9a-f-]{36}$`));
+    expect(place).toMatch(new RegExp(`^3\\. ${ticketRef("3")} · [0-9a-f-]{36}$`));
   });
 
-  it("labels a group whose label thing no Connection can read with the locked label, never its title", async () => {
-    const origin = await run((arranged) =>
+  it("writes the label from the label thing's record at the time of the write, so access lost after the groups were read locks it", async () => {
+    const block = await run((arranged) =>
       Effect.gen(function* () {
         const { service, sql } = arranged;
         const ids = yield* arrangeTickets(arranged, ["1", "2"]);
         yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        const origin = yield* service.readPromptContextOrigin(ids);
+        // The label thing becomes a place nobody can read after the groups were decided.
         yield* withTransaction(
           sql,
-          sql`UPDATE external_entity_observations SET access = 'inaccessible'`,
+          Effect.gen(function* () {
+            yield* sql`UPDATE external_entities SET pace = 'context' WHERE ref = ${ticketRef("1")}`;
+            yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
+                       WHERE ref = ${ticketRef("1")}`;
+          }),
         );
-        return yield* service.readPromptContextOrigin(ids);
+        return yield* service.buildPromptContext(ids, origin);
       }),
     );
-    expect(origin.kind).toBe("group");
-    const label = origin.kind === "group" ? origin.label : "";
-    expect(label).toMatch(/ you cannot open$/);
-    expect(label).not.toContain("Ticket");
+    const [origin] = block.split("\n");
+    expect(origin).toBe("From your linked group “A ticket you cannot open” (2 things)");
+    expect(block).not.toContain("Ticket 1");
   });
 
   it("fails with not_found naming each unknown id, and with forbidden naming the missing grant of task.read and signal.read", async () => {
@@ -2870,7 +2877,7 @@ describe("readCards", () => {
     expect(cards[0]!.face).toEqual({});
   });
 
-  it("gives a thing no Connection can read only its id, ref, kind and noun, and a readable partial record what its rows hold", async () => {
+  it("gives a place no Connection can read only its id, ref, kind and noun, and a full record that lost access, or a readable partial record, what its rows hold", async () => {
     const cards = await run((arranged) =>
       Effect.gen(function* () {
         const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
@@ -2886,13 +2893,17 @@ describe("readCards", () => {
         return (yield* service.readCards({ ids })).cards;
       }),
     );
-    for (const index of [0, 2]) {
-      expect(Object.keys(cards[index]!).sort()).toEqual(
-        ["face", "id", "kind", "noun", "ref", "restricted"].sort(),
-      );
-      expect(cards[index]).toMatchObject({ face: null, restricted: true, noun: "Ticket" });
-    }
+    expect(cards[0]).toMatchObject({
+      restricted: false,
+      title: "Ticket 1",
+      card: "compact",
+      face: {},
+    });
     expect(cards[1]).toMatchObject({ restricted: false, title: "Ticket 2" });
+    expect(Object.keys(cards[2]!).sort()).toEqual(
+      ["face", "id", "kind", "noun", "ref", "restricted"].sort(),
+    );
+    expect(cards[2]).toMatchObject({ face: null, restricted: true, noun: "Ticket" });
   });
 
   it("needs only task.read, and refuses without it naming the grant", async () => {

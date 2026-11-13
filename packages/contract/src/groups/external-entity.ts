@@ -882,21 +882,26 @@ export type EntityCardsQuery = Schema.Schema.Type<typeof EntityCardsQuery>;
  * signals, offers, links or Inbox membership that `read` adds. Its fields are
  * those of `EntityRecord` and `ExternalEntityDetail`.
  *
- * A `restricted` card is one no Connection can read now: it holds only `id`,
- * `ref`, `kind`, `noun`, `restricted` true and a null `face`, with no
- * identifier, title or status. A record that Hercule holds only in part (seen
- * through a signal) gives what its rows hold, so its `title` may be absent.
- * `face` is null for a kind with no declared face, and when its plugin is not
- * active.
+ * A `restricted` card is a place no Connection can read now (spec 20 section
+ * 1.3): it holds only `id`, `ref`, `kind`, `noun` and `restricted` true, with
+ * a null `face` and no `card`, identifier, title or status. A full record
+ * that lost access is not restricted: it keeps its last known facts, as
+ * `EntityRecord` does. A record that Hercule holds only in part (seen through
+ * a signal) gives what its rows hold, so its `title` and `card` may be absent.
+ * `card` says whether the kind draws a rich or a compact card, for the rule
+ * that a compact card hides a status of the `norm` tone. `face` is null for a
+ * kind with no declared face, and when its plugin is not active. The fields
+ * that `EntityRecord` also has keep its schemas and bounds.
  */
 export const EntityCard = Schema.Struct({
-  id: Id,
-  ref: ExternalRef,
-  kind: Schema.String,
-  noun: bounded(1, 40),
-  identifier: Schema.optionalKey(bounded(1, 64)),
-  title: Schema.optionalKey(bounded(1, 512)),
-  status: Schema.optionalKey(EntityStatus),
+  id: entityFields.id,
+  ref: entityFields.ref,
+  kind: entityFields.kind,
+  noun: entityFields.noun,
+  card: Schema.optionalKey(entityFields.card),
+  identifier: Schema.optionalKey(entityFields.identifier),
+  title: Schema.optionalKey(entityFields.title),
+  status: entityFields.status,
   face: Schema.NullOr(CardFace),
   restricted: Schema.Boolean,
 });

@@ -4,10 +4,10 @@
  * it", folded, which opens in place to the block as it was sent (spec 17,
  * "Starting a thread").
  */
-import { useState, type JSX } from "react";
+import { memo, useState, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { formatContextLineCount, namePlugin, type PluginIdentity } from "@hercule/client-core";
+import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
   describeContextCard,
   describeContextCardFromBlock,
@@ -95,10 +95,13 @@ function ContextCardView({
 
 /**
  * Renders the card of `thing` from `card`, the thing's light read. Without it
- * (the read is out, it failed, or the reply left the thing out because it is
- * gone) the card draws what the block kept: the source and the title.
+ * (the read has not answered, or the reply left the thing out because it was
+ * pruned) the card draws what the block kept: the source and the title.
+ *
+ * It is `memo`: Query keeps a card that did not change as the same object, so
+ * when one card of a message changes, only that card draws again.
  */
-function ContextCard({
+const ContextCard = memo(function ContextCard({
   thing,
   card,
   plugins,
@@ -115,7 +118,7 @@ function ContextCard({
       plugins={plugins}
     />
   );
-}
+});
 
 /**
  * Renders the fold: a button that reads "Context sent with it" and the block's
@@ -137,7 +140,7 @@ function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX
         }}
       >
         <ChevronRightIcon size={12} />
-        Context sent with it<span>{formatContextLineCount(context)}</span>
+        Context sent with it<span>{String(context.lineCount)} lines</span>
       </button>
       {open ? <pre className="msg-ctx-body">{context.text}</pre> : null}
     </>
@@ -149,29 +152,33 @@ function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX
  * for each thing the block names, then the fold with the block itself. It is
  * the one reader of the cards: one request for the whole message, which never
  * suspends, so the transcript draws at once with the block's own words.
+ *
+ * The read answers with a card for every thing that still exists and that the
+ * user may see, so it fails only on a dropped connection or a server error. A
+ * failed refresh keeps the cards of the last good read. The cards fall back to
+ * the block's words only while there is no read at all.
  */
 export function MessageContext({ context }: { readonly context: PromptContextBlock }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { data: plugins } = useQuery(pluginsQuery(client));
-  const ids = context.things.map((thing) => thing.entityId);
-  const read = useQuery({ ...entityCardsQuery(client, ids), enabled: ids.length > 0 });
-  // After a failed refresh Query still holds the last answer, which is stale
-  // now (a thing was pruned, or the user lost access), so an error wins.
-  const cards = read.isError ? undefined : read.data;
+  const { data: cards } = useQuery(
+    entityCardsQuery(
+      client,
+      context.things.map((thing) => thing.entityId),
+    ),
+  );
   return (
     <>
-      {context.things.length === 0 ? null : (
-        <ul className="msg-cards">
-          {context.things.map((thing) => (
-            <ContextCard
-              key={thing.entityId}
-              thing={thing}
-              card={cards?.get(thing.entityId)}
-              plugins={plugins ?? NO_PLUGINS}
-            />
-          ))}
-        </ul>
-      )}
+      <ul className="msg-cards">
+        {context.things.map((thing) => (
+          <ContextCard
+            key={thing.entityId}
+            thing={thing}
+            card={cards?.get(thing.entityId)}
+            plugins={plugins ?? NO_PLUGINS}
+          />
+        ))}
+      </ul>
       <ContextFold context={context} />
     </>
   );

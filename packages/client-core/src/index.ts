@@ -1106,8 +1106,9 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
+  holdsUserMessage,
+  isFirstSendingInput,
   splitSentText,
-  formatContextLineCount,
   type RuntimeNote,
   type ThreadItem,
   type ThreadTurn,

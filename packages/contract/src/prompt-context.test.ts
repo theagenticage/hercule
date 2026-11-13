@@ -107,6 +107,20 @@ describe("formatPromptContext", () => {
     ).toContain("They share: project Checkout");
   });
 
+  it("does not share a field that holds a ref with one that holds the same text as a plain value", () => {
+    const ref = "linear:project:northwind/checkout";
+    const field = { key: "project", type: "text", label: "project" };
+    expect(
+      formatPromptContext({
+        ...selection,
+        things: [
+          { ...issue, fields: [{ ...field, value: ref, ref }] },
+          { ...pullRequest, fields: [{ ...field, value: ref }] },
+        ],
+      }),
+    ).not.toContain("They share");
+  });
+
   it("replaces the typographic quotes with plain ones and keeps every other character", () => {
     const quoted = { ...issue, title: '“A” "B" it\'s `c`; d', status: "It’s “x”", fields: [] };
     const [, entry] = formatPromptContext({ origin: { kind: "one" }, things: [quoted] }).split(

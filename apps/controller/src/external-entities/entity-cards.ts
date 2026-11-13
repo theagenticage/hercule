@@ -4,7 +4,7 @@
  * service's job.
  */
 import type { CardFace, EntityCard } from "@hercule/contract";
-import { findActiveKind, type ActiveEntityKind } from "./entity-records";
+import { findActiveKind, isRestrictedPlace, type ActiveEntityKind } from "./entity-records";
 import type { TaskableEntity } from "./repository";
 
 /**
@@ -12,12 +12,12 @@ import type { TaskableEntity } from "./repository";
  * has no noun stored and no active kind owns its ref, because a card must say
  * what kind of thing it is. A client draws what it knows for such a thing.
  *
- * - A record that no Connection can read now, whether it is full or partial,
- *   gives only its id, ref, kind and noun, with no face: its stored title,
- *   status and fields are what the user could once read. This is the rule
- *   `buildPromptContextThing` uses.
- * - Any other record gives what its rows hold. A partial record may have no
- *   identifier or title yet, and then the card leaves them out.
+ * - A restricted place (`isRestrictedPlace`) gives only its id, ref, kind and
+ *   noun, with no face and no `card`: its stored title, status and fields are
+ *   what the user could once read.
+ * - Any other record gives what its rows hold, including a full record that
+ *   lost access (its last known facts). A partial record may have no
+ *   identifier, title or `card` yet, and then the card leaves them out.
  *
  * `face` is the card face read for the record, null when its kind declares
  * none. A partial record may have no kind stored; the card then takes the
@@ -37,9 +37,10 @@ export const buildEntityCard = (
     kind: record.kind === "" ? (owner?.kind ?? "") : record.kind,
     noun,
   };
-  if (record.access !== "ok") return { ...base, face: null, restricted: true };
+  if (isRestrictedPlace(record)) return { ...base, face: null, restricted: true };
   return {
     ...base,
+    ...(record.card === undefined ? {} : { card: record.card }),
     ...(record.identifier === "" ? {} : { identifier: record.identifier }),
     ...(record.title === "" ? {} : { title: record.title }),
     ...(record.status === undefined ? {} : { status: record.status }),

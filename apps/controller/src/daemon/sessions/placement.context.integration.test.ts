@@ -266,24 +266,7 @@ describe("session.spawn with context", () => {
     });
   });
 
-  it("gives a thing no account can read only its ref and id", async () => {
-    await withThings(async (arranged, account) => {
-      const thing = await arrange(arranged, account, "WEB-1");
-      await runWrite(
-        arranged,
-        arranged.harness
-          .sql`UPDATE external_entity_observations SET access = 'inaccessible' WHERE ref = ${thing.ref}`,
-      );
-
-      const session = await spawnOk(arranged, { prompt: "", context: ids(thing) });
-
-      expect((await readFirstInput(arranged, session)).split("\n")[1]).toMatch(
-        new RegExp(`^1\\. ${thing.ref} · ${UUID}$`),
-      );
-    });
-  });
-
-  it("names the locked label for a group whose things no account can read", async () => {
+  it("keeps the title and the facts of things that lost access, in the entries and as the group label", async () => {
     await withThings(async (arranged, account) => {
       const things = [
         await arrange(arranged, account, "WEB-1"),
@@ -299,8 +282,8 @@ describe("session.spawn with context", () => {
       const session = await spawnOk(arranged, { context: ids(...things) });
 
       const text = await readFirstInput(arranged, session);
-      expect(text).toMatch(/\n\nFrom your linked group “An? .+ you cannot open” \(2 things\)\n/);
-      expect(text).not.toContain("Thing WEB");
+      expect(text).toContain("\n\nFrom your linked group “Thing WEB-1” (2 things)\n");
+      expect(text).toContain(`1. ${things[0]!.ref} · “Thing WEB-1” · `);
     });
   });
 

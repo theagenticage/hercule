@@ -1692,21 +1692,28 @@ describe("buildTurns: the context block in a user message", () => {
     ],
   });
 
-  /** Returns the first message of the turn built from one `user_message` that was sent with `text`. */
-  const readSentMessage = (text: string, senderSessionId?: string) => {
-    const rows = [
+  /**
+   * Returns the message built from the user message sent with `text` (by
+   * `senderSessionId`, when set), which comes after `earlier` other user
+   * messages in the transcript.
+   */
+  const readSentMessage = (text: string, senderSessionId?: string, earlier = 0) => {
+    const row = (itemId: string, itemText: string, detail: object = {}) =>
       buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T10:00:00.000Z",
         turnId: "t1",
-        itemId: "u1",
+        itemId,
         kind: "user_message",
-        detail: senderSessionId === undefined ? { text } : { text, senderSessionId },
-      }),
+        detail: { text: itemText, ...detail },
+      });
+    const rows = [
+      ...Array.from({ length: earlier }, (_, index) => row(`earlier-${String(index)}`, "Hello")),
+      row("u1", text, senderSessionId === undefined ? {} : { senderSessionId }),
     ];
-    return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0];
+    return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[earlier];
   };
 
   it("reads the words and the block apart", () => {
@@ -1725,11 +1732,19 @@ describe("buildTurns: the context block in a user message", () => {
     expect(message?.context?.text).toBe(BLOCK);
   });
 
-  it("keeps the whole text of a message another agent sent, even when it ends in a block", () => {
+  it("reads the block of the first message when another session's agent sent it", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`, "s-spawner");
+    expect(message).toMatchObject({ text: "Look into this.", senderSessionId: "s-spawner" });
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("keeps the whole text of a later message, even when it ends in a block", () => {
     const text = `Look into this.\n\n${BLOCK}`;
-    const message = readSentMessage(text, "s-sender");
-    expect(message).toMatchObject({ text, senderSessionId: "s-sender" });
-    expect(message).not.toHaveProperty("context");
+    for (const sender of [undefined, "s-sender"]) {
+      const message = readSentMessage(text, sender, 1);
+      expect(message).toMatchObject({ text });
+      expect(message).not.toHaveProperty("context");
+    }
   });
 
   it("keeps a text with no block, or a near miss, whole as words", () => {

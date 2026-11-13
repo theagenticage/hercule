@@ -784,12 +784,17 @@ const cleanGeneratedText = (text: string): string =>
 const isAcceptableRole = Schema.is(SessionRole);
 
 /**
- * Builds a session's short title, trimmed and cut by `cutTitle`:
- * `chosen` when the caller chose a title, otherwise the first non-blank line
- * of the user's words in the session's first prompt, otherwise the title of
- * the first thing in the prompt's context block, otherwise the name of the
- * prompt's first image. The context block is never read for a line of the
- * title when the prompt has words. That way a sidebar row has something to show without reading the
+ * Builds a session's short title, trimmed and cut by `cutTitle`. The title is
+ * the first of these that exists:
+ *
+ * 1. `chosen`, when the caller chose a title;
+ * 2. the first non-blank line of the user's words in the session's first
+ *    prompt;
+ * 3. the title of the first thing in the prompt's context block that has one;
+ * 4. the name of the prompt's first image.
+ *
+ * The context block never supplies a line of the title when the prompt has
+ * words. That way a sidebar row has something to show without reading the
  * transcript.
  */
 const buildTitle = (
@@ -801,7 +806,7 @@ const buildTitle = (
   const title =
     chosen ??
     words.split("\n").find((line) => line.trim().length > 0) ??
-    context?.things[0]?.title ??
+    context?.things.find((thing) => thing.title !== undefined)?.title ??
     firstAttachmentName ??
     "";
   return cutTitle(title);

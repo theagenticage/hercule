@@ -1566,6 +1566,36 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
   });
 });
 
+describe("buildThreadBlocks: the context block of a user message", () => {
+  const block = formatPromptContext({
+    origin: { kind: "one" },
+    things: [
+      {
+        entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+        ref: "linear:issue:northwind/SHOP-142",
+        fields: [],
+      },
+    ],
+  });
+  const text = `Look into this.\n\n${block}`;
+  const agent = buildSessionAgentState(IDLE);
+
+  it("reads a block in the first message only, and leaves a later one as words", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 1, text),
+      buildTurnCompleted("t1", 2),
+      buildTurnStarted("t2", 3),
+      ...buildUserMessage("t2", "u2", 4, text),
+      buildTurnCompleted("t2", 5),
+    ];
+    const [first, later] = buildThreadBlocks(rows, agent).filter((each) => each.kind === "user");
+    expect(first).toMatchObject({ text: "Look into this.", context: { text: block } });
+    expect(later).toMatchObject({ text });
+    expect(later).not.toHaveProperty("context");
+  });
+});
+
 describe("appendSendingMessages", () => {
   const SENDING: Input = {
     id: "01a1317e-d8d3-7402-8971-cfcc37f653ca",
@@ -1637,13 +1667,13 @@ describe("appendSendingMessages", () => {
       ],
     });
     const withContext = { ...SENDING, text: `Look into this.\n\n${block}` };
-    const [, sent] = appendSendingMessages([EARLIER], [withContext]);
+    const [sent] = appendSendingMessages([], [withContext]);
     expect(sent).toMatchObject({ text: "Look into this.", context: { text: block, lineCount: 3 } });
-    const [, plain] = appendSendingMessages([EARLIER], [SENDING]);
+    const [plain] = appendSendingMessages([], [SENDING]);
     expect(plain).not.toHaveProperty("context");
   });
 
-  it("keeps the whole text of a message another agent sent, even when it ends in a block", () => {
+  it("keeps the whole text of a message that is not the session's first, even when it ends in a block", () => {
     const block = formatPromptContext({
       origin: { kind: "one" },
       things: [
@@ -1655,10 +1685,33 @@ describe("appendSendingMessages", () => {
       ],
     });
     const text = `Look into this.\n\n${block}`;
-    const fromAgent = { ...SENDING, text, actor: "session:01a12f36-0000-7000-8000-0000000000aa" };
-    const [, sent] = appendSendingMessages([EARLIER], [fromAgent]);
-    expect(sent).toMatchObject({ text });
-    expect(sent).not.toHaveProperty("context");
+    const second = { ...SENDING, id: "in-2", text };
+    const [, , sentSecond] = appendSendingMessages([EARLIER], [SENDING, second]);
+    expect(sentSecond).toMatchObject({ text });
+    expect(sentSecond).not.toHaveProperty("context");
+    const [, sentLater] = appendSendingMessages([EARLIER], [{ ...SENDING, text }]);
+    expect(sentLater).toMatchObject({ text });
+    expect(sentLater).not.toHaveProperty("context");
+  });
+
+  it("reads the block of the first message, whoever sent it, while the transcript holds none", () => {
+    const block = formatPromptContext({
+      origin: { kind: "one" },
+      things: [
+        {
+          entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+          ref: "linear:issue:northwind/SHOP-142",
+          fields: [],
+        },
+      ],
+    });
+    const spawned = {
+      ...SENDING,
+      text: `Look into this.\n\n${block}`,
+      actor: "session:01a12f36-0000-7000-8000-0000000000aa",
+    };
+    const [sent] = appendSendingMessages([], [spawned]);
+    expect(sent).toMatchObject({ text: "Look into this.", context: { text: block } });
   });
 
   it("returns the same list when nothing is sending", () => {

@@ -1,4 +1,8 @@
-/** Tests how a stored record and its field values become the entry of a prompt's context block. */
+/**
+ * Tests how a stored record and its field values become the entry of a
+ * prompt's context block. Which records are restricted is tested through the
+ * service, where the access of a record is read from its observations.
+ */
 import { describe, expect, it } from "vitest";
 import type { EntityFieldValue } from "@hercule/contract";
 import { buildPromptContextThing } from "./prompt-context";
@@ -13,6 +17,7 @@ const record = (overrides: Partial<TaskableEntity> = {}): TaskableEntity => ({
   completeness: "full",
   isWorkRecord: true,
   noun: "Ticket",
+  card: "compact",
   identifier: "ACME-1",
   title: "Fix the cart",
   status: { shape: "half", tone: "active", label: "In progress" },
@@ -49,22 +54,8 @@ describe("buildPromptContextThing", () => {
     ]);
   });
 
-  it.each(["full", "partial"] as const)(
-    "gives a %s record that no Connection can read only its ref and id",
-    (completeness) => {
-      const thing = buildPromptContextThing(record({ completeness, access: "inaccessible" }), [
-        { ...identity, type: "text", text: "Storefront" },
-      ]);
-      expect(thing).toEqual({
-        entityId: "0199f0b7-0000-7000-8000-000000000001",
-        ref: "acme:ticket:1",
-        fields: [],
-      });
-    },
-  );
-
-  it("gives a readable record its title, status and fields", () => {
-    expect(buildPromptContextThing(record({ completeness: "partial" }), [])).toMatchObject({
+  it("gives a record its title and the label of its status", () => {
+    expect(buildPromptContextThing(record(), [])).toMatchObject({
       title: "Fix the cart",
       status: "In progress",
     });

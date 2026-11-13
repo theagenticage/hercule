@@ -15,6 +15,7 @@ import {
 import type { Call } from "@hercule/client-core/testing";
 import { THREAD_FIXTURES } from "../../app/testing";
 import { entityCardsQuery } from "../../app/queries";
+import { AgentSentMessage } from "../thread/agent-sent-message";
 import { renderThreadPart } from "../thread/testing";
 import { hasSameMessageProps, UserMessage } from "./messages";
 
@@ -164,7 +165,7 @@ describe("the cards under a message with context", () => {
     expect(screen.getByText("TypeError · kept in the block")).toBeTruthy();
   });
 
-  it("draws the block's cards, not the old values, when a refresh fails", async () => {
+  it("keeps the cards of the last good read when a refresh fails", async () => {
     const failing = { now: false };
     const { queryClient, client } = await renderMessage(undefined, failing);
     await screen.findByText("1,211 events");
@@ -176,9 +177,15 @@ describe("the cards under a message with context", () => {
       });
     });
 
-    const card = (await screen.findByText("TypeError · kept in the block")).closest("li")!;
-    expect(within(card).queryByText("STOREFRONT-1Z9")).toBeNull();
-    expect(within(card).queryByText("1,211 events")).toBeNull();
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(entityCardsQuery(client, [ISSUE_ID, ERROR_ID]).queryKey)
+          ?.fetchStatus,
+      ).toBe("idle");
+    });
+    const card = screen.getByText("STOREFRONT-1Z9").closest("li")!;
+    expect(within(card).getByText("1,211 events")).toBeTruthy();
+    expect(screen.queryByText("TypeError · kept in the block")).toBeNull();
   });
 
   it("draws a fact that changes again, without drawing the other card", async () => {
@@ -203,6 +210,33 @@ describe("the cards under a message with context", () => {
     // The same element stays: the issue's card was not drawn again.
     expect(screen.getByText("SHOP-142").closest("li")).toBe(issue);
   });
+});
+
+it("draws the cards and the fold under the first message of a thread another agent spawned", async () => {
+  await renderThreadPart(
+    () => (
+      <AgentSentMessage
+        senderSessionId="01a06d02-9000-7000-8000-0000000000b1"
+        text="Look into these."
+        context={CONTEXT}
+        attachments={[]}
+        at="2026-11-13T09:41:00.000Z"
+        timezone="UTC"
+        today={Date.parse("2026-11-13T12:00:00.000Z")}
+        steered={false}
+        sending={false}
+        skills={[]}
+        sessionId={THREAD.session.id}
+      />
+    ),
+    {
+      thread: THREAD,
+      handlers: { [CARDS_PATH]: () => ({ body: { cards: [ISSUE, ERROR] } }) },
+    },
+  );
+
+  expect(await screen.findByText("STOREFRONT-1Z9")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Context sent with it/ })).toBeTruthy();
 });
 
 describe("the fold under the cards", () => {

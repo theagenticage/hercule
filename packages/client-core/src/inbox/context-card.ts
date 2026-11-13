@@ -6,23 +6,7 @@
 import type { EntityCard, EntityFieldValue, EntityStatus } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
 import { describeLockedRow } from "../desk/relation-rows";
-import { ApiError } from "../errors";
-
-/** How many times a card's read is tried again after it fails for a reason that may pass. */
-const MAX_CARD_READ_RETRIES = 3;
-
-/**
- * Decides whether the read of a message's cards is tried again after it failed
- * `failureCount` times with `error`. A refusal that will not change by asking
- * again (`not_found`, `forbidden`) draws what the block kept at once. Any other
- * failure, such as a connection that dropped, is tried again up to three times.
- */
-export const shouldRetryCardsRead = (failureCount: number, error: unknown): boolean => {
-  if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden")) {
-    return false;
-  }
-  return failureCount < MAX_CARD_READ_RETRIES;
-};
+import { decideShownStatus } from "./card-face";
 
 /**
  * Returns the system of an External Ref (`linear` for `linear:issue:...`),
@@ -81,7 +65,8 @@ const readFaceWords = (field: EntityFieldValue | undefined): string | undefined 
 
 /**
  * Returns the card of a thing that was read: its source, noun, identifier,
- * title and status, and at the end of the status line the face's fact (the
+ * title and status (left out on a compact card when it is of the `norm` tone,
+ * as on the Inbox's cards), and at the end of the status line the face's fact (the
  * live number, such as "1,211 events") or, when it has none, the place the
  * thing lives in. A restricted thing (no Connection can read it) is a locked
  * card with only its source and noun, worded like the locked rows of a pane:
@@ -92,6 +77,7 @@ export const describeContextCard = (card: EntityCard): ContextCardFace => {
   if (card.restricted) {
     return { pluginId, noun: card.noun, title: describeLockedRow(card), isLocked: true };
   }
+  const status = decideShownStatus(card.card, card.status);
   const fact = readFaceWords(card.face?.fact);
   const place = readFaceWords(card.face?.place);
   const trailing =
@@ -105,17 +91,18 @@ export const describeContextCard = (card: EntityCard): ContextCardFace => {
     noun: card.noun,
     ...(card.identifier === undefined ? {} : { identifier: card.identifier }),
     title: card.title ?? card.ref,
-    ...(card.status === undefined ? {} : { status: card.status }),
+    ...(status === undefined ? {} : { status }),
     ...(trailing === undefined ? {} : { trailing }),
   };
 };
 
 /**
  * Returns the card drawn from what the context block kept of a thing, for when
- * the live read of the cards is missing: not answered yet, failed, or the
- * thing is gone (the reply leaves out an id that names nothing). It has the source, taken from
- * the ref (`linear:issue:...` is Linear's), and the title the block kept
- * exactly as it was written, or the ref itself when the block kept none.
+ * the live read has no card for it: the read has not answered yet or failed,
+ * or the thing was pruned (the reply leaves out an id that names nothing).
+ * The card has the source, taken from the ref (`linear:issue:...` is
+ * Linear's), and the title the block kept exactly as it was written, or the
+ * ref itself when the block kept none.
  */
 export const describeContextCardFromBlock = (thing: {
   readonly ref: string;

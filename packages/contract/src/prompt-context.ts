@@ -184,16 +184,23 @@ const writeEntry = (thing: PromptContextThing, number: number): string =>
   `${String(number)}. ${[thing.ref, ...writeEntryDetails(thing), thing.entityId].join(PART_SEPARATOR)}`;
 
 /**
- * Returns the fields that at least two of the things hold with the same key,
- * type and ref (or value, for a field with no ref), written as the share line's text, or `undefined` when the
- * things share nothing. Fields come in the order they first appear.
+ * Returns the text of the share line: the fields that at least two of the
+ * things hold with the same key and type, and the same ref (or the same
+ * value, for a field with no ref). Returns `undefined` when the things share
+ * nothing. Fields come in the order they first appear.
  */
 const writeSharedFields = (things: readonly PromptContextThing[]): string | undefined => {
   const shared = new Map<string, { holders: Set<string>; text: string }>();
   for (const thing of things)
     for (const field of thing.fields) {
       if (!hasValue(field)) continue;
-      const identity = JSON.stringify([field.key, field.type, field.ref ?? field.value]);
+      // The tag keeps a ref and a plain value apart: a text value may look
+      // exactly like a ref.
+      const identity = JSON.stringify([
+        field.key,
+        field.type,
+        ...(field.ref === undefined ? ["value", field.value] : ["ref", field.ref]),
+      ]);
       const entry = shared.get(identity) ?? { holders: new Set(), text: describeField(field) };
       entry.holders.add(thing.entityId);
       shared.set(identity, entry);
@@ -216,25 +223,28 @@ const writeOriginLine = (origin: PromptContextOrigin, count: number): string => 
 /**
  * Returns the text of the block that tells an agent about things: an origin
  * line, one numbered entry per thing, a line with what the things share when
- * there is something, and a line telling the agent how to read a thing in
+ * there is something, and a line that tells the agent how to read a thing in
  * full. The lines are joined by line feeds, with no blank line and no trailing
  * line feed.
  *
  * Each entry is `<n>. <ref> · “<title>” · <status> · <label value, ...> · <id>`.
  * A part with no text is left out, so a thing with no title has no quoted
- * part. The typographic quotes “ and ” in the title, the status, the labels, the
- * values and the group label become a plain `"`, so the closing quote of a
- * title is always the first one. The
- * title is cut at 200 characters, the status at 100 and each field value at
- * 80, and an ellipsis marks a cut. Everything between the ref and the id adds
- * up to at most 400 characters: fields are written in order until the next
- * one would not fit, and then one `…` stands for the rest. The ref and the id
- * always stay. The share line lists the fields that two or more things hold
- * with the same key and type and the same ref (or value, when there is no ref).
+ * part.
+ *
+ * - The typographic quotes “ and ” in the title, the status, the labels, the
+ *   values and the group label become a plain `"`, so the closing quote of a
+ *   title is always the first one.
+ * - The title is cut at 200 characters, the status at 100 and each field
+ *   value at 80. An ellipsis marks a cut.
+ * - Everything between the ref and the id adds up to at most 400 characters.
+ *   Fields are written in order until the next one would not fit, and then
+ *   one `…` stands for the rest. The ref and the id always stay.
+ * - The share line lists the fields that two or more things hold with the
+ *   same key and type, and the same ref (or value, when there is no ref).
  *
  * The caller puts the block after the user's words and a blank line. The
  * caller must pass the origin that matches the things: one thing for `one`,
- * and two or more for `group` and `selection`; `splitPromptContext` refuses a
+ * and two or more for `group` and `selection`. `splitPromptContext` refuses a
  * block that does not match.
  */
 export const formatPromptContext = (input: PromptContextInput): string => {
@@ -258,11 +268,14 @@ const readOriginCount = (line: string): number | undefined => {
 
 /**
  * Reads one entry line as the thing it names, or returns `undefined` when the
- * line is not entry number `number`. The line must start with its number and a
- * valid External Ref and end with an id. The title is read only when the part
- * after the ref starts with an opening quote, and it ends at the first closing
- * quote, which is exact because the title holds no typographic quotes. The rest of the text
- * between the ref and the id is not read.
+ * line is not entry number `number`.
+ *
+ * - The line must start with its number and a valid External Ref, and end
+ *   with an id.
+ * - The title is read only when the part after the ref starts with an opening
+ *   quote. It ends at the first closing quote, which is exact because the
+ *   block's title holds no typographic quotes.
+ * - The rest of the text between the ref and the id is not read.
  */
 const readEntry = (
   line: string,
@@ -288,9 +301,9 @@ const readEntry = (
  * about things. It never fails: a text with no block comes back as `words`
  * with no `context`.
  *
- * It finds the block only as the whole last paragraph (the text after the last
- * blank line), or as the whole text when the text is only a block. The block
- * must be exactly what `formatPromptContext` writes:
+ * It finds the block only as the whole last paragraph (the text after the
+ * last blank line), or as the whole text when the text is only a block. The
+ * block must be exactly what `formatPromptContext` writes:
  *
  * - an origin line that announces N things;
  * - exactly N entries, numbered 1 to N, each starting with a valid External
@@ -300,10 +313,11 @@ const readEntry = (
  * - a share line, only when N is at least 2;
  * - the read line, last.
  *
- * Anything else, such as a wrong count, too many things, a repeated id, a bad
- * ref or id, a missing read line or a block that is not last, keeps the whole text as `words`. The match is
- * for showing the block nicely, never for trusting it: a user who types a
- * block by hand gets it shown the same way, and nothing else changes.
+ * Anything else keeps the whole text as `words`: a wrong count, too many
+ * things, a repeated id, a bad ref or id, a missing read line, or a block
+ * that is not last. The match is for showing the block nicely, never for
+ * trusting it: a user who types a block by hand gets it shown the same way,
+ * and nothing else changes.
  *
  * `words` is the text before the blank line, without that blank line, and is
  * empty when the text is only a block.

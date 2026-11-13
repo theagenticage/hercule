@@ -1,12 +1,7 @@
 /** Tests the cards drawn under a message that carried context. */
 import type { EntityCard } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../errors";
-import {
-  describeContextCard,
-  describeContextCardFromBlock,
-  shouldRetryCardsRead,
-} from "./context-card";
+import { describeContextCard, describeContextCardFromBlock } from "./context-card";
 
 const REF = "linear:issue:northwind/SHOP-142";
 
@@ -94,6 +89,23 @@ describe("describeContextCard", () => {
   });
 });
 
+describe("the status of a card", () => {
+  const NORM = { shape: "ring", tone: "quiet", label: "Open", norm: true } as const;
+  const BAD = { shape: "alert", tone: "bad", label: "Escalating" } as const;
+
+  it("is left out on a compact card when it is the norm, as in the Inbox", () => {
+    expect(describeContextCard(buildCard({ card: "compact", status: NORM }))).not.toHaveProperty(
+      "status",
+    );
+    expect(describeContextCard(buildCard({ status: NORM }))).not.toHaveProperty("status");
+  });
+
+  it("is kept on a rich card, and on a compact one when it is not the norm", () => {
+    expect(describeContextCard(buildCard({ card: "rich", status: NORM })).status).toEqual(NORM);
+    expect(describeContextCard(buildCard({ card: "compact", status: BAD })).status).toEqual(BAD);
+  });
+});
+
 describe("the plugin of a card", () => {
   it("is the entity's kind for a card that was read, and a guess from the ref's system otherwise", () => {
     const ref = "github:pr:northwind/web#6244";
@@ -101,19 +113,6 @@ describe("the plugin of a card", () => {
       "acme",
     );
     expect(describeContextCardFromBlock({ ref }).pluginId).toBe("github");
-  });
-});
-
-describe("shouldRetryCardsRead", () => {
-  it.each(["not_found", "forbidden"] as const)("does not retry a read refused as %s", (code) => {
-    expect(shouldRetryCardsRead(1, new ApiError(code, "No."))).toBe(false);
-  });
-
-  it("retries another failure up to three times", () => {
-    const error = new ApiError("internal", "Down.");
-    expect(shouldRetryCardsRead(1, error)).toBe(true);
-    expect(shouldRetryCardsRead(2, error)).toBe(true);
-    expect(shouldRetryCardsRead(3, error)).toBe(false);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   buildUpdatedItem,
   buildUnknownEventMessage,
   buildUserMessage,
+  isFirstSendingInput,
   splitSentText,
   describeToolCallTarget,
   type ThreadItem,
@@ -427,6 +428,7 @@ export const buildThreadBlocks = (
   const openRequestIds = new Set(parkedRequests.map((request) => request.requestId));
   const awaitingItemIds = new Set(parkedRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
+  let sawUserMessage = false;
   const turns = new Map<string, BuildingTurn>();
   const agents = new Map<string, BuildingAgent>();
   const workItems = new Map<
@@ -531,10 +533,12 @@ export const buildThreadBlocks = (
         turn.lastStartedItemId = event.itemId;
         if (event.kind === "user_message") {
           closeStretch(turn, event.at);
+          const isFirstMessage = !sawUserMessage;
+          sawUserMessage = true;
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
-            ...buildUserMessage(event),
+            ...buildUserMessage(event, isFirstMessage),
             at: event.at,
           });
           turn.boundary = event.at;
@@ -826,13 +830,14 @@ export const appendSendingMessages = (
   sending: readonly Input[],
 ): readonly ThreadBlock[] => {
   if (sending.length === 0) return blocks;
+  const transcriptHoldsMessage = blocks.some((block) => block.kind === "user");
   const messages = sending.map((input): UserBlock => {
     const senderSessionId = readInputSender(input);
     return {
       kind: "user",
       key: `sending:${input.id}`,
       itemId: input.id,
-      ...splitSentText(input.text, senderSessionId),
+      ...splitSentText(input.text, isFirstSendingInput(transcriptHoldsMessage, sending, input)),
       attachments: input.attachments,
       skills: [],
       steered: false,

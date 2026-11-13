@@ -21,6 +21,7 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
+  type Input,
   type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
@@ -164,27 +165,41 @@ export interface ThreadUserMessage {
  * `user_message` and a message still sending go through here, so the two
  * never read a block differently.
  *
- * Only the owner's messages are split. A message another session's agent sent
- * (`senderSessionId` is set) keeps its whole text as words: an agent could
- * otherwise hide text behind the fold, and make the app read the ids of
- * things it chose.
+ * Only the session's first message is split, whoever sent it. The controller
+ * appends a block only when it spawns a session, and that spawn is always the
+ * session's first input. Any later message keeps its whole text as words: an
+ * agent could otherwise hide text behind the fold, or make the app read the
+ * ids of things it chose, by typing a block into a message to itself.
  */
 export const splitSentText = (
   sentText: string,
-  senderSessionId: string | undefined,
+  isFirstMessage: boolean,
 ): Pick<ThreadUserMessage, "text" | "context"> => {
-  if (senderSessionId !== undefined) return { text: sentText };
+  if (!isFirstMessage) return { text: sentText };
   const { words, context } = splitPromptContext(sentText);
   return context === undefined ? { text: words } : { text: words, context };
 };
 
 /**
- * Returns the line count of a context block as the fold under a message
- * writes it, such as "6 lines". A block has at least three lines (the origin,
- * one entry and the read line), so the count is never one.
+ * Checks whether the transcript `rows` hold a `user_message` already, which
+ * makes any message that comes after it not the session's first.
  */
-export const formatContextLineCount = (context: PromptContextBlock): string =>
-  `${String(context.lineCount)} lines`;
+export const holdsUserMessage = (rows: readonly TranscriptRow[]): boolean =>
+  rows.some(({ event }) => event._tag === "item.started" && event.kind === "user_message");
+
+/**
+ * Checks whether `input`, one of the messages still on its way into the
+ * session (`sending`, oldest first), is the session's first message. That is
+ * so when the transcript holds no message yet (`transcriptHoldsMessage`) and
+ * `input` is the oldest one sending. The first input of a session is
+ * carried by its start, so it is still sending until its message reaches the
+ * transcript.
+ */
+export const isFirstSendingInput = (
+  transcriptHoldsMessage: boolean,
+  sending: readonly Input[],
+  input: Input,
+): boolean => !transcriptHoldsMessage && sending[0] === input;
 
 /**
  * Returns the message a `user_message` item's `item.started` holds. Each
@@ -193,12 +208,15 @@ export const formatContextLineCount = (context: PromptContextBlock): string =>
  * and its blocks both build their messages here, so the two never read a
  * message differently.
  */
-export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+export const buildUserMessage = (
+  event: ItemStarted,
+  isFirstMessage: boolean,
+): ThreadUserMessage => {
   const text = readJsonObject(event.detail)?.text;
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    ...splitSentText(typeof text === "string" ? text : "", senderSessionId),
+    ...splitSentText(typeof text === "string" ? text : "", isFirstMessage),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
@@ -705,6 +723,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  let sawUserMessage = false;
 
   for (const row of rows) {
     const event: HarnessEvent = row.event;
@@ -743,7 +762,8 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event));
+          turn.userMessages.push(buildUserMessage(event, !sawUserMessage));
+          sawUserMessage = true;
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);

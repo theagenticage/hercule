@@ -1,4 +1,9 @@
-/** Tests how a stored record becomes a small card: what a card of a restricted or partial record leaves out. */
+/**
+ * Tests how a stored record becomes a small card: its fields, what a record
+ * with no identifier or title leaves out, and the kind it falls back to. Which
+ * records are restricted is tested through the service, where the access of a
+ * record is read from its observations.
+ */
 import { describe, expect, it } from "vitest";
 import { buildEntityCard } from "./entity-cards";
 import type { ActiveEntityKind } from "./entity-records";
@@ -11,6 +16,7 @@ const record = (overrides: Partial<TaskableEntity> = {}): TaskableEntity => ({
   completeness: "full",
   isWorkRecord: true,
   noun: "Ticket",
+  card: "compact",
   identifier: "ACME-1",
   title: "Fix the cart",
   status: { shape: "half", tone: "active", label: "In progress" },
@@ -40,25 +46,11 @@ describe("buildEntityCard", () => {
       identifier: "ACME-1",
       title: "Fix the cart",
       status: { shape: "half", tone: "active", label: "In progress" },
+      card: "compact",
       face,
       restricted: false,
     });
   });
-
-  it.each(["inaccessible", "deleted"] as const)(
-    "gives a record that is %s only its id, ref, kind and noun",
-    (access) => {
-      const card = buildEntityCard(record({ access }), { fact: undefined } as never, [ticketKind]);
-      expect(card).toEqual({
-        id: "0199f0b7-0000-7000-8000-000000000001",
-        ref: "acme:ticket:1",
-        kind: "acme/ticket",
-        noun: "Ticket",
-        face: null,
-        restricted: true,
-      });
-    },
-  );
 
   it("leaves out the identifier and title a partial record does not hold yet", () => {
     const card = buildEntityCard(record({ identifier: "", title: "", status: undefined }), null, [

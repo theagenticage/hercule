@@ -32,6 +32,7 @@ import {
   MAX_PROMPT_LENGTH,
   MEMORY_CORE,
   refuseEmptyPrompt,
+  splitPromptContext,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   createValidationError,
@@ -419,6 +420,11 @@ const make = Effect.gen(function* () {
    * title it was given from the message, and the role it was spawned with, if
    * any.
    *
+   * The model reads the user's words when there are any. Only a message with
+   * no words, such as one that is only a context block, goes to it whole, so
+   * text that came from outside Hercule stays away from the title model when
+   * the user wrote something.
+   *
    * `madeTaskId` is the Task made for this Thread, if the join made one. It is
    * handed on to `setGeneratedTitleAndRole`, which renames that Task together
    * with the Thread.
@@ -431,6 +437,8 @@ const make = Effect.gen(function* () {
     forkAfterCommit(
       "Generating a Thread title failed",
       Effect.gen(function* () {
+        const { words } = splitPromptContext(firstMessage);
+        const titleInput = words.trim() === "" ? firstMessage : words;
         // The service checks the answer against the JSON Schema, and
         // `ThreadTitleAndRole` has no check that JSON Schema leaves out, so the
         // answer always decodes. Either failure keeps the cut-short title.
@@ -440,7 +448,7 @@ const make = Effect.gen(function* () {
               caller: "core:sessions",
               purpose: "thread.title",
               instructions: THREAD_TITLE_INSTRUCTIONS,
-              input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+              input: titleInput.slice(0, MAX_TITLE_INPUT_LENGTH),
               outputSchema: THREAD_TITLE_AND_ROLE_OUTPUT_SCHEMA,
               // A title is only worth having soon; the Thread keeps its
               // cut-short title instead.
@@ -1386,9 +1394,9 @@ const make = Effect.gen(function* () {
      * and stays off the writer. Its entries are read after the take-on, inside
      * the transaction. A prompt that grows past
      * `MAX_PROMPT_LENGTH` fails with `Validation` at `context`. The Thread's
-     * title is made from the user's words (`buildTitle`), and its generation
-     * reads the whole prompt, so a Thread with context and no words still
-     * gets a generated title.
+     * title is made from the user's words (`buildTitle`), and so is its
+     * generation (`startThreadTitle`). A Thread with context and no words
+     * gets a title from the first thing, and a generated one from the block.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {

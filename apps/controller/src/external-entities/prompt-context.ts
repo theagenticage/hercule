@@ -5,8 +5,44 @@
  * in `@hercule/contract`; this module only turns stored rows into its input.
  * It is pure: reading the rows is the service's job.
  */
-import type { EntityFieldValue, PromptContextField, PromptContextThing } from "@hercule/contract";
+import type {
+  EntityFieldValue,
+  PromptContextField,
+  PromptContextOrigin,
+  PromptContextThing,
+} from "@hercule/contract";
+import { buildLockedLabel, isRestrictedPlace } from "./entity-records";
 import type { TaskableEntity } from "./repository";
+
+/**
+ * Where a prompt's things came from, as decided before the label text is
+ * known. A group names its label thing by ref. The text of the label is read
+ * from that thing's current record when the block is written, so access that
+ * changes between the two reads is never missed.
+ */
+export type PromptContextOriginSource =
+  | { readonly kind: "group"; readonly labelRef: string }
+  | { readonly kind: "selection" }
+  | { readonly kind: "one" };
+
+/**
+ * Builds the origin of the block from `source` and the current `records` of
+ * the prompt's things. The label of a group is the title of its label thing,
+ * or the locked label (`A pull request you cannot open`) when that thing is a
+ * restricted place, so its stored title never reaches the prompt. The label
+ * thing is one of `records`: a group is exactly its members.
+ */
+export const buildPromptContextOrigin = (
+  source: PromptContextOriginSource,
+  records: ReadonlyArray<TaskableEntity>,
+): PromptContextOrigin => {
+  if (source.kind !== "group") return source;
+  const labelRecord = records.find((record) => record.ref === source.labelRef)!;
+  return {
+    kind: "group",
+    label: isRestrictedPlace(labelRecord) ? buildLockedLabel(labelRecord.noun) : labelRecord.title,
+  };
+};
 
 /**
  * Returns a field value as the text a prompt shows next to the field's label.
@@ -45,20 +81,18 @@ const describeField = (field: EntityFieldValue): PromptContextField => ({
  * Returns the prompt context entry of one stored record, given the declared
  * field values read for it (empty when none).
  *
- * - A record that no Connection can read now, whether it is full or partial,
- *   gives only its ref and id, because its stored title, status and fields
- *   are what the user could once read. This is the rule `buildPlace` uses for
- *   a restricted place. The ref already names the kind of thing.
- * - Any other record gives what its rows hold: a partial record's title may
- *   be empty and its fields are those stored.
+ * - A restricted place (`isRestrictedPlace`) gives only its ref and id,
+ *   because its stored title, status and fields are what the user could once
+ *   read. The ref already names the kind of thing.
+ * - Any other record gives what its rows hold, including a full record that
+ *   lost access (its last known facts): a partial record's title may be empty
+ *   and its fields are those stored.
  */
 export const buildPromptContextThing = (
   record: TaskableEntity,
   fields: ReadonlyArray<EntityFieldValue>,
 ): PromptContextThing => {
-  if (record.access !== "ok") {
-    return { entityId: record.id, ref: record.ref, fields: [] };
-  }
+  if (isRestrictedPlace(record)) return { entityId: record.id, ref: record.ref, fields: [] };
   return {
     entityId: record.id,
     ref: record.ref,

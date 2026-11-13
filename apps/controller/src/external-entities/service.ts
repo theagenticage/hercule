@@ -73,7 +73,6 @@ import {
   type NotFound,
   type ProjectMatch,
   formatPromptContext,
-  type PromptContextOrigin,
   type Task,
   type TaskStage,
   type Unauthenticated,
@@ -107,9 +106,13 @@ import {
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
 import { readFieldValues } from "./entity-fields";
-import { buildActiveEntityKind } from "./entity-records";
+import { buildActiveEntityKind, isRestrictedPlace } from "./entity-records";
 import { buildEntityCard } from "./entity-cards";
-import { buildPromptContextThing } from "./prompt-context";
+import {
+  buildPromptContextOrigin,
+  buildPromptContextThing,
+  type PromptContextOriginSource,
+} from "./prompt-context";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
@@ -1070,8 +1073,9 @@ const make = Effect.gen(function* () {
      * other grants guard.
      *
      * Reads stored rows only, never a source: the records and their
-     * observations, then the field values the faces need for the records some
-     * Connection can read, one statement each however many things there are.
+     * observations, then the field values the faces need for the records that
+     * are not restricted places (`isRestrictedPlace`), one statement each
+     * however many things there are.
      */
     readCards: (
       query: EntityCardsQuery,
@@ -1084,10 +1088,10 @@ const make = Effect.gen(function* () {
           ),
         );
         const kinds = (yield* readEnvironment).activeEntityKinds ?? [];
-        const readable = [...records.values()].filter((record) => record.access === "ok");
+        const drawn = [...records.values()].filter((record) => !isRestrictedPlace(record));
         const values = yield* Effect.provideService(
           readFieldValues(
-            readable.map(({ ref }) => ref),
+            drawn.map(({ ref }) => ref),
             kinds,
           ),
           SqlClient.SqlClient,
@@ -1105,14 +1109,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns where the things of `entityIds` came from, for the first line
-     * of a prompt's context block. Needs the grants `task.read` and
-     * `signal.query`: the origin shows which Inbox group the things are in,
-     * and a group depends on signals (`readInboxGroup` needs both too). Fails
-     * with `NotFound` naming each unknown id. It reads stored rows only.
+     * of a prompt's context block, before the text of a group's label is
+     * known. Needs the grants `task.read` and `signal.query`: the origin shows
+     * which Inbox group the things are in, and a group depends on signals
+     * (`readInboxGroup` needs both too). Fails with `NotFound` naming each
+     * unknown id. It reads stored rows only.
      *
      * - 2 or more things that are exactly the members of one linked group on
-     *   the Inbox, by the same groups the Inbox draws: `group`, with that
-     *   group's label (a locked label when its label thing is restricted);
+     *   the Inbox, by the same groups the Inbox draws: `group`, with the ref
+     *   of the group's label thing;
      * - 2 or more other things: `selection`;
      * - one thing: `one`.
      *
@@ -1121,16 +1126,21 @@ const make = Effect.gen(function* () {
      */
     readPromptContextOrigin: (
       entityIds: ReadonlyArray<string>,
-    ): Effect.Effect<PromptContextOrigin, Unauthenticated | Forbidden | NotFound | SqlError> =>
+    ): Effect.Effect<
+      PromptContextOriginSource,
+      Unauthenticated | Forbidden | NotFound | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireContextGrants;
         const records = yield* readTaskableEntitiesOrFail(entityIds);
         if (records.length < 2) return { kind: "one" };
-        const label = yield* inbox.findInboxGroupMadeOf(
+        const labelRef = yield* inbox.findInboxGroupLabelRef(
           yield* readInboxEnvironment,
           records.map(({ ref }) => ref),
         );
-        return Option.isNone(label) ? { kind: "selection" } : { kind: "group", label: label.value };
+        return Option.isNone(labelRef)
+          ? { kind: "selection" }
+          : { kind: "group", labelRef: labelRef.value };
       }),
 
     /**
@@ -1140,17 +1150,19 @@ const make = Effect.gen(function* () {
      * `signal.query`. Fails with `NotFound` naming each unknown id. The
      * records are read again here and not passed from
      * `readPromptContextOrigin`, because they must be read after the take-on.
+     * For a group, the label text comes from the label thing's record read
+     * here, so access revoked since `readPromptContextOrigin` is respected.
      *
      * It reads stored rows only, never a source: the records, their declared
      * field values, and one statement for each, however many things there
      * are. Call it after `takeOnAsOneTask` in the same transaction, so a thing
      * that was read at its source for a Task carries the fields it was stored
-     * with. A thing that no Connection can read, whole or partial, gives only
-     * its ref and id.
+     * with. A restricted place (`isRestrictedPlace`) gives only its ref and
+     * id; a full record that lost access gives its last known facts.
      */
     buildPromptContext: (
       entityIds: ReadonlyArray<string>,
-      origin: PromptContextOrigin,
+      origin: PromptContextOriginSource,
     ): Effect.Effect<string, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireContextGrants;
@@ -1165,7 +1177,7 @@ const make = Effect.gen(function* () {
           sql,
         );
         return formatPromptContext({
-          origin,
+          origin: buildPromptContextOrigin(origin, records),
           things: records.map((record) =>
             buildPromptContextThing(record, values.get(record.ref)?.fields ?? []),
           ),

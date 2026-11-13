@@ -40,7 +40,6 @@ import {
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
-import { shouldRetryCardsRead } from "@hercule/client-core/inbox";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -1131,8 +1130,7 @@ const indexCardsById = (reply: {
  * context. The data is the cards by thing id: a thing that names nothing is
  * not in it. The key holds `ids` in the order asked, under its own prefix
  * (`queryKeys.entityCards`), which a push on `externalEntity`, `connection` or
- * `plugin` reads again. It never retries a refusal that will not change
- * (`shouldRetryCardsRead`).
+ * `plugin` reads again.
  */
 export const entityCardsQuery = (client: HerculeClient, ids: ReadonlyArray<string>) =>
   queryOptions({
@@ -1140,7 +1138,7 @@ export const entityCardsQuery = (client: HerculeClient, ids: ReadonlyArray<strin
     queryFn: ({ signal }) =>
       client.externalEntity.readCards({ payload: { ids: [...ids] } }, { signal }),
     select: indexCardsById,
-    retry: shouldRetryCardsRead,
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 

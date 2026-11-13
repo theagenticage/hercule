@@ -85,12 +85,22 @@ const decideWhose = (card: EntityRecord): string | undefined => {
   return card.person === undefined || card.yours ? undefined : `${card.person.name}'s`;
 };
 
+/**
+ * Returns the status a card draws, or `undefined` when it draws none. A
+ * compact card leaves out a status of the `norm` tone, because it is what the
+ * thing is expected to be. A card whose size is not known (`cardSize` is
+ * `undefined`, as on a thing seen only through a signal) is treated as
+ * compact, the narrower of the two.
+ */
+export const decideShownStatus = (
+  cardSize: EntityRecord["card"] | undefined,
+  status: EntityStatus | undefined,
+): EntityStatus | undefined =>
+  status !== undefined && (cardSize === "rich" || status.norm !== true) ? status : undefined;
+
 /** Returns what the generic card draws for `card`. */
 export const decideOpenCardFace = (card: EntityRecord): OpenCardFace => {
-  const status =
-    card.status !== undefined && (card.card === "rich" || card.status.norm !== true)
-      ? card.status
-      : undefined;
+  const status = decideShownStatus(card.card, card.status);
   const sentence = decideSentence(card);
   const whose = decideWhose(card);
   return {

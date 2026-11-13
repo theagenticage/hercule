@@ -1628,6 +1628,7 @@ async function mountShellSpecimen(
                       ref: detail.ref,
                       kind: detail.kind,
                       noun: detail.noun,
+                      card: detail.card,
                       identifier: detail.identifier,
                       title: detail.title,
                       ...(detail.status === undefined ? {} : { status: detail.status }),
