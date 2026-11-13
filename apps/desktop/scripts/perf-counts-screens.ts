@@ -19,8 +19,9 @@
  * Every step checks that it did what it is named for, such as a row becoming
  * current or a thing leaving the list, so a step that did nothing cannot pass
  * with a count of zero. A step has settled when what it waits for is on
- * screen, no read or write is running, no animation frame or animation that
- * ends is pending, and two frames have passed with no new request.
+ * screen, no read or write is running, no animation frame, timeout due
+ * within a second or animation that ends is pending, and two frames have
+ * passed with no new request.
  *
  * It runs on plain Node, like the other scripts, so its imports name the
  * `.ts` file.

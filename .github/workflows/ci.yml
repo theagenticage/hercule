@@ -394,11 +394,15 @@ jobs:
   # The desktop counts check (spec 17 §Performance › The counts check):
   # `perf:counts` builds the desktop bundle, runs the Work board's and the
   # Inbox's speed tests in their counts mode, and drives the Inbox and Work in
-  # Chromium on a fake controller, all at once, then fails when a count is
-  # worse than `apps/desktop/perf-counts.baseline.json`. Counts do not depend
-  # on the machine, so it runs on the same Linux runner as `ui-metrics`, with
-  # the same Chromium the container records the baseline with. It took 23 s
-  # on 2026-11-12 in the container; its budget is 5 minutes.
+  # Chromium on a fake controller, all at once. It took 23 s on 2026-11-12 in
+  # the container; its budget is 5 minutes.
+  #
+  # It informs and never fails on a count (#1146). On `main` it saves the
+  # counts to the Actions cache. On a pull request it restores main's latest
+  # counts, compares, and posts the report as one comment, which each push
+  # updates. A pull request from a fork gets no comment, because its token
+  # cannot write one; its report is in the job's log. The job fails only when
+  # it cannot measure, such as a request the fake controller does not answer.
   #
   # It runs only when something it counts can have changed: the desktop app,
   # the controller (whose reads the speed tests count), the shared packages,
@@ -406,6 +410,9 @@ jobs:
   desktop-counts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -446,11 +453,55 @@ jobs:
       - if: steps.changes.outputs.run == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
-      - if: steps.changes.outputs.run == 'true'
-        run: pnpm --filter @hercule/desktop perf:counts
+      # main's latest counts, which the report compares with. The first pull
+      # request after the cache lost them gets a report with nothing to compare.
+      - name: Restore main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}
+          restore-keys: desktop-counts-
 
-      # The log shows the report. `counts.json` is what `--write-baseline`
-      # would write, and the logs hold the build's and the speed tests' output.
+      # On `main` the run writes the counts the next pull requests compare with.
+      - name: Count
+        if: steps.changes.outputs.run == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            pnpm --filter @hercule/desktop perf:counts --write-baseline
+          else
+            pnpm --filter @hercule/desktop perf:counts
+          fi
+
+      - name: Save main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # One comment per pull request, found by its first line and replaced on
+      # each push, so the conversation holds the latest report only.
+      - name: Post the report on the pull request
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          marker='<!-- desktop-counts -->'
+          { echo "$marker"; cat apps/desktop/out/perf-counts/report.md; } > "$RUNNER_TEMP/comment.md"
+          id=$(gh api "repos/$REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPOSITORY/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/issues/$PR/comments" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          fi
+
+      # The build's and the speed tests' logs, and what the run counted.
       - if: failure() && steps.changes.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:

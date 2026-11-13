@@ -149,6 +149,12 @@ export interface ProbeTarget {
 export interface FocusOutcome {
   /** Whether the element is `document.activeElement` and matches `:focus-visible`. */
   readonly focused: boolean;
+  /**
+   * Whether no element carries the target's id any more, so nothing was
+   * focused. The page re-rendered the element after `collectTargets`, as the
+   * Inbox's pane does when focus on a row makes another thing current.
+   */
+  readonly replaced: boolean;
 }
 
 /** A change to the page that tests how its text survives (WCAG 1.4.12, larger text, reflow). */
