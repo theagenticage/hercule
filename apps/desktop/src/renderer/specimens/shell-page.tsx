@@ -1613,6 +1613,31 @@ async function mountShellSpecimen(
             if (url.endsWith("/api/v1/sessions"))
               return answerJson(inbox.threadStart.started.session);
           }
+          // The cards under a message that carried context are read together, from the fixture things.
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/cards")) {
+            const { ids } = JSON.parse(await new Request(url, init).text()) as {
+              ids: readonly string[];
+            };
+            const cards = ids.flatMap((id) => {
+              const detail = inbox.details.get(id);
+              return detail === undefined
+                ? []
+                : [
+                    {
+                      id,
+                      ref: detail.ref,
+                      kind: detail.kind,
+                      noun: detail.noun,
+                      identifier: detail.identifier,
+                      title: detail.title,
+                      ...(detail.status === undefined ? {} : { status: detail.status }),
+                      face: detail.face ?? null,
+                      restricted: false,
+                    },
+                  ];
+            });
+            return answerJson({ cards });
+          }
           const isRead = (init?.method ?? "GET") === "GET";
           // The pane reads what the source shows of the open thing, and the open ask whole.
           const blocksPath = /\/api\/v1\/external-entities\/([^/]+)\/blocks$/.exec(url);

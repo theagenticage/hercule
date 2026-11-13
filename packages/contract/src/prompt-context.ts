@@ -20,11 +20,13 @@
  *
  * Every text that came from outside Hercule (a title, a status, a field) is
  * collapsed to one line first, so none of it can start a line of its own and
- * pass for another part of the block. The title, the status, the field labels
- * and the group label also lose their quotes, so the quotes around a title
- * and a group label always mark where the text ends.
+ * pass for another part of the block. The typographic double quotes “ and ”
+ * in it become a plain `"`, so the quotes around a title and a group label
+ * always mark where the text ends, and a status can never pass for a title.
+ * Every other character stays as it was written: apostrophes, plain quotes,
+ * backticks and semicolons are part of what a thing says.
  */
-import { flattenToOneLine, prepareForQuoting } from "./agent-text";
+import { flattenToOneLine } from "./agent-text";
 import { MAX_CONTEXT_REFERENCES } from "./groups/session";
 import { ExternalRef, isId } from "./ids";
 import { Schema } from "effect";
@@ -135,12 +137,17 @@ const cutWithEllipsis = (text: string, maxLength: number): string => {
   return characters.length <= maxLength ? text : `${characters.slice(0, maxLength).join("")}…`;
 };
 
-/** Returns text with its quotes removed and on one line, cut at `maxLength` characters with an ellipsis. */
-const prepareQuotedText = (text: string, maxLength: number): string =>
-  cutWithEllipsis(prepareForQuoting(text, Infinity), maxLength);
+/**
+ * Returns text from outside Hercule as one line, with the typographic double
+ * quotes “ and ” replaced by a plain `"`, cut at `maxLength` characters with
+ * an ellipsis. The block writes those two quotes itself around a title and a
+ * group label, so text from outside must not hold them.
+ */
+const prepareExternalText = (text: string, maxLength: number): string =>
+  cutWithEllipsis(flattenToOneLine(text).replace(/[“”]/g, '"'), maxLength);
 
 const describeField = (field: PromptContextField): string =>
-  `${prepareQuotedText(field.label, MAX_TITLE_LENGTH)} ${cutWithEllipsis(flattenToOneLine(field.value), MAX_FIELD_VALUE_LENGTH)}`;
+  `${prepareExternalText(field.label, MAX_TITLE_LENGTH)} ${prepareExternalText(field.value, MAX_FIELD_VALUE_LENGTH)}`;
 
 const hasValue = (field: PromptContextField): boolean => flattenToOneLine(field.value).length > 0;
 
@@ -151,11 +158,8 @@ const hasValue = (field: PromptContextField): boolean => flattenToOneLine(field.
  * one would not fit, and then a single ellipsis stands for the rest.
  */
 const writeEntryDetails = (thing: PromptContextThing): string[] => {
-  const title = prepareQuotedText(thing.title ?? "", MAX_TITLE_LENGTH);
-  const status = cutWithEllipsis(
-    prepareForQuoting(thing.status ?? "", Infinity),
-    MAX_STATUS_LENGTH,
-  );
+  const title = prepareExternalText(thing.title ?? "", MAX_TITLE_LENGTH);
+  const status = prepareExternalText(thing.status ?? "", MAX_STATUS_LENGTH);
   const parts = [title.length > 0 ? `“${title}”` : "", status].filter((part) => part.length > 0);
   const fieldTexts = thing.fields.filter(hasValue).map(describeField);
 
@@ -201,7 +205,7 @@ const writeSharedFields = (things: readonly PromptContextThing[]): string | unde
 const writeOriginLine = (origin: PromptContextOrigin, count: number): string => {
   switch (origin.kind) {
     case "group":
-      return `From your linked group “${prepareQuotedText(origin.label, MAX_TITLE_LENGTH)}” (${String(count)} things)`;
+      return `From your linked group “${prepareExternalText(origin.label, MAX_TITLE_LENGTH)}” (${String(count)} things)`;
     case "selection":
       return `From your selection (${String(count)} things)`;
     case "one":
@@ -218,8 +222,9 @@ const writeOriginLine = (origin: PromptContextOrigin, count: number): string => 
  *
  * Each entry is `<n>. <ref> · “<title>” · <status> · <label value, ...> · <id>`.
  * A part with no text is left out, so a thing with no title has no quoted
- * part. Quotes are removed from the title, the status and the labels, and the
- * group label, so the closing quote of a title is always the first one. The
+ * part. The typographic quotes “ and ” in the title, the status, the labels, the
+ * values and the group label become a plain `"`, so the closing quote of a
+ * title is always the first one. The
  * title is cut at 200 characters, the status at 100 and each field value at
  * 80, and an ellipsis marks a cut. Everything between the ref and the id adds
  * up to at most 400 characters: fields are written in order until the next
@@ -256,7 +261,7 @@ const readOriginCount = (line: string): number | undefined => {
  * line is not entry number `number`. The line must start with its number and a
  * valid External Ref and end with an id. The title is read only when the part
  * after the ref starts with an opening quote, and it ends at the first closing
- * quote, which is exact because the title holds no quotes. The rest of the text
+ * quote, which is exact because the title holds no typographic quotes. The rest of the text
  * between the ref and the id is not read.
  */
 const readEntry = (

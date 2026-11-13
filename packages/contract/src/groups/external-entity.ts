@@ -61,7 +61,7 @@ import {
   SignalStatus,
 } from "./signal";
 import { RunStarted } from "./run";
-import { MAX_THREAD_THINGS } from "./session";
+import { MAX_CONTEXT_REFERENCES, MAX_THREAD_THINGS } from "./session";
 import { MAX_SEARCH_TEXT_LENGTH, MAX_TASK_TITLE_LENGTH, TaskPriority, TaskStage } from "./task";
 import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
@@ -862,6 +862,57 @@ export const InboxGroupDetail = Schema.Struct({
 export type InboxGroupDetail = Schema.Schema.Type<typeof InboxGroupDetail>;
 
 /**
+ * The input of `readCards`: the things whose cards to draw, as entity ids, in
+ * the order the cards are wanted. A message holds at most
+ * `MAX_CONTEXT_REFERENCES` things, so that is the most one read takes.
+ */
+export const EntityCardsQuery = Schema.Struct({
+  ids: atMost(Id, MAX_CONTEXT_REFERENCES).check(
+    Schema.isMinLength(1),
+    Schema.isUnique({
+      message: "Each thing can be listed once in ids; remove the repeated entity id.",
+    }),
+  ),
+});
+
+export type EntityCardsQuery = Schema.Schema.Type<typeof EntityCardsQuery>;
+
+/**
+ * One thing as a small card draws it: what the record holds, with none of the
+ * signals, offers, links or Inbox membership that `read` adds. Its fields are
+ * those of `EntityRecord` and `ExternalEntityDetail`.
+ *
+ * A `restricted` card is one no Connection can read now: it holds only `id`,
+ * `ref`, `kind`, `noun`, `restricted` true and a null `face`, with no
+ * identifier, title or status. A record that Hercule holds only in part (seen
+ * through a signal) gives what its rows hold, so its `title` may be absent.
+ * `face` is null for a kind with no declared face, and when its plugin is not
+ * active.
+ */
+export const EntityCard = Schema.Struct({
+  id: Id,
+  ref: ExternalRef,
+  kind: Schema.String,
+  noun: bounded(1, 40),
+  identifier: Schema.optionalKey(bounded(1, 64)),
+  title: Schema.optionalKey(bounded(1, 512)),
+  status: Schema.optionalKey(EntityStatus),
+  face: Schema.NullOr(CardFace),
+  restricted: Schema.Boolean,
+});
+
+export type EntityCard = Schema.Schema.Type<typeof EntityCard>;
+
+/**
+ * What `readCards` returns: a card for each id that names a thing, in the
+ * order asked. An id that names nothing (unknown, or pruned) is left out, so a
+ * client draws what it already knows for that thing.
+ */
+export const EntityCards = Schema.Struct({ cards: atMost(EntityCard, MAX_CONTEXT_REFERENCES) });
+
+export type EntityCards = Schema.Schema.Type<typeof EntityCards>;
+
+/**
  * One value of a facet, with how many things in the result hold it. `value`
  * is what a clause sends: the stored text, or the ref of a context record.
  * `label` is what the row shows: the record's title when the value is a
@@ -1623,6 +1674,19 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       payload: InboxGroupQuery,
       success: InboxGroupDetail,
       error: [Unauthenticated, Forbidden, NotFound, Internal],
+    }),
+    /**
+     * Returns the small card of each thing of `ids`, in the order asked, for
+     * the cards a message draws: see `EntityCards`. Reads stored rows only, in
+     * a fixed number of statements however many ids there are. An id that names
+     * nothing is left out of the reply, not an error. A POST that reads and
+     * stores nothing, for the reason `queryInbox` is one: the ids are a list,
+     * which a flat query string cannot carry.
+     */
+    HttpApiEndpoint.post("readCards", "/external-entities/cards", {
+      payload: EntityCardsQuery,
+      success: EntityCards,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.get("search", "/external-entities/search", {
       query: EntitySearchQuery,

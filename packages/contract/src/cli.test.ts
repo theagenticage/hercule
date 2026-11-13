@@ -68,6 +68,7 @@ const HIDDEN = [
   "externalEntity.countInbox",
   "externalEntity.readInboxOutline",
   "externalEntity.suggestInboxValues",
+  "externalEntity.readCards",
   "externalEntity.undoTakeOn",
   "externalEntity.undoTakeOnTogether",
 ];

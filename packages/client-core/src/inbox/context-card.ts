@@ -3,21 +3,21 @@
  * context: the live thing when it could be read, and what the context block
  * kept of it when it could not.
  */
-import type { EntityFieldValue, EntityStatus, ExternalEntityDetail } from "@hercule/contract";
+import type { EntityCard, EntityFieldValue, EntityStatus } from "@hercule/contract";
+import { readEntityPluginId } from "../desk/entity-words";
+import { describeLockedRow } from "../desk/relation-rows";
 import { ApiError } from "../errors";
-import { decideOpenCardFace } from "./card-face";
 
 /** How many times a card's read is tried again after it fails for a reason that may pass. */
 const MAX_CARD_READ_RETRIES = 3;
 
 /**
- * Decides whether a card's read of its thing is tried again after it failed
- * `failureCount` times with `error`. A thing that is gone (`not_found`) or
- * that the user may not read (`forbidden`) will not change by asking again, so
- * the card draws what the block kept at once. Any other failure, such as a
- * connection that dropped, is tried again up to three times.
+ * Decides whether the read of a message's cards is tried again after it failed
+ * `failureCount` times with `error`. A refusal that will not change by asking
+ * again (`not_found`, `forbidden`) draws what the block kept at once. Any other
+ * failure, such as a connection that dropped, is tried again up to three times.
  */
-export const shouldRetryCardRead = (failureCount: number, error: unknown): boolean => {
+export const shouldRetryCardsRead = (failureCount: number, error: unknown): boolean => {
   if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden")) {
     return false;
   }
@@ -45,6 +45,8 @@ export interface ContextCardFace {
   /** How the source names it, such as `SHOP-142`. */
   readonly identifier?: string;
   readonly title: string;
+  /** True for a thing no Connection of the user can read: the card is locked, and its title only says so. */
+  readonly isLocked?: true;
   readonly status?: EntityStatus;
   /**
    * What ends the status line: a live `fact` such as "1,211 events", which a
@@ -81,12 +83,17 @@ const readFaceWords = (field: EntityFieldValue | undefined): string | undefined 
  * Returns the card of a thing that was read: its source, noun, identifier,
  * title and status, and at the end of the status line the face's fact (the
  * live number, such as "1,211 events") or, when it has none, the place the
- * thing lives in.
+ * thing lives in. A restricted thing (no Connection can read it) is a locked
+ * card with only its source and noun, worded like the locked rows of a pane:
+ * its title is never drawn.
  */
-export const describeContextCard = (detail: ExternalEntityDetail): ContextCardFace => {
-  const face = decideOpenCardFace(detail);
-  const fact = readFaceWords(detail.face?.fact);
-  const place = readFaceWords(detail.face?.place);
+export const describeContextCard = (card: EntityCard): ContextCardFace => {
+  const pluginId = readEntityPluginId(card.kind);
+  if (card.restricted) {
+    return { pluginId, noun: card.noun, title: describeLockedRow(card), isLocked: true };
+  }
+  const fact = readFaceWords(card.face?.fact);
+  const place = readFaceWords(card.face?.place);
   const trailing =
     fact !== undefined
       ? ({ kind: "fact", text: fact } as const)
@@ -94,19 +101,19 @@ export const describeContextCard = (detail: ExternalEntityDetail): ContextCardFa
         ? undefined
         : ({ kind: "place", text: place } as const);
   return {
-    pluginId: face.pluginId,
-    noun: face.noun,
-    identifier: face.identifier,
-    title: face.title,
-    ...(face.status === undefined ? {} : { status: face.status }),
+    pluginId,
+    noun: card.noun,
+    ...(card.identifier === undefined ? {} : { identifier: card.identifier }),
+    title: card.title ?? card.ref,
+    ...(card.status === undefined ? {} : { status: card.status }),
     ...(trailing === undefined ? {} : { trailing }),
   };
 };
 
 /**
  * Returns the card drawn from what the context block kept of a thing, for when
- * the live read of the thing is missing: not answered yet, or failed (the
- * thing is gone, or the user cannot read it). It has the source, taken from
+ * the live read of the cards is missing: not answered yet, failed, or the
+ * thing is gone (the reply leaves out an id that names nothing). It has the source, taken from
  * the ref (`linear:issue:...` is Linear's), and the title the block kept
  * exactly as it was written, or the ref itself when the block kept none.
  */

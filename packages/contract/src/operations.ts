@@ -364,6 +364,14 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/external-entities/match-project",
   },
+  // The card of each thing, from stored record data only: no signal text,
+  // offer or Inbox membership, so `task.read` is the whole grant. A POST that
+  // reads and stores nothing.
+  "externalEntity.readCards": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/cards",
+  },
   "externalEntity.search": {
     requires: "task.read",
     method: "GET",

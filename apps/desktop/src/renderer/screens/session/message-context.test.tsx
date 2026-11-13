@@ -5,16 +5,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { buildFakeInboxDetail } from "@hercule/client-core/inbox/testing";
 import {
   formatPromptContext,
   type Attachment,
   splitPromptContext,
-  type InboxThing,
+  type EntityCard,
   type PromptContextBlock,
 } from "@hercule/contract";
-import { buildErrorBody, THREAD_FIXTURES } from "../../app/testing";
-import { entityQuery } from "../../app/queries";
+import type { Call } from "@hercule/client-core/testing";
+import { THREAD_FIXTURES } from "../../app/testing";
+import { entityCardsQuery } from "../../app/queries";
 import { renderThreadPart } from "../thread/testing";
 import { hasSameMessageProps, UserMessage } from "./messages";
 
@@ -30,34 +30,28 @@ const ERROR_ID = "01a06d02-9000-7000-8000-000000000002";
 const ISSUE_REF = "linear:issue:northwind/SHOP-142";
 const ERROR_REF = "sentry:error:storefront-1z9";
 
-const buildThing = (id: string, ref: string, overrides: Partial<InboxThing>): InboxThing =>
-  ({
-    id,
-    ref,
-    kind: "linear/issue",
-    noun: "Issue",
-    patience: 24,
-    identifier: "SHOP-142",
-    title: "Show the delivery cost",
-    url: "https://example.test/x",
-    observedAt: "2026-11-01T09:00:00.000Z",
-    sourceUpdatedAt: "2026-11-01T09:00:00.000Z",
-    ...overrides,
-  }) as InboxThing;
-
-const ISSUE = buildFakeInboxDetail(buildThing(ISSUE_ID, ISSUE_REF, {}));
-const ERROR = {
-  ...buildFakeInboxDetail(
-    buildThing(ERROR_ID, ERROR_REF, {
-      kind: "sentry/error",
-      noun: "Error",
-      identifier: "STOREFRONT-1Z9",
-      title: "TypeError: Cannot read properties of undefined",
-    }),
-  ),
+const ISSUE: EntityCard = {
+  id: ISSUE_ID,
+  ref: ISSUE_REF,
+  kind: "linear/issue",
+  noun: "Issue",
+  identifier: "SHOP-142",
+  title: "Show the delivery cost",
+  face: null,
+  restricted: false,
+};
+const ERROR: EntityCard = {
+  id: ERROR_ID,
+  ref: ERROR_REF,
+  kind: "sentry/error",
+  noun: "Error",
+  identifier: "STOREFRONT-1Z9",
+  title: "TypeError: Cannot read properties of undefined",
   status: { shape: "alert", tone: "bad", label: "Escalating" },
   face: { fact: { key: "events", type: "number", label: "Events", number: 1211 } },
-} as const;
+  restricted: false,
+};
+const CARDS_PATH = "POST /api/v1/external-entities/cards";
 
 const CONTEXT_TEXT = formatPromptContext({
   origin: { kind: "selection" },
@@ -80,27 +74,33 @@ const drawMessage = () => (): React.JSX.Element => (
 );
 
 /**
- * Renders the message, with the controller reading the issue and the error,
- * and the thing in `unreadable` failing. A handler for `refused` replaces the
- * error's answer: it answers `not_found` while `refused.now` is true.
+ * Renders the message, with the controller answering one read of the cards.
+ * `answer` is the reply for the ids asked; the default leaves out the ids in
+ * `gone` and answers the issue and the error otherwise. `failing.now` makes
+ * the read fail with a `forbidden` refusal.
  */
-const renderMessage = (unreadable?: string, refused?: { now: boolean }) =>
+const renderMessage = (
+  answer: (ids: readonly string[]) => readonly EntityCard[] = (ids) =>
+    [ISSUE, ERROR].filter((card) => ids.includes(card.id)),
+  failing?: { now: boolean },
+) =>
   renderThreadPart(drawMessage(), {
     thread: THREAD,
     handlers: {
-      [`GET /api/v1/external-entities/${ISSUE_ID}`]:
-        unreadable === ISSUE_ID
-          ? { status: 404, body: buildErrorBody("not_found", "No entity has this id.") }
-          : { body: ISSUE },
-      [`GET /api/v1/external-entities/${ERROR_ID}`]:
-        unreadable === ERROR_ID || refused !== undefined
-          ? () =>
-              unreadable === ERROR_ID || refused?.now === true
-                ? { status: 404, body: buildErrorBody("not_found", "No entity has this id.") }
-                : { body: ERROR }
-          : { body: ERROR },
+      [CARDS_PATH]: (call) =>
+        failing?.now === true
+          ? {
+              status: 403,
+              body: {
+                error: { code: "forbidden", message: "No.", details: { grant: "task.read" } },
+              },
+            }
+          : { body: { cards: answer((call.body as { ids: string[] }).ids) } },
     },
   });
+
+const cardCalls = (calls: readonly Call[]) =>
+  calls.filter((call) => `${call.method} ${call.path}` === CARDS_PATH);
 
 describe("the cards under a message with context", () => {
   it("draws each thing from its live read: source, identifier, title, status and fact", async () => {
@@ -116,8 +116,15 @@ describe("the cards under a message with context", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("draws the title the block kept, and no identifier, for a thing that cannot be read", async () => {
-    await renderMessage(ERROR_ID);
+  it("reads all the things of one message in one request, in the order of the block", async () => {
+    const { calls } = await renderMessage();
+    await screen.findByText("1,211 events");
+
+    expect(cardCalls(calls).map((call) => call.body)).toEqual([{ ids: [ISSUE_ID, ERROR_ID] }]);
+  });
+
+  it("draws the title the block kept, and no identifier, for a thing the reply leaves out", async () => {
+    await renderMessage((ids) => (ISSUE.id === ids[0] ? [ISSUE] : []));
 
     await screen.findByText("SHOP-142");
     const card = screen.getByText("TypeError · kept in the block").closest("li")!;
@@ -125,27 +132,48 @@ describe("the cards under a message with context", () => {
     expect(within(card).queryByText("Escalating")).toBeNull();
   });
 
-  it("asks once for a thing that is gone, and does not retry", async () => {
-    const { queryClient, client } = await renderMessage(ERROR_ID);
+  it("draws a locked card, with no title, for a thing the user cannot read", async () => {
+    await renderMessage(() => [
+      ISSUE,
+      {
+        id: ERROR_ID,
+        ref: ERROR_REF,
+        kind: "sentry/error",
+        noun: "Error",
+        face: null,
+        restricted: true,
+      },
+    ]);
 
-    await waitFor(() => {
-      expect(queryClient.getQueryState(entityQuery(client, ERROR_ID).queryKey)?.status).toBe(
-        "error",
-      );
-    });
-    expect(
-      queryClient.getQueryState(entityQuery(client, ERROR_ID).queryKey)?.fetchFailureCount,
-    ).toBe(1);
+    await screen.findByText("SHOP-142");
+    const card = screen.getByText("An error you cannot open").closest("li")!;
+    expect(card.className).toContain("is-locked");
+    expect(screen.queryByText("STOREFRONT-1Z9")).toBeNull();
+    expect(screen.queryByText("TypeError · kept in the block")).toBeNull();
   });
 
-  it("draws the block's card, not the old values, when a refresh fails", async () => {
-    const refused = { now: false };
-    const { queryClient, client } = await renderMessage(undefined, refused);
+  it("asks once when the read is refused for good, and does not retry", async () => {
+    const { queryClient, client, calls } = await renderMessage(undefined, { now: true });
+
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(entityCardsQuery(client, [ISSUE_ID, ERROR_ID]).queryKey)?.status,
+      ).toBe("error");
+    });
+    expect(cardCalls(calls)).toHaveLength(1);
+    expect(screen.getByText("TypeError · kept in the block")).toBeTruthy();
+  });
+
+  it("draws the block's cards, not the old values, when a refresh fails", async () => {
+    const failing = { now: false };
+    const { queryClient, client } = await renderMessage(undefined, failing);
     await screen.findByText("1,211 events");
 
-    refused.now = true;
+    failing.now = true;
     await act(async () => {
-      await queryClient.invalidateQueries({ queryKey: entityQuery(client, ERROR_ID).queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: entityCardsQuery(client, [ISSUE_ID, ERROR_ID]).queryKey,
+      });
     });
 
     const card = (await screen.findByText("TypeError · kept in the block")).closest("li")!;
@@ -160,9 +188,14 @@ describe("the cards under a message with context", () => {
     const issue = screen.getByText("SHOP-142").closest("li")!;
 
     act(() => {
-      queryClient.setQueryData(entityQuery(client, ERROR_ID).queryKey, {
-        ...ERROR,
-        face: { fact: { key: "events", type: "number", label: "Events", number: 1212 } },
+      queryClient.setQueryData(entityCardsQuery(client, [ISSUE_ID, ERROR_ID]).queryKey, {
+        cards: [
+          ISSUE,
+          {
+            ...ERROR,
+            face: { fact: { key: "events", type: "number", label: "Events", number: 1212 } },
+          },
+        ],
       });
     });
 

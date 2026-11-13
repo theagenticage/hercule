@@ -124,3 +124,10 @@
   line-height: 17px;
   white-space: pre-wrap;
 }
+/* A thing the user cannot open: a lock and the words, all faint, as the locked rows of a pane. */
+.msg-card.is-locked .msg-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}

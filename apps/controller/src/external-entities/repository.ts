@@ -177,6 +177,10 @@ export interface TaskableEntity {
   readonly completeness: "full" | "partial";
   /** True when the record is a full record of a work kind (fast or slow), the only kind of record a card is made from. */
   readonly isWorkRecord: boolean;
+  /** The kind's noun, such as "Pull request". Empty for a record that has none stored. */
+  readonly noun: string;
+  /** How the source names it, such as `SHOP-123`. Empty for a record that has none yet. */
+  readonly identifier: string;
   /** Empty for a record that has no title yet. */
   readonly title: string;
   readonly status: EntityStatus | undefined;
@@ -1130,6 +1134,8 @@ const make = Effect.gen(function* () {
           kind: (row.kind as string | null) ?? "",
           completeness: row.completeness as "full" | "partial",
           isWorkRecord: isWorkRecord(row),
+          noun: (row.noun as string | null) ?? "",
+          identifier: (row.identifier as string | null) ?? "",
           title: (row.title as string | null) ?? "",
           status,
           stage,

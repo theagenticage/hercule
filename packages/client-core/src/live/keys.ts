@@ -144,6 +144,18 @@ export const queryKeys = {
   externalEntity: (id?: string): LiveQueryKey =>
     id === undefined ? ["external-entity"] : ["external-entity", id],
   /**
+   * The light cards of the things a message carried as context
+   * (`externalEntity.readCards`), one read per message, keyed by its ids in the
+   * order asked. Its own prefix, not under `externalEntity()`: a `task` or
+   * `signal` push reads that prefix and can change nothing a card shows, which
+   * is title, status, the face's values and whether the user can read the
+   * thing. Live topics: exactly the ones of `ENTITY_SOURCE_KEYS`
+   * (`externalEntity` for the values, `connection` for access, `plugin` for
+   * face declarations).
+   */
+  entityCards: (ids?: ReadonlyArray<string>): LiveQueryKey =>
+    ids === undefined ? ["entity-cards"] : ["entity-cards", ids],
+  /**
    * Every suggestion list of the Add sheet (`externalEntity.listSuggestions`).
    * Live topics: `externalEntity` and a plain `task` push, which can give an
    * entity a live Task or take it away. A search of the source is not keyed
@@ -539,6 +551,7 @@ const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
  */
 const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
   queryKeys.externalEntity(),
+  queryKeys.entityCards(),
   queryKeys.workBoard(),
   queryKeys.task(),
   queryKeys.entitySuggestions(),

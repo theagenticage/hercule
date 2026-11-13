@@ -107,17 +107,41 @@ describe("formatPromptContext", () => {
     ).toContain("They share: project Checkout");
   });
 
-  it("removes quotes from the title, status, labels and group label", () => {
-    const quoted = { ...issue, title: '“A” "B"', status: "It’s “x”", fields: [] };
+  it("replaces the typographic quotes with plain ones and keeps every other character", () => {
+    const quoted = { ...issue, title: '“A” "B" it\'s `c`; d', status: "It’s “x”", fields: [] };
     const [, entry] = formatPromptContext({ origin: { kind: "one" }, things: [quoted] }).split(
       "\n",
     );
-    expect(entry).toBe(`1. ${issue.ref} · “A B” · Its x · ${FIRST_ID}`);
+    expect(entry).toBe(`1. ${issue.ref} · “"A" "B" it's \`c\`; d” · It’s "x" · ${FIRST_ID}`);
     const [first] = formatPromptContext({
       origin: { kind: "group", label: "a” (9 things) “b" },
       things: [issue, pullRequest],
     }).split("\n");
-    expect(first).toBe("From your linked group “a (9 things) b” (2 things)");
+    expect(first).toBe('From your linked group “a" (9 things) "b” (2 things)');
+  });
+
+  it("writes a Sentry title and an apostrophe exactly as they are", () => {
+    const sentry = "TypeError: Cannot read properties of undefined (reading 'deliveryCost')";
+    const split = splitPromptContext(
+      formatPromptContext({
+        origin: { kind: "selection" },
+        things: [
+          { ...issue, title: sentry },
+          { ...pullRequest, title: "Don't merge" },
+        ],
+      }),
+    );
+    expect(split.context?.things.map(({ title }) => title)).toEqual([sentry, "Don't merge"]);
+  });
+
+  it("cannot be made to fake a title by a status holding typographic quotes", () => {
+    const split = splitPromptContext(
+      formatPromptContext({
+        origin: { kind: "one" },
+        things: [{ ...withoutTitle(issue), status: "“x”" }],
+      }),
+    );
+    expect(split.context?.things[0]).toEqual({ entityId: FIRST_ID, ref: issue.ref });
   });
 
   it("keeps everything between the ref and the id within 400 characters", () => {
@@ -229,10 +253,13 @@ describe("splitPromptContext", () => {
     const split = splitPromptContext(
       formatPromptContext({
         origin: { kind: "selection" },
-        things: [{ ...issue, title: 'A · B "C” · D' }, withoutTitle(pullRequest)],
+        things: [{ ...issue, title: 'A · B "C” · D “E”' }, withoutTitle(pullRequest)],
       }),
     );
-    expect(split.context?.things.map(({ title }) => title)).toEqual(["A · B C · D", undefined]);
+    expect(split.context?.things.map(({ title }) => title)).toEqual([
+      'A · B "C" · D "E"',
+      undefined,
+    ]);
   });
 
   it("returns text with no block unchanged", () => {

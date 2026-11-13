@@ -1500,6 +1500,10 @@ export const CLI = {
   // Exists only for the search box of the desktop app: it suggests values of a
   // field while the user types. A terminal types the value it knows.
   "externalEntity.suggestInboxValues": { hidden: true },
+  // Exists only for the cards a desktop transcript draws for a message's context:
+  // one batch read of the small cards. A terminal reads one thing in full with
+  // `entity read`.
+  "externalEntity.readCards": { hidden: true },
   "externalEntity.readInboxGroup": {
     command: "entity group",
     help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Needs the grants `task.read` and `signal.query`. Fails with not_found when the thing is not on the Inbox.",

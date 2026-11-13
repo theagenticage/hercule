@@ -11,12 +11,12 @@ import { formatContextLineCount, namePlugin, type PluginIdentity } from "@hercul
 import {
   describeContextCard,
   describeContextCardFromBlock,
-  shouldRetryCardRead,
   type ContextCardFace,
 } from "@hercule/client-core/inbox";
-import type { PromptContextBlock } from "@hercule/contract";
-import { entityQuery, pluginsQuery } from "../../app/queries";
+import type { EntityCard, PromptContextBlock } from "@hercule/contract";
+import { entityCardsQuery, pluginsQuery } from "../../app/queries";
 import { ChevronRightIcon } from "../../icons/chevron-right";
+import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import "./message-context.css";
@@ -68,13 +68,16 @@ function ContextCardView({
 }): JSX.Element {
   const { status, trailing } = face;
   return (
-    <li className="msg-card">
+    <li className={face.isLocked === true ? "msg-card is-locked" : "msg-card"}>
       <p className="msg-card-top">
         <PluginMark pluginId={face.pluginId} plugins={plugins} size={14} />
         <span>{face.noun === undefined ? sourceName : `${sourceName} · ${face.noun}`}</span>
         {face.identifier === undefined ? null : <b>{face.identifier}</b>}
       </p>
-      <p className="msg-card-title">{face.title}</p>
+      <p className="msg-card-title">
+        {face.isLocked === true ? <LockIcon size={13} /> : null}
+        {face.title}
+      </p>
       {status === undefined && trailing === undefined ? null : (
         <p className="msg-card-status">
           {status === undefined ? null : (
@@ -91,30 +94,25 @@ function ContextCardView({
 }
 
 /**
- * Renders the card of `thing`. It reads the thing where it draws it, so a live
- * update of one thing draws that card again and no other. While the read is
- * out, and when it fails (a thing that is gone, or one the user cannot read),
- * the card draws what the block kept: the source and the title.
+ * Renders the card of `thing` from `card`, the thing's light read. Without it
+ * (the read is out, it failed, or the reply left the thing out because it is
+ * gone) the card draws what the block kept: the source and the title.
  */
-function ContextCard({ thing }: { readonly thing: ContextThing }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { data: plugins } = useQuery(pluginsQuery(client));
-  const read = useQuery({
-    ...entityQuery(client, thing.entityId),
-    retry: shouldRetryCardRead,
-  });
-  // After a failed refresh Query still holds the last answer, which is stale
-  // now (the thing was pruned, or the user lost access), so an error wins.
-  const face =
-    read.isError || read.data === undefined
-      ? describeContextCardFromBlock(thing)
-      : describeContextCard(read.data);
-  const installed = plugins ?? NO_PLUGINS;
+function ContextCard({
+  thing,
+  card,
+  plugins,
+}: {
+  readonly thing: ContextThing;
+  readonly card: EntityCard | undefined;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
+}): JSX.Element {
+  const face = card === undefined ? describeContextCardFromBlock(thing) : describeContextCard(card);
   return (
     <ContextCardView
       face={face}
-      sourceName={namePlugin(face.pluginId, installed)}
-      plugins={installed}
+      sourceName={namePlugin(face.pluginId, plugins)}
+      plugins={plugins}
     />
   );
 }
@@ -147,16 +145,30 @@ function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX
 }
 
 /**
- * Renders what hangs under a bubble whose message carried `context`: a live
- * card for each thing the block names, then the fold with the block itself.
+ * Renders what hangs under a bubble whose message carried `context`: a card
+ * for each thing the block names, then the fold with the block itself. It is
+ * the one reader of the cards: one request for the whole message, which never
+ * suspends, so the transcript draws at once with the block's own words.
  */
 export function MessageContext({ context }: { readonly context: PromptContextBlock }): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { data: plugins } = useQuery(pluginsQuery(client));
+  const ids = context.things.map((thing) => thing.entityId);
+  const read = useQuery({ ...entityCardsQuery(client, ids), enabled: ids.length > 0 });
+  // After a failed refresh Query still holds the last answer, which is stale
+  // now (a thing was pruned, or the user lost access), so an error wins.
+  const cards = read.isError ? undefined : read.data;
   return (
     <>
       {context.things.length === 0 ? null : (
         <ul className="msg-cards">
           {context.things.map((thing) => (
-            <ContextCard key={thing.entityId} thing={thing} />
+            <ContextCard
+              key={thing.entityId}
+              thing={thing}
+              card={cards?.get(thing.entityId)}
+              plugins={plugins ?? NO_PLUGINS}
+            />
           ))}
         </ul>
       )}

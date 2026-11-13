@@ -76,6 +76,7 @@ const TICKET_KIND: EntityKindDeclaration = {
     { key: "team", label: "Team", type: "text" },
     { key: "size", label: "Size", type: "number" },
   ],
+  face: { place: "team", fact: "size" },
   facts: [],
   reasons: {},
 };
@@ -2826,5 +2827,115 @@ describe("the prompt context of things", () => {
     expect(result.originWithoutSignalQuery).toMatchObject({
       error: { code: "forbidden", details: { grant: "signal.read" } },
     });
+  });
+});
+
+describe("readCards", () => {
+  const MISSING_ID = "0199f0b7-0000-7000-8000-00000000dead";
+
+  it("returns a card for each thing in the order asked, leaves out an id that names nothing, and draws the face", async () => {
+    const cards = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        yield* withTransaction(
+          sql,
+          replaceFieldRows([
+            {
+              ref: ticketRef("1"),
+              fields: [
+                { key: "team", text_value: "Storefront", number_value: null },
+                { key: "size", text_value: null, number_value: 3 },
+              ],
+            },
+          ]),
+        );
+        const first = yield* entityId(ticketRef("1"));
+        const second = yield* entityId(ticketRef("2"));
+        return (yield* service.readCards({ ids: [second, MISSING_ID, first] })).cards;
+      }),
+    );
+    expect(cards.map((card) => card.ref)).toEqual([ticketRef("2"), ticketRef("1")]);
+    expect(cards[1]).toMatchObject({
+      kind: KIND,
+      noun: "Ticket",
+      identifier: "1",
+      title: "Ticket 1",
+      restricted: false,
+      face: {
+        place: { key: "team", text: "Storefront" },
+        fact: { key: "size", number: 3 },
+      },
+    });
+    expect(cards[0]!.face).toEqual({});
+  });
+
+  it("gives a thing no Connection can read only its id, ref, kind and noun, and a readable partial record what its rows hold", async () => {
+    const cards = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        yield* reportPartial("3");
+        yield* withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'
+              WHERE ref IN (${ticketRef("1")}, ${ticketRef("3")})`,
+        );
+        const ids = yield* Effect.forEach(["1", "2", "3"], (key) => entityId(ticketRef(key)));
+        return (yield* service.readCards({ ids })).cards;
+      }),
+    );
+    for (const index of [0, 2]) {
+      expect(Object.keys(cards[index]!).sort()).toEqual(
+        ["face", "id", "kind", "noun", "ref", "restricted"].sort(),
+      );
+      expect(cards[index]).toMatchObject({ face: null, restricted: true, noun: "Ticket" });
+    }
+    expect(cards[1]).toMatchObject({ restricted: false, title: "Ticket 2" });
+  });
+
+  it("needs only task.read, and refuses without it naming the grant", async () => {
+    const result = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, report, connectionId, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        const id = yield* entityId(ticketRef("1"));
+        const only = (grants: ReadonlyArray<string>) =>
+          Effect.provideService(service.readCards({ ids: [id] }), CurrentActor, {
+            ...A_SESSION,
+            grants,
+          } as unknown as Actor);
+        return { allowed: yield* only(["task.read"]), refused: yield* Effect.flip(only([])) };
+      }),
+    );
+    expect(result.allowed.cards).toHaveLength(1);
+    expect(result.refused).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+  });
+
+  it("sends as many statements for 24 things as for 4", async () => {
+    const count = (things: number) =>
+      run(({ service, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          const keys = Array.from({ length: things }, (_, index) => String(index));
+          yield* report(
+            connectionId,
+            keys.map((key) => buildObservation(key)),
+          );
+          const ids = yield* Effect.forEach(keys, (key) => entityId(ticketRef(key)));
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          yield* service.readCards({ ids }).pipe(record);
+          return statements.length;
+        }),
+      );
+    expect(await count(24)).toBe(await count(4));
   });
 });

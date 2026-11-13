@@ -40,6 +40,9 @@ import {
   type Conflict,
   type EntityAddToWorkInput,
   type EntityAddToWorkResult,
+  type EntityCard,
+  type EntityCards,
+  type EntityCardsQuery,
   type EntityLinkInput,
   type EntityProjectMatchInput,
   type EntityLinkResult,
@@ -105,6 +108,7 @@ import {
 import { announceEntityChanges } from "./announce";
 import { readFieldValues } from "./entity-fields";
 import { buildActiveEntityKind } from "./entity-records";
+import { buildEntityCard } from "./entity-cards";
 import { buildPromptContextThing } from "./prompt-context";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
@@ -1055,6 +1059,48 @@ const make = Effect.gen(function* () {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),
           onSome: Effect.succeed,
         });
+      }),
+
+    /**
+     * Returns the small card of each thing of `query.ids`, in that order: see
+     * `EntityCards`. An id that names nothing is left out, as is a record with
+     * no noun that no active kind owns. Needs the grant `task.read` only: a
+     * card holds record data (title, status, face) that the search already
+     * shows, and none of the signal text, offers or Inbox membership that the
+     * other grants guard.
+     *
+     * Reads stored rows only, never a source: the records and their
+     * observations, then the field values the faces need for the records some
+     * Connection can read, one statement each however many things there are.
+     */
+    readCards: (
+      query: EntityCardsQuery,
+    ): Effect.Effect<EntityCards, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        const records = new Map(
+          (yield* entities.readTaskableEntities({ ids: query.ids })).map(
+            (record) => [record.id, record] as const,
+          ),
+        );
+        const kinds = (yield* readEnvironment).activeEntityKinds ?? [];
+        const readable = [...records.values()].filter((record) => record.access === "ok");
+        const values = yield* Effect.provideService(
+          readFieldValues(
+            readable.map(({ ref }) => ref),
+            kinds,
+          ),
+          SqlClient.SqlClient,
+          sql,
+        );
+        const cards: Array<EntityCard> = [];
+        for (const id of query.ids) {
+          const record = records.get(id);
+          if (record === undefined) continue;
+          const card = buildEntityCard(record, values.get(record.ref)?.face ?? null, kinds);
+          if (card !== undefined) cards.push(card);
+        }
+        return { cards };
       }),
 
     /**

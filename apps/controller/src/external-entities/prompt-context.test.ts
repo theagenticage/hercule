@@ -12,6 +12,8 @@ const record = (overrides: Partial<TaskableEntity> = {}): TaskableEntity => ({
   kind: "acme/ticket",
   completeness: "full",
   isWorkRecord: true,
+  noun: "Ticket",
+  identifier: "ACME-1",
   title: "Fix the cart",
   status: { shape: "half", tone: "active", label: "In progress" },
   stage: undefined,

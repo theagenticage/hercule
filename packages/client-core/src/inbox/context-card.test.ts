@@ -1,35 +1,30 @@
 /** Tests the cards drawn under a message that carried context. */
-import type { ExternalEntityDetail, InboxThing } from "@hercule/contract";
+import type { EntityCard } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { buildFakeInboxDetail } from "./cards.testing";
 import { ApiError } from "../errors";
 import {
   describeContextCard,
   describeContextCardFromBlock,
-  shouldRetryCardRead,
+  shouldRetryCardsRead,
 } from "./context-card";
 
-const THING = {
+const REF = "linear:issue:northwind/SHOP-142";
+
+const buildCard = (overrides: Partial<EntityCard> = {}): EntityCard => ({
   id: "ent_1",
-  ref: "linear:issue:northwind/SHOP-142",
+  ref: REF,
   kind: "linear/issue",
   noun: "Issue",
-  patience: 24,
   identifier: "SHOP-142",
   title: "Show the delivery cost",
-  url: "https://example.test/SHOP-142",
-  observedAt: "2026-11-01T09:00:00.000Z",
-  sourceUpdatedAt: "2026-11-01T09:00:00.000Z",
-} as InboxThing;
-
-const buildDetail = (overrides: Partial<ExternalEntityDetail> = {}): ExternalEntityDetail => ({
-  ...buildFakeInboxDetail(THING),
+  face: null,
+  restricted: false,
   ...overrides,
 });
 
 describe("describeContextCard", () => {
   it("draws the source, noun, identifier and title of the thing", () => {
-    expect(describeContextCard(buildDetail())).toEqual({
+    expect(describeContextCard(buildCard())).toEqual({
       pluginId: "linear",
       noun: "Issue",
       identifier: "SHOP-142",
@@ -40,7 +35,7 @@ describe("describeContextCard", () => {
   it("keeps the status, and ends the line with the face's fact", () => {
     const status = { shape: "most", tone: "active", label: "In Progress" } as const;
     const card = describeContextCard(
-      buildDetail({
+      buildCard({
         status,
         face: { fact: { key: "events", type: "number", label: "Events", number: 1211 } },
       }),
@@ -49,16 +44,36 @@ describe("describeContextCard", () => {
     expect(card.trailing).toEqual({ kind: "fact", text: "1,211 events" });
   });
 
-  it("ignores the generic facts of the record, such as a diff", () => {
+  it("has no trailing words when the thing has no face", () => {
+    expect(describeContextCard(buildCard())).not.toHaveProperty("trailing");
+  });
+
+  it("is a locked card, with no title or identifier, for a restricted thing", () => {
     const card = describeContextCard(
-      buildDetail({ facts: [{ form: "delta", added: 142, removed: 38 }] }),
+      buildCard({
+        restricted: true,
+        identifier: "SHOP-142",
+        title: "Secret",
+        status: { shape: "most", tone: "active", label: "In Progress" },
+      }),
     );
-    expect(card).not.toHaveProperty("trailing");
+    expect(card).toEqual({
+      pluginId: "linear",
+      noun: "Issue",
+      title: "An issue you cannot open",
+      isLocked: true,
+    });
+  });
+
+  it("falls back to the ref when the thing has no title", () => {
+    const untitled = buildCard();
+    delete (untitled as { title?: string }).title;
+    expect(describeContextCard(untitled).title).toBe(REF);
   });
 
   it("ends the line with the place when the thing has no fact", () => {
     const card = describeContextCard(
-      buildDetail({
+      buildCard({
         face: {
           place: { key: "team", type: "text", label: "Team", text: "Storefront" },
         },
@@ -69,7 +84,7 @@ describe("describeContextCard", () => {
 
   it("leaves out a place that is an age, because a card has no clock", () => {
     const card = describeContextCard(
-      buildDetail({
+      buildCard({
         face: {
           place: { key: "seen", type: "age", label: "Seen", since: "2026-11-01T09:00:00.000Z" },
         },
@@ -82,40 +97,38 @@ describe("describeContextCard", () => {
 describe("the plugin of a card", () => {
   it("is the entity's kind for a card that was read, and a guess from the ref's system otherwise", () => {
     const ref = "github:pr:northwind/web#6244";
-    expect(describeContextCard(buildDetail({ ref, kind: "acme/pull-request" })).pluginId).toBe(
+    expect(describeContextCard(buildCard({ ref, kind: "acme/pull-request" })).pluginId).toBe(
       "acme",
     );
     expect(describeContextCardFromBlock({ ref }).pluginId).toBe("github");
   });
 });
 
-describe("shouldRetryCardRead", () => {
+describe("shouldRetryCardsRead", () => {
   it.each(["not_found", "forbidden"] as const)("does not retry a read refused as %s", (code) => {
-    expect(shouldRetryCardRead(1, new ApiError(code, "No."))).toBe(false);
+    expect(shouldRetryCardsRead(1, new ApiError(code, "No."))).toBe(false);
   });
 
   it("retries another failure up to three times", () => {
     const error = new ApiError("internal", "Down.");
-    expect(shouldRetryCardRead(1, error)).toBe(true);
-    expect(shouldRetryCardRead(2, error)).toBe(true);
-    expect(shouldRetryCardRead(3, error)).toBe(false);
+    expect(shouldRetryCardsRead(1, error)).toBe(true);
+    expect(shouldRetryCardsRead(2, error)).toBe(true);
+    expect(shouldRetryCardsRead(3, error)).toBe(false);
   });
 });
 
 describe("describeContextCardFromBlock", () => {
   it("draws the source of the ref and the title the block kept", () => {
-    expect(
-      describeContextCardFromBlock({ ref: THING.ref, title: "Show the delivery cost" }),
-    ).toEqual({
+    expect(describeContextCardFromBlock({ ref: REF, title: "Show the delivery cost" })).toEqual({
       pluginId: "linear",
       title: "Show the delivery cost",
     });
   });
 
   it("falls back to the ref when the block kept no title", () => {
-    expect(describeContextCardFromBlock({ ref: THING.ref })).toEqual({
+    expect(describeContextCardFromBlock({ ref: REF })).toEqual({
       pluginId: "linear",
-      title: THING.ref,
+      title: REF,
     });
   });
 });
