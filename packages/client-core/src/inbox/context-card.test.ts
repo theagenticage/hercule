@@ -2,7 +2,7 @@
 import type { ExternalEntityDetail, InboxThing } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildFakeInboxDetail } from "./cards.testing";
-import { describeContextCard, describeUnreadContextCard } from "./context-card";
+import { describeContextCard, describeContextCardFromBlock } from "./context-card";
 
 const THING = {
   id: "ent_1",
@@ -74,16 +74,18 @@ describe("describeContextCard", () => {
   });
 });
 
-describe("describeUnreadContextCard", () => {
+describe("describeContextCardFromBlock", () => {
   it("draws the source of the ref and the title the block kept", () => {
-    expect(describeUnreadContextCard({ ref: THING.ref, title: "Show the delivery cost" })).toEqual({
+    expect(
+      describeContextCardFromBlock({ ref: THING.ref, title: "Show the delivery cost" }),
+    ).toEqual({
       pluginId: "linear",
       title: "Show the delivery cost",
     });
   });
 
   it("falls back to the ref when the block kept no title", () => {
-    expect(describeUnreadContextCard({ ref: THING.ref })).toEqual({
+    expect(describeContextCardFromBlock({ ref: THING.ref })).toEqual({
       pluginId: "linear",
       title: THING.ref,
     });

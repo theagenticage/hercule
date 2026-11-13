@@ -33,6 +33,9 @@ function List({
     <section ref={scrollRef} aria-label="List" onScroll={noteScroll}>
       <div ref={columnRef}>
         <div data-testid="nested" />
+        <button type="button" data-holds-place="">
+          Fold
+        </button>
       </div>
     </section>
   );
@@ -107,5 +110,31 @@ describe("useMessageList wheel check", () => {
     Object.defineProperty(nested, "scrollHeight", { configurable: true, value: 200 });
     fireEvent.wheel(nested, { deltaY: 200 });
     expect(onBottomChange).toHaveBeenCalledExactlyOnceWith(true);
+  });
+});
+
+describe("useMessageList fold", () => {
+  it("stops following the bottom when a control that holds the place is clicked", () => {
+    const onBottomChange = vi.fn();
+    render(<List onBottomChange={onBottomChange} />);
+    const list = screen.getByLabelText("List");
+    Object.defineProperties(list, {
+      scrollHeight: { configurable: true, get: () => SCROLL_HEIGHT },
+      clientHeight: { configurable: true, get: () => CLIENT_HEIGHT },
+      scrollTop: { configurable: true, get: () => BOTTOM, set: () => {} },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Fold" }));
+
+    expect(onBottomChange).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it("keeps following when something else in the list is clicked", () => {
+    const onBottomChange = vi.fn();
+    render(<List onBottomChange={onBottomChange} />);
+
+    fireEvent.click(screen.getByTestId("nested"));
+
+    expect(onBottomChange).not.toHaveBeenCalled();
   });
 });

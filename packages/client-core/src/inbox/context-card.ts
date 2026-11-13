@@ -77,11 +77,13 @@ export const describeContextCard = (detail: ExternalEntityDetail): ContextCardFa
 };
 
 /**
- * Returns the card of a thing that could not be read: its source from the
- * ref (`linear:issue:...` is Linear's) and the title the context block kept,
- * or the ref itself when the block kept none.
+ * Returns the card drawn from what the context block kept of a thing, for when
+ * the live read of the thing is missing: not answered yet, or failed (the
+ * thing is gone, or the user cannot read it). It has the source, taken from
+ * the ref (`linear:issue:...` is Linear's), and the title the block kept, or
+ * the ref itself when the block kept none.
  */
-export const describeUnreadContextCard = (thing: {
+export const describeContextCardFromBlock = (thing: {
   readonly ref: string;
   readonly title?: string | undefined;
 }): ContextCardFace => ({

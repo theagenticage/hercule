@@ -130,7 +130,7 @@ const buildSteps = (things: ReadonlyArray<ContextThingSource>): ReadonlyArray<Tr
     "it-first",
     "assistant_message",
     undefined,
-    "I read all 4: issue, pull request, error and thread. I’ll start with STOREFRONT-1Z9, which has reached 312 people, and read it against the change in #6244 next.",
+    "I read all 4: three pull requests and an error. I’ll start with STOREFRONT-1Z9, which has reached 312 people, and read it against the change in #6244 next.",
   ),
 ];
 

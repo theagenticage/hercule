@@ -22,6 +22,13 @@
  *   still when a block above it changes height. Nothing moves the view for
  *   a change below it.
  *
+ * - A click on a control marked `data-holds-place` (the fold "Context sent
+ *   with it") counts as leaving the bottom, before its content grows. The
+ *   content then opens downward under the reader, and the control stays where
+ *   it was under the pointer, instead of the list following the new bottom.
+ *   Folding it again brings the reader back to the bottom when the scroll
+ *   that the shorter content causes ends there.
+ *
  * Other writers of the scroll position exist and are not part of that rule:
  * the virtualizer's initial offset and its retry of a scroll that the
  * browser clamped, `scrollToBottom`, the browser revealing a focused
@@ -306,6 +313,21 @@ export const useMessageList = ({
     scroller.addEventListener("wheel", followWheelToBottom, { passive: true });
     return () => {
       scroller.removeEventListener("wheel", followWheelToBottom);
+    };
+  }, []);
+
+  const leaveBottomOnToggle = useEffectEvent((event: MouseEvent): void => {
+    if (event.target instanceof Element && event.target.closest("[data-holds-place]") !== null) {
+      setFollowing(false);
+    }
+  });
+
+  // Captured, so it runs before React handles the click and the content grows.
+  useEffect(() => {
+    const scroller = scrollRef.current!;
+    scroller.addEventListener("click", leaveBottomOnToggle, { capture: true });
+    return () => {
+      scroller.removeEventListener("click", leaveBottomOnToggle, { capture: true });
     };
   }, []);
 

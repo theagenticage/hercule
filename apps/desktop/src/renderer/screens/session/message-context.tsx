@@ -10,7 +10,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
   describeContextCard,
-  describeUnreadContextCard,
+  describeContextCardFromBlock,
   type ContextCardFace,
 } from "@hercule/client-core/inbox";
 import type { PromptContextBlock } from "@hercule/contract";
@@ -100,7 +100,7 @@ function ContextCard({ thing }: { readonly thing: ContextThing }): JSX.Element {
   const { data: plugins } = useQuery(pluginsQuery(client));
   const { data: detail } = useQuery(entityQuery(client, thing.entityId));
   const face =
-    detail === undefined ? describeUnreadContextCard(thing) : describeContextCard(detail);
+    detail === undefined ? describeContextCardFromBlock(thing) : describeContextCard(detail);
   const installed = plugins ?? NO_PLUGINS;
   return (
     <ContextCardView
@@ -128,6 +128,7 @@ export function ContextFold({ context }: { readonly context: PromptContextBlock 
       <button
         type="button"
         className="msg-ctx"
+        data-holds-place=""
         aria-expanded={open}
         onClick={() => {
           setOpen(!open);
