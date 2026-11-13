@@ -307,15 +307,34 @@ const ALL_THINGS: ReadonlyArray<InboxThing> = ITEMS.map((item) => item.thing);
 
 /** The saved queries, with the same words the controller's core list has. */
 const SAVED_QUERIES: InboxOutline["savedQueries"] = [
-  { id: CORE_SAVED_QUERY_IDS.waits, name: "Someone waits on me", order: "waiting", count: 6 },
-  { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", count: 2 },
-  { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", count: 3 },
-  { id: CORE_SAVED_QUERY_IDS.held, name: "With Hercule", order: "newest", count: 1 },
-  { id: CORE_SAVED_QUERY_IDS.everything, name: "Everything", order: "newest", count: ITEMS.length },
+  {
+    id: CORE_SAVED_QUERY_IDS.waits,
+    name: "Someone waits on me",
+    order: "waiting",
+    signalKinds: [],
+    count: 6,
+  },
+  { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", signalKinds: [], count: 2 },
+  { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", signalKinds: [], count: 3 },
+  {
+    id: CORE_SAVED_QUERY_IDS.held,
+    name: "With Hercule",
+    order: "newest",
+    signalKinds: [],
+    count: 1,
+  },
+  {
+    id: CORE_SAVED_QUERY_IDS.everything,
+    name: "Everything",
+    order: "newest",
+    signalKinds: [],
+    count: ITEMS.length,
+  },
   {
     id: "github/review-requests",
     name: "Review requests",
     order: "waiting",
+    signalKinds: [],
     source: "github",
     count: 3,
   },

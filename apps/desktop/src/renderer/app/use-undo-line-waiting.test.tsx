@@ -69,4 +69,13 @@ describe("the undo line for a gesture that waits", () => {
     act(() => hook.result.current.hold(false));
     expect(hold.mock.calls).toEqual([[true], [false]]);
   });
+
+  it("lets go of a held gesture when the page unmounts, so it is not stranded", () => {
+    const { hook, gesture, hold } = setUp();
+    act(() => hook.result.current.say("Replying.", gesture));
+    act(() => hook.result.current.hold(true));
+
+    hook.unmount();
+    expect(hold.mock.calls).toEqual([[true], [false]]);
+  });
 });

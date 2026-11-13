@@ -111,7 +111,8 @@ function computeWidestPaneWidth(frameWidth: number, railWidth: number): number {
  *   the pane lies over the list instead: `isPaneOpen` slides it in, the list
  *   behind is inert, and Esc or the "List" button call `onClosePane`, after
  *   which the caller moves the focus back to the row.
- * - `onOpenAtSource` adds "Open at its source" to the pane's menu.
+ * - `onOpenAtSource` adds "Open at its source" to the pane's menu, and with
+ *   `openAtSourceWords` ("Open on GitHub") an icon button in its head.
  *
  * `overlays` is drawn last in the page, over everything: the keys sheet and
  * the hand-off menu. `onStackedChange` is called with whether the pane lies
@@ -135,6 +136,7 @@ export function InboxFrame({
   onPaneWidthChange,
   onClosePane,
   onOpenAtSource,
+  openAtSourceWords,
   onOpenIntake,
   onOpenKeys,
   isKeysOpen,
@@ -154,6 +156,7 @@ export function InboxFrame({
   readonly onPaneWidthChange: (width: number) => void;
   readonly onClosePane: () => void;
   readonly onOpenAtSource?: (() => void) | undefined;
+  readonly openAtSourceWords?: string | undefined;
   readonly onOpenIntake: () => void;
   readonly onOpenKeys: () => void;
   readonly isKeysOpen: boolean;
@@ -340,6 +343,7 @@ export function InboxFrame({
         onWidthChange={onPaneWidthChange}
         onClose={onClosePane}
         onOpenAtSource={onOpenAtSource}
+        openAtSourceWords={openAtSourceWords}
       >
         {lastPane.body}
       </InboxPaneFrame>

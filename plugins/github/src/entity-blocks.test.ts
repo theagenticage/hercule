@@ -31,6 +31,12 @@ const pullRequest = (overrides: Record<string, unknown> = {}) => ({
         commit: {
           statusCheckRollup: {
             contexts: {
+              checkRunCountsByState: [
+                { state: "FAILURE", count: 1 },
+                { state: "SUCCESS", count: 1 },
+                { state: "IN_PROGRESS", count: 1 },
+              ],
+              statusContextCountsByState: [{ state: "SUCCESS", count: 1 }],
               nodes: [
                 {
                   __typename: "CheckRun",
@@ -154,6 +160,47 @@ describe("reading the blocks of a pull request", () => {
     expect(markdown.length).toBeLessThanOrEqual(32 * 1024);
     expect(markdown).toContain("Open it on GitHub to read the rest.");
   });
+});
+
+it("counts every check, not only the 100 listed: a failing 101st check still shows", async () => {
+  const stub = stubGithub(() =>
+    answer({
+      pullRequest: pullRequest({
+        commits: {
+          totalCount: 2,
+          nodes: [
+            {
+              commit: {
+                statusCheckRollup: {
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "SUCCESS", count: 100 },
+                      { state: "TIMED_OUT", count: 1 },
+                    ],
+                    statusContextCountsByState: [],
+                    nodes: Array.from({ length: 100 }, (_, index) => ({
+                      __typename: "CheckRun",
+                      name: `job ${String(index)}`,
+                      status: "COMPLETED",
+                      conclusion: "SUCCESS",
+                      detailsUrl: null,
+                    })),
+                  },
+                },
+              },
+            },
+          ],
+        },
+      }),
+    }),
+  );
+
+  const blocks = Result.getOrThrow(
+    await runAgainstStub(readItemBlocks(TEST_TOKEN, PULL_REF), stub),
+  );
+
+  expect(blocks[0]).toMatchObject({ checks: { passed: 100, failed: 1, pending: 0 } });
+  expect(blocks[1]).toEqual({ type: "checks", rows: [], passed: 100, omitted: 1 });
 });
 
 describe("reading the blocks of an issue", () => {

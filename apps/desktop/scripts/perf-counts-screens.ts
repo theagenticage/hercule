@@ -175,7 +175,7 @@ const inboxRowAt = (position: number): string =>
 const INBOX_CURRENT = `Number(document.querySelector(".ib-rows > .ib-row.is-current")?.getAttribute("aria-posinset") ?? 0)`;
 
 /** An expression for the title the Inbox's pane shows, or null. */
-const INBOX_PANE_TITLE = `(document.querySelector('[aria-label="The open thing"] .open-card-title')?.textContent ?? null)`;
+const INBOX_PANE_TITLE = `(document.querySelector('[aria-label="The open thing"] .ib-pane-title')?.firstChild?.textContent?.trim() ?? null)`;
 
 /** An expression that is true while a row with the External Ref `ref` is mounted in the Inbox's list. */
 const isInboxRowMounted = (ref: string): string =>

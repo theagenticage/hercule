@@ -412,12 +412,15 @@ const make = Effect.gen(function* () {
         if (Option.isNone(found) || readBlocks === undefined) return { blocks: [] };
         const { source } = found.value;
         const eligible = yield* listEligibleConnections(source);
-        // Connections that observed the thing go first, because another
-        // account may not see it at all. Each group stays oldest first.
-        const preferred = new Set(preferredConnectionIds);
+        // Connections that observed the thing go first, in the caller's order
+        // (the likeliest reader first), because another account may not see
+        // it at all. The others follow, oldest first.
+        const preferred = preferredConnectionIds.flatMap((id) =>
+          eligible.filter((connection) => connection.id === id),
+        );
         const ordered = [
-          ...eligible.filter((connection) => preferred.has(connection.id)),
-          ...eligible.filter((connection) => !preferred.has(connection.id)),
+          ...preferred,
+          ...eligible.filter((connection) => !preferredConnectionIds.includes(connection.id)),
         ];
         for (const connection of ordered.slice(0, MAX_READ_BLOCKS_CONNECTIONS)) {
           const answer = yield* ask(source, connection, (ingestConnection, context) =>

@@ -1679,7 +1679,6 @@ This text replaces the Inbox of [#1032](https://github.com/theagenticage/hercule
 - **What the Inbox leaves out for now.** Each of these comes with its own ticket, and until then the Inbox shows nothing in its place, never a dead control:
   - groups of linked things: the list is flat ([#1124](https://github.com/theagenticage/hercule/issues/1124)), and with them Link (L) and drag to link;
   - Triage, its rail entry and the `8` key ([#1125](https://github.com/theagenticage/hercule/issues/1125)), and Start a thread (N) ([#1126](https://github.com/theagenticage/hercule/issues/1126));
-  - the pane's own content: the pane is the frame, and shows the open-card body that the Inbox had before, until [#1123](https://github.com/theagenticage/hercule/issues/1123) replaces it;
   - the offline outbox ([#1138](https://github.com/theagenticage/hercule/issues/1138)).
 
 ### The page
@@ -1788,12 +1787,35 @@ The search is a combobox over the list (`aria-expanded`, `aria-activedescendant`
 
 ### The pane
 
-*(Until [#1123](https://github.com/theagenticage/hercule/issues/1123).)* The pane is a frame: a head, a body, a footer, and the width and the overlay of [The page](#the-page). Its body is the open-card body of the old Inbox until #1123 replaces it: the title, the signals with their answers, the linked things and the timeline, read with `externalEntity.read`.
+*(Written 2026-11-13, [#1123](https://github.com/theagenticage/hercule/issues/1123).)* The pane is a head, a body and a footer, with the width and the overlay of [The page](#the-page). Each part shows only when it has something. Top to bottom:
 
-- **The head** has the mark, "GitHub · Pull request · storefront-web", and the account when the source has several. At its end it has an icon button that opens the thing at its source and the ⋯ menu, which holds Open at its source (O) and the width choices.
-- **The footer** holds the core's moves, each with its key: Take on (T), the hand-off (H), Go to its Task (G) when there is one, and Dismiss (E).
+1. **Where it is from.** The mark, "GitHub · Pull request · storefront-web", and the account when the source has several. At its end: an icon button that opens the thing at its source (its words are in the tooltip), and the ⋯ menu with Open at its source (O) and the width choices.
+2. **The title**, in full, 18/24 semibold, with its identifier faint after it. It wraps with `text-wrap: pretty`, so the identifier never sits alone.
+3. **The meta line.** The status glyph and word, who and when, and the declared facts. A thing that came back after a dismissal says so here: "Dismissed 1 day ago, back for Kwame's mention". The words come from the same function as the row's ([The list](#the-list)).
+4. **Who has it,** when a Task or a workflow holds the thing: the face or monogram, the Task, and "Go to the Task G".
+5. **One section per open ask,** newest first (by the time the signal was raised). A section is drawn for an open, unsnoozed signal of a kind that declares `asks`. A taken ask still has its section, because it can still be answered. Each section has a marigold dot, who asks what, and when.
+   - **The current ask** is the one ↩ answers. It is unfolded and has an ink edge. It is the section the user unfolded last for that thing (the window remembers it), else the newest ask of the saved query's signal kind, else the newest. Only the current ask is read in full and filled: its blocks (a message that mentions the user has the app's marigold rule), its answers with the plugin's suggested answer filled and carrying ↩, Done (quiet, last), and under them the describe line of the answer under the pointer or the focus. An answer with a field opens its reply box inside the section.
+   - **The other asks** are folded to one line. A folded section is inert: nothing in it is read until the user unfolds it. `[` and `]` change the current ask while the focus stays in the list.
+   - **N more asks.** The detail holds at most 50 signals. When open asks do not fit, the pane says "N more asks" under the sections.
+6. **The thing's blocks.** The plugin's own account of the thing: text, messages, change, checks, fields, trend and code, at most eight. A type the app does not know draws "This part can't be shown here." The blocks are read with `externalEntity.readBlocks` when the row has rested as the current row for 250ms, so a held J reads nothing. A read that is no longer needed is aborted, and its answer is kept for the thing in memory. Blocks are never stored. When the source cannot be read, the pane draws one quiet line and the rest of the pane stays.
+7. **Linked.** What the thing is linked to, each with who claims it ("Linear reports this", "You linked this") and, for a person's link, Unlink on hover.
+8. **What happened.** The timeline, newest first.
+9. **The footer.** Only moves that work: Take on (T), the hand-off (H) and Dismiss (E), and Go to its Task (G) when there is one. Thread (N) and Link (L) come with [#1126](https://github.com/theagenticage/hercule/issues/1126) and [#1124](https://github.com/theagenticage/hercule/issues/1124), and until then the pane shows nothing in their place. The hand-off always shows its whole name, as [Handing a thing to an agent](#handing-a-thing-to-an-agent) says: under 460px it comes first and Take on becomes an icon, under 400px the key hints go to the tooltips, and a name too long even then keeps its line while the icons wrap under it. A thing that a Task holds keeps its hand-off: Take on hides only when the thing is taken on. No move is filled: the one filled button on the pane is the suggested answer of the current ask.
+
 - **The pane follows the current row** in the same frame as a key. A held J never blanks it, so it swaps with no fade. When nothing is current (an empty list, all clear, nothing matching) the pane fades over 140ms and then the list takes its room.
-- **A selection** of two or more things, or one that is not the current row, shows in the pane as what is in it, with Take on and Dismiss ([#1123](https://github.com/theagenticage/hercule/issues/1123) builds it). Until then the pane keeps showing the current row, and the selection bar and the keys carry the moves. Take on refuses on a selection, for now, as [The moves and keys](#the-moves-and-keys) says.
+- **A selection** of two or more things, or one that is not the current row, shows in the pane as its members, one line each, and Dismiss in the footer. Take on and the hand-off are not offered, and T and H on a selection refuse with the reason in the undo line, as [The moves and keys](#the-moves-and-keys) says. The selection bar at the foot of the list stays.
+- **The reads.** The pane reads the thing with `externalEntity.read`, the blocks with `externalEntity.readBlocks` and the current ask with `signal.read` ([What the Inbox reads](#what-the-inbox-reads)).
+
+#### Answering a signal from the pane
+
+An answer is a signal's bound operation, run with `signal.act`. Done goes through `signal.markDone`.
+
+- **An answer that runs a plugin action is held.** It acts on the source (approve a pull request, comment on an issue), so it waits `SIGNAL_ANSWER_HOLD_MS` (8s) in the undo line before it is sent, as a mail app holds a sent mail. The line says "Sends in 8s". ⌘Z in that time cancels it and makes the thing current again, in its old place. Done and answers that run a core operation are not held and run at once, with the same undo as any move. Work's held answers keep their 5s ([Answering from the pane](#answering-from-the-pane) under Work).
+- **Holding the line holds the answer.** While the pointer or the focus is on the undo line, the answer waits, so its Undo always works. When both leave, the answer is sent.
+- **Sent.** The line says "Sent to GitHub." and has no Undo. ⌘Z after that stays on the stack and says "Already sent to GitHub, so it can't be taken back here." For a reply, it also opens the reply box again with its words.
+- **Reply drafts are kept per ask,** for the life of the window and per account. Closing the box or moving to another thing keeps the words.
+- **A quit during the hold** keeps the answer as not sent: the pane shows it in its ask with the words, why, and Send again and Discard. When the app closed while the answer was being sent, it says the answer may have been sent. Nothing is ever sent by itself after a restart. Send again holds for 8s again.
+- **Offline,** an answer refuses and the undo line says so, as every move does until [#1138](https://github.com/theagenticage/hercule/issues/1138).
 
 ### The moves and keys
 
@@ -1803,7 +1825,9 @@ A move answers in the same frame, and the controller call follows. Every move ha
 |---|---|---|
 | J K, ↓ ↑ | Next and previous row | ⇧J ⇧K extend a range from the anchor, and shrink it back |
 | X | Select, or unselect | ⇧-click a range, ⌘-click one, ⌘A all that is loaded |
-| Return | Open the pane for the row (under 1032 the pane slides in). In the pane, the open ask's suggested answer | |
+| Return | In the list: when the pane is stacked over the list (under 1032px) and closed, it opens the pane. Otherwise it runs the current ask's suggested answer, or with none moves the focus to the current ask's first answer | |
+| `[` `]` | The previous and next ask in the pane | |
+| Space, ⇧Space | Scroll the pane | |
 | O | Open at its source | |
 | E | Dismiss | Dismisses all of them in one atomic call, with one undo |
 | T | **Take on**: a Task on Work. `externalEntity.takeOn` | Refuses, with the reason |
@@ -1821,9 +1845,9 @@ A move answers in the same frame, and the controller call follows. Every move ha
 - **Take on** was called "Take it" before. T is named "Take on" wherever the move appears: the buttons, the tooltips, the undo line and the keys sheet.
 - **Dismiss and restore take several things** in one call, all or nothing, up to 1,000. A selection of more than 1,000 refuses, with the reason. The undo is one `restore` of the same things.
 - **Hand off** is [Handing a thing to an agent](#handing-a-thing-to-an-agent). H moves the current row on at once: the row after it becomes current as the hand-off starts.
-- **Take on and the hand-off on a selection** refuse, for now, with a reason in the undo line. E on a selection works.
+- **Take on and the hand-off on a selection** refuse with a reason in the undo line. E on a selection works.
 - **Single keys belong to the list and the pane** (WCAG 2.1.4). In the rail, the bar, the keys sheet or a menu they do nothing, so speech input and a stray key never act on a row nobody is looking at. `/` and `?` work from anywhere outside a field, and Esc goes back to the list. The only keys with a modifier are ⌘A, ⌘Z and ⌘-click. An open menu owns the keyboard: ↑ ↓ move, Return picks, Esc closes and gives the focus back, Tab leaves.
-- **Return on a focused button is that button's.** Only in the list does Return open the pane.
+- **Return on a focused button is that button's.** Only in the list does Return open the pane or run the suggested answer. *(Amended 2026-11-13, [#1123](https://github.com/theagenticage/hercule/issues/1123): Return used to open the pane only. With the pane showing, it now answers the current ask, as on Intake.)*
 - **Moves refuse with a reason** where they do not apply, in the undo line: a thing a live Task holds says who has it, G with no Task says so, a kind that is not available says why, and a selection that is too large says how many it may be.
 - **After a move** the next row becomes current and has the focus, so the same key handles the next. When the move leaves nothing current, the focus goes to the empty state's heading.
 - **Offline, moves refuse** and the undo line says so. Nothing is queued until the outbox of [#1138](https://github.com/theagenticage/hercule/issues/1138) exists.
@@ -1892,6 +1916,8 @@ The list orders it "Longest waiting first": things with an ask by their oldest a
 | Draws the rail | `externalEntity.readInboxOutline`, in `inboxOutlineQuery`, under a key inside the `inbox` prefix (`queryKeys.inboxOutline()`), so the pushes that refresh the pages refresh it. It is not shell data: the route's loader prefetches it |
 | Suggests values | `externalEntity.suggestInboxValues`, as the search is typed |
 | Reads one thing for the pane | `externalEntity.read`, under `queryKeys.externalEntity(id)` |
+| Reads the plugin's blocks of the thing | `externalEntity.readBlocks`, once the row has rested for 250ms. Never stored, not retried, kept in memory per thing |
+| Reads the current ask | `signal.read`, for the current ask only. The folded asks are not read |
 | Takes on, dismisses, undoes | `externalEntity.takeOn`, `dismiss` (several things), `restore` (several) and `undoTakeOn`, as mutations |
 | Hands off, takes back | `externalEntity.handOff` and `undoHandOff`, as mutations. The offers come with the page |
 | Keeps pins and folds | The user settings `inbox.pins` and `inbox.browseFolded` |

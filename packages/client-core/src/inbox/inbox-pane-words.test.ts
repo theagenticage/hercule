@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildInboxAsk, buildInboxThing } from "./cards.testing";
 import {
   describeAnswerFailure,
+  describeAnswerSending,
   describeAnswerSent,
   describeAnswerTooLate,
   describeDismissalReturn,
@@ -38,6 +39,9 @@ describe("the sent, too late and failed lines", () => {
     expect(describeAnswerSent("Linear")).toBe("Sent to Linear.");
     expect(describeAnswerTooLate("Linear")).toBe(
       "Already sent to Linear, so it can't be taken back here.",
+    );
+    expect(describeAnswerSending("Linear")).toBe(
+      "It is being sent to Linear, so it can't be taken back here.",
     );
     expect(
       describeAnswerFailure(

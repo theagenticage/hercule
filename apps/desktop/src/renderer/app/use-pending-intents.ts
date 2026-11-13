@@ -6,7 +6,12 @@
 import { useSyncExternalStore } from "react";
 import type { AccountScope } from "./account-scope";
 import type { CardMover } from "./card-mover";
-import type { IntentContent, PendingIntent, PendingIntents } from "./pending-intents";
+import type {
+  IntentContent,
+  IntentProgress,
+  PendingIntent,
+  PendingIntents,
+} from "./pending-intents";
 import type { Gesture } from "./undo-stack";
 
 /** What `usePendingIntents` returns. */
@@ -46,6 +51,8 @@ interface UndoLineForIntent {
    * intent, and rejects with "It was already sent." once it is on its way.
    */
   readonly undo?: (intentId: string) => Promise<undefined>;
+  /** What Undo answers after it cancelled the held intent. Without it, the line says "Put back: <words>.". */
+  readonly cancelledText?: string;
   /**
    * Keeps the gesture on the undo stack once the intent is on its way, so the
    * next Undo reaches it and answers `text` (which says it cannot be taken
@@ -56,7 +63,10 @@ interface UndoLineForIntent {
    * starts `sending`, and the line runs on its own timer.
    */
   readonly afterSending?: {
+    /** What Undo answers once the send is confirmed. */
     readonly text: string;
+    /** What Undo answers while the send is under way and delivery is not confirmed. */
+    readonly sendingText: string;
     readonly sentLine: string;
     readonly run?: () => void;
   };
@@ -73,7 +83,7 @@ interface UndoLineForIntent {
 export const holdWithUndo = (
   store: PendingIntents,
   content: IntentContent,
-  { sayWithUndo, line, words, undo, afterSending }: UndoLineForIntent,
+  { sayWithUndo, line, words, undo, cancelledText, afterSending }: UndoLineForIntent,
 ): string => {
   const intentId = store.hold(content);
   // Ends the gesture's `settled` promise: the watch below calls it when the intent is sent, cancelled or fails.
@@ -84,25 +94,31 @@ export const holdWithUndo = (
       : new Promise<string | undefined>((resolve) => {
           settle = resolve;
         });
+  let progress: IntentProgress | "pending" = "pending";
   const takeOffStack = sayWithUndo(line, {
     words,
     // The line is held while the user is on it: the intent waits past its window.
     hold: (isHeld) => {
       store.setHeld(intentId, isHeld);
     },
-    settled,
+    ...(settled === undefined ? {} : { settled }),
     undo: () => {
       if (undo !== undefined) return undo(intentId);
-      if (store.undo(intentId)) return Promise.resolve(undefined);
+      if (store.undo(intentId)) {
+        return Promise.resolve(cancelledText === undefined ? undefined : { text: cancelledText });
+      }
       if (afterSending === undefined) return Promise.reject(new Error("It was already sent."));
+      // While sending, delivery is unconfirmed: say so and leave the reply box alone.
+      if (progress === "sending") return Promise.resolve({ text: afterSending.sendingText });
       afterSending.run?.();
       return Promise.resolve({ text: afterSending.text });
     },
   });
-  const stopWatching = store.watch(intentId, (progress) => {
-    if (afterSending !== undefined && progress === "sending") return;
-    settle(progress === "sent" ? afterSending?.sentLine : undefined);
-    if (afterSending !== undefined && progress === "sent") return;
+  const stopWatching = store.watch(intentId, (reported) => {
+    progress = reported;
+    if (afterSending !== undefined && reported === "sending") return;
+    settle(reported === "sent" ? afterSending?.sentLine : undefined);
+    if (afterSending !== undefined && reported === "sent") return;
     stopWatching();
     takeOffStack();
   });

@@ -32,7 +32,9 @@ export type InboxKeyAction =
   | { readonly kind: "narrow" }
   | { readonly kind: "toggleKeys" }
   | { readonly kind: "nextRegion"; readonly backwards: boolean }
-  | { readonly kind: "openPane" }
+  | { readonly kind: "activate" }
+  | { readonly kind: "stepAsk"; readonly by: 1 | -1 }
+  | { readonly kind: "scrollPane"; readonly back: boolean }
   | { readonly kind: "focusList" };
 
 /**
@@ -127,7 +129,13 @@ export const decideInboxKeyAction = (
     case ".":
       return { kind: "showArrivals" };
     case "enter":
-      return { kind: "openPane" };
+      return { kind: "activate" };
+    case "[":
+      return { kind: "stepAsk", by: -1 };
+    case "]":
+      return { kind: "stepAsk", by: 1 };
+    case " ":
+      return { kind: "scrollPane", back: press.shiftKey };
     default:
       return null;
   }
@@ -145,7 +153,9 @@ export const buildInboxKeyRows = (platform: DesktopPlatform): readonly InboxKeyR
   ["⇧J ⇧K", "Select a range while moving"],
   ["X", "Select, or unselect"],
   [platform === "mac" ? "⌘A" : "Ctrl A", "Select every thing that is loaded"],
-  ["Return", "Open the pane, when it lies over the list"],
+  ["Return", "Open the pane when it lies over the list, else answer the open ask"],
+  ["[ ]", "The ask before and after, in the pane"],
+  ["Space ⇧Space", "Scroll the pane by a page"],
   ["E", "Dismiss, all of the selection at once"],
   ["T", "Take on: a Task on Work"],
   ["H", "Hand off to an agent"],

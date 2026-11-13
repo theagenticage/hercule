@@ -849,7 +849,8 @@ const buildCheckRow = (run: CheckToShow, log: string | undefined) => {
 
 /**
  * Returns a `checks` block: the failed checks and then the pending ones, at
- * most `MAX_CHECK_ROWS` (`omitted` counts the rest), and how many passed.
+ * most `MAX_CHECK_ROWS` (`omitted` counts the rest, and `unlisted` ones the
+ * caller did not list), and how many passed.
  * `readLog` gives the end of what a check reported, when it is known.
  */
 export const buildChecksBlock = <C extends CheckToShow>(
@@ -857,6 +858,8 @@ export const buildChecksBlock = <C extends CheckToShow>(
     readonly failed: ReadonlyArray<C>;
     readonly pending: ReadonlyArray<C>;
     readonly passed: number;
+    /** How many more failed or pending checks exist than `failed` and `pending` list. */
+    readonly unlisted?: number;
   },
   readLog: (check: C) => string | undefined,
 ) => {
@@ -865,7 +868,7 @@ export const buildChecksBlock = <C extends CheckToShow>(
     type: "checks" as const,
     rows: rows.map((run) => buildCheckRow(run, readLog(run))),
     passed: checks.passed,
-    omitted: checks.failed.length + checks.pending.length - rows.length,
+    omitted: checks.failed.length + checks.pending.length - rows.length + (checks.unlisted ?? 0),
   };
 };
 

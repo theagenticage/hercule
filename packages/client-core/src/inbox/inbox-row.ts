@@ -144,7 +144,7 @@ const readFieldText = (field: EntityFieldValue | undefined, now: Date): string |
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
 /** Returns the holder mark of a row: see `findHolder` for who has the thing. */
-const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
+export const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
   const holder = findHolder(thing);
   if (holder === undefined) return undefined;
   return holder.kind === "colleague"
@@ -239,7 +239,7 @@ const decideReason = (
  * name, or the first faces of the best fits when several can. Returns `null`
  * when none can.
  */
-const decideHandOff = (thing: InboxThing, offers: CardOffers): InboxRowHandOff | null => {
+export const decideHandOff = (thing: InboxThing, offers: CardOffers): InboxRowHandOff | null => {
   const choices = listAvailableHandOffs(offers, thing);
   const [first] = choices;
   if (first === undefined) return null;

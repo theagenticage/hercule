@@ -16,6 +16,8 @@ import {
   type PendingIntents,
 } from "./pending-intents";
 import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
+import type { CardMover } from "./card-mover";
+import type { Gesture } from "./undo-stack";
 import { holdWithUndo } from "./use-pending-intents";
 
 /** The details the controller puts on a refusal that means the Request is closed. */
@@ -569,12 +571,8 @@ describe("holding with the undo line", () => {
   const setUp = () => {
     const stub = createSend();
     const store = open(createMemoryStorage(), stub.send);
-    let gesture: {
-      undo: () => Promise<unknown>;
-      hold?: (isHeld: boolean) => void;
-      settled?: Promise<string | undefined>;
-    } | null = null;
-    const sayWithUndo = vi.fn((_text: string, offered: NonNullable<typeof gesture>) => {
+    let gesture: Gesture<CardMover> | null = null;
+    const sayWithUndo = vi.fn((_text: string, offered: Gesture<CardMover>) => {
       gesture = offered;
       return () => {
         gesture = null;
@@ -587,7 +585,7 @@ describe("holding with the undo line", () => {
       isOnStack: () => gesture !== null,
       hold: (isHeld: boolean) => gesture?.hold?.(isHeld),
       settled: () => gesture?.settled,
-      undo: () => gesture?.undo(),
+      undo: () => gesture?.undo(null as never),
     };
   };
 
@@ -606,7 +604,11 @@ describe("holding with the undo line", () => {
       sayWithUndo,
       line: "Replied.",
       words: "Replied",
-      afterSending: { text: "Already sent to GitHub.", sentLine: "Sent to GitHub." },
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
     });
 
     await undo();
@@ -622,7 +624,12 @@ describe("holding with the undo line", () => {
       sayWithUndo,
       line: "Replied.",
       words: "Replied",
-      afterSending: { text: "Already sent to GitHub.", sentLine: "Sent to GitHub.", run: reopen },
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+        run: reopen,
+      },
     });
 
     await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
@@ -634,13 +641,37 @@ describe("holding with the undo line", () => {
     expect(reopen).toHaveBeenCalledTimes(1);
   });
 
+  it("says it is still being sent, and leaves the reply box alone, when undone while sending", async () => {
+    const { store, sayWithUndo, undo } = setUp();
+    const reopen = vi.fn();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent.",
+        sendingText: "Still being sent.",
+        sentLine: "Sent.",
+        run: reopen,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+
+    await expect(undo()).resolves.toEqual({ text: "Still being sent." });
+    expect(reopen).not.toHaveBeenCalled();
+  });
+
   it("takes the gesture off the stack when the send fails", async () => {
     const { stub, store, sayWithUndo, isOnStack } = setUp();
     holdWithUndo(store, SIGNAL_ANSWER, {
       sayWithUndo,
       line: "Replied.",
       words: "Replied",
-      afterSending: { text: "Already sent to GitHub.", sentLine: "Sent to GitHub." },
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
     });
     await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
     stub.calls[0]?.reject(new Error("The source refused."));
@@ -667,7 +698,11 @@ describe("holding with the undo line", () => {
       sayWithUndo,
       line: "Replied.",
       words: "Replied",
-      afterSending: { text: "Already sent.", sentLine: "Sent to GitHub." },
+      afterSending: {
+        text: "Already sent.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
     });
     await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
     stub.calls[0]?.resolve();
@@ -678,7 +713,11 @@ describe("holding with the undo line", () => {
       sayWithUndo,
       line: "Replied.",
       words: "Replied",
-      afterSending: { text: "Already sent.", sentLine: "Sent to GitHub." },
+      afterSending: {
+        text: "Already sent.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
     });
     const cancelledLine = settled();
     await undo();

@@ -47,6 +47,10 @@ export const describeAnswerSent = (sourceName: string): string => `Sent to ${sou
 export const describeAnswerTooLate = (sourceName: string): string =>
   `Already sent to ${sourceName}, so it can't be taken back here.`;
 
+/** Returns the line for Undo (⌘Z) while the answer is on its way and delivery is not confirmed. */
+export const describeAnswerSending = (sourceName: string): string =>
+  `It is being sent to ${sourceName}, so it can't be taken back here.`;
+
 /** The line after Undo took back a held answer. */
 export const ANSWER_CANCELLED = "Not sent. The ask is open again.";
 

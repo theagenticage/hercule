@@ -1138,6 +1138,27 @@ export const entityQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads what the source of one External Entity shows of it in the Inbox's pane
+ * (`externalEntity.readBlocks`): the plugin's own blocks. The read goes to the
+ * source, so it never retries (a source that cannot be read answers with one
+ * quiet line in the pane) and no push reads it again. It is never stale, so
+ * an open pane sets no timer for it (the app is idle when nothing changes);
+ * what was read is kept for a minute after the pane leaves the thing, so
+ * walking back shows its blocks at once and a thing visited after longer reads
+ * them again.
+ */
+export const entityBlocksQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: ["external-entity-blocks", id],
+    queryFn: ({ signal }) => client.externalEntity.readBlocks({ params: { id } }, { signal }),
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+/**
  * Reads whether any live Task has a failed run, for the sidebar's dot, which
  * shows on every screen. The answer is one boolean, so the dot has no number.
  * A plain `task` push reads it again, and the controller sends one when a

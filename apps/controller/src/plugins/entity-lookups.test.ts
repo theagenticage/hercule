@@ -554,6 +554,19 @@ describe("readBlocks", () => {
     expect(calls).toEqual(["b"]);
   });
 
+  it("keeps the caller's order among the Connections that observed the thing", async () => {
+    const calls = await runWith(["a", "b"], (fake, lookups) =>
+      Effect.gen(function* () {
+        const connections = yield* connectionRepository;
+        const all = yield* Effect.orDie(connections.ofPlugin("tracker"));
+        const id = (account: string) => all.find((c) => c.accountId === account)!.id;
+        yield* lookups.readBlocks("tracker", "tracker:ticket:1", [id("b"), id("a")]);
+        return fake.calls;
+      }),
+    );
+    expect(calls).toEqual(["b"]);
+  });
+
   it("is unreadable when every asked Connection fails, at most 3 of them, or none is eligible", async () => {
     const { answer, calls } = await runWith(["a", "b", "c", "d"], (fake, lookups) =>
       Effect.gen(function* () {

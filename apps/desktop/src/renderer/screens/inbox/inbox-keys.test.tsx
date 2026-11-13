@@ -47,7 +47,14 @@ describe("decideInboxKeyAction", () => {
     expect(decide("o", "list")).toBe("openAtSource");
     expect(decide("f", "list")).toBe("narrow");
     expect(decide(".", "list")).toBe("showArrivals");
-    expect(decide("Enter", "list")).toBe("openPane");
+    expect(decide("Enter", "list")).toBe("activate");
+    expect(decideInboxKeyAction(press("["), "list")).toEqual({ kind: "stepAsk", by: -1 });
+    expect(decideInboxKeyAction(press("]"), "list")).toEqual({ kind: "stepAsk", by: 1 });
+    expect(decideInboxKeyAction(press(" "), "list")).toEqual({ kind: "scrollPane", back: false });
+    expect(decideInboxKeyAction(press(" ", { shiftKey: true }), "list")).toEqual({
+      kind: "scrollPane",
+      back: true,
+    });
     expect(decideInboxKeyAction(press("3"), "list")).toEqual({ kind: "pickList", index: 2 });
     expect(decide("a", "list", { metaKey: true })).toBe("selectAll");
   });

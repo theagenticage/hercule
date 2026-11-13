@@ -19,14 +19,17 @@ const MAX_TEXT_BLOCK_LENGTH = 32 * 1024;
 /** The line that ends a description that was cut. */
 const CUT_NOTICE = "\n\n_The description is longer than this. Open it on GitHub to read the rest._";
 
-/** How many checks of the latest commit one read lists. */
+/** How many checks of the latest commit one read lists. The counts cover all of them. */
 const CHECKS_READ = 100;
 
 /** Reads the fields of a pull request that the blocks show. */
 const PULL_REQUEST_SELECTION = `... on PullRequest {
   body headRefName baseRefName changedFiles additions deletions
   commits(last: 1) { totalCount nodes { commit { statusCheckRollup {
-    contexts(first: ${String(CHECKS_READ)}) { nodes {
+    contexts(first: ${String(CHECKS_READ)}) {
+    checkRunCountsByState { state count }
+    statusContextCountsByState { state count }
+    nodes {
       __typename
       ... on CheckRun { name status conclusion detailsUrl }
       ... on StatusContext { context state targetUrl }
@@ -60,6 +63,9 @@ const CheckContext = Schema.Union([
   }),
 ]);
 
+/** How many checks of the latest commit are in one state, such as `SUCCESS` or `QUEUED`. */
+const StateCount = Schema.Struct({ state: Schema.String, count: Schema.Int });
+
 const PullRequestBlocksNode = Schema.Struct({
   body: Schema.String,
   headRefName: Schema.String,
@@ -77,6 +83,8 @@ const PullRequestBlocksNode = Schema.Struct({
               statusCheckRollup: Schema.NullOr(
                 Schema.Struct({
                   contexts: Schema.Struct({
+                    checkRunCountsByState: Schema.NullOr(Schema.Array(StateCount)),
+                    statusContextCountsByState: Schema.NullOr(Schema.Array(StateCount)),
                     nodes: Schema.NullOr(Schema.Array(Schema.NullOr(CheckContext))),
                   }),
                 }),
@@ -123,6 +131,31 @@ const convertCheck = (context: typeof CheckContext.Type): LatestCheck => {
   };
 };
 
+/** The states of a check that has not finished. */
+const UNFINISHED_STATES: ReadonlySet<string> = new Set([
+  "in_progress",
+  "pending",
+  "queued",
+  "waiting",
+  "expected",
+]);
+
+/**
+ * Adds up the counts GitHub gives for all checks of the latest commit, not
+ * only the ones the read lists. A state that is neither passing nor
+ * unfinished counts as failed.
+ */
+const sumCheckCounts = (counts: ReadonlyArray<typeof StateCount.Type>) => {
+  const total = { passed: 0, failed: 0, pending: 0 };
+  for (const { state, count } of counts) {
+    const word = state.toLowerCase();
+    if (UNFINISHED_STATES.has(word)) total.pending += count;
+    else if (isPassingConclusion(word)) total.passed += count;
+    else total.failed += count;
+  }
+  return total;
+};
+
 /** Returns the description as a text block, or no block for an empty description. A long one is cut and says so. */
 const buildDescriptionBlocks = (body: string): ReadonlyArray<EntityBlockDraft> => {
   const description = body.trim();
@@ -143,12 +176,15 @@ const buildPullRequestBlocks = (
   node: typeof PullRequestBlocksNode.Type,
 ): ReadonlyArray<EntityBlockDraft> => {
   const rollup = node.commits.nodes?.[0]?.commit.statusCheckRollup;
-  const checks = (rollup?.contexts.nodes ?? []).flatMap((context) =>
+  const listed = (rollup?.contexts.nodes ?? []).flatMap((context) =>
     context === null ? [] : [convertCheck(context)],
   );
-  const failed = checks.filter((check) => isFailedConclusion(check.conclusion));
-  const pending = checks.filter((check) => check.status !== "completed");
-  const passed = checks.filter((check) => isPassingConclusion(check.conclusion)).length;
+  const failed = listed.filter((check) => isFailedConclusion(check.conclusion));
+  const pending = listed.filter((check) => check.status !== "completed");
+  const totals = sumCheckCounts([
+    ...(rollup?.contexts.checkRunCountsByState ?? []),
+    ...(rollup?.contexts.statusContextCountsByState ?? []),
+  ]);
   return [
     buildChangeBlock({
       from: node.headRefName,
@@ -157,13 +193,24 @@ const buildPullRequestBlocks = (
       additions: node.additions,
       deletions: node.deletions,
       commits: node.commits.totalCount,
-      ...(checks.length === 0
-        ? {}
-        : { checks: { passed, failed: failed.length, pending: pending.length } }),
+      ...(totals.passed + totals.failed + totals.pending === 0 ? {} : { checks: totals }),
     }),
-    ...(failed.length + pending.length === 0
+    ...(totals.failed + totals.pending === 0
       ? []
-      : [buildChecksBlock({ failed, pending, passed }, () => undefined)]),
+      : [
+          buildChecksBlock(
+            {
+              failed,
+              pending,
+              passed: totals.passed,
+              unlisted: Math.max(
+                0,
+                totals.failed + totals.pending - failed.length - pending.length,
+              ),
+            },
+            () => undefined,
+          ),
+        ]),
     ...buildDescriptionBlocks(node.body),
   ];
 };

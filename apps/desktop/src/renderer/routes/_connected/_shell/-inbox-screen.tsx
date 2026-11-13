@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { namePlugin } from "@hercule/client-core";
 import {
   EMPTY_INBOX_SEARCH,
   addInboxClause,
@@ -13,12 +14,13 @@ import type { InboxClause } from "@hercule/contract";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { useQuietValue } from "../../../app/use-quiet-value";
-import { inboxCountQuery, inboxOutlineQuery, userQuery } from "../../../app/queries";
+import { inboxCountQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import type { SavedController } from "../../../app/context";
 import { KeysSheet, UndoLine } from "../../../screens/desk";
 import { InboxFrame } from "../../../screens/inbox/inbox-frame";
+import { INBOX_PANE_ID } from "../../../screens/inbox/inbox-pane-frame";
 import { buildInboxKeyRows, type InboxKeyAction } from "../../../screens/inbox/inbox-keys";
 import { focusNextInboxRegion } from "../../../screens/inbox/inbox-regions";
 import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
@@ -31,9 +33,10 @@ import { useInboxClock } from "./-inbox-clock";
 import { useInboxVisit, type InboxListRow } from "./-inbox-visit";
 import { InboxHandMenuPart } from "./-inbox-hand-part";
 import { InboxListPart } from "./-inbox-list-part";
+import { useInboxAnswers } from "./-inbox-answers";
 import { useInboxMoves } from "./-inbox-moves";
 import { useInboxKeys } from "./-use-inbox-keys";
-import { InboxPaneHeadPart, InboxPanePart } from "./-inbox-pane-part";
+import { InboxPaneHeadPart, InboxPanePart, type InboxPaneHandle } from "./-inbox-pane-part";
 import { InboxRailPart } from "./-inbox-rail-part";
 import { InboxSearchPart, type SearchTie } from "./-inbox-search-part";
 import {
@@ -49,6 +52,8 @@ import {
 
 /** How long typing in the search stops before the list reads for it, in milliseconds. */
 const SEARCH_QUIET_MS = 200;
+
+const NO_KINDS: readonly string[] = [];
 
 /** The hand-off menu that is open: the thing it hands, and the element it opens under. */
 interface HandMenu {
@@ -87,6 +92,7 @@ export function InboxScreen({
   const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { newestArrival } = useSuspenseQuery(inboxCountQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const formatClock = useInboxClock(client);
   const offlineSince = useOfflineSince(live);
   const [search, setSearch] = useState<InboxSearch>(EMPTY_INBOX_SEARCH);
@@ -102,6 +108,7 @@ export function InboxScreen({
   const [headingFocusRequest, setHeadingFocusRequest] = useState(0);
   const searchRef = useRef<InboxSearchHandle>(null);
   const listRef = useRef<InboxListHandle>(null);
+  const paneRef = useRef<InboxPaneHandle>(null);
 
   // The field shows every letter at once, but the list reads for the text that has held still.
   const quietText = useQuietValue(search.text, SEARCH_QUIET_MS);
@@ -115,6 +122,18 @@ export function InboxScreen({
   const currentThing = isReady
     ? snapshot.rows.find((row) => row.ref === snapshot.current)
     : undefined;
+  // Two or more selected things, or one that is not the current row, show the pane of the selection.
+  const selectedRows = isReady
+    ? snapshot.rows.filter((row) => snapshot.selection.has(row.ref))
+    : [];
+  const isShowingSelection =
+    selectedRows.length >= 2 ||
+    (selectedRows.length === 1 && selectedRows[0]!.ref !== snapshot.current);
+  // The ask of the saved query's kind unfolds first; a search or a Browse value has no kind.
+  const savedQueryKinds =
+    scope.kind === "saved-query" && !isSearching(searched)
+      ? (outline.savedQueries.find((query) => query.id === scope.id)?.signalKinds ?? [])
+      : NO_KINDS;
 
   // What the waits list shows is what the sidebar's dot has been told about.
   const isShowingWaits =
@@ -126,6 +145,7 @@ export function InboxScreen({
   const focusList = (): void => {
     setListFocusRequest((request) => request + 1);
   };
+  const isPaneVisible = !isStacked || isPaneOpen;
   // A pane that lies over the list is the one place the keys work in then, so the focus stays in it.
   const isPaneHoldingFocus = isStacked && isPaneOpen;
   /**
@@ -141,9 +161,10 @@ export function InboxScreen({
       focusList();
     }
   };
+  const accountScope = controller.accountScopes.read();
   const moves = useInboxMoves({
     client,
-    scope: controller.accountScopes.read(),
+    scope: accountScope,
     visit,
     isOffline: offlineSince !== null,
     openTask: (taskId) => {
@@ -151,13 +172,25 @@ export function InboxScreen({
     },
     onMoved: followMove,
   });
-  const openHandMenu = (thing: InboxListRow | null, ref: string): void => {
+  const answers = useInboxAnswers({
+    client,
+    scope: accountScope,
+    visit,
+    moves,
+    isOffline: offlineSince !== null,
+  });
+  // A hand-off from the keys or the pane's own button opens its menu under the pane's button while the pane shows.
+  const openHandMenu = (thing: InboxListRow | null, ref: string | undefined): void => {
     if (thing === null) return;
-    const anchor = listRef.current?.findHandAnchor(ref);
+    const paneAnchor =
+      ref === undefined && isPaneVisible
+        ? document.getElementById(INBOX_PANE_ID)?.querySelector<HTMLElement>("[data-hand-anchor]")
+        : null;
+    const anchor = paneAnchor ?? listRef.current?.findHandAnchor(ref ?? snapshot.current ?? "");
     if (anchor !== null && anchor !== undefined) setHandMenu({ thing, anchor });
   };
   const startHandOff = (ref: string | undefined): void => {
-    openHandMenu(moves.startHandOff(ref), ref ?? snapshot.current ?? "");
+    openHandMenu(moves.startHandOff(ref), ref);
   };
   /** Slides the pane away first when it lies over the list, for what is about the list. */
   const slidePaneAside = (): void => {
@@ -240,8 +273,16 @@ export function InboxScreen({
       case "nextRegion":
         focusNextInboxRegion(action.backwards, { isStacked, isPaneOpen });
         return;
-      case "openPane":
-        if (isStacked && !isPaneOpen && isReady && snapshot.current !== null) setIsPaneOpen(true);
+      case "activate":
+        if (isStacked && !isPaneOpen) {
+          if (isReady && snapshot.current !== null) setIsPaneOpen(true);
+        } else paneRef.current?.answerCurrentAsk();
+        return;
+      case "stepAsk":
+        paneRef.current?.stepAsk(action.by);
+        return;
+      case "scrollPane":
+        paneRef.current?.scrollPage(action.back);
         return;
     }
   };
@@ -372,7 +413,11 @@ export function InboxScreen({
       }
       paneHead={
         currentThing === undefined ? null : (
-          <InboxPaneHeadPart client={client} thing={currentThing} />
+          <InboxPaneHeadPart
+            client={client}
+            thing={currentThing}
+            selection={isShowingSelection ? selectedRows : null}
+          />
         )
       }
       pane={
@@ -382,10 +427,16 @@ export function InboxScreen({
           ) : null
         ) : (
           <InboxPanePart
-            isActive={!isStacked || isPaneOpen}
+            ref={paneRef}
             client={client}
+            scope={accountScope}
             thing={currentThing}
-            offers={currentThing.offers}
+            selection={isShowingSelection ? selectedRows : null}
+            order={snapshot.order ?? "waiting"}
+            isActive={isPaneVisible}
+            isHandMenuOpen={handMenu !== null}
+            savedQueryKinds={savedQueryKinds}
+            answers={answers}
             moves={{
               onTakeOn: () => {
                 moves.takeOn();
@@ -393,19 +444,23 @@ export function InboxScreen({
               onDismiss: () => {
                 moves.dismiss();
               },
-              onGoToTask: (taskId) => {
-                void navigate({ to: "/work", search: { task: taskId } });
+              onGoToTask: () => {
+                moves.goToTask();
               },
-              onSeeInIntake: () => {
-                void navigate({ to: "/intake", search: { entity: currentThing.id } });
+              onGoTo: (ref) => {
+                if (snapshot.rows.some((row) => row.ref === ref)) {
+                  visit.select({ kind: "focus", ref });
+                } else moves.say("That thing is not in this list.");
               },
-              onHandOff: (offer, connectionId) => {
-                moves.handOff(undefined, offer, connectionId);
+              onHandOff: () => {
+                startHandOff(undefined);
               },
-              onClose: () => {
-                setIsPaneOpen(false);
-                focusList();
-              },
+            }}
+            onWalk={(ref) => {
+              visit.select({ kind: "focus", ref });
+            }}
+            onDismissSelection={() => {
+              moves.dismiss();
             }}
           />
         )
@@ -422,7 +477,14 @@ export function InboxScreen({
         focusList();
       }}
       onOpenAtSource={
-        currentThing === undefined || currentThing.url === "" ? undefined : moves.openAtSource
+        currentThing === undefined || currentThing.url === "" || isShowingSelection
+          ? undefined
+          : moves.openAtSource
+      }
+      openAtSourceWords={
+        currentThing === undefined || isShowingSelection
+          ? undefined
+          : `Open on ${namePlugin(currentThing.source, plugins)}`
       }
       onOpenIntake={() => {
         void navigate({ to: "/intake" });

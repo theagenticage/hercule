@@ -195,6 +195,15 @@ export function useUndoLine<Page>(
     });
   };
 
+  // Leaving the page while the user is on the line would strand a held
+  // gesture: the line never reports the pointer leaving, so release it here.
+  useEffect(
+    () => () => {
+      if (current.current.hold === "held") current.current.offered?.hold?.(false);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!held.isShown || held.hold === "held" || held.isWaiting) return;
     const stays = held.hold === "released" ? RELEASED_LINE_MS : held.staysMs;

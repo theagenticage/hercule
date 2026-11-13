@@ -205,3 +205,11 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/* Holds the scroll and the footer of one thing, so a stale one can be made inert as a whole. */
+.ib-pane-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
