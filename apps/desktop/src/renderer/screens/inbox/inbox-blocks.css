@@ -6,7 +6,8 @@
   flex-direction: column;
   gap: 20px;
 }
-.bk h3 {
+/* The block's own heading only: a `> h3` leaves the headings of markdown text to the text rules. */
+.bk > h3 {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: var(--t-12);
@@ -92,7 +93,8 @@
   padding: 0;
   list-style: none;
 }
-.bk-msgs li {
+/* `>` keeps the grid to the block's own messages: a markdown list inside a message holds `li` too. */
+.bk-msgs > li {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 10px;
@@ -131,12 +133,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bk-msgs li.is-you .bk-msg-text {
+.bk-msgs > li.is-you .bk-msg-text {
   padding-left: 10px;
   box-shadow: inset 2px 0 0 var(--you);
 }
 /* The note for the messages the producer left out sits under the first message's text column. */
-.bk-msgs li.bk-omitted {
+.bk-msgs > li.bk-omitted {
   display: block;
   padding-left: 32px;
   color: var(--faint);
