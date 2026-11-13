@@ -650,6 +650,11 @@ const openThreadDialog = async (page: Document, needles: ReadonlyArray<string>):
     tick.click();
     await nextFrame();
   }
+  // The dialog opens with Web Animations. Chromium rasterises the chips' marks
+  // and the composer's icons a little differently from run to run once they
+  // have been animated, which no screenshot wait cures, so these states open
+  // with Reduce motion, which the dialog's motion obeys by reading this token.
+  page.documentElement.style.setProperty("--dur-2", "0s");
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
   await waitFor(page, ".thread-dialog .composer-card");
   // The reason line says "Looking for the project" until the match answers.
