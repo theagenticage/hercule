@@ -86,6 +86,16 @@ const open = async (
   change(inbox);
   let isUnreachable = false;
   const opened = await openInbox(inbox, {
+    [DISMISS]: (call) => {
+      // As the controller does: a dismissed thing is gone from every later read. A fake that kept
+      // listing it would make the app show it again as an arrival, and a test that waits for the
+      // empty list would pass or fail by the order of two reads.
+      const dismissed = new Set((call.body as { ids: readonly string[] }).ids);
+      for (const [name, things] of Object.entries(inbox.lists)) {
+        inbox.lists[name] = things.filter((thing) => !dismissed.has(thing.id));
+      }
+      return { body: {} };
+    },
     ...handlers,
     "POST /api/v1/auth/ws-ticket": () =>
       isUnreachable
@@ -260,12 +270,9 @@ describe("Dismiss", () => {
   });
 
   it("moves the focus to the empty state's heading when the last thing leaves", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
 
     await user.keyboard("e");
 
@@ -341,12 +348,9 @@ describe("Dismiss", () => {
 
 describe("the last thing leaving", () => {
   it("plays the sunrise for the user's own move", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
     expect(document.querySelector(".ib-em")).toBeNull();
 
     await user.keyboard("e");
@@ -367,12 +371,9 @@ describe("the last thing leaving", () => {
   });
 
   it("says what waits behind the new pill, instead of drawing nothing, and the focus goes to it", async () => {
-    const { user, live, inbox } = await open(
-      (fake) => {
-        fake.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user, live, inbox } = await open((fake) => {
+      fake.lists.waits = [SLOTS];
+    });
     await waitFor(() => {
       expect(live.readTopics()).toContain("externalEntity");
     });
