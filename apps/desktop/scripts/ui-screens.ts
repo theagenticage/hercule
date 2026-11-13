@@ -285,6 +285,13 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".ib-row",
     nonTextParts: [],
   },
+  // The rail's Browse in a world with real-length names: long repository names, two accounts, a Linear source.
+  {
+    name: "inbox-browse",
+    path: "inbox.html?state=browse",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
   {
     name: "inbox-dialog",
     path: "inbox.html?state=dialog",

@@ -32,7 +32,12 @@ export interface RailSavedQuery {
 }
 
 export interface RailPin extends InboxBrowseValue {
+  /** The name drawn: a repository's own name, without its owner. */
   readonly label: string;
+  /** The owner of a repository whose name another value of the same account shares. Drawn faint, before the name. */
+  readonly owner?: string;
+  /** The whole name, for the tooltip: "owner/repo" for a repository. */
+  readonly title: string;
   readonly count: number;
   /** The account's label, given only when the pin's source has several accounts. */
   readonly accountLabel?: string;
@@ -42,7 +47,12 @@ export type RailHealth = "on-track" | "at-risk" | "off-track";
 
 export interface RailFacetValue {
   readonly value: string;
+  /** The name drawn: a repository's own name, without its owner. */
   readonly label: string;
+  /** The owner of a repository whose name another value of the same account shares. Drawn faint, before the name. */
+  readonly owner?: string;
+  /** The whole name, for the tooltip: "owner/repo" for a repository. */
+  readonly title: string;
   readonly count: number;
   readonly health?: RailHealth;
 }
@@ -106,6 +116,46 @@ const readHealth = (status: EntityStatus | undefined): RailHealth | undefined =>
   return undefined;
 };
 
+/** The key of the facet whose values are repositories, written "owner/name". */
+const REPOSITORY_KEY = "repo";
+
+interface DrawnName {
+  readonly label: string;
+  readonly owner?: string;
+  readonly title: string;
+}
+
+/**
+ * Returns what the rail draws for the names of the values of one facet in one
+ * account, in the order given.
+ *
+ * - A repository (`key` is `repo`, the name is `owner/name`) is drawn as its own
+ *   name. Its owner comes along only when another name in `names` is the same
+ *   repository name under another owner, because then the name alone is
+ *   ambiguous.
+ * - Any other name is drawn whole, with no owner.
+ * - `title` is always the whole name, for the tooltip.
+ */
+const describeValueNames = (
+  key: string,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<DrawnName> => {
+  if (key !== REPOSITORY_KEY) return names.map((name) => ({ label: name, title: name }));
+  const split = names.map((name) => {
+    const slash = name.indexOf("/");
+    return slash < 0
+      ? { owner: undefined, own: name }
+      : { owner: name.slice(0, slash), own: name.slice(slash + 1) };
+  });
+  const times = new Map<string, number>();
+  for (const { own } of split) times.set(own, (times.get(own) ?? 0) + 1);
+  return split.map(({ owner, own }, index) => ({
+    label: own,
+    title: names[index]!,
+    ...(owner !== undefined && (times.get(own) ?? 0) > 1 ? { owner } : {}),
+  }));
+};
+
 /**
  * Returns the label of the account a thing or a value belongs to, for a
  * source with the given `accounts`: the first account of `connectionIds`
@@ -127,6 +177,8 @@ export const findAccountLabel = (
  * - A core saved query has the icon of its id, a plugin's has its plugin's
  *   mark, and the first seven have their digit.
  * - A pin names its account when its source has more than one.
+ * - A repository is named by its own name, with its owner only when two names
+ *   of one account share it (see `describeValueNames`).
  * - A source names itself with its plugin's name, and carries the time a failing Connection
  *   last changed when `outline.failing` lists it. `formatTime` writes
  *   that time for the reader ("08:40").
@@ -144,7 +196,30 @@ export function describeInboxRail(
       query.source === undefined ? (CORE_ICONS[query.id] ?? "intake") : { pluginId: query.source },
     ...(index < KEYED_SAVED_QUERIES ? { shortcut: String(index + 1) } : {}),
   }));
+  // Pins are named in groups of one source, account and facet, as the values they came from are.
+  const buildPinGroupKey = (pin: InboxOutline["pins"][number]): string =>
+    JSON.stringify([pin.source, pin.connectionId ?? null, pin.key]);
+  const pinNames = new Map<InboxOutline["pins"][number], DrawnName>();
+  for (const group of new Set(outline.pins.map(buildPinGroupKey))) {
+    const members = outline.pins.filter((pin) => buildPinGroupKey(pin) === group);
+    const first = members[0]!;
+    const facet = outline.sources
+      .find((source) => source.source === first.source)
+      ?.facets?.find(
+        (facet) => facet.key === first.key && facet.connectionId === first.connectionId,
+      );
+    const labels = [
+      ...new Set([
+        ...members.map((pin) => pin.label),
+        ...(facet?.values.map((value) => value.label) ?? []),
+      ]),
+    ];
+    const names = describeValueNames(first.key, labels);
+    const namesByLabel = new Map(labels.map((label, index) => [label, names[index]!]));
+    members.forEach((pin) => pinNames.set(pin, namesByLabel.get(pin.label)!));
+  }
   const pins = outline.pins.map((pin): RailPin => {
+    const drawn = pinNames.get(pin)!;
     const accounts = outline.sources.find((source) => source.source === pin.source)?.accounts ?? [];
     const accountLabel = findAccountLabel(
       accounts,
@@ -154,7 +229,9 @@ export function describeInboxRail(
       source: pin.source,
       key: pin.key,
       value: pin.value,
-      label: pin.label,
+      label: drawn.label,
+      title: drawn.title,
+      ...(drawn.owner === undefined ? {} : { owner: drawn.owner }),
       count: pin.count,
       ...(pin.connectionId === undefined ? {} : { connectionId: pin.connectionId }),
       ...(accountLabel === undefined ? {} : { accountLabel }),
@@ -169,21 +246,30 @@ export function describeInboxRail(
       folded: source.folded,
       ...(failing === undefined ? {} : { failingChangedAt: formatTime(failing.updatedAt) }),
       accounts: source.accounts,
-      facets: (source.facets ?? []).map((facet) => ({
-        key: facet.key,
-        plural: facet.plural,
-        more: facet.more,
-        ...(facet.connectionId === undefined ? {} : { connectionId: facet.connectionId }),
-        values: facet.values.map((item) => {
-          const health = readHealth(item.health);
-          return {
-            value: item.value,
-            label: item.label,
-            count: item.count,
-            ...(health === undefined ? {} : { health }),
-          };
-        }),
-      })),
+      facets: (source.facets ?? []).map((facet) => {
+        const names = describeValueNames(
+          facet.key,
+          facet.values.map((item) => item.label),
+        );
+        return {
+          key: facet.key,
+          plural: facet.plural,
+          more: facet.more,
+          ...(facet.connectionId === undefined ? {} : { connectionId: facet.connectionId }),
+          values: facet.values.map((item, index) => {
+            const health = readHealth(item.health);
+            const drawn = names[index]!;
+            return {
+              value: item.value,
+              label: drawn.label,
+              title: drawn.title,
+              ...(drawn.owner === undefined ? {} : { owner: drawn.owner }),
+              count: item.count,
+              ...(health === undefined ? {} : { health }),
+            };
+          }),
+        };
+      }),
     };
   });
   return { savedQueries, pins, sources };
