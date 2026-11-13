@@ -4,7 +4,7 @@
  * the describe line. A section is unfolded or folded to its head; its body
  * grows and shrinks on the hand spring.
  */
-import { useId, useLayoutEffect, useRef, type JSX } from "react";
+import { useId, useImperativeHandle, useLayoutEffect, useRef, type JSX, type Ref } from "react";
 import { describeHiddenAsks } from "@hercule/client-core/inbox";
 import type { Block } from "@hercule/contract";
 import { animateValue, type MotionValue } from "../../app/motion";
@@ -46,6 +46,12 @@ function SayLine({
   );
 }
 
+/** What the pane asks of a section. */
+export interface InboxAskSectionHandle {
+  /** Moves the focus to the first answer in the section's body, if it has any. */
+  readonly focusFirstAnswer: () => void;
+}
+
 /**
  * Renders the section of one open signal.
  *
@@ -54,6 +60,7 @@ function SayLine({
  * - A folded body is inert, so its buttons take no focus and no click.
  * - `body` is how far the signal's full read is: while it is on its way the
  *   body draws quiet shapes, and a read that failed says why in one line.
+ * - `ref` receives the handle that focuses the section's first answer.
  */
 export function InboxAskSection({
   say,
@@ -62,6 +69,7 @@ export function InboxAskSection({
   isOpen,
   isCurrent,
   body,
+  ref,
   onToggle,
 }: {
   readonly say: string;
@@ -71,10 +79,16 @@ export function InboxAskSection({
   readonly isOpen: boolean;
   readonly isCurrent: boolean;
   readonly body: AskSectionBody;
+  readonly ref?: Ref<InboxAskSectionHandle> | undefined;
   readonly onToggle: () => void;
 }): JSX.Element {
   const bodyId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(ref, () => ({
+    focusFirstAnswer: () => {
+      bodyRef.current?.querySelector<HTMLElement>("[data-answer]")?.focus();
+    },
+  }));
   const height = useRef<MotionValue | null>(null);
   const isFirstDraw = useRef(true);
 

@@ -195,6 +195,16 @@ describe("a held answer", () => {
   });
 });
 
+describe("with no presentation attached", () => {
+  it("holds nothing, so no answer is sent without an Undo", () => {
+    const { held, store, detach } = setUp();
+    detach();
+
+    expect(held.hold(ANSWER)).toBe(false);
+    expect(store.getSnapshot()).toEqual([]);
+  });
+});
+
 describe("unsent answers after the app restarted", () => {
   const restart = () => {
     const storage = createMemoryStorage();

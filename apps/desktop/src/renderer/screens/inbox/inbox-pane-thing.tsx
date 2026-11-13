@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { JSX, ReactNode, Ref } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type {
   InboxRowHolder,
@@ -94,6 +94,7 @@ function InboxPaneBlockSlot({ blocks }: { readonly blocks: InboxPaneBlocks }): J
  * - `links` is the Linked section, left out when empty.
  * - `history` is What happened, newest first, left out when empty.
  * - `onGoTo` is called with a linked thing's reference when its title is pressed.
+ * - `ref` is the element that scrolls, which the keys scroll by a page.
  *
  * Every word comes in as a prop; the component decides nothing.
  */
@@ -107,6 +108,7 @@ export function InboxPaneThing({
   links,
   history,
   plugins,
+  ref,
   onGoToTask,
   onGoTo,
 }: {
@@ -119,12 +121,13 @@ export function InboxPaneThing({
   readonly links: ReadonlyArray<PaneLink>;
   readonly history: ReadonlyArray<PaneHistoryLine>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
+  readonly ref?: Ref<HTMLDivElement>;
   readonly onGoToTask: () => void;
   readonly onGoTo: (ref: string) => void;
 }): JSX.Element {
   const hasAsks = asks !== null && asks !== undefined && asks !== false;
   return (
-    <div className="ib-pane-scroll">
+    <div ref={ref} className="ib-pane-scroll">
       <h2 className="ib-pane-title">
         {title}
         {identifier === undefined || identifier === "" ? null : (

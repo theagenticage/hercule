@@ -16,6 +16,7 @@ import {
   type FailureReason,
 } from "../work/held-answers";
 import { SIGNAL_ANSWER_HOLD_MS } from "./inbox-asks";
+import type { InboxRowHandOff } from "./inbox-row";
 
 /** What the undo line says for a held answer: what is being done, and the note that it waits. */
 export interface HeldAnswerWords {
@@ -110,6 +111,17 @@ export const describeHiddenAsks = (count: number): string => `${String(count)} m
 /** Returns the title of the selection pane: "1 thing selected", "3 things selected". */
 export const describeSelectedThings = (count: number): string =>
   `${String(count)} ${count === 1 ? "thing" : "things"} selected`;
+
+/** Returns the name of the pane's button that dismisses a selection: "Dismiss all 3". */
+export const describeDismissAll = (count: number): string => `Dismiss all ${String(count)}`;
+
+/** Returns what a hand-off button is called to the ear: "Hand to Triage" for one workflow, "Hand to…" for several. */
+export const describeHandOff = (handOff: InboxRowHandOff): string =>
+  handOff.kind === "one" ? `Hand to ${handOff.name}` : "Hand to…";
+
+/** Returns what a hand-off button shows next to its faces: the workflow's name, or "Hand to…" for several. */
+export const describeHandOffLabel = (handOff: InboxRowHandOff): string =>
+  handOff.kind === "one" ? handOff.name : "Hand to…";
 
 /** Returns an ask's name by who raised it: "Mei’s review request", or "the failing checks" when no one did. */
 const nameAsk = (ask: Pick<InboxAsk, "asker" | "noun">): string =>

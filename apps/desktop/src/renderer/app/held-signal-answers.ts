@@ -128,14 +128,17 @@ export interface HeldAnswersView {
 export interface HeldSignalAnswers {
   /**
    * Holds the answer for its window with Undo on the undo line, then sends
-   * it. Returns false, with the reason on the undo line, when it was refused
-   * because the app is offline and nothing was held.
+   * it. Returns false and holds nothing when it is refused: with no
+   * presentation attached (an answer held with no undo line could not be
+   * taken back, so the caller must be the Inbox), or, with the reason on the
+   * undo line, when the app is offline.
    */
   readonly hold: (answer: HeldSignalAnswer) => boolean;
   /**
    * Holds the unsent answer `id` again, as `hold` does, and forgets the old
    * one once the new one is held. Returns false, leaving the unsent answer
-   * in place, when it is unknown or the app is offline.
+   * in place, when it is unknown, when no presentation is attached, or when
+   * the app is offline.
    */
   readonly sendAgain: (id: string, context: SendAgainContext) => boolean;
   /** Removes the unsent answer `id`. */
@@ -320,7 +323,8 @@ export const createHeldSignalAnswers = (store: PendingIntents): HeldSignalAnswer
 
   return {
     hold: (answer) => {
-      if (attached?.isOffline() === true) {
+      if (attached === undefined) return false;
+      if (attached.isOffline()) {
         attached.say(REFUSED_OFFLINE);
         return false;
       }
@@ -329,8 +333,8 @@ export const createHeldSignalAnswers = (store: PendingIntents): HeldSignalAnswer
     },
     sendAgain: (id, context) => {
       const intent = findUnsent(id);
-      if (intent === undefined) return false;
-      if (attached?.isOffline() === true) {
+      if (intent === undefined || attached === undefined) return false;
+      if (attached.isOffline()) {
         attached.say(REFUSED_OFFLINE);
         return false;
       }

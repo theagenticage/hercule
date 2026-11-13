@@ -82,9 +82,27 @@ const open = async (
 ) => {
   const inbox = defaultInbox();
   change(inbox);
-  const opened = await openInbox(inbox, handlers);
+  let isUnreachable = false;
+  const opened = await openInbox(inbox, {
+    ...handlers,
+    "POST /api/v1/auth/ws-ticket": () =>
+      isUnreachable
+        ? { status: 503, body: buildErrorBody("unavailable", "The controller is down.") }
+        : { body: { ticket: "ws-ticket" } },
+  });
   await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
-  return { ...opened, inbox, user: userEvent.setup() };
+  /**
+   * Drops the live connection and keeps the controller unreachable. Without
+   * that, the app reconnects after about a second and a slow machine can lose
+   * the offline state before the test has looked at it.
+   */
+  const dropConnection = (): void => {
+    isUnreachable = true;
+    act(() => {
+      opened.live.drop();
+    });
+  };
+  return { ...opened, inbox, dropConnection, user: userEvent.setup() };
 };
 
 describe("walking and selecting", () => {
@@ -495,16 +513,14 @@ describe("the hand-off", () => {
   });
 
   it("refuses a hand-off picked from an open menu when the connection was lost meanwhile", async () => {
-    const { user, live, calls } = await open(handable, {
+    const { user, live, calls, dropConnection } = await open(handable, {
       [handOffPath(LOYALTY.id)]: { body: { runId: RUN_ID, taskId: TASK_ID } },
     });
     await live.waitForFirstPushes();
     await user.keyboard("j");
     await user.keyboard("h");
     await screen.findByRole("menuitem", { name: /Repair the build/, hidden: true });
-    act(() => {
-      live.drop();
-    });
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("2");
@@ -673,11 +689,11 @@ describe("Go to its Task, Open at its source and the keys sheet", () => {
 
 describe("offline", () => {
   it("refuses every move with the reason and sends nothing", async () => {
-    const { user, live, calls } = await open(undefined, { [DISMISS]: { body: {} } });
-    await live.waitForFirstPushes();
-    act(() => {
-      live.drop();
+    const { user, live, calls, dropConnection } = await open(undefined, {
+      [DISMISS]: { body: {} },
     });
+    await live.waitForFirstPushes();
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("e");

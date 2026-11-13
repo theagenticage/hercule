@@ -1,6 +1,10 @@
-import type { JSX } from "react";
+import type { JSX, Ref } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import { describeSelectedThings, type InboxRowView } from "@hercule/client-core/inbox";
+import {
+  describeDismissAll,
+  describeSelectedThings,
+  type InboxRowView,
+} from "@hercule/client-core/inbox";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CheckIcon } from "../../icons/check";
 import { PluginMark } from "../../marks";
@@ -37,7 +41,7 @@ export function InboxSelectionHead({
 /**
  * Renders the pane of a selection of things: "3 things selected", the hint
  * for the selection keys, one row for each `member` and a footer that holds
- * Dismiss only, named "Dismiss all 3".
+ * Dismiss only, named "Dismiss all 3". `ref` is the element that scrolls.
  *
  * A member row is a button that calls `onWalk` with the member's reference,
  * so the pane walks to that thing. Taking on and handing off a selection are
@@ -47,19 +51,21 @@ export function InboxSelectionPane({
   members,
   plugins,
   platform,
+  ref,
   onWalk,
   onDismiss,
 }: {
   readonly members: ReadonlyArray<InboxRowView>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly platform: DesktopPlatform;
+  readonly ref?: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
   const count = members.length;
   return (
     <>
-      <div className="ib-pane-scroll">
+      <div ref={ref} className="ib-pane-scroll">
         <h2 className="ib-pane-title">{describeSelectedThings(count)}</h2>
         <p className="ib-pane-meta">
           <span>{describeSelectionHint(platform)}</span>
@@ -98,7 +104,7 @@ export function InboxSelectionPane({
       </div>
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
-          <InboxPaneDismiss words={`Dismiss all ${String(count)}`} onDismiss={onDismiss} />
+          <InboxPaneDismiss words={describeDismissAll(count)} onDismiss={onDismiss} />
         </div>
       </footer>
     </>

@@ -23,7 +23,6 @@ import { useOfflineSince } from "../../../app/use-offline-since";
 import type { SavedController } from "../../../app/context";
 import { KeysSheet, UndoLine } from "../../../screens/desk";
 import { InboxFrame } from "../../../screens/inbox/inbox-frame";
-import { INBOX_PANE_ID } from "../../../screens/inbox/inbox-pane-frame";
 import { buildInboxKeyRows, type InboxKeyAction } from "../../../screens/inbox/inbox-keys";
 import { focusNextInboxRegion } from "../../../screens/inbox/inbox-regions";
 import type { InboxRowActions } from "../../../screens/inbox/inbox-row";
@@ -198,9 +197,7 @@ export function InboxScreen({
   const openHandMenu = (thing: InboxListRow | null, ref: string | undefined): void => {
     if (thing === null) return;
     const paneAnchor =
-      ref === undefined && isPaneVisible
-        ? document.getElementById(INBOX_PANE_ID)?.querySelector<HTMLElement>("[data-hand-anchor]")
-        : null;
+      ref === undefined && isPaneVisible ? paneRef.current?.findHandAnchor() : null;
     const anchor = paneAnchor ?? listRef.current?.findHandAnchor(ref ?? snapshot.current ?? "");
     if (anchor !== null && anchor !== undefined) setHandMenu({ thing, anchor });
   };

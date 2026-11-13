@@ -17,5 +17,6 @@ export * from "./inbox-search";
 export * from "./inbox-moves";
 export * from "./inbox-outline";
 export * from "./inbox-asks";
+export * from "./inbox-ask-choice";
 export * from "./inbox-pane-words";
 export * from "./inbox-pane-view";

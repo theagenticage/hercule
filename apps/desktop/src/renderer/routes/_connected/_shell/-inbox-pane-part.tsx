@@ -1,10 +1,12 @@
-import { useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
+import { useImperativeHandle, useReducer, useRef, type JSX, type Ref } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { namePlugin, type HerculeClient } from "@hercule/client-core";
 import {
+  NO_PANE_ASK_CHOICE,
   describeInboxRow,
   findAccountLabel,
+  reducePaneAskChoice,
   readThingPlace,
   type InboxRowView,
 } from "@hercule/client-core/inbox";
@@ -12,14 +14,13 @@ import type { InboxOrder } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
 import { inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
-import { INBOX_PANE_ID } from "../../../screens/inbox/inbox-pane-frame";
 import {
   InboxSelectionHead,
   InboxSelectionPane,
 } from "../../../screens/inbox/inbox-selection-pane";
 import type { InboxAnswers } from "./-inbox-answers";
 import { useInboxNow } from "./-inbox-clock";
-import type { InboxPaneAsksHandle, PaneReply } from "./-inbox-pane-asks";
+import type { InboxPaneAsksHandle } from "./-inbox-pane-asks";
 import { InboxPaneThingPart, type InboxPaneMoves } from "./-inbox-pane-thing-part";
 import type { InboxListRow } from "./-inbox-visit";
 
@@ -29,6 +30,8 @@ export type { InboxPaneMoves };
 export interface InboxPaneHandle extends InboxPaneAsksHandle {
   /** Scrolls the pane down by a page, or up with `back`. */
   readonly scrollPage: (back: boolean) => void;
+  /** Returns the pane's hand-off button, where the hand menu anchors, or `null` when the pane has none. */
+  readonly findHandAnchor: () => HTMLElement | null;
 }
 
 /**
@@ -81,12 +84,14 @@ function InboxSelectionPart({
   client,
   members,
   order,
+  scrollRef,
   onWalk,
   onDismiss,
 }: {
   readonly client: HerculeClient;
   readonly members: ReadonlyArray<InboxListRow>;
   readonly order: InboxOrder;
+  readonly scrollRef: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
@@ -102,6 +107,7 @@ function InboxSelectionPart({
       members={views}
       plugins={plugins}
       platform={bridge.platform}
+      ref={scrollRef}
       onWalk={onWalk}
       onDismiss={onDismiss}
     />
@@ -112,12 +118,12 @@ function InboxSelectionPart({
  * Renders the body of the pane: the pane of the selection when `selection`
  * holds things, else the pane of the current `thing`.
  *
- * It keeps what the user chose in the pane for as long as the screen lives:
- * the ask unfolded last for each thing (so walking away and back finds it as
- * it was left) and the reply box that is open. `ref` receives the handle the
- * keys use.
+ * It keeps what the user chose in the pane for as long as the screen lives
+ * (`reducePaneAskChoice`): the ask unfolded last for each thing, so walking
+ * away and back finds it as it was left, and the reply box that is open.
+ * `ref` receives the handle the keys use.
  *
- * Orchestrating: it owns those two pieces of client state.
+ * Orchestrating: it owns that client state.
  */
 export function InboxPanePart({
   client,
@@ -149,12 +155,10 @@ export function InboxPanePart({
   readonly onWalk: (ref: string) => void;
   readonly onDismissSelection: () => void;
 }): JSX.Element {
-  // The ask the user chose last for each thing, and whether they folded it.
-  const [chosenAsks, setChosenAsks] = useState<
-    ReadonlyMap<string, { readonly signalId: string; readonly isFolded: boolean }>
-  >(new Map());
-  const [reply, setReply] = useState<PaneReply | null>(null);
+  const [choice, dispatchAskMove] = useReducer(reducePaneAskChoice, NO_PANE_ASK_CHOICE);
   const asksRef = useRef<InboxPaneAsksHandle>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const handAnchorRef = useRef<HTMLButtonElement>(null);
   useImperativeHandle(ref, () => ({
     answerCurrentAsk: () => {
       asksRef.current?.answerCurrentAsk();
@@ -163,11 +167,12 @@ export function InboxPanePart({
       asksRef.current?.stepAsk(by);
     },
     scrollPage: (back) => {
-      const scroller = document.getElementById(INBOX_PANE_ID)?.querySelector(".ib-pane-scroll");
-      if (scroller === null || scroller === undefined) return;
+      const scroller = scrollRef.current;
+      if (scroller === null) return;
       const page = scroller.clientHeight * 0.9;
       scroller.scrollBy({ top: back ? -page : page });
     },
+    findHandAnchor: () => handAnchorRef.current,
   }));
 
   if (selection !== null) {
@@ -176,6 +181,7 @@ export function InboxPanePart({
         client={client}
         members={selection}
         order={order}
+        scrollRef={scrollRef}
         onWalk={onWalk}
         onDismiss={onDismissSelection}
       />
@@ -189,16 +195,13 @@ export function InboxPanePart({
       isActive={isActive}
       isHandMenuOpen={isHandMenuOpen}
       savedQueryKinds={savedQueryKinds}
-      chosenAskId={chosenAsks.get(thing.id)?.signalId}
-      isAskFolded={chosenAsks.get(thing.id)?.isFolded ?? false}
-      reply={reply}
+      choice={choice}
       answers={answers}
       moves={moves}
       asksRef={asksRef}
-      onChooseAsk={(signalId, isFolded) => {
-        setChosenAsks((before) => new Map(before).set(thing.id, { signalId, isFolded }));
-      }}
-      onReplyChange={setReply}
+      scrollRef={scrollRef}
+      handAnchorRef={handAnchorRef}
+      dispatchAskMove={dispatchAskMove}
     />
   );
 }
