@@ -345,6 +345,8 @@ export const useInboxMoves = ({
   }): void => {
     const receipt = visit.move("taken", refs);
     tellMoved();
+    // Sound because sendInLine's mutation returns exactly `send()`'s value unchanged, so the
+    // result type is the caller's. Revisit if sendInLine ever transforms its output.
     const request = sendInLine.mutateAsync(send) as Promise<Result>;
     // A call that wrote nothing (it failed, or the things already had their Task) has nothing to put back.
     const wasChanged = request.then(

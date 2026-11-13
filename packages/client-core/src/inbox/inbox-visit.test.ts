@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { InboxGroup } from "@hercule/contract";
+import { EntityTakeOnTogetherInput, type InboxGroup } from "@hercule/contract";
+import { Schema } from "effect";
 import {
   createInboxVisit,
   type FirstPage,
@@ -8,6 +9,7 @@ import {
   type MoveReceipt,
   type NextPage,
 } from "./inbox-visit";
+import { planInboxMove } from "./inbox-moves";
 
 interface Row {
   readonly ref: string;
@@ -1051,6 +1053,24 @@ describe("groups", () => {
     if (entry?.kind !== "head") throw new Error(`no head ${key}`);
     return entry.group;
   };
+
+  it("plans T on a group whose other member arrived behind N new as a take on of the held one, never a take on together", async () => {
+    // The visit holds a alone. A refresh links a and n, but n is a new first-page arrival.
+    const { fake, visit } = await openedGroups(rows("a", "b"), []);
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("n", "a", "b"), [group("a", ["a", "n"])]);
+    expect(visit.getSnapshot().arrivals).toBe(1);
+    visit.select({ kind: "focus", ref: "a" });
+    const target = visit.targets("group:1");
+    expect(target).toMatchObject({ kind: "group", group: { size: 1 } });
+    // The test rows are not inbox things, so the target is cast for the planner.
+    const planTarget = target as unknown as Parameters<typeof planInboxMove>[0]["target"];
+    const plan = planInboxMove({ move: "takeOn", target: planTarget, isOffline: false });
+    expect(plan).toMatchObject({ kind: "takeOn", thing: { ref: "a" } });
+    if (plan.kind === "takeOnTogether") {
+      Schema.decodeUnknownSync(EntityTakeOnTogetherInput)({ ids: plan.ids, title: plan.title });
+    }
+  });
 
   it("keeps a group's key, fold and current entry when a read names it after another member", async () => {
     const { fake, visit } = await openedGroups(rows("a", "b", "c", "d"), [

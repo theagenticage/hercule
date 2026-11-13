@@ -155,20 +155,31 @@ export const NO_LINE_TO_LINK_FROM =
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
 /**
- * Returns the reason a group cut by the controller's bound on members (more
- * than `MAX_INBOX_MOVED_THINGS` things) cannot be moved as a whole, or
- * `undefined` for a group whose members are all known.
+ * Returns the reason a group cannot be moved as a whole, or `undefined` when
+ * it can. Two independent limits apply:
+ * - the membership is incomplete: the controller cut the group at its bound,
+ *   so `size` is above the members the visit knows;
+ * - the move is too big: the operative members are more than
+ *   `MAX_INBOX_MOVED_THINGS`, which one call refuses. A held reply can carry
+ *   such a group (the cut members plus a held one beyond the cut), with
+ *   `size` equal to `members.length`.
  */
 const refuseTooLargeGroup = (
   group: InboxGroupView<unknown>,
   verb: string,
   key: string,
-): Refusal | undefined =>
-  group.size > group.members.length
-    ? refuse(
-        `This group has ${formatCount(group.size)} things, and ${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} at once. Open the group, select some of its things, then press ${key}.`,
-      )
-    : undefined;
+): Refusal | undefined => {
+  const advice = `Open the group, select some of its things, then press ${key}.`;
+  if (group.size > group.members.length)
+    return refuse(
+      `This group has ${formatCount(group.size)} things, and ${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} at once. ${advice}`,
+    );
+  if (group.members.length > MAX_INBOX_MOVED_THINGS)
+    return refuse(
+      `This group has ${formatCount(group.members.length)} things to move, and ${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} at once. ${advice}`,
+    );
+  return undefined;
+};
 
 /** Returns the reason a selection of more than `MAX_INBOX_MOVED_THINGS` rows is refused, or `undefined` for a smaller target. */
 const refuseTooLargeSelection = (
@@ -222,7 +233,7 @@ const planDismiss = <Row extends MovedRow>(
  * several things become one Task: a group lists its label's thing first,
  * because the Task takes its stage and Project from the first thing, and is
  * titled with the group's label; a selection is titled with its first row's
- * title.
+ * title. A group with one operative member takes that member on alone.
  */
 const planTakeOn = <Row extends MovedRow>(
   target: InboxMoveTarget<Row>,
@@ -230,17 +241,28 @@ const planTakeOn = <Row extends MovedRow>(
   const cut = (title: string): string => title.slice(0, MAX_TASK_TITLE_LENGTH);
   if (target.kind === "group") {
     const { group } = target;
+    const tooLargeGroup = refuseTooLargeGroup(group, "Take on", "T");
+    if (tooLargeGroup !== undefined) return tooLargeGroup;
+    // One operative member is not a group to take on together (the controller needs two or
+    // more). It happens when the other members wait behind "N new": take on just that one.
+    if (group.members.length < 2) {
+      const operative = group.members[0];
+      const held = group.rows.find((row) => row.ref === operative?.ref);
+      if (held === undefined)
+        return refuse(
+          "This group has nothing on the list to take on yet. Open the group, then press T on a thing.",
+        );
+      return planTakeOn({ kind: "thing", row: held, groupMemberRefs: [] });
+    }
     const label = group.members.filter((member) => member.ref === group.labelRef);
     const others = group.members.filter((member) => member.ref !== group.labelRef);
     const members = [...label, ...others];
-    return (
-      refuseTooLargeGroup(group, "Take on", "T") ?? {
-        kind: "takeOnTogether",
-        ids: members.map((member) => member.id),
-        refs: members.map((member) => member.ref),
-        title: cut(group.label),
-      }
-    );
+    return {
+      kind: "takeOnTogether",
+      ids: members.map((member) => member.id),
+      refs: members.map((member) => member.ref),
+      title: cut(group.label),
+    };
   }
   const tooLarge = refuseTooLargeSelection(target, "Take on", "T");
   if (tooLarge !== undefined) return tooLarge;

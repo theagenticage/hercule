@@ -1,10 +1,13 @@
 /** Tests which moves of the Inbox are refused, what the rest send, and what the undo line says about them. */
 import {
+  EntityTakeOnTogetherInput,
+  InboxMove,
   MAX_INBOX_MOVED_THINGS,
   MAX_TASK_TITLE_LENGTH,
   type InboxGroupMember,
   type InboxThing,
 } from "@hercule/contract";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { NO_OFFERS, type CardOffers } from "./card-hand-off";
 import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
@@ -53,6 +56,8 @@ const memberOf = (n: number, matches = true): InboxGroupMember => ({
   ref: `acme:ticket:${n}`,
   matches,
 });
+/** An id the contract accepts (a UUIDv7), for the tests that validate a plan against its schema. */
+const uuidOf = (n: number): string => `01900000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 /** A group of `count` members that all answer the query, the first of which the visit holds. */
 const groupOf = (
   count: number,
@@ -170,6 +175,61 @@ describe("planInboxMove", () => {
         }),
       ),
     ).toContain("Take on takes up to 1,000 at once");
+  });
+
+  it("takes a group with one operative member on alone, never as a take on together", () => {
+    const plan = planInboxMove({
+      move: "takeOn",
+      target: groupOf(1, { members: [memberOf(1)], size: 1, unloadedCount: 0 }),
+      ...online,
+    });
+    expect(plan).toEqual({ kind: "takeOn", thing });
+  });
+
+  it("refuses to take a group of one operative member on when that member is not held", () => {
+    const plan = planInboxMove({
+      move: "takeOn",
+      target: groupOf(1, { members: [memberOf(7)], size: 1, unloadedCount: 1 }),
+      ...online,
+    });
+    expect(reasonOf(plan)).toContain("nothing on the list to take on");
+  });
+
+  it("dismisses a group of one operative member by that one id", () => {
+    const plan = planInboxMove({
+      move: "dismiss",
+      target: groupOf(1, { members: [{ ...memberOf(1), id: uuidOf(1) }], size: 1 }),
+      ...online,
+    });
+    if (plan.kind !== "dismiss") throw new Error(plan.kind);
+    expect(plan.ids).toEqual([uuidOf(1)]);
+    Schema.decodeUnknownSync(InboxMove)({ ids: plan.ids });
+  });
+
+  it("refuses E and T on a group with more operative members than one call takes, even when its size matches", () => {
+    const count = MAX_INBOX_MOVED_THINGS + 1;
+    for (const [move, verb] of [
+      ["dismiss", "Dismiss"],
+      ["takeOn", "Take on"],
+    ] as const) {
+      expect(reasonOf(planInboxMove({ move, target: groupOf(count), ...online }))).toBe(
+        `This group has 1,001 things to move, and ${verb} takes up to 1,000 at once. Open the group, select some of its things, then press ${move === "dismiss" ? "E" : "T"}.`,
+      );
+    }
+  });
+
+  it("plans a take on together that the contract accepts, at the most one call takes", () => {
+    const members = Array.from({ length: MAX_INBOX_MOVED_THINGS }, (_, n) => ({
+      ...memberOf(n),
+      id: uuidOf(n),
+    }));
+    const plan = planInboxMove({
+      move: "takeOn",
+      target: groupOf(MAX_INBOX_MOVED_THINGS, { members }),
+      ...online,
+    });
+    if (plan.kind !== "takeOnTogether") throw new Error(plan.kind);
+    Schema.decodeUnknownSync(EntityTakeOnTogetherInput)({ ids: plan.ids, title: plan.title });
   });
 
   it("takes a selection of several on as one Task, in order and titled with its first row", () => {
