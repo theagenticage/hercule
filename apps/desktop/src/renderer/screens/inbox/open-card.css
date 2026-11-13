@@ -154,7 +154,7 @@
 /* The moves and the answers of an opened line (`.open-card-answers`) share one column for their names,
    `--open-card-name-column` wide, so every description starts at the same place down the sheet. */
 .open-card {
-  --open-card-name-column: 136px;
+  --open-card-name-column: 152px;
 }
 .open-card-ledger {
   display: grid;

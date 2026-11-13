@@ -259,6 +259,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
+    name: "inbox-dialog",
+    path: "inbox.html?state=dialog",
+    contentSelector: ".thread-dialog .composer-card",
+    nonTextParts: [],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",

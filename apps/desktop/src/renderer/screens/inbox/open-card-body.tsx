@@ -145,7 +145,12 @@ function OpenCardMoves({
       {isOff && <p className="open-card-why">{moves.reason}</p>}
       {hand}
       {onStartThread === undefined ? null : (
-        <button type="button" className="open-card-row" disabled={isOff} onClick={onStartThread}>
+        <button
+          type="button"
+          className="open-card-row is-quiet"
+          disabled={isOff}
+          onClick={onStartThread}
+        >
           <span className="open-card-label">Start a thread</span>
           <span className="open-card-says">An agent starts on it, on a new Task.</span>
           <kbd>N</kbd>
