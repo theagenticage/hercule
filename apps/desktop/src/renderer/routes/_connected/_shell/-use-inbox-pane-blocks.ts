@@ -17,7 +17,9 @@ const BLOCKS_DELAY_MS = 250;
  * and unmounting each cancel it and start nothing. A read that is out when the
  * user steps on is aborted through the query's signal. The result is of `id`
  * alone: no data shows for a thing whose blocks were not read yet, so the
- * blocks of one thing never show under the title of another.
+ * blocks of one thing never show under the title of another. The remembered
+ * thing is never reset (that would render once per step for nothing): the
+ * `waitedId === id` check already keeps every other thing disabled.
  */
 export const useInboxPaneBlocks = (
   client: HerculeClient,
@@ -32,7 +34,6 @@ export const useInboxPaneBlocks = (
     }, BLOCKS_DELAY_MS);
     return () => {
       clearTimeout(timer);
-      setWaitedId(undefined);
     };
   }, [id, isActive]);
   return useQuery({ ...entityBlocksQuery(client, id), enabled: isActive && waitedId === id });

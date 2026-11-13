@@ -299,6 +299,38 @@ describe("who is on the Inbox", () => {
     expect(arrivals.after).toBe(arrivals.stored);
   });
 
+  it("names the active Task on a thing that has one, and only then", async () => {
+    const things = await run(() =>
+      Effect.gen(function* () {
+        const held = yield* insertTicket({ key: "held" });
+        yield* insertTicket({ key: "free" });
+        const tasks = yield* taskRepository;
+        yield* tasks.insert({
+          title: "Checkout flaky on Safari",
+          description: "",
+          status: "open",
+          stage: "planned",
+          priority: "normal",
+          labels: [],
+          projectId: undefined,
+          provenance: [{ ref: held }],
+          at: at(1),
+          actor: "user",
+        });
+        return {
+          held,
+          things: (yield* list(2, { list: { savedQuery: "everything" } })).things,
+        };
+      }),
+    );
+    expect(
+      things.things.map((thing) => [thing.ref === things.held, thing.taskTitle]).sort(),
+    ).toEqual([
+      [false, undefined],
+      [true, "Checkout flaky on Safari"],
+    ]);
+  });
+
   it("takes an ask off the list only when the user took the thing on after it was raised", async () => {
     const steps = await run(() =>
       Effect.gen(function* () {

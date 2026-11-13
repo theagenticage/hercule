@@ -61,7 +61,7 @@ import {
   SignalStatus,
 } from "./signal";
 import { RunStarted } from "./run";
-import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
+import { MAX_SEARCH_TEXT_LENGTH, MAX_TASK_TITLE_LENGTH, TaskPriority, TaskStage } from "./task";
 import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
 export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
@@ -749,6 +749,8 @@ export const InboxThing = Schema.Struct({
   waitingSince: Schema.optionalKey(Timestamp),
   /** The active Task, when there is one. */
   taskId: Schema.optionalKey(Id),
+  /** The active Task's title. Present exactly when `taskId` is, so a row can name the Task without reading it. */
+  taskTitle: Schema.optionalKey(bounded(1, MAX_TASK_TITLE_LENGTH)),
   takenOn: Schema.Boolean,
   liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
   dismissedAt: Schema.optionalKey(Timestamp),
