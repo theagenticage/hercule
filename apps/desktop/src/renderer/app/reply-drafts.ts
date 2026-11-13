@@ -4,7 +4,8 @@
  * opens again (the user moved to another row and came back) gives its words
  * back. The drafts live in memory for the life of the window, in the account
  * scope (`account-scope.ts`), so the next user never sees them. A reply that
- * was sent keeps its draft, so Undo can open the box again with its words.
+ * is still held keeps its draft, so Undo can open the box again with its
+ * words. Once the reply was sent, the box does not open again.
  */
 
 export interface ReplyDrafts {

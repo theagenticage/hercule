@@ -322,7 +322,7 @@ describe("Dismiss", () => {
 });
 
 describe("the last thing leaving", () => {
-  it("plays the sunrise for the user's own move, and draws it still when the Inbox opens empty", async () => {
+  it("plays the sunrise for the user's own move", async () => {
     const { user } = await open(
       (inbox) => {
         inbox.lists.waits = [SLOTS];
@@ -335,8 +335,11 @@ describe("the last thing leaving", () => {
 
     await screen.findByRole("heading", { name: /Nobody waits on you|All clear/ });
     expect(document.querySelector(".ib-em--rises")).not.toBeNull();
-    cleanup();
+  });
 
+  // Its own test, not a second app opened after the first one: the first app's live connection
+  // stays alive until the test ends, and would still be reading from the second app's fake.
+  it("draws the sunrise still when the Inbox opens empty", async () => {
     const empty = defaultInbox();
     empty.lists.waits = [];
     await openInbox(empty);

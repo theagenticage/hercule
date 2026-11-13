@@ -933,11 +933,17 @@ export const externalEntityInbox = Effect.gen(function* () {
               ROW_NUMBER() OVER (PARTITION BY g.unit ORDER BY ${order}) AS rn
             FROM matched m JOIN grouped g ON g.ref = m.ref)
           WHERE rn = 1)
+       -- The inner select sorts and cuts the page first, so the Task title is
+       -- looked up for the few rows of the page, not for every placed unit.
        SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
-              m.oldest_ask, m.upd, m.grp, m.unit
-         ${options.withTotal ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
-       FROM placed m WHERE ${where.sql}
-       ORDER BY ${order} LIMIT ?`,
+              m.oldest_ask, m.upd, m.grp, m.unit${options.withTotal ? ", m.total" : ""}
+       FROM (
+         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.unit
+           ${options.withTotal ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
+         FROM placed m WHERE ${where.sql}
+         ORDER BY ${order} LIMIT ?
+       ) m
+       ORDER BY ${order}`,
       [
         ...matched.params,
         JSON.stringify(
@@ -1162,7 +1168,11 @@ export const externalEntityInbox = Effect.gen(function* () {
         `WITH ${matched.sql}
          SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
                 m.oldest_ask, m.upd, m.grp
-         FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
+         FROM (
+           SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+           FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?
+         ) m
+         ORDER BY ${ORDER_BY[selection.list.order]}`,
         [...matched.params, MAX_INBOX_HELD_REFS],
       );
       const groupsOfThings = new Set(rows.map((row) => groups.get(row.ref)?.labelRef));

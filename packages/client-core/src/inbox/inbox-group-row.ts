@@ -7,7 +7,7 @@ import type { InboxThing } from "@hercule/contract";
 import {
   decideReason,
   decideTime,
-  readHolder,
+  findRowHolder,
   type InboxRowContext,
   type InboxRowReason,
   type InboxRowTime,
@@ -60,7 +60,7 @@ export const describeInboxGroupRow = (
     reasonOwner === undefined
       ? { rest: "", more: 0, quiet: true }
       : {
-          ...decideReason(reasonOwner, context, readHolder(reasonOwner, context.userName)),
+          ...decideReason(reasonOwner, context, findRowHolder(reasonOwner, context.userName)),
           // The group counts the members that ask, not the asks of one member.
           more: others.length,
           aside: undefined,
@@ -68,7 +68,7 @@ export const describeInboxGroupRow = (
   const time: InboxRowTime =
     placer === undefined
       ? { kind: "none" }
-      : decideTime(placer, context, readHolder(placer, context.userName));
+      : decideTime(placer, context, findRowHolder(placer, context.userName));
   const sources = [...new Set(group.rows.map((row) => row.source))];
   const count = `${String(group.size)} things`;
   const sentence = [reason.who, reason.rest].filter((word) => word !== undefined).join(" ");

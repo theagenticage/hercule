@@ -225,9 +225,13 @@ export const Person = Schema.Struct({
 
 export type Person = Schema.Schema.Type<typeof Person>;
 
-/** A block of markdown. */
+/** The most characters a block's title or caption holds. */
+const MAX_BLOCK_TITLE_LENGTH = 80;
+
+/** A block of markdown, with an optional title drawn above it ("Description"). */
 export const TextBlock = Schema.Struct({
   type: Schema.Literal("text"),
+  title: Schema.optionalKey(bounded(1, MAX_BLOCK_TITLE_LENGTH)),
   markdown: bounded(1, MAX_TEXT_BLOCK_LENGTH),
 });
 
@@ -330,9 +334,6 @@ export const MAX_TREND_POINTS = 90;
 
 /** The most lines a code block holds. */
 export const MAX_CODE_LINES = 60;
-
-/** The most characters a block's title or caption holds. */
-const MAX_BLOCK_TITLE_LENGTH = 80;
 
 /** A short list of labelled values, such as a pull request's author, branch and milestone. */
 export const FieldsBlock = Schema.Struct({

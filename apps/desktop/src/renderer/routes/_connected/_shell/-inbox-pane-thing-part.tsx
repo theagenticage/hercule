@@ -13,14 +13,16 @@ import {
   describeDismissalReturn,
   describeHolderStrip,
   describePaneMeta,
+  describeUnreadable,
   findAccountLabel,
+  findRowHolder,
   listPaneAsks,
   listPaneHistory,
   listPaneLinks,
-  readHolder,
 } from "@hercule/client-core/inbox";
 import type { AccountScope } from "../../../app/account-scope";
 import {
+  entityBlocksQuery,
   entityQuery,
   inboxOutlineQuery,
   pluginsQuery,
@@ -34,7 +36,7 @@ import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import type { InboxAnswers } from "./-inbox-answers";
 import { useInboxNow } from "./-inbox-clock";
 import { InboxPaneAsks, type InboxPaneAsksHandle, type PaneReply } from "./-inbox-pane-asks";
-import { useInboxPaneBlocks } from "./-use-inbox-pane-blocks";
+import { useRestedThing } from "./-use-rested-thing";
 import type { InboxListRow } from "./-inbox-visit";
 
 /** The blocks slot while they are read. One shared object, so stepping from one loading thing to another leaves the slot as it is. */
@@ -112,12 +114,15 @@ export function InboxPaneThingPart({
     enabled: isActive,
     placeholderData: keepPreviousData,
   });
-  const blocks = useInboxPaneBlocks(client, thing.id, isActive);
+  const isRested = useRestedThing(thing.id, isActive);
+  // A read that is out when the user steps on is aborted through the query's signal. No data shows for a
+  // thing whose blocks were not read yet, so the blocks of one thing never show under another's title.
+  const blocks = useQuery({ ...entityBlocksQuery(client, thing.id), enabled: isRested });
   const record = detail.data;
   if (record === undefined) {
     return detail.isError ? (
       <p className="ib-pane-blocks-note">
-        {`This thing could not be read. ${readErrorMessage(detail.error)}`}
+        {describeUnreadable("thing", readErrorMessage(detail.error))}
       </p>
     ) : (
       <InboxPaneSkeleton />
@@ -127,11 +132,11 @@ export function InboxPaneThingPart({
   const isStale = detail.isPlaceholderData;
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const sourceName = namePlugin(thing.source, plugins);
-  const holder = readHolder(thing, username);
+  const holder = findRowHolder(thing, username);
   const holdingHeading = describeHolderStrip(thing);
-  // While the thing before's record is drawn, its title must not carry this thing's blocks.
   const paneAsks = listPaneAsks(record);
   const hasAsks = paneAsks.sections.length > 0 || paneAsks.hiddenOpenCount > 0;
+  // While the thing before's record is drawn, its title must not carry this thing's blocks.
   const paneBlocks: InboxPaneBlocks = isStale
     ? LOADING_BLOCKS
     : blocks.data !== undefined
@@ -151,6 +156,7 @@ export function InboxPaneThingPart({
         title={record.title}
         identifier={record.identifier}
         meta={describePaneMeta(record, {
+          now,
           account: findAccountLabel(
             outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
             thing.accounts,
@@ -172,6 +178,7 @@ export function InboxPaneThingPart({
               paneAsks={paneAsks}
               isStale={isStale}
               isActive={isActive}
+              isRested={isRested}
               savedQueryKinds={savedQueryKinds}
               chosenId={chosenAskId}
               isFolded={isAskFolded}

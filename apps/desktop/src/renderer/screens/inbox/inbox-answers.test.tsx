@@ -5,7 +5,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SignalAnswer } from "@hercule/client-core";
 import { DONE_ACTION_ID } from "@hercule/contract";
-import { InboxAnswers, type InboxAnswersProps, type OpenReply } from "./inbox-answers";
+import {
+  InboxAnswers,
+  InboxUnsentAnswers,
+  type InboxAnswersProps,
+  type OpenReply,
+  type UnsentAnswer,
+} from "./inbox-answers";
 
 const ANSWERS: ReadonlyArray<SignalAnswer> = [
   {
@@ -58,8 +64,6 @@ const renderAnswers = (overrides: Partial<InboxAnswersProps> = {}) => {
     onOpenReply: vi.fn(),
     onCloseReply: vi.fn(),
     onDraftChange: vi.fn(),
-    onRetry: vi.fn(),
-    onDiscard: vi.fn(),
   };
   render(
     <InboxAnswers
@@ -91,8 +95,6 @@ describe("InboxAnswers", () => {
         onOpenReply={vi.fn()}
         onCloseReply={vi.fn()}
         onDraftChange={vi.fn()}
-        onRetry={vi.fn()}
-        onDiscard={vi.fn()}
       />,
     );
     const approve = screen.getByRole("button", { name: /Approve/ });
@@ -148,20 +150,12 @@ describe("InboxAnswers", () => {
     expect(calls.onDone).not.toHaveBeenCalled();
   });
 
-  it.each(["failed", "interrupted"] as const)(
-    "says why an answer that is %s was not sent, and offers to send it again or discard it",
-    async (state) => {
-      const user = userEvent.setup();
-      const calls = renderAnswers({
-        chosen: { actionId: "approve", state, sentence: "GitHub did not answer." },
-      });
-      expect(screen.getByRole("alert").textContent).toContain("GitHub did not answer.");
-      await user.click(screen.getByRole("button", { name: "Send again" }));
-      await user.click(screen.getByRole("button", { name: "Discard" }));
-      expect(calls.onRetry).toHaveBeenCalledOnce();
-      expect(calls.onDiscard).toHaveBeenCalledOnce();
-    },
-  );
+  it("takes no other answer while the answer it chose is unsent", async () => {
+    const user = userEvent.setup();
+    const calls = renderAnswers({ chosen: { actionId: "approve", state: "unsent" } });
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(calls.onDone).not.toHaveBeenCalled();
+  });
 
   describe("the reply box", () => {
     /** Holds the open box and its words the way the caller does, so closing and opening keep them. */
@@ -189,8 +183,6 @@ describe("InboxAnswers", () => {
             setReply(null);
           }}
           onDraftChange={setDraft}
-          onRetry={vi.fn()}
-          onDiscard={vi.fn()}
         />
       );
     }
@@ -225,5 +217,50 @@ describe("InboxAnswers", () => {
       expect(onAnswer).not.toHaveBeenCalled();
       expect(screen.getByRole("textbox")).toBe(document.activeElement);
     });
+  });
+});
+
+describe("InboxUnsentAnswers", () => {
+  const unsent = (overrides: Partial<UnsentAnswer> = {}): UnsentAnswer => ({
+    id: "one",
+    sentence: "GitHub did not answer.",
+    isInterrupted: false,
+    words: undefined,
+    canSendAgain: true,
+    onSendAgain: vi.fn(),
+    onDiscard: vi.fn(),
+    ...overrides,
+  });
+
+  it("says why an answer was not sent, and offers to send it again or discard it", async () => {
+    const user = userEvent.setup();
+    const answer = unsent();
+    render(<InboxUnsentAnswers answers={[answer]} />);
+    expect(screen.getByRole("alert").textContent).toContain("GitHub did not answer.");
+    await user.click(screen.getByRole("button", { name: "Send again" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(answer.onSendAgain).toHaveBeenCalledOnce();
+    expect(answer.onDiscard).toHaveBeenCalledOnce();
+  });
+
+  it("offers only Discard, with the words to copy, when the ask is no longer open", () => {
+    render(
+      <InboxUnsentAnswers answers={[unsent({ canSendAgain: false, words: "Looks good to me" })]} />,
+    );
+    expect(screen.queryByRole("button", { name: "Send again" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+    expect(screen.getByText("Looks good to me")).toBeTruthy();
+  });
+
+  it("lists every unsent answer", () => {
+    render(
+      <InboxUnsentAnswers
+        answers={[
+          unsent({ id: "a", sentence: "First." }),
+          unsent({ id: "b", sentence: "Second." }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
   });
 });

@@ -45,6 +45,7 @@ import {
   CORE_SAVED_QUERY_IDS,
   type InboxQuery,
   type InboxThing,
+  type Signal,
   type Task,
   type WorkCard,
 } from "@hercule/contract";
@@ -117,11 +118,67 @@ function buildInboxWorld(): {
     pageSize: 200,
     offerSets: {},
   };
+  const everyThing = [...things, arrival];
+  /** The id of the one open ask of the `n`th thing. */
+  const buildAskId = (n: number): string => buildWorldId("aaab", n);
+  // Each thing holds one open ask, so the pane reads it whole, as it does for a real thing.
   const details = Object.fromEntries(
-    [...things, arrival].map((thing) => [
-      `GET /api/v1/external-entities/${thing.id}`,
-      { body: buildFakeInboxDetail(thing) },
-    ]),
+    everyThing.map((thing, index) => {
+      const n = index + 1;
+      const detail = buildFakeInboxDetail(thing);
+      const asker = n % 2 === 0 ? "Mei" : "Omar";
+      return [
+        `GET /api/v1/external-entities/${thing.id}`,
+        {
+          body: {
+            ...detail,
+            signals: [
+              {
+                id: buildAskId(n),
+                kind: "acme/review-requested",
+                title: thing.title,
+                priority: "normal",
+                status: "open",
+                createdAt: hoursBefore(2),
+                say: { say: `${asker} asked for your review`, tone: "plain" },
+                snoozed: false,
+                asks: true,
+                asker,
+              },
+            ],
+            openCount: 1,
+            signalCount: 1,
+          },
+        },
+      ];
+    }),
+  );
+  const signals = Object.fromEntries(
+    everyThing.map((thing, index) => {
+      const id = buildAskId(index + 1);
+      const signal: Signal = {
+        id,
+        kind: "acme/review-requested",
+        origin: { type: "api", actor: "user", eventIds: [], reason: "Counts check" },
+        title: thing.title,
+        priority: "normal",
+        blocks: [],
+        actions: [
+          {
+            id: "approve",
+            label: "Approve",
+            primary: true,
+            operation: { op: "acme/pr.approve", input: {} },
+            describeLine: [{ kind: "text", text: "Approves the pull request" }],
+          },
+          { id: "done", label: "Done", operation: null },
+        ],
+        match: {},
+        status: "open",
+        createdAt: hoursBefore(2),
+      };
+      return [`GET /api/v1/signals/${id}`, { body: signal }];
+    }),
   );
   // The pane reads the blocks of the open thing from its source: this world's things show none.
   const blocks = Object.fromEntries(
@@ -145,6 +202,7 @@ function buildInboxWorld(): {
       "POST /api/v1/external-entities/dismiss": { body: {} },
       "POST /api/v1/external-entities/restore": { body: {} },
       ...details,
+      ...signals,
       ...blocks,
     },
     changes: {

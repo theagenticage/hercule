@@ -1,7 +1,13 @@
 import { useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import { namePlugin, type HerculeClient } from "@hercule/client-core";
-import { describeInboxRow, findAccountLabel, type InboxRowView } from "@hercule/client-core/inbox";
+import {
+  describeInboxRow,
+  findAccountLabel,
+  readThingPlace,
+  type InboxRowView,
+} from "@hercule/client-core/inbox";
 import type { InboxOrder } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
 import { inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
@@ -27,7 +33,7 @@ export interface InboxPaneHandle extends InboxPaneAsksHandle {
 
 /**
  * Renders the line at the start of the pane's head: for one thing, its source,
- * its kind and its place, and the account when the source has several; for a
+ * its kind and its place (left out when it has none), and the account when the source has several; for a
  * selection, which sources the selected things come from.
  */
 export function InboxPaneHeadPart({
@@ -42,6 +48,7 @@ export function InboxPaneHeadPart({
 }): JSX.Element {
   const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const now = useInboxNow([thing]);
   if (selection !== null) {
     const sourceNames = [...new Set(selection.map((row) => namePlugin(row.source, plugins)))];
     return <InboxSelectionHead sourceNames={sourceNames} />;
@@ -50,11 +57,16 @@ export function InboxPaneHeadPart({
     outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
     thing.accounts,
   );
+  const place = readThingPlace(thing, now);
   return (
     <InboxPaneHead
       pluginId={thing.source}
       plugins={plugins}
-      parts={[namePlugin(thing.source, plugins), thing.noun, thing.identifier]}
+      parts={[
+        namePlugin(thing.source, plugins),
+        thing.noun,
+        ...(place === undefined ? [] : [place]),
+      ]}
       account={account}
     />
   );
@@ -82,6 +94,7 @@ function InboxSelectionPart({
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
 }): JSX.Element {
+  const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const now = useInboxNow(members);
@@ -92,6 +105,7 @@ function InboxSelectionPart({
     <InboxSelectionPane
       members={views}
       plugins={plugins}
+      platform={bridge.platform}
       onWalk={onWalk}
       onTakeOn={onTakeOn}
       onLink={onLink}
@@ -152,7 +166,9 @@ export function InboxPanePart({
   const [reply, setReply] = useState<PaneReply | null>(null);
   const asksRef = useRef<InboxPaneAsksHandle>(null);
   useImperativeHandle(ref, () => ({
-    answerCurrentAsk: () => asksRef.current?.answerCurrentAsk() ?? false,
+    answerCurrentAsk: () => {
+      asksRef.current?.answerCurrentAsk();
+    },
     stepAsk: (by) => {
       asksRef.current?.stepAsk(by);
     },

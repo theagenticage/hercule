@@ -499,6 +499,27 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     );
   }
 
+  /** The ids of the moves the controller has confirmed but whose row is still claimed by an unsettled move. */
+  const confirmedClaims = new Set<number>();
+
+  /**
+   * Settles `receipt` in the claims: a move that failed or was undone
+   * (`isConfirmed` false) leaves them, a confirmed one stays only while an
+   * earlier, unsettled move on the same row could still fail and must see it.
+   * A row whose claims are all confirmed is forgotten, so the claims do not
+   * grow with every move.
+   */
+  function settleClaims(receipt: MoveReceipt<Row>, isConfirmed: boolean): void {
+    if (isConfirmed) confirmedClaims.add(receipt.id);
+    for (const ref of receipt.refs) {
+      const rest = (claims.get(ref) ?? []).filter((id) => isConfirmed || id !== receipt.id);
+      if (rest.every((id) => confirmedClaims.has(id))) {
+        for (const id of rest) confirmedClaims.delete(id);
+        claims.delete(ref);
+      } else claims.set(ref, rest);
+    }
+  }
+
   /**
    * Returns `receipt` with only the rows no later move has handled since, and
    * takes the receipt out of the claims. A move that fails or is undone late
@@ -509,12 +530,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     const owned = receipt.refs.filter(
       (ref) => !(claims.get(ref) ?? []).some((id) => id > receipt.id),
     );
-    for (const ref of receipt.refs) {
-      claims.set(
-        ref,
-        (claims.get(ref) ?? []).filter((id) => id !== receipt.id),
-      );
-    }
+    settleClaims(receipt, false);
     if (owned.length === receipt.refs.length) return receipt;
     const isOwned = new Set(owned);
     return {
@@ -598,6 +614,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       return applied.receipt;
     },
     confirmMove(receipt) {
+      settleClaims(receipt, true);
       if (state === null || receipt.visit !== visitId) return;
       state = confirmHidden(state, receipt, seq);
     },

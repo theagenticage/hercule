@@ -288,9 +288,11 @@ export const readIssueBlocks = (
       ...(description === undefined
         ? []
         : [
-            cut
-              ? { ...description, markdown: description.markdown + DESCRIPTION_CUT_NOTE }
-              : description,
+            {
+              ...description,
+              title: "Description",
+              markdown: cut ? description.markdown + DESCRIPTION_CUT_NOTE : description.markdown,
+            },
           ]),
     ];
   });

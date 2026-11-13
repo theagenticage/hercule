@@ -15,6 +15,7 @@ const setUp = () => {
   const stack = createUndoStack<null>();
   const hook = renderHook(() => useUndoLine(stack, () => null));
   let settle: (words: string | undefined) => void = () => undefined;
+  let markOverdue: (words: string) => void = () => undefined;
   const hold = vi.fn();
   const gesture: Gesture<null> = {
     words: "Replied",
@@ -23,8 +24,17 @@ const setUp = () => {
     settled: new Promise((resolve) => {
       settle = resolve;
     }),
+    overdue: new Promise((resolve) => {
+      markOverdue = resolve;
+    }),
   };
-  return { hook, gesture, settle: (words: string | undefined) => settle(words), hold };
+  return {
+    hook,
+    gesture,
+    settle: (words: string | undefined) => settle(words),
+    markOverdue: (words: string) => markOverdue(words),
+    hold,
+  };
 };
 
 describe("the undo line for a gesture that waits", () => {
@@ -49,6 +59,18 @@ describe("the undo line for a gesture that waits", () => {
 
     await act(() => vi.advanceTimersByTimeAsync(6_000));
     expect(hook.result.current.line.isShown).toBe(false);
+  });
+
+  it("changes its words, keeping Undo, when the gesture is overdue because the line is held", async () => {
+    const { hook, gesture, markOverdue } = setUp();
+    act(() => hook.result.current.say("Replying. Sends in 8s.", gesture));
+
+    markOverdue("Replying. Sends when you let go.");
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(hook.result.current.line).toMatchObject({
+      canUndo: true,
+      text: "Replying. Sends when you let go.",
+    });
   });
 
   it("ends on its own timer when the gesture stops waiting without being sent", async () => {

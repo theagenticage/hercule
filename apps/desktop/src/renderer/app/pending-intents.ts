@@ -31,7 +31,11 @@
  */
 import { isRequestClosed, readErrorMessage } from "@hercule/client-core";
 import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
-import type { FailureReason } from "@hercule/client-core/work";
+import {
+  APP_CLOSED_BEFORE_SENT,
+  APP_CLOSED_WHILE_SENDING,
+  type FailureReason,
+} from "@hercule/client-core/work";
 import type { SessionRespondToQuestionInput } from "@hercule/contract";
 
 /** How long an intent stays `pending`, where Undo can still cancel it. */
@@ -84,7 +88,7 @@ export type PendingIntent = IntentContent & {
 };
 
 /** What `PendingIntents.watch` reports about one intent. */
-export type IntentProgress = "sending" | "sent" | "failed" | "cancelled";
+export type IntentProgress = "overdue" | "sending" | "sent" | "failed" | "cancelled";
 
 export interface PendingIntents {
   /**
@@ -100,8 +104,9 @@ export interface PendingIntents {
    */
   readonly hold: (content: IntentContent) => string;
   /**
-   * Tells `listener` each time the intent `intentId` starts `sending`, ends
-   * `failed`, is `cancelled` by Undo, or is `sent`. The last two are reported
+   * Tells `listener` each time the intent `intentId` runs out of its window
+   * while the undo line holds it (`overdue`: it waits to be sent), starts
+   * `sending`, ends `failed`, is `cancelled` by Undo, or is `sent`. The last two are reported
    * before the intent leaves the store, because the intent's removal alone
    * cannot tell sent from cancelled. Returns a function that stops the
    * reports. Nothing is reported after `dispose`.
@@ -251,12 +256,12 @@ const decideFailureReason = (
 
 const NOT_SENT: IntentFailure = {
   reason: "interrupted",
-  message: "The app closed before this was sent.",
+  message: APP_CLOSED_BEFORE_SENT,
 };
 
 const MAYBE_SENT: IntentFailure = {
   reason: "interrupted-while-sending",
-  message: "The app closed while this was being sent. It may have been sent.",
+  message: APP_CLOSED_WHILE_SENDING,
 };
 
 /**
@@ -403,8 +408,10 @@ export const createPendingIntents = (options: {
       setTimeout(
         () => {
           timers.delete(intent.intentId);
-          if (heldByLine.has(intent.intentId)) overdue.add(intent.intentId);
-          else void transmit(intent, false);
+          if (heldByLine.has(intent.intentId)) {
+            overdue.add(intent.intentId);
+            report(intent.intentId, "overdue");
+          } else void transmit(intent, false);
         },
         intent.kind === "signal-answer" ? SIGNAL_ANSWER_HOLD_MS : UNDO_WINDOW_MS,
       ),

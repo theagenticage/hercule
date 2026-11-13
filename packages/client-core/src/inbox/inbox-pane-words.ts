@@ -10,6 +10,11 @@
 import type { InboxAsk, InboxThing } from "@hercule/contract";
 import { describeAge } from "../threads/age";
 import { findHolder } from "./inbox-holder";
+import {
+  APP_CLOSED_BEFORE_SENT,
+  APP_CLOSED_WHILE_SENDING,
+  type FailureReason,
+} from "../work/held-answers";
 import { SIGNAL_ANSWER_HOLD_MS } from "./inbox-asks";
 
 /** What the undo line says for a held answer: what is being done, and the note that it waits. */
@@ -21,10 +26,10 @@ export interface HeldAnswerWords {
 /**
  * Returns the undo line for an answer that is held before it is sent, such as
  * "Approve ENG-1 on GitHub" with the note "Sends in 8s". `replyTo` is the
- * asker's name for an answer the user typed, which reads "Reply sent to Mei
- * on GitHub" instead.
+ * asker's name for an answer the user typed, which reads "Reply to Mei on
+ * GitHub" instead.
  */
-export const describeHeldAnswer = (answer: {
+export const describeHeldSignalAnswer = (answer: {
   readonly label: string;
   readonly identifier: string;
   readonly sourceName: string;
@@ -33,7 +38,7 @@ export const describeHeldAnswer = (answer: {
   text:
     answer.replyTo === undefined
       ? `${answer.label} ${answer.identifier} on ${answer.sourceName}`
-      : `${answer.label} sent to ${answer.replyTo} on ${answer.sourceName}`,
+      : `${answer.label} to ${answer.replyTo} on ${answer.sourceName}`,
   note: `Sends in ${String(SIGNAL_ANSWER_HOLD_MS / 1000)}s`,
 });
 
@@ -49,7 +54,7 @@ export const describeAnswerTooLate = (sourceName: string): string =>
 
 /** Returns the line for Undo (⌘Z) while the answer is on its way and delivery is not confirmed. */
 export const describeAnswerSending = (sourceName: string): string =>
-  `It is being sent to ${sourceName}, so it can't be taken back here.`;
+  `It is being sent to ${sourceName}, so it can’t be taken back here.`;
 
 /** The line after Undo took back a held answer. */
 export const ANSWER_CANCELLED = "Not sent. The ask is open again.";
@@ -62,18 +67,49 @@ export const describeAnswerFailure = (
   `${answer.label} ${answer.identifier} was not sent to ${answer.sourceName}: ${reason}. Try again.`;
 
 /**
- * Returns what the ask says about an answer left over from a closed app.
- * `before-sending` means the app closed while the answer was held, so nothing
- * left. `while-sending` means it closed during the send, so the source may have
- * it.
+ * Returns the sentence for an answer that was not sent: why, in the words of
+ * its `failure`. An answer left over from a closed app says so, and says
+ * whether the source may have it; any other failure carries the controller's
+ * message.
  */
-export const describeInterruptedAnswer = (
-  phase: "before-sending" | "while-sending",
-  sourceName: string,
-): string =>
-  phase === "before-sending"
-    ? "Not sent: the app closed before it was sent."
-    : `The app closed while it was being sent; it may have reached ${sourceName}.`;
+export const describeUnsentSignalAnswer = (
+  answer: { readonly label: string; readonly identifier: string; readonly sourceName: string },
+  failure: { readonly reason: FailureReason; readonly message: string },
+): string => {
+  if (failure.reason === "interrupted") return APP_CLOSED_BEFORE_SENT;
+  if (failure.reason === "interrupted-while-sending") return APP_CLOSED_WHILE_SENDING;
+  return describeAnswerFailure(answer, failure.message);
+};
+
+/** Returns the line for Done after it ended an ask: the source was not told, and the user cannot undo it here. */
+export const describeMarkedDone = (sourceName: string): string =>
+  `Marked done. ${sourceName} was not told, and it can’t be undone here.`;
+
+/** Returns what the Done answer does, shown before it is pressed. */
+export const describeDoneEffect = (sourceName: string): string =>
+  `Ends this ask here. ${sourceName} is not told.`;
+
+/** The line for O while the pane shows a selection, since O opens only one thing. */
+export const OPEN_AT_SOURCE_NEEDS_ONE_THING =
+  "O opens one thing. Press Esc to clear the selection, then O on the thing you want.";
+
+/** The line for a thing the user asked for that the list no longer holds. */
+export const THING_NOT_IN_LIST = "That thing is not in this list.";
+
+/** Returns the line for a part of the pane that could not be read: `reason` is why, from the controller. */
+export const describeUnreadable = (part: "ask" | "thing", reason: string): string =>
+  `This ${part} could not be read. ${reason}`;
+
+/**
+ * Returns the quiet line for the open asks the pane has no section for:
+ * "3 more". It does not say "asks", because some of the hidden signals may be
+ * snoozed or may not ask for a move.
+ */
+export const describeHiddenAsks = (count: number): string => `${String(count)} more`;
+
+/** Returns the title of the selection pane: "1 thing selected", "3 things selected". */
+export const describeSelectedThings = (count: number): string =>
+  `${String(count)} ${count === 1 ? "thing" : "things"} selected`;
 
 /** Returns an ask's name by who raised it: "Mei’s review request", or "the failing checks" when no one did. */
 const nameAsk = (ask: Pick<InboxAsk, "asker" | "noun">): string =>

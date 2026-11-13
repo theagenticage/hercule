@@ -726,6 +726,14 @@ describe("moves", () => {
       expect(refsOf(visit)).toEqual(["b", "c"]);
     });
 
+    it("leaves the later dismissal alone when the controller confirmed it first", async () => {
+      const { visit } = await opened(rows("a", "b", "c"));
+      const taken = visit.move("taken", ["a"]);
+      confirmed(visit, visit.move("dismissed", ["a"]));
+      visit.failMove(taken);
+      expect(refsOf(visit)).toEqual(["b", "c"]);
+    });
+
     it("still reverses the rows the later move did not handle", async () => {
       const { visit } = await opened(rows("a", "b", "c"));
       const taken = visit.move("taken", ["a", "b"]);

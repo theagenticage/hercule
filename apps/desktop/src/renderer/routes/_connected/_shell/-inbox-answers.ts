@@ -14,15 +14,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys, trimAnswerEllipsis, type HerculeClient } from "@hercule/client-core";
 import {
   ANSWER_CANCELLED,
+  ANSWER_WAITS_NOTE,
   REFUSED_OFFLINE,
   describeAnswerFailure,
   describeAnswerSending,
   describeAnswerSent,
   describeAnswerTooLate,
-  describeHeldAnswer,
+  describeHeldSignalAnswer,
+  describeMarkedDone,
   isAnswerHeld,
 } from "@hercule/client-core/inbox";
-import type { SignalAction } from "@hercule/contract";
+import type { Signal, SignalAction } from "@hercule/contract";
+import { actOnSignal } from "../../../app/act-on-signal";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import { readReason } from "../../../app/read-reason";
 import { holdWithUndo } from "../../../app/use-pending-intents";
@@ -66,27 +69,18 @@ export const useInboxAnswers = ({
   visit,
   moves,
   isOffline,
+  showThing,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
   readonly visit: InboxListVisit;
   readonly moves: Pick<InboxMoves, "say" | "sayWithUndo" | "tellMoved">;
   readonly isOffline: boolean;
+  /** Shows the thing `ref` alone in the pane, whatever the pane showed before. */
+  readonly showThing: (ref: string) => void;
 }): InboxAnswers => {
   const queryClient = useQueryClient();
   const store = scope.pendingIntents;
-
-  /** Reads again what an answer changed: the thing, the signal and the list. */
-  const readAgain = (request: Pick<ThingAnswer, "thing" | "signalId">): void => {
-    if (!scope.isCurrent()) return;
-    for (const queryKey of [
-      queryKeys.externalEntity(request.thing.id),
-      queryKeys.signal(request.signalId),
-      queryKeys.inbox(),
-    ]) {
-      void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
-    }
-  };
 
   /** Sends `send` now and settles the row: confirmed when it works, put back with the reason when it fails. */
   const sendNow = (
@@ -105,7 +99,6 @@ export const useInboxAnswers = ({
       .then(
         () => {
           visit.confirmMove(receipt);
-          readAgain(request);
           if (sentLine !== undefined && scope.isCurrent()) moves.say(sentLine);
         },
         (error: unknown) => {
@@ -126,7 +119,7 @@ export const useInboxAnswers = ({
     const { thing, signalId, action, text, sourceName, replyTo } = request;
     const receipt = visit.move("taken", [thing.ref]);
     moves.tellMoved();
-    const words = describeHeldAnswer({
+    const words = describeHeldSignalAnswer({
       label,
       identifier: thing.identifier,
       sourceName,
@@ -146,6 +139,7 @@ export const useInboxAnswers = ({
         sayWithUndo: moves.sayWithUndo,
         line: `${words.text}. ${words.note}.`,
         words: words.text,
+        overdueLine: `${words.text}. ${ANSWER_WAITS_NOTE}.`,
         cancelledText: ANSWER_CANCELLED,
         afterSending: {
           text: describeAnswerTooLate(sourceName),
@@ -155,18 +149,23 @@ export const useInboxAnswers = ({
       },
     );
     const stopWatching = store.watch(intentId, (progress) => {
-      if (progress === "sending") return;
+      if (progress === "sending" || progress === "overdue") return;
       stopWatching();
       if (progress === "sent") {
         visit.confirmMove(receipt);
         return;
       }
-      // Cancelled by Undo: the thing is current again and a reply's box opens with its words.
+      // Cancelled by Undo: the thing is current again. A reply's box opens with its words, in a pane
+      // that shows the thing, and the box takes the focus (so the list must not ask for it).
       // Failed: the thing is back with its reason in the ask.
-      if (progress === "cancelled") {
+      if (progress === "cancelled" && request.reopenReply !== undefined) {
         visit.undo(receipt);
-        request.reopenReply?.();
-      } else visit.failMove(receipt);
+        showThing(thing.ref);
+        request.reopenReply();
+        return;
+      }
+      if (progress === "cancelled") visit.undo(receipt);
+      else visit.failMove(receipt);
       moves.tellMoved();
     });
   };
@@ -186,12 +185,10 @@ export const useInboxAnswers = ({
         request,
         label,
         () =>
-          client.signal.act({
-            params: { id: request.signalId },
-            payload:
-              request.text === undefined
-                ? { actionId: request.action.id }
-                : { actionId: request.action.id, text: request.text },
+          actOnSignal(client, queryClient, scope.isCurrent, {
+            signalId: request.signalId,
+            actionId: request.action.id,
+            text: request.text,
           }),
         undefined,
       );
@@ -205,8 +202,16 @@ export const useInboxAnswers = ({
       sendNow(
         { ...request, action: { id: "done", label: "Done", operation: null } },
         "Done",
-        () => client.signal.markDone({ payload: { signalIds: [request.signalId] } }),
-        `Marked done. ${request.sourceName} was not told, and it can't be undone here.`,
+        async () => {
+          await client.signal.markDone({ payload: { signalIds: [request.signalId] } });
+          // Done returns no signal: show the cached one as resolved until the controller's push reads the lists.
+          if (scope.isCurrent()) {
+            queryClient.setQueryData<Signal>(queryKeys.signal(request.signalId), (cached) =>
+              cached === undefined ? undefined : { ...cached, status: "resolved" },
+            );
+          }
+        },
+        describeMarkedDone(request.sourceName),
       );
     },
   };

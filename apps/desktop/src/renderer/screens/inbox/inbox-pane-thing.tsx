@@ -1,18 +1,16 @@
-import type { JSX, ReactNode, Ref } from "react";
+import type { JSX, ReactNode } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import type { CardFact, InboxRowHolder } from "@hercule/client-core/inbox";
-import type { EntityStatus } from "@hercule/contract";
+import type {
+  InboxRowHolder,
+  PaneHistoryLine,
+  PaneLink,
+  PaneMetaItem,
+} from "@hercule/client-core/inbox";
 import { buildLook, Face, UserAvatar } from "../../faces";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import { CardFactText } from "./card-parts";
 import "./inbox-pane-thing.css";
-
-/** One item of the meta line, in the order the line shows them. */
-export type InboxPaneMetaItem =
-  | { readonly kind: "status"; readonly status: EntityStatus }
-  | { readonly kind: "words"; readonly words: string }
-  | { readonly kind: "fact"; readonly fact: CardFact };
 
 /** Who holds the thing: `holder` draws the face or monogram, `heading` is "Your Task" or "Mei has it", `taskName` is the Task's name. */
 export interface InboxPaneHolding {
@@ -31,25 +29,6 @@ export type InboxPaneBlocks =
   | { readonly state: "loading" }
   | { readonly state: "failed"; readonly words: string }
   | { readonly state: "ready"; readonly content: ReactNode };
-
-/** One thing linked to the open thing. `claim` says who claims the link, "Linear reports this". */
-export interface InboxPaneLink {
-  readonly ref: string;
-  readonly pluginId: string;
-  readonly title: string;
-  readonly identifier?: string | undefined;
-  readonly claim: string;
-}
-
-/** One line of what happened: when, in words, and what. */
-export interface InboxPaneHistoryLine {
-  readonly when: string;
-  readonly sentence: string;
-}
-
-/** Returns whether a meta item draws anything: a priority-bars fact is drawn by the open card only. */
-const isDrawnMetaItem = (item: InboxPaneMetaItem): boolean =>
-  item.kind !== "fact" || item.fact.form !== "bars";
 
 /** Renders the strip that says who holds the thing and goes to its Task. */
 function InboxPaneHeld({
@@ -112,10 +91,8 @@ function InboxPaneBlockSlot({ blocks }: { readonly blocks: InboxPaneBlocks }): J
  * - `holding` is who holds the thing, or `undefined` when no Task does.
  *   `onGoToTask` is called by its "Go to the Task" button.
  * - `asks` holds the signal sections and is drawn first, then `blocks`.
- * - `links` is the Linked section, left out when empty. `groupWords` is the
- *   quiet count after its heading, "in a group of 5".
+ * - `links` is the Linked section, left out when empty.
  * - `history` is What happened, newest first, left out when empty.
- * - `titleRef` is the title, which takes the focus when the pane opens.
  * - `onGoTo` is called with a linked thing's reference when its title is pressed.
  *
  * Every word comes in as a prop; the component decides nothing.
@@ -123,13 +100,11 @@ function InboxPaneBlockSlot({ blocks }: { readonly blocks: InboxPaneBlocks }): J
 export function InboxPaneThing({
   title,
   identifier,
-  titleRef,
   meta,
   holding,
   asks,
   blocks,
   links,
-  groupWords,
   history,
   plugins,
   onGoToTask,
@@ -137,23 +112,20 @@ export function InboxPaneThing({
 }: {
   readonly title: string;
   readonly identifier?: string | undefined;
-  readonly titleRef?: Ref<HTMLHeadingElement> | undefined;
-  readonly meta: ReadonlyArray<InboxPaneMetaItem>;
+  readonly meta: ReadonlyArray<PaneMetaItem>;
   readonly holding?: InboxPaneHolding | undefined;
   readonly asks: ReactNode;
   readonly blocks: InboxPaneBlocks;
-  readonly links: ReadonlyArray<InboxPaneLink>;
-  readonly groupWords?: string | undefined;
-  readonly history: ReadonlyArray<InboxPaneHistoryLine>;
+  readonly links: ReadonlyArray<PaneLink>;
+  readonly history: ReadonlyArray<PaneHistoryLine>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onGoToTask: () => void;
   readonly onGoTo: (ref: string) => void;
 }): JSX.Element {
   const hasAsks = asks !== null && asks !== undefined && asks !== false;
-  const drawnMeta = meta.filter(isDrawnMetaItem);
   return (
     <div className="ib-pane-scroll">
-      <h2 ref={titleRef} className="ib-pane-title" tabIndex={-1}>
+      <h2 className="ib-pane-title">
         {title}
         {identifier === undefined || identifier === "" ? null : (
           <>
@@ -162,9 +134,9 @@ export function InboxPaneThing({
           </>
         )}
       </h2>
-      {drawnMeta.length > 0 && (
+      {meta.length > 0 && (
         <p className="ib-pane-meta">
-          {drawnMeta.map((item, index) => (
+          {meta.map((item, index) => (
             <span key={index}>
               {item.kind === "status" ? (
                 <>
@@ -185,10 +157,7 @@ export function InboxPaneThing({
       <InboxPaneBlockSlot blocks={blocks} />
       {links.length > 0 && (
         <section className="ib-pane-sec">
-          <h3 className="ib-pane-h">
-            Linked
-            {groupWords === undefined ? null : <span className="ib-pane-h-n">{groupWords}</span>}
-          </h3>
+          <h3 className="ib-pane-h">Linked</h3>
           <ul className="ib-pane-links">
             {links.map((link) => (
               <li key={link.ref} className="ib-pane-link">

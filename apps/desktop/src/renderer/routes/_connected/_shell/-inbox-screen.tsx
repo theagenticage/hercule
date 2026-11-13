@@ -4,6 +4,8 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import { namePlugin } from "@hercule/client-core";
 import {
   EMPTY_INBOX_SEARCH,
+  OPEN_AT_SOURCE_NEEDS_ONE_THING,
+  THING_NOT_IN_LIST,
   addInboxClause,
   nameInboxScope,
   typeInboxSearch,
@@ -219,12 +221,34 @@ export function InboxScreen({
     },
     onMoved: followMove,
   });
+  /**
+   * Opens the group that holds `ref` (and its "Show N more") when the list does
+   * not draw the line of `ref`. Does nothing when the list draws it or does not hold it.
+   */
+  const openGroupHolding = (ref: string): void => {
+    const { entries } = visit.getSnapshot();
+    if (entries.some((entry) => entry.key === ref)) return;
+    const head = entries.find(
+      (entry) => entry.kind === "head" && entry.group.rows.some((row) => row.ref === ref),
+    );
+    if (head === undefined) return;
+    visit.fold({ kind: "open", key: head.key });
+    visit.fold({ kind: "showMore", key: `${head.key}:more` });
+  };
+  /** Makes `ref` the one thing the pane shows: ends a selection, opens the group that holds it, and slides the pane over the list when it lies closed. */
+  const showThing = (ref: string): void => {
+    visit.select({ kind: "clear" });
+    openGroupHolding(ref);
+    visit.select({ kind: "focus", ref });
+    setIsPaneOpen(true);
+  };
   const answers = useInboxAnswers({
     client,
     scope: accountScope,
     visit,
     moves,
     isOffline: offlineSince !== null,
+    showThing,
   });
   // A hand-off from the keys or the pane's own button opens its menu under the pane's button while the pane shows.
   const openHandMenu = (thing: InboxListRow | null, ref: string | undefined): void => {
@@ -260,20 +284,11 @@ export function InboxScreen({
    * Says so when the list does not hold the thing.
    */
   const walkTo = (ref: string): void => {
-    const { entries, rows } = visit.getSnapshot();
-    if (!rows.some((row) => row.ref === ref)) {
-      moves.say("That thing is not in this list.");
+    if (!visit.getSnapshot().rows.some((row) => row.ref === ref)) {
+      moves.say(THING_NOT_IN_LIST);
       return;
     }
-    if (!entries.some((entry) => entry.key === ref)) {
-      const head = entries.find(
-        (entry) => entry.kind === "head" && entry.group.rows.some((row) => row.ref === ref),
-      );
-      if (head !== undefined) {
-        visit.fold({ kind: "open", key: head.key });
-        visit.fold({ kind: "showMore", key: `${head.key}:more` });
-      }
-    }
+    openGroupHolding(ref);
     visit.select({ kind: "focus", ref });
   };
   /** Slides the pane away first when it lies over the list, for what is about the list. */
@@ -340,9 +355,7 @@ export function InboxScreen({
       case "openAtSource":
         // The pane shows the selection, not the current row, so O would open a thing the user is not looking at.
         if (isShowingSelection) {
-          moves.say(
-            "O opens one thing. Press Esc to clear the selection, then O on the thing you want.",
-          );
+          moves.say(OPEN_AT_SOURCE_NEEDS_ONE_THING);
         } else moves.openAtSource();
         return;
       case "showArrivals":
@@ -405,9 +418,7 @@ export function InboxScreen({
   const handOffInPane = useStableCallback(() => {
     startHandOff(undefined);
   });
-  const walkInPane = useStableCallback((ref: string) => {
-    walkTo(ref);
-  });
+  const walkInPane = useStableCallback(showThing);
   const linkInPane = useStableCallback(() => {
     startLink(undefined);
   });

@@ -8,7 +8,7 @@ import type { EntityPeer, EntityStatus, InboxGroupDetail, InboxThing } from "@he
 import { readEntityPluginId } from "../desk/entity-words";
 import { describeClaim } from "../desk/link-claim";
 import { namePlugin, type PluginName } from "../intake";
-import { decideReason, readHolder } from "./inbox-row";
+import { decideReason, findRowHolder } from "./inbox-row";
 
 /** One member of the group: the line it takes in the pane. */
 export interface InboxGroupPaneMember {
@@ -103,7 +103,7 @@ const buildMember = (
   const why: InboxGroupPaneMember["why"] =
     row === undefined
       ? { rest: peer.status?.label ?? peer.noun, more: 0, quiet: true }
-      : decideReason(row, context, readHolder(row, context.userName));
+      : decideReason(row, context, findRowHolder(row, context.userName));
   return {
     ref: peer.ref,
     pluginId: readEntityPluginId(peer.kind),

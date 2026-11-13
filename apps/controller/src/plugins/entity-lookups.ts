@@ -393,9 +393,11 @@ const make = Effect.gen(function* () {
     /**
      * Reads the blocks the Inbox pane draws for the thing `ref` of the plugin
      * `pluginId`, through its eligible Connections, one after another, at
-     * most 3: first those in `preferredConnectionIds` (the ones that observed
-     * the thing), then the others, each group oldest first, and stops at the first one that answers. An empty
-     * list is an answer. It never reads the thing with `resolve` first.
+     * most 3, and stops at the first one that answers. The order is
+     * `preferredConnectionIds` first, in the caller's order (the caller puts
+     * the Connections that observed the thing with access `ok` first), then
+     * the other eligible Connections, oldest first. An empty list is an
+     * answer. It never reads the thing with `resolve` first.
      *
      * Answers `{ blocks: [] }` without asking any Connection when the plugin
      * is not active or its lookup has no `readBlocks`. Answers `unreadable`
@@ -412,9 +414,9 @@ const make = Effect.gen(function* () {
         if (Option.isNone(found) || readBlocks === undefined) return { blocks: [] };
         const { source } = found.value;
         const eligible = yield* listEligibleConnections(source);
-        // Connections that observed the thing go first, in the caller's order
-        // (the likeliest reader first), because another account may not see
-        // it at all. The others follow, oldest first.
+        // The preferred Connections go first, in the caller's order, because
+        // another account may not see the thing at all. The others follow in
+        // the order the eligible list has: oldest first.
         const preferred = preferredConnectionIds.flatMap((id) =>
           eligible.filter((connection) => connection.id === id),
         );

@@ -163,6 +163,13 @@ export function useUndoLine<Page>(
             },
       );
     });
+    void offeredGesture?.overdue?.then((waitingText) => {
+      setHeld((before) =>
+        before.offered === offeredGesture && before.isWaiting
+          ? { ...before, text: waitingText }
+          : before,
+      );
+    });
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,

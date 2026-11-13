@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import type { InboxRowView } from "@hercule/client-core/inbox";
+import { describeSelectedThings, type InboxRowView } from "@hercule/client-core/inbox";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CheckIcon } from "../../icons/check";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
@@ -14,8 +15,9 @@ import "./inbox-pane-head.css";
 import "./inbox-pane-thing.css";
 import "./inbox-selection-pane.css";
 
-/** The hint line under the selection's title. */
-const SELECTION_HINT = "X or ⌘-click adds and removes; ⇧ selects a range; Esc clears";
+/** Returns the hint line under the selection's title, naming the click that adds a row on `platform`. */
+const describeSelectionHint = (platform: DesktopPlatform): string =>
+  `X or ${platform === "mac" ? "⌘" : "Ctrl"}-click adds and removes; ⇧ selects a range; Esc clears`;
 
 /**
  * Renders the pane's head line while a selection shows: the check icon and
@@ -50,6 +52,7 @@ export function InboxSelectionHead({
 export function InboxSelectionPane({
   members,
   plugins,
+  platform,
   onWalk,
   onTakeOn,
   onLink,
@@ -57,6 +60,7 @@ export function InboxSelectionPane({
 }: {
   readonly members: ReadonlyArray<InboxRowView>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
+  readonly platform: DesktopPlatform;
   readonly onWalk: (ref: string) => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
@@ -66,11 +70,9 @@ export function InboxSelectionPane({
   return (
     <>
       <div className="ib-pane-scroll">
-        <h2 className="ib-pane-title">
-          {count === 1 ? "1 thing selected" : `${String(count)} things selected`}
-        </h2>
+        <h2 className="ib-pane-title">{describeSelectedThings(count)}</h2>
         <p className="ib-pane-meta">
-          <span>{SELECTION_HINT}</span>
+          <span>{describeSelectionHint(platform)}</span>
         </p>
         <section className="ib-pane-sec ib-pane-sec--first">
           <ul className="ib-pane-members">

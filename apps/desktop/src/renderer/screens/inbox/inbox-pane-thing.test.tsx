@@ -97,11 +97,9 @@ describe("InboxPaneThing", () => {
         },
         { ref: "github:#7", pluginId: "github", title: "Older fix", claim: "You linked this" },
       ],
-      groupWords: "in a group of 4",
     });
     expect(screen.getByText("Linear reports this")).toBeTruthy();
     expect(screen.getByText("You linked this")).toBeTruthy();
-    expect(screen.getByText("in a group of 4")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Unlink/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Checkout total is off" }));
     expect(onGoTo).toHaveBeenCalledWith("linear:ENG-9");

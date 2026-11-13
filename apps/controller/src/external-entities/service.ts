@@ -28,6 +28,11 @@ import {
   createInvalidStateError,
   createNotFoundError,
   EntityBlocks,
+  formatIssue,
+  listDecodeIssues,
+  truncateMessage,
+  KnownBlock,
+  MAX_ENTITY_BLOCKS,
   MAX_ENTITY_SEARCH_RESULTS,
   MAX_ENTITY_ANCESTORS,
   MAX_ENTITY_SUGGESTIONS,
@@ -108,7 +113,15 @@ import {
   type TaskableEntity,
 } from "./repository";
 
-const decodeEntityBlocks = Schema.decodeUnknownEffect(EntityBlocks);
+/**
+ * Decodes the drafts a plugin read as blocks of a type the contract knows, so
+ * a misspelled type is a plugin error and not a block the app cannot draw.
+ * `EntityBlocks` itself accepts any type, because a newer controller may send
+ * blocks an older app does not know.
+ */
+const decodeKnownEntityBlocks = Schema.decodeUnknownEffect(
+  Schema.Struct({ blocks: Schema.Array(KnownBlock).check(Schema.isMaxLength(MAX_ENTITY_BLOCKS)) }),
+);
 
 /** The message of the error `readBlocks` fails with. It names no plugin and no credential. */
 const SOURCE_UNREADABLE_MESSAGE =
@@ -907,7 +920,7 @@ const make = Effect.gen(function* () {
      * Answers no blocks when the plugin of the entity's kind is not active or
      * offers none. Fails with `InvalidState` (reason `source-unreadable`)
      * when no Connection could read the source, or the plugin answered
-     * blocks the contract does not accept. The message is the same safe
+     * blocks of a type the contract does not know. The message is the same safe
      * sentence for every cause; the cause goes to the controller's log.
      */
     readBlocks: (
@@ -936,10 +949,11 @@ const make = Effect.gen(function* () {
           yield* Effect.logWarning(`No Connection could read the blocks of ${record.ref}.`);
           return yield* Effect.fail(unreadable);
         }
-        return yield* Effect.catch(decodeEntityBlocks({ blocks: outcome.blocks }), (error) =>
+        return yield* Effect.catch(decodeKnownEntityBlocks({ blocks: outcome.blocks }), (error) =>
           Effect.andThen(
+            // Only where the value failed (path and message), never the value itself.
             Effect.logWarning(
-              `The plugin ${owner.pluginId} returned blocks for ${record.ref} that the contract does not accept: ${error.message}`,
+              `The plugin ${owner.pluginId} returned blocks for ${record.ref} that the contract does not accept: ${truncateMessage(listDecodeIssues(error).map(formatIssue).join("; "))}`,
             ),
             Effect.fail(unreadable),
           ),

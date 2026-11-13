@@ -157,6 +157,8 @@ function drawInline(
           width={inline.width}
           height={inline.height}
           referrerPolicy="no-referrer"
+          // A plugin's long text can hold many images: only the ones scrolled near are fetched.
+          loading="lazy"
         />
       ) : (
         <ImageLink key={key} src={inline.src} alt={inline.alt} title={inline.title} />

@@ -5,6 +5,7 @@
  * grows and shrinks on the hand spring.
  */
 import { useId, useLayoutEffect, useRef, type JSX } from "react";
+import { describeHiddenAsks } from "@hercule/client-core/inbox";
 import type { Block } from "@hercule/contract";
 import { animateValue, type MotionValue } from "../../app/motion";
 import { ChevronDownIcon } from "../../icons/chevron-down";
@@ -49,7 +50,7 @@ function SayLine({
  * Renders the section of one open signal.
  *
  * - The head is a button that calls `onToggle`; it carries `aria-expanded`.
- * - `isCurrent` draws the ink edge of the ask that Return answers.
+ * - `isCurrent` marks the ask that Return answers (`aria-current`) and draws its ink edge.
  * - A folded body is inert, so its buttons take no focus and no click.
  * - `body` is how far the signal's full read is: while it is on its way the
  *   body draws quiet shapes, and a read that failed says why in one line.
@@ -111,7 +112,10 @@ export function InboxAskSection({
 
   const classes = ["sig", isOpen && "is-open", isCurrent && "is-current-ask"];
   return (
-    <section className={classes.filter(Boolean).join(" ")}>
+    <section
+      className={classes.filter(Boolean).join(" ")}
+      aria-current={isCurrent ? "true" : undefined}
+    >
       <button
         type="button"
         className="sig-head"
@@ -164,11 +168,9 @@ function AskSectionContent({
 
 /**
  * Renders the quiet line that says how many open asks the pane does not show a
- * section for, such as "3 more asks". Draws nothing for none.
+ * section for, such as "3 more". Draws nothing for none.
  */
 export function InboxMoreAsks({ count }: { readonly count: number }): JSX.Element | null {
   if (count <= 0) return null;
-  return (
-    <p className="bk-fine sig-more">{`${String(count)} more ${count === 1 ? "ask" : "asks"}`}</p>
-  );
+  return <p className="bk-fine sig-more">{describeHiddenAsks(count)}</p>;
 }

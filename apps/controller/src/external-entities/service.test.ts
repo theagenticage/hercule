@@ -754,20 +754,23 @@ describe("readBlocks", () => {
       return yield* entityId(ticketRef("1"));
     });
 
-  it("returns the blocks the lookup read, decoded against the contract", async () => {
+  it("returns the blocks the lookup read, checked against the contract", async () => {
     const reply = await run((arranged) =>
       Effect.gen(function* () {
         arranged.script.readBlocks = () => ({
           blocks: [
             { type: "text", markdown: "hello" },
-            { type: "calendar", day: "2026-11-12" },
+            { type: "code", text: "const a = 1;" },
           ],
         });
         return yield* arranged.service.readBlocks(yield* ARRANGE_ONE(arranged));
       }),
     );
     expect(reply).toEqual({
-      blocks: [{ type: "text", markdown: "hello" }, { type: "calendar" }],
+      blocks: [
+        { type: "text", markdown: "hello" },
+        { type: "code", text: "const a = 1;" },
+      ],
     });
   });
 
@@ -780,7 +783,7 @@ describe("readBlocks", () => {
     expect(reply).toEqual({ blocks: [] });
   });
 
-  it("fails with one safe error when no Connection could read, or a draft breaks the contract", async () => {
+  it("fails with one safe error when no Connection could read, a draft breaks the contract, or its type is misspelled", async () => {
     const errors = await run((arranged) =>
       Effect.gen(function* () {
         const id = yield* ARRANGE_ONE(arranged);
@@ -790,7 +793,11 @@ describe("readBlocks", () => {
           blocks: [{ type: "fields", rows: [] }],
         });
         const invalid = yield* Effect.flip(arranged.service.readBlocks(id));
-        return [unreadable, invalid];
+        arranged.script.readBlocks = () => ({
+          blocks: [{ type: "calender", day: "2026-11-12" }],
+        });
+        const misspelled = yield* Effect.flip(arranged.service.readBlocks(id));
+        return [unreadable, invalid, misspelled];
       }),
     );
     for (const error of errors) {
@@ -799,6 +806,7 @@ describe("readBlocks", () => {
       });
     }
     expect(errors[1]).toEqual(errors[0]);
+    expect(errors[2]).toEqual(errors[0]);
   });
 
   it("refuses an unknown id, a place, and a session without the grants", async () => {

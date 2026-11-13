@@ -6,31 +6,36 @@ import {
   describeAnswerSent,
   describeAnswerTooLate,
   describeDismissalReturn,
-  describeHeldAnswer,
+  describeDoneEffect,
+  describeHeldSignalAnswer,
+  describeHiddenAsks,
   describeHolderStrip,
-  describeInterruptedAnswer,
+  describeMarkedDone,
+  describeSelectedThings,
+  describeUnreadable,
+  describeUnsentSignalAnswer,
 } from "./inbox-pane-words";
 
 const NOW = new Date("2026-11-12T09:00:00.000Z");
 const DISMISSED = "2026-11-11T08:00:00.000Z";
 const after = "2026-11-12T01:00:00.000Z";
 
-describe("describeHeldAnswer", () => {
+describe("describeHeldSignalAnswer", () => {
   it("says what is done and that it sends in 8s", () => {
     expect(
-      describeHeldAnswer({ label: "Approve", identifier: "ENG-1", sourceName: "GitHub" }),
+      describeHeldSignalAnswer({ label: "Approve", identifier: "ENG-1", sourceName: "GitHub" }),
     ).toEqual({ text: "Approve ENG-1 on GitHub", note: "Sends in 8s" });
   });
 
   it("names who a typed reply goes to", () => {
     expect(
-      describeHeldAnswer({
+      describeHeldSignalAnswer({
         label: "Reply",
         identifier: "ENG-1",
         sourceName: "GitHub",
         replyTo: "Mei",
       }).text,
-    ).toBe("Reply sent to Mei on GitHub");
+    ).toBe("Reply to Mei on GitHub");
   });
 });
 
@@ -41,7 +46,7 @@ describe("the sent, too late and failed lines", () => {
       "Already sent to Linear, so it can’t be taken back here. Answer again on Linear if it needs changing.",
     );
     expect(describeAnswerSending("Linear")).toBe(
-      "It is being sent to Linear, so it can't be taken back here.",
+      "It is being sent to Linear, so it can’t be taken back here.",
     );
     expect(
       describeAnswerFailure(
@@ -52,14 +57,22 @@ describe("the sent, too late and failed lines", () => {
   });
 });
 
-describe("describeInterruptedAnswer", () => {
+describe("describeUnsentSignalAnswer", () => {
+  const answer = { label: "Approve", identifier: "ENG-1", sourceName: "GitHub" };
+
   it("tells apart an answer that never left from one that may have", () => {
-    expect(describeInterruptedAnswer("before-sending", "GitHub")).toBe(
-      "Not sent: the app closed before it was sent.",
+    expect(describeUnsentSignalAnswer(answer, { reason: "interrupted", message: "" })).toBe(
+      "The app closed before it was sent.",
     );
-    expect(describeInterruptedAnswer("while-sending", "GitHub")).toBe(
-      "The app closed while it was being sent; it may have reached GitHub.",
-    );
+    expect(
+      describeUnsentSignalAnswer(answer, { reason: "interrupted-while-sending", message: "" }),
+    ).toBe("The app closed while it was being sent, so it may have been sent.");
+  });
+
+  it("carries the message of a failed send", () => {
+    expect(
+      describeUnsentSignalAnswer(answer, { reason: "send-failed", message: "no access" }),
+    ).toBe("Approve ENG-1 was not sent to GitHub: no access. Try again.");
   });
 });
 
@@ -118,5 +131,29 @@ describe("describeHolderStrip", () => {
     ["nobody", { liveWorkflows: [], takenOn: false }, undefined],
   ])("reads %s", (_name, thing, expected) => {
     expect(describeHolderStrip(thing)).toBe(expected);
+  });
+});
+
+describe("the lines of the pane's other moments", () => {
+  it("name the source Done does not tell", () => {
+    expect(describeDoneEffect("GitHub")).toBe("Ends this ask here. GitHub is not told.");
+    expect(describeMarkedDone("GitHub")).toBe(
+      "Marked done. GitHub was not told, and it can’t be undone here.",
+    );
+  });
+
+  it("count the hidden asks without calling them asks", () => {
+    expect(describeHiddenAsks(3)).toBe("3 more");
+  });
+
+  it("count the selected things", () => {
+    expect(describeSelectedThings(1)).toBe("1 thing selected");
+    expect(describeSelectedThings(4)).toBe("4 things selected");
+  });
+
+  it("say why a part could not be read", () => {
+    expect(describeUnreadable("ask", "The runner is away.")).toBe(
+      "This ask could not be read. The runner is away.",
+    );
   });
 });

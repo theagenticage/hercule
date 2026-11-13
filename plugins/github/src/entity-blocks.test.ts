@@ -116,7 +116,7 @@ describe("reading the blocks of a pull request", () => {
         passed: 2,
         omitted: 0,
       },
-      { type: "text", markdown: "Adds the delivery cost." },
+      { type: "text", title: "Description", markdown: "Adds the delivery cost." },
     ]);
   });
 
@@ -210,7 +210,7 @@ describe("reading the blocks of an issue", () => {
     const result = await runAgainstStub(readItemBlocks(TEST_TOKEN, ISSUE_REF), stub);
 
     expect(Result.getOrThrow(result)).toEqual([
-      { type: "text", markdown: "The spinner never stops." },
+      { type: "text", title: "Description", markdown: "The spinner never stops." },
       {
         type: "fields",
         rows: [

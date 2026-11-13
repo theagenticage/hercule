@@ -676,7 +676,7 @@ type Block = Text | Messages | Change | Checks | Fields | Trend | Code | { type:
 
 interface Person { name: string; handle?: string; avatarUrl?: string }   // initials when there is no avatar
 
-interface Text { type: "text"; markdown: string }                     // at most 32 KB
+interface Text { type: "text"; title?: string; markdown: string }     // title at most 80 characters; markdown at most 32 KB
 
 interface Messages {
   type: "messages";

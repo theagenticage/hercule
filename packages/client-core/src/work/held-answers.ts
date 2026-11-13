@@ -127,6 +127,13 @@ export interface UnsentAnswer {
   readonly actions: readonly UnsentAnswerAction[];
 }
 
+/** What an answer says when the app closed before the answer was sent. */
+export const APP_CLOSED_BEFORE_SENT = "The app closed before it was sent.";
+
+/** What an answer says when the app closed during the send, so the source may have it. */
+export const APP_CLOSED_WHILE_SENDING =
+  "The app closed while it was being sent, so it may have been sent.";
+
 const SEND_AGAIN: UnsentAnswerAction = { id: "send-again", label: "Send again" };
 const OPEN_THREAD: UnsentAnswerAction = { id: "open-thread", label: "Open thread" };
 const DISCARD: UnsentAnswerAction = { id: "discard", label: "Discard" };
@@ -162,13 +169,13 @@ export const describeUnsentAnswer = (source: UnsentAnswerSource): UnsentAnswer =
     case "interrupted":
       return {
         ...base,
-        notice: "The app closed before it was sent.",
+        notice: APP_CLOSED_BEFORE_SENT,
         actions: [SEND_AGAIN, DISCARD],
       };
     case "interrupted-while-sending":
       return {
         ...base,
-        notice: "The app closed while it was being sent, so it may have been sent.",
+        notice: APP_CLOSED_WHILE_SENDING,
         actions: [SEND_AGAIN, DISCARD],
       };
     case "closed-before-sent":
