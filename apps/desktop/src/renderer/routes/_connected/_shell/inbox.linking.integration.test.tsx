@@ -369,3 +369,18 @@ describe("the members of an open group", () => {
     expect(members.map((member) => member.getAttribute("aria-setsize"))).toEqual(["2", "2"]);
   });
 });
+
+describe("L on the only selected member of a folded group", () => {
+  it("opens Link to... under the group's head", async () => {
+    const inbox = defaultInbox();
+    const answer = answerGroupedWith([SLOTS_AND_LOYALTY]);
+    await openInbox(inbox, { [QUERY_PATH]: (call) => answer(inbox, call) });
+    await screen.findByRole("treeitem", { name: /Linked group/ });
+    const user = userEvent.setup();
+
+    // Open the group, select its first member, fold the group again, press L.
+    await user.keyboard("{ArrowRight}jx{ArrowLeft}{ArrowLeft}l");
+
+    expect(await screen.findByLabelText(/Search for a thing to link/)).toBeTruthy();
+  });
+});

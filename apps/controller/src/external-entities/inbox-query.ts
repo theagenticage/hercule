@@ -1147,6 +1147,11 @@ export const externalEntityInbox = Effect.gen(function* () {
    * things, one for the rows, then the batched reads of the details. A held
    * ref that is not on the list, or was pruned, is not in the reply. Members
    * that are not held are not hydrated: the group only names them.
+   *
+   * A group lists at most `MAX_INBOX_MOVED_THINGS` of its members, but a held
+   * ref of an answering group stays on the list and in the group's `members`
+   * wherever it stands in the group: one more statement reads those beyond the
+   * cap.
    */
   const readHeldRows = (
     environment: InboxEnvironment,
@@ -1164,18 +1169,22 @@ export const externalEntityInbox = Effect.gen(function* () {
         ).values(),
       ];
       const membersByUnit = yield* readMembersByUnit(environment, selection, groups, heldGroups);
-      // A held member that does not answer stays when some member of its group does.
       const heldSet = new Set(held);
-      const quiet = [...membersByUnit.values()].flatMap((members) =>
-        members.some((member) => member.matches === 1)
-          ? members.filter((member) => member.matches === 0 && heldSet.has(member.ref))
-          : [],
+      // A group has a member that answers exactly when its first member does:
+      // the members that answer come first. The capped read is enough for that.
+      // Every held ref of such a group stays, however far down the group it is.
+      const answeringGroups = new Set(
+        [...membersByUnit].flatMap(([key, members]) => (members[0]?.matches === 1 ? [key] : [])),
       );
+      const quiet = held.filter((ref) => {
+        const group = groups.get(ref);
+        return group !== undefined && answeringGroups.has(group.labelRef);
+      });
       const onList = joinConditions("OR", [
         selection.filter,
         {
           sql: "e.ref IN (SELECT value FROM json_each(?))",
-          params: [JSON.stringify(quiet.map((member) => member.ref))],
+          params: [JSON.stringify(quiet)],
         },
       ]);
       const matched = buildMatchedEntities(environment, onList, undefined, held);
@@ -1193,12 +1202,30 @@ export const externalEntityInbox = Effect.gen(function* () {
       );
       const groupsOfThings = new Set(rows.map((row) => groups.get(row.ref)?.labelRef));
       const { things, offerSets } = yield* hydrate(environment, rows);
+      // A held ref beyond the cap of its group's capped read is not in
+      // `membersByUnit`. It is read apart, so its group always lists it.
+      const listedRefs = new Set(
+        [...membersByUnit.values()].flatMap((members) => members.map((member) => member.ref)),
+      );
+      const beyondCap = heldGroups.flatMap((group) => {
+        const refs = group.memberRefs.filter((ref) => heldSet.has(ref) && !listedRefs.has(ref));
+        return refs.length === 0 || !answeringGroups.has(group.labelRef)
+          ? []
+          : [{ ...group, memberRefs: refs }];
+      });
+      const heldBeyondCap = yield* readMembersByUnit(environment, selection, groups, beyondCap);
       return {
         things,
         groups: heldGroups
           .filter((group) => groupsOfThings.has(group.labelRef))
           .map((group) =>
-            buildInboxGroup(group, membersByUnit.get(group.labelRef)!.map(describeMember)),
+            buildInboxGroup(
+              group,
+              [
+                ...membersByUnit.get(group.labelRef)!,
+                ...(heldBeyondCap.get(group.labelRef) ?? []),
+              ].map(describeMember),
+            ),
           ),
         offerSets,
       };

@@ -92,6 +92,13 @@ export interface MoveReceipt<Row> {
   readonly entries: ReadonlyArray<{ readonly row: Row; readonly index: number }>;
   /** The groups the move touched, as they were before it, so an undo can put them back under their keys. */
   readonly groups: readonly HeldGroup[];
+  /**
+   * The fold the user had chosen for each touched group (by its key) when the
+   * move was made. A group with no choice is not listed. An undo restores a fold
+   * unless the user has chosen another since, because a read that comes between
+   * the move and the undo may have dropped it with the group.
+   */
+  readonly folds: ReadonlyMap<GroupKey, GroupFold>;
   /** The entry that was current when the move was made. */
   readonly currentKey: string | null;
 }
@@ -685,13 +692,20 @@ export function applyMove<Row extends InboxVisitRow, Query>(
   const entries = state.rows.flatMap((row, index) =>
     isHandled.has(row.ref) ? [{ row, index }] : [],
   );
+  const touchedGroups = state.groups.filter((group) =>
+    group.members.some((member) => isHandled.has(member.ref)),
+  );
   const receipt: MoveReceipt<Row> = {
     id: move.id,
     visit: move.visit,
     refs: handled,
     entries,
-    groups: state.groups.filter((group) =>
-      group.members.some((member) => isHandled.has(member.ref)),
+    groups: touchedGroups,
+    folds: new Map(
+      touchedGroups.flatMap((group) => {
+        const fold = state.folds.get(group.key);
+        return fold === undefined ? [] : [[group.key, fold] as const];
+      }),
     ),
     currentKey: state.current,
   };
@@ -837,6 +851,11 @@ export function applyUndo<Row extends InboxVisitRow, Query>(
     locks.set(ref, seq);
     if (isHeldNow.has(ref)) freshAt.set(ref, -1);
   }
+  const groups = restoreGroups(state.groups, receipt, isHeldNow);
+  const folds = new Map(state.folds);
+  for (const [key, fold] of receipt.folds) {
+    if (!folds.has(key) && groups.some((group) => group.key === key)) folds.set(key, fold);
+  }
   const result = withRows(
     state,
     {
@@ -845,7 +864,8 @@ export function applyUndo<Row extends InboxVisitRow, Query>(
       overrides,
       locks,
       freshAt,
-      groups: restoreGroups(state.groups, receipt, isHeldNow),
+      groups,
+      folds,
       landedOn: null,
     },
     rows,

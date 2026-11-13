@@ -54,7 +54,7 @@ import {
 
 export type { FirstPage, FoldChange, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
 export type { InboxMoveTarget };
-export { buildMoreKey, parseMoreKey } from "./inbox-groups";
+export { buildMoreKey, findEntryKey, parseMoreKey } from "./inbox-groups";
 export type { GroupKey, InboxEntry, InboxGroupView, MoreKey } from "./inbox-groups";
 
 /**
@@ -619,7 +619,15 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     move(kind, refs, show) {
       const id = (receiptId += 1);
       if (state === null)
-        return { id, visit: visitId, refs: [], entries: [], groups: [], currentKey: null };
+        return {
+          id,
+          visit: visitId,
+          refs: [],
+          entries: [],
+          groups: [],
+          folds: new Map(),
+          currentKey: null,
+        };
       const before = state;
       const applied = applyMove(before, { id, visit: visitId, kind, refs, at: now(), show });
       const emptied =

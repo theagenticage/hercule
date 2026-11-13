@@ -807,18 +807,24 @@ export type InboxGroupMember = Schema.Schema.Type<typeof InboxGroupMember>;
  *   without that member.
  * - `members` are the members that answer the list's query first, then the
  *   others, each part in the list's order. The first member is the one that
- *   places the group in the list. At most `MAX_INBOX_MOVED_THINGS` are listed.
+ *   places the group in the list. At most `MAX_INBOX_MOVED_THINGS` are listed,
+ *   plus, in a `rows` or `refresh` reply, every held member beyond that cut
+ *   (at most `MAX_INBOX_HELD_REFS`), so a held thing is always listed in its
+ *   group.
  *   The `things` of a `first` or `next` reply hold the members that fit in the
  *   page; a `rows` or `refresh` reply holds only the held members that are
  *   still on the list, so the client reads the rows of the other members when
  *   it needs them.
  * - `size` is how many members the group has. It is above `members.length`
- *   only when the group has more than `MAX_INBOX_MOVED_THINGS`.
+ *   only when the group has more than `MAX_INBOX_MOVED_THINGS` (a client then
+ *   refuses Dismiss and Take on together for it).
  */
 export const InboxGroup = Schema.Struct({
   labelRef: ExternalRef,
   label: bounded(1, 512),
-  members: atMost(InboxGroupMember, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(2)),
+  members: atMost(InboxGroupMember, MAX_INBOX_MOVED_THINGS + MAX_INBOX_HELD_REFS).check(
+    Schema.isMinLength(2),
+  ),
   size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
 });
 

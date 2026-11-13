@@ -1416,6 +1416,36 @@ describe("groups", () => {
       expect(headOf(visit, "group:1").size).toBe(3);
     });
 
+    it("keeps an open cut group open when it is undone after a read that predates the move dropped it", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), [cutGroup()]);
+      visit.fold({ kind: "open" });
+      expect(headOf(visit, "group:1")).toMatchObject({ isOpen: true, unloadedCount: 1 });
+      visit.pushArrived();
+      const early = fake.open("refresh");
+      const receipt = visit.move("dismissed", ["a", "b", "x"]);
+      early.resolve({
+        firstPage: { ...firstPage(rows("c")), groups: [] },
+        heldRows: [],
+        heldGroups: [],
+      });
+      await settle();
+      visit.undo(receipt);
+      expect(headOf(visit, "group:1")).toMatchObject({ isOpen: true, isCut: true });
+      visit.viewportChanged(0, 10);
+      expect(fake.open("rows").held).toContain("x");
+    });
+
+    it("does not override a fold the user chose after the move", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), [cutGroup()]);
+      visit.fold({ kind: "open" });
+      const receipt = visit.move("dismissed", ["a", "b", "x"]);
+      visit.pushArrived();
+      await answerRefreshGroups(fake, rows("c"), []);
+      visit.undo(receipt);
+      visit.fold({ kind: "close", key: "group:1" });
+      expect(headOf(visit, "group:1").isOpen).toBe(false);
+    });
+
     it("asks about every hidden member in a refresh, at most half the window, and the rest of the window is rows", async () => {
       const members = Array.from({ length: 450 }, (_, n) => `m${n}`);
       const items = [...members.slice(0, 5).map((ref) => row(ref)), row("z")];

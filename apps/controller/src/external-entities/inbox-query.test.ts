@@ -1856,6 +1856,41 @@ describe("groups of linked things", () => {
     expect(few.rows).toBe(none.rows + 2);
     expect(few.refresh).toBe(none.refresh + 2);
   });
+
+  /** Reads `rows` of a chain of 1,001 linked tickets, one past the cap of a group, holding the last one. */
+  const readHeldBeyondGroupCap = (text: string | undefined) =>
+    run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 1001; index++) {
+          refs.push(
+            yield* insertTicket({
+              key: `h${String(index).padStart(4, "0")}`,
+              title: index === 0 ? "needle" : "quiet",
+              updated: 2000 - index,
+            }),
+          );
+          if (index > 0) yield* linkTickets(refs[index - 1]!, refs[index]!);
+        }
+        return yield* inbox.readRows(
+          environment(3000),
+          { list: everything, ...(text === undefined ? {} : { text }) },
+          [refs[1000]!],
+        );
+      }),
+    );
+
+  it("keeps a held member beyond the cap of a group on the list when it does not answer the query", async () => {
+    const result = await readHeldBeyondGroupCap("needle");
+    expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:h1000"]);
+  });
+
+  it("lists a held member beyond the cap of a group in the descriptor of its group", async () => {
+    const result = await readHeldBeyondGroupCap(undefined);
+    expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:h1000"]);
+    expect(result.groups[0]!.size).toBe(1001);
+    expect(result.groups[0]!.members.map((member) => member.ref)).toContain("acme:ticket:h1000");
+  });
 });
 
 /** Writes a link between two tickets that the plugin `acme` reports, through the account `ACCOUNT_A`. */

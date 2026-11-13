@@ -10,7 +10,12 @@
  * group. A unit's key is the ref of its label thing (a group) or its own ref
  * (a lone thing). Both are refs of a thing on the Inbox, so keys never clash.
  */
-import { MAX_INBOX_MOVED_THINGS, type InboxGroup, type InboxGroupMember } from "@hercule/contract";
+import {
+  MAX_INBOX_HELD_REFS,
+  MAX_INBOX_MOVED_THINGS,
+  type InboxGroup,
+  type InboxGroupMember,
+} from "@hercule/contract";
 
 /** What electing the label of a group needs to know about a thing on the Inbox. */
 export interface GroupCandidate {
@@ -165,7 +170,8 @@ export const cutPage = <Unit extends PageUnit>(
  * list's order with whether each answers the query. The members that answer
  * come first, then the others, each part keeping the list's order, so the
  * first member is the one that places the group. The list is cut to
- * `MAX_INBOX_MOVED_THINGS`; `size` is the number of refs the group has, which
+ * `MAX_INBOX_MOVED_THINGS` plus the most held members a `rows` reply can add
+ * beyond that; `size` is the number of refs the group has, which
  * `members` may hold fewer of.
  */
 export const buildInboxGroup = (
@@ -177,6 +183,6 @@ export const buildInboxGroup = (
   members: [
     ...members.filter((member) => member.matches),
     ...members.filter((member) => !member.matches),
-  ].slice(0, MAX_INBOX_MOVED_THINGS),
+  ].slice(0, MAX_INBOX_MOVED_THINGS + MAX_INBOX_HELD_REFS),
   size: group.memberRefs.length,
 });

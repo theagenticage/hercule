@@ -21,27 +21,6 @@ export function InboxPaneFootEnd({ children }: { readonly children: ReactNode })
   return <span className="ib-pane-foot-end">{children}</span>;
 }
 
-/**
- * Renders the button that dismisses at the end of the pane's footer: an icon
- * with `words` as its name ("Dismiss", "Dismiss all 3") and the key E in its
- * tooltip. It calls `onDismiss` when pressed. It sits in its own end of the
- * footer; to put it beside other icon buttons, use `InboxPaneDismissButton`
- * inside an `InboxPaneFootEnd`.
- */
-export function InboxPaneDismiss({
-  words,
-  onDismiss,
-}: {
-  readonly words: string;
-  readonly onDismiss: () => void;
-}): JSX.Element {
-  return (
-    <InboxPaneFootEnd>
-      <InboxPaneDismissButton words={words} onDismiss={onDismiss} />
-    </InboxPaneFootEnd>
-  );
-}
-
 /** Renders the icon button of Dismiss alone: `words` is its name and `onDismiss` is called when it is pressed. */
 export function InboxPaneDismissButton({
   words,

@@ -9,6 +9,7 @@ import {
   addInboxClause,
   buildGroupLinkEnd,
   buildMoreKey,
+  findEntryKey,
   nameInboxScope,
   typeInboxSearch,
   type InboxScope,
@@ -73,6 +74,9 @@ const NO_KINDS: readonly string[] = [];
 
 /** What the undo line says when a row is dropped on a line of its own group. */
 const ALREADY_IN_ONE_GROUP = "These are in one group already.";
+
+/** What the undo line says when "Link to..." finds no line to open under. */
+const NO_LINE_TO_LINK_FROM = "Can't open Link to... here: that thing's line is not on the list.";
 
 /**
  * Returns the end of a link that the list line `entry` stands for: the thing
@@ -280,15 +284,24 @@ export function InboxScreen({
    * the pane's Link button asked for it. The line is scrolled into view first
    * (it may be far from the view, and then not drawn), so the popover has a
    * line to sit under. A selection of one thing links that thing, so the
-   * popover sits under its line even when it is not the current line.
+   * popover sits under its line even when it is not the current line. When
+   * that thing is in a folded group it has no line, so the popover sits under
+   * the group's head. When no line shows the thing, the undo line says so.
    */
   const openLinkMenu = (pick: InboxLinkPick | null): void => {
     if (pick === null) return;
-    const { selection } = snapshot;
+    const { selection, entries } = visit.getSnapshot();
     const lineKey =
-      selection.size === 1 && selection.has(pick.from.ref) ? pick.from.ref : pick.anchorKey;
+      selection.size === 1 && selection.has(pick.from.ref)
+        ? findEntryKey(entries, pick.from.ref)
+        : pick.anchorKey;
+    if (lineKey === null) {
+      moves.say(NO_LINE_TO_LINK_FROM);
+      return;
+    }
     void listRef.current?.revealLine(lineKey).then((anchor) => {
-      if (anchor !== null) setLinkMenu({ pick, anchor });
+      if (anchor === null) moves.say(NO_LINE_TO_LINK_FROM);
+      else setLinkMenu({ pick, anchor });
     });
   };
   const startLink = (ref: string | undefined): void => {
