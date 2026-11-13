@@ -45,13 +45,13 @@ import { rememberRecentModel } from "../../../app/recent-models";
 import {
   buildThreadStartDraft,
   isWorthKeeping,
+  type SentThread,
   type ThreadStartDrafts,
 } from "../../../app/thread-start-drafts";
 import type { InboxMoves } from "./-inbox-moves";
 import {
   InboxThreadDialog,
   buildThreadStartImagesKey,
-  type SentThread,
   type StartedThread,
 } from "./-inbox-thread-dialog";
 import type { InboxListSnapshot, InboxListVisit } from "./-inbox-visit";
@@ -76,18 +76,6 @@ export interface InboxThread {
 }
 
 /**
- * Returns whether the live connection is down right now. `onStatus` calls its
- * listener at once with the current status, so subscribing and leaving reads it.
- */
-const isDisconnected = (live: SavedController["live"]): boolean => {
-  let status: string = "idle";
-  live.onStatus((current) => {
-    status = current;
-  })();
-  return status === "disconnected";
-};
-
-/**
  * Returns whether a stored draft holds a send that was attempted, which may
  * have made the thread: its things can then show as held by its own Task.
  */
@@ -95,7 +83,7 @@ const hasAttemptedSend = (
   drafts: ThreadStartDrafts,
   things: readonly { readonly id: string }[],
 ): boolean =>
-  drafts.read(buildThingsDraftKey(things.map((thing) => thing.id)))?.dedupKey !== undefined;
+  drafts.read(buildThingsDraftKey(things.map((thing) => thing.id)))?.attempt !== undefined;
 
 /**
  * Makes the start-thread dialog of the Inbox for `controller`, over the list
@@ -113,15 +101,18 @@ export function useInboxThread({
   scope,
   visit,
   moves,
+  isOffline,
   onClosed,
 }: {
   readonly controller: SavedController;
   readonly scope: AccountScope;
   readonly visit: InboxListVisit;
   readonly moves: InboxMoves;
+  /** Whether the Inbox shows itself offline: the one state that decides whether a send is refused. */
+  readonly isOffline: boolean;
   readonly onClosed: (snapshot: InboxListSnapshot) => void;
 }): InboxThread {
-  const { client, pendingSubmissions, live } = controller;
+  const { client, pendingSubmissions } = controller;
   const { threadStarts: drafts } = scope;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -132,9 +123,9 @@ export function useInboxThread({
   const taken = useRef<readonly string[] | null>(null);
 
   // A continuation of a request outlives the render that made it, so it reads the newest of these.
-  const latest = useRef({ openKey, started, moves, onClosed, navigate });
+  const latest = useRef({ openKey, started, moves, isOffline, onClosed, navigate });
   useLayoutEffect(() => {
-    latest.current = { openKey, started, moves, onClosed, navigate };
+    latest.current = { openKey, started, moves, isOffline, onClosed, navigate };
   });
 
   const openThread = useCallback((sessionId: string): void => {
@@ -267,11 +258,11 @@ export function useInboxThread({
       if (isMutationRunning(queryClient, START_KEY)) return;
       const current = drafts.read(sent.draftKey);
       // The connection may have dropped since the dialog opened.
-      const offline = describeOfflineSendRefusal(isDisconnected(live));
+      const offline = describeOfflineSendRefusal(latest.current.isOffline);
       if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure: offline });
       if (offline === null) startThread(sent);
     },
-    [drafts, live, queryClient, startThread],
+    [drafts, queryClient, startThread],
   );
 
   // The list drops a thing that is taken from "Someone waits on me" on its next read, which can

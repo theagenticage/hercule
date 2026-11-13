@@ -15,9 +15,7 @@ import {
   listProjectRepos,
   queryKeys,
   readErrorMessage,
-  type RecentModel,
   type SignInTarget,
-  type ShelfItem,
   type ThreadChoice,
   type ThreadPicks,
 } from "@hercule/client-core";
@@ -34,12 +32,17 @@ import {
   type ProjectChoice,
   type ThreadStarter,
 } from "@hercule/client-core/inbox";
-import type { InboxThing, SessionSpawnInput, Workspace } from "@hercule/contract";
+import type { Workspace } from "@hercule/contract";
+import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import { useDraftReads } from "../../../app/draft-thread";
 import { pluginsQuery, projectMatchQuery } from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { readRecentModels } from "../../../app/recent-models";
-import type { ThreadStartDraft, ThreadStartDrafts } from "../../../app/thread-start-drafts";
+import type {
+  SentThread,
+  ThreadStartDraft,
+  ThreadStartDrafts,
+} from "../../../app/thread-start-drafts";
 import { buildLook } from "../../../faces";
 import { useComposerImages } from "../../../screens/attachments/use-composer-images";
 import { DraftComposer } from "../../../screens/new-thread/draft-composer";
@@ -63,22 +66,6 @@ const ProviderLoginDialog = lazy(() =>
 
 /** The shelf key of the images a dialog holds, in the pending submissions. */
 export const buildThreadStartImagesKey = (draftKey: string): string => `inbox-thread:${draftKey}`;
-
-/** What one send carries to the controller, and what the screen needs once it answers. */
-export interface SentThread {
-  /** The key of the draft the send was made from. */
-  readonly draftKey: string;
-  readonly input: SessionSpawnInput;
-  /** The new Task's name. */
-  readonly title: string;
-  readonly things: readonly InboxThing[];
-  /** The images the send carries, which leave the shelf once it succeeds. */
-  readonly attachments: readonly ShelfItem[];
-  /** The model the user picked for this send, to remember in Recent once it succeeds, or `null`. */
-  readonly recent: RecentModel | null;
-  /** The line under the Task's name once the thread has started. */
-  readonly summary: string;
-}
 
 /** The thread that started from the dialog, once the controller has answered. */
 export interface StartedThread {
@@ -179,8 +166,14 @@ function ThreadStartForm({
   const queryClient = useQueryClient();
   const [signIn, setSignIn] = useState<SignInTarget | null>(null);
   const inspection = useMutation({
-    mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
-    onSuccess: (current) => {
+    // The scope is read when the user opens the menu and travels with the request, so an answer
+    // that arrives after another account signed in does not write into that account's cache.
+    mutationFn: ({ id, scope }: { id: string; scope: AccountScope }) => {
+      requireSignedIn(scope);
+      return client.workspace.inspect({ params: { id } });
+    },
+    onSuccess: (current, { scope }) => {
+      if (!scope.isCurrent()) return;
       queryClient.setQueryData<readonly Workspace[]>(queryKeys.workspaces(), (records) =>
         records?.map((each) => (each.id === current.id ? current : each)),
       );
@@ -209,10 +202,14 @@ function ThreadStartForm({
       ? { kind: "none-chosen" }
       : draft.chosenProject !== undefined
         ? { kind: "chosen", projectId: draft.chosenProject }
-        : match.data !== undefined
-          ? { kind: "inferred", match: match.data }
-          : match.isError
-            ? { kind: "failed", reason: readReason(match.error) }
+        : match.isError
+          ? // A refresh that failed after an answer leaves the old answer in `data`, which must not
+            // stay sendable. While the retry runs, the lookup is on its way again.
+            match.isFetching
+            ? { kind: "matching" }
+            : { kind: "failed", reason: readReason(match.error) }
+          : match.data !== undefined
+            ? { kind: "inferred", match: match.data }
             : { kind: "matching" };
   const matchedResourceId =
     choice.kind === "inferred" && choice.match.kind === "matched"
@@ -261,8 +258,12 @@ function ThreadStartForm({
   const { blocked } = view.fields;
   // The message is the user's own words or an image: the things are added to it when it is sent.
   const hasMessage = holdsMessageContent({ text: draft.text, attachments: shelf });
+  // An attempt is sent as it was, so what the dialog shows now does not decide whether it can go.
+  const { attempt } = draft;
   const canSend =
-    isProjectPicked && hasMessage && blocked === null && !isStarting && !images.sendBlocked;
+    attempt !== undefined
+      ? !isStarting
+      : isProjectPicked && hasMessage && blocked === null && !isStarting && !images.sendBlocked;
 
   /** Returns the draft as it is now, which a handler reads instead of the render it was made in. */
   const readLatest = (): ThreadStartDraft => drafts.read(draftKey) ?? draft;
@@ -275,7 +276,7 @@ function ThreadStartForm({
     drafts.write(draftKey, {
       ...readLatest(),
       ...patch,
-      dedupKey: undefined,
+      attempt: undefined,
       isEdited: true,
       ...(clearsFailure ? { failure: null } : {}),
     });
@@ -316,6 +317,11 @@ function ThreadStartForm({
 
   const start = (): void => {
     if (started !== null) return;
+    const sentBefore = readLatest().attempt;
+    if (sentBefore !== undefined) {
+      if (!isStarting) onSend(sentBefore);
+      return;
+    }
     // The reason line says the match is on its way, and the send follows the answer.
     if (choice.kind === "matching") return;
     if (!isProjectPicked) {
@@ -334,23 +340,23 @@ function ThreadStartForm({
       setRefusal(prompt.reason);
       return;
     }
-    const dedupKey = current.dedupKey ?? crypto.randomUUID();
-    if (current.dedupKey === undefined) drafts.write(draftKey, { ...current, dedupKey });
     images.clearRefusal();
     const { input } = buildSubmission(view.resolved, { text: prompt.text, attachments: shelf });
-    onSend({
+    const sent: SentThread = {
       draftKey,
       input: {
         ...input,
         newTask: { title, entityIds: current.things.map((thing) => thing.id) },
-        dedupKey,
+        dedupKey: crypto.randomUUID(),
       },
       title,
       things: current.things,
       attachments: shelf,
       recent: buildRecentModel(current.picks, view.resolved),
       summary: describeStartedThread(project?.name, view),
-    });
+    };
+    drafts.write(draftKey, { ...current, attempt: sent });
+    onSend(sent);
   };
   useSendOnMenuCommand(start);
 
@@ -381,7 +387,7 @@ function ThreadStartForm({
     refusal ??
     draft.failure ??
     (inspection.error === null ? null : readErrorMessage(inspection.error)) ??
-    (blocked === null ? null : `Can’t start yet. ${blocked.reason}.`);
+    (attempt !== undefined || blocked === null ? null : `Can’t start yet. ${blocked.reason}.`);
 
   return (
     <>
@@ -443,6 +449,11 @@ function ThreadStartForm({
                           plugins={plugins}
                           onRemove={leaveThingOut}
                         />
+                        {attempt !== undefined && !isStarting ? (
+                          <button type="button" className="thread-dialog-retry" onClick={start}>
+                            Try again
+                          </button>
+                        ) : null}
                         {choice.kind === "failed" ? (
                           <button
                             type="button"
@@ -479,7 +490,9 @@ function ThreadStartForm({
                     onSubmit={start}
                     onOpenWorkspaceMenu={() => {
                       if (inspection.isPending) return;
-                      for (const id of view.workspaceInspectionIds) inspection.mutate(id);
+                      const scope = controller.accountScopes.read();
+                      for (const id of view.workspaceInspectionIds)
+                        inspection.mutate({ id, scope });
                     }}
                   />
                 ),

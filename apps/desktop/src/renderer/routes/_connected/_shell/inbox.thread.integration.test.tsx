@@ -25,7 +25,6 @@ import {
   type Call,
   type Handler,
 } from "../../../app/testing";
-import { buildThreadStartDraft } from "../../../app/thread-start-drafts";
 import {
   BASKET,
   LOYALTY,
@@ -494,21 +493,43 @@ describe("review fixes", () => {
   });
 
   it("reopens a draft whose send was attempted on a thing that now shows as held, and retries with its dedup key", async () => {
-    const held = request(4, "Held by a Task", "Ana", {
-      taskId: "01a1b576-c999-7000-8000-000000000902",
+    const plain = request(4, "Held by a Task", "Ana");
+    let lost = true;
+    const { user, calls, inbox, context } = await open(
+      MATCHED,
+      (list) => {
+        list.lists.waits = [plain];
+      },
+      {
+        [SPAWN]: () => {
+          if (lost) throw new Error("the connection was lost");
+          return { body: STARTED.session };
+        },
+      },
+    );
+    let dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+    await within(dialog).findByText(/was not started as a thread/);
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
-    const { user, calls, context } = await open(MATCHED, (inbox) => {
-      inbox.lists.waits = [held];
+    // The controller made the Task while the reply was lost, so the row now shows as held.
+    lost = false;
+    inbox.lists.waits = [{ ...plain, taskId: "01a1b576-c999-7000-8000-000000000902" }];
+    await context.queryClient.invalidateQueries();
+    await waitFor(() => {
+      expect(readUndoLine()).not.toContain("G goes to its Task");
     });
-    const { threadStarts } = context.controller!.accountScopes.read();
-    threadStarts.write(held.id, { ...buildThreadStartDraft([held]), dedupKey: "attempt-1" });
 
-    const dialog = await openDialog(user);
+    dialog = await openDialog(user);
     await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
     await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
 
     await screen.findByRole("dialog", { name: "Thread started" });
-    expect((callsTo(calls, SPAWN)[0]!.body as { dedupKey: string }).dedupKey).toBe("attempt-1");
+    const [first, second] = callsTo(calls, SPAWN).map((call) => call.body as { dedupKey: string });
+    expect(second!.dedupKey).toBe(first!.dedupKey);
   });
 
   it("keeps a failed draft on close even though nothing was edited", async () => {
@@ -543,5 +564,76 @@ describe("review fixes", () => {
 
     expect(readMessage(dialog)).toBe(OWN_WORDS);
     expect(reads).not.toHaveBeenCalled();
+  });
+
+  it("tries again with the same request and key after a lost reply, when the project is gone", async () => {
+    let lost = true;
+    let match: ProjectMatch = MATCHED;
+    const { user, calls, context } = await open(() => ({ body: match }), undefined, {
+      [SPAWN]: () => {
+        if (lost) throw new Error("the connection was lost");
+        return { body: STARTED.session };
+      },
+    });
+    let dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+    await within(dialog).findByText(/was not started as a thread/);
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    // The controller committed the thread, and the Project has since gone.
+    lost = false;
+    match = { kind: "none" };
+    await context.queryClient.invalidateQueries();
+
+    dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: "Choose a project" });
+    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+
+    await screen.findByRole("dialog", { name: "Thread started" });
+    const [first, second] = callsTo(calls, SPAWN).map((call) => call.body as { dedupKey: string });
+    expect(callsTo(calls, SPAWN)).toHaveLength(2);
+    expect(second).toEqual(first);
+  });
+
+  it("shows a refresh of the match that failed, and does not keep the old project", async () => {
+    let fail = false;
+    const { user, calls, context } = await open(() =>
+      fail ? { status: 500, body: buildErrorBody("internal", "match is down") } : { body: MATCHED },
+    );
+    const dialog = await startWith(user);
+
+    fail = true;
+    await context.queryClient.invalidateQueries();
+
+    await within(dialog).findByRole("button", { name: "Try the lookup again" });
+    expect(dialog.querySelector(".thread-dialog-why")?.textContent).toContain(
+      "Could not look up the project: match is down",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+    expect(callsTo(calls, SPAWN)).toHaveLength(0);
+  });
+
+  it("refuses to send while the Inbox says offline, also when a reconnect is pending", async () => {
+    let hold = false;
+    const { user, calls, context, live } = await open(MATCHED, undefined, {
+      "POST /api/v1/auth/ws-ticket": () =>
+        hold ? new Promise<never>(() => undefined) : { body: { ticket: "ws-ticket" } },
+    });
+    const dialog = await startWith(user);
+    const statuses: string[] = [];
+    context.controller!.live.onStatus((status) => statuses.push(status));
+
+    hold = true;
+    live.drop();
+    await waitFor(() => {
+      expect(statuses.at(-1)).toBe("connecting");
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+
+    await within(dialog).findByText(/You are offline, so that was not done/);
+    expect(callsTo(calls, SPAWN)).toHaveLength(0);
   });
 });

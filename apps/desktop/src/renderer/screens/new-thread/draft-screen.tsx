@@ -29,6 +29,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
+import { requireSignedIn, type AccountScope } from "../../app/account-scope";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { threadAndAgentSessionsQuery } from "../../app/queries";
@@ -126,8 +127,14 @@ export function DraftScreen({
   const { projects, workspaces } = catalogs;
   const { groupRows } = useSessionPresentation();
   const inspection = useMutation({
-    mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
-    onSuccess: (current) => {
+    // The scope is read when the user opens the menu and travels with the request, so an answer
+    // that arrives after another account signed in does not write into that account's cache.
+    mutationFn: ({ id, scope }: { id: string; scope: AccountScope }) => {
+      requireSignedIn(scope);
+      return client.workspace.inspect({ params: { id } });
+    },
+    onSuccess: (current, { scope }) => {
+      if (!scope.isCurrent()) return;
       queryClient.setQueryData<readonly Workspace[]>(queryKeys.workspaces(), (records) =>
         records?.map((each) => (each.id === current.id ? current : each)),
       );
@@ -317,7 +324,8 @@ export function DraftScreen({
             onSubmit={submit}
             onOpenWorkspaceMenu={() => {
               if (inspection.isPending) return;
-              for (const id of view.workspaceInspectionIds) inspection.mutate(id);
+              const scope = controller.accountScopes.read();
+              for (const id of view.workspaceInspectionIds) inspection.mutate({ id, scope });
             }}
           />
           {project === undefined ? null : (

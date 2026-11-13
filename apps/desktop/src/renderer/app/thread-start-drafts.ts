@@ -13,8 +13,28 @@ import {
   writeStarterMessage,
   type ThreadStarter,
 } from "@hercule/client-core/inbox";
-import type { ThreadPicks } from "@hercule/client-core";
-import type { InboxThing } from "@hercule/contract";
+import type { RecentModel, ShelfItem, ThreadPicks } from "@hercule/client-core";
+import type { InboxThing, SessionSpawnInput } from "@hercule/contract";
+
+/**
+ * What one send carries to the controller, and what the screen needs once it
+ * answers. It is built once, when the user sends, and never changed after.
+ */
+export interface SentThread {
+  /** The key of the draft the send was made from. */
+  readonly draftKey: string;
+  /** The request, with the dedup key that makes sending it again safe. */
+  readonly input: SessionSpawnInput;
+  /** The new Task's name. */
+  readonly title: string;
+  readonly things: readonly InboxThing[];
+  /** The images the send carries, which leave the shelf once it succeeds. */
+  readonly attachments: readonly ShelfItem[];
+  /** The model the user picked for this send, to remember in Recent once it succeeds, or `null`. */
+  readonly recent: RecentModel | null;
+  /** The line under the Task's name once the thread has started. */
+  readonly summary: string;
+}
 
 /** What one start-thread dialog holds and has not sent. */
 export interface ThreadStartDraft {
@@ -34,11 +54,14 @@ export interface ThreadStartDraft {
   /** The model, options, access mode and other picks the user made in the composer. */
   readonly picks: ThreadPicks;
   /**
-   * The key that makes a send safe to repeat. It is made on the first send and
-   * kept for the retries of that send. Any change to the draft removes it,
-   * because the controller does not compare a repeat with the first call.
+   * The exact request of the last send, with its dedup key, while that send
+   * failed or its answer is unknown: the controller may have made the thread.
+   * "Try again" sends this request as it is, whatever the project match and
+   * the picks are now, so the controller finds the thread it made. Any change
+   * to the draft removes it, because the controller does not compare a repeat
+   * with the first call.
    */
-  readonly dedupKey: string | undefined;
+  readonly attempt: SentThread | undefined;
   /**
    * Whether the user changed anything: the words, the name, a chip, the
    * project, a pick or an image. A draft the user did not change is not worth
@@ -60,7 +83,7 @@ export const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStar
   starter: DEFAULT_THREAD_STARTER,
   chosenProject: undefined,
   picks: {},
-  dedupKey: undefined,
+  attempt: undefined,
   isEdited: false,
   failure: null,
 });
@@ -72,7 +95,7 @@ export const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStar
  * lost, and only a retry with the same dedup key finds it again.
  */
 export const isWorthKeeping = (draft: ThreadStartDraft): boolean =>
-  draft.isEdited || draft.dedupKey !== undefined || draft.failure !== null;
+  draft.isEdited || draft.attempt !== undefined || draft.failure !== null;
 
 /** The unsent dialogs of one account scope, by `buildThingsDraftKey`. */
 export interface ThreadStartDrafts {

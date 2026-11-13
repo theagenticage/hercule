@@ -160,6 +160,7 @@ export function InboxScreen({
     scope: accountScope,
     visit,
     moves,
+    isOffline: offlineSince !== null,
     onClosed: followMove,
   });
   const openHandMenu = (thing: InboxListRow | null, ref: string): void => {
