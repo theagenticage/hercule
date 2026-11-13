@@ -336,20 +336,32 @@ async function removeFocusFromPage(page: Page): Promise<void> {
  * Each control costs one call into the page (`focusTarget`, which also blurs
  * the control before it) and one small screenshot of the clip around it.
  * Leaves the page with nothing focused.
+ *
+ * Focusing a control can re-render others before their turn: on the Inbox,
+ * focus on a row makes that thing current, and the pane then draws its
+ * controls. A control replaced that way is skipped, not counted, and named on
+ * the output under `label`, because whether it is replaced before its turn
+ * depends on when the page's reads answer.
  */
 async function listTargetsWithoutFocusRing(
   page: Page,
   camera: Camera,
   probe: PageProbe,
   targets: ReadonlyArray<ProbeTarget>,
+  label: string,
 ): Promise<MetricSummary> {
   await removeFocusFromPage(page);
   const unfocused = await camera.capture();
   const missing: MetricElement[] = [];
+  const replacedNames: string[] = [];
   let hasFocusedTarget = false;
   for (const target of targets) {
     if (!target.inWindow) continue;
-    const { focused } = await probe.focusTarget(target.id);
+    const { focused, replaced } = await probe.focusTarget(target.id);
+    if (replaced) {
+      replacedNames.push(target.name);
+      continue;
+    }
     hasFocusedTarget = true;
     let hasRing = false;
     if (focused) {
@@ -360,6 +372,11 @@ async function listTargetsWithoutFocusRing(
     if (!hasRing) missing.push({ element: target.element, contribution: 1 });
   }
   if (hasFocusedTarget) await probe.blurTarget();
+  if (replacedNames.length > 0) {
+    console.log(
+      `${label}: ${String(replacedNames.length)} controls were re-rendered by an earlier control's focus, so their focus ring was not checked: ${replacedNames.join(", ")}`,
+    );
+  }
   return {
     values: { "focus.missing": missing.length },
     elements: missing.length === 0 ? {} : { "focus.missing": rankElements(missing, "sum") },
@@ -561,7 +578,15 @@ export async function measurePage(
   const targets = await probe.collectTargets();
   add(summarizeTargets(targets));
   lap("other");
-  add(await listTargetsWithoutFocusRing(page, camera, probe, targets));
+  add(
+    await listTargetsWithoutFocusRing(
+      page,
+      camera,
+      probe,
+      targets,
+      `${variant.theme}/${variant.screen.name}`,
+    ),
+  );
   lap("focus");
 
   if (variant.screen.name === "thread-long") {
