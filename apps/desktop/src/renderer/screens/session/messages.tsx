@@ -22,13 +22,14 @@ import {
   type Pose,
   type SenderReading,
 } from "@hercule/client-core";
-import type { Attachment } from "@hercule/contract";
+import type { Attachment, PromptContextBlock } from "@hercule/contract";
 import { buildHueStyle, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { CopyIcon } from "../../icons/copy";
 import { SentImages } from "../attachments/sent-images";
 import { useCopyResult } from "../use-copy-result";
 import { Markdown } from "./markdown";
+import { MessageContext } from "./message-context";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
 import { useSessionSkills } from "./use-session-skills";
 import type { AttachOpenParagraph } from "./use-session-live";
@@ -219,6 +220,28 @@ function SkillMessageText({
 }
 
 /**
+ * Checks whether a message's props are the same as before, for `memo`. Props
+ * are compared one by one, except the context block: the transcript reads it
+ * out of the message's text each time it groups its rows again, so it is a new
+ * object every time, and it counts as the same when its text is.
+ */
+export const hasSameMessageProps = <
+  Props extends { readonly context?: PromptContextBlock | undefined },
+>(
+  previous: Props,
+  next: Props,
+): boolean => {
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+    const isSame =
+      key === "context"
+        ? previous.context?.text === next.context?.text
+        : Object.is(previous[key as keyof Props], next[key as keyof Props]);
+    if (!isSame) return false;
+  }
+  return true;
+};
+
+/**
  * Renders a message sent into the session: the images sent with it, then
  * the bubble, as markdown with its line breaks kept, and its time under it,
  * with a button before the time that copies the message (`MessageCopyButton`).
@@ -231,6 +254,9 @@ function SkillMessageText({
  * skills must be given. Any other `$name` stays text.
  * Text taller than 10 lines is collapsed, with a button that shows it in
  * full (`BubbleText`).
+ * `text` is the user's words. When the message carried a `context` block, the
+ * things it names hang under the bubble as live cards, with the block folded
+ * under them (`MessageContext`), and the message is 88% of the column.
  * A message sent with images and no text draws no bubble. A message steered
  * into the running turn reads "Steered" before its time. A message still on
  * its way into the session reads "Sending…" in place of its time.
@@ -246,6 +272,7 @@ function SkillMessageText({
  */
 export const UserMessage = memo(function UserMessage({
   text,
+  context,
   attachments,
   at,
   timezone,
@@ -257,6 +284,7 @@ export const UserMessage = memo(function UserMessage({
   sessionId,
 }: {
   readonly text: string;
+  readonly context?: PromptContextBlock | undefined;
   readonly attachments: readonly Attachment[];
   readonly at: string;
   readonly timezone: string;
@@ -271,7 +299,10 @@ export const UserMessage = memo(function UserMessage({
   const agent = sender === undefined || sender === "loading" ? undefined : sender;
   return (
     <div
-      className={agent === undefined ? "msg--me" : "msg--me msg--agent"}
+      className={
+        (agent === undefined ? "msg--me" : "msg--me msg--agent") +
+        (context === undefined ? "" : " msg--context")
+      }
       style={agent === undefined ? undefined : buildHueStyle(buildSenderLook(agent).hue)}
       role={agent === undefined ? undefined : "group"}
       aria-label={agent === undefined ? undefined : `Message from ${agent.label}`}
@@ -299,6 +330,7 @@ export const UserMessage = memo(function UserMessage({
             </BubbleText>
           </div>
         )}
+        {context === undefined ? null : <MessageContext context={context} />}
         <div className="bubble-meta">
           {text === "" ? null : <MessageCopyButton text={text} />}
           {sending
@@ -312,7 +344,7 @@ export const UserMessage = memo(function UserMessage({
       </div>
     </div>
   );
-});
+}, hasSameMessageProps);
 
 /**
  * Renders the text of a message the agent is still writing: its finished

@@ -7,6 +7,7 @@
  * Nothing here knows a kind by name: a plugin's card draws from its record.
  */
 export * from "./card-face";
+export * from "./context-card";
 export * from "./card-hand-off";
 export * from "./card-wait";
 export * from "./inbox-empty";

@@ -1,6 +1,6 @@
 import { memo, type JSX } from "react";
-import type { Attachment } from "@hercule/contract";
-import { UserMessage } from "../session/messages";
+import type { Attachment, PromptContextBlock } from "@hercule/contract";
+import { hasSameMessageProps, UserMessage } from "../session/messages";
 import { useSenderReading } from "./use-sender-reading";
 
 /**
@@ -17,6 +17,7 @@ import { useSenderReading } from "./use-sender-reading";
 export const AgentSentMessage = memo(function AgentSentMessage({
   senderSessionId,
   text,
+  context,
   attachments,
   at,
   timezone,
@@ -28,6 +29,8 @@ export const AgentSentMessage = memo(function AgentSentMessage({
 }: {
   readonly senderSessionId: string;
   readonly text: string;
+  /** The context block the message carried, as `UserMessage` takes it. */
+  readonly context?: PromptContextBlock | undefined;
   readonly attachments: readonly Attachment[];
   readonly at: string;
   readonly timezone: string;
@@ -43,6 +46,7 @@ export const AgentSentMessage = memo(function AgentSentMessage({
   return (
     <UserMessage
       text={text}
+      context={context}
       attachments={attachments}
       at={at}
       timezone={timezone}
@@ -54,4 +58,4 @@ export const AgentSentMessage = memo(function AgentSentMessage({
       sessionId={sessionId}
     />
   );
-});
+}, hasSameMessageProps);

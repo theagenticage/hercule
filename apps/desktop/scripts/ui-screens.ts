@@ -298,6 +298,19 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".thread-dialog .composer-card",
     nonTextParts: [],
   },
+  // The started thread: the message's words, the things as live cards, and "Context sent with it" folded, then opened.
+  {
+    name: "inbox-dialog-started",
+    path: "inbox.html?state=dialog-started",
+    contentSelector: ".thread-dialog .msg-card",
+    nonTextParts: [],
+  },
+  {
+    name: "inbox-dialog-context",
+    path: "inbox.html?state=dialog-context",
+    contentSelector: ".thread-dialog .msg-ctx-body",
+    nonTextParts: [],
+  },
   {
     name: "settings-appearance",
     path: "settings-appearance.html",

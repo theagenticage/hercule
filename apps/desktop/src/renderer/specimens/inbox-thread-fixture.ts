@@ -5,7 +5,13 @@
  * matches things to it, and the thread that the fake controller starts, with a
  * short transcript.
  */
-import type { ProjectMatch, Resource, SettingsState, Workspace } from "@hercule/contract";
+import {
+  formatPromptContext,
+  type ProjectMatch,
+  type Resource,
+  type SettingsState,
+  type Workspace,
+} from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
 import { DRAFT_PAGE_RECORDS } from "./draft-fixture";
 import type { SidebarRecords, ThreadScreenRecords } from "./shell-page";
@@ -78,10 +84,37 @@ const TURN_ID = "turn-1";
 /** The moment the started thread's turn began, which is the specimen's clock. */
 const TURN_START = SPECIMEN_NOW;
 
-const STEPS: ReadonlyArray<TranscriptStep> = [
+/** What the user wrote in the dialog, before the context block the controller appends. */
+const USER_WORDS =
+  "Look into these 4 and tell me what is going on before you change anything. Say what you think the cause is, how sure you are, and what you would do next.";
+
+/** A thing the started thread's message carries as context, with what the block writes of it. */
+export interface ContextThingSource {
+  readonly id: string;
+  readonly ref: string;
+  readonly title: string;
+  readonly status?: string;
+  /** The place the thing lives in, such as its repository. Written as the block's `Project` field. */
+  readonly place?: string;
+}
+
+/** Returns the steps of the started thread, whose first message is `USER_WORDS` and the context block of `things`. */
+const buildSteps = (things: ReadonlyArray<ContextThingSource>): ReadonlyArray<TranscriptStep> => [
   [0, { _tag: "turn.started", turnId: TURN_ID, model: CLAUDE_OPUS.slug }],
   ...runItem([0, 0], "it-ask", "user_message", {
-    text: "Look into these 4 and tell me what is going on before you change anything. Say what you think the cause is, how sure you are, and what you would do next.",
+    text: `${USER_WORDS}\n\n${formatPromptContext({
+      origin: { kind: "selection" },
+      things: things.map((thing) => ({
+        entityId: thing.id,
+        ref: thing.ref,
+        title: thing.title,
+        ...(thing.status === undefined ? {} : { status: thing.status }),
+        fields:
+          thing.place === undefined
+            ? []
+            : [{ key: "project", type: "text", label: "project", value: thing.place }],
+      })),
+    })}`,
   }),
   ...runTool([2, 3], "it-read-1", "command_execution", "Bash", {
     command: "hercule entity read ent_shop142",
@@ -101,36 +134,41 @@ const STEPS: ReadonlyArray<TranscriptStep> = [
   ),
 ];
 
-const started: ThreadScreenRecords = replaceWithWireIds({
-  session: buildSpecimenSession({
-    id: SESSION_ID,
-    title: "Show the delivery cost before the payment step",
-    projectId: "p-webshop",
-    status: "busy",
-    minutesAgo: 0,
-    model: CLAUDE_OPUS,
-    modelSelection: { model: CLAUDE_OPUS.slug, options: { effort: "medium" } },
-    requestedAccessMode: "auto-accept-edits",
-    accessMode: "auto-accept-edits",
-  }),
-  transcript: STEPS.map(([seconds, body], index) => {
-    const at = new Date(TURN_START + seconds * 1000).toISOString();
-    return {
-      position: index + 1,
-      at,
-      event: { ...body, eventId: `event-${String(index + 1)}`, sessionId: SESSION_ID, at },
-    };
-  }),
-  queuedInputs: [],
-});
+const buildStarted = (things: ReadonlyArray<ContextThingSource>): ThreadScreenRecords => {
+  const steps = buildSteps(things);
+  return replaceWithWireIds({
+    session: buildSpecimenSession({
+      id: SESSION_ID,
+      title: "Show the delivery cost before the payment step",
+      projectId: "p-webshop",
+      status: "busy",
+      minutesAgo: 0,
+      model: CLAUDE_OPUS,
+      modelSelection: { model: CLAUDE_OPUS.slug, options: { effort: "medium" } },
+      requestedAccessMode: "auto-accept-edits",
+      accessMode: "auto-accept-edits",
+    }),
+    transcript: steps.map(([seconds, body], index) => {
+      const at = new Date(TURN_START + seconds * 1000).toISOString();
+      return {
+        position: index + 1,
+        at,
+        event: { ...body, eventId: `event-${String(index + 1)}`, sessionId: SESSION_ID, at },
+      };
+    }),
+    queuedInputs: [],
+  });
+};
 
 /**
  * Returns the thread-start records for the specimen. The fake controller
  * matches every set of things that holds a pull request to webshop, by that
- * pull request, and every other set to nothing.
+ * pull request, and every other set to nothing. The started thread's first
+ * message carries `contextThings` as its context block.
  */
 export const buildThreadStartRecords = (
   pullRequests: ReadonlyArray<{ readonly id: string; readonly identifier: string }>,
+  contextThings: ReadonlyArray<ContextThingSource>,
 ): ThreadStartRecords => ({
   matchProject: (ids) => {
     const thing = pullRequests.find((each) => ids.includes(each.id));
@@ -150,5 +188,5 @@ export const buildThreadStartRecords = (
     "thread.accessMode": "auto-accept-edits",
     "thread.workspace": "ephemeral",
   },
-  started,
+  started: buildStarted(contextThings),
 });
