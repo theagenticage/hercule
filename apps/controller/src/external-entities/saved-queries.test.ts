@@ -5,7 +5,12 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { RegisteredSavedQuery } from "../plugins";
-import { CORE_SAVED_QUERIES, listSavedQueries, findSavedQuery } from "./saved-queries";
+import {
+  CORE_SAVED_QUERIES,
+  findSavedQuery,
+  listQuerySignalKinds,
+  listSavedQueries,
+} from "./saved-queries";
 
 const REVIEW_REQUESTS: RegisteredSavedQuery = {
   id: "github/review-requests",
@@ -69,5 +74,22 @@ describe("findSavedQuery", () => {
 
     expect(error.error.message).toContain('unknown saved query "github/review-requests"');
     expect(JSON.stringify(error.error.details)).toContain("waits, mine, updates");
+  });
+});
+
+describe("listQuerySignalKinds", () => {
+  it("returns the kinds of the signal clauses, without repeats, and none for a query with no such clause", () => {
+    expect(listQuerySignalKinds(REVIEW_REQUESTS)).toEqual(["github/review-requested"]);
+    expect(
+      listQuerySignalKinds({
+        ...REVIEW_REQUESTS,
+        clauses: [
+          { key: "signal", op: "is", value: ["github/a", "github/b"] },
+          { key: "signal", op: "is", value: "github/a" },
+          { key: "asks", op: "is", value: true },
+        ],
+      }),
+    ).toEqual(["github/a", "github/b"]);
+    expect(listQuerySignalKinds(CORE_SAVED_QUERIES[0]!)).toEqual([]);
   });
 });

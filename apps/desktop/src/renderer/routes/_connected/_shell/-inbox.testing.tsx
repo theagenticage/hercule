@@ -56,10 +56,10 @@ export const BASKET = request(3, "Fix the basket rounding", "Tessa");
 
 export const OUTLINE: InboxOutline = buildInboxOutline({
   savedQueries: [
-    { id: "waits", name: "Someone waits on me", order: "waiting", count: 3 },
-    { id: "mine", name: "Mine", order: "newest", count: 1 },
-    { id: "updates", name: "Updates", order: "newest", count: 2 },
-    { id: "everything", name: "Everything", order: "newest", count: 6 },
+    { id: "waits", name: "Someone waits on me", order: "waiting", signalKinds: [], count: 3 },
+    { id: "mine", name: "Mine", order: "newest", signalKinds: [], count: 1 },
+    { id: "updates", name: "Updates", order: "newest", signalKinds: [], count: 2 },
+    { id: "everything", name: "Everything", order: "newest", signalKinds: [], count: 6 },
   ],
   fields: [{ key: "team", label: "Team", type: "text" }],
 });

@@ -362,6 +362,28 @@ const buildReviewActions = (
   ];
 };
 
+/** The totals of a pull request that a `change` block shows. */
+interface ChangeTotals {
+  readonly from: string;
+  readonly to: string;
+  readonly files: number;
+  readonly additions: number;
+  readonly deletions: number;
+  readonly commits: number;
+  readonly checks?: { readonly passed: number; readonly failed: number; readonly pending: number };
+}
+
+/**
+ * Returns a `change` block for a pull request, branch names cut to the
+ * block's limit. Signals and the Inbox pane's blocks build it the same way.
+ */
+export const buildChangeBlock = (change: ChangeTotals) => ({
+  type: "change" as const,
+  ...change,
+  from: cutText(change.from, MAX_BLOCK_NAME_LENGTH),
+  to: cutText(change.to, MAX_BLOCK_NAME_LENGTH),
+});
+
 /**
  * Builds the signal of a review request: the pull request's title, who
  * asked, a `change` block with the pull request's totals, then a `messages`
@@ -391,15 +413,14 @@ export const buildReviewRequestSignal = (
       ...(event.author === null ? {} : { asker: event.author }),
       place: buildItemPlace(item),
       blocks: [
-        {
-          type: "change",
-          from: cutText(pull.head.ref, MAX_BLOCK_NAME_LENGTH),
-          to: cutText(pull.base.ref, MAX_BLOCK_NAME_LENGTH),
+        buildChangeBlock({
+          from: pull.head.ref,
+          to: pull.base.ref,
           files: pull.changed_files,
           additions: pull.additions,
           deletions: pull.deletions,
           commits: pull.commits,
-        },
+        }),
         ...buildDescriptionBlocks(pull),
       ],
       actions: buildReviewActions(item),
@@ -802,11 +823,19 @@ const readFailedCheckLog = (
     return cutCheckLog(failures.join("\n")) ?? reported();
   });
 
+/** What a checks block needs to know of one check: its name, whether it finished, and where to read it. */
+export interface CheckToShow {
+  readonly name: string;
+  /** `completed` once the check has finished, any other word while it has not. */
+  readonly status: string;
+  readonly html_url: string | null;
+}
+
 /**
  * Returns one row of a checks block. A check that has not completed is
  * pending, and every other row is a failed check.
  */
-const buildCheckRow = (run: ListedCheckRun, log: string | undefined) => {
+const buildCheckRow = (run: CheckToShow, log: string | undefined) => {
   const url = run.html_url;
   return {
     name: cutText(run.name, MAX_BLOCK_NAME_LENGTH),
@@ -815,6 +844,31 @@ const buildCheckRow = (run: ListedCheckRun, log: string | undefined) => {
       ? { url }
       : {}),
     ...(log === undefined ? {} : { log }),
+  };
+};
+
+/**
+ * Returns a `checks` block: the failed checks and then the pending ones, at
+ * most `MAX_CHECK_ROWS` (`omitted` counts the rest, and `unlisted` ones the
+ * caller did not list), and how many passed.
+ * `readLog` gives the end of what a check reported, when it is known.
+ */
+export const buildChecksBlock = <C extends CheckToShow>(
+  checks: {
+    readonly failed: ReadonlyArray<C>;
+    readonly pending: ReadonlyArray<C>;
+    readonly passed: number;
+    /** How many more failed or pending checks exist than `failed` and `pending` list. */
+    readonly unlisted?: number;
+  },
+  readLog: (check: C) => string | undefined,
+) => {
+  const rows = [...checks.failed, ...checks.pending].slice(0, MAX_CHECK_ROWS);
+  return {
+    type: "checks" as const,
+    rows: rows.map((run) => buildCheckRow(run, readLog(run))),
+    passed: checks.passed,
+    omitted: checks.failed.length + checks.pending.length - rows.length + (checks.unlisted ?? 0),
   };
 };
 
@@ -846,7 +900,6 @@ export const buildChecksFailedSignal = (
     );
     const failed = runs.filter((run) => isFailedConclusion(run.conclusion));
     const pending = runs.filter((run) => run.status !== "completed");
-    const rows = [...failed, ...pending].slice(0, MAX_CHECK_ROWS);
     const logs = new Map(
       yield* Effect.forEach(
         failed.slice(0, MAX_LOGGED_CHECKS),
@@ -861,12 +914,14 @@ export const buildChecksFailedSignal = (
       ...(app === undefined ? {} : { asker: app }),
       place,
       blocks: [
-        {
-          type: "checks",
-          rows: rows.map((run) => buildCheckRow(run, logs.get(run.id))),
-          passed: runs.filter((run) => isPassingConclusion(run.conclusion)).length,
-          omitted: failed.length + pending.length - rows.length,
-        },
+        buildChecksBlock(
+          {
+            failed,
+            pending,
+            passed: runs.filter((run) => isPassingConclusion(run.conclusion)).length,
+          },
+          (run) => logs.get(run.id),
+        ),
       ],
       actions: [
         {

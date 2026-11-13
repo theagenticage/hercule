@@ -5,8 +5,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
-import { PluginError, type EntityRecognition } from "@hercule/plugin-host";
-import { recognizeLinearIssues, resolveIssue, searchIssues } from "./entity-lookup";
+import { AuthError, PluginError, type EntityRecognition } from "@hercule/plugin-host";
+import {
+  readIssueBlocks,
+  recognizeLinearIssues,
+  resolveIssue,
+  searchIssues,
+} from "./entity-lookup";
 import {
   buildFakeIssue,
   buildFakeLinear,
@@ -279,6 +284,109 @@ describe("resolving a recognition", () => {
     const fake = buildFakeLinear(buildFakeWorld([]));
 
     const result = await runAgainstStub(resolveIssue(TEST_API_KEY, scoped("12")), fake);
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(PluginError);
+    expect(fake.requests).toEqual([]);
+  });
+});
+
+describe("reading the blocks of an issue", () => {
+  const issueRef = `linear:issue:${TEST_ORGANIZATION.id}/issue-12`;
+
+  it("returns the facts the kind does not declare, then the description, in one request", async () => {
+    const fake = buildFakeLinear(
+      buildFakeWorld([
+        buildFakeIssue(12, {
+          dueDate: "2026-11-21",
+          estimate: 3,
+          labels: {
+            nodes: [
+              { id: "l1", name: "Bug" },
+              { id: "l2", name: "Checkout" },
+            ],
+          },
+        }),
+      ]),
+    );
+
+    const result = await runAgainstStub(readIssueBlocks(TEST_API_KEY, issueRef), fake);
+
+    // The creator's name is not what this test is about, only that the row is there.
+    const anyText: unknown = expect.any(String);
+    expect(result).toEqual(
+      Result.succeed([
+        {
+          type: "fields",
+          rows: [
+            { label: "Labels", value: "Bug, Checkout" },
+            { label: "Due", value: "2026-11-21" },
+            { label: "Estimate", value: "3" },
+            { label: "Creator", value: anyText },
+          ],
+        },
+        {
+          type: "text",
+          title: "Description",
+          markdown: "Pressing the button logs a TypeError and the order is not placed.",
+        },
+      ]),
+    );
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it("leaves out the blocks an issue has nothing for", async () => {
+    const fake = buildFakeLinear(
+      buildFakeWorld([buildFakeIssue(12, { description: null, creator: null })]),
+    );
+
+    const result = await runAgainstStub(readIssueBlocks(TEST_API_KEY, issueRef), fake);
+
+    expect(result).toEqual(Result.succeed([]));
+  });
+
+  it("cuts a description that is too long and says it was cut", async () => {
+    const fake = buildFakeLinear(
+      buildFakeWorld([buildFakeIssue(12, { description: "x".repeat(20_000), creator: null })]),
+    );
+
+    const result = await runAgainstStub(readIssueBlocks(TEST_API_KEY, issueRef), fake);
+
+    const markdown = Result.isSuccess(result) ? String(result.success[0]?.["markdown"]) : "";
+    expect(markdown.length).toBeLessThan(17_000);
+    expect(markdown).toContain("The description is cut here");
+  });
+
+  it("fails with an AuthError when Linear refuses the credential", async () => {
+    const fake = buildFakeLinear(buildFakeWorld([buildFakeIssue(12)]));
+
+    const result = await runAgainstStub(readIssueBlocks("wrong-key", issueRef), fake);
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AuthError);
+  });
+
+  it("fails with a PluginError for an issue Linear does not return, or one of another workspace", async () => {
+    const fake = buildFakeLinear(buildFakeWorld([buildFakeIssue(12)]));
+
+    const missing = await runAgainstStub(
+      readIssueBlocks(TEST_API_KEY, `linear:issue:${TEST_ORGANIZATION.id}/issue-99`),
+      fake,
+    );
+    const elsewhere = await runAgainstStub(
+      readIssueBlocks(TEST_API_KEY, "linear:issue:org-globex/issue-12"),
+      fake,
+    );
+
+    expect(Result.isFailure(missing) && missing.failure).toBeInstanceOf(PluginError);
+    expect(Result.isFailure(elsewhere) && elsewhere.failure).toBeInstanceOf(PluginError);
+  });
+
+  it("fails with a PluginError for a ref that is not an issue's, sending nothing", async () => {
+    const fake = buildFakeLinear(buildFakeWorld([]));
+
+    const result = await runAgainstStub(
+      readIssueBlocks(TEST_API_KEY, `linear:team:${TEST_ORGANIZATION.id}/team-eng`),
+      fake,
+    );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(PluginError);
     expect(fake.requests).toEqual([]);

@@ -364,6 +364,7 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("search", ({ query }) => withApiErrors(entities.search(query)))
       .handle("listSuggestions", ({ query }) => withApiErrors(entities.listSuggestions(query)))
       .handle("read", ({ params }) => withApiErrors(entities.read(params.id)))
+      .handle("readBlocks", ({ params }) => withApiErrors(entities.readBlocks(params.id)))
       .handle("takeOn", ({ params }) => withApiErrors(entities.takeOn(params.id)))
       .handle("undoTakeOn", ({ params, payload }) =>
         withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),

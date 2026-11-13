@@ -13,15 +13,18 @@ import type { ThreadSignal, ThreadSignalLines } from "../signals";
 import { parseReasonTemplates, renderSentence } from "./sentences";
 
 /**
- * Builds the line of one signal: its fields, and the sentence it says
- * (`buildSignalSay`).
+ * Builds the line of one signal: its fields, the sentence it says
+ * (`buildSignalSay`), and whether its kind asks the user (`askingKinds` is
+ * the result of `listAskingKinds`).
  */
 const buildSignalLine = (
   signal: ThreadSignal,
   reasonTemplates: string | null,
+  askingKinds: ReadonlyArray<string>,
 ): EntitySignalLine => ({
   ...signal,
   say: buildSignalSay(signal, reasonTemplates),
+  asks: askingKinds.includes(signal.kind),
 });
 
 /**
@@ -56,8 +59,9 @@ export const buildSignalSay = (
 export const buildDetailSignalFields = (
   found: ThreadSignalLines,
   reasonTemplates: string | null,
+  askingKinds: ReadonlyArray<string>,
 ): Pick<ExternalEntityDetail, "signals" | "openCount" | "signalCount"> => ({
-  signals: found.signals.map((signal) => buildSignalLine(signal, reasonTemplates)),
+  signals: found.signals.map((signal) => buildSignalLine(signal, reasonTemplates, askingKinds)),
   openCount: found.openCount,
   signalCount: found.signalCount,
 });

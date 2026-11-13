@@ -81,7 +81,7 @@ import {
   type SortTuple,
   type SqlValue,
 } from "./inbox-relation";
-import { findSavedQuery, listSavedQueries } from "./saved-queries";
+import { findSavedQuery, listQuerySignalKinds, listSavedQueries } from "./saved-queries";
 import { buildSignalSay } from "./signal-lines";
 import { buildWorkflowOfferTarget, makeEntityRowReads } from "./entity-reads";
 import { makeWorkflowOfferReads } from "./workflow-offer-reads";
@@ -522,6 +522,8 @@ const readSourceCounts = (
 interface PageRow {
   readonly ref: string;
   readonly task_id: Uint8Array | null;
+  /** The active Task's title, read in the page statement. Null when `task_id` is. */
+  readonly task_title: string | null;
   readonly oldest_ask: string | null;
   readonly upd: string;
   readonly grp: number;
@@ -696,7 +698,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           askKinds: found[0] === undefined ? [] : (JSON.parse(found[0].kinds) as Array<string>),
           openKinds: openKinds.get(page.ref) ?? [],
           ...(page.oldest_ask === null ? {} : { waitingSince: page.oldest_ask }),
-          ...(taskId === undefined ? {} : { taskId }),
+          ...(taskId === undefined ? {} : { taskId, taskTitle: page.task_title! }),
           takenOn: taken.has(page.ref),
           liveWorkflows: taskId === undefined ? [] : (liveWorkflows.get(taskId) ?? []),
           ...(row.dismissed_at === null ? {} : { dismissedAt: row.dismissed_at }),
@@ -747,11 +749,18 @@ export const externalEntityInbox = Effect.gen(function* () {
       const where = buildKeyset(list.order, tuple);
       const rows = yield* runStatement<PageRow>(
         sql,
+        // The inner select sorts and cuts the page first, so the Task title is
+        // looked up for the few rows of the page, not for every matched thing.
         `WITH ${matched.sql}
-         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
-           ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
-         FROM matched m WHERE ${where.sql}
-         ORDER BY ${ORDER_BY[list.order]} LIMIT ?`,
+         SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
+                m.oldest_ask, m.upd, m.grp${tuple === undefined ? ", m.total" : ""}
+         FROM (
+           SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+             ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
+           FROM matched m WHERE ${where.sql}
+           ORDER BY ${ORDER_BY[list.order]} LIMIT ?
+         ) m
+         ORDER BY ${ORDER_BY[list.order]}`,
         [...matched.params, ...where.params, MAX_INBOX_PAGE + 1],
       );
       const pageRows = rows.slice(0, MAX_INBOX_PAGE);
@@ -814,8 +823,13 @@ export const externalEntityInbox = Effect.gen(function* () {
       const rows = yield* runStatement<PageRow>(
         sql,
         `WITH ${matched.sql}
-         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
-         FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
+         SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
+                m.oldest_ask, m.upd, m.grp
+         FROM (
+           SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+           FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?
+         ) m
+         ORDER BY ${ORDER_BY[selection.list.order]}`,
         [...matched.params, MAX_INBOX_HELD_REFS],
       );
       return yield* hydrate(environment, rows);
@@ -1050,6 +1064,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           name: query.name,
           order: query.order,
           ...(query.source === undefined ? {} : { source: query.source }),
+          signalKinds: listQuerySignalKinds(query),
           count: readCountColumn(index),
         })),
         sources: sourceIds.map((source) => {

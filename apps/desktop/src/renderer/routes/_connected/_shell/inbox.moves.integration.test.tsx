@@ -82,9 +82,37 @@ const open = async (
 ) => {
   const inbox = defaultInbox();
   change(inbox);
-  const opened = await openInbox(inbox, handlers);
+  let isUnreachable = false;
+  const opened = await openInbox(inbox, {
+    [DISMISS]: (call) => {
+      // As the controller does: a dismissed thing is gone from every later read. A fake that kept
+      // listing it would make the app show it again as an arrival, and a test that waits for the
+      // empty list would pass or fail by the order of two reads.
+      const dismissed = new Set((call.body as { ids: readonly string[] }).ids);
+      for (const [name, things] of Object.entries(inbox.lists)) {
+        inbox.lists[name] = things.filter((thing) => !dismissed.has(thing.id));
+      }
+      return { body: {} };
+    },
+    ...handlers,
+    "POST /api/v1/auth/ws-ticket": () =>
+      isUnreachable
+        ? { status: 503, body: buildErrorBody("unavailable", "The controller is down.") }
+        : { body: { ticket: "ws-ticket" } },
+  });
   await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
-  return { ...opened, inbox, user: userEvent.setup() };
+  /**
+   * Drops the live connection and keeps the controller unreachable. Without
+   * that, the app reconnects after about a second and a slow machine can lose
+   * the offline state before the test has looked at it.
+   */
+  const dropConnection = (): void => {
+    isUnreachable = true;
+    act(() => {
+      opened.live.drop();
+    });
+  };
+  return { ...opened, inbox, dropConnection, user: userEvent.setup() };
 };
 
 describe("walking and selecting", () => {
@@ -240,12 +268,9 @@ describe("Dismiss", () => {
   });
 
   it("moves the focus to the empty state's heading when the last thing leaves", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
 
     await user.keyboard("e");
 
@@ -320,21 +345,21 @@ describe("Dismiss", () => {
 });
 
 describe("the last thing leaving", () => {
-  it("plays the sunrise for the user's own move, and draws it still when the Inbox opens empty", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+  it("plays the sunrise for the user's own move", async () => {
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
     expect(document.querySelector(".ib-em")).toBeNull();
 
     await user.keyboard("e");
 
     await screen.findByRole("heading", { name: /Nobody waits on you|All clear/ });
     expect(document.querySelector(".ib-em--rises")).not.toBeNull();
-    cleanup();
+  });
 
+  // Its own test, not a second app opened after the first one: the first app's live connection
+  // stays alive until the test ends, and would still be reading from the second app's fake.
+  it("draws the sunrise still when the Inbox opens empty", async () => {
     const empty = defaultInbox();
     empty.lists.waits = [];
     await openInbox(empty);
@@ -344,12 +369,9 @@ describe("the last thing leaving", () => {
   });
 
   it("says what waits behind the new pill, instead of drawing nothing, and the focus goes to it", async () => {
-    const { user, live, inbox } = await open(
-      (fake) => {
-        fake.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user, live, inbox } = await open((fake) => {
+      fake.lists.waits = [SLOTS];
+    });
     await waitFor(() => {
       expect(live.readTopics()).toContain("externalEntity");
     });
@@ -492,16 +514,14 @@ describe("the hand-off", () => {
   });
 
   it("refuses a hand-off picked from an open menu when the connection was lost meanwhile", async () => {
-    const { user, live, calls } = await open(handable, {
+    const { user, live, calls, dropConnection } = await open(handable, {
       [handOffPath(LOYALTY.id)]: { body: { runId: RUN_ID, taskId: TASK_ID } },
     });
     await live.waitForFirstPushes();
     await user.keyboard("j");
     await user.keyboard("h");
     await screen.findByRole("menuitem", { name: /Repair the build/, hidden: true });
-    act(() => {
-      live.drop();
-    });
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("2");
@@ -526,22 +546,15 @@ describe("the hand-off", () => {
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
-  it("refuses a selection of several things from the pane's workflow rows, as H does", async () => {
+  it("offers no hand-off in the pane of a selection of several things, only Dismiss", async () => {
     const { user, calls } = await open(handable);
     await user.keyboard("x");
     await user.keyboard("j");
     await user.keyboard("x");
 
-    const row = await within(document.getElementById("inbox-pane")!).findByRole("button", {
-      name: /Review PR/,
-    });
-    // A pane that has just opened takes no pointer for a moment.
-    await waitFor(() => {
-      expect(document.querySelector("[data-arming]")).toBeNull();
-    });
-    await user.click(row);
-
-    await waitForUndoLine("Hand-off takes one thing at a time.");
+    const pane = document.getElementById("inbox-pane")!;
+    expect(await within(pane).findByRole("button", { name: "Dismiss all 2" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /Hand to/ })).toBeNull();
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
@@ -677,11 +690,11 @@ describe("Go to its Task, Open at its source and the keys sheet", () => {
 
 describe("offline", () => {
   it("refuses every move with the reason and sends nothing", async () => {
-    const { user, live, calls } = await open(undefined, { [DISMISS]: { body: {} } });
-    await live.waitForFirstPushes();
-    act(() => {
-      live.drop();
+    const { user, live, calls, dropConnection } = await open(undefined, {
+      [DISMISS]: { body: {} },
     });
+    await live.waitForFirstPushes();
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("e");

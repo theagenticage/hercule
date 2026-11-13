@@ -1387,6 +1387,7 @@ const make = Effect.gen(function* () {
           ...buildDetailSignalFields(
             yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS, environment.now),
             row.reason_templates as string | null,
+            environment.askingKinds,
           ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
@@ -1398,6 +1399,20 @@ const make = Effect.gen(function* () {
           actingConnections: offers.actingConnections.get(row.ref) ?? [],
         });
       }),
+
+    /**
+     * Returns the ids of the Connections that observed `ref`, the ones that
+     * could read it first. Used to ask the likeliest account first when a
+     * thing is read at its source.
+     */
+    listObservingConnectionIds: (ref: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly connection_id: Uint8Array }>`
+          SELECT connection_id FROM external_entity_observations
+          WHERE ref = ${ref}
+          ORDER BY (access = 'ok') DESC, connection_id`,
+        (rows) => rows.map((row) => uuidToString(row.connection_id)),
+      ),
 
     /**
      * Returns the facts a Task's summary reads (`LinkedEntityFacts`) for each

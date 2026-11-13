@@ -145,9 +145,12 @@ export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
  * - `blocker-cycle`: the write would make Tasks wait on each other in a loop
  *   (a blocker added, or two Tasks merged). The message names the path. A
  *   client shows the message as it is and never matches its text.
+ * - `source-unreadable`: the system the thing lives in could not be read, or
+ *   answered something this contract does not accept. Trying again later may
+ *   work. The message is safe to show.
  */
 export const InvalidStateDetails = Schema.Struct({
-  reason: Schema.Literals(["request-closed", "blocker-cycle"]),
+  reason: Schema.Literals(["request-closed", "blocker-cycle", "source-unreadable"]),
 });
 
 export type InvalidStateDetails = Schema.Schema.Type<typeof InvalidStateDetails>;

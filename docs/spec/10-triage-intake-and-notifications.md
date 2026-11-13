@@ -627,6 +627,8 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 - A failed operation leaves the signal open with the error shown, and the user may retry or pick another answer.
 - `signal.act` refuses `actionId: "done"`: Done goes through `signal.markDone`.
 
+*(Amended 2026-11-13, [#1123](https://github.com/theagenticage/hercule/issues/1123).)* The desktop Inbox holds an answer that runs a plugin action for eight seconds before it calls `signal.act`, so the user can take it back with Undo ([./17-desktop-app.md](./17-desktop-app.md#answering-a-signal-from-the-pane)). `signal.act` itself is unchanged and runs at once. The hold belongs to the client.
+
 **A typed reply.** An action may carry `field?: { name, placeholder }`. `name` is one top-level text field of the operation's input (`body` on `github/issue.comment`), empty until the click. `signal.act`'s `text` fills it in; the core decodes the input again and runs it. The describe line leaves the text out, and the text box beside it shows the text in full. `field` exists on Signals only: `notification.create` refuses it. *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* Only a plugin action takes a `field` in v1: a core operation usable as `signal.answer` (`task.create`, `task.update`, `run.start`, `signal.handOff`) has no input a reply belongs in, so `signal.raise` refuses `field` on one with `validation`.
 
 **The suggested action.** A signal has at most one `primary` action. `build` or the `signal.raise` caller may mark one of its own. The actions the core adds are never primary, with two exceptions: Accept on a proposal and Ignore on the core's Ignore Rule offer. When nobody marks one, nothing is suggested.
@@ -670,11 +672,11 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 A signal's body is `blocks: Block[]`, filled by the producer (a kind's `build`, or the `signal.raise` caller) and drawn by each app in its own way. A plugin never ships markup. Notifications keep their markdown `body` (Section 7.1).
 
 ```ts
-type Block = Text | Messages | Change | Checks | { type: string };   // the open last member: see below
+type Block = Text | Messages | Change | Checks | Fields | Trend | Code | { type: string };   // the open last member: see below
 
 interface Person { name: string; handle?: string; avatarUrl?: string }   // initials when there is no avatar
 
-interface Text { type: "text"; markdown: string }                     // at most 32 KB
+interface Text { type: "text"; title?: string; markdown: string }     // title at most 80 characters; markdown at most 32 KB
 
 interface Messages {
   type: "messages";
@@ -707,14 +709,34 @@ interface Checks {           // failed and pending checks are rows; passing ones
   passed: number;
   omitted: number;
 }
+
+interface Fields {           // a few labelled facts, as rows (added 2026-11-12, #1123)
+  type: "fields";
+  title?: string;            // at most 80 characters
+  rows: { label: string; value: string }[];   // 1 to 12 rows; label at most 40 characters, value at most 200
+}
+
+interface Trend {            // a series over time, drawn as a small line (added 2026-11-12, #1123)
+  type: "trend";
+  caption: string;           // at most 80 characters
+  points: { at: string; value: number }[];    // 2 to 90 points, oldest first; value is finite and not below 0
+}
+
+interface Code {             // a piece of code or a log, as plain text (added 2026-11-12, #1123)
+  type: "code";
+  title?: string;            // at most 80 characters
+  text: string;              // at most 8 KB and 60 lines
+  truncated?: true;          // the producer cut the text
+}
 ```
 
 - **A snapshot.** Blocks never change after the signal is written. They are drawn in the order of the array; the producer picks the order.
 - **Limits.** At most 8 blocks per signal. The producer does the cutting and records what it left out (`omitted`, `truncated`). The schema refuses anything over a limit, so a plugin bug fails loudly as a build failure (Section 9.4) and nothing is cut silently.
 - **Growing the palette.** `Block` is a union tagged on `type`, with an open last member `{ type: string }`. An app that meets a type it does not know draws nothing or one plain line, and the rest of the signal still decodes. A field added to an existing block is always optional; no field is removed or renamed.
-- **Named for later, with no schema yet:** `when` (the hours around an event, and any clash), `count` (one big number and what it counts), `fields` (a few facts in a row).
+- **Named for later, with no schema yet:** `when` (the hours around an event, and any clash), `count` (one big number and what it counts).
+- *(Added 2026-11-12, [#1123](https://github.com/theagenticage/hercule/issues/1123).)* **`fields`, `trend` and `code`** are one union with the others, so a signal may carry them too. A known type that fails its schema is refused, never read as unknown. A plugin also serves them for an External Entity when the Inbox pane opens ([./20-external-entities.md](./20-external-entities.md#83-reading)); those are read from the source then and never stored.
 - **Not blocks.** Two parts are worked out each time the signal is read and drawn in a fixed spot outside the blocks: **Your work** (the Tasks whose refs match the signal's thread) and **Sources** (the signal's events). For a signal triage raised, a line under Your work such as "Triage at 11:00 added 38 events to this task" is worked out from the Task's provenance entries written by runs of the workflow `intake.triageWorkflowId` names. None of these is stored. *(Amended 2026-10-21, [#802](https://github.com/theagenticage/hercule/issues/802).)* The controller works out Your work with `signal.queryYourWork` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)): the active Task of the thread ref of an open signal, on To do or snoozed (the oldest live Task that links the ref, so one signal shows on one Task only; *(Amended 2026-11-07, [#1033](https://github.com/theagenticage/hercule/issues/1033).)*), each Task once, with the ids of the open signals it belongs to. It does this on every read and stores nothing. The desktop app reads it with that operation and matches each Task to the To do signals it holds, by intersecting those ids with its cached To do list ([./17-desktop-app.md](./17-desktop-app.md#tracking)). So To do alone decides which signals show Your work: a signal on Later or Done has none in the desktop app, and a snooze that runs out needs no new read of Your work. The reply holds no description and no provenance. The app reads again when a signal or a Task changes.
-- **As text.** Agents read blocks as JSON through `signal.read`. The CLI turns them into text with one function in `@hercule/client-core`.
+- **As text.** Agents read blocks as JSON through `signal.read`. The CLI turns them into text with one function in `@hercule/client-core`. *(Amended 2026-11-12, [#1123](https://github.com/theagenticage/hercule/issues/1123).)* A `fields` block prints as its title and a `label: value` line per row, a `trend` as its caption and an `at: value` line per point, and a `code` as its title and its text indented by four spaces.
 - **Images.** Markdown images and `Person.avatarUrl` load inline, only for the open signal. *(Amended 2026-10-16, [#714](https://github.com/theagenticage/hercule/issues/714).)* An `<img>` inside the markdown (bots such as Cypress write them) is the same image, with the same address check and the same https-only rule, and keeps its whole-number `width` and `height`. Both apps' CSP allows `img-src https:` for this, a relaxation recorded with its costs in [Content from untrusted sources: images, tracking and the CSP (#503)](https://github.com/theagenticage/hercule/issues/503).
 
 Which blocks each v1 plugin kind fills is in [./08-events-and-connections.md](./08-events-and-connections.md#51-github-plugin) section 5.1, [section 5.2](./08-events-and-connections.md#52-gmail-plugin), [section 5.6](./08-events-and-connections.md#56-sentry-plugin) and [section 5.7](./08-events-and-connections.md#57-linear-plugin). The core kinds carry a `text` block, and a `signal.raise` caller may add any other block.

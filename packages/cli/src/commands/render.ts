@@ -59,6 +59,7 @@ import {
   type WikiPage,
   type WikiPageWithRevisions,
   type Notification,
+  type EntityBlocks,
   type NotificationAction,
   type OpenRequest,
   type OperationId,
@@ -1497,6 +1498,10 @@ const VALUE_RENDERERS: Partial<
   "notification.act": (value) =>
     renderNotificationDecided(value as Notification & { readonly resolution: Resolution }),
   "signal.read": (value) => renderSignal(value as Signal),
+  "externalEntity.readBlocks": (value) => {
+    const { blocks } = value as EntityBlocks;
+    return blocks.length === 0 ? ["no blocks"] : formatBlocksAsText(blocks).split("\n");
+  },
   "signal.raise": (value) => renderSignalRaised(value as SignalRaiseResult),
   "signal.act": (value) => renderSignalResolved(value as ResolvedSignal),
   "signal.handOff": (value) => renderSignalHandedOff(value as ResolvedSignal),

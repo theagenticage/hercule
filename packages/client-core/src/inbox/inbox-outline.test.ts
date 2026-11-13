@@ -10,8 +10,15 @@ describe("describeInboxRail", () => {
   it("gives the core's lists their icons and the first seven their digit, and a plugin's list its mark", () => {
     const counts = buildInboxOutline({
       savedQueries: [
-        { id: "waits", name: "Someone waits on me", order: "waiting", count: 3 },
-        { id: "linear/cycle", name: "This cycle", order: "newest", source: "linear", count: 1 },
+        { id: "waits", name: "Someone waits on me", order: "waiting", signalKinds: [], count: 3 },
+        {
+          id: "linear/cycle",
+          name: "This cycle",
+          order: "newest",
+          source: "linear",
+          signalKinds: [],
+          count: 1,
+        },
       ],
     });
     const { savedQueries } = describeInboxRail(counts, PLUGINS, time);
@@ -70,7 +77,9 @@ describe("describeInboxRail", () => {
 
 describe("nameInboxScope", () => {
   const counts = buildInboxOutline({
-    savedQueries: [{ id: "waits", name: "Someone waits on me", order: "waiting", count: 3 }],
+    savedQueries: [
+      { id: "waits", name: "Someone waits on me", order: "waiting", signalKinds: [], count: 3 },
+    ],
     pins: [{ source: "linear", key: "team", value: "t1", label: "Checkout (pinned)", count: 2 }],
     sources: [
       {

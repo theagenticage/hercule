@@ -1,183 +1,207 @@
-import { useState, type JSX } from "react";
-import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useImperativeHandle, useReducer, useRef, type JSX, type Ref } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
+import { namePlugin, type HerculeClient } from "@hercule/client-core";
 import {
-  buildInitials,
-  namePlugin,
-  readErrorMessage,
-  type HerculeClient,
-} from "@hercule/client-core";
-import {
-  buildOpenTimeline,
-  decideOpenCard,
-  describeTimelineOverflow,
+  NO_PANE_ASK_CHOICE,
+  describeInboxRow,
   findAccountLabel,
-  findFirstOpenLine,
-  type CardOffers,
+  reducePaneAskChoice,
+  readThingPlace,
+  type InboxRowView,
 } from "@hercule/client-core/inbox";
-import type { InboxThing, WorkflowOffer } from "@hercule/contract";
-import { entityQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
-import { OpenCardBody } from "../../../screens/inbox/open-card-body";
-import { OpenCardHandRows } from "../../../screens/inbox/open-card-hand";
-import { OpenCardLine } from "../../../screens/inbox/open-card-line";
-import { OpenCardTimeline } from "../../../screens/inbox/open-card-timeline";
+import type { InboxOrder } from "@hercule/contract";
+import type { AccountScope } from "../../../app/account-scope";
+import { inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
-import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
-import { useOpenCardClock } from "../../../screens/inbox/use-open-card-clock";
+import {
+  InboxSelectionHead,
+  InboxSelectionPane,
+} from "../../../screens/inbox/inbox-selection-pane";
+import type { InboxAnswers } from "./-inbox-answers";
+import { useInboxNow } from "./-inbox-clock";
+import type { InboxPaneAsksHandle } from "./-inbox-pane-asks";
+import { InboxPaneThingPart, type InboxPaneMoves } from "./-inbox-pane-thing-part";
+import type { InboxListRow } from "./-inbox-visit";
 
-/** The moves of the open thing, which the screen decides what to do with. */
-export interface InboxPaneMoves {
-  readonly onTakeOn: () => void;
-  readonly onDismiss: () => void;
-  readonly onGoToTask: (taskId: string) => void;
-  /** Shows the open thing's group on Intake, where its other open asks are. */
-  readonly onSeeInIntake: () => void;
-  /** Hands the open thing to `offer`, as `connectionId` or the account the controller picks. */
-  readonly onHandOff: (offer: WorkflowOffer, connectionId: string | undefined) => void;
-  readonly onClose: () => void;
+export type { InboxPaneMoves };
+
+/** What the keys ask of the pane. */
+export interface InboxPaneHandle extends InboxPaneAsksHandle {
+  /** Scrolls the pane down by a page, or up with `back`. */
+  readonly scrollPage: (back: boolean) => void;
+  /** Returns the pane's hand-off button, where the hand menu anchors, or `null` when the pane has none. */
+  readonly findHandAnchor: () => HTMLElement | null;
 }
 
 /**
- * Renders the line at the start of the pane's head for `thing`: its source,
- * its kind and its identifier, and the account when the source has several.
+ * Renders the line at the start of the pane's head: for one thing, its source,
+ * its kind and its place (left out when it has none), and the account when the source has several; for a
+ * selection, which sources the selected things come from.
  */
 export function InboxPaneHeadPart({
   client,
   thing,
+  selection,
 }: {
   readonly client: HerculeClient;
-  readonly thing: InboxThing;
+  readonly thing: InboxListRow;
+  /** The selected things when the pane shows a selection, else `null`. */
+  readonly selection: ReadonlyArray<InboxListRow> | null;
 }): JSX.Element {
   const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const now = useInboxNow([thing]);
+  if (selection !== null) {
+    const sourceNames = [...new Set(selection.map((row) => namePlugin(row.source, plugins)))];
+    return <InboxSelectionHead sourceNames={sourceNames} />;
+  }
   const account = findAccountLabel(
     outline.sources.find((source) => source.source === thing.source)?.accounts ?? [],
     thing.accounts,
   );
+  const place = readThingPlace(thing, now);
   return (
     <InboxPaneHead
       pluginId={thing.source}
       plugins={plugins}
-      parts={[namePlugin(thing.source, plugins), thing.noun, thing.identifier]}
+      parts={[
+        namePlugin(thing.source, plugins),
+        thing.noun,
+        ...(place === undefined ? [] : [place]),
+      ]}
       account={account}
     />
   );
 }
 
 /**
- * Renders the body of the pane for `thing`: today's open-card body, read with
- * `externalEntity.read`, until the pane's own content replaces it. It shows
- * quiet shapes while the first read is on its way, and says why when it fails.
- * With `isActive` false (the pane lies over the list and is closed) nothing is
- * read, so stepping through the list reads no thing the user does not see. What
- * was read stays cached for the next time the pane shows it.
- *
- * Stepping to another thing keeps this component mounted: the body of the
- * thing before stays drawn, inert and marked busy, until the read of the new
- * thing answers, and then the same elements show the new one. Drawing the
- * quiet shapes and the whole body again on every step would cost two renders
- * of the pane a step. The open line and the chosen account start over for each
- * thing.
- *
- * Orchestrating: it owns the read and the choice of the open line.
+ * Renders the pane of a selection: each selected thing as a row and Dismiss for
+ * all of them. Orchestrating: it describes the rows with the user's name and
+ * the time they show.
  */
-export function InboxPanePart({
+function InboxSelectionPart({
   client,
-  thing,
-  offers,
-  moves,
-  isActive,
+  members,
+  order,
+  scrollRef,
+  onWalk,
+  onDismiss,
 }: {
   readonly client: HerculeClient;
-  readonly thing: InboxThing;
-  /** The workflows the open thing can be handed to, which the pane's moves list. */
-  readonly offers: CardOffers;
-  readonly moves: InboxPaneMoves;
-  readonly isActive: boolean;
+  readonly members: ReadonlyArray<InboxListRow>;
+  readonly order: InboxOrder;
+  readonly scrollRef: Ref<HTMLDivElement>;
+  readonly onWalk: (ref: string) => void;
+  readonly onDismiss: () => void;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const detail = useQuery({
-    ...entityQuery(client, thing.id),
-    enabled: isActive,
-    placeholderData: keepPreviousData,
-  });
-  const record = detail.data;
-  // True while `record` is the thing before's, kept drawn until this thing's read answers.
-  const isStale = detail.isPlaceholderData;
-  const lines = record === undefined ? [] : buildOpenTimeline(record, []);
-  const now = useOpenCardClock(record, lines);
-  // The card opens its first open line by itself, once it has one.
-  const [chosenConnectionId, setChosenConnectionId] = useState<string | undefined>(undefined);
-  const [chosenLine, setChosenLine] = useState<string | null | undefined>(undefined);
-  const [choicesAreOf, setChoicesAreOf] = useState<string | undefined>(undefined);
-  if (record !== undefined && !isStale && choicesAreOf !== thing.id) {
-    setChoicesAreOf(thing.id);
-    setChosenConnectionId(undefined);
-    setChosenLine(findFirstOpenLine(record.signals));
-  }
-
-  if (record === undefined) {
-    return detail.isError ? (
-      <p className="open-card-trust">
-        {`This thing could not be read. ${readErrorMessage(detail.error)}`}
-      </p>
-    ) : (
-      <InboxPaneSkeleton />
-    );
-  }
-  const words = decideOpenCard(record, record, record.kindAvailable, now);
-  const timeline =
-    lines.length === 0 ? null : (
-      <OpenCardTimeline
-        lines={lines}
-        overflow={describeTimelineOverflow(record)}
-        now={now}
-        plugins={plugins}
-        openLineId={chosenLine ?? undefined}
-        onToggleLine={(signalId) => {
-          setChosenLine((current) => (current === signalId ? null : signalId));
-        }}
-        onSeeInIntake={moves.onSeeInIntake}
-        answers={(signalId) => (
-          <OpenCardLine
-            key={signalId}
-            client={client}
-            signalId={signalId}
-            platform={bridge.platform}
-          />
-        )}
-      />
-    );
+  const now = useInboxNow(members);
+  const views: InboxRowView[] = members.map((row) =>
+    describeInboxRow(row, { order, now, userName: username, offers: row.offers }),
+  );
   return (
-    <div className="open-card" aria-busy={isStale ? "true" : undefined} inert={isStale}>
-      <OpenCardBody
-        sheetKey={thing.id}
-        url={record.url}
-        words={words}
-        plugins={plugins}
-        userMonogram={buildInitials(username)}
-        timeline={timeline}
-        linked={null}
-        hand={
-          <OpenCardHandRows
-            offers={offers}
-            openKinds={thing.openKinds}
-            actingConnections={thing.actingConnections}
-            chosenConnectionId={chosenConnectionId}
-            onChooseConnection={setChosenConnectionId}
-            onHand={(workflowId) => {
-              const offer = offers.available.find((each) => each.workflowId === workflowId);
-              if (offer !== undefined) moves.onHandOff(offer, chosenConnectionId);
-            }}
-          />
-        }
-        onClose={moves.onClose}
-        onTake={moves.onTakeOn}
-        onDismiss={moves.onDismiss}
-        onSeeTask={moves.onGoToTask}
+    <InboxSelectionPane
+      members={views}
+      plugins={plugins}
+      platform={bridge.platform}
+      ref={scrollRef}
+      onWalk={onWalk}
+      onDismiss={onDismiss}
+    />
+  );
+}
+
+/**
+ * Renders the body of the pane: the pane of the selection when `selection`
+ * holds things, else the pane of the current `thing`.
+ *
+ * It keeps what the user chose in the pane for as long as the screen lives
+ * (`reducePaneAskChoice`): the ask unfolded last for each thing, so walking
+ * away and back finds it as it was left, and the reply box that is open.
+ * `ref` receives the handle the keys use.
+ *
+ * Orchestrating: it owns that client state.
+ */
+export function InboxPanePart({
+  client,
+  scope,
+  thing,
+  selection,
+  order,
+  isActive,
+  isHandMenuOpen,
+  savedQueryKinds,
+  answers,
+  moves,
+  ref,
+  onWalk,
+  onDismissSelection,
+}: {
+  readonly client: HerculeClient;
+  readonly scope: AccountScope;
+  readonly thing: InboxListRow;
+  readonly selection: ReadonlyArray<InboxListRow> | null;
+  readonly order: InboxOrder;
+  readonly isActive: boolean;
+  readonly isHandMenuOpen: boolean;
+  /** The signal kinds of the saved query the user is on: the ask of such a kind is unfolded first. */
+  readonly savedQueryKinds: readonly string[];
+  readonly answers: InboxAnswers;
+  readonly moves: InboxPaneMoves;
+  readonly ref: Ref<InboxPaneHandle>;
+  readonly onWalk: (ref: string) => void;
+  readonly onDismissSelection: () => void;
+}): JSX.Element {
+  const [choice, dispatchAskMove] = useReducer(reducePaneAskChoice, NO_PANE_ASK_CHOICE);
+  const asksRef = useRef<InboxPaneAsksHandle>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const handAnchorRef = useRef<HTMLButtonElement>(null);
+  useImperativeHandle(ref, () => ({
+    answerCurrentAsk: () => {
+      asksRef.current?.answerCurrentAsk();
+    },
+    stepAsk: (by) => {
+      asksRef.current?.stepAsk(by);
+    },
+    scrollPage: (back) => {
+      const scroller = scrollRef.current;
+      if (scroller === null) return;
+      const page = scroller.clientHeight * 0.9;
+      scroller.scrollBy({ top: back ? -page : page });
+    },
+    findHandAnchor: () => handAnchorRef.current,
+  }));
+
+  if (selection !== null) {
+    return (
+      <InboxSelectionPart
+        client={client}
+        members={selection}
+        order={order}
+        scrollRef={scrollRef}
+        onWalk={onWalk}
+        onDismiss={onDismissSelection}
       />
-    </div>
+    );
+  }
+  return (
+    <InboxPaneThingPart
+      client={client}
+      scope={scope}
+      thing={thing}
+      isActive={isActive}
+      isHandMenuOpen={isHandMenuOpen}
+      savedQueryKinds={savedQueryKinds}
+      choice={choice}
+      answers={answers}
+      moves={moves}
+      asksRef={asksRef}
+      scrollRef={scrollRef}
+      handAnchorRef={handAnchorRef}
+      dispatchAskMove={dispatchAskMove}
+    />
   );
 }

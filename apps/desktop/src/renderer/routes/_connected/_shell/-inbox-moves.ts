@@ -49,6 +49,7 @@ import {
   buildCachedEndedCardMover,
   type CardMover,
 } from "../../../app/card-mover";
+import type { AnswerLine } from "../../../app/held-signal-answers";
 import { readReason } from "../../../app/read-reason";
 import type { Gesture, UndoAnswer } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
@@ -121,6 +122,15 @@ export interface InboxMoves {
   readonly openAtSource: () => void;
   /** Says `text` on the undo line, with no Undo. */
   readonly say: (text: string) => void;
+  /**
+   * Puts `gesture` on the undo stack and says `text` on the undo line with
+   * Undo. Returns a function that takes the gesture off the stack again.
+   */
+  readonly sayWithUndo: (text: string, gesture: Gesture<CardMover>) => () => void;
+  /** Changes the undo line while it shows `gesture`. See `UndoLineControls.restate`. */
+  readonly restate: AnswerLine["restate"];
+  /** Tells the screen what is current after the caller changed the list with `visit`, so the focus follows. */
+  readonly tellMoved: () => void;
   /** What the undo line shows. */
   readonly line: UndoLineState;
   /** Tells the line whether the pointer or the focus is on it, which keeps it from hiding. */
@@ -166,7 +176,7 @@ export const useInboxMoves = ({
   // The things whose hand-off the controller has not answered, so a second H waits for the first.
   const handing = useRef(new Set<string>());
 
-  const { line, say, hold, undo } = useUndoLine(undoStack, () => ({
+  const { line, say, withdraw, restate, hold, undo } = useUndoLine(undoStack, () => ({
     putCardBack: buildCachedCardMover(client, queryClient),
     putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
   }));
@@ -449,6 +459,15 @@ export const useInboxMoves = ({
     say: (text) => {
       say(text);
     },
+    sayWithUndo: (text, gesture) => {
+      undoStack.reserve(gesture, Promise.resolve(true));
+      say(text, gesture);
+      return () => {
+        withdraw(gesture);
+      };
+    },
+    restate,
+    tellMoved,
     line,
     holdLine: hold,
     undoLastMove: undo,

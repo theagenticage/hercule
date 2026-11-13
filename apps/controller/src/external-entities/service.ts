@@ -19,12 +19,19 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createConflictError,
   createInvalidStateError,
   createNotFoundError,
+  EntityBlocks,
+  formatIssue,
+  listDecodeIssues,
+  truncateMessage,
+  KnownBlock,
+  MAX_ENTITY_BLOCKS,
   MAX_ENTITY_SEARCH_RESULTS,
   MAX_ENTITY_ANCESTORS,
   MAX_ENTITY_SUGGESTIONS,
@@ -99,6 +106,20 @@ import {
   type PruneResult,
   type TaskableEntity,
 } from "./repository";
+
+/**
+ * Decodes the drafts a plugin read as blocks of a type the contract knows, so
+ * a misspelled type is a plugin error and not a block the app cannot draw.
+ * `EntityBlocks` itself accepts any type, because a newer controller may send
+ * blocks an older app does not know.
+ */
+const decodeKnownEntityBlocks = Schema.decodeUnknownEffect(
+  Schema.Struct({ blocks: Schema.Array(KnownBlock).check(Schema.isMaxLength(MAX_ENTITY_BLOCKS)) }),
+);
+
+/** The message of the error `readBlocks` fails with. It names no plugin and no credential. */
+const SOURCE_UNREADABLE_MESSAGE =
+  "The source could not be read right now. Try again later, or open the thing at its source.";
 
 /** Builds the reply of `search` from how the search ended. */
 const buildSearchReply = (
@@ -758,6 +779,56 @@ const make = Effect.gen(function* () {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),
           onSome: Effect.succeed,
         });
+      }),
+
+    /**
+     * Reads, from the source, the blocks the Inbox pane draws for one entity,
+     * at most 8, and returns them in order. They are read when asked and never
+     * stored. Needs the grants `task.read` and `signal.query`, because blocks
+     * are body parts like a signal's. Fails with `NotFound` for an unknown id,
+     * a partial record or a place, as `read` does.
+     *
+     * Answers no blocks when the plugin of the entity's kind is not active or
+     * offers none. Fails with `InvalidState` (reason `source-unreadable`)
+     * when no Connection could read the source, or the plugin answered
+     * blocks of a type the contract does not know. The message is the same safe
+     * sentence for every cause; the cause goes to the controller's log.
+     */
+    readBlocks: (
+      id: string,
+    ): Effect.Effect<
+      EntityBlocks,
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
+        const record = yield* readTaskableEntityOrFail(id);
+        if (!record.isWorkRecord)
+          return yield* Effect.fail(createNotFoundError("no such external entity"));
+        const owner = (yield* readCatalog).kinds.get(record.kind);
+        if (owner === undefined) return { blocks: [] };
+        const unreadable = createInvalidStateError(SOURCE_UNREADABLE_MESSAGE, {
+          reason: "source-unreadable",
+        });
+        const outcome = yield* lookups.readBlocks(
+          owner.pluginId,
+          record.ref,
+          yield* entities.listObservingConnectionIds(record.ref),
+        );
+        if ("unreadable" in outcome) {
+          yield* Effect.logWarning(`No Connection could read the blocks of ${record.ref}.`);
+          return yield* Effect.fail(unreadable);
+        }
+        return yield* Effect.catch(decodeKnownEntityBlocks({ blocks: outcome.blocks }), (error) =>
+          Effect.andThen(
+            // Only where the value failed (path and message), never the value itself.
+            Effect.logWarning(
+              `The plugin ${owner.pluginId} returned blocks for ${record.ref} that the contract does not accept: ${truncateMessage(listDecodeIssues(error).map(formatIssue).join("; "))}`,
+            ),
+            Effect.fail(unreadable),
+          ),
+        );
       }),
 
     /**
