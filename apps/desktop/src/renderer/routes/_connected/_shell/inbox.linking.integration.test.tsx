@@ -57,6 +57,7 @@ const GROUP_PATH = `${BASE}/inbox/group`;
 const TAKE_ON_TOGETHER = `${BASE}/take-on`;
 const UNDO_TAKE_ON_TOGETHER = `${BASE}/take-on/undo`;
 const TASK_ID = "01a1b576-c999-7000-8000-000000000902";
+const RECORD_ID = "01a1b576-c999-7000-8000-000000000903";
 
 /** Makes the Inbox's frame report `width`, so a width under 760 stacks the pane over the list. */
 const stubFrameWidth = (width: number): void => {
@@ -162,17 +163,17 @@ describe("Return on an open group in a window too narrow for the pane beside the
 
 describe("dropping a row on another", () => {
   it("links the line dropped on with the thing carried, in that order", async () => {
-    const { calls } = await openGrouped({ [LINK]: { body: { created: true } } });
+    const { calls } = await openGrouped({ [LINK]: { body: { created: [BASKET.ref] } } });
 
     dropOn(findLine(BASKET.ref), findHead());
 
     await waitForUndoLine("Linked");
     expect(callsTo(calls, LINK)).toHaveLength(1);
-    expect(callsTo(calls, LINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRef: BASKET.ref });
+    expect(callsTo(calls, LINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRefs: [BASKET.ref] });
   });
 
   it("refuses a drop on the head of the carried member's own group, and says why", async () => {
-    const { user, calls } = await openGrouped({ [LINK]: { body: { created: true } } });
+    const { user, calls } = await openGrouped({ [LINK]: { body: { created: [BASKET.ref] } } });
     await user.keyboard("{ArrowRight}");
 
     dropOn(findLine(LOYALTY.ref), findHead());
@@ -182,7 +183,7 @@ describe("dropping a row on another", () => {
   });
 
   it("refuses a drop on another member of the carried member's own group", async () => {
-    const { user, calls } = await openGrouped({ [LINK]: { body: { created: true } } });
+    const { user, calls } = await openGrouped({ [LINK]: { body: { created: [BASKET.ref] } } });
     await user.keyboard("{ArrowRight}");
 
     dropOn(findLine(LOYALTY.ref), findLine(SLOTS.ref));
@@ -192,7 +193,7 @@ describe("dropping a row on another", () => {
   });
 
   it("refuses offline and sends nothing", async () => {
-    const { live, calls } = await openGrouped({ [LINK]: { body: { created: true } } });
+    const { live, calls } = await openGrouped({ [LINK]: { body: { created: [BASKET.ref] } } });
     act(() => {
       live.drop();
     });
@@ -208,22 +209,22 @@ describe("dropping a row on another", () => {
 describe("Unlink in the pane of a group", () => {
   it("removes the pair the user linked, and Undo links it again", async () => {
     const { user, calls } = await openGrouped({
-      [UNLINK]: { body: { removed: true } },
-      [LINK]: { body: { created: true } },
+      [UNLINK]: { body: { results: [{ toRef: LOYALTY.ref, removed: true }] } },
+      [LINK]: { body: { created: [LOYALTY.ref] } },
     });
     const pane = document.getElementById("inbox-pane")!;
 
     await user.click(await within(pane).findByRole("button", { name: /^Unlink / }));
 
     await waitForUndoLine("Unlinked");
-    expect(callsTo(calls, UNLINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRef: LOYALTY.ref });
+    expect(callsTo(calls, UNLINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRefs: [LOYALTY.ref] });
     // The line names the two ends, which the pair knows without another read.
     expect(document.querySelector(".ib .undo-line")?.textContent ?? "").toMatch(/ and /);
 
     await pressUndo(user);
 
     await waitForUndoLine("Linked again.");
-    expect(callsTo(calls, LINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRef: LOYALTY.ref });
+    expect(callsTo(calls, LINK)[0]?.body).toEqual({ fromRef: SLOTS.ref, toRefs: [LOYALTY.ref] });
   });
 });
 
@@ -232,9 +233,9 @@ describe("T on a group whose Task exists", () => {
     const result = {
       taskId: TASK_ID,
       created: false,
-      added: [LOYALTY.id],
-      taken: [SLOTS.id, LOYALTY.id],
-      takenAt: "2026-11-13T10:00:00.000Z",
+      recordId: RECORD_ID,
+      added: 1,
+      taken: 2,
     };
     const { user, calls } = await openGrouped({
       [TAKE_ON_TOGETHER]: { body: result },
@@ -248,7 +249,7 @@ describe("T on a group whose Task exists", () => {
     await waitFor(() => {
       expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)).toHaveLength(1);
     });
-    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual(result);
+    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual({ recordId: RECORD_ID });
   });
 });
 
@@ -275,17 +276,12 @@ describe("a group of more than 1,000 things", () => {
   });
 });
 
-describe("L on a selection when one link fails", () => {
-  it("says the link did not save, and Undo unlinks only the pair that was written", async () => {
-    let answered = 0;
+describe("L on a selection when the link fails", () => {
+  it("says the link did not save, offers no Undo, and unlinks nothing", async () => {
     const inbox = defaultInbox();
     const { user, calls } = await (async () => {
       const opened = await openInbox(inbox, {
-        [LINK]: () =>
-          (answered += 1) === 1
-            ? { body: { created: true } }
-            : { status: 500, body: buildErrorBody("internal", "The database is locked.") },
-        [UNLINK]: { body: { removed: true } },
+        [LINK]: { status: 500, body: buildErrorBody("internal", "The database is locked.") },
       });
       await screen.findByRole("treeitem", { name: new RegExp(SLOTS.title) });
       return { ...opened, user: userEvent.setup() };
@@ -299,11 +295,13 @@ describe("L on a selection when one link fails", () => {
     await user.keyboard("l");
 
     await waitForUndoLine("The link did not save: The database is locked");
-    await pressUndo(user);
-    await waitForUndoLine("Unlinked.");
-    expect(callsTo(calls, UNLINK).map((call) => call.body)).toEqual([
-      { fromRef: SLOTS.ref, toRef: LOYALTY.ref },
-    ]);
+    expect(callsTo(calls, LINK)).toHaveLength(1);
+    expect(
+      within(document.querySelector<HTMLElement>(".ib .undo-line")!).queryByRole("button", {
+        name: /Undo/,
+      }),
+    ).toBeNull();
+    expect(callsTo(calls, UNLINK)).toHaveLength(0);
   });
 });
 
@@ -341,9 +339,9 @@ describe("a click on a group's head", () => {
         body: {
           taskId: TASK_ID,
           created: true,
-          added: [SLOTS.id, LOYALTY.id],
-          taken: [SLOTS.id, LOYALTY.id],
-          takenAt: "2026-11-13T10:00:00.000Z",
+          recordId: RECORD_ID,
+          added: 2,
+          taken: 2,
         },
       },
     });

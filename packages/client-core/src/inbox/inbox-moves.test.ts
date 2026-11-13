@@ -444,8 +444,8 @@ describe("the undo line for linking, groups and take on together", () => {
   });
 
   it("says whether a take on together made the Task or joined one, with the title last", () => {
-    const made = { created: true, added: ["a", "b"], taken: ["a", "b"] };
-    const joined = { created: false, added: ["b"], taken: ["a", "b"] };
+    const made = { created: true, added: 2, taken: 2 };
+    const joined = { created: false, added: 1, taken: 2 };
     expect(describeInboxTakeOnTogether("Checkout is slow", made)).toEqual({
       text: "Took on, a Task on Work",
       title: "Checkout is slow",
@@ -456,12 +456,12 @@ describe("the undo line for linking, groups and take on together", () => {
   });
 
   it("says a take on together that changed nothing is on its Task already, with nothing to undo", () => {
-    const nothing = { created: false, added: [], taken: [] };
+    const nothing = { created: false, added: 0, taken: 0 };
     expect(didTakeOnTogetherChange(nothing)).toBe(false);
     expect(describeInboxTakeOnTogether("Checkout is slow", nothing).text).toBe(
       "Already on its Task on Work, so nothing changed",
     );
-    expect(didTakeOnTogetherChange({ ...nothing, taken: ["a"] })).toBe(true);
+    expect(didTakeOnTogetherChange({ ...nothing, taken: 1 })).toBe(true);
   });
 });
 

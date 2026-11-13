@@ -60,7 +60,7 @@ import {
   type InboxMovePlans,
   type MoveReceipt,
 } from "@hercule/client-core/inbox";
-import type { WorkflowOffer } from "@hercule/contract";
+import type { EntityLinkInput, WorkflowOffer } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import {
   buildCachedCardMover,
@@ -96,58 +96,6 @@ const useMoveRequest = <Variables, Result>(
       return send(variables);
     },
   });
-
-/** The two ends of a link, as `link` and `unlink` take them. */
-interface LinkPair {
-  readonly fromRef: string;
-  readonly toRef: string;
-}
-
-/** What linking some pairs did: the pairs whose link this call wrote, and the failure that stopped it, if any. */
-interface LinkOutcome {
-  readonly created: readonly LinkPair[];
-  readonly failure?: unknown;
-}
-
-/**
- * Links `pairs` one after the other and returns the pairs this call wrote
- * (the controller answers `created: false` for a pair the user had already
- * linked). It stops at the first failure and returns it with what was written
- * until then, so the caller can still offer to undo that.
- */
-const linkEveryPair = async (
-  client: HerculeClient,
-  pairs: readonly LinkPair[],
-): Promise<LinkOutcome> => {
-  const created: LinkPair[] = [];
-  for (const pair of pairs) {
-    try {
-      const result = await client.externalEntity.link({ payload: pair });
-      if (result.created) created.push(pair);
-    } catch (failure) {
-      return { created, failure };
-    }
-  }
-  return { created };
-};
-
-/**
- * Unlinks `pairs` one after the other. It stops at the first failure and
- * returns it, or returns `undefined` when every pair is unlinked.
- */
-const unlinkEveryPair = async (
-  client: HerculeClient,
-  pairs: readonly LinkPair[],
-): Promise<Error | undefined> => {
-  for (const pair of pairs) {
-    try {
-      await client.externalEntity.unlink({ payload: pair });
-    } catch (failure) {
-      return failure instanceof Error ? failure : new Error(readReason(failure));
-    }
-  }
-  return undefined;
-};
 
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
 
@@ -276,9 +224,6 @@ export const useInboxMoves = ({
   const dismissRequest = useMoveRequest(scope, (ids: readonly string[]) =>
     client.externalEntity.dismiss({ payload: { ids: [...ids] } }),
   );
-  const takeOnRequest = useMoveRequest(scope, (id: string) =>
-    client.externalEntity.takeOn({ params: { id } }),
-  );
   const handOffRequest = useMoveRequest(
     scope,
     ({
@@ -295,17 +240,14 @@ export const useInboxMoves = ({
         payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
       }),
   );
-  const takeOnTogetherRequest = useMoveRequest(
-    scope,
-    (input: { readonly ids: string[]; readonly title: string }) =>
-      client.externalEntity.takeOnTogether({ payload: input }),
+  const linkRequest = useMoveRequest(scope, (input: EntityLinkInput) =>
+    client.externalEntity.link({ payload: input }),
   );
-  const linkRequest = useMoveRequest(scope, (pairs: readonly LinkPair[]) =>
-    linkEveryPair(client, pairs),
+  const unlinkRequest = useMoveRequest(scope, (input: EntityLinkInput) =>
+    client.externalEntity.unlink({ payload: input }),
   );
-  const unlinkRequest = useMoveRequest(scope, (pair: LinkPair) =>
-    client.externalEntity.unlink({ payload: pair }),
-  );
+  // Take on has no request of its own: `takeOnExecutor` is given what to send, and sends it in this line.
+  const sendInLine = useMoveRequest(scope, (send: () => Promise<unknown>) => send());
   // The reversals wait in the same line as the moves, so none overtakes another.
   const reverseMove = useMoveRequest(scope, (reverse: () => Promise<UndoAnswer | undefined>) =>
     reverse(),
@@ -373,63 +315,76 @@ export const useInboxMoves = ({
   };
 
   /**
-   * Takes the things of a group or of a selection of several on as one Task.
-   * The undo takes back what the call wrote, and is offered only when the
-   * call wrote something: a Task, a link to it or a taken mark.
+   * Runs one Take on, for a single thing or for several as one Task. The
+   * caller has decided what to send and what to say; this does the part both
+   * share: the rows move at once, the request goes out in the line, the gesture
+   * takes its place on the undo stack, and a failure puts the rows back.
+   *
+   * - `send` makes the request and `reverse` takes it back; `reverse` returns
+   *   the words of the undo line and fails when the Task was touched since.
+   * - `didChange` tells whether the call wrote anything an undo can take back.
+   * - `words` and `failureText` build the lines; `taskId` is the Task the line
+   *   offers to open.
    */
-  const takeOnTogether = (
-    together: Extract<InboxMovePlans<InboxListRow>["takeOn"], { kind: "takeOnTogether" }>,
-  ): void => {
-    const receipt = visit.move("taken", together.refs);
+  const runTakeOn = <Result extends { readonly taskId: string }>({
+    refs,
+    send,
+    didChange,
+    reverse,
+    gestureWords,
+    words,
+    failureText,
+  }: {
+    readonly refs: readonly string[];
+    readonly send: () => Promise<Result>;
+    readonly didChange: (result: Result) => boolean;
+    readonly reverse: (result: Result) => Promise<string>;
+    readonly gestureWords: InboxLineWords;
+    readonly words: (result: Result) => InboxLineWords;
+    readonly failureText: (reason: string) => string;
+  }): void => {
+    const receipt = visit.move("taken", refs);
     tellMoved();
-    const request = takeOnTogetherRequest.mutateAsync({
-      ids: [...together.ids],
-      title: together.title,
-    });
+    const request = sendInLine.mutateAsync(send) as Promise<Result>;
+    // A call that wrote nothing (it failed, or the things already had their Task) has nothing to put back.
     const wasChanged = request.then(
       (result) => {
         visit.confirmMove(receipt);
-        return didTakeOnTogetherChange(result);
+        return didChange(result);
       },
       () => false,
     );
     const gesture: Gesture<CardMover> = {
-      words: joinGestureWords(
-        describeInboxTakeOnTogether(together.title, { created: true, added: [], taken: [] }),
-      ),
+      words: joinGestureWords(gestureWords),
       undo: () =>
         reverseMove.mutateAsync(async () => {
           if (!(await wasChanged)) throw new Error(NOT_SAVED);
           const result = await request;
           requireSignedIn(scope);
-          const outcome = await client.externalEntity.undoTakeOnTogether({ payload: result });
-          // The Task was touched since, so it stays and the line says why.
-          if (!outcome.undone) {
-            throw new Error(outcome.reason ?? "The Task has changed since you made it.");
-          }
+          const text = await reverse(result);
           if (!isCurrent()) return undefined;
           visit.undo(receipt);
           tellMoved();
-          return { text: describeInboxTakeOnTogetherUndone(result.created) };
+          return { text };
         }),
     };
     undoStack.reserve(gesture, wasChanged);
     request.then(
       async (result) => {
         if (!isCurrent()) return;
-        const words = describeInboxTakeOnTogether(together.title, result);
+        const line = words(result);
         say(
-          words.text,
+          line.text,
           (await wasChanged) ? gesture : undefined,
           { label: "Go to the Task", act: () => latest.current.openTask(result.taskId) },
-          words.title ?? undefined,
+          line.title ?? undefined,
         );
       },
       (error: unknown) => {
         if (!isCurrent()) return;
         visit.failMove(receipt);
         tellMoved();
-        say(describeInboxTakeOnFailure({ title: together.title }, readReason(error)));
+        say(failureText(readReason(error)));
       },
     );
   };
@@ -438,55 +393,42 @@ export const useInboxMoves = ({
     const plan = planMove("takeOn", hoveredKey);
     if (plan === null) return;
     if (plan.kind === "takeOnTogether") {
-      takeOnTogether(plan);
+      const { title } = plan;
+      runTakeOn({
+        refs: plan.refs,
+        send: () =>
+          client.externalEntity.takeOnTogether({ payload: { ids: [...plan.ids], title } }),
+        didChange: didTakeOnTogetherChange,
+        reverse: async (result) => {
+          const outcome = await client.externalEntity.undoTakeOnTogether({
+            payload: { recordId: result.recordId },
+          });
+          // The Task was touched since, so it stays and the line says why.
+          if (!outcome.undone) {
+            throw new Error(outcome.reason ?? "The Task has changed since you made it.");
+          }
+          return describeInboxTakeOnTogetherUndone(result.created);
+        },
+        gestureWords: describeInboxTakeOnTogether(title, { created: true, added: 0, taken: 0 }),
+        words: (result) => describeInboxTakeOnTogether(title, result),
+        failureText: (reason) => describeInboxTakeOnFailure({ title }, reason),
+      });
       return;
     }
     const { thing } = plan;
-    const receipt = visit.move("taken", [thing.ref]);
-    tellMoved();
-    const request = takeOnRequest.mutateAsync(thing.id);
-    // A Take on that made no Task (it failed, or the thing already had one) has nothing to put back.
-    const wasCreated = request.then(
-      ({ created }) => {
-        visit.confirmMove(receipt);
-        return created;
+    runTakeOn({
+      refs: [thing.ref],
+      send: () => client.externalEntity.takeOn({ params: { id: thing.id } }),
+      didChange: ({ created }) => created,
+      reverse: async ({ taskId }) => {
+        // The Task was touched since, so it stays and the line says why.
+        await undoAddedTask(client, thing.id, taskId);
+        return TAKE_ON_UNDONE;
       },
-      () => false,
-    );
-    const gesture: Gesture<CardMover> = {
-      words: joinGestureWords(describeInboxTakeOn(thing, true)),
-      undo: () =>
-        reverseMove.mutateAsync(async () => {
-          if (!(await wasCreated)) throw new Error(NOT_SAVED);
-          const { taskId } = await request;
-          requireSignedIn(scope);
-          // The Task was touched since, so it stays and the line says why.
-          await undoAddedTask(client, thing.id, taskId);
-          if (!isCurrent()) return undefined;
-          visit.undo(receipt);
-          tellMoved();
-          return { text: TAKE_ON_UNDONE };
-        }),
-    };
-    undoStack.reserve(gesture, wasCreated);
-    request.then(
-      ({ taskId, created }) => {
-        if (!isCurrent()) return;
-        const words = describeInboxTakeOn(thing, created);
-        say(
-          words.text,
-          created ? gesture : undefined,
-          { label: "Go to the Task", act: () => latest.current.openTask(taskId) },
-          words.title ?? undefined,
-        );
-      },
-      (error: unknown) => {
-        if (!isCurrent()) return;
-        visit.failMove(receipt);
-        tellMoved();
-        say(describeInboxTakeOnFailure(thing, readReason(error)));
-      },
-    );
+      gestureWords: describeInboxTakeOn(thing, true),
+      words: ({ created }) => describeInboxTakeOn(thing, created),
+      failureText: (reason) => describeInboxTakeOnFailure(thing, reason),
+    });
   };
 
   /** Hands `thing`, which the caller has checked may be handed, to `offer`. */
@@ -598,18 +540,22 @@ export const useInboxMoves = ({
   };
 
   /**
-   * Links `pairs` in the line of the moves and says what happened, with an Undo
-   * that unlinks only the pairs this call wrote. `named` are the things the
-   * line names. Afterwards the visit reads again, which is what draws the group.
+   * Links `fromRef` to `toRefs` in one call, in the line of the moves, and says
+   * what happened, with an Undo that unlinks exactly what the call created.
+   * `named` are the things the line names. A failure saves nothing. Afterwards
+   * the visit reads again, which is what draws the group. Returns whether a
+   * link was written.
    */
-  const linkPairs = (
-    pairs: readonly LinkPair[],
+  const linkSet = (
+    fromRef: string,
+    toRefs: readonly string[],
     named: readonly InboxLinkEnd[],
   ): Promise<boolean> => {
-    const request = linkRequest
-      .mutateAsync(pairs)
-      .catch((error: unknown): LinkOutcome => ({ created: [], failure: error }));
-    const wasLinked = request.then(({ created }) => created.length > 0);
+    const request = linkRequest.mutateAsync({ fromRef, toRefs: [...toRefs] });
+    const wasLinked = request.then(
+      ({ created }) => created.length > 0,
+      () => false,
+    );
     const gesture: Gesture<CardMover> = {
       words: joinGestureWords(describeInboxLink(named, true)),
       undo: () =>
@@ -617,33 +563,29 @@ export const useInboxMoves = ({
           if (!(await wasLinked)) throw new Error(NOT_SAVED);
           const { created } = await request;
           requireSignedIn(scope);
-          // An unlink that fails part way has still taken some pairs away, so the list reads again either way.
-          const failure = await unlinkEveryPair(client, created);
+          await client.externalEntity.unlink({ payload: { fromRef, toRefs: created } });
           visit.pushArrived();
-          if (failure !== undefined) throw failure;
           return { text: LINK_UNDONE };
         }),
     };
     undoStack.reserve(gesture, wasLinked);
-    // The request never rejects: its failure is folded into the outcome above.
-    void request.then(({ created, failure }) => {
-      if (!isCurrent()) return;
-      if (created.length > 0) visit.linkMade(created.flatMap((pair) => [pair.fromRef, pair.toRef]));
-      if (failure !== undefined) {
+    request.then(
+      ({ created }) => {
+        if (!isCurrent()) return;
+        if (created.length > 0) visit.linkMade([fromRef, ...created]);
+        const words = describeInboxLink(named, created.length > 0);
         say(
-          describeInboxLinkFailure(readReason(failure)),
+          words.text,
           created.length > 0 ? gesture : undefined,
+          undefined,
+          words.title ?? undefined,
         );
-        return;
-      }
-      const words = describeInboxLink(named, created.length > 0);
-      say(
-        words.text,
-        created.length > 0 ? gesture : undefined,
-        undefined,
-        words.title ?? undefined,
-      );
-    });
+      },
+      (error: unknown) => {
+        if (!isCurrent()) return;
+        say(describeInboxLinkFailure(readReason(error)));
+      },
+    );
     return wasLinked;
   };
 
@@ -651,10 +593,7 @@ export const useInboxMoves = ({
     const plan = planMove("link", hoveredKey);
     if (plan === null) return null;
     if (plan.kind === "pickLink") return plan;
-    void linkPairs(
-      plan.toRefs.map((toRef) => ({ fromRef: plan.fromRef, toRef })),
-      plan.named,
-    );
+    void linkSet(plan.fromRef, plan.toRefs, plan.named);
     return null;
   };
 
@@ -663,7 +602,7 @@ export const useInboxMoves = ({
       say(REFUSED_OFFLINE);
       return Promise.resolve(false);
     }
-    return linkPairs([{ fromRef: from.ref, toRef: to.ref }], [from, to]);
+    return linkSet(from.ref, [to.ref], [from, to]);
   };
 
   const unlink = (first: InboxLinkEnd, second: InboxLinkEnd): void => {
@@ -671,10 +610,10 @@ export const useInboxMoves = ({
       say(REFUSED_OFFLINE);
       return;
     }
-    const pair = { fromRef: first.ref, toRef: second.ref };
-    const request = unlinkRequest.mutateAsync(pair);
+    const input = { fromRef: first.ref, toRefs: [second.ref] };
+    const request = unlinkRequest.mutateAsync(input);
     const wasRemoved = request.then(
-      ({ removed }) => removed,
+      ({ results }) => results[0]!.removed,
       () => false,
     );
     const gesture: Gesture<CardMover> = {
@@ -683,16 +622,17 @@ export const useInboxMoves = ({
         reverseMove.mutateAsync(async () => {
           if (!(await wasRemoved)) throw new Error(NOT_SAVED);
           requireSignedIn(scope);
-          await client.externalEntity.link({ payload: pair });
+          await client.externalEntity.link({ payload: input });
           visit.pushArrived();
           return { text: UNLINK_UNDONE };
         }),
     };
     undoStack.reserve(gesture, wasRemoved);
     request.then(
-      (result) => {
+      ({ results }) => {
         if (!isCurrent()) return;
         visit.pushArrived();
+        const result = results[0]!;
         const words = describeInboxUnlink(first, second, result);
         say(words.text, result.removed ? gesture : undefined, undefined, words.title ?? undefined);
       },

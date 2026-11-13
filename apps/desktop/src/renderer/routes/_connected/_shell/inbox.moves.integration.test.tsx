@@ -50,6 +50,7 @@ const undoTakeOnPath = (id: string): string => `${BASE}/${id}/take-on/undo`;
 const handOffPath = (id: string): string => `${BASE}/${id}/hand-off`;
 const RUN_ID = "01a1b576-c999-7000-8000-000000000901";
 const TASK_ID = "01a1b576-c999-7000-8000-000000000902";
+const RECORD_ID = "01a1b576-c999-7000-8000-000000000903";
 const UNDO_HAND_OFF = `${BASE}/handoffs/${RUN_ID}/undo`;
 
 const REVIEW = {
@@ -444,9 +445,9 @@ describe("Take on", () => {
     const result = {
       taskId: TASK_ID,
       created: true,
-      added: [SLOTS.id, LOYALTY.id],
-      taken: [SLOTS.id, LOYALTY.id],
-      takenAt: "2026-11-13T10:00:00.000Z",
+      recordId: RECORD_ID,
+      added: 2,
+      taken: 2,
     };
     const { user, calls } = await open(undefined, {
       [TAKE_ON_TOGETHER]: { body: result },
@@ -472,7 +473,7 @@ describe("Take on", () => {
     );
 
     await waitForUndoLine("The Task is gone, and nothing had started.");
-    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual(result);
+    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual({ recordId: RECORD_ID });
   });
 });
 

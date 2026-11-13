@@ -10,7 +10,7 @@
 import {
   MAX_INBOX_MOVED_THINGS,
   MAX_TASK_TITLE_LENGTH,
-  type EntityUnlinkResult,
+  type EntityUnlinkedPair,
   type InboxThing,
   type WorkflowOffer,
 } from "@hercule/contract";
@@ -569,13 +569,13 @@ export const LINK_UNDONE = "Unlinked. The sources were never told.";
 
 /**
  * Returns the words for the line after the user unlinked `first` and `second`,
- * from what `unlink` answered. A link a source made cannot be removed, so the
- * line says the source still links them.
+ * from what `unlink` answered for that one pair. A link a source made cannot be
+ * removed, so the line says the source still links them.
  */
 export const describeInboxUnlink = (
   first: Pick<InboxThing, "identifier" | "title">,
   second: Pick<InboxThing, "identifier" | "title">,
-  result: EntityUnlinkResult,
+  result: Pick<EntityUnlinkedPair, "removed" | "remaining">,
 ): InboxLineWords => {
   if (!result.removed) return { text: "You had not linked these, so nothing changed", title: null };
   return result.remaining === "source"
@@ -593,8 +593,10 @@ export const describeInboxUnlinkFailure = (reason: string): string =>
 /** What `externalEntity.takeOnTogether` answered, as far as the words and the undo need it. */
 export interface TakeOnTogetherOutcome {
   readonly created: boolean;
-  readonly added: readonly string[];
-  readonly taken: readonly string[];
+  /** How many things the call linked to the Task. */
+  readonly added: number;
+  /** How many links the call marked as taken on. */
+  readonly taken: number;
 }
 
 /**
@@ -603,7 +605,7 @@ export interface TakeOnTogetherOutcome {
  * nothing to undo.
  */
 export const didTakeOnTogetherChange = (outcome: TakeOnTogetherOutcome): boolean =>
-  outcome.created || outcome.added.length > 0 || outcome.taken.length > 0;
+  outcome.created || outcome.added > 0 || outcome.taken > 0;
 
 /**
  * Returns the words for the line after a group or a selection was taken on

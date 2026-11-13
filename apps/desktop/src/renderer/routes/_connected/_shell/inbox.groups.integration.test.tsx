@@ -47,6 +47,7 @@ const UNDO_TAKE_ON_TOGETHER = `${BASE}/take-on/undo`;
 const LINK = `${BASE}/links`;
 const UNLINK = `${BASE}/links/remove`;
 const TASK_ID = "01a1b576-c999-7000-8000-000000000902";
+const RECORD_ID = "01a1b576-c999-7000-8000-000000000903";
 
 const GROUP = SLOTS_AND_LOYALTY;
 const answerGrouped = answerGroupedWith([GROUP]);
@@ -105,9 +106,9 @@ describe("T on a group", () => {
     const result = {
       taskId: TASK_ID,
       created: true,
-      added: [SLOTS.id, LOYALTY.id],
-      taken: [SLOTS.id, LOYALTY.id],
-      takenAt: "2026-11-13T10:00:00.000Z",
+      recordId: RECORD_ID,
+      added: 2,
+      taken: 2,
     };
     const { user, calls } = await openGrouped({
       [TAKE_ON_TOGETHER]: { body: result },
@@ -125,19 +126,18 @@ describe("T on a group", () => {
     await pressUndo(user);
 
     await waitForUndoLine("The Task is gone, and nothing had started.");
-    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual(result);
+    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual({ recordId: RECORD_ID });
   });
 });
 
 describe("L on a selection", () => {
-  it("links the selected things from the first, and Undo unlinks only the pairs this call wrote", async () => {
-    let answered = 0;
+  it("links the selected things from the first in one call, and Undo unlinks only what the call created", async () => {
     const inbox = defaultInbox();
     const { user, calls } = await (async () => {
       const opened = await openInbox(inbox, {
-        // The first pair is new; the user had already linked the second.
-        [LINK]: () => ({ body: { created: (answered += 1) === 1 } }),
-        [UNLINK]: { body: { removed: true } },
+        // The first target is new; the user had already linked the second.
+        [LINK]: { body: { created: [LOYALTY.ref] } },
+        [UNLINK]: { body: { results: [{ toRef: LOYALTY.ref, removed: true }] } },
       });
       await screen.findByRole("treeitem", { name: new RegExp(SLOTS.title) });
       return { ...opened, user: userEvent.setup() };
@@ -152,15 +152,14 @@ describe("L on a selection", () => {
 
     await waitForUndoLine("Linked 3 things");
     expect(callsTo(calls, LINK).map((call) => call.body)).toEqual([
-      { fromRef: SLOTS.ref, toRef: LOYALTY.ref },
-      { fromRef: SLOTS.ref, toRef: BASKET.ref },
+      { fromRef: SLOTS.ref, toRefs: [LOYALTY.ref, BASKET.ref] },
     ]);
 
     await pressUndo(user);
 
     await waitForUndoLine("Unlinked. The sources were never told.");
     expect(callsTo(calls, UNLINK).map((call) => call.body)).toEqual([
-      { fromRef: SLOTS.ref, toRef: LOYALTY.ref },
+      { fromRef: SLOTS.ref, toRefs: [LOYALTY.ref] },
     ]);
   });
 });
