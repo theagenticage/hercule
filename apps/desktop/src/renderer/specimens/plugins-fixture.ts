@@ -45,6 +45,14 @@ export const TIDEWATCH_PLUGIN: PluginDetail = buildPlugin("tidewatch", "Tidewatc
   hue: 250,
 });
 
+/** The Linear plugin, with its mark and hue as the Linear plugin declares them. */
+export const LINEAR_PLUGIN: PluginDetail = buildPlugin("linear", "Linear", {
+  paths: [
+    "M1.924 2.786667A7.988 7.988 0 0 1 7.993333 0C12.416 0 16 3.584 16 8.006c0 2.426667-1.08 4.602-2.786667 6.07L1.924667 2.786667ZM1.211333 3.750667l11.037333 11.037333c-.349333.22-.716667.413333-1.1.577333L.634 4.851333c.164667-.383333.358-.750667.577333-1.1ZM.214667 6.108667l9.676667 9.676667c-.473333.114667-.962.188-1.463333.214667L0 7.572a8 8 0 0 1 .214667-1.463333Zm-.113333 3.241333 6.548667 6.549333a8.013333 8.013333 0 0 1-6.549333-6.549333Z",
+  ],
+  hue: 268,
+});
+
 /**
  * Sentry's mark, as the Sentry plugin declares it: the Bureau book's
  * brands.js path (Simple Icons, CC0) scaled by 2/3 onto the 16-unit grid.

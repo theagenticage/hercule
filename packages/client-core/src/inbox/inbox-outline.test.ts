@@ -131,3 +131,108 @@ describe("findAccountLabel", () => {
     expect(findAccountLabel(accounts, ["other"])).toBeUndefined();
   });
 });
+
+describe("describeInboxRail repository names", () => {
+  const buildRepositoryValue = (value: string, count: number) => ({ value, label: value, count });
+  const buildFacet = (connectionId: string, values: ReturnType<typeof buildRepositoryValue>[]) => ({
+    source: "github",
+    connectionId,
+    key: "repo",
+    label: "Repository",
+    plural: "Repositories",
+    more: 0,
+    values,
+  });
+  const buildPin = (connectionId: string, value: string) => ({
+    source: "github",
+    connectionId,
+    key: "repo",
+    value,
+    label: value,
+    count: 1,
+  });
+  const outline = buildInboxOutline({
+    pins: [buildPin("c1", "acme/site"), buildPin("c1", "labs/site"), buildPin("c2", "acme/site")],
+    sources: [
+      {
+        source: "github",
+        count: 4,
+        folded: false,
+        accounts: [],
+        facets: [
+          buildFacet("c1", [
+            buildRepositoryValue("acme/site", 2),
+            buildRepositoryValue("labs/site", 1),
+            buildRepositoryValue("acme/api", 1),
+          ]),
+          buildFacet("c2", [buildRepositoryValue("acme/site", 1)]),
+        ],
+      },
+    ],
+  });
+
+  it("names the values of each account on its own, so a name shared across accounts has no owner", () => {
+    const [first, second] = describeInboxRail(outline, [], time).sources[0]!.facets;
+    expect(first!.values.map(({ label, owner }) => [owner, label])).toEqual([
+      ["acme", "site"],
+      ["labs", "site"],
+      [undefined, "api"],
+    ]);
+    expect(second!.values[0]).toMatchObject({ label: "site", title: "acme/site" });
+    expect(second!.values[0]!.owner).toBeUndefined();
+  });
+
+  it("names pins the same way, one account at a time, and keeps the value for the search", () => {
+    const { pins } = describeInboxRail(outline, [], time);
+    expect(pins.map(({ owner, label }) => [owner, label])).toEqual([
+      ["acme", "site"],
+      ["labs", "site"],
+      [undefined, "site"],
+    ]);
+    expect(pins[0]).toMatchObject({ value: "acme/site", title: "acme/site" });
+  });
+  it("keeps a pinned repository's owner when its duplicate in the account is not pinned", () => {
+    const rail = describeInboxRail({ ...outline, pins: [buildPin("c1", "acme/site")] }, [], time);
+    expect(rail.pins[0]).toMatchObject({
+      label: "site",
+      owner: "acme",
+      title: "acme/site",
+      value: "acme/site",
+    });
+  });
+
+  it.each([
+    ["repo", ["NorthwindMarket/storefront-web", "NorthwindMarket/ops"], ["storefront-web", "ops"]],
+    ["team", ["a/b", "c/b"], ["a/b", "c/b"]],
+    ["repo", ["monorepo"], ["monorepo"]],
+  ])("keeps full values and tooltips while naming %s entries", (key, labels, expected) => {
+    const rail = describeInboxRail(
+      buildInboxOutline({
+        sources: [
+          {
+            source: "github",
+            count: 2,
+            folded: false,
+            accounts: [],
+            facets: [
+              {
+                ...buildFacet(
+                  "c1",
+                  labels.map((label) => buildRepositoryValue(label, 1)),
+                ),
+                key,
+              },
+            ],
+          },
+        ],
+      }),
+      [],
+      time,
+    );
+    const values = rail.sources[0]!.facets[0]!.values;
+    expect(values.map((value) => value.label)).toEqual(expected);
+    expect(values.map((value) => value.value)).toEqual(labels);
+    expect(values.map((value) => value.title)).toEqual(labels);
+    expect(values.every((value) => value.owner === undefined)).toBe(true);
+  });
+});

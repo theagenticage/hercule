@@ -62,11 +62,15 @@
 .ib-rail-row[data-on] .ib-rail-icon {
   color: var(--muted);
 }
-/* A long name wraps instead of being cut, so a larger text size or wider letter spacing loses no letters. */
+/* Every name is one line, cut at the end with an ellipsis; the row's tooltip holds the whole name.
+   The ellipsis sits on this child of the grid row: it never shows on a flex or grid container. */
 .ib-rail-name {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ib-rail-account-suffix {
+.ib-rail-faint {
   color: var(--faint);
 }
 .ib-rail-count {

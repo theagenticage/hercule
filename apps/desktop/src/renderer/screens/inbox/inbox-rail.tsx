@@ -244,7 +244,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
     );
   };
 
-  const valueRow = (value: InboxBrowseValue, label: string, item: RailFacetValue): JSX.Element => {
+  const valueRow = (value: InboxBrowseValue, item: RailFacetValue): JSX.Element => {
     const id = `value:${valueKey(value)}`;
     const isOn = isCurrentValue(current, value);
     const isEmpty = item.count === 0 && !loading;
@@ -257,7 +257,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
           data-on={isOn || undefined}
           data-empty={isEmpty || undefined}
           aria-current={isOn ? "true" : undefined}
-          title={isEmpty ? "Nothing of yours here yet" : undefined}
+          title={isEmpty ? `${item.title} - nothing of yours here yet` : item.title}
           {...itemProps(id)}
           onClick={() => {
             props.onPick({ kind: "value", value });
@@ -266,10 +266,10 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
           <span className="ib-rail-icon">
             {health === undefined ? null : <HealthGlyph health={health} />}
           </span>
-          <span className="ib-rail-name">{label}</span>
+          <RailName owner={item.owner} name={item.label} />
           {countOf(item.count)}
         </button>
-        {star(value, label, `star:${id}`)}
+        {star(value, item.title, `star:${id}`)}
       </div>
     );
   };
@@ -284,7 +284,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
           {facet.plural}
         </p>
         {visibleValues(facet, isOpened).map((item) =>
-          valueRow(valueOf(source.source, facet, item), item.label, item),
+          valueRow(valueOf(source.source, facet, item), item),
         )}
         {facet.values.length > VALUES_SHOWN ? (
           <button
@@ -334,6 +334,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
           {...itemProps(`fold:${source.source}`)}
           aria-expanded={!source.folded}
           data-failing={warning === null ? undefined : ""}
+          title={source.name}
           onClick={() => {
             props.onToggleFold(source.source);
           }}
@@ -357,7 +358,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
             {hasAccounts
               ? source.accounts.map((account) => (
                   <div key={account.connectionId}>
-                    <p className="ib-rail-account">
+                    <p className="ib-rail-account" title={account.label}>
                       <span className="ib-rail-icon">
                         <ConnectionsIcon size={14} />
                       </span>
@@ -387,6 +388,7 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
               data-on={isOn || undefined}
               aria-current={isOn ? "true" : undefined}
               aria-keyshortcuts={query.shortcut}
+              title={query.name}
               {...itemProps(`saved:${query.id}`)}
               onClick={() => {
                 props.onPick({ kind: "saved-query", id: query.id });
@@ -421,6 +423,11 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
                     className="ib-rail-row"
                     data-on={isOn || undefined}
                     aria-current={isOn ? "true" : undefined}
+                    title={
+                      pin.accountLabel === undefined
+                        ? pin.title
+                        : `${pin.title} - ${pin.accountLabel}`
+                    }
                     {...itemProps(id)}
                     onClick={() => {
                       props.onPick({ kind: "value", value: pin });
@@ -429,18 +436,14 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
                     <span className="ib-rail-icon">
                       <PluginMark pluginId={pin.source} plugins={plugins} size={16} />
                     </span>
-                    <span className="ib-rail-name">
-                      {pin.label}
-                      {pin.accountLabel === undefined ? null : (
-                        <>
-                          {" "}
-                          <span className="ib-rail-account-suffix">{`· ${pin.accountLabel}`}</span>
-                        </>
-                      )}
-                    </span>
+                    <RailName
+                      owner={pin.owner}
+                      name={pin.label}
+                      suffix={pin.accountLabel === undefined ? undefined : `· ${pin.accountLabel}`}
+                    />
                     {countOf(pin.count)}
                   </button>
-                  {star(pin, pin.label, `star:${id}`)}
+                  {star(pin, pin.title, `star:${id}`)}
                 </div>
               );
             })}
@@ -453,6 +456,34 @@ export function InboxRail(props: InboxRailProps): JSX.Element {
       ) : null}
       {sources.map(sourceBlock)}
     </nav>
+  );
+}
+
+/**
+ * Draws a rail entry's name on one line, cut at the end with an ellipsis. The
+ * owner of a repository and a pin's account are faint text in the same line.
+ * The row that holds it carries the whole name as its tooltip.
+ */
+function RailName({
+  name,
+  owner,
+  suffix,
+}: {
+  readonly name: string;
+  readonly owner?: string | undefined;
+  readonly suffix?: string | undefined;
+}): JSX.Element {
+  return (
+    <span className="ib-rail-name">
+      {owner === undefined ? null : <span className="ib-rail-faint">{`${owner}/`}</span>}
+      {name}
+      {suffix === undefined ? null : (
+        <>
+          {" "}
+          <span className="ib-rail-faint">{suffix}</span>
+        </>
+      )}
+    </span>
   );
 }
 

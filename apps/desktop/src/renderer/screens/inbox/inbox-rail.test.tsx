@@ -9,6 +9,7 @@ import { InboxRail, type InboxRailProps } from "./inbox-rail";
 const VALUES: ReadonlyArray<RailFacetValue> = Array.from({ length: 8 }, (_, index) => ({
   value: `team-${String(index + 1)}`,
   label: `Team ${String(index + 1)}`,
+  title: `Team ${String(index + 1)}`,
   count: index === 7 ? 0 : index + 1,
 }));
 
@@ -138,9 +139,25 @@ describe("InboxRail", () => {
   });
 
   it("lists pins, with the account only when given one, and unpins them by their star", async () => {
-    const pin = { source: "linear", key: "team", value: "team-1", label: "Checkout", count: 4 };
+    const pin = {
+      source: "linear",
+      key: "team",
+      value: "team-1",
+      label: "Checkout",
+      title: "Checkout",
+      count: 4,
+    };
     const { onTogglePin } = renderRail({
-      pins: [pin, { ...pin, value: "team-2", label: "Payments", accountLabel: "northwind" }],
+      pins: [
+        pin,
+        {
+          ...pin,
+          value: "team-2",
+          label: "Payments",
+          title: "Payments",
+          accountLabel: "northwind",
+        },
+      ],
     });
     expect(screen.getByText("Pinned")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Checkout/ })).toBeTruthy();
@@ -171,8 +188,24 @@ describe("InboxRail", () => {
   it("marks a value with nothing of yours as faint, with no count", () => {
     renderRail({ sources: [{ ...LINEAR, facets: [{ ...TEAMS, values: [valueAt(7)] }] }] });
     const row = screen.getByRole("button", { name: "Team 8" });
-    expect(row.getAttribute("title")).toBe("Nothing of yours here yet");
+    expect(row.getAttribute("title")).toBe("Team 8 - nothing of yours here yet");
     expect(row.textContent).toBe("Team 8");
+  });
+
+  it("draws a repository as its own name, the owner faint before it, and the whole name as the tooltip", () => {
+    const repo: RailFacetValue = {
+      value: "acme/site",
+      label: "site",
+      owner: "acme",
+      title: "acme/site",
+      count: 2,
+    };
+    renderRail({
+      sources: [{ ...LINEAR, facets: [{ ...TEAMS, key: "repo", values: [repo] }] }],
+    });
+    const row = screen.getByRole("button", { name: /^acme\/site/ });
+    expect(row.getAttribute("title")).toBe("acme/site");
+    expect(row.textContent).toBe("acme/site2");
   });
 
   it("draws a count only when there is something to count", () => {

@@ -45,7 +45,13 @@ import {
   REVIEW,
 } from "./inbox-pane-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK, TIDEWATCH_PLUGIN } from "./plugins-fixture";
+import {
+  buildPlugin,
+  GITHUB_PLUGIN,
+  LINEAR_PLUGIN,
+  SENTRY_MARK,
+  TIDEWATCH_PLUGIN,
+} from "./plugins-fixture";
 import type { SidebarRecords } from "./shell-page";
 import {
   buildThreadStartRecords,
@@ -853,6 +859,120 @@ const BASE: InboxRecords = {
   blocks: BLOCKS,
 };
 
+/** The two GitHub accounts of the Browse scene: the company's and a contractor's. */
+const NORTHWIND_ACCOUNT = buildId(900);
+const LABS_ACCOUNT = buildId(903);
+
+const buildRepositoryFacet = (
+  connectionId: ReturnType<typeof buildId>,
+  values: ReadonlyArray<readonly [string, number]>,
+  more = 0,
+): InboxFacet => ({
+  source: "github",
+  connectionId,
+  key: "repo",
+  label: "Repository",
+  plural: "Repositories",
+  more,
+  values: values.map(([value, count]) => ({ value, label: value, count })),
+});
+
+/**
+ * The outline of the Browse scene: names as long as real ones. Two GitHub
+ * accounts with many repositories (two with the same name under
+ * different owners), and a Linear source with long project and team names.
+ */
+const BROWSE_OUTLINE: InboxOutline = {
+  ...BASE.outline,
+  sources: [
+    {
+      source: "github",
+      count: 14,
+      folded: false,
+      accounts: [
+        { connectionId: NORTHWIND_ACCOUNT, label: "northwind-market", count: 11 },
+        { connectionId: LABS_ACCOUNT, label: "northwind-labs", count: 3 },
+      ],
+      facets: [
+        buildRepositoryFacet(
+          NORTHWIND_ACCOUNT,
+          [
+            ["NorthwindMarket/storefront-web-checkout-experiments", 4],
+            ["NorthwindMarket/platform-core", 3],
+            ["NorthwindMarket/storefront-web", 2],
+            ["NorthwindArchive/storefront-web", 0],
+            ["NorthwindMarket/payment-gateway-reconciliation-service", 1],
+            ["NorthwindMarket/infrastructure", 1],
+            ["NorthwindMarket/mobile-app-android", 0],
+            ["NorthwindMarket/mobile-app-ios", 0],
+            ["NorthwindMarket/design-system-tokens", 0],
+            ["NorthwindMarket/data-warehouse-pipelines", 0],
+            ["NorthwindMarket/loyalty-points-engine", 0],
+            ["NorthwindMarket/docs", 0],
+          ],
+          3,
+        ),
+        buildRepositoryFacet(LABS_ACCOUNT, [
+          ["NorthwindLabs/storefront-web", 2],
+          ["NorthwindLabs/recommendation-engine-prototype", 1],
+          ["NorthwindLabs/docs", 0],
+        ]),
+      ],
+    },
+    {
+      source: "linear",
+      count: 14,
+      folded: false,
+      accounts: [],
+      facets: [
+        facet("linear", "project", "Project", "Projects", [
+          ...PROJECTS.map((project) => ({
+            value: project.name,
+            label: project.name,
+            count: project.count,
+            health: { shape: "ring" as const, tone: project.tone, label: project.name },
+          })),
+          {
+            value: "Warehouse management system rollout for the Rotterdam distribution centre",
+            label: "Warehouse management system rollout for the Rotterdam distribution centre",
+            count: 0,
+            health: { shape: "ring" as const, tone: "attention" as const, label: "At risk" },
+          },
+        ]),
+        facet("linear", "team", "Team", "Teams", [
+          { value: "Payments", label: "Payments", count: 6 },
+          {
+            value: "Checkout and Basket Experience",
+            label: "Checkout and Basket Experience",
+            count: 3,
+          },
+        ]),
+      ],
+    },
+  ],
+  pins: [
+    {
+      source: "linear",
+      key: "project",
+      value: "Checkout revamp",
+      label: "Checkout revamp",
+      count: 2,
+    },
+    {
+      source: "github",
+      connectionId: LABS_ACCOUNT,
+      key: "repo",
+      value: "NorthwindLabs/recommendation-engine-prototype",
+      label: "NorthwindLabs/recommendation-engine-prototype",
+      count: 1,
+    },
+  ],
+  fields: [
+    ...BASE.outline.fields,
+    { key: "project", label: "Project", type: "text", source: "linear" },
+  ],
+};
+
 const nextFrame = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -1001,7 +1121,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
   { name: "waits", records: BASE, play: openPullRequest },
   {
     name: "browse",
-    records: BASE,
+    records: { ...BASE, outline: BROWSE_OUTLINE },
     play: async (page) => {
       await waitFor(page, ".ib-rail-value");
       const row = [...page.querySelectorAll<HTMLElement>(".ib-rail-value")].find((each) =>
@@ -1010,6 +1130,8 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       if (row === undefined) throw new Error("The rail lists no Checkout revamp.");
       row.click();
       await waitFor(page, ".ib-row");
+      await waitFor(page, ".ib-pane-held");
+      await waitFor(page, ".ib-pane-blocks:not(.ib-pane-blocks-skel)");
     },
   },
   {
@@ -1251,6 +1373,7 @@ const connect = (id: string, type: string, label: string): Connection => ({
 
 const PLUGINS: ReadonlyArray<PluginDetail> = [
   GITHUB_PLUGIN,
+  LINEAR_PLUGIN,
   TIDEWATCH_PLUGIN,
   buildPlugin("sentry", "Sentry", SENTRY_MARK),
 ];
