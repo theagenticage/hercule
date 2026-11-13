@@ -3078,9 +3078,23 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(readResource).toMatchObject({ id: resource.id, remote: REPO_REMOTE });
 
-      const upgradedAccounts = readListedItems<ListedAccount>(
-        await runCli(["provider-account", "list", "--json"], upgraded),
-      );
+      const listAccounts = async (): Promise<ListedAccount[]> =>
+        readListedItems<ListedAccount>(
+          await runCli(["provider-account", "list", "--json"], upgraded),
+        );
+      // The runner probes the accounts in the background once the gate is
+      // open, so the plan the probe reports shows up some time after the
+      // upgrade. Wait for it before the read the assertions below use.
+      await expect
+        .poll(
+          async () => (await listAccounts()).find((a) => a.id === claudeAccount.id)?.planLabel,
+          {
+            timeout: 30_000,
+            message: "the runner's probe never set the plan of the Claude account",
+          },
+        )
+        .toBe(PROBED_PLAN_LABEL);
+      const upgradedAccounts = await listAccounts();
       // No account is added, such as by a fresh-install seed, and none is lost.
       expect(upgradedAccounts.map((account) => account.id).sort()).toEqual(
         edgeAccounts.map((account) => account.id).sort(),
