@@ -5,7 +5,10 @@ import {
   describeAnswerSending,
   describeAnswerSent,
   describeAnswerTooLate,
+  describeDismissAll,
   describeDismissalReturn,
+  describeHandOff,
+  describeHandOffLabel,
   describeDoneEffect,
   describeHeldSignalAnswer,
   describeHiddenAsks,
@@ -149,6 +152,19 @@ describe("the lines of the pane's other moments", () => {
   it("count the selected things", () => {
     expect(describeSelectedThings(1)).toBe("1 thing selected");
     expect(describeSelectedThings(4)).toBe("4 things selected");
+  });
+
+  it("name the button that dismisses a selection", () => {
+    expect(describeDismissAll(3)).toBe("Dismiss all 3");
+  });
+
+  it("name the hand-off button for one workflow and for several", () => {
+    const one = { kind: "one", name: "Triage", faceSeed: "w1" } as const;
+    const several = { kind: "several", faceSeeds: ["w1", "w2"] } as const;
+    expect(describeHandOff(one)).toBe("Hand to Triage");
+    expect(describeHandOffLabel(one)).toBe("Triage");
+    expect(describeHandOff(several)).toBe("Hand to…");
+    expect(describeHandOffLabel(several)).toBe("Hand to…");
   });
 
   it("say why a part could not be read", () => {

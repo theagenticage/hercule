@@ -1,5 +1,9 @@
-import type { JSX, ReactNode } from "react";
-import type { InboxRowHandOff } from "@hercule/client-core/inbox";
+import type { JSX, ReactNode, Ref } from "react";
+import {
+  describeHandOff,
+  describeHandOffLabel,
+  type InboxRowHandOff,
+} from "@hercule/client-core/inbox";
 import { buildLook, Face } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
 import { LinkIcon } from "../../icons/link";
@@ -153,7 +157,7 @@ export function InboxPaneTakeOnButton({
  *   thing. With one workflow it shows that workflow's face and its whole name,
  *   and its accessible name is "Hand to <name>". With several it shows the
  *   first three faces and "Hand to…", and opens a menu: `isHandMenuOpen` is
- *   that menu's `aria-expanded`. The button carries `data-hand-anchor`, where
+ *   that menu's `aria-expanded`. `handAnchorRef` receives the button, where
  *   the menu anchors.
  * - The pane's width, through a container query, changes the layout. Under
  *   460px the hand-off comes first and Take on is an icon. Under 400px the
@@ -163,6 +167,7 @@ export function InboxPaneFooter({
   isTakenOn,
   handOff,
   isHandMenuOpen,
+  handAnchorRef,
   onTakeOn,
   onHandOff,
   onLink,
@@ -171,13 +176,13 @@ export function InboxPaneFooter({
   readonly isTakenOn: boolean;
   readonly handOff: InboxRowHandOff | null;
   readonly isHandMenuOpen: boolean;
+  readonly handAnchorRef?: Ref<HTMLButtonElement>;
   readonly onTakeOn: () => void;
   readonly onHandOff: () => void;
   readonly onLink: () => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
-  const handName =
-    handOff === null ? "" : handOff.kind === "one" ? `Hand to ${handOff.name}` : "Hand to…";
+  const handName = handOff === null ? "" : describeHandOff(handOff);
   return (
     <footer className="ib-pane-foot-box">
       <div className="ib-pane-foot">
@@ -186,6 +191,7 @@ export function InboxPaneFooter({
           <button
             type="button"
             className="btn btn--sm ib-pane-move ib-pane-move--hand"
+            ref={handAnchorRef}
             data-hand-anchor=""
             title={`${handName} (H)`}
             aria-label={handName}
@@ -204,9 +210,7 @@ export function InboxPaneFooter({
                   <Face key={seed} look={buildLook(seed)} pose="idle" size={18} />
                 ))}
               </span>
-              <span className="ib-pane-move-name">
-                {handOff.kind === "one" ? handOff.name : "Hand to…"}
-              </span>
+              <span className="ib-pane-move-name">{describeHandOffLabel(handOff)}</span>
             </span>
             <kbd aria-hidden="true">H</kbd>
           </button>

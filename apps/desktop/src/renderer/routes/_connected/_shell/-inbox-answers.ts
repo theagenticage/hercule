@@ -3,24 +3,19 @@
  * stays in its row and the current row moves on, as for Take on.
  *
  * - An answer that acts on the source (a plugin's action) is held for eight
- *   seconds with Undo (`holdWithUndo`) and then sent. Undo within the hold
- *   makes the thing current again, and opens a reply's box with its words.
- *   After the send, Undo says it is too late and changes nothing.
+ *   seconds with Undo and then sent, by the account scope's held answers
+ *   (`held-signal-answers.ts`). This hook attaches the Inbox's list, undo
+ *   line and pane to them while it is mounted.
  * - Any other answer, and Done, is sent at once. Done has no Undo anywhere in
  *   the app, so its line says that.
  * - Offline, an answer is refused like every other Inbox move.
  */
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys, trimAnswerEllipsis, type HerculeClient } from "@hercule/client-core";
 import {
-  ANSWER_CANCELLED,
-  ANSWER_WAITS_NOTE,
   REFUSED_OFFLINE,
   describeAnswerFailure,
-  describeAnswerSending,
-  describeAnswerSent,
-  describeAnswerTooLate,
-  describeHeldSignalAnswer,
   describeMarkedDone,
   isAnswerHeld,
 } from "@hercule/client-core/inbox";
@@ -28,7 +23,6 @@ import type { Signal, SignalAction } from "@hercule/contract";
 import { actOnSignal } from "../../../app/act-on-signal";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import { readReason } from "../../../app/read-reason";
-import { holdWithUndo } from "../../../app/use-pending-intents";
 import type { InboxMoves } from "./-inbox-moves";
 import type { InboxListRow, InboxListVisit } from "./-inbox-visit";
 
@@ -43,7 +37,7 @@ export interface ThingAnswer {
   readonly sourceName: string;
   /** The asker's name, which a reply's line names. */
   readonly replyTo?: string | undefined;
-  /** Opens the reply box again with its words, when Undo takes the held reply back. */
+  /** Opens the reply box again, when Undo takes the held reply back. */
   readonly reopenReply?: (() => void) | undefined;
 }
 
@@ -74,13 +68,55 @@ export const useInboxAnswers = ({
   readonly client: HerculeClient;
   readonly scope: AccountScope;
   readonly visit: InboxListVisit;
-  readonly moves: Pick<InboxMoves, "say" | "sayWithUndo" | "tellMoved">;
+  readonly moves: Pick<InboxMoves, "say" | "sayWithUndo" | "restate" | "tellMoved">;
   readonly isOffline: boolean;
   /** Shows the thing `ref` alone in the pane, whatever the pane showed before. */
   readonly showThing: (ref: string) => void;
 }): InboxAnswers => {
   const queryClient = useQueryClient();
-  const store = scope.pendingIntents;
+  const held = scope.heldSignalAnswers;
+  const latest = useRef({ visit, moves, isOffline, showThing });
+  useLayoutEffect(() => {
+    latest.current = { visit, moves, isOffline, showThing };
+  });
+  // The held answers draw through the newest of these while the Inbox is mounted, and stop when it unmounts.
+  useEffect(
+    () =>
+      held.attach({
+        line: {
+          sayWithUndo: (text, gesture) => latest.current.moves.sayWithUndo(text, gesture),
+          restate: (gesture, update) => {
+            latest.current.moves.restate(gesture, update);
+          },
+        },
+        takeRow: (ref) => {
+          const { visit: list } = latest.current;
+          const receipt = list.move("taken", [ref]);
+          return {
+            confirm: () => {
+              list.confirmMove(receipt);
+            },
+            putBack: () => {
+              list.undo(receipt);
+            },
+            fail: () => {
+              list.failMove(receipt);
+            },
+          };
+        },
+        moved: () => {
+          latest.current.moves.tellMoved();
+        },
+        showThing: (ref) => {
+          latest.current.showThing(ref);
+        },
+        say: (text) => {
+          latest.current.moves.say(text);
+        },
+        isOffline: () => latest.current.isOffline,
+      }),
+    [held],
+  );
 
   /** Sends `send` now and settles the row: confirmed when it works, put back with the reason when it fails. */
   const sendNow = (
@@ -115,71 +151,25 @@ export const useInboxAnswers = ({
       );
   };
 
-  const hold = (request: ThingAnswer, label: string): void => {
-    const { thing, signalId, action, text, sourceName, replyTo } = request;
-    const receipt = visit.move("taken", [thing.ref]);
-    moves.tellMoved();
-    const words = describeHeldSignalAnswer({
-      label,
-      identifier: thing.identifier,
-      sourceName,
-      ...(replyTo === undefined ? {} : { replyTo }),
-    });
-    const intentId = holdWithUndo(
-      store,
-      {
-        kind: "signal-answer",
-        signalId,
-        entityId: thing.id,
-        actionId: action.id,
-        ...(text === undefined ? {} : { text }),
-        sourceName,
-      },
-      {
-        sayWithUndo: moves.sayWithUndo,
-        line: `${words.text}. ${words.note}.`,
-        words: words.text,
-        overdueLine: `${words.text}. ${ANSWER_WAITS_NOTE}.`,
-        cancelledText: ANSWER_CANCELLED,
-        afterSending: {
-          text: describeAnswerTooLate(sourceName),
-          sendingText: describeAnswerSending(sourceName),
-          sentLine: describeAnswerSent(sourceName),
-        },
-      },
-    );
-    const stopWatching = store.watch(intentId, (progress) => {
-      if (progress === "sending" || progress === "overdue") return;
-      stopWatching();
-      if (progress === "sent") {
-        visit.confirmMove(receipt);
-        return;
-      }
-      // Cancelled by Undo: the thing is current again. A reply's box opens with its words, in a pane
-      // that shows the thing, and the box takes the focus (so the list must not ask for it).
-      // Failed: the thing is back with its reason in the ask.
-      if (progress === "cancelled" && request.reopenReply !== undefined) {
-        visit.undo(receipt);
-        showThing(thing.ref);
-        request.reopenReply();
-        return;
-      }
-      if (progress === "cancelled") visit.undo(receipt);
-      else visit.failMove(receipt);
-      moves.tellMoved();
-    });
-  };
-
   return {
     answer: (request) => {
+      const label = trimAnswerEllipsis(request.action.label);
+      if (isAnswerHeld(request.action)) {
+        const { thing, signalId, action, text, sourceName, replyTo, reopenReply } = request;
+        return scope.heldSignalAnswers.hold({
+          thing,
+          signalId,
+          actionId: action.id,
+          label,
+          text,
+          sourceName,
+          replyTo,
+          reopenReply,
+        });
+      }
       if (isOffline) {
         moves.say(REFUSED_OFFLINE);
         return false;
-      }
-      const label = trimAnswerEllipsis(request.action.label);
-      if (isAnswerHeld(request.action)) {
-        hold(request, label);
-        return true;
       }
       sendNow(
         request,

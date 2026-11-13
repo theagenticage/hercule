@@ -1,6 +1,10 @@
-import type { JSX } from "react";
+import type { JSX, Ref } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import { describeSelectedThings, type InboxRowView } from "@hercule/client-core/inbox";
+import {
+  describeDismissAll,
+  describeSelectedThings,
+  type InboxRowView,
+} from "@hercule/client-core/inbox";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { CheckIcon } from "../../icons/check";
 import { PluginMark } from "../../marks";
@@ -44,6 +48,7 @@ export function InboxSelectionHead({
  * for the selection keys, one row for each `member` and a footer with Link
  * (the things link to each other; one thing opens "Link to..."), Take on (one
  * Task for all of them) and, at the end, Dismiss, named "Dismiss all 3".
+ * `ref` is the element that scrolls.
  *
  * A member row is a button that calls `onWalk` with the member's reference,
  * so the pane walks to that thing. Handing off a selection is not offered
@@ -53,6 +58,7 @@ export function InboxSelectionPane({
   members,
   plugins,
   platform,
+  ref,
   onWalk,
   onTakeOn,
   onLink,
@@ -61,6 +67,7 @@ export function InboxSelectionPane({
   readonly members: ReadonlyArray<InboxRowView>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly platform: DesktopPlatform;
+  readonly ref?: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
@@ -69,7 +76,7 @@ export function InboxSelectionPane({
   const count = members.length;
   return (
     <>
-      <div className="ib-pane-scroll">
+      <div ref={ref} className="ib-pane-scroll">
         <h2 className="ib-pane-title">{describeSelectedThings(count)}</h2>
         <p className="ib-pane-meta">
           <span>{describeSelectionHint(platform)}</span>
@@ -114,7 +121,7 @@ export function InboxSelectionPane({
           />
           <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
           <InboxPaneFootEnd>
-            <InboxPaneDismissButton words={`Dismiss all ${String(count)}`} onDismiss={onDismiss} />
+            <InboxPaneDismissButton words={describeDismissAll(count)} onDismiss={onDismiss} />
           </InboxPaneFootEnd>
         </div>
       </footer>

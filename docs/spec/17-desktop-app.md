@@ -6464,12 +6464,12 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 **Cost review** (reasoned, not measured):
 
 - **Processes:** none added.
-- **Idle:** no recurring timer. A blocks read leaves one react-query `gcTime` timeout, and a read of the current ask leaves another; neither repeats. The 250 ms trailing delay (`useRestedThing`) before the blocks read and the ask's read runs only after a step moves the current row, and is cancelled by the next step.
+- **Idle:** no recurring timer. A blocks read leaves one react-query `gcTime` timeout, and a read of the current ask leaves another; neither repeats. The 250 ms trailing delay (`useReadGate`) before the blocks read and the ask's read runs only after a step moves the current row, and is cancelled by the next step.
 - **Work per streamed token:** none. The pane does not subscribe to any stream.
 - **Memory:** the blocks of a thing stay cached for the 60 s `gcTime` after the pane leaves it. Reply drafts stay in memory per account and per (signal, answer) until the window closes.
 - **Requests when a thing opens:** its detail, then the current ask's `signal.read` (when the thing has an open ask that is unfolded), then its blocks after 250 ms. The blocks read is one GraphQL request to the source, through at most 3 Connections, and a thing with no `readBlocks` hook answers `{ blocks: [] }` without one.
 
-**Counts check,** the Inbox world of `specimens/perf-counts.tsx`, which now gives each of its 300 things one open asking line and answers `GET /signals/<id>` for it, so the pane's read of the current ask is counted. Before this change the world held no asks and the check could not see that read. Baseline is the one in `apps/desktop/perf-counts.baseline.json` before this change; the figures come from the 27 counts that rose.
+**Counts check,** the Inbox world of `specimens/perf-counts.tsx`, which now gives each of its 300 things one open asking line and answers `GET /signals/<id>` for it, so the pane's read of the current ask is counted. Before this change the world held no asks and the check could not see that read. The comparison is against this branch's counts before the asks were added (the counts check has no checked-in baseline now: CI compares a change with `main`); the figures come from the 27 counts that rose.
 
 | Inbox step | requests | restyled | renders | elements |
 |---|---:|---:|---:|---:|
@@ -6486,11 +6486,13 @@ Idle: `idle/inbox/longTimeouts` 5 -> 7 (one for the blocks read, one for the ask
 
 Why each count rose:
 
-- **Requests, +1 per thing that opens and rests:** after the thing has been current for 250 ms, the pane reads the current ask whole (`signal.read`), gated by the same rule as the blocks read (`useRestedThing`). J x50 sends one, for the row it ends on, not one per row passed (the first version of the pane sent 49, 50 -> 99). On `click the first row` the +2 are the ask and the blocks of the row, which now land in that step because their 250 ms ends there.
+- **Requests, +1 per thing that opens and rests:** after the thing has been current for 250 ms, the pane reads the current ask whole (`signal.read`), gated by the same rule as the blocks read (`useReadGate`). J x50 sends one, for the row it ends on, not one per row passed (the first version of the pane sent 49, 50 -> 99). On `click the first row` the +2 are the ask and the blocks of the row, which now land in that step because their 250 ms ends there.
 - **Elements, +19 at rest on every Inbox step, +19 more when a card opens:** the pane's structure (head, section of the ask, answers, footer) and the blocks' loading shape.
 - **Renders and restyled on J x50, +563 and +1,888 (35% and 12% more):** each row passed draws the ask section from its record's lines (no read needed), which is more components per pane render. The read adds none per row passed. The pane's first measurement against the old screen put J x50 at 1,880 renders before the fixes and 1,587 after them; with asks in the world it is 2,150.
 - **Renders, +12 to +27 on the single steps, +21 on `click the first row`:** the same section, drawn once per step, and the rested thing's reads landing.
 - **Controller bytes (Inbox page, refresh, rows, outline):** each row carries its Task's title (`taskTitle`), and the outline carries `signalKinds`: +790 bytes on a 200-row page, +85 on the outline.
+
+**After the pane's ask state moved to client-core and the held answers to one module** (Linux, same container and world, before = the commit before the change, back to back): requests, elements and idle are equal in every step (`idle/inbox/longTimeouts` stays 7). Renders are equal in every step except `Show the arrival`, 472 -> 473 (+1). Restyled moved by noise only (`open a card` 244 -> 245, `E dismisses` 477 -> 467, `Cmd+Z undoes it` 345 -> 356, `Show the arrival` 498 -> 518, `J x50` 17,152 -> 17,155). Renderer bytes 4,815,023 -> 4,815,938 (+915), gzipped 1,756,351 -> 1,756,694 (+343), first screen gzipped 526,557 -> 526,514 (-43). Main and preload are unchanged. The reads of a thing now go through one gate (`useReadGate`) with the same rule as before, except that Return answers nothing in the 250 ms after a step.
 
 **Bundle,** `bun run scripts/compare-bundle.ts`, base `origin/main`, in bytes:
 

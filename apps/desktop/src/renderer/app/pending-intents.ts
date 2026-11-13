@@ -70,6 +70,10 @@ export type IntentContent =
       readonly text?: string;
       /** The name of the source, such as "GitHub", for the words about the answer after a restart. */
       readonly sourceName: string;
+      /** What the action is called, such as "Approve", for the same words. */
+      readonly label: string;
+      /** The thing's identifier, such as "ENG-1", for the same words. */
+      readonly identifier: string;
     };
 
 export interface IntentFailure {
@@ -299,7 +303,7 @@ const isStoredIntent = (value: unknown): value is PendingIntent => {
     return false;
   if (intent.kind === "signal-answer") {
     return (
-      hasStrings("signalId", "entityId", "actionId", "sourceName") &&
+      hasStrings("signalId", "entityId", "actionId", "sourceName", "label", "identifier") &&
       (intent.text === undefined || typeof intent.text === "string")
     );
   }

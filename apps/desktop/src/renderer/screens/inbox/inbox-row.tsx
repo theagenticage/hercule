@@ -1,9 +1,11 @@
 import type { PluginIdentity } from "@hercule/client-core";
-import type {
-  InboxRowHolder,
-  InboxRowReason,
-  InboxRowTime,
-  InboxRowView,
+import {
+  describeHandOff,
+  describeHandOffLabel,
+  type InboxRowHolder,
+  type InboxRowReason,
+  type InboxRowTime,
+  type InboxRowView,
 } from "@hercule/client-core/inbox";
 import { memo, type JSX, type MouseEvent } from "react";
 import { buildLook, Face, UserAvatar } from "../../faces";
@@ -137,8 +139,8 @@ function RowMoves({
               className="ib-row-act ib-row-act--named"
               data-hand-anchor=""
               tabIndex={-1}
-              title={handOff.kind === "one" ? `Hand to ${handOff.name} (H)` : "Hand to… (H)"}
-              aria-label={handOff.kind === "one" ? `Hand to ${handOff.name}` : "Hand to…"}
+              title={`${describeHandOff(handOff)} (H)`}
+              aria-label={describeHandOff(handOff)}
               aria-keyshortcuts="H"
               onClick={() => {
                 actions.onHandOff(ref);
@@ -151,7 +153,7 @@ function RowMoves({
                   ),
                 )}
               </span>
-              <span>{handOff.kind === "one" ? handOff.name : "Hand to…"}</span>
+              <span>{describeHandOffLabel(handOff)}</span>
             </button>
           )}
         </>

@@ -399,6 +399,63 @@ describe("the read of the current ask", () => {
   });
 });
 
+describe("Return on a thing the user just stepped to", () => {
+  const OTHER_ASK = buildThingId(203);
+  const stepAway = async () => {
+    const opened = await open(
+      (inbox) => {
+        inbox.outline = {
+          ...OUTLINE,
+          savedQueries: OUTLINE.savedQueries.map((query) =>
+            query.id === "waits" ? { ...query, signalKinds: [REVIEW_KIND] } : query,
+          ),
+        };
+      },
+      {
+        [`GET /api/v1/external-entities/${LOYALTY.id}`]: () =>
+          withAsks(LOYALTY, [
+            buildLine(OTHER_ASK, MENTION_KIND, "Omar mentioned you", "2026-11-07T10:00:00.000Z"),
+          ]),
+        [`GET /api/v1/signals/${OTHER_ASK}`]: {
+          body: buildSignal(OTHER_ASK, MENTION_KIND, "Mention"),
+        },
+      },
+    );
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    return opened;
+  };
+
+  it("answers when the thing and its ask were read before, without waiting for the pane to rest", async () => {
+    const { calls } = await stepAway();
+    fireEvent.keyDown(document.body, { key: "j" });
+    await pass(400);
+    fireEvent.keyDown(document.body, { key: "k" });
+
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await pass(0);
+
+    expect(readUndoLine()).toMatch(/Approve/);
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(0);
+  });
+
+  it("starts the read of an ask that was not read yet at once, and answers nothing", async () => {
+    const { calls } = await stepAway();
+    const readsOfOtherAsk = () => callsTo(calls, `GET /api/v1/signals/${OTHER_ASK}`);
+    fireEvent.keyDown(document.body, { key: "j" });
+    await pass(100);
+    expect(readsOfOtherAsk()).toHaveLength(0);
+
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await pass(0);
+
+    expect(readsOfOtherAsk()).toHaveLength(1);
+    expect(readUndoLine()).not.toMatch(/Mention|Approve/);
+    expect(
+      calls.filter((call) => call.method === "POST" && call.path.startsWith("/api/v1/signals/")),
+    ).toHaveLength(0);
+  });
+});
+
 describe("a selection", () => {
   it("shows the pane of the selection for two things, and E dismisses both", async () => {
     const { user, calls } = await open(undefined, {
@@ -448,8 +505,15 @@ describe("the asks and blocks of the thing before", () => {
 
 describe("Send again", () => {
   it("keeps the saved answer when the answer is refused because the app is offline", async () => {
+    // After the drop the controller stays unreachable, so the app cannot reconnect (its first retry
+    // comes after one second) between the drop and the click, however slow the machine is.
+    let isUnreachable = false;
     const { calls, live, user } = await open(undefined, {
       [ACT_REVIEW]: { status: 409, body: buildErrorBody("invalid_state", "The source said no.") },
+      "POST /api/v1/auth/ws-ticket": () =>
+        isUnreachable
+          ? { status: 503, body: buildErrorBody("unavailable", "The controller is down.") }
+          : { body: { ticket: "ws-ticket" } },
     });
     await user.keyboard("]");
     await waitFor(() => {
@@ -467,6 +531,7 @@ describe("Send again", () => {
     const failed = await screen.findByRole("alert");
     expect(failed.textContent).toMatch(/was not sent to/);
 
+    isUnreachable = true;
     act(() => {
       live.drop();
     });

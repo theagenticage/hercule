@@ -1,8 +1,7 @@
 /**
- * Which asks the Inbox pane shows as sections, which one is current (the one
- * Return answers), how `[` and `]` move between them, and which answers are
- * held before they are sent. Pure rules over the pane's read: no kind is named
- * here.
+ * Which asks the Inbox pane shows as sections, and which answers are held
+ * before they are sent. Pure rules over the pane's read: no kind is named
+ * here. Which ask is current is in `inbox-ask-choice.ts`.
  */
 import { isQualifiedId, type BoundAction, type EntitySignalLine } from "@hercule/contract";
 
@@ -38,41 +37,6 @@ export const listPaneAsks = (read: {
     sections: open.filter((line) => line.asks && !line.snoozed).toSorted(compareNewestFirst),
     hiddenOpenCount: Math.max(0, read.openCount - open.length),
   };
-};
-
-/**
- * Returns the id of the current ask: `chosenId` when it is still a section,
- * else the newest section whose kind is in `savedQueryKinds` (the signal kinds
- * the list the user is on is about), else the newest section. Returns
- * `undefined` when there are no sections.
- */
-export const chooseCurrentAsk = (
-  sections: readonly EntitySignalLine[],
-  savedQueryKinds: readonly string[],
-  chosenId: string | undefined,
-): string | undefined => {
-  if (chosenId !== undefined && sections.some((line) => line.id === chosenId)) return chosenId;
-  const named = sections.find((line) => savedQueryKinds.includes(line.kind));
-  return (named ?? sections[0])?.id;
-};
-
-/**
- * Returns the id of the section before (`-1`) or after (`1`) `currentId`, as
- * `[` and `]` step. It stops at the first and last section and does not wrap,
- * so the id returned at an end is `currentId` itself. A `currentId` that is not
- * a section steps from the first one. Returns `undefined` with no sections.
- */
-export const stepAsk = (
-  sections: readonly EntitySignalLine[],
-  currentId: string | undefined,
-  direction: -1 | 1,
-): string | undefined => {
-  if (sections.length === 0) return undefined;
-  const at = Math.max(
-    0,
-    sections.findIndex((line) => line.id === currentId),
-  );
-  return sections[Math.min(sections.length - 1, Math.max(0, at + direction))]!.id;
 };
 
 /** How long an answer that acts on the source waits before it is sent, in milliseconds. */

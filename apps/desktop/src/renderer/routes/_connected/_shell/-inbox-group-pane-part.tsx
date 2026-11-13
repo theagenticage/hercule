@@ -10,7 +10,7 @@ import {
 } from "../../../screens/inbox/inbox-group-pane";
 import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import { useInboxNow } from "./-inbox-clock";
-import { useRestedThing } from "./-use-rested-thing";
+import { useReadGate } from "./-use-read-gate";
 import type { InboxListRow } from "./-inbox-visit";
 
 /** The moves of the open group, which the screen decides what to do with. */
@@ -44,10 +44,10 @@ export function InboxGroupHeadPart({
   readonly isActive: boolean;
 }): JSX.Element {
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const isRested = useRestedThing(memberRef, isActive);
+  const gate = useReadGate(memberRef, isActive, false);
   const group = useQuery({
     ...inboxGroupQuery(client, memberRef),
-    enabled: isRested,
+    enabled: gate === "rested",
     placeholderData: keepPreviousData,
   });
   return (
@@ -91,10 +91,10 @@ export function InboxGroupPanePart({
 }): JSX.Element {
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const isRested = useRestedThing(memberRef, isActive);
+  const gate = useReadGate(memberRef, isActive, false);
   const group = useQuery({
     ...inboxGroupQuery(client, memberRef),
-    enabled: isRested,
+    enabled: gate === "rested",
     placeholderData: keepPreviousData,
   });
   const detail = group.data;

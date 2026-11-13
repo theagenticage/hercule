@@ -1,4 +1,4 @@
-import type { JSX, Ref } from "react";
+import type { ActionDispatch, JSX, Ref } from "react";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -19,6 +19,8 @@ import {
   listPaneAsks,
   listPaneHistory,
   listPaneLinks,
+  type PaneAskChoice,
+  type PaneAskMove,
 } from "@hercule/client-core/inbox";
 import type { AccountScope } from "../../../app/account-scope";
 import {
@@ -35,8 +37,8 @@ import { InboxPaneThing, type InboxPaneBlocks } from "../../../screens/inbox/inb
 import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import type { InboxAnswers } from "./-inbox-answers";
 import { useInboxNow } from "./-inbox-clock";
-import { InboxPaneAsks, type InboxPaneAsksHandle, type PaneReply } from "./-inbox-pane-asks";
-import { useRestedThing } from "./-use-rested-thing";
+import { InboxPaneAsks, type InboxPaneAsksHandle } from "./-inbox-pane-asks";
+import { useReadGate } from "./-use-read-gate";
 import type { InboxListRow } from "./-inbox-visit";
 
 /** The blocks slot while they are read. One shared object, so stepping from one loading thing to another leaves the slot as it is. */
@@ -61,10 +63,11 @@ export interface InboxPaneMoves {
  * moves that work.
  *
  * It reads the thing whole (`externalEntity.read`) and, after the thing has
- * been current for a moment, its blocks from the source. It shows quiet shapes
- * while the first read is on its way, and says why when it fails. With
- * `isActive` false (the pane lies over the list and is closed) nothing is
- * read, so stepping through the list reads no thing the user does not see.
+ * been current for a moment, its blocks from the source (see `useReadGate`).
+ * It shows quiet shapes while the first read is on its way, and says why when
+ * it fails. With `isActive` false (the pane lies over the list and is closed)
+ * nothing is read, so stepping through the list reads no thing the user does
+ * not see.
  *
  * Stepping to another thing keeps this component mounted: the thing before
  * stays drawn, inert and marked busy, until the read of the new one answers,
@@ -79,14 +82,13 @@ export function InboxPaneThingPart({
   isActive,
   isHandMenuOpen,
   savedQueryKinds,
-  chosenAskId,
-  isAskFolded,
-  reply,
+  choice,
   answers,
   moves,
   asksRef,
-  onChooseAsk,
-  onReplyChange,
+  scrollRef,
+  handAnchorRef,
+  dispatchAskMove,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
@@ -94,14 +96,15 @@ export function InboxPaneThingPart({
   readonly isActive: boolean;
   readonly isHandMenuOpen: boolean;
   readonly savedQueryKinds: readonly string[];
-  readonly chosenAskId: string | undefined;
-  readonly isAskFolded: boolean;
-  readonly reply: PaneReply | null;
+  /** What the user decided on the asks, which the asks part reads. */
+  readonly choice: PaneAskChoice;
   readonly answers: InboxAnswers;
   readonly moves: InboxPaneMoves;
   readonly asksRef: Ref<InboxPaneAsksHandle>;
-  readonly onChooseAsk: (signalId: string, isFolded: boolean) => void;
-  readonly onReplyChange: (reply: PaneReply | null) => void;
+  /** The element that scrolls, and the hand-off button: the keys reach them through these. */
+  readonly scrollRef: Ref<HTMLDivElement>;
+  readonly handAnchorRef: Ref<HTMLButtonElement>;
+  readonly dispatchAskMove: ActionDispatch<[move: PaneAskMove]>;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
@@ -114,10 +117,15 @@ export function InboxPaneThingPart({
     enabled: isActive,
     placeholderData: keepPreviousData,
   });
-  const isRested = useRestedThing(thing.id, isActive);
+  // True while the record drawn is the thing before's, kept drawn until this thing's read answers.
+  const isStale = detail.isPlaceholderData;
+  const gate = useReadGate(thing.id, isActive, isStale);
   // A read that is out when the user steps on is aborted through the query's signal. No data shows for a
   // thing whose blocks were not read yet, so the blocks of one thing never show under another's title.
-  const blocks = useQuery({ ...entityBlocksQuery(client, thing.id), enabled: isRested });
+  const blocks = useQuery({
+    ...entityBlocksQuery(client, thing.id),
+    enabled: gate === "rested" || gate === "stale",
+  });
   const record = detail.data;
   if (record === undefined) {
     return detail.isError ? (
@@ -128,8 +136,6 @@ export function InboxPaneThingPart({
       <InboxPaneSkeleton />
     );
   }
-  // True while `record` is the thing before's, kept drawn until this thing's read answers.
-  const isStale = detail.isPlaceholderData;
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const sourceName = namePlugin(thing.source, plugins);
   const holder = findRowHolder(thing, username);
@@ -176,20 +182,16 @@ export function InboxPaneThingPart({
               scope={scope}
               thing={thing}
               paneAsks={paneAsks}
-              isStale={isStale}
-              isActive={isActive}
-              isRested={isRested}
+              gate={gate}
+              isShowingRecord={isActive && !isStale}
               savedQueryKinds={savedQueryKinds}
-              chosenId={chosenAskId}
-              isFolded={isAskFolded}
-              reply={reply}
+              choice={choice}
               sourceName={sourceName}
               timezone={timezone}
               now={now}
               platform={bridge.platform}
               answers={answers}
-              onChoose={onChooseAsk}
-              onReplyChange={onReplyChange}
+              dispatch={dispatchAskMove}
             />
           ) : null
         }
@@ -197,6 +199,7 @@ export function InboxPaneThingPart({
         links={listPaneLinks(record, plugins)}
         history={listPaneHistory(record, now)}
         plugins={plugins}
+        ref={scrollRef}
         onGoToTask={moves.onGoToTask}
         onGoTo={moves.onGoTo}
       />
@@ -204,6 +207,7 @@ export function InboxPaneThingPart({
         isTakenOn={thing.takenOn}
         handOff={decideHandOff(thing, thing.offers)}
         isHandMenuOpen={isHandMenuOpen}
+        handAnchorRef={handAnchorRef}
         onTakeOn={moves.onTakeOn}
         onHandOff={moves.onHandOff}
         onLink={moves.onLink}
