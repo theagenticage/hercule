@@ -4,6 +4,7 @@ import { memo, type JSX, type MouseEvent } from "react";
 import { ArchiveIcon } from "../../icons/archive";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { CheckIcon } from "../../icons/check";
+import { ComposeIcon } from "../../icons/compose";
 import { LinkIcon } from "../../icons/link";
 import { MinusIcon } from "../../icons/minus";
 import { TasksIcon } from "../../icons/tasks";
@@ -39,9 +40,10 @@ const SOURCE_MARK_SIZE = 12;
  * modifier keys down, so Shift extends the selection and Command or Control
  * toggles the group in it, as on a thing's row.
  *
- * Under the pointer the head offers Take on and "Dismiss all N", which act
- * on the group (or on the selection, when the group is in it). There is no
- * thread button yet: starting a thread on a group waits for the thread slice.
+ * Under the pointer the head offers "Start a thread", Take on and "Dismiss
+ * all N", which act on the group (or on the selection, when the group is in
+ * it). A thread started on a group takes the group's members and is named
+ * after the group's label.
  *
  * The head is a tree item at level 1 whose `aria-expanded` is `isOpen`, and
  * it is selected when the selection holds all of the group. Its key is its
@@ -58,6 +60,7 @@ export const InboxGroupRow = memo(function InboxGroupRow({
   onPick,
   onToggleSelect,
   onToggleOpen,
+  onStartThread,
   onTakeOn,
   onDismiss,
 }: {
@@ -75,6 +78,8 @@ export const InboxGroupRow = memo(function InboxGroupRow({
   /** The tick was pressed. `whole` is true with Shift down. */
   readonly onToggleSelect: (key: string, whole: boolean) => void;
   readonly onToggleOpen: (key: string) => void;
+  /** "Start a thread" was pressed on the row. */
+  readonly onStartThread: (key: string) => void;
   /** Take on was pressed on the row. */
   readonly onTakeOn: (key: string) => void;
   /** "Dismiss all" was pressed on the row. */
@@ -169,6 +174,19 @@ export const InboxGroupRow = memo(function InboxGroupRow({
         </span>
       </span>
       <span className="ib-row-acts">
+        <button
+          type="button"
+          className="ib-row-act"
+          tabIndex={-1}
+          title="Start a thread (N)"
+          aria-label="Start a thread"
+          aria-keyshortcuts="N"
+          onClick={() => {
+            onStartThread(key);
+          }}
+        >
+          <ComposeIcon size={14} />
+        </button>
         <button
           type="button"
           className="ib-row-act"

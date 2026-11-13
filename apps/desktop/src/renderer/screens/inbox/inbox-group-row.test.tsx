@@ -30,6 +30,7 @@ const renderHead = (
   const onPick = vi.fn();
   const onToggleSelect = vi.fn();
   const onToggleOpen = vi.fn();
+  const onStartThread = vi.fn();
   const onTakeOn = vi.fn();
   const onDismiss = vi.fn();
   render(
@@ -43,6 +44,7 @@ const renderHead = (
       onPick={onPick}
       onToggleSelect={onToggleSelect}
       onToggleOpen={onToggleOpen}
+      onStartThread={onStartThread}
       onTakeOn={onTakeOn}
       onDismiss={onDismiss}
     />,
@@ -52,6 +54,7 @@ const renderHead = (
     onPick,
     onToggleSelect,
     onToggleOpen,
+    onStartThread,
     onTakeOn,
     onDismiss,
   };
@@ -135,6 +138,17 @@ describe("InboxGroupRow", () => {
       { shiftKey: true, metaKey: false, ctrlKey: false },
       { shiftKey: false, metaKey: true, ctrlKey: false },
     ]);
+  });
+
+  it("offers Start a thread under the pointer, acting on the group's key and not selecting or unfolding it", async () => {
+    const { head, onStartThread, onPick, onToggleOpen } = renderHead();
+    await userEvent.setup().click(within(head).getByRole("button", { name: "Start a thread" }));
+    expect(onStartThread).toHaveBeenCalledWith("group:1");
+    expect(onPick).not.toHaveBeenCalled();
+    expect(onToggleOpen).not.toHaveBeenCalled();
+    expect(within(head).getByRole("button", { name: "Start a thread" }).title).toBe(
+      "Start a thread (N)",
+    );
   });
 
   it("offers Take on and Dismiss all under the pointer, each acting on the group's key and not selecting or unfolding it", async () => {

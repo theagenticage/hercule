@@ -10,7 +10,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProjectMatch } from "@hercule/contract";
+import type {
+  EntityPeer,
+  InboxGroup,
+  InboxGroupDetail,
+  InboxThing,
+  ProjectMatch,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   buildThreadHandlers,
@@ -29,8 +35,11 @@ import {
   BASKET,
   LOYALTY,
   SLOTS,
+  SLOTS_AND_LOYALTY,
+  answerGroupedWith,
   defaultInbox,
   openInbox,
+  QUERY_PATH,
   request,
   type FakeInbox,
 } from "./-inbox.testing";
@@ -635,5 +644,96 @@ describe("review fixes", () => {
 
     await within(dialog).findByText(/You are offline, so that was not done/);
     expect(callsTo(calls, SPAWN)).toHaveLength(0);
+  });
+});
+
+describe("a group of linked things", () => {
+  const GROUP: InboxGroup = { ...SLOTS_AND_LOYALTY, label: "Slots and loyalty rework" };
+  const answerGrouped = answerGroupedWith([GROUP]);
+
+  const buildPeer = (thing: InboxThing): EntityPeer => ({
+    id: thing.id,
+    ref: thing.ref,
+    kind: thing.kind,
+    noun: thing.noun,
+    identifier: thing.identifier,
+    title: thing.title,
+    url: thing.url,
+    yours: false,
+    restricted: false,
+  });
+  /** What the group pane reads: the two linked by the user. */
+  const GROUP_DETAIL: InboxGroupDetail = {
+    labelRef: SLOTS.ref,
+    label: GROUP.label,
+    members: [buildPeer(SLOTS), buildPeer(LOYALTY)],
+    links: [
+      {
+        fromRef: SLOTS.ref,
+        toRef: LOYALTY.ref,
+        claim: { type: "person", actor: "user" },
+        hasPersonClaim: true,
+      },
+    ],
+    complete: true,
+  };
+
+  /** Opens the Inbox with Slots and Loyalty linked into one group. */
+  const openWithGroup = () => {
+    let inbox: FakeInbox;
+    return open(MATCHED, (made) => (inbox = made), {
+      [QUERY_PATH]: (call: Call) => answerGrouped(inbox, call),
+      "POST /api/v1/external-entities/inbox/group": { body: GROUP_DETAIL },
+    });
+  };
+
+  /** Starts the thread in the open dialog and checks the Task holds both members under the label. */
+  const sendAndExpectGroupTask = async (
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+    calls: readonly Call[],
+  ) => {
+    expect(within(dialog).getByText(SLOTS.identifier)).toBeTruthy();
+    expect(within(dialog).getByText(LOYALTY.identifier)).toBeTruthy();
+    expect(within(dialog).getByLabelText<HTMLInputElement>("The Task’s name").value).toBe(
+      GROUP.label,
+    );
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+    await screen.findByRole("dialog", { name: "Thread started" });
+    expect(callsTo(calls, SPAWN)).toHaveLength(1);
+    const body = callsTo(calls, SPAWN)[0]!.body as {
+      newTask: { title: string; entityIds: string[] };
+    };
+    expect(body.newTask).toEqual({ title: GROUP.label, entityIds: [SLOTS.id, LOYALTY.id] });
+  };
+
+  it("starts one Task for both members, named by the label, on N", async () => {
+    const { user, calls } = await openWithGroup();
+    await screen.findByRole("treeitem", { name: /Linked group, 2 things/ });
+
+    const dialog = await openDialog(user);
+
+    await sendAndExpectGroupTask(user, dialog, calls);
+  });
+
+  it("does the same from the group row's Start a thread button", async () => {
+    const { user, calls } = await openWithGroup();
+    const row = await screen.findByRole("treeitem", { name: /Linked group, 2 things/ });
+
+    await user.click(within(row).getByRole("button", { name: /Start a thread/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Start a thread" });
+    await sendAndExpectGroupTask(user, dialog, calls);
+  });
+
+  it("does the same from the group pane's Start a thread on all 2", async () => {
+    const { user, calls } = await openWithGroup();
+    await screen.findByRole("treeitem", { name: /Linked group, 2 things/ });
+
+    await user.click(await screen.findByRole("button", { name: "Start a thread on all 2" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Start a thread" });
+    await sendAndExpectGroupTask(user, dialog, calls);
   });
 });

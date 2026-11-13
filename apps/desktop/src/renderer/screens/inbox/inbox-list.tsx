@@ -172,6 +172,7 @@ function renderInboxLine({
           onPick={actions?.onPickGroup ?? NO_CALL}
           onToggleSelect={actions?.onToggleGroupSelect ?? NO_CALL}
           onToggleOpen={actions?.onToggleGroupOpen ?? NO_CALL}
+          onStartThread={actions?.onStartThread ?? NO_CALL}
           onTakeOn={actions?.onTakeOn ?? NO_CALL}
           onDismiss={actions?.onDismiss ?? NO_CALL}
         />
