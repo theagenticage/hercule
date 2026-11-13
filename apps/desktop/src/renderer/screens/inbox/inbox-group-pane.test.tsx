@@ -120,14 +120,12 @@ describe("InboxGroupPane", () => {
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
   });
 
-  it("gives the Link button a class of its own, apart from Dismiss's", () => {
+  it("gives the Link button a class of its own, apart from Dismiss's and the Linked rows'", () => {
     renderPane();
-    expect(screen.getByRole("button", { name: "Link another thing" }).className).toContain(
-      "ib-pane-link",
-    );
-    expect(screen.getByRole("button", { name: "Link another thing" }).className).not.toContain(
-      "ib-pane-dismiss",
-    );
+    const classes = [...screen.getByRole("button", { name: "Link another thing" }).classList];
+    expect(classes).toContain("ib-pane-foot-link");
+    expect(classes).not.toContain("ib-pane-dismiss");
+    expect(classes).not.toContain("ib-pane-link");
   });
 });
 

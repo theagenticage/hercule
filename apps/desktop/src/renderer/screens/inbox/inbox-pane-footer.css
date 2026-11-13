@@ -67,8 +67,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The footer's Link is named apart from the Linked list's rows (`.ib-pane-link`), whose rules it must not take. */
 .ib-pane-dismiss,
-.ib-pane-link {
+.ib-pane-foot-link {
   width: 28px;
   height: 28px;
   color: var(--muted);

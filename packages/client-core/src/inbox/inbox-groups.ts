@@ -260,6 +260,60 @@ function pushGroup<Row extends { readonly ref: string }>(
 }
 
 /**
+ * Returns `next`, with each entry that equals the entry of the same key in
+ * `previous` replaced by that previous entry, so a line that did not change
+ * keeps its object and is not drawn again. Returns `previous` itself when every
+ * entry was kept and none was added.
+ *
+ * Entries are matched by key, not by place: when a row comes or goes, every
+ * entry after it moves one place, and a match by place would compare different
+ * rows. Rows are compared as objects, because the visit already keeps the same
+ * row object while a row is unchanged.
+ */
+export function keepUnchangedEntries<Row>(
+  previous: readonly InboxEntry<Row>[],
+  next: readonly InboxEntry<Row>[],
+): readonly InboxEntry<Row>[] {
+  const previousByKey = new Map(previous.map((entry) => [entry.key, entry]));
+  const kept = next.map((entry) => {
+    const old = previousByKey.get(entry.key);
+    return old !== undefined && isSameEntry(old, entry) ? old : entry;
+  });
+  const isAllKept =
+    kept.length === previous.length && kept.every((entry, index) => entry === previous[index]);
+  return isAllKept ? previous : kept;
+}
+
+/** Checks that two entries have the same fields. A head's group is compared field by field, and its arrays item by item. */
+function isSameEntry<Row>(a: InboxEntry<Row>, b: InboxEntry<Row>): boolean {
+  if (a.kind === "head" && b.kind === "head") {
+    return a.key === b.key && haveSameFields(a.group, b.group, isSameItems);
+  }
+  return haveSameFields(a, b, Object.is);
+}
+
+/** Checks that `a` and `b` have the same keys and that `isSame` holds for the value of each. */
+function haveSameFields(
+  a: object,
+  b: object,
+  isSame: (left: unknown, right: unknown) => boolean,
+): boolean {
+  const keys = Object.keys(b);
+  return (
+    keys.length === Object.keys(a).length &&
+    keys.every((key) => isSame(a[key as keyof typeof a], b[key as keyof typeof b]))
+  );
+}
+
+/** Checks that two values are the same, or are arrays of the same items in the same order. */
+const isSameItems = (a: unknown, b: unknown): boolean =>
+  a === b ||
+  (Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((item, index) => item === b[index]));
+
+/**
  * Returns the refs a selection acts on for `entry`: a head's held members that
  * answer the query, a thing's or a member's own ref, and nothing for a "more" line.
  */

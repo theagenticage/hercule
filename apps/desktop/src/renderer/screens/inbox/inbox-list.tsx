@@ -1,7 +1,6 @@
 import type { PluginIdentity } from "@hercule/client-core";
 import type { GroupKey } from "@hercule/client-core/inbox";
 import {
-  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -119,12 +118,15 @@ export interface InboxListHandle {
 }
 
 /**
- * Renders one line of the list. With `actions` null it is an inert copy, such as
- * one that fades out of the list. It is memoized: a step of the current entry
- * draws again only the lines whose own props changed, which holds while
- * `entry` and `actions` keep their identity.
+ * Returns the element of one line of the list: a row, a group's head, or its
+ * "Show N more" line. With `actions` null the line is an inert copy, such as
+ * one that fades out of the list. The element's key is the entry's key.
+ *
+ * It is a function and not a component: each of the three is memoized itself,
+ * so a step of the current entry draws again only the lines whose own props
+ * changed, and a wrapper component would add a render to every line drawn.
  */
-const InboxLineBody = memo(function InboxLineBody({
+function renderInboxLine({
   entry,
   plugins,
   position,
@@ -146,6 +148,7 @@ const InboxLineBody = memo(function InboxLineBody({
     case "member":
       return (
         <InboxRow
+          key={entry.key}
           view={entry.view}
           plugins={plugins}
           position={position}
@@ -153,12 +156,13 @@ const InboxLineBody = memo(function InboxLineBody({
           current={isCurrent}
           selected={isSelected}
           actions={actions}
-          {...(entry.kind === "member" ? { member: entry.member } : {})}
+          member={entry.kind === "member" ? entry.member : undefined}
         />
       );
     case "head":
       return (
         <InboxGroupRow
+          key={entry.key}
           view={entry.view}
           plugins={plugins}
           isCurrent={isCurrent}
@@ -175,6 +179,7 @@ const InboxLineBody = memo(function InboxLineBody({
     case "more":
       return (
         <InboxGroupMore
+          key={entry.key}
           groupKey={entry.groupKey}
           hiddenCount={entry.hiddenCount}
           unloadedCount={entry.unloadedCount}
@@ -183,7 +188,7 @@ const InboxLineBody = memo(function InboxLineBody({
         />
       );
   }
-});
+}
 
 /** The callback of an inert copy, which no one can press. */
 const NO_CALL = (): void => {};
@@ -223,15 +228,15 @@ function LeavingCopy({
   }, [id, how, onGone]);
   return (
     <div ref={ref} className="ib-leaving-row" style={{ top: leaving.top }}>
-      <InboxLineBody
-        entry={entry}
-        plugins={plugins}
-        position={1}
-        size={1}
-        isCurrent={false}
-        isSelected={false}
-        actions={null}
-      />
+      {renderInboxLine({
+        entry,
+        plugins,
+        position: 1,
+        size: 1,
+        isCurrent: false,
+        isSelected: false,
+        actions: null,
+      })}
     </div>
   );
 }
@@ -457,16 +462,15 @@ export function InboxList({
               line.kind === "gap" ? (
                 <div key={line.key} role="presentation" style={{ height: line.height }} />
               ) : (
-                <InboxLineBody
-                  key={line.item.key}
-                  entry={line.item.entry}
-                  plugins={plugins}
-                  position={line.item.index + 1}
-                  size={entries.length}
-                  isCurrent={line.item.key === currentKey}
-                  isSelected={selection.has(line.item.key)}
-                  actions={rowActions}
-                />
+                renderInboxLine({
+                  entry: line.item.entry,
+                  plugins,
+                  position: line.item.index + 1,
+                  size: entries.length,
+                  isCurrent: line.item.key === currentKey,
+                  isSelected: selection.has(line.item.key),
+                  actions: rowActions,
+                })
               ),
             )}
             <div

@@ -21,7 +21,7 @@
  */
 import { replaceEqualDeep } from "@tanstack/query-core";
 import type { InboxFacet, InboxGroup, InboxOrder } from "@hercule/contract";
-import { listSelectionRefs, type InboxEntry } from "./inbox-groups";
+import { keepUnchangedEntries, listSelectionRefs, type InboxEntry } from "./inbox-groups";
 import type { InboxMoveTarget } from "./inbox-moves";
 import {
   HELD_WINDOW,
@@ -306,7 +306,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       error: opening?.error,
       query: state?.query ?? null,
       rows: isSameRows ? previous.rows : shown,
-      entries: replaceEqualDeep(
+      entries: keepUnchangedEntries(
         previous?.entries ?? NO_ENTRIES,
         state === null ? NO_ENTRIES : buildStateEntries(state, shown),
       ),

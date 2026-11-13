@@ -4,6 +4,7 @@ import {
   buildMoreKey,
   findEntryKey,
   gatherGroupRows,
+  keepUnchangedEntries,
   parseMoreKey,
   reconcileGroups,
   removeMembers,
@@ -150,6 +151,31 @@ describe("buildEntries", () => {
     expect(tick([])).toBe("none");
     expect(tick(["b"])).toBe("some");
     expect(tick(["a"])).toBe("all");
+  });
+});
+
+describe("keepUnchangedEntries", () => {
+  const build = (list: { readonly ref: string }[], groups: HeldGroup[]) =>
+    buildEntries({ rows: list, groups, folds: NO_FOLDS, isSearch: false, selection: new Set() });
+
+  it("keeps the object of every entry that did not change when a row comes in at the top", () => {
+    const [a, b, c] = rows("a", "b", "c");
+    const groups = [held("group:1", "b", "c")];
+    const before = build([a!, b!, c!], groups);
+    const after = keepUnchangedEntries(before, build([{ ref: "new" }, a!, b!, c!], groups));
+    expect(after.map((entry) => entry.key)).toEqual(["new", "a", "group:1"]);
+    expect(after.slice(1)).toEqual(before);
+    expect(after[1]).toBe(before[0]);
+    expect(after[2]).toBe(before[1]);
+  });
+
+  it("takes the new entry of a changed row, and returns the previous list when nothing changed", () => {
+    const [a, b] = rows("a", "b");
+    const before = build([a!, b!], []);
+    const changed = keepUnchangedEntries(before, build([a!, { ref: "b" }], []));
+    expect(changed[0]).toBe(before[0]);
+    expect(changed[1]).not.toBe(before[1]);
+    expect(keepUnchangedEntries(before, build([a!, b!], []))).toBe(before);
   });
 });
 

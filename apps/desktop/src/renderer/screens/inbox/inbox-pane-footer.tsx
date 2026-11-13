@@ -1,4 +1,4 @@
-import type { JSX, ReactNode, Ref } from "react";
+import type { JSX, Ref } from "react";
 import {
   describeHandOff,
   describeHandOffLabel,
@@ -12,14 +12,6 @@ import "./inbox-pane-footer.css";
 
 /** How many faces the hand-off button shows when several workflows fit. */
 const HAND_OFF_FACES = 3;
-
-/**
- * Renders the end of the pane's footer: the icon buttons, pushed to the right
- * edge. `children` are those buttons, in order.
- */
-export function InboxPaneFootEnd({ children }: { readonly children: ReactNode }): JSX.Element {
-  return <span className="ib-pane-foot-end">{children}</span>;
-}
 
 /** Renders the icon button of Dismiss alone: `words` is its name and `onDismiss` is called when it is pressed. */
 export function InboxPaneDismissButton({
@@ -57,7 +49,7 @@ export function InboxPaneLinkButton({
   return (
     <button
       type="button"
-      className="icon-btn ib-pane-link"
+      className="icon-btn ib-pane-foot-link"
       title={`${words} (L)`}
       aria-label={words}
       aria-keyshortcuts="L"
@@ -194,10 +186,10 @@ export function InboxPaneFooter({
             <kbd aria-hidden="true">H</kbd>
           </button>
         )}
-        <InboxPaneFootEnd>
+        <span className="ib-pane-foot-end">
           <InboxPaneLinkButton words="Link to another thing" onLink={onLink} />
           <InboxPaneDismissButton words="Dismiss" onDismiss={onDismiss} />
-        </InboxPaneFootEnd>
+        </span>
       </div>
     </footer>
   );

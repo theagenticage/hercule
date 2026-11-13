@@ -7,7 +7,6 @@ import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import {
   InboxPaneDismissButton,
-  InboxPaneFootEnd,
   InboxPaneLinkButton,
   InboxPaneTakeOnButton,
 } from "./inbox-pane-footer";
@@ -180,13 +179,13 @@ export function InboxGroupPane({
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
           <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
-          <InboxPaneFootEnd>
+          <span className="ib-pane-foot-end">
             <InboxPaneLinkButton words="Link another thing" onLink={onLink} />
             <InboxPaneDismissButton
               words={`Dismiss all ${String(view.members.length)}`}
               onDismiss={onDismiss}
             />
-          </InboxPaneFootEnd>
+          </span>
         </div>
       </footer>
     </>
