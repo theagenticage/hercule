@@ -153,3 +153,15 @@ describe("the account scope", () => {
     expect(() => scopes.read()).toThrow(/No account scope is open/);
   });
 });
+
+describe("the reply drafts of the account scope", () => {
+  it("are kept apart per account and dropped when the scope closes", () => {
+    const { scopes } = setUp();
+    const ada = scopes.open("ada");
+    ada.heldSignalAnswers.writeDraft("s1", "reply", "Ada's words");
+
+    const bob = scopes.open("bob");
+    expect(bob.heldSignalAnswers.readDraft("s1", "reply")).toBe("");
+    expect(ada.heldSignalAnswers.readDraft("s1", "reply")).toBe("");
+  });
+});

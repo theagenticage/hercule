@@ -16,9 +16,6 @@ import {
   type PendingIntents,
 } from "./pending-intents";
 import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
-import type { CardMover } from "./card-mover";
-import type { Gesture } from "./undo-stack";
-import { holdWithUndo } from "./use-pending-intents";
 
 /** The details the controller puts on a refusal that means the Request is closed. */
 const CLOSED = { reason: "request-closed" };
@@ -460,6 +457,8 @@ const SIGNAL_ANSWER: IntentContent = {
   actionId: "reply",
   text: "On it",
   sourceName: "GitHub",
+  label: "Reply",
+  identifier: "ENG-1",
 };
 
 describe("a held signal answer", () => {
@@ -564,176 +563,5 @@ describe("an intent found again after the app closed", () => {
     });
     expect(failureOf(sendingId)?.reason).toBe("interrupted-while-sending");
     expect(failureOf(sendingId)?.message).toMatch(/may have been sent/);
-  });
-});
-
-describe("holding with the undo line", () => {
-  const setUp = () => {
-    const stub = createSend();
-    const store = open(createMemoryStorage(), stub.send);
-    let gesture: Gesture<CardMover> | null = null;
-    const sayWithUndo = vi.fn((_text: string, offered: Gesture<CardMover>) => {
-      gesture = offered;
-      return () => {
-        gesture = null;
-      };
-    });
-    return {
-      stub,
-      store,
-      sayWithUndo,
-      isOnStack: () => gesture !== null,
-      hold: (isHeld: boolean) => gesture?.hold?.(isHeld),
-      settled: () => gesture?.settled,
-      overdue: () => gesture?.overdue,
-      undo: () => gesture?.undo(null as never),
-    };
-  };
-
-  it("takes the gesture off the stack once sending, as before", async () => {
-    const { store, sayWithUndo, isOnStack } = setUp();
-    holdWithUndo(store, MERGE, { sayWithUndo, line: "Merged.", words: "Merged" });
-    expect(isOnStack()).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
-    expect(isOnStack()).toBe(false);
-  });
-
-  it("cancels the intent on Undo while pending", async () => {
-    const { stub, store, sayWithUndo, undo } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent to GitHub.",
-        sentLine: "Sent to GitHub.",
-        sendingText: "Still being sent.",
-      },
-    });
-
-    await undo();
-    expect(store.getSnapshot()).toEqual([]);
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
-    expect(stub.send).not.toHaveBeenCalled();
-  });
-
-  it("keeps the gesture after sending, and Undo then says it was already sent", async () => {
-    const { stub, store, sayWithUndo, isOnStack, undo } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent to GitHub.",
-        sentLine: "Sent to GitHub.",
-        sendingText: "Still being sent.",
-      },
-    });
-
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
-    stub.calls[0]?.resolve();
-    await settle();
-    expect(isOnStack()).toBe(true);
-
-    await expect(undo()).resolves.toEqual({ text: "Already sent to GitHub." });
-  });
-
-  it("says it is still being sent when undone while sending", async () => {
-    const { store, sayWithUndo, undo } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent.",
-        sendingText: "Still being sent.",
-        sentLine: "Sent.",
-      },
-    });
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
-
-    await expect(undo()).resolves.toEqual({ text: "Still being sent." });
-  });
-
-  it("takes the gesture off the stack when the send fails", async () => {
-    const { stub, store, sayWithUndo, isOnStack } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent to GitHub.",
-        sentLine: "Sent to GitHub.",
-        sendingText: "Still being sent.",
-      },
-    });
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
-    stub.calls[0]?.reject(new Error("The source refused."));
-    await settle();
-
-    expect(isOnStack()).toBe(false);
-  });
-
-  it("waits while the user holds the line, and is sent when the line lets go", async () => {
-    const { stub, store, sayWithUndo, hold } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, { sayWithUndo, line: "Replied.", words: "Replied" });
-
-    hold(true);
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS * 2);
-    expect(stub.send).not.toHaveBeenCalled();
-
-    hold(false);
-    expect(stub.send).toHaveBeenCalledTimes(1);
-  });
-
-  it("tells the line what to say once the hold keeps the intent past its window", async () => {
-    const { store, sayWithUndo, hold, overdue } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied. Sends in 8s.",
-      words: "Replied",
-      overdueLine: "Replied. Sends when you let go.",
-    });
-    const waitingLine = vi.fn();
-    void overdue()?.then(waitingLine);
-
-    hold(true);
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS - 1);
-    expect(waitingLine).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(waitingLine).toHaveBeenCalledWith("Replied. Sends when you let go.");
-  });
-
-  it("settles the line with the sent words once sent, and with nothing when cancelled", async () => {
-    const { stub, store, sayWithUndo, settled, undo } = setUp();
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent.",
-        sentLine: "Sent to GitHub.",
-        sendingText: "Still being sent.",
-      },
-    });
-    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
-    stub.calls[0]?.resolve();
-    await settle();
-    await expect(settled()).resolves.toBe("Sent to GitHub.");
-
-    holdWithUndo(store, SIGNAL_ANSWER, {
-      sayWithUndo,
-      line: "Replied.",
-      words: "Replied",
-      afterSending: {
-        text: "Already sent.",
-        sentLine: "Sent to GitHub.",
-        sendingText: "Still being sent.",
-      },
-    });
-    const cancelledLine = settled();
-    await undo();
-    await expect(cancelledLine).resolves.toBeUndefined();
   });
 });

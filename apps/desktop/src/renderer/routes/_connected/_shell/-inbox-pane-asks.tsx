@@ -1,5 +1,5 @@
-import { useImperativeHandle, type JSX, type Ref } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useImperativeHandle, useSyncExternalStore, type JSX, type Ref } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   buildSignalAnswers,
   findSuggestedAnswer,
@@ -9,7 +9,6 @@ import {
 } from "@hercule/client-core";
 import {
   chooseCurrentAsk,
-  describeUnsentSignalAnswer,
   describeUnreadable,
   stepAsk,
   type PaneAsks,
@@ -17,14 +16,8 @@ import {
 import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 import type { AccountScope } from "../../../app/account-scope";
-import type { IntentFailure, PendingIntent } from "../../../app/pending-intents";
 import { signalQuery } from "../../../app/queries";
-import { usePendingIntents } from "../../../app/use-pending-intents";
-import {
-  InboxUnsentAnswers,
-  type ChosenAnswer,
-  type UnsentAnswer,
-} from "../../../screens/inbox/inbox-answers";
+import { InboxUnsentAnswers, type UnsentAnswer } from "../../../screens/inbox/inbox-answers";
 import {
   InboxAskSection,
   InboxMoreAsks,
@@ -56,46 +49,6 @@ export interface PaneReply {
   readonly signalId: string;
   readonly actionId: string;
 }
-
-/** An answer to a signal that was not sent, as a pending intent holds it. */
-type UnsentAnswerIntent = PendingIntent & {
-  readonly kind: "signal-answer";
-  readonly state: "failed";
-  readonly failure: IntentFailure;
-};
-
-/** Returns the answers on the signals of the thing `entityId` that were not sent, oldest first. */
-const listUnsentSignalAnswers = (
-  intents: readonly PendingIntent[],
-  entityId: string,
-): readonly UnsentAnswerIntent[] =>
-  intents.filter(
-    (intent): intent is UnsentAnswerIntent =>
-      intent.kind === "signal-answer" &&
-      intent.entityId === entityId &&
-      intent.state === "failed" &&
-      intent.failure !== null,
-  );
-
-/**
- * Returns what became of the answer the user gave on `signalId`: held, being
- * sent, or unsent (shown apart, in the list of unsent answers). `undefined`
- * when no answer was given. The ask takes no other answer until this one is
- * sent or discarded.
- */
-const readChosenAnswer = (
-  intents: readonly PendingIntent[],
-  signalId: string,
-): ChosenAnswer | undefined => {
-  const intent = intents.find(
-    (each) => each.kind === "signal-answer" && each.signalId === signalId,
-  );
-  if (intent?.kind !== "signal-answer") return undefined;
-  return {
-    actionId: intent.actionId,
-    state: intent.state === "failed" ? "unsent" : intent.state === "sending" ? "sending" : "held",
-  };
-};
 
 /** Focuses the first answer of the ask that is current, so Return on an ask with no suggested answer lands on its answers. */
 const focusFirstAnswer = (): void => {
@@ -178,22 +131,22 @@ export function InboxPaneAsks({
     ...signalQuery(client, currentId ?? ""),
     enabled: isCurrentOpen && canRead && isRested,
   });
-  const { store, intents } = usePendingIntents(scope);
+  const held = scope.heldSignalAnswers;
+  const heldNow = useSyncExternalStore(held.subscribe, held.getSnapshot);
   const signal = read.data;
   // A signal that was answered is resolved in the cache before the list shows it gone: it offers no answers meanwhile.
   const signalAnswers =
     signal === undefined || signal.status !== "open" ? [] : buildSignalAnswers(signal);
   const askers = new Map(sections.map((line) => [line.id, line.asker]));
 
-  // Every unsent answer of the thing is listed, whichever of its asks it was given on.
-  const unsent = listUnsentSignalAnswers(intents, thing.id);
-  const unsentReads = useQueries({
-    queries: unsent.map((intent) => ({
-      ...signalQuery(client, intent.signalId),
-      enabled: askers.has(intent.signalId) && canRead,
-    })),
-  });
-
+  /** Returns what opens the reply box of `actionId` again for a reply, which only a reply has. */
+  const buildReopenReply = (signalId: string, actionId: string, text: string | undefined) =>
+    text === undefined
+      ? undefined
+      : () => {
+          onChoose(signalId, false);
+          onReplyChange({ signalId, actionId });
+        };
   /** Gives the answer `actionId` of `target`, with the words typed for it. */
   const giveAnswer = (target: Signal, actionId: string, text?: string): boolean => {
     const action = target.actions.find((each) => each.id === actionId);
@@ -205,14 +158,7 @@ export function InboxPaneAsks({
       text,
       sourceName,
       replyTo: text === undefined ? undefined : askers.get(target.id),
-      reopenReply:
-        text === undefined
-          ? undefined
-          : () => {
-              scope.replyDrafts.write(target.id, actionId, text);
-              onChoose(target.id, false);
-              onReplyChange({ signalId: target.id, actionId });
-            },
+      reopenReply: buildReopenReply(target.id, actionId, text),
     });
     // A refused answer leaves the box open with its words.
     if (isAccepted) onReplyChange(null);
@@ -233,7 +179,7 @@ export function InboxPaneAsks({
         onChoose(currentId, false);
         return;
       }
-      if (signal === undefined || readChosenAnswer(intents, currentId) !== undefined) return;
+      if (signal === undefined || heldNow.readChosen(currentId) !== undefined) return;
       const suggested = findSuggestedAnswer(
         signalAnswers.filter((each) => each.workflowId === null),
       );
@@ -267,11 +213,11 @@ export function InboxPaneAsks({
       answers: {
         answers: signalAnswers,
         sourceName,
-        chosen: readChosenAnswer(intents, id),
+        chosen: heldNow.readChosen(id),
         // The box takes the words only when it opens: it keeps them while the user types.
         reply:
           reply?.signalId === id
-            ? { actionId: reply.actionId, draft: scope.replyDrafts.read(id, reply.actionId) }
+            ? { actionId: reply.actionId, draft: held.readDraft(id, reply.actionId) }
             : null,
         platform,
         onAnswer: answer,
@@ -283,38 +229,28 @@ export function InboxPaneAsks({
           onReplyChange(null);
         },
         onDraftChange: (text) => {
-          if (reply !== null) scope.replyDrafts.write(id, reply.actionId, text);
+          if (reply !== null) held.writeDraft(id, reply.actionId, text);
         },
       },
     };
   };
-  const unsentAnswers: UnsentAnswer[] = unsent.map((intent, index) => {
-    const unsentSignal = unsentReads[index]?.data;
-    const label =
-      unsentSignal?.actions.find((action) => action.id === intent.actionId)?.label ?? "Answer";
-    return {
-      id: intent.intentId,
-      sentence: describeUnsentSignalAnswer(
-        { label, identifier: thing.identifier, sourceName },
-        intent.failure,
-      ),
-      isInterrupted:
-        intent.failure.reason === "interrupted" ||
-        intent.failure.reason === "interrupted-while-sending",
-      words: intent.text,
-      // Sending again goes to a question that is still open here; any other is out of reach.
-      canSendAgain: unsentSignal !== undefined && askers.has(intent.signalId),
-      onSendAgain: () => {
-        // The saved answer goes only once the new one was accepted: offline, it stays to be sent again.
-        if (unsentSignal !== undefined && giveAnswer(unsentSignal, intent.actionId, intent.text)) {
-          store.discard(intent.intentId);
-        }
-      },
-      onDiscard: () => {
-        store.discard(intent.intentId);
-      },
-    };
-  });
+  const unsentAnswers: UnsentAnswer[] = heldNow.listUnsent(thing.id).map((unsent) => ({
+    ...unsent,
+    // Sending again goes to a question that is still open here; any other is out of reach.
+    canSendAgain: askers.has(unsent.signalId),
+    onSendAgain: () => {
+      // The saved answer is forgotten only once the new one was held: offline, it stays to be sent again.
+      const isAccepted = held.sendAgain(unsent.id, {
+        thing,
+        replyTo: unsent.words === undefined ? undefined : askers.get(unsent.signalId),
+        reopenReply: buildReopenReply(unsent.signalId, unsent.actionId, unsent.words),
+      });
+      if (isAccepted) onReplyChange(null);
+    },
+    onDiscard: () => {
+      held.discard(unsent.id);
+    },
+  }));
   return (
     <>
       {sections.map((line) => (

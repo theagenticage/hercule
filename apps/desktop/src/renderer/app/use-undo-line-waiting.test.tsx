@@ -11,46 +11,37 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const buildGesture = (hold = vi.fn()): Gesture<null> => ({
+  words: "Replied",
+  undo: () => Promise.resolve(undefined),
+  hold,
+});
+
 const setUp = () => {
   const stack = createUndoStack<null>();
   const hook = renderHook(() => useUndoLine(stack, () => null));
-  let settle: (words: string | undefined) => void = () => undefined;
-  let markOverdue: (words: string) => void = () => undefined;
   const hold = vi.fn();
-  const gesture: Gesture<null> = {
-    words: "Replied",
-    undo: () => Promise.resolve(undefined),
-    hold,
-    settled: new Promise((resolve) => {
-      settle = resolve;
-    }),
-    overdue: new Promise((resolve) => {
-      markOverdue = resolve;
-    }),
-  };
-  return {
-    hook,
-    gesture,
-    settle: (words: string | undefined) => settle(words),
-    markOverdue: (words: string) => markOverdue(words),
-    hold,
-  };
+  return { hook, gesture: buildGesture(hold), hold };
 };
+
+const WAITING = { text: "Replying. Sends in 8s.", offersUndo: true, isWaiting: true };
 
 describe("the undo line for a gesture that waits", () => {
   it("stays past its usual time, then says the sent words without Undo, then goes", async () => {
-    const { hook, gesture, settle } = setUp();
+    const { hook, gesture } = setUp();
     act(() => hook.result.current.say("Replying.", gesture));
+    act(() => hook.result.current.restate(gesture, WAITING));
 
     await act(() => vi.advanceTimersByTimeAsync(20_000));
-    expect(hook.result.current.line).toMatchObject({
-      isShown: true,
-      canUndo: true,
-      text: "Replying.",
-    });
+    expect(hook.result.current.line).toMatchObject({ isShown: true, canUndo: true });
 
-    settle("Sent to GitHub.");
-    await act(() => vi.advanceTimersByTimeAsync(0));
+    act(() =>
+      hook.result.current.restate(gesture, {
+        text: "Sent to GitHub.",
+        offersUndo: false,
+        isWaiting: false,
+      }),
+    );
     expect(hook.result.current.line).toMatchObject({
       isShown: true,
       canUndo: false,
@@ -61,26 +52,37 @@ describe("the undo line for a gesture that waits", () => {
     expect(hook.result.current.line.isShown).toBe(false);
   });
 
-  it("changes its words, keeping Undo, when the gesture is overdue because the line is held", async () => {
-    const { hook, gesture, markOverdue } = setUp();
-    act(() => hook.result.current.say("Replying. Sends in 8s.", gesture));
+  it("changes its words, keeping Undo, while the gesture waits", () => {
+    const { hook, gesture } = setUp();
+    act(() => hook.result.current.say("Replying.", gesture));
+    act(() => hook.result.current.restate(gesture, WAITING));
 
-    markOverdue("Replying. Sends when you let go.");
-    await act(() => vi.advanceTimersByTimeAsync(0));
+    act(() =>
+      hook.result.current.restate(gesture, {
+        text: "Replying. Sends when you let go.",
+        offersUndo: true,
+        isWaiting: true,
+      }),
+    );
     expect(hook.result.current.line).toMatchObject({
       canUndo: true,
       text: "Replying. Sends when you let go.",
     });
   });
 
-  it("ends on its own timer when the gesture stops waiting without being sent", async () => {
-    const { hook, gesture, settle } = setUp();
+  it("ignores a gesture that the line no longer shows", () => {
+    const { hook, gesture } = setUp();
     act(() => hook.result.current.say("Replying.", gesture));
+    act(() => hook.result.current.say("Moved something.", buildGesture()));
 
-    settle(undefined);
-    await act(() => vi.advanceTimersByTimeAsync(0));
-    await act(() => vi.advanceTimersByTimeAsync(6_000));
-    expect(hook.result.current.line.isShown).toBe(false);
+    act(() =>
+      hook.result.current.restate(gesture, {
+        text: "Sent to GitHub.",
+        offersUndo: false,
+        isWaiting: false,
+      }),
+    );
+    expect(hook.result.current.line).toMatchObject({ text: "Moved something.", canUndo: true });
   });
 
   it("tells the gesture when the user is on the line and when they leave", () => {

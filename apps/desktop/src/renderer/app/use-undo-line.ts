@@ -51,7 +51,9 @@ interface HeldLine<Page> {
   readonly hold: Hold;
   /** How long the line stays, fixed when it is said: a withdrawn gesture does not restart the timer. */
   readonly staysMs: number;
-  /** Whether the offered gesture still waits (`Gesture.settled`), which keeps the line up. */
+  /** The gesture the line was said for, which `restate` finds the line by. It stays after Undo has left the line. */
+  readonly shown: Gesture<Page> | null;
+  /** Whether the line stays up with no timer of its own, because its gesture waits to act (see `restate`). */
   readonly isWaiting: boolean;
 }
 
@@ -76,6 +78,24 @@ export interface UndoLineControls<Page> {
    * any more. When the line offers it, Undo goes from the line at once.
    */
   readonly withdraw: (gesture: Gesture<Page>) => void;
+  /**
+   * Changes the words of the line, and whether it offers Undo, but only while
+   * the line shows `gesture`: a gesture that finishes late never overwrites
+   * the words of a newer one. Taking Undo away leaves the gesture on the undo
+   * stack, so the next Undo still reaches it and explains itself.
+   *
+   * While `isWaiting` is true the line stays up with no timer, for a gesture
+   * that waits before it acts. When `isWaiting` turns false the line's timer
+   * starts again.
+   */
+  readonly restate: (
+    gesture: Gesture<Page>,
+    update: {
+      readonly text: string;
+      readonly offersUndo: boolean;
+      readonly isWaiting: boolean;
+    },
+  ) => void;
   /**
    * Tells the line whether the pointer or the focus is on it. While it is,
    * the line does not hide, also when a new line replaces its words. It hides 3
@@ -121,6 +141,7 @@ export function useUndoLine<Page>(
     serial: 0,
     hold: "free",
     staysMs: FAILURE_LINE_MS,
+    shown: null,
     isWaiting: false,
   });
   // The newest line, for the calls that must read it outside a state update.
@@ -149,27 +170,6 @@ export function useUndoLine<Page>(
       current.current.offered?.hold?.(false);
       offeredGesture?.hold?.(true);
     }
-    void offeredGesture?.settled?.then((sentText) => {
-      setHeld((before) =>
-        before.offered !== offeredGesture || !before.isWaiting
-          ? before
-          : {
-              ...before,
-              isWaiting: false,
-              serial: before.serial + 1,
-              text: sentText ?? before.text,
-              offered: sentText === undefined ? before.offered : null,
-              staysMs: MOVE_LINE_MS,
-            },
-      );
-    });
-    void offeredGesture?.overdue?.then((waitingText) => {
-      setHeld((before) =>
-        before.offered === offeredGesture && before.isWaiting
-          ? { ...before, text: waitingText }
-          : before,
-      );
-    });
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,
@@ -179,7 +179,8 @@ export function useUndoLine<Page>(
       serial: before.serial + 1,
       hold: before.hold === "held" ? "held" : "free",
       staysMs: offeredGesture === undefined ? FAILURE_LINE_MS : MOVE_LINE_MS,
-      isWaiting: offeredGesture?.settled !== undefined,
+      shown: offeredGesture ?? null,
+      isWaiting: false,
     }));
   };
 
@@ -191,6 +192,22 @@ export function useUndoLine<Page>(
       before.offered !== null && !undoStack.holds(before.offered)
         ? { ...before, offered: null, isWaiting: false }
         : before,
+    );
+  };
+
+  const restate: UndoLineControls<Page>["restate"] = (gesture, update) => {
+    setHeld((before) =>
+      before.shown !== gesture
+        ? before
+        : {
+            ...before,
+            text: update.text,
+            // Undo cannot come back once the stack lost the gesture (see `withdraw`).
+            offered: update.offersUndo && before.offered !== null ? gesture : null,
+            isWaiting: update.isWaiting,
+            serial: before.isWaiting && !update.isWaiting ? before.serial + 1 : before.serial,
+            staysMs: MOVE_LINE_MS,
+          },
     );
   };
 
@@ -243,5 +260,5 @@ export function useUndoLine<Page>(
     void undoStack.undo();
   };
 
-  return { line, say, withdraw, hold, undo };
+  return { line, say, withdraw, restate, hold, undo };
 }

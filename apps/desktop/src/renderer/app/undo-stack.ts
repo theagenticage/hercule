@@ -76,20 +76,6 @@ export interface Gesture<Page> {
    * `isHeld` is true.
    */
   readonly hold?: (isHeld: boolean) => void;
-  /**
-   * For a gesture that waits before it acts: the undo line stays up while it
-   * waits, and shows no countdown of its own. Resolves when the wait ends,
-   * with the words the line shows from then on (and without Undo), or with
-   * `undefined` when the gesture stopped waiting for another reason
-   * (cancelled or failed) and the line should end on its own timer.
-   */
-  readonly settled?: Promise<string | undefined>;
-  /**
-   * For a gesture that waits before it acts: resolves when its time has run
-   * out but the user's hold on the line keeps it from acting, with the words
-   * the line shows while it waits (still with Undo).
-   */
-  readonly overdue?: Promise<string>;
 }
 
 /**
