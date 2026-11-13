@@ -225,9 +225,13 @@ export const Person = Schema.Struct({
 
 export type Person = Schema.Schema.Type<typeof Person>;
 
-/** A block of markdown. */
+/** The most characters a block's title or caption holds. */
+const MAX_BLOCK_TITLE_LENGTH = 80;
+
+/** A block of markdown, with an optional title drawn above it ("Description"). */
 export const TextBlock = Schema.Struct({
   type: Schema.Literal("text"),
+  title: Schema.optionalKey(bounded(1, MAX_BLOCK_TITLE_LENGTH)),
   markdown: bounded(1, MAX_TEXT_BLOCK_LENGTH),
 });
 
@@ -322,11 +326,77 @@ export const ChecksBlock = Schema.Struct({
 
 export type ChecksBlock = Schema.Schema.Type<typeof ChecksBlock>;
 
+/** The most rows a fields block holds. */
+export const MAX_FIELD_ROWS = 12;
+
+/** The most points a trend block holds. */
+export const MAX_TREND_POINTS = 90;
+
+/** The most lines a code block holds. */
+export const MAX_CODE_LINES = 60;
+
+/** A short list of labelled values, such as a pull request's author, branch and milestone. */
+export const FieldsBlock = Schema.Struct({
+  type: Schema.Literal("fields"),
+  title: Schema.optionalKey(bounded(1, MAX_BLOCK_TITLE_LENGTH)),
+  rows: atMost(
+    Schema.Struct({ label: bounded(1, 40), value: bounded(1, 200) }),
+    MAX_FIELD_ROWS,
+  ).check(Schema.isMinLength(1)),
+});
+
+export type FieldsBlock = Schema.Schema.Type<typeof FieldsBlock>;
+
+/** A series of numbers over time, oldest first, drawn as a small line. */
+export const TrendBlock = Schema.Struct({
+  type: Schema.Literal("trend"),
+  caption: bounded(1, MAX_BLOCK_TITLE_LENGTH),
+  points: atMost(
+    Schema.Struct({ at: Timestamp, value: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)) }),
+    MAX_TREND_POINTS,
+  ).check(Schema.isMinLength(2)),
+});
+
+export type TrendBlock = Schema.Schema.Type<typeof TrendBlock>;
+
+/** A piece of code or log, as plain text. */
+export const CodeBlock = Schema.Struct({
+  type: Schema.Literal("code"),
+  title: Schema.optionalKey(bounded(1, MAX_BLOCK_TITLE_LENGTH)),
+  text: bounded(1, MAX_CHECK_LOG_LENGTH).check(
+    Schema.makeFilter((text) =>
+      text.split("\n").length <= MAX_CODE_LINES
+        ? undefined
+        : `The text has more than ${MAX_CODE_LINES} lines. Keep at most ${MAX_CODE_LINES} lines.`,
+    ),
+  ),
+  /** Set when the producer cut the text. */
+  truncated: Schema.optionalKey(Schema.Literal(true)),
+});
+
+export type CodeBlock = Schema.Schema.Type<typeof CodeBlock>;
+
 /** The block types this version of the contract knows. */
-export const KNOWN_BLOCK_TYPES = ["text", "messages", "change", "checks"] as const;
+export const KNOWN_BLOCK_TYPES = [
+  "text",
+  "messages",
+  "change",
+  "checks",
+  "fields",
+  "trend",
+  "code",
+] as const;
 
 /** A block of one of the types this version of the contract knows. */
-export const KnownBlock = Schema.Union([TextBlock, MessagesBlock, ChangeBlock, ChecksBlock]);
+export const KnownBlock = Schema.Union([
+  TextBlock,
+  MessagesBlock,
+  ChangeBlock,
+  ChecksBlock,
+  FieldsBlock,
+  TrendBlock,
+  CodeBlock,
+]);
 
 export type KnownBlock = Schema.Schema.Type<typeof KnownBlock>;
 

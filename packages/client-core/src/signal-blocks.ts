@@ -10,6 +10,9 @@ import {
   type ChangeBlock,
   type CheckRow,
   type ChecksBlock,
+  type CodeBlock,
+  type FieldsBlock,
+  type TrendBlock,
   type KnownBlock,
   type MessagesBlock,
   type Person,
@@ -121,18 +124,43 @@ const formatChecks = (block: ChecksBlock): ReadonlyArray<string> => [
   ].join(", "),
 ];
 
+/** Returns the lines of a fields block: its title, then a `label: value` line per row. */
+const formatFields = (block: FieldsBlock): ReadonlyArray<string> => [
+  ...(block.title === undefined ? [] : [block.title]),
+  ...block.rows.map((row) => `${row.label}: ${row.value}`),
+];
+
+/** Returns the lines of a trend block: its caption, then an `at: value` line per point, oldest first. */
+const formatTrend = (block: TrendBlock): ReadonlyArray<string> => [
+  block.caption,
+  ...block.points.map((point) => `${point.at}: ${String(point.value)}`),
+];
+
+/** Returns the lines of a code block: its title, then its text, indented. */
+const formatCode = (block: CodeBlock): ReadonlyArray<string> => [
+  ...(block.title === undefined ? [] : [block.title]),
+  ...block.text.split("\n").map((line) => `    ${line}`),
+  ...(block.truncated === true ? ["(the text is cut short here)"] : []),
+];
+
 /** Returns the lines of one block, or the one line for a block of an unknown type. */
 const formatBlock = (block: Block): ReadonlyArray<string> => {
   if (!isKnownBlock(block)) return [UNKNOWN_BLOCK_TEXT];
   switch (block.type) {
     case "text":
-      return block.markdown.split("\n");
+      return [...(block.title === undefined ? [] : [block.title]), ...block.markdown.split("\n")];
     case "messages":
       return formatMessages(block);
     case "change":
       return formatChange(block);
     case "checks":
       return formatChecks(block);
+    case "fields":
+      return formatFields(block);
+    case "trend":
+      return formatTrend(block);
+    case "code":
+      return formatCode(block);
   }
 };
 
@@ -141,7 +169,7 @@ const formatBlock = (block: Block): ReadonlyArray<string> => {
  * them, with an empty line between two blocks. Returns an empty string for a
  * signal with no blocks.
  *
- * A text block is its markdown, unchanged. A block of a type this client does
+ * A text block is its title when it has one, then its markdown, unchanged. A block of a type this client does
  * not know is the line `UNKNOWN_BLOCK_TEXT`. Nothing is shortened: every
  * limit is the producer's, and it records what it left out in the block.
  * Times are printed as the record holds them, so the text does not depend on
@@ -149,3 +177,20 @@ const formatBlock = (block: Block): ReadonlyArray<string> => {
  */
 export const formatBlocksAsText = (blocks: ReadonlyArray<Block>): string =>
   blocks.map((block) => formatBlock(block).join("\n")).join("\n\n");
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Returns how long before `now` a timestamp was, in whole days, as words: "today", "yesterday", "14 days ago". */
+export const describeDaysAgo = (timestamp: string, now: Date): string => {
+  const days = Math.max(0, Math.round((now.getTime() - new Date(timestamp).getTime()) / DAY_MS));
+  if (days === 0) return "today";
+  return days === 1 ? "yesterday" : `${String(days)} days ago`;
+};
+
+/** Returns the summary of a change's checks, the worst first: "1 failing, 2 pending, 11 passed". */
+export const describeChecks = (checks: NonNullable<ChangeBlock["checks"]>): string =>
+  [
+    ...(checks.failed > 0 ? [`${String(checks.failed)} failing`] : []),
+    ...(checks.pending > 0 ? [`${String(checks.pending)} pending`] : []),
+    ...(checks.passed > 0 ? [`${String(checks.passed)} passed`] : []),
+  ].join(", ");

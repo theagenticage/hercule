@@ -73,12 +73,12 @@ export interface ThreadStartDraft {
 }
 
 /**
- * Returns the draft of a dialog that opens on `things`: the first thing's
- * name as the Task's name, and the default starter's words.
+ * Returns the draft of a dialog that opens on `things`: `title` as the Task's
+ * name (the plan of the move decides it), and the default starter's words.
  */
-const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStartDraft => ({
+const buildThreadStartDraft = (things: readonly InboxThing[], title: string): ThreadStartDraft => ({
   things,
-  title: things[0]?.title ?? "",
+  title,
   text: writeStarterMessage(DEFAULT_THREAD_STARTER, things),
   starter: DEFAULT_THREAD_STARTER,
   chosenProject: undefined,
@@ -111,8 +111,11 @@ export type ThreadStartDraftEdit = Partial<
 export interface ThreadStartDrafts {
   /** Returns the draft at `key`, or `undefined`. The same object comes back until the next change at `key`. */
   readonly read: (key: string) => ThreadStartDraft | undefined;
-  /** Creates the draft at `key` for `things` when there is none. An existing draft stays as it is. */
-  readonly open: (key: string, things: readonly InboxThing[]) => void;
+  /**
+   * Creates the draft at `key` for `things`, with `title` as the Task's name,
+   * when there is none. An existing draft stays as it is.
+   */
+  readonly open: (key: string, things: readonly InboxThing[], title: string) => void;
   /**
    * Applies what the user changed. The draft is then no longer the one a send
    * was made from, so its `attempt` (and its dedup key) goes, and it counts as
@@ -169,9 +172,9 @@ export const createThreadStartDrafts = (): ThreadStartDrafts => {
   };
   return {
     read: (key) => drafts.get(key),
-    open: (key, things) => {
+    open: (key, things, title) => {
       if (drafts.has(key)) return;
-      drafts.set(key, buildThreadStartDraft(things));
+      drafts.set(key, buildThreadStartDraft(things, title));
       tell();
     },
     edit: (key, patch, options) => {

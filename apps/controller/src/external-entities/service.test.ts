@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { MAX_ACTING_CONNECTIONS, MAX_LIVE_WORKFLOWS, type ExternalRef } from "@hercule/contract";
 import {
   HOST_API,
@@ -26,10 +27,23 @@ import {
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { connectionRepository } from "../connections";
-import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import {
+  AfterCommit,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  withTransaction,
+  type Change,
+} from "../db";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
-import { EntityLookups, PluginHost, type DecidedResolution, type SearchOutcome } from "../plugins";
+import {
+  EntityLookups,
+  PluginHost,
+  type BlocksOutcome,
+  type DecidedResolution,
+  type SearchOutcome,
+} from "../plugins";
 import { buildPluginStack, IDLE_FEEDS, IDLE_INGEST_OPEN, USER } from "../plugins/testing";
 import { projectRepository } from "../projects";
 import { resourceRepository } from "../resources";
@@ -120,6 +134,7 @@ interface Script {
   resolve: (target: EntityRecognition) => DecidedResolution;
   search: () => SearchOutcome;
   recognize: (text: string) => ReadonlyArray<EntityRecognition>;
+  readBlocks: () => BlocksOutcome;
   readonly resolved: Array<EntityRecognition>;
 }
 
@@ -127,6 +142,7 @@ const buildScript = (): Script => ({
   resolve: () => ({ missing: "unknown" }),
   search: () => ({ observations: [], incomplete: false, outcome: "results" }),
   recognize: () => [],
+  readBlocks: () => ({ blocks: [] }),
   resolved: [],
 });
 
@@ -136,6 +152,7 @@ const buildLookups = (script: Script): EntityLookups["Service"] => ({
       script.recognize(text).map((recognition) => ({ pluginId: "acme", recognition })),
     ),
   listLinkSources: () => Effect.succeed(["acme"]),
+  readBlocks: () => Effect.sync(() => script.readBlocks()),
   search: () => Effect.sync(() => script.search()),
   resolve: (_pluginId, target) =>
     Effect.sync(() => {
@@ -186,6 +203,8 @@ interface Arranged {
   /** Inserts another Connection of the plugin, which is another account. */
   readonly insertAccount: (accountId: string) => Effect.Effect<string, unknown>;
   readonly countTasks: Effect.Effect<number, unknown>;
+  /** Every change a committed transaction announced so far. */
+  readonly published: Array<Change>;
 }
 
 /** The list that holds every thing on the Inbox. */
@@ -214,6 +233,7 @@ const run = <A>(
   body: (arranged: Arranged) => Effect.Effect<A, unknown, SqlClient.SqlClient>,
 ): Promise<A> => {
   const script = buildScript();
+  const published: Array<Change> = [];
   return Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -290,6 +310,7 @@ const run = <A>(
       const connectionId = yield* insertAccount("acme-1");
       return yield* body({
         script,
+        published,
         connectionId,
         service: yield* ExternalEntityService,
         tasks: yield* TaskService,
@@ -310,6 +331,14 @@ const run = <A>(
     }).pipe(
       Effect.provideService(CurrentActor, USER),
       Effect.provide(buildLayer(script)),
+      Effect.provide(
+        Layer.succeed(AfterCommit)({
+          publish: (changes) =>
+            Effect.sync(() => {
+              published.push(...changes);
+            }),
+        }),
+      ),
     ) as Effect.Effect<A>,
   );
 };
@@ -457,6 +486,31 @@ describe("takeOn", () => {
         });
       }
     }
+  });
+
+  it("refuses the group of a thing to a session without the grants for the Inbox's text, and reads it with them", async () => {
+    const result = await run(({ service, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const as = (grants: ReadonlyArray<string>) =>
+          Effect.provideService(service.readInboxGroup(ticketRef("1")), CurrentActor, {
+            ...A_SESSION,
+            grants,
+          } as unknown as Actor);
+        return {
+          noSignals: yield* Effect.flip(as(["task.read"])),
+          noTasks: yield* Effect.flip(as(["signal.read"])),
+          allowed: yield* as(["task.read", "signal.read"]),
+        };
+      }),
+    );
+    expect(result.noSignals).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
+    });
+    expect(result.noTasks).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+    expect(result.allowed.labelRef).toBe(ticketRef("1"));
   });
 
   it("refuses a place, saying why", async () => {
@@ -857,6 +911,104 @@ describe("taking several things on as one Task", () => {
   });
 });
 
+describe("readBlocks", () => {
+  const ARRANGE_ONE = ({ report, connectionId, entityId }: Arranged) =>
+    Effect.gen(function* () {
+      yield* report(connectionId, [buildObservation("1")]);
+      return yield* entityId(ticketRef("1"));
+    });
+
+  it("returns the blocks the lookup read, checked against the contract", async () => {
+    const reply = await run((arranged) =>
+      Effect.gen(function* () {
+        arranged.script.readBlocks = () => ({
+          blocks: [
+            { type: "text", markdown: "hello" },
+            { type: "code", text: "const a = 1;" },
+          ],
+        });
+        return yield* arranged.service.readBlocks(yield* ARRANGE_ONE(arranged));
+      }),
+    );
+    expect(reply).toEqual({
+      blocks: [
+        { type: "text", markdown: "hello" },
+        { type: "code", text: "const a = 1;" },
+      ],
+    });
+  });
+
+  it("returns no blocks for a plugin that offers none", async () => {
+    const reply = await run((arranged) =>
+      Effect.gen(function* () {
+        return yield* arranged.service.readBlocks(yield* ARRANGE_ONE(arranged));
+      }),
+    );
+    expect(reply).toEqual({ blocks: [] });
+  });
+
+  it("fails with one safe error when no Connection could read, a draft breaks the contract, or its type is misspelled", async () => {
+    const errors = await run((arranged) =>
+      Effect.gen(function* () {
+        const id = yield* ARRANGE_ONE(arranged);
+        arranged.script.readBlocks = () => ({ unreadable: true });
+        const unreadable = yield* Effect.flip(arranged.service.readBlocks(id));
+        arranged.script.readBlocks = () => ({
+          blocks: [{ type: "fields", rows: [] }],
+        });
+        const invalid = yield* Effect.flip(arranged.service.readBlocks(id));
+        arranged.script.readBlocks = () => ({
+          blocks: [{ type: "calender", day: "2026-11-12" }],
+        });
+        const misspelled = yield* Effect.flip(arranged.service.readBlocks(id));
+        return [unreadable, invalid, misspelled];
+      }),
+    );
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        error: { code: "invalid_state", details: { reason: "source-unreadable" } },
+      });
+    }
+    expect(errors[1]).toEqual(errors[0]);
+    expect(errors[2]).toEqual(errors[0]);
+  });
+
+  it("refuses an unknown id, a place, and a session without the grants", async () => {
+    const { unknown, place, forbidden } = await run((arranged) =>
+      Effect.gen(function* () {
+        const id = yield* ARRANGE_ONE(arranged);
+        yield* arranged.report(arranged.connectionId, [
+          {
+            kind: "project",
+            ref: projectRef("harbour"),
+            title: "Harbour",
+            fields: { key: "HARBOUR" },
+            concerns: [],
+            sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
+          },
+        ]);
+        const noGrants = { ...A_SESSION, grants: ["task.read"] } as unknown as Actor;
+        return {
+          unknown: yield* Effect.flip(
+            arranged.service.readBlocks("0199e0e7-0000-7000-8000-000000000000"),
+          ),
+          place: yield* Effect.flip(
+            arranged.service.readBlocks(yield* arranged.entityId(projectRef("harbour"))),
+          ),
+          forbidden: yield* Effect.flip(
+            Effect.provideService(arranged.service.readBlocks(id), CurrentActor, noGrants),
+          ),
+        };
+      }),
+    );
+    expect(unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(place).toMatchObject({ error: { code: "not_found" } });
+    expect(forbidden).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
+    });
+  });
+});
+
 describe("addToWork", () => {
   it("creates the entity and then the Task for a thing Hercule has never seen, and follows it", async () => {
     const { result, task, followed, inbox, stillThere } = await run((arranged) =>
@@ -1096,6 +1248,415 @@ describe("undoTakeOn", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "forbidden" } });
+  });
+});
+
+/** Reads the links of a Task: the ref, and whether and when the user took it on. */
+const readLinks = (sql: SqlClient.SqlClient, taskId: string) =>
+  Effect.map(
+    sql<{ readonly ref: string; readonly taken_at: string | null }>`
+      SELECT ref, taken_at FROM task_entity_links
+      WHERE task_id = ${uuidFromString(taskId)} ORDER BY ref`,
+    (rows) => rows.map((row) => [row.ref, row.taken_at !== null] as const),
+  );
+
+describe("takeOnTogether and undoTakeOnTogether", () => {
+  it("makes one Task for things that have none, linked and taken, with the stage of the first", async () => {
+    const { result, links, task, taskCount, ids } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [
+            buildObservation("1", { status: "doing" }),
+            buildObservation("2"),
+          ]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const result = yield* service.takeOnTogether({ ids, title: "Both tickets" });
+          return {
+            result,
+            ids,
+            links: yield* readLinks(sql, result.taskId),
+            task: yield* tasks.read(result.taskId),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(result).toMatchObject({ created: true, added: 2, taken: 2 });
+    expect(ids).toHaveLength(2);
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+    expect(task).toMatchObject({ title: "Both tickets", stage: "building" });
+    expect(taskCount).toBe(1);
+  });
+
+  it("joins the Task that things share, adding only the new links and taking every link on", async () => {
+    const { result, links, taskCount, earlierId } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const one = yield* entityId(ticketRef("1"));
+          const two = yield* entityId(ticketRef("2"));
+          // A Task that something else made: its link is not taken on yet.
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }],
+          });
+          const result = yield* service.takeOnTogether({ ids: [one, two], title: "Unused" });
+          return {
+            result: { ...result, one, two },
+            earlierId: earlier.id,
+            links: yield* readLinks(sql, earlier.id),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(result).toMatchObject({
+      taskId: earlierId,
+      created: false,
+      added: 1,
+      taken: 2,
+    });
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+    expect(taskCount).toBe(1);
+  });
+
+  it("refuses things on two different Tasks, naming them, and writes nothing", async () => {
+    const { error, taskCount } = await run(
+      ({ service, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const one = yield* entityId(ticketRef("1"));
+          const two = yield* entityId(ticketRef("2"));
+          yield* service.takeOn(one);
+          yield* service.takeOn(two);
+          const error = yield* Effect.flip(
+            service.takeOnTogether({ ids: [one, two], title: "Together" }),
+          );
+          return { error, taskCount: yield* countTasks };
+        }),
+    );
+    expect(error).toMatchObject({ error: { code: "invalid_state" } });
+    expect(JSON.stringify(error)).toContain("Ticket 1");
+    expect(JSON.stringify(error)).toContain("Ticket 2");
+    expect(taskCount).toBe(2);
+  });
+
+  it("fails like takeOn for a place or an unknown id, and for a session, and makes no Task", async () => {
+    const { place, unknown, session, taskCount } = await run(
+      ({ service, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [
+            buildObservation("1"),
+            {
+              kind: "project",
+              ref: projectRef("harbour"),
+              title: "Harbour",
+              fields: { key: "HARBOUR" },
+              concerns: [],
+              sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
+            },
+          ]);
+          const one = yield* entityId(ticketRef("1"));
+          const harbour = yield* entityId(projectRef("harbour"));
+          return {
+            place: yield* Effect.flip(service.takeOnTogether({ ids: [one, harbour], title: "x" })),
+            unknown: yield* Effect.flip(
+              service.takeOnTogether({
+                ids: [one, "0199e0e7-9999-7000-8000-000000000000"],
+                title: "x",
+              }),
+            ),
+            session: yield* Effect.flip(
+              Effect.provideService(
+                service.takeOnTogether({ ids: [one, harbour], title: "x" }),
+                CurrentActor,
+                A_SESSION,
+              ),
+            ),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(place).toMatchObject({ error: { code: "invalid_state" } });
+    expect(unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(session).toMatchObject({ error: { code: "forbidden" } });
+    expect(taskCount).toBe(0);
+  });
+
+  it("deletes the Task it made when nothing was added, and keeps it once it was edited", async () => {
+    const { undone, kept, gone } = await run(({ service, tasks, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const first = yield* service.takeOnTogether({ ids, title: "First" });
+        const undone = yield* service.undoTakeOnTogether(first);
+        const second = yield* service.takeOnTogether({ ids, title: "Second" });
+        yield* tasks.update({ id: second.taskId, title: "Renamed" });
+        return {
+          undone,
+          kept: yield* service.undoTakeOnTogether(second),
+          gone: yield* Effect.flip(tasks.read(first.taskId)),
+        };
+      }),
+    );
+    expect(undone).toEqual({ undone: true });
+    expect(kept.undone).toBe(false);
+    expect(kept.reason).toContain("edited");
+    expect(gone).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("takes back a join: removes what it linked, clears what it took on, keeps the Task", async () => {
+    const { undone, links, stillLive } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }],
+          });
+          const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+          const undone = yield* service.undoTakeOnTogether(joined);
+          return {
+            undone,
+            links: yield* readLinks(sql, earlier.id),
+            stillLive: (yield* tasks.read(earlier.id)).id === earlier.id,
+          };
+        }),
+    );
+    expect(undone).toEqual({ undone: true });
+    expect(links).toEqual([[ticketRef("1"), false]]);
+    expect(stillLive).toBe(true);
+  });
+
+  it("has a real undo when every thing already links the Task: it clears the taken mark", async () => {
+    const { joined, undone, links } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }, { ref: ticketRef("2") }],
+          });
+          const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+          const undone = yield* service.undoTakeOnTogether(joined);
+          return { joined, undone, links: yield* readLinks(sql, earlier.id) };
+        }),
+    );
+    expect(joined).toMatchObject({ created: false, added: 0, taken: 2 });
+    expect(undone).toEqual({ undone: true });
+    expect(links).toEqual([
+      [ticketRef("1"), false],
+      [ticketRef("2"), false],
+    ]);
+  });
+
+  it("refuses to undo a join when a link no longer holds the time the call wrote", async () => {
+    const { undone, links } = await run(({ service, tasks, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const earlier = yield* tasks.create({
+          title: "Earlier",
+          description: "",
+          stage: "planned",
+          provenance: [{ ref: ticketRef("1") }],
+        });
+        const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+        // Something else took the second link on again, later.
+        yield* withTransaction(
+          sql,
+          sql`UPDATE task_entity_links SET taken_at = '2030-01-01T00:00:00.000Z'
+              WHERE task_id = ${uuidFromString(earlier.id)} AND ref = ${ticketRef("2")}`,
+        );
+        const undone = yield* service.undoTakeOnTogether(joined);
+        return { undone, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(undone.undone).toBe(false);
+    expect(undone.reason).toContain("changed");
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+});
+
+describe("takeOnTogether sends a fixed number of statements", () => {
+  // Each thing the Task links also gets a first-sight fact and its event: two
+  // statements per thing that the facts ledger writes one at a time. They are
+  // left out of the count, which is about the reads, the preparation and the links.
+  it("sends as many statements for 24 things as for 4, apart from the facts and their events, whether it makes the Task or joins one", async () => {
+    const count = (things: number, joins: boolean) =>
+      run(({ service, tasks, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          const keys = Array.from({ length: things }, (_, index) => String(index));
+          yield* report(
+            connectionId,
+            keys.map((key) => buildObservation(key)),
+          );
+          const ids = yield* Effect.forEach(keys, (key) => entityId(ticketRef(key)));
+          if (joins) {
+            yield* tasks.create({
+              title: "Earlier",
+              description: "",
+              stage: "planned",
+              provenance: [{ ref: ticketRef("0") }],
+            });
+          }
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          const result = yield* service.takeOnTogether({ ids, title: "Together" }).pipe(record);
+          expect(result.created).toBe(!joins);
+          return statements.filter(
+            (text) => !text.includes("INTO events") && !text.includes("INTO task_entity_facts"),
+          ).length;
+        }),
+      );
+    expect(await count(24, false)).toBe(await count(4, false));
+    expect(await count(24, true)).toBe(await count(4, true));
+  });
+});
+
+describe("undoTakeOnTogether checks the rows against its record", () => {
+  /** A Task that links ticket 1 already; taking both tickets on together joins it and links ticket 2. */
+  const joinEarlierTask = ({
+    service,
+    tasks,
+    sql,
+    report,
+    connectionId,
+    entityId,
+  }: Parameters<Parameters<typeof run>[0]>[0]) =>
+    Effect.gen(function* () {
+      yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+      const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))] as const;
+      const earlier = yield* tasks.create({
+        title: "Earlier",
+        description: "",
+        stage: "planned",
+        provenance: [{ ref: ticketRef("1") }],
+      });
+      const joined = yield* service.takeOnTogether({ ids: [...ids], title: "Unused" });
+      return { ids, earlier, joined, sql };
+    });
+
+  const rewrite = (
+    sql: SqlClient.SqlClient,
+    taskId: string,
+    ref: string,
+    set: { readonly linkedAt?: string; readonly takenAt: string },
+  ) =>
+    withTransaction(
+      sql,
+      sql`UPDATE task_entity_links
+          SET taken_at = ${set.takenAt}, linked_at = ${set.linkedAt ?? sql`linked_at`}
+          WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`,
+    );
+
+  it("refuses when a link it added was written again at another time, and changes nothing", async () => {
+    const { refused, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { earlier, joined, sql } = yield* joinEarlierTask(context);
+        yield* rewrite(sql, earlier.id, ticketRef("2"), {
+          linkedAt: "2030-01-01T00:00:00.000Z",
+          takenAt: "2030-01-01T00:00:00.000Z",
+        });
+        const refused = yield* context.service.undoTakeOnTogether(joined);
+        return { refused, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(refused.undone).toBe(false);
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+
+  it("refuses when a link it marked taken was marked again, and keeps the other marks", async () => {
+    const { refused, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { earlier, joined, sql } = yield* joinEarlierTask(context);
+        yield* rewrite(sql, earlier.id, ticketRef("1"), { takenAt: "2030-01-01T00:00:00.000Z" });
+        const refused = yield* context.service.undoTakeOnTogether(joined);
+        return { refused, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(refused.undone).toBe(false);
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+
+  it("refuses when a link it added was removed", async () => {
+    const refused = await run((context) =>
+      Effect.gen(function* () {
+        const { earlier, joined, sql } = yield* joinEarlierTask(context);
+        yield* withTransaction(
+          sql,
+          sql`DELETE FROM task_entity_links
+              WHERE task_id = ${uuidFromString(earlier.id)} AND ref = ${ticketRef("2")}`,
+        );
+        return yield* context.service.undoTakeOnTogether(joined);
+      }),
+    );
+    expect(refused.undone).toBe(false);
+    expect(refused.reason).toContain("changed");
+  });
+
+  it("answers a repeat of a successful undo with the same answer, and writes nothing the second time", async () => {
+    const { first, second, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { earlier, joined, sql } = yield* joinEarlierTask(context);
+        const first = yield* context.service.undoTakeOnTogether(joined);
+        // The links are taken on again by hand: a repeat must not undo them.
+        yield* rewrite(sql, earlier.id, ticketRef("1"), { takenAt: "2031-01-01T00:00:00.000Z" });
+        const second = yield* context.service.undoTakeOnTogether(joined);
+        return { first, second, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(first).toEqual({ undone: true });
+    expect(second).toEqual(first);
+    expect(links).toEqual([[ticketRef("1"), true]]);
+  });
+
+  it("refuses an unknown record id with not_found, and a record that wrote nothing with a reason", async () => {
+    const { unknown, empty } = await run((context) =>
+      Effect.gen(function* () {
+        const { ids, joined } = yield* joinEarlierTask(context);
+        // The second call finds every link written and taken already.
+        const again = yield* context.service.takeOnTogether({ ids: [...ids], title: "Unused" });
+        expect(joined.recordId).not.toBe(again.recordId);
+        return {
+          unknown: yield* Effect.flip(
+            context.service.undoTakeOnTogether({
+              recordId: "0199e0e7-9999-7000-8000-000000000000",
+            }),
+          ),
+          empty: yield* context.service.undoTakeOnTogether(again),
+        };
+      }),
+    );
+    expect(unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(empty.undone).toBe(false);
+    expect(empty.reason).toContain("Nothing was written");
   });
 });
 
@@ -1504,7 +2065,7 @@ describe("link and unlink", () => {
     const { claims, wanted } = await run(({ service, sql, report, connectionId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1")]);
-        yield* service.link({ fromRef: ticketRef("1"), toRef: UNREAD });
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [UNREAD] });
         const claims = yield* sql<{
           readonly from_ref: string;
           readonly to_ref: string;
@@ -1544,7 +2105,7 @@ describe("link and unlink", () => {
     const rows = await run(({ service, sql, report, connectionId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
-        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
         const timeline = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM external_entity_timeline`;
         return timeline[0]!.n;
@@ -1558,16 +2119,19 @@ describe("link and unlink", () => {
     const count = await run(({ service, sql, report, connectionId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
-        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
-        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
-        yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
+        const first = yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        const again = yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        const reversed = yield* service.link({ fromRef: ticketRef("2"), toRefs: [ticketRef("1")] });
         const rows = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM external_entity_relation_claims`;
-        return rows[0]!.n;
+        return {
+          count: rows[0]!.n,
+          created: [first, again, reversed].map((r) => r.created.length),
+        };
       }),
     );
 
-    expect(count).toBe(1);
+    expect(count).toEqual({ count: 1, created: [1, 0, 0] });
   });
 
   it("removes only the person's claim, in either direction, and says what a source's claim leaves", async () => {
@@ -1579,33 +2143,150 @@ describe("link and unlink", () => {
           }),
           buildObservation("2"),
         ]);
-        yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
-        const removed = yield* service.unlink({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
-        const again = yield* service.unlink({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        yield* service.link({ fromRef: ticketRef("2"), toRefs: [ticketRef("1")] });
+        const removed = yield* service.unlink({
+          fromRef: ticketRef("1"),
+          toRefs: [ticketRef("2")],
+        });
+        const again = yield* service.unlink({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
         const left = yield* sql<{ readonly claim_type: string }>`
           SELECT claim_type FROM external_entity_relation_claims`;
         return { removed, again, left: left.map((row) => row.claim_type) };
       }),
     );
 
-    expect(result.removed).toEqual({ removed: true, remaining: "source" });
-    expect(result.again).toEqual({ removed: false, remaining: "source" });
+    expect(result.removed.results).toEqual([
+      { toRef: ticketRef("2"), removed: true, remaining: "source" },
+    ]);
+    expect(result.again.results).toEqual([
+      { toRef: ticketRef("2"), removed: false, remaining: "source" },
+    ]);
     expect(result.left).toEqual(["source"]);
+  });
+
+  it("links a whole set in one call and says which claims it wrote, leaving out one already linked", async () => {
+    const { first, second, rows } = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1"),
+          buildObservation("2"),
+          buildObservation("3"),
+        ]);
+        const first = yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        // Ticket 1 is linked already, from the other side.
+        const second = yield* service.link({
+          fromRef: ticketRef("2"),
+          toRefs: [ticketRef("1"), ticketRef("3"), UNREAD],
+        });
+        const rows = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM external_entity_relation_claims`;
+        return { first, second, rows: rows[0]!.n };
+      }),
+    );
+    expect(first.created).toEqual([ticketRef("2")]);
+    expect(second.created).toEqual([ticketRef("3"), UNREAD]);
+    expect(rows).toBe(3);
+  });
+
+  it("changes nothing when one target is bad, and when the first ref is unknown", async () => {
+    const { errors, rows } = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        const errors = [
+          yield* Effect.flip(
+            service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2"), ticketRef("1")] }),
+          ),
+          yield* Effect.flip(
+            service.link({
+              fromRef: ticketRef("1"),
+              toRefs: [ticketRef("2"), "unresolved:url:https://x.test"],
+            }),
+          ),
+          yield* Effect.flip(
+            service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2"), ticketRef("2")] }),
+          ),
+          yield* Effect.flip(
+            service.link({ fromRef: UNREAD, toRefs: [ticketRef("1"), ticketRef("2")] }),
+          ),
+        ];
+        const rows = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM external_entity_relation_claims`;
+        return { errors, rows: rows[0]!.n };
+      }),
+    );
+    expect(errors).toMatchObject([
+      { error: { code: "invalid_state" } },
+      { error: { code: "invalid_state" } },
+      { error: { code: "invalid_state" } },
+      { error: { code: "not_found" } },
+    ]);
+    expect(rows).toBe(0);
+  });
+
+  it("announces a set once: each changed thing is announced one time", async () => {
+    const entityChanges = await run(({ service, report, connectionId, published }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1"),
+          buildObservation("2"),
+          buildObservation("3"),
+        ]);
+        published.length = 0;
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2"), ticketRef("3")] });
+        return published.filter(
+          (change) => change._tag === "record" && change.topic === "externalEntity",
+        );
+      }),
+    );
+    expect(entityChanges).toHaveLength(3);
+    expect(new Set(entityChanges.map((change) => (change as { id: string }).id)).size).toBe(3);
+  });
+
+  it("unlinks a set with one answer per pair, and a claim a source made remains", async () => {
+    const { result, left } = await run(({ service, sql, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1", {
+            relations: { complete: true, partOf: [], linked: [ticketRef("2")] },
+          }),
+          buildObservation("2"),
+          buildObservation("3"),
+          buildObservation("4"),
+        ]);
+        yield* service.link({
+          fromRef: ticketRef("1"),
+          toRefs: [ticketRef("2"), ticketRef("3")],
+        });
+        const result = yield* service.unlink({
+          fromRef: ticketRef("1"),
+          toRefs: [ticketRef("3"), ticketRef("2"), ticketRef("4")],
+        });
+        const left = yield* sql<{ readonly claim_type: string }>`
+          SELECT claim_type FROM external_entity_relation_claims`;
+        return { result, left: left.map((row) => row.claim_type) };
+      }),
+    );
+    expect(result.results).toEqual([
+      { toRef: ticketRef("3"), removed: true },
+      { toRef: ticketRef("2"), removed: true, remaining: "source" },
+      { toRef: ticketRef("4"), removed: false },
+    ]);
+    expect(left).toEqual(["source"]);
   });
 
   it("refuses a session, a link to itself, and a ref that is not one; and a thing Hercule never saw", async () => {
     const errors = await run(({ service, report, connectionId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1")]);
-        const input = { fromRef: ticketRef("1"), toRef: UNREAD };
+        const input = { fromRef: ticketRef("1"), toRefs: [UNREAD] };
         return [
           yield* Effect.flip(Effect.provideService(service.link(input), CurrentActor, A_SESSION)),
           yield* Effect.flip(Effect.provideService(service.unlink(input), CurrentActor, A_SESSION)),
-          yield* Effect.flip(service.link({ fromRef: ticketRef("1"), toRef: ticketRef("1") })),
+          yield* Effect.flip(service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("1")] })),
           yield* Effect.flip(
-            service.link({ fromRef: ticketRef("1"), toRef: "unresolved:url:https://x.test" }),
+            service.link({ fromRef: ticketRef("1"), toRefs: ["unresolved:url:https://x.test"] }),
           ),
-          yield* Effect.flip(service.link({ fromRef: UNREAD, toRef: ticketRef("1") })),
+          yield* Effect.flip(service.link({ fromRef: UNREAD, toRefs: [ticketRef("1")] })),
         ];
       }),
     );

@@ -28,7 +28,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isMutationRunning, queryKeys } from "@hercule/client-core";
 import {
-  OFFLINE_MOVE_REFUSAL,
+  REFUSED_OFFLINE,
   buildThingsDraftKey,
   describeThreadStartError,
 } from "@hercule/client-core/inbox";
@@ -63,13 +63,14 @@ const WORDS_KEPT = "Your words are kept. N on the same things opens them again."
 /** What `useInboxThread` returns. It changes only when the dialog opens, closes, sends or starts. */
 export interface InboxThread {
   /**
-   * Opens the dialog on the things the move is for: the selection, else the
-   * current row, or with `hoveredRef` that row (see `InboxMoves.dismiss`). A
+   * Opens the dialog on the things the move is for: a group, the selection,
+   * else the current row, or with `hoveredKey` that line (see
+   * `InboxMoves.dismiss`), with the default name its plan gives. A
    * refusal says why on the undo line and opens nothing. The dialog waits for
    * the settings and profiles it reads, so it opens a moment after the call.
    * The function is the same for the life of the screen.
    */
-  readonly open: (hoveredRef?: string) => void;
+  readonly open: (hoveredKey?: string) => void;
   /** The dialog while it is open, else `null`: the screen draws it with its overlays. */
   readonly element: JSX.Element | null;
 }
@@ -193,12 +194,13 @@ export function useInboxThread({
   const { mutate: startThread } = start;
 
   const open = useCallback(
-    (hoveredRef?: string): void => {
+    (hoveredKey?: string): void => {
       if (isOpening.current) return;
-      const things = latest.current.moves.readStartTargets(hoveredRef, (targets) =>
+      const start = latest.current.moves.readThreadStart(hoveredKey, (targets) =>
         hasAttemptedSend(drafts, targets),
       );
-      if (things === null) return;
+      if (start === null) return;
+      const { things, title } = start;
       const key = buildThingsDraftKey(things.map((thing) => thing.id));
       isOpening.current = true;
       // The composer is built from these two, which no other screen reads on the way here.
@@ -208,7 +210,7 @@ export function useInboxThread({
       ]).then(
         () => {
           if (!scope.isCurrent()) return;
-          drafts.open(key, things);
+          drafts.open(key, things, title);
           setStarted(null);
           setOpenKey(key);
         },
@@ -249,7 +251,7 @@ export function useInboxThread({
       if (isMutationRunning(queryClient, START_KEY)) return;
       // The connection may have dropped since the dialog opened.
       const { isOffline: offline } = latest.current;
-      drafts.recordFailure(sent.draftKey, offline ? OFFLINE_MOVE_REFUSAL : null);
+      drafts.recordFailure(sent.draftKey, offline ? REFUSED_OFFLINE : null);
       if (!offline) startThread(sent);
     },
     [drafts, queryClient, startThread],

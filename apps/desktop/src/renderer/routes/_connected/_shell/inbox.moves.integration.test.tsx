@@ -44,10 +44,13 @@ const BASE = "POST /api/v1/external-entities";
 const DISMISS = `${BASE}/dismiss`;
 const RESTORE = `${BASE}/restore`;
 const takeOnPath = (id: string): string => `${BASE}/${id}/take-on`;
+const TAKE_ON_TOGETHER = `${BASE}/take-on`;
+const UNDO_TAKE_ON_TOGETHER = `${BASE}/take-on/undo`;
 const undoTakeOnPath = (id: string): string => `${BASE}/${id}/take-on/undo`;
 const handOffPath = (id: string): string => `${BASE}/${id}/hand-off`;
 const RUN_ID = "01a1b576-c999-7000-8000-000000000901";
 const TASK_ID = "01a1b576-c999-7000-8000-000000000902";
+const RECORD_ID = "01a1b576-c999-7000-8000-000000000903";
 const UNDO_HAND_OFF = `${BASE}/handoffs/${RUN_ID}/undo`;
 
 const REVIEW = {
@@ -82,9 +85,37 @@ const open = async (
 ) => {
   const inbox = defaultInbox();
   change(inbox);
-  const opened = await openInbox(inbox, handlers);
+  let isUnreachable = false;
+  const opened = await openInbox(inbox, {
+    [DISMISS]: (call) => {
+      // As the controller does: a dismissed thing is gone from every later read. A fake that kept
+      // listing it would make the app show it again as an arrival, and a test that waits for the
+      // empty list would pass or fail by the order of two reads.
+      const dismissed = new Set((call.body as { ids: readonly string[] }).ids);
+      for (const [name, things] of Object.entries(inbox.lists)) {
+        inbox.lists[name] = things.filter((thing) => !dismissed.has(thing.id));
+      }
+      return { body: {} };
+    },
+    ...handlers,
+    "POST /api/v1/auth/ws-ticket": () =>
+      isUnreachable
+        ? { status: 503, body: buildErrorBody("unavailable", "The controller is down.") }
+        : { body: { ticket: "ws-ticket" } },
+  });
   await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
-  return { ...opened, inbox, user: userEvent.setup() };
+  /**
+   * Drops the live connection and keeps the controller unreachable. Without
+   * that, the app reconnects after about a second and a slow machine can lose
+   * the offline state before the test has looked at it.
+   */
+  const dropConnection = (): void => {
+    isUnreachable = true;
+    act(() => {
+      opened.live.drop();
+    });
+  };
+  return { ...opened, inbox, dropConnection, user: userEvent.setup() };
 };
 
 describe("walking and selecting", () => {
@@ -240,12 +271,9 @@ describe("Dismiss", () => {
   });
 
   it("moves the focus to the empty state's heading when the last thing leaves", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
 
     await user.keyboard("e");
 
@@ -320,21 +348,21 @@ describe("Dismiss", () => {
 });
 
 describe("the last thing leaving", () => {
-  it("plays the sunrise for the user's own move, and draws it still when the Inbox opens empty", async () => {
-    const { user } = await open(
-      (inbox) => {
-        inbox.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+  it("plays the sunrise for the user's own move", async () => {
+    const { user } = await open((inbox) => {
+      inbox.lists.waits = [SLOTS];
+    });
     expect(document.querySelector(".ib-em")).toBeNull();
 
     await user.keyboard("e");
 
     await screen.findByRole("heading", { name: /Nobody waits on you|All clear/ });
     expect(document.querySelector(".ib-em--rises")).not.toBeNull();
-    cleanup();
+  });
 
+  // Its own test, not a second app opened after the first one: the first app's live connection
+  // stays alive until the test ends, and would still be reading from the second app's fake.
+  it("draws the sunrise still when the Inbox opens empty", async () => {
     const empty = defaultInbox();
     empty.lists.waits = [];
     await openInbox(empty);
@@ -344,12 +372,9 @@ describe("the last thing leaving", () => {
   });
 
   it("says what waits behind the new pill, instead of drawing nothing, and the focus goes to it", async () => {
-    const { user, live, inbox } = await open(
-      (fake) => {
-        fake.lists.waits = [SLOTS];
-      },
-      { [DISMISS]: { body: {} } },
-    );
+    const { user, live, inbox } = await open((fake) => {
+      fake.lists.waits = [SLOTS];
+    });
     await waitFor(() => {
       expect(live.readTopics()).toContain("externalEntity");
     });
@@ -416,18 +441,39 @@ describe("Take on", () => {
     await waitForUndoLine("A thread was started on the Task.");
   });
 
-  it("refuses a selection of several things, with the reason and what to do instead", async () => {
-    const { user, calls } = await open();
+  it("takes a selection of several things on as one Task, and Undo takes back what the call wrote", async () => {
+    const result = {
+      taskId: TASK_ID,
+      created: true,
+      recordId: RECORD_ID,
+      added: 2,
+      taken: 2,
+    };
+    const { user, calls } = await open(undefined, {
+      [TAKE_ON_TOGETHER]: { body: result },
+      [UNDO_TAKE_ON_TOGETHER]: { body: { undone: true } },
+    });
     await user.keyboard("x");
     await user.keyboard("j");
     await user.keyboard("x");
 
     await user.keyboard("t");
 
-    await waitForUndoLine("Take on makes one Task for one thing.");
-    expect(readUndoLine()).toContain("Press Esc to clear the selection");
+    await waitForUndoLine("Took on, a Task on Work");
+    expect(callsTo(calls, TAKE_ON_TOGETHER)[0]?.body).toEqual({
+      ids: [SLOTS.id, LOYALTY.id],
+      title: SLOTS.title,
+    });
     expect(callsTo(calls, takeOnPath(SLOTS.id))).toHaveLength(0);
-    expect(callsTo(calls, takeOnPath(LOYALTY.id))).toHaveLength(0);
+
+    await user.click(
+      within(document.querySelector<HTMLElement>(".ib .undo-line")!).getByRole("button", {
+        name: /Undo/,
+      }),
+    );
+
+    await waitForUndoLine("The Task is gone, and nothing had started.");
+    expect(callsTo(calls, UNDO_TAKE_ON_TOGETHER)[0]?.body).toEqual({ recordId: RECORD_ID });
   });
 });
 
@@ -492,16 +538,14 @@ describe("the hand-off", () => {
   });
 
   it("refuses a hand-off picked from an open menu when the connection was lost meanwhile", async () => {
-    const { user, live, calls } = await open(handable, {
+    const { user, live, calls, dropConnection } = await open(handable, {
       [handOffPath(LOYALTY.id)]: { body: { runId: RUN_ID, taskId: TASK_ID } },
     });
     await live.waitForFirstPushes();
     await user.keyboard("j");
     await user.keyboard("h");
     await screen.findByRole("menuitem", { name: /Repair the build/, hidden: true });
-    act(() => {
-      live.drop();
-    });
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("2");
@@ -526,22 +570,17 @@ describe("the hand-off", () => {
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
-  it("refuses a selection of several things from the pane's workflow rows, as H does", async () => {
+  it("offers no hand-off in the pane of a selection of several things, only Take on, Link and Dismiss", async () => {
     const { user, calls } = await open(handable);
     await user.keyboard("x");
     await user.keyboard("j");
     await user.keyboard("x");
 
-    const row = await within(document.getElementById("inbox-pane")!).findByRole("button", {
-      name: /Review PR/,
-    });
-    // A pane that has just opened takes no pointer for a moment.
-    await waitFor(() => {
-      expect(document.querySelector("[data-arming]")).toBeNull();
-    });
-    await user.click(row);
-
-    await waitForUndoLine("Hand-off takes one thing at a time.");
+    const pane = document.getElementById("inbox-pane")!;
+    expect(await within(pane).findByRole("button", { name: "Dismiss all 2" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Take on" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Link all 2" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /Hand to/ })).toBeNull();
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
@@ -667,7 +706,9 @@ describe("Go to its Task, Open at its source and the keys sheet", () => {
     await user.keyboard("?");
 
     const sheet = await screen.findByRole("dialog", { name: "Keys" });
-    expect(within(sheet).getByText("Dismiss, all of the selection at once")).toBeTruthy();
+    expect(
+      within(sheet).getByText("Dismiss, all of the selection or of the group at once"),
+    ).toBeTruthy();
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();
@@ -677,11 +718,11 @@ describe("Go to its Task, Open at its source and the keys sheet", () => {
 
 describe("offline", () => {
   it("refuses every move with the reason and sends nothing", async () => {
-    const { user, live, calls } = await open(undefined, { [DISMISS]: { body: {} } });
-    await live.waitForFirstPushes();
-    act(() => {
-      live.drop();
+    const { user, live, calls, dropConnection } = await open(undefined, {
+      [DISMISS]: { body: {} },
     });
+    await live.waitForFirstPushes();
+    dropConnection();
     await screen.findByText(/Offline/);
 
     await user.keyboard("e");

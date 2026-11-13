@@ -64,6 +64,7 @@ import type {
   EventWithFacts,
   HandoffLeg,
   Harness,
+  InboxGroupQuery,
   InboxQuery,
   InboxValueQuery,
   IgnoreRuleWithCatches,
@@ -1589,6 +1590,14 @@ async function mountShellSpecimen(
             const answer = inbox.answer(query);
             return answer === "never" ? new Promise(() => undefined) : answerJson(answer);
           }
+          if (
+            init?.method === "POST" &&
+            url.endsWith("/api/v1/external-entities/inbox/group") &&
+            inbox.answerGroup !== undefined
+          ) {
+            const query = JSON.parse(await new Request(url, init).text()) as InboxGroupQuery;
+            return answerJson(inbox.answerGroup(query));
+          }
           if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
             const query = JSON.parse(await new Request(url, init).text()) as InboxValueQuery;
             return answerJson(inbox.answerValues(query));
@@ -1604,10 +1613,24 @@ async function mountShellSpecimen(
             if (url.endsWith("/api/v1/sessions"))
               return answerJson(inbox.threadStart.started.session);
           }
+          const isRead = (init?.method ?? "GET") === "GET";
+          // The pane reads what the source shows of the open thing, and the open ask whole.
+          const blocksPath = /\/api\/v1\/external-entities\/([^/]+)\/blocks$/.exec(url);
+          if (isRead && blocksPath !== null) {
+            const blocks = inbox.blocks.get(blocksPath[1]!) ?? { blocks: [] };
+            return blocks === "fails"
+              ? new Response(
+                  JSON.stringify({ _tag: "Internal", message: "The source did not answer." }),
+                  { status: 500, headers: { "content-type": "application/json" } },
+                )
+              : answerJson(blocks);
+          }
+          const signal = isRead
+            ? inbox.signals.get(url.slice(url.lastIndexOf("/") + 1))
+            : undefined;
+          if (signal !== undefined && url.includes("/api/v1/signals/")) return answerJson(signal);
           const detail = inbox.details.get(url.slice(url.lastIndexOf("/") + 1));
-          return (init?.method ?? "GET") === "GET" &&
-            url.includes("/api/v1/external-entities/") &&
-            detail !== undefined
+          return isRead && url.includes("/api/v1/external-entities/") && detail !== undefined
             ? answerJson(detail)
             : fetchRecords(url, init);
         };

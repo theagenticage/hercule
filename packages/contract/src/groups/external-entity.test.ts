@@ -6,7 +6,13 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import { readShorthandDecoder } from "../shorthand";
-import { CardFace, EntityFieldValue, InboxQuery } from "./external-entity";
+import {
+  CardFace,
+  EntityFieldValue,
+  InboxGroup,
+  InboxQuery,
+  MAX_INBOX_PAGE,
+} from "./external-entity";
 
 const PROJECT_FIELD = {
   key: "project",
@@ -51,5 +57,41 @@ describe("the typed clause word of `entity list --clause`", () => {
 
   it("refuses a word that is not a clause, with what to write", () => {
     expect(() => decodeWord("nonsense")).toThrow(/Write key=value/);
+  });
+});
+
+describe("the `limit` of a first page", () => {
+  const decode = Schema.decodeUnknownExit(InboxQuery);
+  const first = { mode: "first", list: { savedQuery: "waits" } };
+
+  it("is optional, from 1 to a whole page, and only for the first page", () => {
+    expect(decode(first)._tag).toBe("Success");
+    expect(decode({ ...first, limit: 1 })._tag).toBe("Success");
+    expect(decode({ ...first, limit: MAX_INBOX_PAGE })._tag).toBe("Success");
+    expect(decode({ ...first, limit: 0 })._tag).toBe("Failure");
+    expect(decode({ ...first, limit: MAX_INBOX_PAGE + 1 })._tag).toBe("Failure");
+    expect(decode({ ...first, limit: 1.5 })._tag).toBe("Failure");
+    expect(decode({ mode: "next", list: first.list, after: "x", limit: 5 })._tag).toBe("Failure");
+  });
+});
+
+describe("InboxGroup", () => {
+  const member = (ref: string) => ({
+    id: "0190c000-0000-7000-8000-000000000001",
+    ref,
+    matches: true,
+  });
+
+  it("needs at least two members and a size of at least two", () => {
+    const decode = Schema.decodeUnknownExit(InboxGroup);
+    const group = {
+      labelRef: "acme:ticket:1",
+      label: "A",
+      members: [member("acme:ticket:1"), member("acme:ticket:2")],
+      size: 2,
+    };
+    expect(decode(group)._tag).toBe("Success");
+    expect(decode({ ...group, size: 1 })._tag).toBe("Failure");
+    expect(decode({ ...group, members: [member("acme:ticket:1")] })._tag).toBe("Failure");
   });
 });

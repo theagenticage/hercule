@@ -10,6 +10,7 @@ import type { ActingConnection } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
 import { SearchIcon } from "../../icons/search";
 import { HandAccount } from "./hand-account";
+import { useInboxPopover } from "./inbox-popover";
 import "./hand-to-menu.css";
 
 /** The size of a workflow's face in the menu, in pixels. */
@@ -92,7 +93,6 @@ export function HandToMenu({
   readonly onClose: () => void;
   readonly anchor: HTMLElement;
 }): JSX.Element {
-  const menuRef = useRef<HTMLDivElement>(null);
   const findRef = useRef<HTMLInputElement>(null);
   const ids = useId();
   const [active, setActive] = useState(0);
@@ -109,42 +109,7 @@ export function HandToMenu({
   const typing = query.trim() !== "";
   const optionId = (index: number): string => `${ids}-${String(index)}`;
 
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    if (menu === null) return;
-    const before = document.activeElement;
-    menu.showPopover();
-    placeMenu(menu, anchor);
-    return () => {
-      if (before instanceof HTMLElement && before.isConnected) {
-        before.focus({ preventScroll: true });
-      }
-    };
-  }, [anchor]);
-
-  // With no field, the active row has the focus, so Return and a screen reader both act on it.
-  // With a field, the field keeps the focus and points at the active row.
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    const row = menu?.querySelector<HTMLElement>(`[data-hand-row="${String(activeIndex)}"]`);
-    if (menu === null || row === null || row === undefined) return;
-    if (hasFind) findRef.current?.focus({ preventScroll: true });
-    else row.focus({ preventScroll: true });
-    // Keeps the active row in view when the menu scrolls, as `scrollIntoView` would.
-    if (row.offsetTop < menu.scrollTop) menu.scrollTop = row.offsetTop;
-    else if (row.offsetTop + row.offsetHeight > menu.scrollTop + menu.clientHeight) {
-      menu.scrollTop = row.offsetTop + row.offsetHeight - menu.clientHeight;
-    }
-  }, [activeIndex, hasFind, shown.length]);
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    // The menu owns the keyboard: the page behind it never sees a key.
-    event.stopPropagation();
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
+  const handleKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     // The account picker keeps its own keys.
     if (event.target instanceof HTMLSelectElement) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -166,17 +131,35 @@ export function HandToMenu({
     if (picked !== undefined) onHand(picked.offer.workflowId);
   };
 
+  const { ref: menuRef, ...popover } = useInboxPopover({
+    anchor,
+    place: placeMenu,
+    onKey: handleKey,
+    onClose,
+  });
+
+  // With no field, the active row has the focus, so Return and a screen reader both act on it.
+  // With a field, the field keeps the focus and points at the active row.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const row = menu?.querySelector<HTMLElement>(`[data-hand-row="${String(activeIndex)}"]`);
+    if (menu === null || row === null || row === undefined) return;
+    if (hasFind) findRef.current?.focus({ preventScroll: true });
+    else row.focus({ preventScroll: true });
+    // Keeps the active row in view when the menu scrolls, as `scrollIntoView` would.
+    if (row.offsetTop < menu.scrollTop) menu.scrollTop = row.offsetTop;
+    else if (row.offsetTop + row.offsetHeight > menu.scrollTop + menu.clientHeight) {
+      menu.scrollTop = row.offsetTop + row.offsetHeight - menu.clientHeight;
+    }
+  }, [menuRef, activeIndex, hasFind, shown.length]);
+
   const itemRole = hasFind ? "option" : "menuitem";
   return (
     <div
       ref={menuRef}
-      popover="auto"
+      {...popover}
       aria-labelledby={`${ids}-heading`}
-      className={typing ? "hand-menu is-finding" : "hand-menu"}
-      onKeyDown={handleKeyDown}
-      onToggle={(event) => {
-        if (event.newState === "closed") onClose();
-      }}
+      className={typing ? "inbox-popover hand-menu is-finding" : "inbox-popover hand-menu"}
     >
       <p className="hand-menu-heading" id={`${ids}-heading`}>
         Hand to

@@ -1,6 +1,11 @@
 import type { Block } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { formatBlocksAsText, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
+import {
+  describeChecks,
+  describeDaysAgo,
+  formatBlocksAsText,
+  UNKNOWN_BLOCK_TEXT,
+} from "./signal-blocks";
 
 const MARTA = { name: "Marta", handle: "marta" };
 
@@ -12,6 +17,12 @@ describe("formatBlocksAsText", () => {
   it("returns a text block's markdown unchanged", () => {
     expect(formatBlocksAsText([{ type: "text", markdown: "**Release 4.2**\n\n- notes" }])).toBe(
       "**Release 4.2**\n\n- notes",
+    );
+  });
+
+  it("prints a text block's title above its markdown", () => {
+    expect(formatBlocksAsText([{ type: "text", title: "Release", markdown: "notes" }])).toBe(
+      "Release\nnotes",
     );
   });
 
@@ -168,6 +179,42 @@ describe("formatBlocksAsText", () => {
     );
   });
 
+  it("prints a fields block as its title and a label: value line per row", () => {
+    expect(
+      formatBlocksAsText([
+        {
+          type: "fields",
+          title: "Details",
+          rows: [
+            { label: "Milestone", value: "v4.2" },
+            { label: "Branch", value: "fix/login" },
+          ],
+        },
+      ]),
+    ).toBe("Details\nMilestone: v4.2\nBranch: fix/login");
+  });
+
+  it("prints a trend block as its caption and a line per point, oldest first", () => {
+    expect(
+      formatBlocksAsText([
+        {
+          type: "trend",
+          caption: "Events per day",
+          points: [
+            { at: "2026-11-10T00:00:00.000Z", value: 4 },
+            { at: "2026-11-11T00:00:00.000Z", value: 9.5 },
+          ],
+        },
+      ]),
+    ).toBe("Events per day\n2026-11-10T00:00:00.000Z: 4\n2026-11-11T00:00:00.000Z: 9.5");
+  });
+
+  it("prints a code block indented, and says when it was cut", () => {
+    expect(
+      formatBlocksAsText([{ type: "code", title: "Stack", text: "a\nb", truncated: true }]),
+    ).toBe("Stack\n    a\n    b\n(the text is cut short here)");
+  });
+
   it("prints one line for a block of a type it does not know, and keeps the blocks around it", () => {
     expect(
       formatBlocksAsText([
@@ -177,5 +224,24 @@ describe("formatBlocksAsText", () => {
       ]),
     ).toBe(`before\n\n${UNKNOWN_BLOCK_TEXT}\n\nafter`);
     expect(UNKNOWN_BLOCK_TEXT).toBe("This part can't be shown here.");
+  });
+});
+
+describe("describeDaysAgo", () => {
+  const now = new Date("2026-11-12T12:00:00.000Z");
+
+  it("counts whole days back from now", () => {
+    expect(describeDaysAgo("2026-11-12T01:00:00.000Z", now)).toBe("today");
+    expect(describeDaysAgo("2026-11-11T12:00:00.000Z", now)).toBe("yesterday");
+    expect(describeDaysAgo("2026-10-29T12:00:00.000Z", now)).toBe("14 days ago");
+  });
+});
+
+describe("describeChecks", () => {
+  it("lists the worst first and leaves out a zero", () => {
+    expect(describeChecks({ failed: 1, pending: 2, passed: 11 })).toBe(
+      "1 failing, 2 pending, 11 passed",
+    );
+    expect(describeChecks({ failed: 0, pending: 0, passed: 3 })).toBe("3 passed");
   });
 });

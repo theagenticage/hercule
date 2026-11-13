@@ -8,7 +8,13 @@
  * (`github/review-requests`).
  */
 import * as Effect from "effect/Effect";
-import { CORE_SAVED_QUERY_IDS, createValidationError, type Validation } from "@hercule/contract";
+import {
+  CORE_SAVED_QUERY_IDS,
+  createValidationError,
+  MAX_SAVED_QUERY_SIGNAL_KINDS,
+  type Validation,
+} from "@hercule/contract";
+import { listClauseValues } from "@hercule/plugin-host";
 import type { RegisteredSavedQuery } from "../plugins";
 
 /**
@@ -55,6 +61,19 @@ export const CORE_SAVED_QUERIES: ReadonlyArray<RegisteredSavedQuery> = [
 export const listSavedQueries = (
   pluginQueries: ReadonlyArray<RegisteredSavedQuery>,
 ): ReadonlyArray<RegisteredSavedQuery> => [...CORE_SAVED_QUERIES, ...pluginQueries];
+
+/**
+ * Returns the signal kinds a saved query is about: the values of its
+ * `signal is` clauses, at most 8, in clause order, without repeats. Empty
+ * when the query has no such clause.
+ */
+export const listQuerySignalKinds = (query: RegisteredSavedQuery): ReadonlyArray<string> => {
+  const kinds = query.clauses
+    .filter((clause) => clause.key === "signal" && clause.op === "is")
+    .flatMap((clause) => listClauseValues(clause.value))
+    .filter((value): value is string => typeof value === "string");
+  return [...new Set(kinds)].slice(0, MAX_SAVED_QUERY_SIGNAL_KINDS);
+};
 
 /**
  * Returns the saved query with this id, or fails with `Validation` naming the

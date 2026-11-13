@@ -9,7 +9,7 @@ const closed = { isStarting: false, hasStarted: false };
 
 const openStore = () => {
   const drafts = createThreadStartDrafts();
-  drafts.open("1", things);
+  drafts.open("1", things, things[0]!.title);
   return drafts;
 };
 
@@ -33,7 +33,7 @@ describe("open", () => {
     drafts.edit("1", { text: "mine" });
     const listener = vi.fn();
     drafts.subscribe(listener);
-    drafts.open("1", things);
+    drafts.open("1", things, things[0]!.title);
     expect(drafts.read("1")?.text).toBe("mine");
     expect(listener).not.toHaveBeenCalled();
   });
@@ -140,7 +140,7 @@ describe("settle", () => {
 describe("finish, clear and subscribe", () => {
   it("removes one draft, or all, and tells the listeners once per change", () => {
     const drafts = openStore();
-    drafts.open("2", things);
+    drafts.open("2", things, things[0]!.title);
     const listener = vi.fn();
     const stop = drafts.subscribe(listener);
     drafts.finish("1");
@@ -149,7 +149,7 @@ describe("finish, clear and subscribe", () => {
     drafts.clear();
     expect(drafts.read("2")).toBeUndefined();
     stop();
-    drafts.open("3", things);
+    drafts.open("3", things, things[0]!.title);
     expect(listener).toHaveBeenCalledTimes(2);
   });
 });

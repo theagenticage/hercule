@@ -1107,6 +1107,18 @@ export const inboxQuery = (client: HerculeClient, selection: InboxSelection) =>
   });
 
 /**
+ * Reads the group of linked things that the thing `ref` is in, in full, for
+ * the pane of a group (`externalEntity.readInboxGroup`). The key is under the
+ * Inbox's, so a push on the Inbox (a link, an unlink) reads it again.
+ */
+export const inboxGroupQuery = (client: HerculeClient, ref: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.inbox(), "group", ref],
+    queryFn: ({ signal }) => client.externalEntity.readInboxGroup({ payload: { ref } }, { signal }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the values of one field among the things of a list, for the search's
  * suggestions. The key is under the Inbox's, so a push on the Inbox reads the
  * values again. `input` is `undefined` while no clause is being typed, and
@@ -1149,6 +1161,27 @@ export const projectMatchQuery = (client: HerculeClient, ids: readonly string[])
       client.externalEntity.matchProject({ payload: { ids: [...ids] } }, { signal }),
     ...LIVE_KEPT_READ_OPTIONS,
     gcTime: 30_000,
+  });
+
+/**
+ * Reads what the source of one External Entity shows of it in the Inbox's pane
+ * (`externalEntity.readBlocks`): the plugin's own blocks. The read goes to the
+ * source, so it never retries (a source that cannot be read answers with one
+ * quiet line in the pane) and no push reads it again. It is never stale, so
+ * an open pane sets no timer for it (the app is idle when nothing changes);
+ * what was read is kept for a minute after the pane leaves the thing, so
+ * walking back shows its blocks at once and a thing visited after longer reads
+ * them again.
+ */
+export const entityBlocksQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: ["external-entity-blocks", id],
+    queryFn: ({ signal }) => client.externalEntity.readBlocks({ params: { id } }, { signal }),
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
 /**

@@ -263,13 +263,13 @@ describe("the morning replay", () => {
     expect(readLine()).toBe("");
 
     // Then the change plays in turn: the cause first, then the card in Building.
+    // The line is waited for on its own: it is replaced by the quiet line soon after the card moves, so reading it after a wait for the card is a race under load.
     await waitFor(
       () => {
-        expect(getCard("Cache delivery slot lookups").dataset["stage"]).toBe("building");
+        expect(readLine()).toBe("Pull request #6221 merged");
       },
       { timeout: 4_000 },
     );
-    expect(readLine()).toBe("Pull request #6221 merged");
 
     // One quiet line stays afterwards.
     const replay = await screen.findByRole(

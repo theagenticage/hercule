@@ -51,6 +51,10 @@ interface HeldLine<Page> {
   readonly hold: Hold;
   /** How long the line stays, fixed when it is said: a withdrawn gesture does not restart the timer. */
   readonly staysMs: number;
+  /** The gesture the line was said for, which `restate` finds the line by. It stays after Undo has left the line. */
+  readonly shown: Gesture<Page> | null;
+  /** Whether the line stays up with no timer of its own, because its gesture waits to act (see `restate`). */
+  readonly isWaiting: boolean;
 }
 
 /** What `useUndoLine` returns. */
@@ -74,6 +78,24 @@ export interface UndoLineControls<Page> {
    * any more. When the line offers it, Undo goes from the line at once.
    */
   readonly withdraw: (gesture: Gesture<Page>) => void;
+  /**
+   * Changes the words of the line, and whether it offers Undo, but only while
+   * the line shows `gesture`: a gesture that finishes late never overwrites
+   * the words of a newer one. Taking Undo away leaves the gesture on the undo
+   * stack, so the next Undo still reaches it and explains itself.
+   *
+   * While `isWaiting` is true the line stays up with no timer, for a gesture
+   * that waits before it acts. When `isWaiting` turns false the line's timer
+   * starts again.
+   */
+  readonly restate: (
+    gesture: Gesture<Page>,
+    update: {
+      readonly text: string;
+      readonly offersUndo: boolean;
+      readonly isWaiting: boolean;
+    },
+  ) => void;
   /**
    * Tells the line whether the pointer or the focus is on it. While it is,
    * the line does not hide, also when a new line replaces its words. It hides 3
@@ -119,6 +141,13 @@ export function useUndoLine<Page>(
     serial: 0,
     hold: "free",
     staysMs: FAILURE_LINE_MS,
+    shown: null,
+    isWaiting: false,
+  });
+  // The newest line, for the calls that must read it outside a state update.
+  const current = useRef(held);
+  useLayoutEffect(() => {
+    current.current = held;
   });
   const line: UndoLineState = {
     text: held.text,
@@ -136,6 +165,11 @@ export function useUndoLine<Page>(
     action?: UndoAction,
     title?: string,
   ): void => {
+    // A line that replaces a held one passes the user's hold on to its gesture.
+    if (current.current.hold === "held") {
+      current.current.offered?.hold?.(false);
+      offeredGesture?.hold?.(true);
+    }
     setHeld((before) => ({
       text,
       offered: offeredGesture ?? null,
@@ -145,6 +179,8 @@ export function useUndoLine<Page>(
       serial: before.serial + 1,
       hold: before.hold === "held" ? "held" : "free",
       staysMs: offeredGesture === undefined ? FAILURE_LINE_MS : MOVE_LINE_MS,
+      shown: offeredGesture ?? null,
+      isWaiting: false,
     }));
   };
 
@@ -154,20 +190,46 @@ export function useUndoLine<Page>(
     // Compiler caches a render by its inputs and cannot see the stack change.
     setHeld((before) =>
       before.offered !== null && !undoStack.holds(before.offered)
-        ? { ...before, offered: null }
+        ? { ...before, offered: null, isWaiting: false }
         : before,
     );
   };
 
+  const restate: UndoLineControls<Page>["restate"] = (gesture, update) => {
+    setHeld((before) =>
+      before.shown !== gesture
+        ? before
+        : {
+            ...before,
+            text: update.text,
+            // Undo cannot come back once the stack lost the gesture (see `withdraw`).
+            offered: update.offersUndo && before.offered !== null ? gesture : null,
+            isWaiting: update.isWaiting,
+            serial: before.isWaiting && !update.isWaiting ? before.serial + 1 : before.serial,
+            staysMs: MOVE_LINE_MS,
+          },
+    );
+  };
+
   const hold = (isHeld: boolean): void => {
+    current.current.offered?.hold?.(isHeld);
     setHeld((before) => {
       if (isHeld) return before.hold === "held" ? before : { ...before, hold: "held" };
       return before.hold === "held" ? { ...before, hold: "released" } : before;
     });
   };
 
+  // Leaving the page while the user is on the line would strand a held
+  // gesture: the line never reports the pointer leaving, so release it here.
+  useEffect(
+    () => () => {
+      if (current.current.hold === "held") current.current.offered?.hold?.(false);
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!held.isShown || held.hold === "held") return;
+    if (!held.isShown || held.hold === "held" || held.isWaiting) return;
     const stays = held.hold === "released" ? RELEASED_LINE_MS : held.staysMs;
     const timer = setTimeout(() => {
       setHeld((now) => (now.serial === held.serial ? { ...now, isShown: false } : now));
@@ -175,7 +237,7 @@ export function useUndoLine<Page>(
     return () => {
       clearTimeout(timer);
     };
-  }, [held.serial, held.isShown, held.staysMs, held.hold]);
+  }, [held.serial, held.isShown, held.staysMs, held.hold, held.isWaiting]);
 
   // The newest state of the page, so a later render is what Undo uses.
   const latest = useRef({ buildPage, isPaused, say });
@@ -198,5 +260,5 @@ export function useUndoLine<Page>(
     void undoStack.undo();
   };
 
-  return { line, say, withdraw, hold, undo };
+  return { line, say, withdraw, restate, hold, undo };
 }

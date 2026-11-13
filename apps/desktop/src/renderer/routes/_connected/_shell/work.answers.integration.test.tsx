@@ -26,9 +26,9 @@ import {
   getCard,
   listCalls,
   openWork,
-  endUndoWindow,
   holdUndoWindow,
   THREAD_ID,
+  endUndoWindow,
 } from "./-work.testing";
 
 // The board stops the paws of a working colleague whose card is out of view.
@@ -165,7 +165,6 @@ describe("answering a question from the details pane", () => {
     expect(listCalls(calls, RESPOND_PATH)).toHaveLength(0);
 
     await endUndoWindow();
-
     await waitFor(() => {
       expect(listCalls(calls, RESPOND_PATH)).toHaveLength(1);
     });

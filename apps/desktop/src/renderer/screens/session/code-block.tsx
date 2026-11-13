@@ -61,7 +61,7 @@ export function CodeBlock({
         >
           {result === "copied" ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
         </button>
-        <span className="code-block-status" role="status">
+        <span className="visually-hidden" role="status">
           {result === undefined ? "" : copyLabel}
         </span>
       </div>

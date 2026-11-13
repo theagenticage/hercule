@@ -6,6 +6,8 @@ Date: 2026-11-07
 
 Accepted by [Work overview: the design and its tickets (#1026)](https://github.com/theagenticage/hercule/issues/1026), built first by [#1032](https://github.com/theagenticage/hercule/issues/1032). Amends [ADR 0019](./0019-the-task-model-is-thin-workflows-own-task-semantics.md), which kept a Task's outside things only as provenance, and [ADR 0046](./0046-handing-a-signal-off-tracks-the-work-on-a-task.md), which picked the Task a hand-off continues by its latest update. Keeps [ADR 0006](./0006-plugins-request-capabilities-and-register-contributions-in-code.md) (a plugin registers data in the catalog), [ADR 0009](./0009-all-events-flow-through-one-persisted-pipeline.md) (what happens is an event) and [ADR 0040](./0040-intake-holds-signals-notifications-are-hercules-own-messages.md) (a Signal is its own record). The rules are in [spec 20](../spec/20-external-entities.md).
 
+**Amended 2026-11-13 ([#1124](https://github.com/theagenticage/hercule/issues/1124)):** riding and "the page is chosen in bundles" are retired. The Inbox draws every set of things linked by a source or a person as one group, pages take whole groups, and counts count things. A text claim still joins and groups nothing ([spec 20 section 8.6](../spec/20-external-entities.md#86-groups-of-linked-things)).
+
 ## Context
 
 Hercule knows outside things only through events. A pull request that asks for the user's review is known because an event once said so. That gives the Inbox three problems:

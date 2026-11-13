@@ -53,7 +53,7 @@ describe("the Inbox screen", () => {
     await waitFor(() => {
       expect(
         within(document.getElementById("inbox-pane")!).getByRole("heading", {
-          name: SLOTS.title,
+          name: new RegExp(`^${SLOTS.title}`),
         }),
       ).toBeTruthy();
     });
@@ -136,7 +136,7 @@ describe("the Inbox screen", () => {
     await waitFor(() => {
       expect(
         within(document.getElementById("inbox-pane")!).getByRole("heading", {
-          name: LOYALTY.title,
+          name: new RegExp(`^${LOYALTY.title}`),
         }),
       ).toBeTruthy();
     });
@@ -159,7 +159,9 @@ describe("the Inbox screen", () => {
       await userEvent.keyboard(key);
       await waitFor(() => {
         expect(
-          within(document.getElementById("inbox-pane")!).getByRole("heading", { name: title }),
+          within(document.getElementById("inbox-pane")!).getByRole("heading", {
+            name: new RegExp(`^${title}`),
+          }),
         ).toBeTruthy();
       });
     };
@@ -180,7 +182,7 @@ describe("the Inbox screen", () => {
     });
     await screen.findByRole("treeitem", { name: /Cache delivery slot lookups/ });
     const pane = document.getElementById("inbox-pane")!;
-    await within(pane).findByRole("heading", { name: SLOTS.title });
+    await within(pane).findByRole("heading", { name: new RegExp(`^${SLOTS.title}`) });
     screen.getByRole("treeitem", { name: /Cache delivery slot lookups/ }).focus();
 
     await userEvent.keyboard("j");
@@ -191,8 +193,8 @@ describe("the Inbox screen", () => {
       );
     });
     // The read of the new thing is out: the old detail stays, with no quiet shapes in its place.
-    const card = pane.querySelector<HTMLElement>(".open-card")!;
-    expect(within(card).getByRole("heading", { name: SLOTS.title })).toBeTruthy();
+    const card = pane.querySelector<HTMLElement>(".ib-pane-content")!;
+    expect(within(card).getByRole("heading", { name: new RegExp(`^${SLOTS.title}`) })).toBeTruthy();
     expect(card.getAttribute("aria-busy")).toBe("true");
     expect(card.hasAttribute("inert")).toBe(true);
     expect(pane.querySelector(".ib-pane-skel")).toBeNull();

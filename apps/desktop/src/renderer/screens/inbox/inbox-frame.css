@@ -78,16 +78,6 @@
 .ib-end > * {
   -webkit-app-region: no-drag;
 }
-/* The page's name for assistive technology: the pill's own tab shows it. */
-.ib-title {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 .ib-pill {
   justify-self: start;
   margin-left: 14px;

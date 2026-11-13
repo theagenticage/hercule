@@ -4,7 +4,9 @@
  * the pane reads, and the helpers to open the Inbox on it and read what it
  * draws. `inbox` is mutable: a test changes it, then pushes.
  */
-import { screen, within } from "@testing-library/react";
+import { expect } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import type userEvent from "@testing-library/user-event";
 import {
   answerFakeInboxQuery,
   buildFakeInboxDetail,
@@ -13,7 +15,13 @@ import {
   buildInboxThing,
   type FakeInbox,
 } from "@hercule/client-core/inbox/testing";
-import type { InboxOutline, InboxQuery, InboxReply, InboxThing } from "@hercule/contract";
+import type {
+  InboxGroup,
+  InboxOutline,
+  InboxQuery,
+  InboxReply,
+  InboxThing,
+} from "@hercule/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -56,10 +64,10 @@ export const BASKET = request(3, "Fix the basket rounding", "Tessa");
 
 export const OUTLINE: InboxOutline = buildInboxOutline({
   savedQueries: [
-    { id: "waits", name: "Someone waits on me", order: "waiting", count: 3 },
-    { id: "mine", name: "Mine", order: "newest", count: 1 },
-    { id: "updates", name: "Updates", order: "newest", count: 2 },
-    { id: "everything", name: "Everything", order: "newest", count: 6 },
+    { id: "waits", name: "Someone waits on me", order: "waiting", signalKinds: [], count: 3 },
+    { id: "mine", name: "Mine", order: "newest", signalKinds: [], count: 1 },
+    { id: "updates", name: "Updates", order: "newest", signalKinds: [], count: 2 },
+    { id: "everything", name: "Everything", order: "newest", signalKinds: [], count: 6 },
   ],
   fields: [{ key: "team", label: "Team", type: "text" }],
 });
@@ -135,3 +143,55 @@ export const readQueries = (calls: readonly Call[]): InboxQuery[] =>
   calls
     .filter((call) => `${call.method} ${call.path}` === QUERY_PATH)
     .map((call) => call.body as InboxQuery);
+
+/** Returns the calls in `calls` that went to `path`, written "METHOD /path". */
+export const callsTo = (calls: readonly Call[], path: string): readonly Call[] =>
+  calls.filter((call) => `${call.method} ${call.path}` === path);
+
+/** Returns the words on the undo line, or an empty string while it shows none. */
+export const readUndoLine = (): string =>
+  document.querySelector(".ib .undo-line .undo-text")?.textContent ?? "";
+
+/** Waits until the undo line says something that contains `text`. */
+export const waitForUndoLine = (text: string): Promise<void> =>
+  waitFor(() => {
+    expect(readUndoLine()).toContain(text);
+  });
+
+/** Presses Undo on the undo line. */
+export const pressUndo = (user: ReturnType<typeof userEvent.setup>): Promise<void> =>
+  user.click(
+    within(document.querySelector<HTMLElement>(".ib .undo-line")!).getByRole("button", {
+      name: /Undo/,
+    }),
+  );
+
+/** Slots and Loyalty are linked; Basket stands alone. */
+export const SLOTS_AND_LOYALTY: InboxGroup = {
+  labelRef: SLOTS.ref,
+  label: SLOTS.title,
+  members: [
+    { id: SLOTS.id, ref: SLOTS.ref, matches: true },
+    { id: LOYALTY.id, ref: LOYALTY.ref, matches: true },
+  ],
+  size: 2,
+};
+
+/** Answers a read as the controller would, with `groups` named in every reply that holds their members. */
+export const answerGroupedWith =
+  (groups: readonly InboxGroup[]) =>
+  (inbox: FakeInbox, call: Call): { body: InboxReply } => {
+    const reply = answerFakeInboxQuery(inbox, call.body as InboxQuery);
+    switch (reply.mode) {
+      case "refresh":
+        return {
+          body: {
+            ...reply,
+            first: { ...reply.first, groups },
+            held: { ...reply.held, groups },
+          },
+        };
+      default:
+        return { body: { ...reply, groups } };
+    }
+  };

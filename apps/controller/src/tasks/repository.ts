@@ -152,20 +152,27 @@ export interface TaskTraces {
   readonly stage: TaskStage;
   /** True when the Task was merged into another Task. */
   readonly merged: boolean;
-  /** True when the Task links the ref that `readTraces` was asked about. */
-  readonly linksRef: boolean;
+  /** True when the Task links every ref that `readTraces` was asked about. */
+  readonly linksEveryRef: boolean;
   /** True when an edit has written the Task since it was created (its `revision` is above 0). A stage that a fact placed is not an edit. */
   readonly edited: boolean;
   /** True when a Thread (a session) belongs to the Task. */
   readonly hasSession: boolean;
   /** True when a run works on the Task. */
   readonly hasRun: boolean;
-  /** How many refs the Task links. */
-  readonly linkCount: number;
+  /** How many refs the Task links besides the ones that `readTraces` was asked about. */
+  readonly otherLinkCount: number;
   /** How many stage decisions have been made on the Task (`stage_revision`). */
   readonly stageRevision: number;
   /** How many times a run or a session has joined the Task (`join_revision`). */
   readonly joinRevision: number;
+}
+
+/** The times a Task's link to a ref holds: when it was written, and when the user took it on. */
+export interface LinkTimes {
+  readonly linkedAt: string;
+  /** Undefined for a link the user has not taken on. */
+  readonly takenAt: string | undefined;
 }
 
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
@@ -766,10 +773,11 @@ const make = Effect.gen(function* () {
   ];
 
   /**
-   * Links the Task to each ref its new provenance entries carry. A pair that
-   * is already linked keeps its row, so the oldest `linked_at` stays and the
-   * active Task of a ref does not change when the Task is updated. Returns
-   * the refs that are new links, in the order the entries name them.
+   * Links the Task to each ref its new provenance entries carry, in one
+   * statement. A pair that is already linked keeps its row, so the oldest
+   * `linked_at` stays and the active Task of a ref does not change when the
+   * Task is updated. Returns the refs that are new links, in the order the
+   * entries name them.
    */
   const insertLinks = (
     taskId: Uint8Array,
@@ -780,41 +788,56 @@ const make = Effect.gen(function* () {
       readonly following: boolean;
       readonly takenOn: boolean;
     },
-  ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-    Effect.map(
-      Effect.forEach(
-        entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
-        (ref) => sql<{ readonly ref: string }>`
-          INSERT INTO task_entity_links
-            (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
-          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
-                  ${link.takenOn ? link.at : null}, ${link.takenOn ? link.actor : null})
-          ON CONFLICT (task_id, ref) DO NOTHING
-          RETURNING ref
-        `,
-      ),
-      (inserted) => inserted.flatMap((rows) => rows.map((row) => row.ref)),
+  ): Effect.Effect<ReadonlyArray<string>, SqlError> => {
+    const refs = [
+      ...new Set(entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref]))),
+    ];
+    if (refs.length === 0) return Effect.succeed([]);
+    return Effect.map(
+      sql<{ readonly ref: string }>`
+        INSERT INTO task_entity_links
+          (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
+        SELECT ${taskId}, value, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
+               ${link.takenOn ? link.at : null}, ${link.takenOn ? link.actor : null}
+        FROM json_each(${JSON.stringify(refs)}) WHERE true
+        ON CONFLICT (task_id, ref) DO NOTHING
+        RETURNING ref
+      `,
+      (rows) => {
+        const inserted = new Set(rows.map((row) => row.ref));
+        return refs.filter((ref) => inserted.has(ref));
+      },
     );
+  };
 
+  /** Appends the provenance entries to the Task, in one statement. */
   const insertProvenance = (
     taskId: Uint8Array,
     entries: ReadonlyArray<ProvenanceInput>,
     at: string,
     actor: string,
-  ) =>
-    Effect.forEach(
-      entries,
-      (entry) => sql`
-        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, merged_task_id,
-                                     at, actor)
-        VALUES (${mintUuid()}, ${taskId}, ${entry.ref ?? null}, ${entry.eventId ?? null},
-                ${entry.runId === undefined ? null : uuidFromString(entry.runId)},
-                ${entry.signalId === undefined ? null : uuidFromString(entry.signalId)},
-                ${entry.mergedTaskId === undefined ? null : uuidFromString(entry.mergedTaskId)},
-                ${at}, ${actor})
-      `,
-      { discard: true },
+  ): Effect.Effect<void, SqlError> => {
+    if (entries.length === 0) return Effect.void;
+    const params = entries.flatMap((entry) => [
+      mintUuid(),
+      taskId,
+      entry.ref ?? null,
+      entry.eventId ?? null,
+      entry.runId === undefined ? null : uuidFromString(entry.runId),
+      entry.signalId === undefined ? null : uuidFromString(entry.signalId),
+      entry.mergedTaskId === undefined ? null : uuidFromString(entry.mergedTaskId),
+      at,
+      actor,
+    ]);
+    return Effect.asVoid(
+      sql.unsafe(
+        `INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, merged_task_id,
+                                      at, actor)
+         VALUES ${entries.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+        params,
+      ),
     );
+  };
 
   /** Returns true if a project exists and has not been deleted. */
   const isLiveProject = (id: string): Effect.Effect<boolean, SqlError> =>
@@ -1629,36 +1652,38 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns what the Task has gathered since it was created, and whether it
-     * links `ref`, or none when there is no such Task or it is deleted. Reads
-     * the Task by its own id, so a merged Task is returned as itself.
-     * Each answer comes from an index: the Thread and run checks use the
-     * partial indexes on `sessions.task_id` and `runs.task_id`.
+     * Returns what the Task has gathered since it was created, whether it
+     * links every one of `refs`, and how many refs it links besides them, or
+     * none when there is no such Task or it is deleted. `refs` has no
+     * repeats. Reads the Task by its own id, so a merged Task is returned as
+     * itself. Each answer comes from an index: the Thread and run checks use
+     * the partial indexes on `sessions.task_id` and `runs.task_id`.
      */
     readTraces: (
       id: string,
-      ref: ExternalRef,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
     ): Effect.Effect<Option.Option<TaskTraces>, SqlError> =>
       Effect.map(
         sql<{
           readonly stage: string;
           readonly merged: number;
-          readonly links_ref: number;
+          readonly linked_ref_count: number;
           readonly edited: number;
           readonly has_session: number;
           readonly has_run: number;
-          readonly link_count: number;
+          readonly other_link_count: number;
           readonly stage_revision: number;
           readonly join_revision: number;
         }>`
           SELECT tasks.stage, tasks.merged_into_id IS NOT NULL AS merged,
                  tasks.stage_revision, tasks.join_revision,
-                 EXISTS (SELECT 1 FROM task_entity_links
-                         WHERE task_id = tasks.id AND ref = ${ref}) AS links_ref,
+                 (SELECT count(*) FROM task_entity_links
+                  WHERE task_id = tasks.id AND ref IN ${sql.in(refs)}) AS linked_ref_count,
                  tasks.revision > 0 AS edited,
                  EXISTS (SELECT 1 FROM sessions WHERE sessions.task_id = tasks.id) AS has_session,
                  EXISTS (SELECT 1 FROM runs WHERE runs.task_id = tasks.id) AS has_run,
-                 (SELECT count(*) FROM task_entity_links WHERE task_id = tasks.id) AS link_count
+                 (SELECT count(*) FROM task_entity_links
+                  WHERE task_id = tasks.id AND ref NOT IN ${sql.in(refs)}) AS other_link_count
           FROM tasks WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`,
         (rows) => {
           const row = rows[0];
@@ -1667,16 +1692,107 @@ const make = Effect.gen(function* () {
             : Option.some({
                 stage: row.stage as TaskStage,
                 merged: row.merged === 1,
-                linksRef: row.links_ref === 1,
+                linksEveryRef: row.linked_ref_count === refs.length,
                 edited: row.edited === 1,
                 hasSession: row.has_session === 1,
                 hasRun: row.has_run === 1,
-                linkCount: row.link_count,
+                otherLinkCount: row.other_link_count,
                 stageRevision: row.stage_revision,
                 joinRevision: row.join_revision,
               });
         },
       ),
+
+    /**
+     * Returns the `linked_at` and `taken_at` the live Task's links to `refs`
+     * hold now, one entry per link that exists (`takenAt` is `undefined` for a
+     * link not taken). A take-on reads them to record what it wrote, and its
+     * undo reads them to see that the links still hold it.
+     */
+    readLinkTimes: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+    ): Effect.Effect<ReadonlyMap<ExternalRef, LinkTimes>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly ref: string;
+          readonly linked_at: string;
+          readonly taken_at: string | null;
+        }>`
+          SELECT l.ref, l.linked_at, l.taken_at
+          FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+          WHERE l.task_id = ${uuidFromString(taskId)} AND tasks.deleted_at IS NULL
+            AND l.ref IN ${sql.in(refs)}`,
+        (rows) =>
+          new Map(
+            rows.map(
+              (row) =>
+                [row.ref, { linkedAt: row.linked_at, takenAt: row.taken_at ?? undefined }] as const,
+            ),
+          ),
+      ),
+
+    /** Clears the taken mark (`taken_at` and `taken_by`) of the Task's links to `refs`, in one statement. */
+    clearLinksTaken: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE task_entity_links SET taken_at = NULL, taken_by = NULL
+            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}`,
+      ),
+
+    /** Returns those of `refs` that the Task, taken as it is, links, in one statement. */
+    listLinkedRefs: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+    ): Effect.Effect<ReadonlySet<ExternalRef>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          SELECT ref FROM task_entity_links
+          WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}`,
+        (rows) => new Set(rows.map((row) => row.ref)),
+      ),
+
+    /**
+     * Marks the Task's links to `refs` as taken at `at` by `by`, for those not
+     * taken yet, in one statement, and returns the refs it marked. A link
+     * taken already keeps its first time and taker.
+     */
+    markLinksTaken: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+      at: string,
+      by: string,
+    ): Effect.Effect<ReadonlySet<ExternalRef>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          UPDATE task_entity_links SET taken_at = ${at}, taken_by = ${by}
+          WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}
+            AND taken_at IS NULL
+          RETURNING ref`,
+        (rows) => new Set(rows.map((row) => row.ref)),
+      ),
+
+    /**
+     * Removes the Task's links to `refs` and records one write on the Task
+     * (`updated_at` and `revision`), like any other edit. Writes nothing when
+     * it links none of them. It never touches provenance, which stays the
+     * history.
+     */
+    removeLinks: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const key = uuidFromString(taskId);
+        const removed = yield* sql`
+          DELETE FROM task_entity_links WHERE task_id = ${key} AND ref IN ${sql.in(refs)}
+          RETURNING ref`;
+        if (removed.length === 0) return;
+        yield* sql`UPDATE tasks SET updated_at = ${at}, revision = revision + 1 WHERE id = ${key}`;
+      }),
 
     /**
      * Returns the stage revision and the join revision of the Task with that

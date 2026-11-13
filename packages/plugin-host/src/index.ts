@@ -90,6 +90,7 @@ export {
   QualifiedEntityFieldDeclaration,
   QualifiedEntityKindDeclaration,
   type EntityInventory,
+  type EntityBlockDraft,
   type EntityLookup,
   type EntityLookupContext,
   type EntityRecognition,

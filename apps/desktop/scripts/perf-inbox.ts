@@ -363,7 +363,7 @@ const rowAt = (position: number): string =>
 const CURRENT_POSITION = `Number(document.querySelector(".ib-rows > .ib-row.is-current")?.getAttribute("aria-posinset") ?? 0)`;
 
 /** An expression for the title the pane shows, or null. */
-const PANE_TITLE = `(document.querySelector('[aria-label="The open thing"] .open-card-title')?.textContent ?? null)`;
+const PANE_TITLE = `(document.querySelector('[aria-label="The open thing"] .ib-pane-title')?.firstChild?.textContent?.trim() ?? null)`;
 
 /** An expression for the list's scrolling element. */
 const SCROLLER = `document.querySelector(".ib-scroll")`;

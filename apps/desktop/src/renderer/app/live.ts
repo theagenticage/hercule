@@ -115,7 +115,7 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
  * read that is already running, because that read may have been answered
  * before the change the push reports.
  */
-export const SHARED_READ_WINDOW_MS = 50;
+const SHARED_READ_WINDOW_MS = 50;
 
 /** Who listens for the Inbox's pushes, by the query client the pushes reach. */
 const inboxPushListeners = new WeakMap<QueryClient, Set<() => void>>();

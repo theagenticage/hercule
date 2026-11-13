@@ -2,6 +2,7 @@ import { useState, type JSX, type KeyboardEvent, type ReactNode, type RefObject 
 import { joinClassNames } from "../../app/join-class-names";
 import { isMotionReduced } from "../../app/motion";
 import { CheckIcon } from "../../icons/check";
+import { ExternalIcon } from "../../icons/external";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { MoreIcon } from "../../icons/more";
 import { useResizablePane } from "../desk/use-resizable-pane";
@@ -53,6 +54,9 @@ const MENU_WIDTHS: ReadonlyArray<{ readonly name: string; readonly width: number
  *   nor counted as cut off.
  * - `isShown` is false while the pane steps aside: it is inert then.
  * - `onOpenAtSource`, when given, adds "Open at its source" to the menu.
+ *   With `openAtSourceWords` as well ("Open on GitHub"), it also adds an
+ *   icon button before the ⋯ menu that opens the thing at its source, with
+ *   those words as its tooltip and its accessible name.
  * - `paneRef` is the pane's element, which the frame fades.
  */
 export function InboxPaneFrame({
@@ -68,6 +72,7 @@ export function InboxPaneFrame({
   onWidthChange,
   onClose,
   onOpenAtSource,
+  openAtSourceWords,
 }: {
   readonly paneRef: RefObject<HTMLElement | null>;
   readonly width: number;
@@ -81,6 +86,7 @@ export function InboxPaneFrame({
   readonly onWidthChange: (width: number) => void;
   readonly onClose: () => void;
   readonly onOpenAtSource?: (() => void) | undefined;
+  readonly openAtSourceWords?: string | undefined;
 }): JSX.Element {
   const separatorProps = useResizablePane({
     paneRef,
@@ -146,11 +152,23 @@ export function InboxPaneFrame({
             )}
             <div className="ib-pane-from">{head}</div>
             {hasMenu && (
-              <>
+              <div className="ib-pane-tools">
+                {onOpenAtSource !== undefined && openAtSourceWords !== undefined && (
+                  <button
+                    type="button"
+                    className="icon-btn ib-pane-open"
+                    aria-label={openAtSourceWords}
+                    title={openAtSourceWords}
+                    aria-keyshortcuts="O"
+                    onClick={onOpenAtSource}
+                  >
+                    <ExternalIcon size={14} />
+                  </button>
+                )}
                 <button
                   {...menu.triggerProps}
                   type="button"
-                  className="icon-btn ib-pane-more"
+                  className="icon-btn"
                   aria-label="More"
                   title="More"
                 >
@@ -202,7 +220,7 @@ export function InboxPaneFrame({
                     </>
                   )}
                 </ToolMenu>
-              </>
+              </div>
             )}
           </header>
         )}

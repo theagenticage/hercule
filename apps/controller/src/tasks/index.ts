@@ -5,6 +5,7 @@ export {
   TaskService,
   TaskServiceLayer,
   type CreatedTaskUndo,
+  type TakeOnUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
   type FailureRestoration,
@@ -14,6 +15,7 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
+export type { TakeOnRecord } from "./take-on-records";
 export { groupByTask } from "./lists";
 export type { EntityLinkPair } from "./entity-facts";
 export {

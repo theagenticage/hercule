@@ -21,6 +21,7 @@ import type { InboxFirstPage, InboxQuery, InboxReply, InboxThing } from "@hercul
 import { listenForInboxPushes } from "../../../app/live";
 import type { InboxSelection } from "../../../app/queries";
 import { isWindowVisible, useWindowVisible } from "../../../app/window-visibility";
+import { isSearching } from "./-inbox-scope";
 
 /** A thing as the list holds it: the workflows it can be handed to are attached. */
 export type InboxListRow = InboxThing & { readonly offers: CardOffers };
@@ -40,6 +41,7 @@ const attachOffers = (
 
 const readFirstPage = (page: InboxFirstPage): FirstPage<InboxListRow> => ({
   rows: attachOffers(page.things, page.offerSets),
+  groups: page.groups,
   nextCursor: page.nextCursor,
   total: page.total,
   order: page.order,
@@ -68,7 +70,11 @@ export function buildInboxReader(client: HerculeClient): InboxReader<InboxListRo
       readFirstPage(await read("first", { mode: "first", ...selection }, signal)),
     readNext: async (selection, after, signal) => {
       const page = await read("next", { mode: "next", ...selection, after }, signal);
-      return { rows: attachOffers(page.things, page.offerSets), nextCursor: page.nextCursor };
+      return {
+        rows: attachOffers(page.things, page.offerSets),
+        groups: page.groups,
+        nextCursor: page.nextCursor,
+      };
     },
     refresh: async (selection, held, signal) => {
       const reply = await read(
@@ -79,11 +85,12 @@ export function buildInboxReader(client: HerculeClient): InboxReader<InboxListRo
       return {
         firstPage: readFirstPage(reply.first),
         heldRows: attachOffers(reply.held.things, reply.held.offerSets),
+        heldGroups: reply.held.groups,
       };
     },
     readRows: async (selection, held, signal) => {
       const reply = await read("rows", { mode: "rows", ...selection, held: [...held] }, signal);
-      return attachOffers(reply.things, reply.offerSets);
+      return { rows: attachOffers(reply.things, reply.offerSets), groups: reply.groups };
     },
   };
 }
@@ -105,7 +112,9 @@ export function useInboxVisit(
 ): { readonly visit: InboxListVisit; readonly snapshot: InboxListSnapshot } {
   const queryClient = useQueryClient();
   const isVisible = useWindowVisible();
-  const [visit] = useState<InboxListVisit>(() => createInboxVisit(buildInboxReader(client)));
+  const [visit] = useState<InboxListVisit>(() =>
+    createInboxVisit(buildInboxReader(client), { isSearch: isSearching }),
+  );
   const snapshot = useSyncExternalStore(visit.subscribe, visit.getSnapshot);
 
   useEffect(

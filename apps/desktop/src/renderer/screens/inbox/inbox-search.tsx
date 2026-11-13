@@ -377,7 +377,7 @@ export function InboxSearchField({
       />
       <kbd className="ib-sx-kbd">/</kbd>
       <span ref={probeRef} className="ib-sx-probe" aria-hidden="true" />
-      <span className="ib-sx-live" role="status">
+      <span className="visually-hidden" role="status">
         {resultsText}
       </span>
       {open &&

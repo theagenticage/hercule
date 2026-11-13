@@ -144,7 +144,7 @@ const readFieldText = (field: EntityFieldValue | undefined, now: Date): string |
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
 /** Returns the holder mark of a row: see `findHolder` for who has the thing. */
-const readHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
+export const findRowHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
   const holder = findHolder(thing);
   if (holder === undefined) return undefined;
   return holder.kind === "colleague"
@@ -169,7 +169,7 @@ const readWait = (thing: InboxThing, now: Date) => {
  * - In a "newest" list the moment the thing last changed shows, faint, and
  *   only an overdue wait shows in its place.
  */
-const decideTime = (
+export const decideTime = (
   thing: InboxThing,
   context: InboxRowContext,
   holder: InboxRowHolder | undefined,
@@ -199,9 +199,9 @@ const decideTime = (
  * - Any other thing that asks nothing says what it is, quietly: its status,
  *   its face's context and fact, or its noun when the face has none of these.
  */
-const decideReason = (
+export const decideReason = (
   thing: InboxThing,
-  context: InboxRowContext,
+  context: Pick<InboxRowContext, "now">,
   holder: InboxRowHolder | undefined,
 ): InboxRowReason => {
   const [newest] = thing.asks;
@@ -239,7 +239,7 @@ const decideReason = (
  * name, or the first faces of the best fits when several can. Returns `null`
  * when none can.
  */
-const decideHandOff = (thing: InboxThing, offers: CardOffers): InboxRowHandOff | null => {
+export const decideHandOff = (thing: InboxThing, offers: CardOffers): InboxRowHandOff | null => {
   const choices = listAvailableHandOffs(offers, thing);
   const [first] = choices;
   if (first === undefined) return null;
@@ -282,6 +282,13 @@ const describeRowAloud = (
 };
 
 /**
+ * Returns the place `thing` lives in ("storefront-web"), or `undefined` when
+ * its face has none. The row and the pane's head both read the place here.
+ */
+export const readThingPlace = (thing: InboxThing, now: Date): string | undefined =>
+  readFieldText(thing.face?.place, now);
+
+/**
  * Returns everything the row of `thing` draws.
  *
  * The place the thing lives in is dropped from the row when it would not fit
@@ -289,9 +296,9 @@ const describeRowAloud = (
  * already has an aside to say. The pane still has it.
  */
 export const describeInboxRow = (thing: InboxThing, context: InboxRowContext): InboxRowView => {
-  const holder = readHolder(thing, context.userName);
+  const holder = findRowHolder(thing, context.userName);
   const reason = decideReason(thing, context, holder);
-  const place = readFieldText(thing.face?.place, context.now);
+  const place = readThingPlace(thing, context.now);
   const dropPlace =
     place !== undefined &&
     (reason.aside !== undefined ||

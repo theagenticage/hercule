@@ -1,0 +1,85 @@
+/** Tests the pane of a selection: the count in its title, its member rows, and the one move it offers. */
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { InboxSelectionHead, InboxSelectionPane } from "./inbox-selection-pane";
+import { TEST_PLUGINS } from "./inbox-row.testing";
+import type { InboxRowView } from "@hercule/client-core/inbox";
+
+const member = (ref: string, title: string): InboxRowView => ({
+  ref,
+  title,
+  pluginId: "github",
+  time: { kind: "none" },
+  reason: { who: "Mei", rest: "asked for your review", more: 0, quiet: false },
+  identifier: `#${ref}`,
+  label: `${title}. Mei asked for your review`,
+  handOff: null,
+  held: false,
+});
+
+const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
+  const onWalk = vi.fn();
+  const onDismiss = vi.fn();
+  const onStartThread = vi.fn();
+  const onTakeOn = vi.fn();
+  const onLink = vi.fn();
+  const members = Array.from({ length: count }, (_, index) =>
+    member(String(index + 1), `Thing ${String(index + 1)}`),
+  );
+  render(
+    <InboxSelectionPane
+      members={members}
+      plugins={TEST_PLUGINS}
+      platform={platform}
+      onWalk={onWalk}
+      onStartThread={onStartThread}
+      onTakeOn={onTakeOn}
+      onLink={onLink}
+      onDismiss={onDismiss}
+    />,
+  );
+  return { onWalk, onDismiss, onStartThread, onTakeOn, onLink };
+};
+
+describe("InboxSelectionPane", () => {
+  it("counts the selection in its title and names Dismiss for all of it", async () => {
+    const { onDismiss } = renderPane(3);
+    expect(screen.getByRole("heading", { name: "3 things selected" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss all 3" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("offers Thread, Take on, Link and Dismiss, and no hand-off", async () => {
+    const { onStartThread, onTakeOn, onLink } = renderPane(2);
+    const footer = screen.getByRole("contentinfo");
+    expect(within(footer).getAllByRole("button")).toHaveLength(4);
+    await userEvent.click(within(footer).getByRole("button", { name: "Start a thread on all 2" }));
+    expect(onStartThread).toHaveBeenCalledOnce();
+    await userEvent.click(within(footer).getByRole("button", { name: "Take on" }));
+    await userEvent.click(within(footer).getByRole("button", { name: "Link all 2" }));
+    expect(onTakeOn).toHaveBeenCalledOnce();
+    expect(onLink).toHaveBeenCalledOnce();
+  });
+
+  it("writes one thing in the singular", () => {
+    renderPane(1);
+    expect(screen.getByRole("heading", { name: "1 thing selected" })).toBeTruthy();
+  });
+
+  it("names the click that adds a row after the platform's primary modifier", () => {
+    renderPane(2, "linux");
+    expect(screen.getByText(/^X or Ctrl-click adds and removes/)).toBeTruthy();
+  });
+
+  it("walks to a member when its row is pressed", async () => {
+    const { onWalk } = renderPane(2);
+    await userEvent.click(screen.getByRole("button", { name: /Thing 2/ }));
+    expect(onWalk).toHaveBeenCalledWith("2");
+  });
+
+  it("names the sources of the selection in its head", () => {
+    render(<InboxSelectionHead sourceNames={["GitHub", "Linear"]} />);
+    expect(screen.getByText("Selected · GitHub, Linear")).toBeTruthy();
+  });
+});

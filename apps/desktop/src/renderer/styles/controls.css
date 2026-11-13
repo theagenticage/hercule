@@ -10,6 +10,7 @@
 /* One doctrine for every button:
    - .btn          a neutral tablet. The default for an answer that does something.
    - .btn--accent  the one suggested answer of a group. The only filled button anywhere.
+   - .btn--answer  the suggested answer of the Inbox's current ask: filled in the answer colour.
    - .btn--quiet   declines and dismissals: text until hovered.
    - .btn--danger  an answer that destroys or deletes: red ink on the neutral tablet. */
 .btn {
@@ -65,6 +66,23 @@
 .btn--quiet:hover {
   background: var(--hover);
   color: var(--ink);
+}
+/* The one suggested answer: the app's --answer, which is each theme's accent except where the
+   accent is not green (Nile). */
+.btn--answer {
+  background: var(--answer);
+  color: var(--answer-fg);
+  font-weight: var(--w-bold);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--answer) 80%, black),
+    inset 0 1px 0 color-mix(in oklab, white calc(30% * var(--glass-level)), transparent);
+}
+.btn--answer:hover {
+  background: color-mix(in oklab, var(--answer) 90%, var(--answer-fg));
+}
+.btn--answer kbd {
+  background: color-mix(in oklab, var(--answer-fg) 16%, transparent);
+  color: var(--answer-fg);
 }
 .btn--danger {
   color: var(--fail-ink);

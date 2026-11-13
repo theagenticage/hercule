@@ -20,7 +20,7 @@ import { taskRepository } from "../tasks";
 import type { ActiveEntityKind } from "./entity-records";
 import { replaceFieldRows } from "./entity-fields";
 import type { InboxEnvironment } from "./inbox-query";
-import { inbox, type InboxSelection } from "./inbox.testing";
+import { inbox, narrowInboxReply, type InboxSelection } from "./inbox.testing";
 import { externalEntityRepository } from "./repository";
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
@@ -190,6 +190,30 @@ const raise = (ref: string, kind: string, minutes: number, asker?: string) =>
     return id;
   });
 
+/** Writes a link between two tickets, as the user's own claim. Returns the id of the claim. */
+const linkTickets = (from: string, to: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO external_entity_relation_claims
+        (from_ref, relation, to_ref, claim_type, actor, evidence_key, state, observed_at)
+      VALUES (${from}, 'linked', ${to}, 'person', 'user', '', 'current', ${at(1)})`;
+  });
+
+/** Removes every link between two tickets, as an unlink does. */
+const unlinkTickets = (from: string, to: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`DELETE FROM external_entity_relation_claims WHERE from_ref = ${from} AND to_ref = ${to}`;
+  });
+
+/** Closes every open signal, so no thing asks any more. */
+const sqlDeleteSignals = () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE signals SET status = 'resolved', resolution = '{}' WHERE status = 'open'`;
+  });
+
 const everything = { savedQuery: "everything" } as const;
 const refsOf = (page: { readonly things: ReadonlyArray<{ readonly ref: string }> }) =>
   page.things.map((thing) => thing.ref.replace("acme:ticket:", ""));
@@ -297,6 +321,38 @@ describe("who is on the Inbox", () => {
     expect(arrivals.before).toBe(0);
     expect(arrivals.after).toBeGreaterThan(0);
     expect(arrivals.after).toBe(arrivals.stored);
+  });
+
+  it("names the active Task on a thing that has one, and only then", async () => {
+    const things = await run(() =>
+      Effect.gen(function* () {
+        const held = yield* insertTicket({ key: "held" });
+        yield* insertTicket({ key: "free" });
+        const tasks = yield* taskRepository;
+        yield* tasks.insert({
+          title: "Checkout flaky on Safari",
+          description: "",
+          status: "open",
+          stage: "planned",
+          priority: "normal",
+          labels: [],
+          projectId: undefined,
+          provenance: [{ ref: held }],
+          at: at(1),
+          actor: "user",
+        });
+        return {
+          held,
+          things: (yield* list(2, { list: { savedQuery: "everything" } })).things,
+        };
+      }),
+    );
+    expect(
+      things.things.map((thing) => [thing.ref === things.held, thing.taskTitle]).sort(),
+    ).toEqual([
+      [false, undefined],
+      [true, "Checkout flaky on Safari"],
+    ]);
   });
 
   it("takes an ask off the list only when the user took the thing on after it was raised", async () => {
@@ -420,7 +476,12 @@ describe("the order and the pages of a list", () => {
     expect(result.newestSecond.things).toHaveLength(5);
     expect(result.newestSecond.nextCursor).toBeUndefined();
     // A next page counts and describes nothing: only the first page does.
-    expect(Object.keys(result.newestSecond).sort()).toEqual(["mode", "offerSets", "things"]);
+    expect(Object.keys(result.newestSecond).sort()).toEqual([
+      "groups",
+      "mode",
+      "offerSets",
+      "things",
+    ]);
     const all = [...result.newestFirst.things, ...result.newestSecond.things].map((t) => t.ref);
     expect(new Set(all).size).toBe(205);
     for (const exit of [result.wrong, result.garbage]) {
@@ -448,7 +509,7 @@ describe("the order and the pages of a list", () => {
     expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:b", "acme:ticket:a"]);
     expect(result.things[1]!.askCount).toBe(1);
     // The rows reply counts and describes nothing.
-    expect(Object.keys(result).sort()).toEqual(["mode", "offerSets", "things"]);
+    expect(Object.keys(result).sort()).toEqual(["groups", "mode", "offerSets", "things"]);
   });
 
   it("refreshes the first page and the held rows that are not on it in one read", async () => {
@@ -1341,5 +1402,622 @@ describe("signals by noun, readable records and plugin saved queries", () => {
     );
     expect(found.page.total).toBe(0);
     expect(found.counts).toEqual([]);
+  });
+});
+
+describe("groups of linked things", () => {
+  const key = (ref: string) => ref.replace("acme:ticket:", "");
+  const waits = { list: { savedQuery: "waits" } } as const;
+
+  it("places a group where its first matching member stands, and lists the members that do not match, last", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", updated: 10 });
+        const b = yield* insertTicket({ key: "b", updated: 50 });
+        const c = yield* insertTicket({ key: "c", updated: 30 });
+        const d = yield* insertTicket({ key: "d", updated: 40 });
+        yield* insertTicket({ key: "lone", updated: 20 });
+        // a and b ask; b is the newest, c is linked through b but asks nothing.
+        yield* raise(a, REVIEW, 2);
+        yield* raise(b, REVIEW, 3);
+        yield* linkTickets(a, b);
+        yield* linkTickets(c, b);
+        yield* linkTickets(d, c);
+        return {
+          waiting: yield* list(100, waits),
+          everyone: yield* list(100),
+          source: yield* list(100, {
+            list: everything,
+            clauses: [{ key: "asks", op: "is", value: true }],
+          }),
+        };
+      }),
+    );
+    // The waiting list: the group stands where `a`, its first asking member, stands.
+    expect(refsOf(result.waiting)).toEqual(["a", "b", "d", "c"]);
+    expect(result.waiting.groups).toHaveLength(1);
+    const group = result.waiting.groups[0]!;
+    expect(group.size).toBe(4);
+    expect(group.members.map((member) => [key(member.ref), member.matches])).toEqual([
+      ["a", true],
+      ["b", true],
+      ["d", false],
+      ["c", false],
+    ]);
+    expect(group.members.every((member) => member.id.length > 0)).toBe(true);
+    expect(group.label).toBe("Ticket a");
+    // Newest: the newest member, b, places the group, and the lone thing stands apart.
+    expect(refsOf(result.everyone)).toEqual(["b", "d", "c", "a", "lone"]);
+    expect(result.everyone.groups[0]!.members.every((member) => member.matches)).toBe(true);
+    // A query that only some members answer: the others come with the group.
+    expect(refsOf(result.source)).toEqual(["b", "a", "d", "c"]);
+    expect(result.source.total).toBe(2);
+    expect(result.source.groups[0]!.members.map((member) => member.matches)).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("does not join through a thing that is not on the Inbox", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a" });
+        const c = yield* insertTicket({ key: "c" });
+        const bridge = yield* insertTicket({ key: "bridge", concerns: [] });
+        yield* linkTickets(a, bridge);
+        yield* linkTickets(bridge, c);
+        return yield* list(100);
+      }),
+    );
+    expect(result.groups).toEqual([]);
+    expect(refsOf(result).sort()).toEqual(["a", "c"]);
+  });
+
+  it("never repeats a group across pages and keeps its members together", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 230; index++) {
+          refs.push(
+            yield* insertTicket({ key: `t${String(index).padStart(3, "0")}`, updated: index }),
+          );
+        }
+        // t229..t227 newest; link t100 with t228 and t020 with t229 so groups straddle the cut.
+        yield* linkTickets(refs[229]!, refs[20]!);
+        yield* linkTickets(refs[199]!, refs[10]!);
+        yield* linkTickets(refs[10]!, refs[0]!);
+        const first = yield* list(400);
+        const second = yield* inbox.readNextPage(
+          environment(400),
+          { list: everything },
+          first.nextCursor!,
+        );
+        return { first, second };
+      }),
+    );
+    const all = [...result.first.things, ...result.second.things].map((thing) => thing.ref);
+    expect(new Set(all).size).toBe(230);
+    expect(result.first.total).toBe(230);
+    // t229 places the group with t020 on the first page, both members there.
+    expect(refsOf(result.first).slice(0, 2)).toEqual(["t229", "t020"]);
+    // The group of t199 holds t010 and t000, which are on the same page.
+    const staying = result.first.groups.find((group) =>
+      group.members.some((m) => key(m.ref) === "t199"),
+    )!;
+    expect(staying.members.map((m) => key(m.ref))).toEqual(["t199", "t010", "t000"]);
+    const secondGroups = result.second.groups.flatMap((group) => group.members.map((m) => m.ref));
+    expect(
+      secondGroups.every(
+        (ref) => !result.first.groups.some((g) => g.members.some((m) => m.ref === ref)),
+      ),
+    ).toBe(true);
+    // Every group's things are contiguous in `things`, in the members' order.
+    for (const page of [result.first, result.second]) {
+      const order = page.things.map((thing) => thing.ref);
+      for (const group of page.groups) {
+        const at0 = order.indexOf(group.members[0]!.ref);
+        expect(order.slice(at0, at0 + group.members.length)).toEqual(
+          group.members.map((m) => m.ref),
+        );
+      }
+    }
+  });
+
+  it("leaves a group that does not fit for the next page, and cuts only a first group larger than the page", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        // 198 lone things, newest first; then a group of 5 that does not fit in the 2 places left.
+        const lone: Array<string> = [];
+        for (let index = 0; index < 198; index++) {
+          lone.push(
+            yield* insertTicket({
+              key: `l${String(index).padStart(3, "0")}`,
+              updated: 1000 - index,
+            }),
+          );
+        }
+        const members: Array<string> = [];
+        for (let index = 0; index < 5; index++) {
+          members.push(yield* insertTicket({ key: `g${index}`, updated: 500 - index }));
+          if (index > 0) yield* linkTickets(members[index - 1]!, members[index]!);
+        }
+        yield* insertTicket({ key: "z", updated: 100 });
+        const first = yield* list(2000);
+        const second = yield* inbox.readNextPage(
+          environment(2000),
+          { list: everything },
+          first.nextCursor!,
+        );
+        return { first, second };
+      }),
+    );
+    expect(result.first.things).toHaveLength(198);
+    expect(result.first.groups).toEqual([]);
+    expect(result.second.groups).toHaveLength(1);
+    expect(refsOf(result.second)).toEqual(["g0", "g1", "g2", "g3", "g4", "z"]);
+  });
+
+  it("cuts a first group larger than the page to the page, lists all its members, and moves the cursor past it", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 205; index++) {
+          refs.push(
+            yield* insertTicket({
+              key: `g${String(index).padStart(3, "0")}`,
+              updated: 1000 - index,
+            }),
+          );
+          if (index > 0) yield* linkTickets(refs[index - 1]!, refs[index]!);
+        }
+        yield* insertTicket({ key: "after", updated: 1 });
+        const first = yield* list(2000);
+        const second = yield* inbox.readNextPage(
+          environment(2000),
+          { list: everything },
+          first.nextCursor!,
+        );
+        return { first, second };
+      }),
+    );
+    expect(result.first.things).toHaveLength(200);
+    expect(result.first.groups).toHaveLength(1);
+    expect(result.first.groups[0]!.size).toBe(205);
+    expect(result.first.groups[0]!.members).toHaveLength(205);
+    // Nothing of the group comes again.
+    expect(refsOf(result.second)).toEqual(["after"]);
+    expect(result.second.groups).toEqual([]);
+  });
+
+  it("returns the held things that are still on the list, with the groups they are in, not whole groups", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", updated: 10 });
+        const b = yield* insertTicket({ key: "b", updated: 20 });
+        const c = yield* insertTicket({ key: "c", updated: 30 });
+        const lone = yield* insertTicket({ key: "lone", updated: 5 });
+        yield* linkTickets(a, b);
+        yield* linkTickets(b, c);
+        yield* raise(a, REVIEW, 2);
+        const selection = {
+          list: waits.list,
+          clauses: [{ key: "asks", op: "is", value: true }],
+        } as InboxSelection;
+        return {
+          rows: yield* inbox.readRows(environment(100), selection, [a, lone, a]),
+          everyone: yield* inbox.readRows(environment(100), { list: everything }, [b, lone]),
+          refresh: yield* inbox.readRefresh(environment(100), { list: everything }, [a, c, lone]),
+        };
+      }),
+    );
+    // `lone` does not ask, so it left the list; `a` is held and answers.
+    expect(refsOf(result.rows)).toEqual(["a"]);
+    expect(result.rows.groups).toHaveLength(1);
+    expect(result.rows.groups[0]!.members.map((m) => key(m.ref))).toEqual(["a", "c", "b"]);
+    // Only the held refs are hydrated, even though the group has three members.
+    expect(refsOf(result.everyone)).toEqual(["b", "lone"]);
+    expect(result.everyone.groups).toHaveLength(1);
+    expect(result.everyone.groups[0]!.size).toBe(3);
+    // The group is on the first page, so the held half holds only what the first page lacks.
+    expect(refsOf(result.refresh.first)).toEqual(["c", "b", "a", "lone"]);
+    expect(result.refresh.held.things).toEqual([]);
+    expect(result.refresh.held.groups).toEqual([]);
+  });
+
+  it("keeps a held member that does not answer while its group has a member that does", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", updated: 10 });
+        const b = yield* insertTicket({ key: "b", updated: 20 });
+        const c = yield* insertTicket({ key: "c", updated: 30 });
+        const lone = yield* insertTicket({ key: "lone", updated: 5 });
+        yield* linkTickets(a, b);
+        yield* linkTickets(b, c);
+        const selection = {
+          list: everything,
+          clauses: [{ key: "asks", op: "is", value: true }],
+        } as InboxSelection;
+        yield* raise(a, REVIEW, 2);
+        const held = [b, c, lone];
+        const whileMatching = yield* inbox.readRows(environment(100), selection, held);
+        const withRefresh = yield* inbox.readRefresh(environment(100), selection, held);
+        // With no ask left, no member answers, so the group leaves the list.
+        yield* sqlDeleteSignals();
+        const afterLastMatch = yield* inbox.readRows(environment(100), selection, held);
+        return { whileMatching, withRefresh, afterLastMatch };
+      }),
+    );
+    // b and c do not ask but their group answers through a; lone is on no group and does not ask.
+    expect(refsOf(result.whileMatching)).toEqual(["c", "b"]);
+    expect(result.whileMatching.groups.map((group) => group.size)).toEqual([3]);
+    expect(result.whileMatching.groups[0]!.members.map((m) => [key(m.ref), m.matches])).toEqual([
+      ["a", true],
+      ["c", false],
+      ["b", false],
+    ]);
+    // The first page holds a's group whole, so the same descriptor comes in both halves, with b and c.
+    expect(refsOf(result.withRefresh.first)).toEqual(["a", "c", "b"]);
+    expect(result.withRefresh.held.things).toEqual([]);
+    expect(result.afterLastMatch.things).toEqual([]);
+    expect(result.afterLastMatch.groups).toEqual([]);
+  });
+
+  it("describes the group of a held thing in the held half of a refresh when the first page lacks it", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        for (let index = 0; index < 200; index++) {
+          yield* insertTicket({ key: `n${String(index).padStart(3, "0")}`, updated: 1000 - index });
+        }
+        const a = yield* insertTicket({ key: "a", updated: 20 });
+        const b = yield* insertTicket({ key: "b", updated: 10 });
+        yield* linkTickets(a, b);
+        return yield* inbox.readRefresh(environment(2000), { list: everything }, [
+          b,
+          "acme:ticket:n000",
+        ]);
+      }),
+    );
+    expect(refsOf(result.held)).toEqual(["b"]);
+    expect(result.held.groups).toHaveLength(1);
+    expect(result.held.groups[0]!.members.map((m) => key(m.ref))).toEqual(["a", "b"]);
+  });
+
+  it("splits a group on the next read after an unlink", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", updated: 10 });
+        const b = yield* insertTicket({ key: "b", updated: 20 });
+        const c = yield* insertTicket({ key: "c", updated: 30 });
+        yield* linkTickets(a, b);
+        yield* linkTickets(b, c);
+        const before = yield* list(100);
+        yield* unlinkTickets(b, c);
+        const after = yield* list(100);
+        return { before, after };
+      }),
+    );
+    expect(result.before.groups.map((group) => group.size)).toEqual([3]);
+    expect(refsOf(result.after)).toEqual(["c", "b", "a"]);
+    expect(result.after.groups.map((group) => group.members.map((m) => key(m.ref)))).toEqual([
+      ["b", "a"],
+    ]);
+  });
+
+  it("takes the label from the member of the most lasting kind that the environment declares", async () => {
+    const STORY_KIND = "acme/story";
+    const story: ActiveEntityKind = { ...TICKET, kind: STORY_KIND, lasting: 3 };
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const ticket = yield* insertTicket({ key: "ticket", title: "The ticket", updated: 10 });
+        const tale = yield* insertTicket({ key: "tale", title: "The story", updated: 20 });
+        yield* sql`UPDATE external_entities SET kind = ${STORY_KIND} WHERE ref = ${tale}`;
+        yield* linkTickets(ticket, tale);
+        const labelWith = (kinds: ReadonlyArray<ActiveEntityKind>) =>
+          Effect.map(
+            inbox.readFirstPage(environment(100, { activeEntityKinds: [...kinds] }), {
+              list: everything,
+            }),
+            (page) => page.groups[0]!.label,
+          );
+        return {
+          storyLasts: yield* labelWith([{ ...TICKET, lasting: 1 }, story]),
+          ticketLasts: yield* labelWith([
+            { ...TICKET, lasting: 3 },
+            { ...story, lasting: 1 },
+          ]),
+        };
+      }),
+    );
+    expect(result.storyLasts).toBe("The story");
+    expect(result.ticketLasts).toBe("The ticket");
+  });
+
+  it("reads at most `limit` things in a first page, keeping a group whole when it fits", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        // A group of three (the newest), then three lone things.
+        const a = yield* insertTicket({ key: "a", updated: 60 });
+        const b = yield* insertTicket({ key: "b", updated: 59 });
+        const c = yield* insertTicket({ key: "c", updated: 58 });
+        yield* linkTickets(a, b);
+        yield* linkTickets(b, c);
+        for (const [key, updated] of [
+          ["x", 30],
+          ["y", 20],
+          ["z", 10],
+        ] as const) {
+          yield* insertTicket({ key, updated });
+        }
+        const read = (limit: number) =>
+          Effect.map(
+            inbox.queryInbox(environment(100), { mode: "first", list: everything, limit }),
+            (reply) => narrowInboxReply("first", reply),
+          );
+        return { two: yield* read(2), four: yield* read(4), all: yield* read(200) };
+      }),
+    );
+    // The first group is larger than the page, so it is cut to the page.
+    expect(refsOf(result.two)).toEqual(["a", "b"]);
+    expect(result.two.groups[0]!.size).toBe(3);
+    expect(result.two.total).toBe(6);
+    expect(result.two.nextCursor).toBeDefined();
+    // The group and one lone thing fit.
+    expect(refsOf(result.four)).toEqual(["a", "b", "c", "x"]);
+    expect(result.four.nextCursor).toBeDefined();
+    expect(refsOf(result.all)).toEqual(["a", "b", "c", "x", "y", "z"]);
+    expect(result.all.nextCursor).toBeUndefined();
+  });
+
+  it("lists the first 1000 members of a larger group, those that match first, and counts them all", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 1005; index++) {
+          refs.push(
+            yield* insertTicket({
+              key: `m${String(index).padStart(4, "0")}`,
+              updated: 2000 - index,
+            }),
+          );
+          if (index > 0) yield* linkTickets(refs[index - 1]!, refs[index]!);
+        }
+        // Only the oldest member asks, so it is the last in the list's own order.
+        yield* raise(refs[1004]!, REVIEW, 5);
+        const first = yield* list(3000, { list: everything });
+        const matching = yield* list(3000, {
+          list: everything,
+          clauses: [{ key: "asks", op: "is", value: true }],
+        });
+        const rows = yield* inbox.readRows(environment(3000), { list: everything }, [refs[2]!]);
+        return { first, matching, rows };
+      }),
+    );
+    for (const group of [result.first.groups[0]!, result.rows.groups[0]!]) {
+      expect(group.size).toBe(1005);
+      expect(group.members).toHaveLength(1000);
+    }
+    // The member that answers the query is first, though the list's order puts it last.
+    expect(result.matching.groups[0]!.members[0]).toMatchObject({
+      ref: "acme:ticket:m1004",
+      matches: true,
+    });
+    expect(result.matching.groups[0]!.members).toHaveLength(1000);
+    expect(refsOf(result.matching)[0]).toBe("m1004");
+  });
+
+  it("sends the same number of statements for a list with no links as with many", async () => {
+    const countStatements = (things: number, linked: boolean) =>
+      run(() =>
+        Effect.gen(function* () {
+          const refs: Array<string> = [];
+          for (let index = 0; index < things; index++) {
+            refs.push(yield* insertTicket({ key: `t${index}`, updated: index }));
+          }
+          // Groups of three.
+          if (linked) {
+            for (let index = 0; index + 1 < things; index++) {
+              if (index % 3 !== 2) yield* linkTickets(refs[index]!, refs[index + 1]!);
+            }
+          }
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          const first = yield* list(1000).pipe(record);
+          const firstCount = statements.splice(0).length;
+          const held = first.things.slice(0, 10).map((thing) => thing.ref);
+          yield* inbox.readRows(environment(1000), { list: everything }, held).pipe(record);
+          const rowsCount = statements.splice(0).length;
+          yield* inbox.readRefresh(environment(1000), { list: everything }, held).pipe(record);
+          return {
+            first: firstCount,
+            rows: rowsCount,
+            refresh: statements.length,
+            groups: first.groups.length,
+          };
+        }),
+      );
+    const none = await countStatements(30, false);
+    const few = await countStatements(9, true);
+    const many = await countStatements(90, true);
+    expect(none.groups).toBe(0);
+    expect(few.groups).toBe(3);
+    expect(many.groups).toBe(30);
+    expect({ ...many, groups: 0 }).toEqual({ ...few, groups: 0 });
+    // The links statement runs for every read. With links there is one more
+    // statement for their ends, and one for the members of the groups read.
+    expect(few.first).toBe(none.first + 2);
+    expect(few.rows).toBe(none.rows + 2);
+    expect(few.refresh).toBe(none.refresh + 2);
+  });
+
+  /** Reads `rows` of a chain of 1,001 linked tickets, one past the cap of a group, holding the last one. */
+  const readHeldBeyondGroupCap = (text: string | undefined) =>
+    run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 1001; index++) {
+          refs.push(
+            yield* insertTicket({
+              key: `h${String(index).padStart(4, "0")}`,
+              title: index === 0 ? "needle" : "quiet",
+              updated: 2000 - index,
+            }),
+          );
+          if (index > 0) yield* linkTickets(refs[index - 1]!, refs[index]!);
+        }
+        return yield* inbox.readRows(
+          environment(3000),
+          { list: everything, ...(text === undefined ? {} : { text }) },
+          [refs[1000]!],
+        );
+      }),
+    );
+
+  it("keeps a held member beyond the cap of a group on the list when it does not answer the query", async () => {
+    const result = await readHeldBeyondGroupCap("needle");
+    expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:h1000"]);
+  });
+
+  it("lists a held member beyond the cap of a group in the descriptor of its group", async () => {
+    const result = await readHeldBeyondGroupCap(undefined);
+    expect(result.things.map((thing) => thing.ref)).toEqual(["acme:ticket:h1000"]);
+    expect(result.groups[0]!.size).toBe(1001);
+    expect(result.groups[0]!.members.map((member) => member.ref)).toContain("acme:ticket:h1000");
+  });
+});
+
+/** Writes a link between two tickets that the plugin `acme` reports, through the account `ACCOUNT_A`. */
+const linkTicketsBySource = (from: string, to: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO external_entity_relation_claims
+        (from_ref, relation, to_ref, claim_type, connection_id, evidence_key, state, observed_at)
+      VALUES (${from}, 'linked', ${to}, 'source', ${uuidFromString(ACCOUNT_A)}, '', 'current', ${at(1)})`;
+  });
+
+describe("the group of one thing", () => {
+  const key = (ref: string) => ref.replace("acme:ticket:", "");
+  const readGroup = (ref: string) =>
+    Effect.flatMap(inbox.readInboxGroup(environment(100), ref), (found) =>
+      found._tag === "Some" ? Effect.succeed(found.value) : Effect.die("not on the Inbox"),
+    );
+
+  it("lists the label first, then the members by ref, and the links between members under their firmest claim", async () => {
+    const group = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a", title: "Ticket a" });
+        const b = yield* insertTicket({ key: "b" });
+        const c = yield* insertTicket({ key: "c" });
+        const outside = yield* insertTicket({ key: "outside", concerns: [] });
+        yield* insertTicket({ key: "lone" });
+        yield* linkTickets(b, a);
+        yield* linkTickets(c, b);
+        // The source also claims a-b: its claim is the firmest, the person's claim stays known. Links come in the order of their firmest claim's id.
+        yield* linkTicketsBySource(a, b);
+        // A link to a thing that is not on the Inbox is no link of the group.
+        yield* linkTickets(c, outside);
+        return yield* readGroup(c);
+      }),
+    );
+    // The three are equally old and of one kind, so the lowest ref is the label.
+    expect(group.labelRef).toBe("acme:ticket:a");
+    expect(group.label).toBe("Ticket a");
+    expect(group.members.map((member) => key(member.ref))).toEqual(["a", "b", "c"]);
+    expect(group.complete).toBe(true);
+    expect(
+      group.links.map((link) => [
+        key(link.fromRef),
+        key(link.toRef),
+        link.claim.type,
+        link.hasPersonClaim,
+      ]),
+    ).toEqual([
+      ["c", "b", "person", true],
+      ["a", "b", "source", true],
+    ]);
+  });
+
+  it("reports a source's claim as the firmest, and that the person also linked the pair", async () => {
+    const group = await run(() =>
+      Effect.gen(function* () {
+        const a = yield* insertTicket({ key: "a" });
+        const b = yield* insertTicket({ key: "b" });
+        yield* linkTickets(a, b);
+        yield* linkTicketsBySource(b, a);
+        return yield* readGroup(a);
+      }),
+    );
+    expect(group.links).toHaveLength(1);
+    expect(group.links[0]).toMatchObject({
+      claim: { type: "source", plugin: "acme" },
+      hasPersonClaim: true,
+    });
+  });
+
+  it("returns a group of one for a thing on the Inbox that is linked to nothing there", async () => {
+    const group = await run(() =>
+      Effect.gen(function* () {
+        const lone = yield* insertTicket({ key: "lone", title: "Alone" });
+        const outside = yield* insertTicket({ key: "outside", concerns: [] });
+        yield* linkTickets(lone, outside);
+        return yield* readGroup(lone);
+      }),
+    );
+    expect(group).toMatchObject({
+      labelRef: "acme:ticket:lone",
+      label: "Alone",
+      links: [],
+      complete: true,
+    });
+    expect(group.members.map((member) => key(member.ref))).toEqual(["lone"]);
+  });
+
+  it("is none for a thing that is not on the Inbox or unknown", async () => {
+    const found = await run(() =>
+      Effect.gen(function* () {
+        yield* insertTicket({ key: "outside", concerns: [] });
+        return [
+          yield* inbox.readInboxGroup(environment(100), "acme:ticket:outside"),
+          yield* inbox.readInboxGroup(environment(100), "acme:ticket:nobody"),
+        ];
+      }),
+    );
+    expect(found.map((one) => one._tag)).toEqual(["None", "None"]);
+  });
+
+  it("sends the same number of statements for a group of three as for a group of thirty", async () => {
+    const countStatements = (size: number) =>
+      run(() =>
+        Effect.gen(function* () {
+          const refs: Array<string> = [];
+          for (let index = 0; index < size; index++) {
+            refs.push(yield* insertTicket({ key: `t${String(index).padStart(2, "0")}` }));
+          }
+          for (let index = 0; index + 1 < size; index++) {
+            yield* linkTickets(refs[index]!, refs[index + 1]!);
+          }
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          const group = yield* readGroup(refs[0]!).pipe(record);
+          return { statements: statements.length, members: group.members.length };
+        }),
+      );
+    const small = await countStatements(3);
+    const large = await countStatements(30);
+    expect([small.members, large.members]).toEqual([3, 30]);
+    expect(large.statements).toBe(small.statements);
   });
 });

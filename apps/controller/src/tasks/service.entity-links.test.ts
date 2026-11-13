@@ -220,7 +220,7 @@ describe("taking on work for a ref", () => {
               following: false,
             }),
           ),
-          yield* asSession(tasks.undoCreatedTask(created.id, REF)),
+          yield* asSession(tasks.undoCreatedTask(created.id, [REF])),
         ];
       }),
     );
@@ -259,7 +259,7 @@ describe("taking back a Task made for a ref", () => {
         const tasks = yield* TaskService;
         const task = yield* makeTask;
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -276,7 +276,7 @@ describe("taking back a Task made for a ref", () => {
         yield* TestClock.adjust(A_MINUTE);
         yield* tasks.update({ id: task.id, priority: "high" });
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -294,7 +294,7 @@ describe("taking back a Task made for a ref", () => {
         const edited = yield* tasks.update({ id: task.id, title: "Renamed" });
         expect(edited.updatedAt).toBe(task.createdAt);
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -314,7 +314,7 @@ describe("taking back a Task made for a ref", () => {
           following: false,
         });
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -337,7 +337,7 @@ describe("taking back a Task made for a ref", () => {
               VALUES (${uuidFromString(task.id)}, ${OTHER_REF}, ${task.createdAt}, 'user')`,
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -367,7 +367,7 @@ describe("taking back a Task made for a ref", () => {
           }),
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -389,7 +389,7 @@ describe("taking back a Task made for a ref", () => {
                       ${task.createdAt}, ${uuidFromString(task.id)})`,
         );
         return {
-          outcome: yield* tasks.undoCreatedTask(task.id, REF),
+          outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
         };
       }),
@@ -405,8 +405,8 @@ describe("taking back a Task made for a ref", () => {
         const task = yield* makeTask;
         yield* tasks.delete(task.id);
         return [
-          yield* tasks.undoCreatedTask(task.id, REF),
-          yield* tasks.undoCreatedTask("0199e0e7-9999-7000-8000-000000000000", REF),
+          yield* tasks.undoCreatedTask(task.id, [REF]),
+          yield* tasks.undoCreatedTask("0199e0e7-9999-7000-8000-000000000000", [REF]),
         ];
       }),
     );
@@ -543,7 +543,7 @@ describe("merging Tasks that link refs", () => {
         const source = yield* createTaskOnRef("Source", REF);
         yield* tasks.merge(source.id, { intoTaskId: survivor.id });
         return {
-          outcome: yield* tasks.undoCreatedTask(source.id, REF),
+          outcome: yield* tasks.undoCreatedTask(source.id, [REF]),
           survivorLinks: (yield* readLinks(survivor.id)).map((link) => link.ref),
         };
       }),

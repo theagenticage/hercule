@@ -20,7 +20,6 @@ import {
   stubIntersectionObserver,
   type Call,
 } from "../../../../app/testing";
-import { SHARED_READ_WINDOW_MS } from "../../../../app/live";
 import { rememberMachineView } from "../../../../screens/fleet/machine-view";
 
 /** Every `machine` prop each card was drawn with, oldest first, by runner id. */
@@ -208,25 +207,13 @@ const openApp = async (path: string, world: World) => {
 };
 
 /**
- * Waits until the page holds the `runnerMetrics` subscription and every read
- * that follows the controller's first pushes is done, so a test counts only
- * the reads of its own pushes.
- *
- * The first pushes name the Inbox count, and the app gathers such pushes for a
- * short real-time window before it reads (`SHARED_READ_WINDOW_MS` in
- * `app/live.ts`). That read starts after `waitForFirstPushes` returns, so a
- * slow machine would let it land inside a test's count. The wait here is
- * longer than the window, and its timer is set after the window's, so the
- * window has always ended, and its read has started, when it returns.
+ * Waits until the page holds the `runnerMetrics` subscription and the reads
+ * the controller's first push started are done, so a test counts only the
+ * reads of its own pushes.
  */
-const settle = async (
-  live: Awaited<ReturnType<typeof openApp>>["live"],
-  context: Awaited<ReturnType<typeof openApp>>["context"],
-): Promise<void> => {
+const settle = async (live: Awaited<ReturnType<typeof openApp>>["live"]): Promise<void> => {
   await waitFor(() => expect(live.readTopics()).toContain("runnerMetrics"));
   await live.waitForFirstPushes();
-  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 2 * SHARED_READ_WINDOW_MS)));
-  await waitForQuiet(context);
 };
 
 const pushMetrics = (
@@ -302,7 +289,7 @@ describe("a machine's page", () => {
     const world = buildMachineWorld();
     world.points.hour.push(buildPoint(ATLAS, "2026-11-02T14:00:00.000Z", { minutes: 60 }));
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
-    await settle(live, context);
+    await settle(live);
     expect(readHourCalls(calls)).toHaveLength(1);
 
     // A nudge within the hour reads the five-minute points and no hour points.
@@ -325,7 +312,7 @@ describe("a machine's page", () => {
   it("reads from the start of its newest point when a push names it, and draws the point that follows", async () => {
     const world = buildMachineWorld();
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
-    await settle(live, context);
+    await settle(live);
     const before = readFiveMinuteCalls(calls).length;
     const runnerReadsBefore = countRunnerReads(calls);
 
@@ -368,19 +355,24 @@ describe("a machine's page", () => {
 
   it("reads nothing when a push names another machine only", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
-    await settle(live, context);
-    const before = calls.length;
+    await settle(live);
+    // A read the page started late (its other sections load on their own) must not count as the push's.
+    await waitForQuiet(context);
+    // Only the reads a push can cause are counted: an unrelated read that starts late (the sidebar's, say) is not the push's.
+    const metricsBefore = readMetricsCalls(calls).length;
+    const runnerReadsBefore = countRunnerReads(calls);
 
     pushMetrics(live, [FORGE]);
     await waitForQuiet(context);
 
-    expect(calls).toHaveLength(before);
+    expect(readMetricsCalls(calls)).toHaveLength(metricsBefore);
+    expect(countRunnerReads(calls)).toBe(runnerReadsBefore);
   });
 
   it("reads once more, not once per push, when pushes arrive while it reads", async () => {
     const world = buildMachineWorld();
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
-    await settle(live, context);
+    await settle(live);
     const before = readFiveMinuteCalls(calls).length;
     let release = () => {};
     world.hold.fiveMinutes = new Promise((resolve) => {
@@ -404,7 +396,7 @@ describe("a machine's page", () => {
 
   it("reads nothing while the window is hidden, and catches up when it shows", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
-    await settle(live, context);
+    await settle(live);
 
     setVisibility("hidden");
     await waitFor(() => expect(live.readTopics()).not.toContain("runnerMetrics"));
@@ -437,7 +429,7 @@ describe("the Fleet page", () => {
       hold: {},
     };
     const { calls, live, context } = await openApp("/fleet", world);
-    await settle(live, context);
+    await settle(live);
 
     pushMetrics(live, [ATLAS]);
     pushMetrics(live, []);
@@ -460,8 +452,8 @@ describe("the Fleet page", () => {
       points: { fiveMinutes: [], hour: buildFallingDiskPoints() },
       hold: {},
     };
-    const { calls, live, context } = await openApp("/fleet", world);
-    await settle(live, context);
+    const { calls, live } = await openApp("/fleet", world);
+    await settle(live);
     expect(readHourCalls(calls)).toHaveLength(1);
 
     world.points.hour.push(buildPoint(ATLAS, "2026-11-02T15:00:00.000Z", { minutes: 3 }));
@@ -484,7 +476,7 @@ describe("the Fleet page", () => {
       hold: {},
     };
     const { calls, live, context } = await openApp("/fleet", world);
-    await settle(live, context);
+    await settle(live);
     let release = () => {};
     world.hold.hour = new Promise((resolve) => {
       release = resolve;
@@ -512,7 +504,7 @@ describe("the Fleet page", () => {
       hold: {},
     };
     const { calls, live, context } = await openApp("/fleet", world);
-    await settle(live, context);
+    await settle(live);
     const before = countRunnerReads(calls);
 
     pushMetrics(live, [ATLAS]);
@@ -529,7 +521,7 @@ describe("the Fleet page", () => {
       hold: {},
     };
     const { live, context } = await openApp("/fleet", world);
-    await settle(live, context);
+    await settle(live);
     const atlasDrawn = drawnMachines.get(ATLAS.id)!.length;
     const forgeMachine = drawnMachines.get(FORGE.id)!.at(-1);
 

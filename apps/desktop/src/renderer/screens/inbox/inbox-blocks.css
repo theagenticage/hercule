@@ -1,0 +1,281 @@
+/* The blocks of the Inbox's pane, drawn by `InboxBlocks`, and the three
+   blocks Intake shares (fields, trend, code). The sizes, spacing and colours
+   are the signed-off drawing's `.bk` rules, on the app's tokens. */
+.bks {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.bk h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+}
+
+/* Text, as markdown: the drawing's one paragraph, and the elements markdown can hold in the same
+   size and rhythm. `.b-words` is also on the element, for the rules markdown.css gives it. */
+.bk .bk-text,
+.bk-msgs .bk-msg-text {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.bk .bk-text :is(p, ul, ol, blockquote, details, .table-scroll),
+.bk-msgs .bk-msg-text :is(p, ul, ol, blockquote, details, .table-scroll) {
+  margin: 0 0 8px;
+}
+.bk .bk-text :is(h1, h2, h3, h4, h5, h6),
+.bk-msgs .bk-msg-text :is(h1, h2, h3, h4, h5, h6) {
+  margin: 12px 0 4px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  line-height: 20px;
+}
+.bk .bk-text :is(ul, ol),
+.bk-msgs .bk-msg-text :is(ul, ol) {
+  padding-left: 20px;
+}
+.bk .bk-text blockquote,
+.bk-msgs .bk-msg-text blockquote {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+  color: var(--muted);
+}
+.bk .bk-text table,
+.bk-msgs .bk-msg-text table {
+  border-collapse: collapse;
+  font-size: var(--t-12);
+}
+.bk .bk-text :is(th, td),
+.bk-msgs .bk-msg-text :is(th, td) {
+  padding: 4px 12px 4px 0;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+.bk .bk-text > :last-child,
+.bk-msgs .bk-msg-text > :last-child {
+  margin-bottom: 0;
+}
+.bk .bk-text a,
+.bk-msgs .bk-msg-text a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.bk .bk-text img,
+.bk-msgs .bk-msg-text img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-sm);
+}
+.bk :not(pre) > code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-12);
+}
+
+/* Messages. */
+.bk-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bk-msgs li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+}
+.bk-av {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.bk-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 1px 0 2px;
+  font-size: var(--t-12);
+}
+.bk-msg-head b {
+  font-weight: var(--w-medium);
+}
+.bk-msg-head time,
+.bk-where {
+  color: var(--faint);
+}
+.bk-where {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-msgs li.is-you .bk-msg-text {
+  padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--you);
+}
+/* The note for the messages the producer left out sits under the first message's text column. */
+.bk-msgs li.bk-omitted {
+  display: block;
+  padding-left: 32px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+/* In a signal's section the messages start right under its head. */
+.sig .bk-msgs {
+  margin-top: 2px;
+}
+
+/* A change. */
+.bk-change {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+/* More specific than `.bk :not(pre) > code`, which pads every other inline code. */
+.bk-change .bk-branch code {
+  padding: 0;
+  background: none;
+}
+.bk-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.bk-branch code {
+  color: var(--ink);
+}
+.bk-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.bk-diff > span {
+  white-space: nowrap;
+}
+.bk-diff .ins {
+  color: var(--ok);
+}
+.bk-diff .del {
+  color: var(--fail-ink);
+}
+.bk-checks {
+  margin-left: auto;
+  line-height: 16px;
+}
+
+/* Checks. */
+.bk-check p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: var(--t-13);
+}
+.bk-check p.is-failed .ic {
+  color: var(--fail-ink);
+}
+.bk-check a {
+  color: inherit;
+}
+.bk-check pre,
+.bk-code {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-12);
+  line-height: 18px;
+  white-space: pre;
+}
+.bk-fine {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+
+/* Fields. */
+.bk-fields {
+  display: grid;
+  margin: 0;
+}
+.bk-fields > div {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  padding: 4px 0;
+  font-size: var(--t-13);
+  line-height: 20px;
+}
+.bk-fields dt {
+  color: var(--muted);
+}
+.bk-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+/* Trend. */
+.bk-trend {
+  display: block;
+  width: 100%;
+  height: 44px;
+  overflow: visible;
+}
+.bk-trend polyline {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.bk-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}

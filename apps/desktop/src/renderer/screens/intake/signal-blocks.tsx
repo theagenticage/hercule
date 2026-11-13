@@ -1,7 +1,7 @@
 /**
  * The blocks of the open signal, as spec 10 §9.5 defines them and spec 17
- * §The pane draws them: text, messages, a change and checks, and one quiet
- * line for a block of a type this app does not know.
+ * §The pane draws them: text, messages, a change, checks, fields, a trend and
+ * code, and one quiet line for a block of a type this app does not know.
  */
 import { useState, type JSX } from "react";
 import type {
@@ -25,6 +25,7 @@ import { DiffIcon } from "../../icons/diff";
 import { Mark } from "../../marks";
 import { TasksIcon } from "../../icons/tasks";
 import { Markdown } from "../session/markdown";
+import { CodeBlockView, FieldsBlockView, TrendBlockView } from "../inbox/inbox-blocks-parts";
 
 /** Returns `count` and the noun, made plural when the count is not one: "1 file", "3 files". */
 const formatCount = (count: number, noun: string): string =>
@@ -38,10 +39,13 @@ export function SignalBlocks({
   blocks,
   task,
   timezone,
+  now,
 }: {
   readonly blocks: ReadonlyArray<Block>;
   readonly task: TaskCreateInput | undefined;
   readonly timezone: string;
+  /** The moment a trend's dates are counted back from. */
+  readonly now: Date;
 }): JSX.Element | null {
   if (blocks.length === 0 && task === undefined) return null;
   return (
@@ -49,7 +53,7 @@ export function SignalBlocks({
       {blocks.map((block, index) => (
         // A signal's blocks hold no id and never change order, so the
         // position is the block's identity.
-        <SignalBlock key={index} block={block} timezone={timezone} />
+        <SignalBlock key={index} block={block} timezone={timezone} now={now} />
       ))}
       {task !== undefined && <TaskPreview task={task} />}
     </div>
@@ -60,17 +64,22 @@ export function SignalBlocks({
 function SignalBlock({
   block,
   timezone,
+  now,
 }: {
   readonly block: Block;
   readonly timezone: string;
+  readonly now: Date;
 }): JSX.Element {
   if (!isKnownBlock(block)) return <p className="b-quiet">{UNKNOWN_BLOCK_TEXT}</p>;
   switch (block.type) {
     case "text":
       return (
-        <div className="b-words">
-          <Markdown text={block.markdown} inlineImages />
-        </div>
+        <section className="bk">
+          {block.title === undefined ? null : <h3>{block.title}</h3>}
+          <div className="b-words">
+            <Markdown text={block.markdown} inlineImages />
+          </div>
+        </section>
       );
     case "messages":
       return <MessagesBlockView block={block} timezone={timezone} />;
@@ -78,6 +87,12 @@ function SignalBlock({
       return <ChangeBlockView block={block} />;
     case "checks":
       return <ChecksBlockView block={block} />;
+    case "fields":
+      return <FieldsBlockView block={block} />;
+    case "trend":
+      return <TrendBlockView block={block} now={now} />;
+    case "code":
+      return <CodeBlockView block={block} />;
   }
 }
 
