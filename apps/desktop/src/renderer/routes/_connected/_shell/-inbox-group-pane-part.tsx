@@ -1,13 +1,13 @@
 import { useMemo, type JSX } from "react";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
-import { describeInboxGroupHead, describeInboxGroupPane } from "@hercule/client-core/inbox";
-import { inboxGroupQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import {
-  InboxGroupHead,
-  InboxGroupPane,
-  type UnlinkedEnd,
-} from "../../../screens/inbox/inbox-group-pane";
+  describeInboxGroupHead,
+  describeInboxGroupPane,
+  type InboxLinkEnd,
+} from "@hercule/client-core/inbox";
+import { inboxGroupQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { InboxGroupHead, InboxGroupPane } from "../../../screens/inbox/inbox-group-pane";
 import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import { useInboxNow } from "./-inbox-clock";
 import { useReadGate } from "./-use-read-gate";
@@ -18,7 +18,7 @@ export interface InboxGroupPaneMoves {
   /** Shows the member `ref`, as the pane of its own thing. */
   readonly onWalkTo: (ref: string) => void;
   /** Removes the link the user made between the two ends of a pair. */
-  readonly onUnlink: (first: UnlinkedEnd, second: UnlinkedEnd) => void;
+  readonly onUnlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
   readonly onTakeOn: () => void;
   /** Starts the search for a thing to link to the group. */
   readonly onLink: () => void;

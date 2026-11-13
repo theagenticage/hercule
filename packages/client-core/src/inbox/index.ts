@@ -22,3 +22,5 @@ export * from "./inbox-ask-choice";
 export * from "./inbox-pane-words";
 export * from "./inbox-pane-view";
 export * from "./inbox-group-pane-view";
+export * from "./inbox-link-candidates";
+export * from "./inbox-current";

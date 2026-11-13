@@ -1,5 +1,4 @@
 import type { PluginIdentity } from "@hercule/client-core";
-import type { GroupKey } from "@hercule/client-core/inbox";
 import {
   useCallback,
   useEffect,
@@ -49,8 +48,8 @@ export interface InboxGroupActions {
   readonly onToggleGroupSelect: (key: string, whole: boolean) => void;
   /** The head's chevron was pressed: the group opens or closes. */
   readonly onToggleGroupOpen: (key: string) => void;
-  /** "Show N more" was pressed. */
-  readonly onShowMore: (groupKey: GroupKey) => void;
+  /** "Show N more" was pressed: given the key of its line. */
+  readonly onShowMore: (key: string) => void;
   /**
    * A row was dropped on another by hand: links the thing `fromKey` with the
    * thing or group `toKey`. Returns whether a link was written; `false` sends the
@@ -180,7 +179,7 @@ function renderInboxLine({
       return (
         <InboxGroupMore
           key={entry.key}
-          groupKey={entry.groupKey}
+          lineKey={entry.key}
           hiddenCount={entry.hiddenCount}
           unloadedCount={entry.unloadedCount}
           isCurrent={isCurrent}

@@ -211,7 +211,7 @@ describe("InboxGroupMore", () => {
   it("says quietly how many members are not loaded yet, and nothing when all are", () => {
     const { rerender } = render(
       <InboxGroupMore
-        groupKey="group:1"
+        lineKey="group:1:more"
         hiddenCount={9}
         unloadedCount={0}
         isCurrent={false}
@@ -221,7 +221,7 @@ describe("InboxGroupMore", () => {
     expect(screen.queryByText(/not loaded yet/)).toBeNull();
     rerender(
       <InboxGroupMore
-        groupKey="group:1"
+        lineKey="group:1:more"
         hiddenCount={9}
         unloadedCount={4}
         isCurrent={false}
@@ -235,7 +235,7 @@ describe("InboxGroupMore", () => {
     const onShowMore = vi.fn();
     render(
       <InboxGroupMore
-        groupKey="group:1"
+        lineKey="group:1:more"
         hiddenCount={9}
         unloadedCount={0}
         isCurrent={false}
@@ -246,6 +246,6 @@ describe("InboxGroupMore", () => {
     expect(line.getAttribute("aria-level")).toBe("2");
     expect(line.getAttribute("data-ref")).toBe("group:1:more");
     await userEvent.setup().click(line);
-    expect(onShowMore).toHaveBeenCalledWith("group:1");
+    expect(onShowMore).toHaveBeenCalledWith("group:1:more");
   });
 });

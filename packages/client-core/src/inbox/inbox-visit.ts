@@ -29,6 +29,7 @@ import {
   applyMove,
   applyNextPage,
   applyRefresh,
+  applyReveal,
   applyRowsRead,
   applySelectionChange,
   applyUndo,
@@ -54,8 +55,7 @@ import {
 
 export type { FirstPage, FoldChange, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
 export type { InboxMoveTarget };
-export { buildMoreKey, findEntryKey, parseMoreKey } from "./inbox-groups";
-export type { GroupKey, InboxEntry, InboxGroupView, MoreKey } from "./inbox-groups";
+export type { InboxEntry, InboxGroupView } from "./inbox-groups";
 
 /**
  * How the visit reads. `Query` is opaque to the visit (the scope and search
@@ -206,6 +206,13 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
   readonly select: (change: SelectionChange) => void;
   /** Opens, closes or expands a group (see `applyFold`). */
   readonly fold: (change: FoldChange) => void;
+  /**
+   * Makes the line of the thing `ref` current, first opening the group that
+   * hides it and showing all its members when the list does not draw it (see
+   * `applyReveal`). Returns false, and changes nothing, when the list holds no
+   * row for `ref`.
+   */
+  readonly reveal: (ref: string) => boolean;
   /**
    * Returns what a move acts on (see `listMoveTargets`): the selection or the
    * current entry, or with `hoveredKey` that entry (the selection when it is in it).
@@ -625,7 +632,6 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
           refs: [],
           entries: [],
           groups: [],
-          folds: new Map(),
           currentKey: null,
         };
       const before = state;
@@ -657,6 +663,12 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       if (state === null) return;
       setState(applyFold(state, change));
       readStaleRows();
+    },
+    reveal(ref) {
+      if (state === null || !state.rows.some((row) => row.ref === ref)) return false;
+      setState(applyReveal(state, ref));
+      readStaleRows();
+      return true;
     },
     targets(hoveredKey) {
       return state === null ? null : listMoveTargets(state, hoveredKey, now());

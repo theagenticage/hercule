@@ -32,14 +32,10 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   DISMISSAL_UNDONE,
   LINK_UNDONE,
-  NO_OFFERS,
   NO_SOURCE_ADDRESS,
   TAKE_ON_UNDONE,
   UNLINK_UNDONE,
-  buildGroupLinkEnd,
   buildHandedThing,
-  buildLinkPairs,
-  buildTakeOnTogether,
   decideHandMove,
   describeHandOffUndo,
   describeInboxDismissalFailure,
@@ -51,23 +47,20 @@ import {
   describeInboxTakeOnFailure,
   describeInboxTakeOnTogether,
   describeInboxTakeOnTogetherUndone,
-  describeInboxTargetDismissal,
   describeInboxUnlink,
   describeInboxUnlinkFailure,
   didTakeOnTogetherChange,
-  findSingleThing,
   isHandOffTakenBack,
-  listTargetThings,
   REFUSED_OFFLINE,
   planInboxMove,
-  type CardOffers,
   type InboxLineWords,
+  type InboxLinkEnd,
+  type InboxLinkPick,
   type InboxMoveKind,
-  type InboxMovePlan,
-  type InboxMoveTarget,
+  type InboxMovePlans,
   type MoveReceipt,
 } from "@hercule/client-core/inbox";
-import type { InboxThing, WorkflowOffer } from "@hercule/contract";
+import type { WorkflowOffer } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
 import {
   buildCachedCardMover,
@@ -156,29 +149,7 @@ const unlinkEveryPair = async (
   return undefined;
 };
 
-/** Returns the workflows the target's first thing can be handed to; a group has none, as it is never handed. */
-const readOffers = (target: InboxMoveTarget<InboxListRow>): CardOffers =>
-  listTargetThings(target)[0]?.offers ?? NO_OFFERS;
-
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
-
-/** One end of a link, named the way a line about the link names it. */
-export type LinkedThing = Pick<InboxThing, "ref" | "identifier" | "title">;
-
-/**
- * What "Link to..." opens with, when the user is linking one thing or one
- * group and still has to pick the other end.
- */
-export interface InboxLinkPick {
-  /** The thing it links from: the thing, or the member a group is named after. */
-  readonly from: LinkedThing;
-  /** How the popover names what is linked from: the thing's identifier, else its title; a group's label. */
-  readonly fromLabel: string;
-  /** The refs of a group's members, so the popover does not offer them. Empty for a thing. */
-  readonly memberRefs: readonly string[];
-  /** The key of the list line the popover opens under. */
-  readonly anchorKey: string;
-}
 
 /**
  * What `useInboxMoves` returns. A move that takes `hoveredKey` acts on the
@@ -233,12 +204,12 @@ export interface InboxMoves {
    * row on. Returns whether a link was written: `false` when the two were linked
    * already, the call was refused or it failed, and the line says why.
    */
-  readonly linkTo: (from: LinkedThing, to: LinkedThing) => Promise<boolean>;
+  readonly linkTo: (from: InboxLinkEnd, to: InboxLinkEnd) => Promise<boolean>;
   /**
    * Removes the user's own link between `first` and `second`, with an Undo
    * that links them again. The line says so when a source still links them.
    */
-  readonly unlink: (first: LinkedThing, second: LinkedThing) => void;
+  readonly unlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
   /** Opens the current thing at its source, or says it has no address. */
   readonly openAtSource: () => void;
   /** Says `text` on the undo line, with no Undo. */
@@ -341,39 +312,22 @@ export const useInboxMoves = ({
   );
 
   /**
-   * Returns what `move` is for and what may be done with it, or says why not
-   * on the undo line and returns `null`. See `InboxVisit.targets` for what a
-   * move is for.
+   * Returns the plan of `move` for what it is for (see `InboxVisit.targets`),
+   * or says why not on the undo line and returns `null`. The caller sends
+   * exactly what the plan says.
    */
-  const planTarget = (
-    move: InboxMoveKind,
+  const planMove = <Move extends InboxMoveKind>(
+    move: Move,
     hoveredKey: string | undefined,
-  ): {
-    readonly target: InboxMoveTarget<InboxListRow>;
-    readonly plan: Exclude<InboxMovePlan, { kind: "refuse" }>;
-  } | null => {
+  ): InboxMovePlans<InboxListRow>[Move] | null => {
     const target = visit.targets(hoveredKey);
     if (target === null) return null;
-    const plan = planInboxMove({
-      move,
-      target,
-      isOffline: latest.current.isOffline,
-      offers: readOffers(target),
-    });
+    const plan = planInboxMove({ move, target, isOffline: latest.current.isOffline });
     if (plan.kind === "refuse") {
       say(plan.reason);
       return null;
     }
-    return { target, plan };
-  };
-
-  /** Returns the one thing `move` is for, or `null` after saying why not. */
-  const readAllowedThing = (
-    move: InboxMoveKind,
-    hoveredKey: string | undefined,
-  ): InboxListRow | null => {
-    const planned = planTarget(move, hoveredKey);
-    return planned === null ? null : (findSingleThing(planned.target) ?? null);
+    return plan;
   };
 
   /** Tells the screen what is current once a move or an undo has changed the list. */
@@ -382,21 +336,10 @@ export const useInboxMoves = ({
   };
 
   const dismiss = (hoveredKey?: string): void => {
-    const planned = planTarget("dismiss", hoveredKey);
-    if (planned === null) return;
-    const { target } = planned;
-    const things = listTargetThings(target);
-    const ids =
-      target.kind === "group"
-        ? target.members.map((member) => member.id)
-        : things.map((thing) => thing.id);
-    const refs =
-      target.kind === "group"
-        ? target.members.map((member) => member.ref)
-        : things.map((thing) => thing.ref);
-    const words = describeInboxTargetDismissal(target);
-    const failed = target.kind === "group" ? [{ title: target.label }] : things;
-    const receipt = visit.move("dismissed", refs);
+    const plan = planMove("dismiss", hoveredKey);
+    if (plan === null) return;
+    const { ids, words } = plan;
+    const receipt = visit.move("dismissed", plan.refs);
     tellMoved();
     const request = dismissRequest.mutateAsync(ids);
     const wasSaved = request.then(
@@ -425,7 +368,7 @@ export const useInboxMoves = ({
       if (!isCurrent()) return;
       visit.failMove(receipt);
       tellMoved();
-      say(describeInboxDismissalFailure(failed, readReason(error)));
+      say(describeInboxDismissalFailure(plan.named, readReason(error)));
     });
   };
 
@@ -435,16 +378,14 @@ export const useInboxMoves = ({
    * call wrote something: a Task, a link to it or a taken mark.
    */
   const takeOnTogether = (
-    target: InboxMoveTarget<InboxListRow>,
-    together: { readonly ids: string[]; readonly title: string },
+    together: Extract<InboxMovePlans<InboxListRow>["takeOn"], { kind: "takeOnTogether" }>,
   ): void => {
-    const refs =
-      target.kind === "group"
-        ? target.members.map((member) => member.ref)
-        : listTargetThings(target).map((thing) => thing.ref);
-    const receipt = visit.move("taken", refs);
+    const receipt = visit.move("taken", together.refs);
     tellMoved();
-    const request = takeOnTogetherRequest.mutateAsync(together);
+    const request = takeOnTogetherRequest.mutateAsync({
+      ids: [...together.ids],
+      title: together.title,
+    });
     const wasChanged = request.then(
       (result) => {
         visit.confirmMove(receipt);
@@ -494,15 +435,13 @@ export const useInboxMoves = ({
   };
 
   const takeOn = (hoveredKey?: string): void => {
-    const planned = planTarget("takeOn", hoveredKey);
-    if (planned === null) return;
-    const together = buildTakeOnTogether(planned.target);
-    if (together !== null) {
-      takeOnTogether(planned.target, together);
+    const plan = planMove("takeOn", hoveredKey);
+    if (plan === null) return;
+    if (plan.kind === "takeOnTogether") {
+      takeOnTogether(plan);
       return;
     }
-    const thing = findSingleThing(planned.target);
-    if (thing === undefined) return;
+    const { thing } = plan;
     const receipt = visit.move("taken", [thing.ref]);
     tellMoved();
     const request = takeOnRequest.mutateAsync(thing.id);
@@ -637,13 +576,14 @@ export const useInboxMoves = ({
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ): void => {
-    const thing = readAllowedThing("handOff", hoveredKey);
-    if (thing !== null) sendHandOff(thing, offer, connectionId);
+    const plan = planMove("handOff", hoveredKey);
+    if (plan !== null) sendHandOff(plan.thing, offer, connectionId);
   };
 
   const startHandOff = (hoveredKey?: string): InboxListRow | null => {
-    const thing = readAllowedThing("handOff", hoveredKey);
-    if (thing === null) return null;
+    const plan = planMove("handOff", hoveredKey);
+    if (plan === null) return null;
+    const { thing } = plan;
     const move = decideHandMove(thing.offers);
     if (move.kind === "one") {
       sendHandOff(thing, move.offer, undefined);
@@ -653,8 +593,8 @@ export const useInboxMoves = ({
   };
 
   const goToTask = (hoveredKey?: string): void => {
-    const taskId = readAllowedThing("goToTask", hoveredKey)?.taskId;
-    if (taskId !== undefined) latest.current.openTask(taskId);
+    const plan = planMove("goToTask", hoveredKey);
+    if (plan !== null) latest.current.openTask(plan.taskId);
   };
 
   /**
@@ -664,7 +604,7 @@ export const useInboxMoves = ({
    */
   const linkPairs = (
     pairs: readonly LinkPair[],
-    named: readonly LinkedThing[],
+    named: readonly InboxLinkEnd[],
   ): Promise<boolean> => {
     const request = linkRequest
       .mutateAsync(pairs)
@@ -708,34 +648,17 @@ export const useInboxMoves = ({
   };
 
   const startLink = (hoveredKey?: string): InboxLinkPick | null => {
-    const planned = planTarget("link", hoveredKey);
-    if (planned === null) return null;
-    const { target, plan } = planned;
-    if (plan.kind === "go") {
-      void linkPairs(buildLinkPairs(target), listTargetThings(target));
-      return null;
-    }
-    const anchorKey = hoveredKey ?? visit.getSnapshot().current;
-    if (anchorKey === null) return null;
-    if (target.kind === "group") {
-      return {
-        from: buildGroupLinkEnd(target),
-        fromLabel: target.label,
-        memberRefs: target.members.map((member) => member.ref),
-        anchorKey,
-      };
-    }
-    const thing = findSingleThing(target);
-    if (thing === undefined) return null;
-    return {
-      from: thing,
-      fromLabel: thing.identifier !== "" ? thing.identifier : thing.title,
-      memberRefs: target.kind === "thing" ? target.groupMemberRefs : [],
-      anchorKey,
-    };
+    const plan = planMove("link", hoveredKey);
+    if (plan === null) return null;
+    if (plan.kind === "pickLink") return plan;
+    void linkPairs(
+      plan.toRefs.map((toRef) => ({ fromRef: plan.fromRef, toRef })),
+      plan.named,
+    );
+    return null;
   };
 
-  const linkTo = (from: LinkedThing, to: LinkedThing): Promise<boolean> => {
+  const linkTo = (from: InboxLinkEnd, to: InboxLinkEnd): Promise<boolean> => {
     if (latest.current.isOffline) {
       say(REFUSED_OFFLINE);
       return Promise.resolve(false);
@@ -743,7 +666,7 @@ export const useInboxMoves = ({
     return linkPairs([{ fromRef: from.ref, toRef: to.ref }], [from, to]);
   };
 
-  const unlink = (first: LinkedThing, second: LinkedThing): void => {
+  const unlink = (first: InboxLinkEnd, second: InboxLinkEnd): void => {
     if (latest.current.isOffline) {
       say(REFUSED_OFFLINE);
       return;

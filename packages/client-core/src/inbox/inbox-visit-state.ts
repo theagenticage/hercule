@@ -23,16 +23,18 @@ import type { InboxFacet, InboxGroup, InboxOrder } from "@hercule/contract";
 import {
   buildEntries,
   findEntryKey,
+  findFoldChoice,
+  findShowingKey,
   gatherGroupRows,
   isGroupKey,
   isGroupOpen,
   listRefsOfEntries,
   listSelectionRefs,
-  parseMoreKey,
   reconcileGroups,
   removeMembers,
   settleKey,
-  type GroupFold,
+  writeFoldChoice,
+  type FoldChoice,
   type GroupKey,
   type HeldGroup,
   type IncomingGroup,
@@ -92,13 +94,6 @@ export interface MoveReceipt<Row> {
   readonly entries: ReadonlyArray<{ readonly row: Row; readonly index: number }>;
   /** The groups the move touched, as they were before it, so an undo can put them back under their keys. */
   readonly groups: readonly HeldGroup[];
-  /**
-   * The fold the user had chosen for each touched group (by its key) when the
-   * move was made. A group with no choice is not listed. An undo restores a fold
-   * unless the user has chosen another since, because a read that comes between
-   * the move and the undo may have dropped it with the group.
-   */
-  readonly folds: ReadonlyMap<GroupKey, GroupFold>;
   /** The entry that was current when the move was made. */
   readonly currentKey: string | null;
 }
@@ -149,8 +144,15 @@ export interface VisitState<Row extends InboxVisitRow, Query> {
   readonly groups: readonly HeldGroup[];
   /** The number the next minted group key gets. */
   readonly nextGroupNumber: number;
-  /** What the user chose for each group. A group with no choice is displayed by default (see `buildEntries`). */
-  readonly folds: ReadonlyMap<GroupKey, GroupFold>;
+  /**
+   * What the user chose for groups, by member ref (see `FoldChoice`). A member
+   * keeps its choice for the whole visit, also while it is in no group (a
+   * dismissal took it, a read dropped its group), so an undo or a later read
+   * that brings the group back brings the user's choice back with it.
+   */
+  readonly folds: ReadonlyMap<string, FoldChoice>;
+  /** The `seq` the next fold choice gets. */
+  readonly nextFoldSeq: number;
   /** True when the list has text or clauses to search for. Fixed when the list opens. */
   readonly isSearch: boolean;
   /**
@@ -179,11 +181,17 @@ export function startVisit<Row extends InboxVisitRow, Query>(
     incoming: page.groups,
     covered: new Set(),
     nextNumber: 1,
-    currentGroup: null,
   });
   const rows = gatherGroupRows(page.rows, groups);
-  const folds = new Map<GroupKey, GroupFold>();
-  const entries = buildEntries({ rows, groups, folds, isSearch, selection: new Set() });
+  const folds = new Map<string, FoldChoice>();
+  const entries = buildEntries({
+    rows,
+    groups,
+    folds,
+    isSearch,
+    selection: new Set(),
+    notOnList: new Set(),
+  });
   return {
     query,
     rows,
@@ -204,6 +212,7 @@ export function startVisit<Row extends InboxVisitRow, Query>(
     groups,
     nextGroupNumber: nextNumber,
     folds,
+    nextFoldSeq: 1,
     isSearch,
     landedOn: null,
   };
@@ -219,7 +228,11 @@ export function listShownRows<Row extends InboxVisitRow>(
   });
 }
 
-/** Builds the entries of the list from `rows` (the state's rows, or the shown copies of them). */
+/**
+ * Builds the entries of the list from `rows` (the state's rows, or the shown
+ * copies of them). The members a dismissal on its way hid and the arrivals
+ * that wait behind "N new" are in no group's operative members.
+ */
 export function buildStateEntries<Row extends InboxVisitRow>(
   state: VisitState<Row, unknown>,
   rows: readonly Row[],
@@ -230,6 +243,7 @@ export function buildStateEntries<Row extends InboxVisitRow>(
     folds: state.folds,
     isSearch: state.isSearch,
     selection: state.selection,
+    notOnList: new Set([...state.hidden.keys(), ...state.arrivals.map((row) => row.ref)]),
   });
 }
 
@@ -279,7 +293,7 @@ const isLocked = (
 
 /**
  * Matches the groups a read describes to the groups the visit holds (see
- * `reconcileGroups`) and returns the new groups with the folds that follow them.
+ * `reconcileGroups`) and returns the new groups.
  *
  * - `found` are the refs the read vouches for as on the list; a group the read
  *   does not mention keeps the members the read did not cover.
@@ -297,7 +311,7 @@ function reconcileReadGroups<Row extends InboxVisitRow, Query>(
     readonly hidden: ReadonlyMap<string, HiddenRow>;
     readonly ticket: ReadTicket;
   },
-): Pick<VisitState<Row, Query>, "groups" | "nextGroupNumber" | "folds"> {
+): Pick<VisitState<Row, Query>, "groups" | "nextGroupNumber"> {
   const covered = new Set(read.found);
   const incoming: IncomingGroup[] = [];
   for (const group of read.groups) {
@@ -320,31 +334,35 @@ function reconcileReadGroups<Row extends InboxVisitRow, Query>(
     incoming,
     covered,
     nextNumber: state.nextGroupNumber,
-    currentGroup: findGroupKey(state, state.current),
   });
-  const folds = new Map<GroupKey, GroupFold>();
-  for (const group of result.groups) {
-    const fold = state.folds.get(group.key) ?? state.folds.get(result.inherit.get(group.key)!);
-    if (fold !== undefined) folds.set(group.key, fold);
-  }
   return {
     groups: replaceEqualDeep(state.groups, result.groups),
     nextGroupNumber: result.nextNumber,
-    folds: replaceEqualDeep(state.folds, folds),
   };
 }
 
-/** Returns the key of the group an entry key belongs to: the key itself, its "more" line's group, or the group holding the member. */
-function findGroupKey(
-  state: VisitState<InboxVisitRow, unknown>,
-  key: string | null,
-): GroupKey | null {
-  if (key === null) return null;
-  const head = parseMoreKey(key) ?? key;
-  if (isGroupKey(head)) return head;
-  return (
-    state.groups.find((group) => group.members.some((member) => member.ref === key))?.key ?? null
-  );
+/**
+ * Returns `state` with `group`'s fold changed by `change` and written to all
+ * its members as the user's latest choice. Fields `change` leaves out keep
+ * the group's current choice, or its default.
+ */
+function chooseFold<Row extends InboxVisitRow, Query>(
+  state: VisitState<Row, Query>,
+  group: HeldGroup,
+  change: Partial<Pick<FoldChoice, "isOpen" | "isExpanded">>,
+): VisitState<Row, Query> {
+  const current = findFoldChoice(group, state.folds);
+  const choice: FoldChoice = {
+    isOpen: current?.isOpen ?? isGroupOpen(group, undefined, state.isSearch),
+    isExpanded: current?.isExpanded ?? false,
+    ...change,
+    seq: state.nextFoldSeq,
+  };
+  return {
+    ...state,
+    folds: writeFoldChoice(state.folds, group, choice),
+    nextFoldSeq: state.nextFoldSeq + 1,
+  };
 }
 
 /**
@@ -637,12 +655,12 @@ export function openLinkedGroup<Row extends InboxVisitRow, Query>(
   if (group === undefined) return state;
   const memberRefs = new Set(group.members.map((member) => member.ref));
   const taken = state.arrivals.filter((row) => memberRefs.has(row.ref));
-  const folds = new Map(state.folds);
-  folds.set(group.key, { ...state.folds.get(group.key), isOpen: true });
+  const chosen = chooseFold(state, group, { isOpen: true });
   const opened = withRows(
     state,
     {
-      folds,
+      folds: chosen.folds,
+      nextFoldSeq: chosen.nextFoldSeq,
       arrivals: state.arrivals.filter((row) => !memberRefs.has(row.ref)),
       watermark: Math.max(state.watermark, highestArrival(taken)),
     },
@@ -701,12 +719,6 @@ export function applyMove<Row extends InboxVisitRow, Query>(
     refs: handled,
     entries,
     groups: touchedGroups,
-    folds: new Map(
-      touchedGroups.flatMap((group) => {
-        const fold = state.folds.get(group.key);
-        return fold === undefined ? [] : [[group.key, fold] as const];
-      }),
-    ),
     currentKey: state.current,
   };
   const land = (next: VisitState<Row, Query>): VisitState<Row, Query> => ({
@@ -852,10 +864,6 @@ export function applyUndo<Row extends InboxVisitRow, Query>(
     if (isHeldNow.has(ref)) freshAt.set(ref, -1);
   }
   const groups = restoreGroups(state.groups, receipt, isHeldNow);
-  const folds = new Map(state.folds);
-  for (const [key, fold] of receipt.folds) {
-    if (!folds.has(key) && groups.some((group) => group.key === key)) folds.set(key, fold);
-  }
   const result = withRows(
     state,
     {
@@ -865,7 +873,6 @@ export function applyUndo<Row extends InboxVisitRow, Query>(
       locks,
       freshAt,
       groups,
-      folds,
       landedOn: null,
     },
     rows,
@@ -977,13 +984,17 @@ export type FoldChange =
   | { readonly kind: "open"; readonly key?: string }
   /** ← on a head: closes the group. On a member or a "more" line: makes the head current. */
   | { readonly kind: "close"; readonly key?: string }
+  /** The head's chevron: closes an open group and opens a closed one. */
+  | { readonly kind: "toggle"; readonly key?: string }
   /** ↩ on a "more" line: shows all the members, and the first newly shown one becomes current. */
   | { readonly kind: "showMore"; readonly key?: string };
 
 /**
  * Opens, closes or expands a group, for the entry `key` (default: the current
- * entry). A fold never touches the selection. When a group closes while the
- * current entry or the anchor is one of its members, they move to the head.
+ * entry). The change is the user's latest choice for the group, written to
+ * all its members (see `FoldChoice`). A fold never touches the selection.
+ * When a group closes while the current entry or the anchor is one of its
+ * members, they move to the head.
  */
 export function applyFold<Row extends InboxVisitRow, Query>(
   state: VisitState<Row, Query>,
@@ -997,15 +1008,19 @@ export function applyFold<Row extends InboxVisitRow, Query>(
   if (change.kind === "close" && entry.kind !== "head") {
     return { ...cleared, current: entry.groupKey };
   }
-  if (change.kind === "open" && entry.kind !== "head") return state;
+  if (change.kind !== "showMore" && entry.kind !== "head") return state;
   if (change.kind === "showMore" && entry.kind !== "more") return state;
   const groupKey = entry.kind === "head" ? entry.key : entry.groupKey;
-  const folds = new Map(state.folds);
-  folds.set(groupKey, {
-    ...state.folds.get(groupKey),
-    ...(change.kind === "showMore" ? { isExpanded: true } : { isOpen: change.kind === "open" }),
-  });
-  const next = { ...cleared, folds };
+  const group = state.groups.find((candidate) => candidate.key === groupKey)!;
+  const isOpen =
+    change.kind === "toggle"
+      ? entry.kind === "head" && !entry.group.isOpen
+      : change.kind !== "close";
+  const next = chooseFold(
+    cleared,
+    group,
+    change.kind === "showMore" ? { isOpen: true, isExpanded: true } : { isOpen },
+  );
   const after = buildStateEntries(next, next.rows);
   if (change.kind === "showMore") {
     const listGroupMembers = (list: readonly InboxEntry<Row>[]) =>
@@ -1020,6 +1035,26 @@ export function applyFold<Row extends InboxVisitRow, Query>(
 }
 
 /**
+ * Makes the line of the thing `ref` current, as a click on it would. When a
+ * closed group or its "Show N more" hides the thing, the group opens and
+ * shows all its members first, as the user's choice. Returns the same state
+ * when the list holds no row for `ref`.
+ */
+export function applyReveal<Row extends InboxVisitRow, Query>(
+  state: VisitState<Row, Query>,
+  ref: string,
+): VisitState<Row, Query> {
+  if (!state.rows.some((row) => row.ref === ref)) return state;
+  const isDrawn = buildStateEntries(state, state.rows).some((entry) => entry.key === ref);
+  const group = state.groups.find((candidate) => candidate.members.some((m) => m.ref === ref));
+  const shown =
+    isDrawn || group === undefined
+      ? state
+      : chooseFold(state, group, { isOpen: true, isExpanded: true });
+  return { ...shown, current: ref, anchor: null, landedOn: null };
+}
+
+/**
  * Returns what a move acts on, or `null` when there is nothing.
  * - From the keyboard or the pane (no `hoveredKey`): the selection if there is
  *   one, else the current entry: a group when it is a head, else a thing.
@@ -1027,10 +1062,10 @@ export function applyFold<Row extends InboxVisitRow, Query>(
  *   thing in the selection, or a head whose members that answer the query are
  *   all selected), then the whole selection.
  *
- * A group target is `isFresh` only when the keyboard acts (no hover, nothing
- * selected) and the head became current by a move less than `FRESH_GROUP_MS`
- * before `now`. Its `members` leave out the members the visit hid and the
- * arrivals that wait behind "N new", and its `size` follows.
+ * A group target carries the group as the entries resolved it (its operative
+ * members, held rows and size). It is `isFresh` only when the keyboard acts
+ * (no hover, nothing selected) and the head became current by a move less
+ * than `FRESH_GROUP_MS` before `now`.
  */
 export function listMoveTargets<Row extends InboxVisitRow>(
   state: VisitState<Row, unknown>,
@@ -1039,34 +1074,26 @@ export function listMoveTargets<Row extends InboxVisitRow>(
 ): InboxMoveTarget<Row> | null {
   const rows = listShownRows(state);
   const entries = buildStateEntries(state, rows);
-  const selectionTarget = (): InboxMoveTarget<Row> => ({
-    kind: "selection",
-    rows: rows.filter((row) => state.selection.has(row.ref)),
-  });
+  const selectionTarget = (): InboxMoveTarget<Row> => {
+    const selected = rows.filter((row) => state.selection.has(row.ref));
+    return {
+      kind: "selection",
+      rows: selected,
+      lineKey: selected.length === 1 ? findEntryKey(entries, selected[0]!.ref) : null,
+    };
+  };
   const buildMoveTarget = (key: string, isFresh: boolean): InboxMoveTarget<Row> | null => {
     const entry = entries.find((candidate) => candidate.key === key);
     if (entry === undefined || entry.kind === "more") return null;
-    if (entry.kind !== "head") {
-      const own = state.groups.find((group) => group.members.some((m) => m.ref === entry.row.ref));
-      return {
-        kind: "thing",
-        row: entry.row,
-        groupMemberRefs: own?.members.map((member) => member.ref) ?? [],
-      };
-    }
-    const group = state.groups.find((candidate) => candidate.key === key)!;
-    const waiting = new Set(state.arrivals.map((row) => row.ref));
-    const members = group.members
-      .filter((member) => !state.hidden.has(member.ref) && !waiting.has(member.ref))
-      .map(({ id, ref, matches }) => ({ id, ref, matches }));
+    if (entry.kind === "head") return { kind: "group", group: entry.group, isFresh };
+    const head =
+      entry.kind === "member"
+        ? entries.find((candidate) => candidate.key === entry.groupKey)
+        : undefined;
     return {
-      kind: "group",
-      labelRef: group.labelRef,
-      label: group.label,
-      members,
-      rows: entry.group.rows,
-      size: group.size - (group.members.length - members.length),
-      isFresh,
+      kind: "thing",
+      row: entry.row,
+      groupMemberRefs: head?.kind === "head" ? head.group.members.map((member) => member.ref) : [],
     };
   };
   if (hoveredKey !== undefined) {
@@ -1085,29 +1112,18 @@ export function listMoveTargets<Row extends InboxVisitRow>(
 }
 
 /**
- * Returns the refs of the members of groups the list shows open that the
- * visit holds no row for, so a group the page cut fills in. A member that is
- * hidden or waits behind "N new" is left out. The refs follow the order of the groups.
+ * Returns the refs of the operative members of the groups the list shows open
+ * that the visit holds no row for, so a group the page cut fills in. The refs
+ * follow the order of the entries.
  */
 export function listUnloadedMembers<Row extends InboxVisitRow>(
-  state: Pick<
-    VisitState<Row, unknown>,
-    "rows" | "groups" | "folds" | "isSearch" | "arrivals" | "hidden"
-  >,
+  state: VisitState<Row, unknown>,
 ): string[] {
-  const held = new Set(state.rows.map((row) => row.ref));
-  const waiting = new Set(state.arrivals.map((row) => row.ref));
-  return state.groups.flatMap((group) =>
-    group.members.some((member) => held.has(member.ref)) &&
-    isGroupOpen(group, state.folds.get(group.key), state.isSearch)
-      ? group.members
-          .filter(
-            (member) =>
-              !held.has(member.ref) && !waiting.has(member.ref) && !state.hidden.has(member.ref),
-          )
-          .map((member) => member.ref)
-      : [],
-  );
+  return buildStateEntries(state, state.rows).flatMap((entry) => {
+    if (entry.kind !== "head" || !entry.group.isOpen) return [];
+    const held = new Set(entry.group.rows.map((row) => row.ref));
+    return entry.group.members.filter((member) => !held.has(member.ref)).map((m) => m.ref);
+  });
 }
 
 /** Returns the refs of the entries from `fromKey` to `toKey`, both ends included, as a set. */
@@ -1129,9 +1145,10 @@ function selectRange(
 /**
  * Applies `patch` to `before` and sets the rows, then repairs what hangs on
  * them. The groups of the patched state gather their held rows next to each
- * other. The selection keeps only held rows. The anchor is kept while its entry
- * shows (or a group now shows it), else it resets. A current entry that is gone
- * gives way by `settleKey`; with no current entry, the first entry takes it.
+ * other. The selection keeps only held rows. The anchor moves to the entry
+ * that now shows what it showed (`findShowingKey`), else it resets. A current
+ * entry that is gone gives way by `settleKey`; with no current entry, the
+ * first entry takes it.
  */
 function withRows<Row extends InboxVisitRow, Query>(
   before: VisitState<Row, Query>,
@@ -1146,7 +1163,8 @@ function withRows<Row extends InboxVisitRow, Query>(
   const after = { ...patched, rows: gathered, selection };
   const entries = buildStateEntries(after, gathered);
   const oldKeys = buildStateEntries(before, before.rows).map((entry) => entry.key);
-  const anchor = after.anchor === null ? null : findEntryKey(entries, after.anchor);
+  const anchor =
+    after.anchor === null ? null : findShowingKey(entries, after.anchor, before.groups);
   const current =
     after.current === null
       ? (entries[0]?.key ?? null)

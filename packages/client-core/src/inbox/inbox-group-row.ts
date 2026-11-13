@@ -54,22 +54,16 @@ export const describeInboxGroupRow = (
   group: InboxGroupView<InboxThing>,
   context: InboxRowContext,
 ): InboxGroupRowView => {
-  const placer = group.placedBy ?? group.rows[0];
+  const placer = group.placedBy;
   const [pressing, ...others] = listAskingMembers(group.rows);
   const reasonOwner = pressing ?? placer;
-  const reason: InboxRowReason =
-    reasonOwner === undefined
-      ? { rest: "", more: 0, quiet: true }
-      : {
-          ...decideReason(reasonOwner, context, findRowHolder(reasonOwner, context.userName)),
-          // The group counts the members that ask, not the asks of one member.
-          more: others.length,
-          aside: undefined,
-        };
-  const time: InboxRowTime =
-    placer === undefined
-      ? { kind: "none" }
-      : decideTime(placer, context, findRowHolder(placer, context.userName));
+  const reason: InboxRowReason = {
+    ...decideReason(reasonOwner, context, findRowHolder(reasonOwner, context.userName)),
+    // The group counts the members that ask, not the asks of one member.
+    more: others.length,
+    aside: undefined,
+  };
+  const time: InboxRowTime = decideTime(placer, context, findRowHolder(placer, context.userName));
   const sources = [...new Set(group.rows.map((row) => row.source))];
   const count = `${String(group.size)} things`;
   const sentence = [reason.who, reason.rest].filter((word) => word !== undefined).join(" ");

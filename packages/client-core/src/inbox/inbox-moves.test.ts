@@ -1,21 +1,19 @@
-/** Tests which moves of the Inbox are refused, and what the undo line says about the rest. */
-import { MAX_INBOX_MOVED_THINGS, MAX_TASK_TITLE_LENGTH, type InboxThing } from "@hercule/contract";
-import { describe, expect, it } from "vitest";
-import { NO_OFFERS } from "./card-hand-off";
-import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
+/** Tests which moves of the Inbox are refused, what the rest send, and what the undo line says about them. */
 import {
-  buildGroupLinkEnd,
+  MAX_INBOX_MOVED_THINGS,
+  MAX_TASK_TITLE_LENGTH,
+  type InboxGroupMember,
+  type InboxThing,
+} from "@hercule/contract";
+import { describe, expect, it } from "vitest";
+import { NO_OFFERS, type CardOffers } from "./card-hand-off";
+import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
+import { buildEntries, type InboxGroupView } from "./inbox-groups";
+import {
   buildHandedThing,
-  buildLinkPairs,
   describeInboxLinkFailure,
-  describeInboxTargetDismissal,
   describeInboxUnlinkFailure,
   didTakeOnTogetherChange,
-  findSingleThing,
-  listTargetThings,
-  buildTakeOnTogether,
-  describeInboxDismissal,
-  describeInboxGroupDismissal,
   describeInboxLink,
   describeInboxTakeOnTogether,
   describeInboxTakeOnTogetherUndone,
@@ -25,48 +23,81 @@ import {
   describeInboxDismissalFailure,
   describeInboxHandOff,
   describeInboxTakeOn,
+  planInboxDrop,
   planInboxMove,
 } from "./inbox-moves";
 
-const thing = buildInboxThing("1", { title: "Cache delivery slot lookups" });
-const held = buildInboxThing("2", { taskId: "t-1", takenOn: true });
-const online = { isOffline: false, offers: NO_OFFERS } as const;
+type Row = InboxThing & { readonly offers: CardOffers };
+
+const offered = (thing: InboxThing, offers: CardOffers = NO_OFFERS): Row => ({ ...thing, offers });
 const oneOffer = { available: [buildWorkflowOffer("Review PR", [])], unavailable: [] };
+const thing = offered(buildInboxThing("1", { title: "Cache delivery slot lookups" }));
+const held = offered(buildInboxThing("2", { taskId: "t-1", takenOn: true }));
+const online = { isOffline: false } as const;
 
-const reasonOf = (plan: ReturnType<typeof planInboxMove>): string =>
-  plan.kind === "refuse" ? plan.reason : "";
+const reasonOf = (plan: { readonly kind: string; readonly reason?: string }): string =>
+  plan.kind === "refuse" ? (plan.reason ?? "") : "";
 
-const one = (row: InboxThing): InboxMoveTarget => ({ kind: "thing", row, groupMemberRefs: [] });
-const selection = (...rows: InboxThing[]): InboxMoveTarget => ({ kind: "selection", rows });
+const one = (row: Row, groupMemberRefs: string[] = []): InboxMoveTarget<Row> => ({
+  kind: "thing",
+  row,
+  groupMemberRefs,
+});
+const selection = (...rows: Row[]): InboxMoveTarget<Row> => ({
+  kind: "selection",
+  rows,
+  lineKey: rows.length === 1 ? rows[0]!.ref : null,
+});
+const memberOf = (n: number, matches = true): InboxGroupMember => ({
+  id: `id-${n}`,
+  ref: `acme:ticket:${n}`,
+  matches,
+});
+/** A group of `count` members that all answer the query, the first of which the visit holds. */
 const groupOf = (
   count: number,
-  overrides: Partial<Extract<InboxMoveTarget, { kind: "group" }>> = {},
-): InboxMoveTarget => {
-  const members = Array.from({ length: count }, (_, n) => ({
-    id: `id-${n}`,
-    ref: `acme:ticket:${n}`,
-    matches: true,
-  }));
+  overrides: Partial<InboxGroupView<Row>> = {},
+  isFresh = false,
+): InboxMoveTarget<Row> => {
+  const members = Array.from({ length: count }, (_, n) => memberOf(n));
   return {
     kind: "group",
-    labelRef: "acme:ticket:1",
-    label: "Checkout is slow",
-    members,
-    rows: [],
-    size: count,
-    isFresh: false,
-    ...overrides,
+    group: {
+      key: "group:1",
+      labelRef: "acme:ticket:1",
+      label: "Checkout is slow",
+      members,
+      size: count,
+      rows: [thing],
+      unloadedCount: count - 1,
+      isOpen: false,
+      placedBy: thing,
+      matchRefs: [thing.ref],
+      tick: "none",
+      ...overrides,
+    },
+    isFresh,
   };
 };
 
 describe("planInboxMove", () => {
-  it("lets Dismiss take a thing or a selection, and refuses past the most one call takes, saying how many", () => {
-    expect(planInboxMove({ move: "dismiss", target: one(thing), ...online }).kind).toBe("go");
-    expect(planInboxMove({ move: "dismiss", target: selection(thing, held), ...online }).kind).toBe(
-      "go",
-    );
+  it("dismisses a thing or a selection by their ids, and refuses past the most one call takes, saying how many", () => {
+    expect(planInboxMove({ move: "dismiss", target: one(thing), ...online })).toEqual({
+      kind: "dismiss",
+      ids: [thing.id],
+      refs: [thing.ref],
+      words: { text: "Dismissed", title: "Cache delivery slot lookups" },
+      named: [thing],
+    });
+    expect(
+      planInboxMove({ move: "dismiss", target: selection(thing, held), ...online }),
+    ).toMatchObject({
+      kind: "dismiss",
+      ids: [thing.id, held.id],
+      words: { text: "Dismissed 2 things", title: null },
+    });
     const many = Array.from({ length: MAX_INBOX_MOVED_THINGS + 1 }, (_, n) =>
-      buildInboxThing(String(n)),
+      offered(buildInboxThing(String(n))),
     );
     expect(
       reasonOf(planInboxMove({ move: "dismiss", target: selection(...many), ...online })),
@@ -75,11 +106,29 @@ describe("planInboxMove", () => {
     );
   });
 
-  it("lets Dismiss take a whole group", () => {
-    expect(planInboxMove({ move: "dismiss", target: groupOf(3), ...online }).kind).toBe("go");
+  it("dismisses every operative member of a group, held or not, and names the group by its label", () => {
+    expect(planInboxMove({ move: "dismiss", target: groupOf(3), ...online })).toEqual({
+      kind: "dismiss",
+      ids: ["id-0", "id-1", "id-2"],
+      refs: ["acme:ticket:0", "acme:ticket:1", "acme:ticket:2"],
+      words: { text: "Dismissed the group “Checkout is slow”: 3 things", title: null },
+      named: [{ title: "Checkout is slow" }],
+    });
   });
 
-  it("refuses Dismiss on a group of more than the most one call takes, and says what to do instead", () => {
+  it("says how many of a dismissed group's things were not in this list", () => {
+    const members = [memberOf(0), memberOf(1), memberOf(2), memberOf(3, false), memberOf(4, false)];
+    const plan = planInboxMove({
+      move: "dismiss",
+      target: groupOf(5, { members }),
+      ...online,
+    });
+    expect(plan.kind === "dismiss" && plan.words.text).toBe(
+      "Dismissed the group “Checkout is slow”: 5 things, 2 of them not in this list",
+    );
+  });
+
+  it("refuses Dismiss on a group the controller cut at its bound, and says what to do instead", () => {
     const reason = reasonOf(
       planInboxMove({
         move: "dismiss",
@@ -95,17 +144,23 @@ describe("planInboxMove", () => {
 
   it("refuses Dismiss on a group that came under the keys a moment ago, and says E again dismisses all", () => {
     expect(
-      reasonOf(
-        planInboxMove({ move: "dismiss", target: groupOf(3, { isFresh: true }), ...online }),
-      ),
+      reasonOf(planInboxMove({ move: "dismiss", target: groupOf(3, {}, true), ...online })),
     ).toBe("The group “Checkout is slow” is under the keys now. E again dismisses all 3.");
   });
 
-  it("makes one Task for a group or a selection, and refuses a group too large to name its things", () => {
-    expect(planInboxMove({ move: "takeOn", target: groupOf(3), ...online }).kind).toBe("go");
-    expect(planInboxMove({ move: "takeOn", target: selection(thing, held), ...online }).kind).toBe(
-      "go",
-    );
+  it("takes a group on as one Task, its label's thing first and titled with its label", () => {
+    expect(planInboxMove({ move: "takeOn", target: groupOf(3), ...online })).toEqual({
+      kind: "takeOnTogether",
+      ids: ["id-1", "id-0", "id-2"],
+      refs: ["acme:ticket:1", "acme:ticket:0", "acme:ticket:2"],
+      title: "Checkout is slow",
+    });
+    const plan = planInboxMove({
+      move: "takeOn",
+      target: groupOf(2, { label: "x".repeat(600) }),
+      ...online,
+    });
+    expect(plan.kind === "takeOnTogether" && plan.title).toHaveLength(MAX_TASK_TITLE_LENGTH);
     expect(
       reasonOf(
         planInboxMove({
@@ -117,9 +172,50 @@ describe("planInboxMove", () => {
     ).toContain("Take on takes up to 1,000 at once");
   });
 
-  it("treats a selection of one row as that row", () => {
+  it("takes a selection of several on as one Task, in order and titled with its first row", () => {
+    expect(planInboxMove({ move: "takeOn", target: selection(thing, held), ...online })).toEqual({
+      kind: "takeOnTogether",
+      ids: [thing.id, held.id],
+      refs: [thing.ref, held.ref],
+      title: "Cache delivery slot lookups",
+    });
+  });
+
+  it("takes one thing, or a selection of one, on by itself", () => {
+    expect(planInboxMove({ move: "takeOn", target: one(thing), ...online })).toEqual({
+      kind: "takeOn",
+      thing,
+    });
+    expect(planInboxMove({ move: "takeOn", target: selection(thing), ...online })).toEqual({
+      kind: "takeOn",
+      thing,
+    });
+  });
+
+  it("lets Take on join a Task the user did not take on, such as a signal's", () => {
+    const signalsTask = offered(buildInboxThing("4", { taskId: "t-3", takenOn: false }));
+
+    expect(planInboxMove({ move: "takeOn", target: one(signalsTask), ...online }).kind).toBe(
+      "takeOn",
+    );
+  });
+
+  it("refuses Take on for a thing the user took on, naming who has it", () => {
+    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(held), ...online }))).toBe(
+      "You have this already. G goes to its Task.",
+    );
     expect(reasonOf(planInboxMove({ move: "takeOn", target: selection(held), ...online }))).toBe(
       "You have this already. G goes to its Task.",
+    );
+    const handed = offered(
+      buildInboxThing("3", {
+        taskId: "t-2",
+        takenOn: true,
+        liveWorkflows: [{ workflowId: "w", name: "Review PR" }],
+      }),
+    );
+    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(handed), ...online }))).toBe(
+      "Review PR has this already. G goes to its Task.",
     );
   });
 
@@ -128,65 +224,97 @@ describe("planInboxMove", () => {
       reasonOf(
         planInboxMove({
           move: "handOff",
-          target: selection(thing, held),
+          target: selection(offered(thing, oneOffer), offered(held, oneOffer)),
           ...online,
-          offers: oneOffer,
         }),
       ),
     ).toBe(
       "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
     );
-    expect(
-      reasonOf(planInboxMove({ move: "handOff", target: groupOf(3), ...online, offers: oneOffer })),
-    ).toBe("Hand-off takes one thing at a time. Open the group and pick one.");
-  });
-
-  it("lets Take on join a Task the user did not take on, such as a signal's", () => {
-    const signalsTask = buildInboxThing("4", { taskId: "t-3", takenOn: false });
-
-    expect(planInboxMove({ move: "takeOn", target: one(signalsTask), ...online }).kind).toBe("go");
-  });
-
-  it("refuses Take on for a thing the user took on, naming who has it", () => {
-    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(held), ...online }))).toBe(
-      "You have this already. G goes to its Task.",
-    );
-    const handed = buildInboxThing("3", {
-      taskId: "t-2",
-      takenOn: true,
-      liveWorkflows: [{ workflowId: "w", name: "Review PR" }],
-    });
-    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(handed), ...online }))).toBe(
-      "Review PR has this already. G goes to its Task.",
+    expect(reasonOf(planInboxMove({ move: "handOff", target: groupOf(3), ...online }))).toBe(
+      "Hand-off takes one thing at a time. Open the group and pick one.",
     );
   });
 
   it("hands a thing a workflow can take, even one a Task holds, and refuses one none can take", () => {
-    expect(
-      planInboxMove({ move: "handOff", target: one(held), ...online, offers: oneOffer }).kind,
-    ).toBe("go");
+    const handable = offered(held, oneOffer);
+    expect(planInboxMove({ move: "handOff", target: one(handable), ...online })).toEqual({
+      kind: "handOff",
+      thing: handable,
+    });
     expect(reasonOf(planInboxMove({ move: "handOff", target: one(thing), ...online }))).toBe(
       "No workflow can take this ticket yet.",
     );
   });
 
-  it("refuses Go to its Task for a thing with no Task, and lets it go for one with a Task", () => {
+  it("goes to the Task of a thing that has one, and refuses one with none or a group", () => {
     expect(reasonOf(planInboxMove({ move: "goToTask", target: one(thing), ...online }))).toBe(
       "This has no Task yet. T takes it on.",
     );
-    expect(planInboxMove({ move: "goToTask", target: one(held), ...online }).kind).toBe("go");
+    expect(planInboxMove({ move: "goToTask", target: one(held), ...online })).toEqual({
+      kind: "goToTask",
+      taskId: "t-1",
+    });
     expect(reasonOf(planInboxMove({ move: "goToTask", target: groupOf(3), ...online }))).toBe(
       "Go to its Task takes one thing at a time.",
     );
   });
 
-  it("links a selection of two or more, and asks the screen to pick for one thing, one selected thing or a group", () => {
-    expect(planInboxMove({ move: "link", target: selection(thing, held), ...online })).toEqual({
-      kind: "go",
+  it("links a selection of two or more as a star from its first row", () => {
+    const third = offered(buildInboxThing("3"));
+    expect(
+      planInboxMove({ move: "link", target: selection(thing, held, third), ...online }),
+    ).toEqual({
+      kind: "link",
+      fromRef: thing.ref,
+      toRefs: [held.ref, third.ref],
+      named: [thing, held, third],
     });
-    for (const target of [one(thing), selection(thing), groupOf(3)]) {
-      expect(planInboxMove({ move: "link", target, ...online })).toEqual({ kind: "pick" });
-    }
+  });
+
+  it("opens Link to... for one thing under its line, leaving out its own group", () => {
+    expect(
+      planInboxMove({ move: "link", target: one(thing, [thing.ref, held.ref]), ...online }),
+    ).toEqual({
+      kind: "pickLink",
+      from: { ref: thing.ref, identifier: thing.identifier, title: thing.title },
+      fromLabel: thing.identifier,
+      excludedRefs: [thing.ref, held.ref],
+      anchorKey: thing.ref,
+    });
+    const bare = offered(buildInboxThing("5", { identifier: "", title: "No identifier here" }));
+    expect(planInboxMove({ move: "link", target: one(bare), ...online })).toMatchObject({
+      fromLabel: "No identifier here",
+    });
+  });
+
+  it("opens Link to... for a selection of one under the line that shows it, and refuses when none does", () => {
+    expect(
+      planInboxMove({
+        move: "link",
+        target: { kind: "selection", rows: [thing], lineKey: "group:4" },
+        ...online,
+      }),
+    ).toMatchObject({ kind: "pickLink", anchorKey: "group:4", excludedRefs: [] });
+    expect(
+      reasonOf(
+        planInboxMove({
+          move: "link",
+          target: { kind: "selection", rows: [thing], lineKey: null },
+          ...online,
+        }),
+      ),
+    ).toBe("Can't open Link to... here: that thing's line is not on the list.");
+  });
+
+  it("opens Link to... for a group from the member it is named after, leaving out its members", () => {
+    expect(planInboxMove({ move: "link", target: groupOf(2), ...online })).toEqual({
+      kind: "pickLink",
+      from: { ref: "acme:ticket:1", identifier: "", title: "Checkout is slow" },
+      fromLabel: "Checkout is slow",
+      excludedRefs: ["acme:ticket:0", "acme:ticket:1"],
+      anchorKey: "group:1",
+    });
   });
 
   it("refuses Link when nothing is selected to link", () => {
@@ -196,71 +324,74 @@ describe("planInboxMove", () => {
   });
 
   it("refuses every move but Go to its Task while offline", () => {
+    const handable = offered(thing, oneOffer);
     for (const move of ["dismiss", "takeOn", "handOff", "link"] as const) {
-      expect(
-        reasonOf(planInboxMove({ move, target: one(thing), isOffline: true, offers: oneOffer })),
-      ).toContain("You are offline");
+      expect(reasonOf(planInboxMove({ move, target: one(handable), isOffline: true }))).toContain(
+        "You are offline",
+      );
     }
-    expect(
-      planInboxMove({ move: "goToTask", target: one(held), isOffline: true, offers: NO_OFFERS })
-        .kind,
-    ).toBe("go");
+    expect(planInboxMove({ move: "goToTask", target: one(held), isOffline: true }).kind).toBe(
+      "goToTask",
+    );
   });
 });
 
-describe("buildTakeOnTogether", () => {
-  it("lists the label's thing first for a group, and titles the Task with the group's label", () => {
-    expect(buildTakeOnTogether(groupOf(3))).toEqual({
-      ids: ["id-1", "id-0", "id-2"],
-      title: "Checkout is slow",
+describe("planInboxDrop", () => {
+  const [a, b, c] = ["a", "b", "c"].map((n) =>
+    buildInboxThing(n, { ref: `acme:ticket:${n}`, identifier: `T-${n}` }),
+  );
+  const entries = buildEntries({
+    rows: [a!, b!, c!],
+    groups: [
+      {
+        key: "group:1",
+        labelRef: a!.ref,
+        label: "Group A",
+        members: [a!, b!].map((row) => ({ id: row.id, ref: row.ref, matches: true })),
+        size: 2,
+      },
+    ],
+    folds: new Map(
+      [a!, b!].map((row) => [row.ref, { isOpen: true, isExpanded: false, seq: 1 }] as const),
+    ),
+    isSearch: false,
+    selection: new Set(),
+    notOnList: new Set(),
+  });
+  const endOf = (row: InboxThing) => ({
+    ref: row.ref,
+    identifier: row.identifier,
+    title: row.title,
+  });
+
+  it("links the line dropped on to the carried line, a head by the member it is named after", () => {
+    expect(planInboxDrop(entries, c!.ref, "group:1")).toEqual({
+      kind: "link",
+      from: { ref: a!.ref, identifier: "", title: "Group A" },
+      to: endOf(c!),
+    });
+    expect(planInboxDrop(entries, b!.ref, c!.ref)).toEqual({
+      kind: "link",
+      from: endOf(c!),
+      to: endOf(b!),
     });
   });
 
-  it("cuts a title to the longest a Task takes", () => {
-    const title = buildTakeOnTogether(groupOf(2, { label: "x".repeat(600) }))?.title;
-
-    expect(title).toHaveLength(MAX_TASK_TITLE_LENGTH);
-  });
-
-  it("lists a selection's rows in order and titles the Task with the first row's title", () => {
-    expect(buildTakeOnTogether(selection(thing, held))).toEqual({
-      ids: [thing.id, held.id],
-      title: "Cache delivery slot lookups",
+  it("refuses a drop on a line of the carried thing's own group", () => {
+    expect(planInboxDrop(entries, b!.ref, "group:1")).toEqual({
+      kind: "refuse",
+      reason: "These are in one group already.",
     });
+    expect(planInboxDrop(entries, b!.ref, a!.ref)).toMatchObject({ kind: "refuse" });
   });
 
-  it("answers null for one thing and for a selection of one", () => {
-    expect(buildTakeOnTogether(one(thing))).toBeNull();
-    expect(buildTakeOnTogether(selection(thing))).toBeNull();
-  });
-});
-
-describe("buildLinkPairs", () => {
-  it("links the first row to each of the others", () => {
-    const third = buildInboxThing("3");
-
-    expect(buildLinkPairs(selection(thing, held, third))).toEqual([
-      { fromRef: thing.ref, toRef: held.ref },
-      { fromRef: thing.ref, toRef: third.ref },
-    ]);
-  });
-
-  it("has no pair for a thing, a group or a selection of one", () => {
-    for (const target of [one(thing), groupOf(3), selection(thing)])
-      expect(buildLinkPairs(target)).toEqual([]);
+  it("does nothing for a line that is not on the list", () => {
+    expect(planInboxDrop(entries, "acme:ticket:gone", c!.ref)).toBeNull();
   });
 });
 
 describe("what the undo line says", () => {
-  it("puts the title last for one thing, and counts several", () => {
-    expect(describeInboxDismissal([thing])).toEqual({
-      text: "Dismissed",
-      title: "Cache delivery slot lookups",
-    });
-    expect(describeInboxDismissal([thing, held])).toEqual({
-      text: "Dismissed 2 things",
-      title: null,
-    });
+  it("puts the title last for a hand-off", () => {
     expect(describeInboxHandOff(thing, "Review PR")).toEqual({
       text: "Handed to Review PR",
       title: "Cache delivery slot lookups",
@@ -280,19 +411,6 @@ describe("what the undo line says", () => {
 });
 
 describe("the undo line for linking, groups and take on together", () => {
-  it("names a dismissed group, and how many of its things were not in the list", () => {
-    const target = (matches: boolean[]) =>
-      groupOf(matches.length, {
-        members: matches.map((m, n) => ({ id: `id-${n}`, ref: `acme:ticket:${n}`, matches: m })),
-      }) as Extract<InboxMoveTarget, { kind: "group" }>;
-    expect(describeInboxGroupDismissal(target([true, true, true, true, true])).text).toBe(
-      "Dismissed the group “Checkout is slow”: 5 things",
-    );
-    expect(describeInboxGroupDismissal(target([true, true, true, false, false])).text).toBe(
-      "Dismissed the group “Checkout is slow”: 5 things, 2 of them not in this list",
-    );
-  });
-
   const shop = buildInboxThing("1", { identifier: "SHOP-150" });
   const pr = buildInboxThing("2", { identifier: "#6251" });
   const bare = buildInboxThing("3", { identifier: "", title: "No identifier here" });
@@ -347,37 +465,7 @@ describe("the undo line for linking, groups and take on together", () => {
   });
 });
 
-describe("reading a target", () => {
-  it("finds the one thing of a thing or of a selection of one, and none for a group or several", () => {
-    expect(findSingleThing(one(thing))).toBe(thing);
-    expect(findSingleThing(selection(thing))).toBe(thing);
-    expect(findSingleThing(selection(thing, held))).toBeUndefined();
-    expect(findSingleThing(selection())).toBeUndefined();
-    expect(findSingleThing(groupOf(3))).toBeUndefined();
-  });
-
-  it("lists the things a target stands for", () => {
-    expect(listTargetThings(one(thing))).toEqual([thing]);
-    expect(listTargetThings(selection(thing, held))).toEqual([thing, held]);
-    expect(listTargetThings(groupOf(3, { rows: [thing] }))).toEqual([thing]);
-  });
-
-  it("words a dismissal by the kind of target", () => {
-    expect(describeInboxTargetDismissal(one(thing))).toEqual({
-      text: "Dismissed",
-      title: "Cache delivery slot lookups",
-    });
-    expect(describeInboxTargetDismissal(groupOf(3)).text).toContain("Dismissed the group");
-  });
-
-  it("names a group as one end of a link by its label, with no identifier", () => {
-    expect(buildGroupLinkEnd({ labelRef: "acme:ticket:1", label: "Checkout is slow" })).toEqual({
-      ref: "acme:ticket:1",
-      identifier: "",
-      title: "Checkout is slow",
-    });
-  });
-
+describe("failure lines", () => {
   it("words link and unlink failures with one full stop before the advice", () => {
     expect(describeInboxLinkFailure("the controller is busy")).toBe(
       "The link did not save: the controller is busy. Try again.",

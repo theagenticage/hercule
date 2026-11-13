@@ -7,7 +7,12 @@
  * A group is a set of things linked to each other. The controller names a group
  * only in the reply that carries it, with no identity of its own, so the visit
  * mints a key (`group:1`, `group:2`, ...) and keeps it while the group's
- * members mostly stay the same. Folds (open, show more) hang on that key.
+ * members mostly stay the same: the key is what the list draws the head
+ * under, so the current entry and the rows' motion follow a relabelled group.
+ *
+ * What the user chose for a group (open, closed, show more) hangs on its
+ * members, not on its key, so it outlives a group that splits, merges or is
+ * gone for a while (see `FoldChoice`).
  */
 import type { InboxGroupMember } from "@hercule/contract";
 
@@ -41,10 +46,49 @@ export interface HeldGroup {
   readonly size: number;
 }
 
-/** What the user chose for a group. A missing field means no choice: the display decides. */
-export interface GroupFold {
-  readonly isOpen?: boolean;
-  readonly isExpanded?: boolean;
+/**
+ * What the user chose for a group, written to every member the group had when
+ * the choice was made. A member with no choice leaves the group to the
+ * display's default (see `isGroupOpen`).
+ */
+export interface FoldChoice {
+  /** True when the user opened the group, false when they closed it. */
+  readonly isOpen: boolean;
+  /** True when the user asked to see every member ("Show N more"). */
+  readonly isExpanded: boolean;
+  /** Rises with each choice the user makes: the latest choice among a group's members wins. */
+  readonly seq: number;
+}
+
+/**
+ * Returns the choice that holds for `group`: the latest of its members'
+ * choices, or `undefined` when none of them has one.
+ *
+ * Because the latest choice wins, a group made of two that merged shows the
+ * fold the user chose last for either part, and both parts of a group that
+ * split keep the fold the whole group had.
+ */
+export function findFoldChoice(
+  group: HeldGroup,
+  folds: ReadonlyMap<string, FoldChoice>,
+): FoldChoice | undefined {
+  let latest: FoldChoice | undefined;
+  for (const member of group.members) {
+    const choice = folds.get(member.ref);
+    if (choice !== undefined && (latest === undefined || choice.seq > latest.seq)) latest = choice;
+  }
+  return latest;
+}
+
+/** Returns `folds` with `choice` written to every member of `group`. */
+export function writeFoldChoice(
+  folds: ReadonlyMap<string, FoldChoice>,
+  group: HeldGroup,
+  choice: FoldChoice,
+): ReadonlyMap<string, FoldChoice> {
+  const next = new Map(folds);
+  for (const member of group.members) next.set(member.ref, choice);
+  return next;
 }
 
 /** A group of this many held members or fewer shows them all when open. */
@@ -52,24 +96,41 @@ const SHOW_ALL_UP_TO = 7;
 /** A larger group shows this many members until the user asks for more. */
 const COLLAPSED_SHOWN = 5;
 
-/** The group as the list draws its head. */
+/**
+ * A group as the list resolves it once per change: its operative members, its
+ * held rows and how it draws. Moves, counts, ticks and words all read this, so
+ * none of them can disagree about who is in the group.
+ *
+ * Two pairs of numbers stay apart on purpose:
+ * - `members` against `rows`: the members a move acts on (held or not) against
+ *   the members the visit holds a row for (hydrated).
+ * - `size` above `members.length` means the reply was cut by the controller's
+ *   bound on members per group (a group too large to move whole). Members that
+ *   wait behind "N new" are not in `members` and not counted in `size`.
+ */
 export interface InboxGroupView<Row> {
   readonly key: GroupKey;
   readonly labelRef: string;
   readonly label: string;
+  /**
+   * The operative members: every member the group names, held or not, less
+   * the members a dismissal on its way hid and the members that wait behind
+   * "N new". The members that answer the query come first.
+   */
+  readonly members: readonly InboxGroupMember[];
+  /** How many members the group has, less the ones left out of `members`. */
   readonly size: number;
-  /** True when the group has members the visit holds no row for. */
-  readonly isCut: boolean;
+  /** The held members, in member order. At least one. */
+  readonly rows: readonly Row[];
   /** How many members the visit holds no row for: `size` less the held members. They are read when the group is shown open. */
   readonly unloadedCount: number;
   readonly isOpen: boolean;
-  /** The first held member that answers the query: its time, ask and marks draw the head. */
-  readonly placedBy: Row | undefined;
-  /** The held members, in member order. */
-  readonly rows: readonly Row[];
-  /** How many members answer the query (`matches`), held or not. */
-  readonly matchCount: number;
-  /** The refs of the held members that answer the query (`matches`). */
+  /**
+   * The row whose time, ask and marks draw the head: the first held member
+   * that answers the query, else the first held member.
+   */
+  readonly placedBy: Row;
+  /** The refs of the held members that answer the query (`matches`): what X on the head selects. */
   readonly matchRefs: readonly string[];
   /** Whether the selection holds all, some or none of the group. */
   readonly tick: "none" | "some" | "all";
@@ -160,7 +221,7 @@ export function gatherGroupRows<Row extends { readonly ref: string }>(
  */
 export const isGroupOpen = (
   group: HeldGroup,
-  fold: GroupFold | undefined,
+  fold: FoldChoice | undefined,
   isSearch: boolean,
 ): boolean =>
   fold?.isOpen ??
@@ -170,18 +231,22 @@ export const isGroupOpen = (
  * Builds the entries the list draws, in order. A group with a held member
  * draws a head and, when open, its members; the others are things.
  *
- * - A group is open when the user opened it. With no choice, it is open in a
- *   search when a member other than its label answers the query, so a hit
- *   inside a group is not hidden behind its head.
+ * - A group is open when the latest choice of its members says so (see
+ *   `findFoldChoice`). With no choice, it is open in a search when a member
+ *   other than its label answers the query, so a hit inside a group is not
+ *   hidden behind its head.
  * - An open group of more than 7 held members shows its first 5 (the members
  *   that answer the query come first) and a "more" line, until expanded.
  */
 export function buildEntries<Row extends { readonly ref: string }>(input: {
   readonly rows: readonly Row[];
   readonly groups: readonly HeldGroup[];
-  readonly folds: ReadonlyMap<GroupKey, GroupFold>;
+  /** The choices the user made, by member ref. */
+  readonly folds: ReadonlyMap<string, FoldChoice>;
   readonly isSearch: boolean;
   readonly selection: ReadonlySet<string>;
+  /** Refs the list does not show yet or any more: hidden by a dismissal on its way, or waiting behind "N new". No group counts them. */
+  readonly notOnList: ReadonlySet<string>;
 }): InboxEntry<Row>[] {
   const placedByRef = placeGroups(input.rows, input.groups);
   const drawn = new Set<GroupKey>();
@@ -194,7 +259,7 @@ export function buildEntries<Row extends { readonly ref: string }>(input: {
     }
     if (drawn.has(placed.group.key)) continue;
     drawn.add(placed.group.key);
-    pushGroup(entries, placed, input.folds.get(placed.group.key), input);
+    pushGroup(entries, placed, findFoldChoice(placed.group, input.folds), input);
   }
   return entries;
 }
@@ -202,10 +267,18 @@ export function buildEntries<Row extends { readonly ref: string }>(input: {
 function pushGroup<Row extends { readonly ref: string }>(
   entries: InboxEntry<Row>[],
   { group, held }: Placed<Row>,
-  fold: GroupFold | undefined,
-  input: { readonly isSearch: boolean; readonly selection: ReadonlySet<string> },
+  fold: FoldChoice | undefined,
+  input: {
+    readonly isSearch: boolean;
+    readonly selection: ReadonlySet<string>;
+    readonly notOnList: ReadonlySet<string>;
+  },
 ): void {
-  const matches = new Map(group.members.map((member) => [member.ref, member.matches]));
+  const members = group.members.some((member) => input.notOnList.has(member.ref))
+    ? group.members.filter((member) => !input.notOnList.has(member.ref))
+    : group.members;
+  const size = group.size - (group.members.length - members.length);
+  const matches = new Map(members.map((member) => [member.ref, member.matches]));
   const matchingRows = held.filter((row) => matches.get(row.ref) === true);
   const isOpen = isGroupOpen(group, fold, input.isSearch);
   const selected = held.filter((row) => input.selection.has(row.ref));
@@ -218,13 +291,12 @@ function pushGroup<Row extends { readonly ref: string }>(
       key: group.key,
       labelRef: group.labelRef,
       label: group.label,
-      size: group.size,
-      isCut: group.size > held.length,
-      unloadedCount: group.size - held.length,
-      isOpen,
-      placedBy: matchingRows[0],
+      members,
+      size,
       rows: held,
-      matchCount: group.members.filter((member) => member.matches).length,
+      unloadedCount: size - held.length,
+      isOpen,
+      placedBy: matchingRows[0] ?? held[0]!,
       matchRefs: matchingRows.map((row) => row.ref),
       tick: isEveryMatchSelected ? "all" : selected.length > 0 ? "some" : "none",
     },
@@ -235,7 +307,7 @@ function pushGroup<Row extends { readonly ref: string }>(
       ? held
       : held.slice(0, COLLAPSED_SHOWN);
   const hiddenCount = held.length - shown.length;
-  const placeOf = new Map(group.members.map((member, index) => [member.ref, index + 1]));
+  const placeOf = new Map(members.map((member, index) => [member.ref, index + 1]));
   shown.forEach((row, index) => {
     entries.push({
       kind: "member",
@@ -243,7 +315,7 @@ function pushGroup<Row extends { readonly ref: string }>(
       row,
       groupKey: group.key,
       position: placeOf.get(row.ref) ?? index + 1,
-      of: group.size,
+      of: size,
       matches: matches.get(row.ref) === true,
       isLast: hiddenCount === 0 && index === shown.length - 1,
     });
@@ -254,7 +326,7 @@ function pushGroup<Row extends { readonly ref: string }>(
       key: buildMoreKey(group.key),
       groupKey: group.key,
       hiddenCount,
-      unloadedCount: group.size - held.length,
+      unloadedCount: size - held.length,
     });
   }
 }
@@ -369,15 +441,39 @@ export function findEntryKey(
 }
 
 /**
- * Returns the entry key to keep as current (or anchor) after the entries
- * changed from `oldKeys` to `newEntries`, or `null` when nothing is left. The
- * first rule that fits:
+ * Returns the entry that now shows what the entry `key` showed, after the
+ * entries changed to `newEntries`, or `null` when no entry does:
  * 1. `key` is still an entry: keep it.
- * 2. `key` is a thing a fold now hides, or a member a read pulled into a group:
- *    the entry that shows it.
- * 3. `key` is a head or "more" line whose group dissolved: the first of its old
- *    members that is still an entry. A "more" line whose head remains: the head.
- * 4. The entry after it in the old order, else the one before, else the first.
+ * 2. `key` is a thing a fold now hides, or a member a read pulled into a
+ *    closed group: the head that shows it.
+ * 3. `key` is a head or a "more" line: the head when it is still an entry,
+ *    else the entry that now shows the first of the group's old members that
+ *    is still shown (a member, or the head of the group it went to).
+ */
+export function findShowingKey(
+  newEntries: readonly InboxEntry<{ readonly ref: string }>[],
+  key: string,
+  oldGroups: readonly HeldGroup[],
+): string | null {
+  if (newEntries.some((entry) => entry.key === key)) return key;
+  const shown = findEntryKey(newEntries, key);
+  if (shown !== null) return shown;
+  const groupKey = parseMoreKey(key) ?? key;
+  if (!isGroupKey(groupKey)) return null;
+  if (newEntries.some((entry) => entry.key === groupKey)) return groupKey;
+  const members = oldGroups.find((group) => group.key === groupKey)?.members ?? [];
+  for (const member of members) {
+    const showing = findEntryKey(newEntries, member.ref);
+    if (showing !== null) return showing;
+  }
+  return null;
+}
+
+/**
+ * Returns the entry key to keep as current after the entries changed from
+ * `oldKeys` to `newEntries`, or `null` when nothing is left: the entry that
+ * shows what `key` showed (see `findShowingKey`), else the entry after it in
+ * the old order, else the one before, else the first.
  */
 export function settleKey(
   oldKeys: readonly string[],
@@ -385,17 +481,9 @@ export function settleKey(
   key: string,
   oldGroups: readonly HeldGroup[],
 ): string | null {
+  const showing = findShowingKey(newEntries, key, oldGroups);
+  if (showing !== null) return showing;
   const newKeys = new Set(newEntries.map((entry) => entry.key));
-  if (newKeys.has(key)) return key;
-  const shown = findEntryKey(newEntries, key);
-  if (shown !== null) return shown;
-  const groupKey = parseMoreKey(key) ?? key;
-  if (isGroupKey(groupKey)) {
-    if (newKeys.has(groupKey)) return groupKey;
-    const members = oldGroups.find((group) => group.key === groupKey)?.members ?? [];
-    const survivor = members.find((member) => newKeys.has(member.ref));
-    if (survivor !== undefined) return survivor.ref;
-  }
   const at = oldKeys.indexOf(key);
   if (at >= 0) {
     const neighbour =
@@ -428,19 +516,21 @@ export type IncomingGroup = Omit<HeldGroup, "key">;
 
 /**
  * Matches the groups a read describes to the groups the visit holds, so a group
- * keeps its key (and its folds) while its members change.
+ * keeps its key while its members change.
  *
  * - Overlap is counted on member refs. The incoming group and held group with
  *   the most refs in common are paired first, then the next most, each group in
- *   one pair at most. A tie goes to the held group of the current row, then to
- *   the first held group.
- * - An incoming group with no pair gets a fresh key. It inherits the folds of
- *   the held group it overlaps most (`inherit`), even when that group's key went
- *   to another: a group that splits keeps both parts open.
+ *   one pair at most. A tie goes to the first held group, then the first
+ *   incoming one. A paired incoming group takes the held group's key; any other
+ *   gets a fresh key.
  * - A held group that no incoming group took stays, less the members the read
  *   `covered` (they are in another group or alone now). It is dropped when fewer
  *   than two members are left, so a group the read did not mention is kept.
  * - An incoming group of fewer than two members is not a group.
+ *
+ * The key decides only which head the list keeps drawing. Whether a group
+ * that merged or split is open does not follow the key: it follows the
+ * choices of its members (see `findFoldChoice`).
  *
  * Returns the groups in the order: incoming first, then the ones kept.
  */
@@ -449,31 +539,17 @@ export function reconcileGroups(input: {
   readonly incoming: readonly IncomingGroup[];
   readonly covered: ReadonlySet<string>;
   readonly nextNumber: number;
-  readonly currentGroup: GroupKey | null;
-}): {
-  readonly groups: HeldGroup[];
-  readonly nextNumber: number;
-  readonly inherit: ReadonlyMap<GroupKey, GroupKey>;
-} {
+}): { readonly groups: HeldGroup[]; readonly nextNumber: number } {
   const { previous, covered } = input;
   const incoming = input.incoming.filter((group) => group.members.length >= 2);
   const previousRefs = previous.map((group) => new Set(group.members.map((m) => m.ref)));
-  const pairs: { incoming: number; previous: number; overlap: number }[] = [];
-  incoming.forEach((group, i) =>
-    previousRefs.forEach((refs, j) => {
+  const pairs = incoming.flatMap((group, i) =>
+    previousRefs.flatMap((refs, j) => {
       const overlap = group.members.filter((member) => refs.has(member.ref)).length;
-      if (overlap > 0) pairs.push({ incoming: i, previous: j, overlap });
+      return overlap > 0 ? [{ incoming: i, previous: j, overlap }] : [];
     }),
   );
-  const isCurrent = (pair: { previous: number }) =>
-    previous[pair.previous]!.key === input.currentGroup ? 0 : 1;
-  pairs.sort(
-    (a, b) =>
-      b.overlap - a.overlap ||
-      isCurrent(a) - isCurrent(b) ||
-      a.previous - b.previous ||
-      a.incoming - b.incoming,
-  );
+  pairs.sort((a, b) => b.overlap - a.overlap || a.previous - b.previous || a.incoming - b.incoming);
   const takenBy = new Map<number, number>();
   const taken = new Set<number>();
   for (const pair of pairs) {
@@ -483,19 +559,15 @@ export function reconcileGroups(input: {
   }
 
   let nextNumber = input.nextNumber;
-  const inherit = new Map<GroupKey, GroupKey>();
   const groups: HeldGroup[] = incoming.map((group, i) => {
     const claimed = takenBy.get(i);
     if (claimed !== undefined) return { ...group, key: previous[claimed]!.key };
     const key: GroupKey = `group:${nextNumber}`;
     nextNumber += 1;
-    const parent = pairs.find((pair) => pair.incoming === i);
-    if (parent !== undefined) inherit.set(key, previous[parent.previous]!.key);
     return { ...group, key };
   });
   previous.forEach((group, j) => {
-    if (taken.has(j)) return;
-    groups.push(...removeMembers([group], covered));
+    if (!taken.has(j)) groups.push(...removeMembers([group], covered));
   });
-  return { groups, nextNumber, inherit };
+  return { groups, nextNumber };
 }

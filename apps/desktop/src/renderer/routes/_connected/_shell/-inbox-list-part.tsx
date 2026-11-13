@@ -17,7 +17,6 @@ import {
   describeInboxGroupRow,
   describeInboxRow,
   findAccountLabel,
-  NO_OFFERS,
   type InboxEntry,
   type InboxRowView,
   type InboxScope,
@@ -156,7 +155,6 @@ function describeEntry(
       };
     case "head": {
       const { group } = entry;
-      const owner = group.placedBy ?? group.rows[0];
       return {
         kind: "head",
         key: entry.key,
@@ -164,7 +162,7 @@ function describeEntry(
           order,
           now,
           userName,
-          offers: owner?.offers ?? NO_OFFERS,
+          offers: group.placedBy.offers,
         }),
         isOpen: group.isOpen,
         tick: group.tick,
@@ -172,13 +170,7 @@ function describeEntry(
       };
     }
     case "more":
-      return {
-        kind: "more",
-        key: entry.key,
-        groupKey: entry.groupKey,
-        hiddenCount: entry.hiddenCount,
-        unloadedCount: entry.unloadedCount,
-      };
+      return entry;
   }
 }
 

@@ -1,7 +1,10 @@
 import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
-import type { InboxGroupPaneEnd, InboxGroupPaneView } from "@hercule/client-core/inbox";
-import type { InboxThing } from "@hercule/contract";
+import type {
+  InboxGroupPaneEnd,
+  InboxGroupPaneView,
+  InboxLinkEnd,
+} from "@hercule/client-core/inbox";
 import { LinkIcon } from "../../icons/link";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
@@ -27,11 +30,8 @@ export function InboxGroupHead({ words }: { readonly words: string }): JSX.Eleme
   );
 }
 
-/** The two ends of a pair as the line about an unlink names them: by identifier, else by title. */
-export type UnlinkedEnd = Pick<InboxThing, "ref" | "identifier" | "title">;
-
 /** Returns `end` of the pair as what an unlink names it by. The pair knows the end's name, not both its identifier and title, so the name fills the one it is. */
-const readUnlinkedEnd = (ref: string, end: InboxGroupPaneEnd): UnlinkedEnd =>
+const readInboxLinkEnd = (ref: string, end: InboxGroupPaneEnd): InboxLinkEnd =>
   end.isIdentifier
     ? { ref, identifier: end.name, title: "" }
     : { ref, identifier: "", title: end.name };
@@ -85,7 +85,7 @@ export function InboxGroupPane({
   readonly view: InboxGroupPaneView;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onWalkTo: (ref: string) => void;
-  readonly onUnlink: (first: UnlinkedEnd, second: UnlinkedEnd) => void;
+  readonly onUnlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
   readonly onDismiss: () => void;
@@ -157,8 +157,8 @@ export function InboxGroupPane({
                       aria-label={`Unlink ${pair.from.name} and ${pair.to.name}`}
                       onClick={() => {
                         onUnlink(
-                          readUnlinkedEnd(pair.fromRef, pair.from),
-                          readUnlinkedEnd(pair.toRef, pair.to),
+                          readInboxLinkEnd(pair.fromRef, pair.from),
+                          readInboxLinkEnd(pair.toRef, pair.to),
                         );
                       }}
                     >

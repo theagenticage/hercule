@@ -15,6 +15,7 @@ import {
   type WorkflowOffer,
 } from "@hercule/contract";
 import { decideHandMove, type CardOffers } from "./card-hand-off";
+import type { InboxEntry, InboxGroupView } from "./inbox-groups";
 import { findHolder } from "./inbox-holder";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
@@ -23,48 +24,42 @@ export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "lin
 /**
  * What a move acts on, as the visit hands it over: never inferred from a count.
  *
- * - `thing`: one row, with the group it is a member of.
- * - `group`: a group of linked things, under the keys as one row.
- *   - `labelRef` and `label` are the member the group is named after and its title.
- *   - `members` is every member the group names, with its id, minus the ones the
- *     visit hid or has not shown yet.
- *   - `rows` are the members the visit holds.
- *   - `size` is how many members the group has. It is above `members.length`
- *     only for a group of more than `MAX_INBOX_MOVED_THINGS`.
- *   - `isFresh` is true when the group came under the keys less than 0.6 seconds ago.
- * - `selection`: the rows the user selected.
+ * - `thing`: one row, with the refs of the group it is a member of (none when
+ *   it stands alone).
+ * - `group`: a group of linked things, under the keys as one row, as the list
+ *   resolved it (see `InboxGroupView`). `isFresh` is true when the group came
+ *   under the keys less than 0.6 seconds ago.
+ * - `selection`: the rows the user selected. `lineKey` is the key of the list
+ *   line that shows the selection's one thing (its group's head when the group
+ *   is closed), or `null` for a selection of several or of a thing no line shows.
  */
 export type InboxMoveTarget<Row extends { readonly ref: string } = InboxThing> =
   | {
       readonly kind: "thing";
       readonly row: Row;
-      /** The refs of the group the thing is a member of, or none when it stands alone. */
       readonly groupMemberRefs: readonly string[];
     }
+  | { readonly kind: "group"; readonly group: InboxGroupView<Row>; readonly isFresh: boolean }
   | {
-      readonly kind: "group";
-      readonly labelRef: string;
-      readonly label: string;
-      readonly members: ReadonlyArray<{
-        readonly id: string;
-        readonly ref: string;
-        /** True when the member answers the list's query. */
-        readonly matches: boolean;
-      }>;
+      readonly kind: "selection";
       readonly rows: ReadonlyArray<Row>;
-      readonly size: number;
-      readonly isFresh: boolean;
-    }
-  | { readonly kind: "selection"; readonly rows: ReadonlyArray<Row> };
+      readonly lineKey: string | null;
+    };
 
-/**
- * What may be done: go on, ask the screen to open "Link to..." so the user
- * picks the thing to link to, or refuse and say why.
- */
-export type InboxMovePlan =
-  | { readonly kind: "go" }
-  | { readonly kind: "pick" }
-  | { readonly kind: "refuse"; readonly reason: string };
+/** One end of a link, named the way a line about the link names it. */
+export type InboxLinkEnd = Pick<InboxThing, "ref" | "identifier" | "title">;
+
+/** What "Link to..." opens with, when the user links one thing or one group and still has to pick the other end. */
+export interface InboxLinkPick {
+  /** The thing it links from: the thing, or the member a group is named after. */
+  readonly from: InboxLinkEnd;
+  /** How the popover names what is linked from: the thing's identifier, else its title; a group's label. */
+  readonly fromLabel: string;
+  /** The refs "Link to..." does not offer, because linking them changes nothing: the members of the group. */
+  readonly excludedRefs: readonly string[];
+  /** The key of the list line the popover opens under. */
+  readonly anchorKey: string;
+}
 
 /** The words of an undo line: what happened, and the title of the thing it happened to. */
 export interface InboxLineWords {
@@ -72,16 +67,61 @@ export interface InboxLineWords {
   readonly title: string | null;
 }
 
-/** Returns the things a target stands for that the list holds: the thing, the group's held members, the selection's rows. */
-export const listTargetThings = <Row extends { readonly ref: string }>(
-  target: InboxMoveTarget<Row>,
-): readonly Row[] => (target.kind === "thing" ? [target.row] : target.rows);
+/**
+ * What each move does when it may be made: everything the screen needs to send
+ * it, so the screen executes the plan and derives nothing from the target.
+ */
+export interface InboxMovePlans<Row> {
+  readonly dismiss: {
+    readonly kind: "dismiss";
+    readonly ids: readonly string[];
+    readonly refs: readonly string[];
+    readonly words: InboxLineWords;
+    /** What a failure line names: each thing, or the group by its label. */
+    readonly named: ReadonlyArray<Pick<InboxThing, "title">>;
+  };
+  readonly takeOn:
+    | { readonly kind: "takeOn"; readonly thing: Row }
+    | {
+        readonly kind: "takeOnTogether";
+        /** The things to take on under one Task. A group lists its label's thing first. */
+        readonly ids: readonly string[];
+        readonly refs: readonly string[];
+        /** The Task's title, cut to `MAX_TASK_TITLE_LENGTH`. */
+        readonly title: string;
+      };
+  readonly handOff: { readonly kind: "handOff"; readonly thing: Row };
+  readonly goToTask: { readonly kind: "goToTask"; readonly taskId: string };
+  readonly link:
+    | {
+        readonly kind: "link";
+        readonly fromRef: string;
+        readonly toRefs: readonly string[];
+        /** The things the line names. */
+        readonly named: readonly InboxLinkEnd[];
+      }
+    | ({ readonly kind: "pickLink" } & InboxLinkPick);
+}
+
+/** A move that may not be made, and why. */
+interface Refusal {
+  readonly kind: "refuse";
+  readonly reason: string;
+}
+
+/** What `move` may do: its plan, or a refusal that says why. */
+export type InboxMovePlan<Row, Move extends InboxMoveKind = InboxMoveKind> =
+  | InboxMovePlans<Row>[Move]
+  | Refusal;
+
+/** A row a move can be planned for: a thing with the workflows it can be handed to. */
+type MovedRow = InboxThing & { readonly offers: CardOffers };
 
 /**
  * Returns the one thing a target is: a thing, or a selection of just one row.
  * Returns `undefined` for a group, an empty selection and a selection of several.
  */
-export const findSingleThing = <Row extends { readonly ref: string }>(
+const findSingleThing = <Row extends { readonly ref: string }>(
   target: InboxMoveTarget<Row>,
 ): Row | undefined =>
   target.kind === "thing"
@@ -90,8 +130,7 @@ export const findSingleThing = <Row extends { readonly ref: string }>(
       ? target.rows[0]
       : undefined;
 
-const GO: InboxMovePlan = { kind: "go" };
-const refuse = (reason: string): InboxMovePlan => ({ kind: "refuse", reason });
+const refuse = (reason: string): Refusal => ({ kind: "refuse", reason });
 
 /** The longest title a sentence quotes before it is cut, in letters. */
 const QUOTED_TITLE_LENGTH = 44;
@@ -109,158 +148,290 @@ const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">):
 export const REFUSED_OFFLINE =
   "You are offline, so that was not done. Try again when the connection is back.";
 
+/** What the undo line says when "Link to..." finds no line to open under. */
+export const NO_LINE_TO_LINK_FROM =
+  "Can't open Link to... here: that thing's line is not on the list.";
+
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
-/** Returns the reason a group of more than `MAX_INBOX_MOVED_THINGS` things cannot be moved as a whole, or `undefined` for a smaller one. */
+/**
+ * Returns the reason a group cut by the controller's bound on members (more
+ * than `MAX_INBOX_MOVED_THINGS` things) cannot be moved as a whole, or
+ * `undefined` for a group whose members are all known.
+ */
 const refuseTooLargeGroup = (
-  target: Extract<InboxMoveTarget, { kind: "group" }>,
+  group: InboxGroupView<unknown>,
   verb: string,
   key: string,
-): InboxMovePlan | undefined =>
-  target.size > target.members.length
+): Refusal | undefined =>
+  group.size > group.members.length
     ? refuse(
-        `This group has ${formatCount(target.size)} things, and ${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} at once. Open the group, select some of its things, then press ${key}.`,
+        `This group has ${formatCount(group.size)} things, and ${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} at once. Open the group, select some of its things, then press ${key}.`,
       )
     : undefined;
 
+/** Returns the reason a selection of more than `MAX_INBOX_MOVED_THINGS` rows is refused, or `undefined` for a smaller target. */
+const refuseTooLargeSelection = (
+  target: InboxMoveTarget<{ readonly ref: string }>,
+  verb: string,
+  key: string,
+): Refusal | undefined =>
+  target.kind === "selection" && target.rows.length > MAX_INBOX_MOVED_THINGS
+    ? refuse(
+        `${verb} takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} things at once, and ${formatCount(target.rows.length)} are selected. Select fewer, then press ${key} again.`,
+      )
+    : undefined;
+
+/** Plans a Dismiss: a thing, a whole group or a selection, in one call. */
+const planDismiss = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "dismiss"> => {
+  if (target.kind === "group") {
+    const { group } = target;
+    const refusal =
+      refuseTooLargeGroup(group, "Dismiss", "E") ??
+      (target.isFresh
+        ? refuse(
+            `The group ${quoteTitle(group.label)} is under the keys now. E again dismisses all ${formatCount(group.size)}.`,
+          )
+        : undefined);
+    return (
+      refusal ?? {
+        kind: "dismiss",
+        ids: group.members.map((member) => member.id),
+        refs: group.members.map((member) => member.ref),
+        words: describeInboxGroupDismissal(group),
+        named: [{ title: group.label }],
+      }
+    );
+  }
+  const things = target.kind === "thing" ? [target.row] : target.rows;
+  return (
+    refuseTooLargeSelection(target, "Dismiss", "E") ?? {
+      kind: "dismiss",
+      ids: things.map((thing) => thing.id),
+      refs: things.map((thing) => thing.ref),
+      words: describeInboxDismissal(things),
+      named: things,
+    }
+  );
+};
+
 /**
- * Decides whether `move` may be made on `target`.
+ * Plans a Take on. A thing becomes its own Task. A group or a selection of
+ * several things become one Task: a group lists its label's thing first,
+ * because the Task takes its stage and Project from the first thing, and is
+ * titled with the group's label; a selection is titled with its first row's
+ * title.
+ */
+const planTakeOn = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "takeOn"> => {
+  const cut = (title: string): string => title.slice(0, MAX_TASK_TITLE_LENGTH);
+  if (target.kind === "group") {
+    const { group } = target;
+    const label = group.members.filter((member) => member.ref === group.labelRef);
+    const others = group.members.filter((member) => member.ref !== group.labelRef);
+    const members = [...label, ...others];
+    return (
+      refuseTooLargeGroup(group, "Take on", "T") ?? {
+        kind: "takeOnTogether",
+        ids: members.map((member) => member.id),
+        refs: members.map((member) => member.ref),
+        title: cut(group.label),
+      }
+    );
+  }
+  const tooLarge = refuseTooLargeSelection(target, "Take on", "T");
+  if (tooLarge !== undefined) return tooLarge;
+  if (target.kind === "selection" && target.rows.length >= 2) {
+    return {
+      kind: "takeOnTogether",
+      ids: target.rows.map((row) => row.id),
+      refs: target.rows.map((row) => row.ref),
+      title: cut(target.rows[0]!.title),
+    };
+  }
+  const only = findSingleThing(target);
+  if (only === undefined) return refuse("There is nothing selected to take on.");
+  // A thing with a Task the user did not take on (a signal's, a hand-off's) may be taken on:
+  // the controller marks that Task as taken instead of making another.
+  return only.takenOn
+    ? refuse(`${describeWhoHasIt(only)} this already. G goes to its Task.`)
+    : { kind: "takeOn", thing: only };
+};
+
+/** Plans a hand-off: one thing, which some workflow can take. */
+const planHandOff = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "handOff"> => {
+  const only = findSingleThing(target);
+  if (only === undefined)
+    return refuse(
+      target.kind === "group"
+        ? "Hand-off takes one thing at a time. Open the group and pick one."
+        : "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
+    );
+  return decideHandMove(only.offers).kind === "none"
+    ? refuse(`No workflow can take this ${only.noun.toLowerCase()} yet.`)
+    : { kind: "handOff", thing: only };
+};
+
+/** Plans Go to its Task: one thing that has a Task. */
+const planGoToTask = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "goToTask"> => {
+  const only = findSingleThing(target);
+  if (only === undefined) return refuse("Go to its Task takes one thing at a time.");
+  return only.taskId === undefined
+    ? refuse("This has no Task yet. T takes it on.")
+    : { kind: "goToTask", taskId: only.taskId };
+};
+
+/**
+ * Plans a link. A selection of two or more is linked at once, as a star from
+ * its first row to each of the others. Rows that are already linked are not
+ * skipped: the controller answers which links it wrote, and the rows do not
+ * say which group they are in. One thing, one selected thing or a group still
+ * needs the other end: "Link to..." opens under the line of what is linked.
+ */
+const planLink = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "link"> => {
+  if (target.kind === "selection" && target.rows.length === 0)
+    return refuse("There is nothing selected to link. Select two or more with X, then press L.");
+  if (target.kind === "selection" && target.rows.length >= 2) {
+    const [first, ...others] = target.rows;
+    return {
+      kind: "link",
+      fromRef: first!.ref,
+      toRefs: others.map((row) => row.ref),
+      named: target.rows,
+    };
+  }
+  if (target.kind === "group") {
+    const { group } = target;
+    return {
+      kind: "pickLink",
+      from: buildGroupLinkEnd(group),
+      fromLabel: group.label,
+      excludedRefs: group.members.map((member) => member.ref),
+      anchorKey: group.key,
+    };
+  }
+  const thing = target.kind === "thing" ? target.row : target.rows[0]!;
+  const anchorKey = target.kind === "thing" ? thing.ref : target.lineKey;
+  if (anchorKey === null) return refuse(NO_LINE_TO_LINK_FROM);
+  return {
+    kind: "pickLink",
+    from: { ref: thing.ref, identifier: thing.identifier, title: thing.title },
+    fromLabel: thing.identifier !== "" ? thing.identifier : thing.title,
+    excludedRefs: target.kind === "thing" ? target.groupMemberRefs : [],
+    anchorKey,
+  };
+};
+
+/**
+ * Decides whether `move` may be made on `target`, and returns what to send.
  *
  * - Every move but Go to its Task needs the connection, because the outbox
  *   that would hold a move for later does not exist yet.
  * - Dismiss takes a thing, a whole group or a selection, up to
- *   `MAX_INBOX_MOVED_THINGS` things, in one call. A group of more than that is
+ *   `MAX_INBOX_MOVED_THINGS` things, in one call. A group cut by that bound is
  *   refused, and so is a group that came under the keys less than 0.6 seconds
  *   ago, because a second E that fast is most likely the first one repeated.
  * - Take on on a thing refuses a thing the user already took on. On a group or
- *   a selection of several things it makes one Task for all of them, so it
- *   refuses a group of more than `MAX_INBOX_MOVED_THINGS`.
- * - The hand-off takes one thing, and refuses a thing no workflow can take
- *   (`offers`, the offers of the one thing). It refuses a group or a selection.
+ *   a selection of several things it makes one Task for all of them (the
+ *   controller joins them when they all share one Task, and refuses and names
+ *   the Tasks when they do not).
+ * - The hand-off takes one thing, and refuses a thing no workflow can take.
  * - Go to its Task needs one thing that has a Task.
- * - Link links the things of a selection of two or more. On one thing, one
- *   selected thing or a group it answers `pick`: the screen opens "Link to..."
- *   and the user picks the other thing. It refuses an empty selection.
+ * - Link links the things of a selection of two or more, and opens "Link
+ *   to..." for anything else (see `planLink`).
+ *
+ * A selection of one row acts as that row.
  */
-export const planInboxMove = ({
+export function planInboxMove<Row extends MovedRow, Move extends InboxMoveKind>({
   move,
   target,
   isOffline,
-  offers,
 }: {
-  readonly move: InboxMoveKind;
-  readonly target: InboxMoveTarget;
+  readonly move: Move;
+  readonly target: InboxMoveTarget<Row>;
   readonly isOffline: boolean;
-  readonly offers: CardOffers;
-}): InboxMovePlan => {
+}): InboxMovePlan<Row, Move> {
   if (isOffline && move !== "goToTask") return refuse(REFUSED_OFFLINE);
-  // A selection of one row acts as that row.
-  const only = findSingleThing(target);
-  switch (move) {
-    case "dismiss":
-      if (target.kind === "group") {
-        const tooLarge = refuseTooLargeGroup(target, "Dismiss", "E");
-        if (tooLarge !== undefined) return tooLarge;
-        return target.isFresh
-          ? refuse(
-              `The group ${quoteTitle(target.label)} is under the keys now. E again dismisses all ${formatCount(target.size)}.`,
-            )
-          : GO;
-      }
-      if (target.kind === "selection" && target.rows.length > MAX_INBOX_MOVED_THINGS)
-        return refuse(
-          `Dismiss takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} things at once, and ${formatCount(target.rows.length)} are selected. Select fewer, then press E again.`,
-        );
-      return GO;
-    case "takeOn":
-      if (target.kind === "group") return refuseTooLargeGroup(target, "Take on", "T") ?? GO;
-      if (target.kind === "selection" && target.rows.length > MAX_INBOX_MOVED_THINGS)
-        return refuse(
-          `Take on takes up to ${formatCount(MAX_INBOX_MOVED_THINGS)} things at once, and ${formatCount(target.rows.length)} are selected. Select fewer, then press T again.`,
-        );
-      // A thing with a Task the user did not take on (a signal's, a hand-off's) may be taken on:
-      // the controller marks that Task as taken instead of making another.
-      // A group or a selection of several things may hold things with Tasks: the controller
-      // joins them when they all share one Task, and refuses and names the Tasks when they do not.
-      if (only === undefined) return GO;
-      return !only.takenOn
-        ? GO
-        : refuse(`${describeWhoHasIt(only)} this already. G goes to its Task.`);
-    case "handOff":
-      if (only === undefined)
-        return refuse(
-          target.kind === "group"
-            ? "Hand-off takes one thing at a time. Open the group and pick one."
-            : "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
-        );
-      return decideHandMove(offers).kind === "none"
-        ? refuse(`No workflow can take this ${only.noun.toLowerCase()} yet.`)
-        : GO;
-    case "goToTask":
-      if (only === undefined) return refuse("Go to its Task takes one thing at a time.");
-      return only.taskId === undefined ? refuse("This has no Task yet. T takes it on.") : GO;
-    case "link":
-      if (target.kind === "selection" && target.rows.length === 0)
-        return refuse(
-          "There is nothing selected to link. Select two or more with X, then press L.",
-        );
-      return target.kind === "selection" && target.rows.length >= 2 ? GO : { kind: "pick" };
-  }
-};
+  const planners: { readonly [M in InboxMoveKind]: () => InboxMovePlan<Row, M> } = {
+    dismiss: () => planDismiss(target),
+    takeOn: () => planTakeOn(target),
+    handOff: () => planHandOff(target),
+    goToTask: () => planGoToTask(target),
+    link: () => planLink(target),
+  };
+  return planners[move]();
+}
 
 /**
- * Returns what `takeOnTogether` takes for a take on of a group or a selection of
- * several things: the ids of the things and the Task's title. Returns `null` for
- * a target that is one thing (the plain take on makes its Task) or a selection
- * of none.
- *
- * - A group lists its label's thing first, because the Task takes its stage and
- *   Project from the first thing, and is titled with the group's label.
- * - A selection is titled with its first row's title and lists the rows in order.
- * - A title is cut to `MAX_TASK_TITLE_LENGTH`.
+ * Returns `group` (a head's group) as one end of a link: the member it is
+ * named after, titled with the group's label and with no identifier, because
+ * a group has none of its own.
  */
-export const buildTakeOnTogether = (
-  target: InboxMoveTarget,
-): { readonly ids: string[]; readonly title: string } | null => {
-  const cut = (title: string): string => title.slice(0, MAX_TASK_TITLE_LENGTH);
-  if (target.kind === "group") {
-    const label = target.members.filter((member) => member.ref === target.labelRef);
-    const others = target.members.filter((member) => member.ref !== target.labelRef);
-    return { ids: [...label, ...others].map((member) => member.id), title: cut(target.label) };
-  }
-  if (target.kind === "selection" && target.rows.length >= 2)
-    return { ids: target.rows.map((row) => row.id), title: cut(target.rows[0]!.title) };
-  return null;
-};
-
-/**
- * Returns `group` (a move target or a head) as one end of a link: the member it is named
- * after, titled with the group's label and with no identifier, because a group
- * has none of its own.
- */
-export const buildGroupLinkEnd = (group: {
+const buildGroupLinkEnd = (group: {
   readonly labelRef: string;
   readonly label: string;
-}): Pick<InboxThing, "ref" | "identifier" | "title"> => ({
+}): InboxLinkEnd => ({
   ref: group.labelRef,
   identifier: "",
   title: group.label,
 });
 
+/** What the undo line says when a row is dropped on a line of its own group. */
+const ALREADY_IN_ONE_GROUP = "These are in one group already.";
+
 /**
- * Returns the pairs to link for L on a selection: a star from the first row to
- * each of the other rows. Rows that are already linked are not skipped: `link`
- * answers `created: false` for a pair the user already linked, and the rows do
- * not say which group they are in. Returns no pair for a target that is not a
- * selection of two or more.
+ * Returns the end of a link that the list line `entry` stands for: the thing
+ * itself, or for a group's head the thing the group is named after. Returns
+ * `undefined` for a "Show N more" line, which links nothing.
  */
-export const buildLinkPairs = (
-  target: InboxMoveTarget,
-): ReadonlyArray<{ readonly fromRef: string; readonly toRef: string }> => {
-  if (target.kind !== "selection") return [];
-  const [first, ...others] = target.rows;
-  return first === undefined ? [] : others.map((row) => ({ fromRef: first.ref, toRef: row.ref }));
+const readLinkEnd = (
+  entry: InboxEntry<Pick<InboxThing, "ref" | "identifier" | "title">>,
+): InboxLinkEnd | undefined => {
+  if (entry.kind === "head") return buildGroupLinkEnd(entry.group);
+  if (entry.kind === "more") return undefined;
+  const { ref, identifier, title } = entry.row;
+  return { ref, identifier, title };
 };
+
+/**
+ * Decides what dropping the line `carriedKey` on the line `targetKey` does,
+ * from the list's `entries`:
+ * - links the two, `from` the line dropped on and `to` the carried line, so
+ *   the undo line names them in the order the drawing shows them;
+ * - refuses when both are lines of one group, which are linked already
+ *   however they were linked;
+ * - returns `null` when there is nothing to link: a line is no longer on the
+ *   list, or it is a "Show N more" line.
+ */
+export function planInboxDrop(
+  entries: readonly InboxEntry<Pick<InboxThing, "ref" | "identifier" | "title">>[],
+  carriedKey: string,
+  targetKey: string,
+):
+  | { readonly kind: "link"; readonly from: InboxLinkEnd; readonly to: InboxLinkEnd }
+  | { readonly kind: "refuse"; readonly reason: string }
+  | null {
+  const carried = entries.find((entry) => entry.key === carriedKey);
+  const target = entries.find((entry) => entry.key === targetKey);
+  if (carried === undefined || target === undefined) return null;
+  const carriedGroup = carried.kind === "member" ? carried.groupKey : undefined;
+  const targetGroup =
+    target.kind === "head" ? target.key : target.kind === "member" ? target.groupKey : undefined;
+  if (carriedGroup !== undefined && carriedGroup === targetGroup)
+    return refuse(ALREADY_IN_ONE_GROUP);
+  const from = readLinkEnd(target);
+  const to = readLinkEnd(carried);
+  return from === undefined || to === undefined ? null : { kind: "link", from, to };
+}
 
 /**
  * Returns `thing` as it reads once `offer` has it: the workflow is live on it,
@@ -303,33 +474,29 @@ export const buildHandedThing = (thing: InboxThing, offer: WorkflowOffer): Inbox
 };
 
 /** Returns the words for the line after `things` were dismissed. One thing shows its title. */
-export const describeInboxDismissal = (things: readonly InboxThing[]): InboxLineWords =>
+const describeInboxDismissal = (
+  things: ReadonlyArray<Pick<InboxThing, "title">>,
+): InboxLineWords =>
   things.length === 1
     ? { text: "Dismissed", title: things[0]!.title }
     : { text: `Dismissed ${things.length.toLocaleString("en-US")} things`, title: null };
 
 /**
- * Returns the words for the line after the group `target` was dismissed: its
- * label and how many things it has, and how many of its members do not answer
- * the current list ("not in this list").
+ * Returns the words for the line after `group` was dismissed: its label and
+ * how many things it has, and how many of its members do not answer the
+ * current list ("not in this list").
  */
-export const describeInboxGroupDismissal = (
-  target: Extract<InboxMoveTarget, { kind: "group" }>,
+const describeInboxGroupDismissal = (
+  group: Pick<InboxGroupView<unknown>, "label" | "size" | "members">,
 ): InboxLineWords => {
-  const outside = target.members.filter((member) => !member.matches).length;
+  const outside = group.members.filter((member) => !member.matches).length;
   return {
-    text: `Dismissed the group ${quoteTitle(target.label)}: ${formatCount(target.size)} things${
+    text: `Dismissed the group ${quoteTitle(group.label)}: ${formatCount(group.size)} things${
       outside > 0 ? `, ${formatCount(outside)} of them not in this list` : ""
     }`,
     title: null,
   };
 };
-
-/** Returns the words for the line after what `target` stood for was dismissed: a group, or things listed by title. */
-export const describeInboxTargetDismissal = (target: InboxMoveTarget): InboxLineWords =>
-  target.kind === "group"
-    ? describeInboxGroupDismissal(target)
-    : describeInboxDismissal(listTargetThings(target));
 
 /** The words for the line after an undo put dismissed things back. */
 export const DISMISSAL_UNDONE = "Back in your Inbox.";

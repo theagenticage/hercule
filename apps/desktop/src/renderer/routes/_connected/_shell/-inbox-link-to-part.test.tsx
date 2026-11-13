@@ -1,4 +1,4 @@
-/** Tests that "Link to..." reads the Inbox's Everything list, leaves out what cannot be linked, and reports a pick. */
+/** Tests that "Link to..." shows what the Inbox offers, reads again only for typed text, and reports a pick. */
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,34 +13,23 @@ afterEach(() => {
 
 type Thing = ReturnType<typeof buildInboxThing>;
 
-/** One reply of the controller: the things of a page, the groups it names, and the cursor of the page after. */
+/** One reply of the controller: the things of a page. */
 interface Page {
   readonly things: ReadonlyArray<Thing>;
-  readonly groups?: ReadonlyArray<{
-    readonly members: ReadonlyArray<{ readonly ref: string; readonly matches: boolean }>;
-  }>;
-  readonly nextCursor?: string;
 }
 
-/**
- * Renders the part over a row, with a controller that answers `pages` in
- * turn, the first to the first read and the next to each read of a next page.
- */
+/** Renders the part over a row, with a controller that answers `pages` in turn, one to each read. */
 const renderPart = (list: ReadonlyArray<Page>) => {
   let next = 0;
   const queryInbox = vi.fn<
-    (
-      query: { payload: { mode: string; text?: string; limit?: number; after?: string } },
-      options: unknown,
-    ) => Promise<unknown>
+    (query: { payload: { mode: string; text?: string } }, options: unknown) => Promise<unknown>
   >((query) => {
     const page = list[Math.min(next, list.length - 1)]!;
     next += 1;
     return Promise.resolve({
       mode: query.payload.mode,
       things: page.things,
-      groups: page.groups ?? [],
-      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      groups: [],
       offerSets: {},
       total: page.things.length,
     });
@@ -61,7 +50,7 @@ const renderPart = (list: ReadonlyArray<Page>) => {
         anchor={row}
         fromRef="acme:ticket:from"
         fromLabel="ACME-from"
-        memberRefs={["acme:ticket:member"]}
+        excludedRefs={["acme:ticket:member"]}
         onLink={onLink}
         onClose={onClose}
       />
@@ -71,63 +60,23 @@ const renderPart = (list: ReadonlyArray<Page>) => {
 };
 
 describe("InboxLinkToPart", () => {
-  it("reads Everything, shows at most six things, and leaves out the thing and its group", async () => {
-    const things = [
-      buildInboxThing("from", { ref: "acme:ticket:from" }),
-      buildInboxThing("member", { ref: "acme:ticket:member" }),
-      ...Array.from({ length: 10 }, (_, index) => buildInboxThing(`t${String(index)}`)),
-    ];
-    const { queryInbox } = renderPart([{ things }]);
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(6);
-    });
-    expect(screen.queryByText("Ticket from")).toBeNull();
-    expect(screen.queryByText("Ticket member")).toBeNull();
-    expect(queryInbox).toHaveBeenCalledTimes(1);
-    // A small page is enough to fill the popover, and the read never asks for more than it shows twice over.
-    expect(queryInbox.mock.calls[0]?.[0]).toEqual({
-      payload: { mode: "first", list: { savedQuery: "everything" }, limit: 12 },
-    });
-  });
-
-  it("does not offer a member of a group that did not match the search, but offers one that did and a lone thing", async () => {
-    const group = {
-      members: [
-        { ref: "acme:ticket:matches", matches: true },
-        { ref: "acme:ticket:quiet", matches: false },
-      ],
-    };
+  it("shows what Everything offers, without the thing and its group", async () => {
     renderPart([
       {
-        things: [buildInboxThing("matches"), buildInboxThing("quiet"), buildInboxThing("alone")],
-        groups: [group],
+        things: [
+          buildInboxThing("from", { ref: "acme:ticket:from" }),
+          buildInboxThing("member", { ref: "acme:ticket:member" }),
+          buildInboxThing("1"),
+          buildInboxThing("2"),
+        ],
       },
     ]);
     await waitFor(() => {
       expect(screen.getAllByRole("option", { hidden: true })).toHaveLength(2);
     });
-    expect(screen.getByText("Ticket matches")).toBeTruthy();
-    expect(screen.getByText("Ticket alone")).toBeTruthy();
-    expect(screen.queryByText("Ticket quiet")).toBeNull();
-  });
-
-  it("reads the next page when the first held only things that cannot be offered", async () => {
-    const { queryInbox } = renderPart([
-      {
-        things: [buildInboxThing("member")].map((thing) => ({
-          ...thing,
-          ref: "acme:ticket:member",
-        })),
-        nextCursor: "cursor-1",
-      },
-      { things: [buildInboxThing("later")] },
-    ]);
-    await screen.findByText("Ticket later");
-    expect(queryInbox).toHaveBeenCalledTimes(2);
-    expect(queryInbox.mock.calls[1]?.[0].payload).toMatchObject({
-      mode: "next",
-      after: "cursor-1",
-    });
+    expect(screen.getByText("Ticket 1")).toBeTruthy();
+    expect(screen.queryByText("Ticket from")).toBeNull();
+    expect(screen.queryByText("Ticket member")).toBeNull();
   });
 
   it("does not read again when the Inbox changes while the popover is open", async () => {
