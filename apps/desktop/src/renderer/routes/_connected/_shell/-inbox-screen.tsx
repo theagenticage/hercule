@@ -49,6 +49,7 @@ import {
 } from "./-inbox-group-pane-part";
 import { InboxLinkToPart } from "./-inbox-link-to-part";
 import { useInboxMoves } from "./-inbox-moves";
+import { useInboxThread } from "./-inbox-thread";
 import { useInboxKeys } from "./-use-inbox-keys";
 import {
   InboxPaneHeadPart,
@@ -99,7 +100,8 @@ interface HandMenu {
  *
  * It also holds what the keys and the moves share: the keys (`useInboxKeys`
  * names an action, and `performKey` does it), the moves (`useInboxMoves`) and
- * where the keyboard focus goes after a move.
+ * where the keyboard focus goes after a move. The start-thread dialog is
+ * `useInboxThread`'s, and it is drawn with the overlays.
  */
 export function InboxScreen({
   controller,
@@ -200,6 +202,15 @@ export function InboxScreen({
       void navigate({ to: "/work", search: { task: taskId } });
     },
     onMoved: followMove,
+  });
+  // The dialog cannot take the focus back while it is open, so `followMove` runs when it closes.
+  const thread = useInboxThread({
+    controller,
+    scope: accountScope,
+    visit,
+    moves,
+    isOffline: offlineSince !== null,
+    onClosed: followMove,
   });
   /** Makes `ref` the one thing the pane shows: ends a selection, opens the group that holds it, and slides the pane over the list when it lies closed. */
   const showThing = (ref: string): void => {
@@ -319,6 +330,9 @@ export function InboxScreen({
       case "dismiss":
         moves.dismiss();
         return;
+      case "startThread":
+        thread.open();
+        return;
       case "takeOn":
         moves.takeOn();
         return;
@@ -397,7 +411,11 @@ export function InboxScreen({
   const unlinkInPane = useStableCallback((first: InboxLinkEnd, second: InboxLinkEnd) => {
     moves.unlink(first, second);
   });
+  const startThreadInPane = useStableCallback(() => {
+    thread.open();
+  });
   const paneMoves: InboxPaneMoves = {
+    onStartThread: startThreadInPane,
     onTakeOn: takeOnInPane,
     onDismiss: dismissInPane,
     onGoToTask: goToTaskInPane,
@@ -408,6 +426,7 @@ export function InboxScreen({
   const groupPaneMoves: InboxGroupPaneMoves = {
     onWalkTo: walkInPane,
     onUnlink: unlinkInPane,
+    onStartThread: startThreadInPane,
     onTakeOn: takeOnInPane,
     onLink: linkInPane,
     onDismiss: dismissInPane,
@@ -427,6 +446,9 @@ export function InboxScreen({
     onPick: pickLine,
     onToggleSelect: (ref) => {
       visit.select({ kind: "toggle", ref });
+    },
+    onStartThread: (ref) => {
+      thread.open(ref);
     },
     onTakeOn: moves.takeOn,
     onHandOff: (ref) => {
@@ -594,6 +616,7 @@ export function InboxScreen({
             moves={paneMoves}
             onWalk={walkInPane}
             onDismissSelection={dismissInPane}
+            onStartThreadSelection={startThreadInPane}
             onTakeOnSelection={takeOnInPane}
             onLinkSelection={linkInPane}
           />
@@ -664,6 +687,7 @@ export function InboxScreen({
               }}
             />
           )}
+          {thread.element}
         </>
       }
     />

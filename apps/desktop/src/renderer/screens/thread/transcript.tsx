@@ -50,6 +50,13 @@ import {
   WorkDivider,
 } from "./blocks";
 
+/**
+ * The attribute the embedded layout puts on the item that holds the user's
+ * first message. The start-thread dialog reads it to lift that message from
+ * where the composer was. The page layout never sets it.
+ */
+export const FIRST_MESSAGE_ATTRIBUTE = "data-first-message";
+
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
 
@@ -151,6 +158,12 @@ export interface TranscriptHandle {
  *   stretch's divider for the stretch's `items`: the spawn lines of the
  *   subagents it started. `onScreen` is true while the stretch is in the
  *   visible part of the transcript.
+ * - `layout` is "page" (the default) for a transcript that fills a page,
+ *   with the floating header's clearance above the first block and room
+ *   for the composer below the last. "embedded" is for a transcript in a
+ *   box of its own, such as a dialog: the blocks start at the box's top
+ *   edge, end at its bottom edge, and fill its width. The box gives the
+ *   transcript its height, and the transcript scrolls inside it.
  * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
@@ -164,6 +177,7 @@ export function Transcript({
   onBottomChange,
   lead,
   renderSpawnLines,
+  layout = "page",
   ref,
 }: {
   readonly sessionId: string;
@@ -176,6 +190,7 @@ export function Transcript({
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly lead?: ReactNode;
   readonly renderSpawnLines?: (items: readonly ThreadItem[], onScreen: boolean) => ReactNode;
+  readonly layout?: "page" | "embedded";
   readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
   "use no memo";
@@ -207,6 +222,7 @@ export function Transcript({
   // `lead`, when set, is the virtualizer's item 0, and the blocks follow it.
   // The virtualizer asks only for indexes below `count`, which is
   // `blocks.length` plus the lead.
+  const clearance = layout === "page" ? HEADER_CLEARANCE : 0;
   const leadCount = lead === undefined ? 0 : 1;
   const getItemKey = useCallback(
     (index: number) => (index < leadCount ? "lead" : blocks[index - leadCount]!.key),
@@ -225,7 +241,7 @@ export function Transcript({
       count: blocks.length + leadCount,
       estimateSize,
       getItemKey,
-      scrollMargin: HEADER_CLEARANCE,
+      scrollMargin: clearance,
       composerStack,
       onBottomChange,
     });
@@ -325,7 +341,10 @@ export function Transcript({
   const visible = virtualizer.range;
   const first = virtualItems[0];
   const last = virtualItems.at(-1);
-  const end = HEADER_CLEARANCE + virtualizer.getTotalSize();
+  const end = clearance + virtualizer.getTotalSize();
+  // Only the embedded layout marks the first message (see FIRST_MESSAGE_ATTRIBUTE).
+  const firstUserBlock = layout === "embedded" ? blocks.findIndex((b) => b.kind === "user") : -1;
+  const firstMessageIndex = firstUserBlock === -1 ? -1 : leadCount + firstUserBlock;
 
   return (
     <section
@@ -334,12 +353,18 @@ export function Transcript({
       aria-label="Transcript"
       onScroll={noteScroll}
     >
-      <div ref={columnRef} className="column tx">
-        {first === undefined || first.start <= HEADER_CLEARANCE ? null : (
-          <div style={{ height: first.start - HEADER_CLEARANCE }} />
+      <div ref={columnRef} className={layout === "page" ? "column tx" : "column tx tx-embedded"}>
+        {first === undefined || first.start <= clearance ? null : (
+          <div style={{ height: first.start - clearance }} />
         )}
         {virtualItems.map(({ index, key }) => (
-          <div key={key} ref={virtualizer.measureElement} data-index={index} className="tx-item">
+          <div
+            key={key}
+            ref={virtualizer.measureElement}
+            data-index={index}
+            {...(index === firstMessageIndex ? { [FIRST_MESSAGE_ATTRIBUTE]: "" } : {})}
+            className="tx-item"
+          >
             {index < leadCount
               ? lead
               : renderBlock(

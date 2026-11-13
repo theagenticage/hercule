@@ -13,6 +13,7 @@ import {
   InboxPaneDismissButton,
   InboxPaneLinkMove,
   InboxPaneTakeOnButton,
+  InboxPaneThreadButton,
 } from "./inbox-pane-footer";
 import "./inbox-pane-head.css";
 import "./inbox-pane-thing.css";
@@ -45,8 +46,8 @@ export function InboxSelectionHead({
 /**
  * Renders the pane of a selection of things: "3 things selected", the hint
  * for the selection keys, one row for each `member` and a footer with Link
- * (the things link to each other; one thing opens "Link to..."), Take on (one
- * Task for all of them) and, at the end, Dismiss, named "Dismiss all 3".
+ * (the things link to each other; one thing opens "Link to..."), Thread (one
+ * Task and a thread on it for all of them), Take on (one Task for all of them) and, at the end, Dismiss, named "Dismiss all 3".
  * `ref` is the element that scrolls.
  *
  * A member row is a button that calls `onWalk` with the member's reference,
@@ -59,6 +60,7 @@ export function InboxSelectionPane({
   platform,
   ref,
   onWalk,
+  onStartThread,
   onTakeOn,
   onLink,
   onDismiss,
@@ -68,6 +70,7 @@ export function InboxSelectionPane({
   readonly platform: DesktopPlatform;
   readonly ref?: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
   readonly onDismiss: () => void;
@@ -117,6 +120,10 @@ export function InboxSelectionPane({
           <InboxPaneLinkMove
             words={count === 1 ? "Link to another thing" : `Link all ${String(count)}`}
             onLink={onLink}
+          />
+          <InboxPaneThreadButton
+            words={count === 1 ? "Start a thread" : `Start a thread on all ${String(count)}`}
+            onStartThread={onStartThread}
           />
           <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
           <span className="ib-pane-foot-end">

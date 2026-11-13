@@ -1,5 +1,6 @@
 import type { JSX, ReactNode, Ref } from "react";
 import {
+  buildComposerPlaceholder,
   formatAccessMode,
   setWorkspaceStartingRevision,
   type DraftView,
@@ -11,6 +12,7 @@ import { AlertIcon } from "../../icons/alert";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
+import { SlidersIcon } from "../../icons/sliders";
 import { WorkspaceIcon } from "../../icons/workspace";
 import { ComposerCard, type ComposerAttachments } from "../session/composer-frame";
 import type { ComposerSkills } from "../session/message-field";
@@ -81,6 +83,13 @@ function DraftPick({
   );
 }
 
+/** The reason line of the access, model and workspace menus, see `DraftComposer`. */
+export interface DraftPickReasons {
+  readonly accessMode: string | null;
+  readonly model: string | null;
+  readonly workspace: string | null;
+}
+
 /**
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
  * page draws it: the card, see `ComposerCard`, with the shelf of attached
@@ -109,15 +118,19 @@ function DraftPick({
 export function DraftComposer({
   view,
   text,
-  placeholder,
   canSend,
   error,
   notice,
   attachments,
   skills,
-  runnerId,
   readRecent,
   fieldRef,
+  aboveField,
+  replaceMessageRef,
+  fieldId,
+  lipStart,
+  picksOffReason,
+  pickReasons,
   onTextChange,
   onChoose,
   onSignIn,
@@ -126,7 +139,6 @@ export function DraftComposer({
 }: {
   readonly view: DraftView;
   readonly text: string;
-  readonly placeholder: string;
   readonly canSend: boolean;
   /** The failed start's message, shown under the row, or `null`. */
   readonly error: string | null;
@@ -134,15 +146,34 @@ export function DraftComposer({
   readonly attachments: ComposerAttachments;
   /** The skills the draft would have, which the message field offers. */
   readonly skills: ComposerSkills;
-  /**
-   * The machine the user picked, or the one the workspace it joins decides;
-   * `null` while any machine will do. The model menu dims an entry by this
-   * machine, not by the one the draft would be placed on by default.
-   */
-  readonly runnerId: string | null;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
+  /** Content inside the card above the field, see `ComposerCard`. */
+  readonly aboveField?: ReactNode;
+  /** Receives the function that replaces the message as one undoable edit, see `MessageField`. */
+  readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
+  /**
+   * The id of the message field, `DRAFT_MESSAGE_ID` when left out; a second
+   * composer on the page, such as the one in the Inbox's start-thread dialog,
+   * passes its own so the ids stay unique.
+   */
+  readonly fieldId?: string;
+  /** Content drawn first in the lip, before the workspace, such as the dialog's project pick. */
+  readonly lipStart?: ReactNode;
+  /**
+   * Why the composer's picks cannot change yet, such as "Choose a project
+   * first", or `null` when they can. The access, effort and profile picks
+   * then draw as the faint words "Access", "Effort" and "Profile" with this
+   * as their tooltip, because the project decides them, and the workspace
+   * and branch picks are left out.
+   */
+  readonly picksOffReason?: string | null;
+  /**
+   * Why each pick is what it is, one muted line at the top of that pick's
+   * menu. A `null` reason draws no line. Left out, no menu has one.
+   */
+  readonly pickReasons?: DraftPickReasons;
   readonly onTextChange: (text: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
   /** Opens the sign-in a dimmed entry of the model menu, or the machine in the lip, offers. */
@@ -151,6 +182,17 @@ export function DraftComposer({
   readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
   const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel } = view;
+  const offReason = picksOffReason ?? null;
+  const placeholder = buildComposerPlaceholder({
+    readOnly: null,
+    busy: false,
+    active: false,
+    pick: fields.workspace.value,
+    workspaces: catalogs.workspaces,
+  });
+  // The machine the user picked, or the one the workspace it joins decides, never the one the
+  // draft would be placed on by default: the model menu must not dim entries by that one.
+  const runnerId = resolved.menuRunnerId;
   const { problem } = fields.machine;
   const signIn = problem?.signIn ?? null;
   const machinePick = (
@@ -166,7 +208,7 @@ export function DraftComposer({
           </span>
         )
       }
-      locked={fields.machine.locked}
+      locked={offReason ?? fields.machine.locked}
       menuLabel="Machine"
       align="end"
       width="widest"
@@ -199,107 +241,128 @@ export function DraftComposer({
         error={error}
         notice={notice}
         attachments={attachments}
+        aboveField={aboveField}
+        replaceMessageRef={replaceMessageRef}
         skills={skills}
         start={
-          <>
-            <DraftPick
-              className="pick"
-              label={formatAccessMode(fields.accessMode.value)}
-              glyph={<ShieldIcon size={14} />}
-              locked={fields.accessMode.locked}
-              menuLabel="Access mode"
-              align="start"
-              width="narrow"
-            >
-              {(close) => (
-                <AccessModeMenu
-                  value={fields.accessMode.value}
-                  rows={fields.accessMode.rows}
-                  onPick={(mode) => {
-                    onChoose({ kind: "accessMode", value: mode });
-                    close();
-                  }}
+          offReason === null ? (
+            <>
+              <DraftPick
+                className="pick"
+                label={formatAccessMode(fields.accessMode.value)}
+                glyph={<ShieldIcon size={14} />}
+                locked={fields.accessMode.locked}
+                menuLabel="Access mode"
+                align="start"
+                width="narrow"
+              >
+                {(close) => (
+                  <AccessModeMenu
+                    value={fields.accessMode.value}
+                    rows={fields.accessMode.rows}
+                    reason={pickReasons?.accessMode ?? null}
+                    onPick={(mode) => {
+                      onChoose({ kind: "accessMode", value: mode });
+                      close();
+                    }}
+                  />
+                )}
+              </DraftPick>
+              {descriptors === null ? null : (
+                <OptionsPick
+                  descriptors={descriptors}
+                  selected={config.options}
+                  modelName={pill.name}
+                  disabled={false}
+                  onChoose={onChoose}
                 />
               )}
-            </DraftPick>
-            {descriptors === null ? null : (
-              <OptionsPick
-                descriptors={descriptors}
-                selected={config.options}
-                modelName={pill.name}
-                disabled={false}
-                onChoose={onChoose}
-              />
-            )}
-          </>
+            </>
+          ) : (
+            <>
+              <OffPick reason={offReason} glyph={<ShieldIcon size={14} />} label="Access" />
+              <OffPick reason={offReason} glyph={<SlidersIcon size={14} />} label="Effort" />
+            </>
+          )
         }
         end={
-          <ModelPick
-            pill={pill}
-            catalogs={catalogs}
-            config={config}
-            kind="draft"
-            runnerId={runnerId}
-            disabled={false}
-            readRecent={readRecent}
-            onChoose={onChoose}
-            onSignIn={onSignIn}
-          />
+          offReason === null ? (
+            <ModelPick
+              pill={pill}
+              catalogs={catalogs}
+              config={config}
+              kind="draft"
+              runnerId={runnerId}
+              disabled={false}
+              readRecent={readRecent}
+              reason={pickReasons?.model ?? null}
+              onChoose={onChoose}
+              onSignIn={onSignIn}
+            />
+          ) : (
+            <OffPick reason={offReason} label="Profile" isPill />
+          )
         }
         fieldRef={fieldRef}
-        fieldId={DRAFT_MESSAGE_ID}
+        fieldId={fieldId ?? DRAFT_MESSAGE_ID}
         // The book's draft field has the focus when the page opens, so the
         // user can type the moment the draft shows.
         autoFocus
         sendTitle="Start thread"
       />
       <div className="lip">
-        <DraftPick
-          className="lip-pick"
-          label={workspaceLabel}
-          glyph={<WorkspaceIcon size={13} />}
-          locked={fields.workspace.locked}
-          menuLabel="Workspace"
-          align="start"
-          // The workspace's and the machine's rows carry a second line; the
-          // branch menu's rows are short.
-          width="widest"
-          onOpen={onOpenWorkspaceMenu}
-        >
-          {(close) => (
-            <WorkspaceMenuContent
-              menu={workspaceMenu}
-              onPick={(picked) => {
-                onChoose({ kind: "workspace", workspace: picked });
-                close();
-              }}
-            />
-          )}
-        </DraftPick>
-        {branch === null ? null : (
-          <DraftPick
-            className="lip-pick"
-            label={branch.label}
-            glyph={<BranchIcon size={13} />}
-            locked={branch.locked}
-            menuLabel="Branch"
-            align="start"
-            width="narrow"
-            onOpen={onOpenWorkspaceMenu}
-          >
-            {(close) => (
-              <BranchMenuContent
-                field={branch}
-                onPick={(picked) => {
-                  onChoose({
-                    kind: "workspace",
-                    workspace: setWorkspaceStartingRevision(workspace, picked),
-                  });
-                  close();
-                }}
-              />
+        {lipStart}
+        {offReason !== null ? null : (
+          <>
+            <DraftPick
+              className="lip-pick"
+              label={workspaceLabel}
+              glyph={<WorkspaceIcon size={13} />}
+              locked={fields.workspace.locked}
+              menuLabel="Workspace"
+              align="start"
+              // The workspace's and the machine's rows carry a second line; the
+              // branch menu's rows are short.
+              width="widest"
+              onOpen={onOpenWorkspaceMenu}
+            >
+              {(close) => (
+                <WorkspaceMenuContent
+                  menu={workspaceMenu}
+                  reason={pickReasons?.workspace ?? null}
+                  onPick={(picked) => {
+                    onChoose({ kind: "workspace", workspace: picked });
+                    close();
+                  }}
+                />
+              )}
+            </DraftPick>
+            {branch === null ? null : (
+              <DraftPick
+                className="lip-pick"
+                label={branch.label}
+                glyph={<BranchIcon size={13} />}
+                locked={branch.locked}
+                menuLabel="Branch"
+                align="start"
+                width="narrow"
+                onOpen={onOpenWorkspaceMenu}
+              >
+                {(close) => (
+                  <BranchMenuContent
+                    field={branch}
+                    onPick={(picked) => {
+                      onChoose({
+                        kind: "workspace",
+                        workspace: setWorkspaceStartingRevision(workspace, picked),
+                      });
+                      close();
+                    }}
+                  />
+                )}
+              </DraftPick>
             )}
-          </DraftPick>
+          </>
         )}
         <span className="spacer" />
         {problem === null ? (
@@ -329,5 +392,35 @@ export function DraftComposer({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Renders a pick that waits for a choice made elsewhere, as faint words with
+ * `reason` as its tooltip: the Inbox's start-thread dialog shows "Access",
+ * "Effort" and "Profile" this way until a project is picked. `isPill` gives it
+ * the pill the model pick has.
+ */
+function OffPick({
+  reason,
+  label,
+  glyph,
+  isPill,
+}: {
+  readonly reason: string;
+  readonly label: string;
+  readonly glyph?: ReactNode;
+  readonly isPill?: boolean | undefined;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={isPill === true ? "pick pick--pill is-off" : "pick is-off"}
+      aria-disabled="true"
+      title={reason}
+    >
+      {glyph}
+      {isPill === true ? <span className="pick-name">{label}</span> : label}
+    </button>
   );
 }

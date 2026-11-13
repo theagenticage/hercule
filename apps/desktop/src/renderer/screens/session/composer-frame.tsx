@@ -129,6 +129,8 @@ export function ComposerCard({
   error,
   notice = null,
   attachments,
+  aboveField,
+  replaceMessageRef,
   start,
   note,
   end,
@@ -155,6 +157,14 @@ export function ComposerCard({
   readonly notice?: string | null;
   /** Given when the composer takes images. */
   readonly attachments?: ComposerAttachments | undefined;
+  /**
+   * Content drawn inside the card above the message field, and above the
+   * shelf of images: a caller's row of chips. It has the shelf's spacing
+   * around it and draws nothing of its own.
+   */
+  readonly aboveField?: ReactNode;
+  /** Receives the function that replaces the message as one undoable edit, see `MessageField`. */
+  readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -187,6 +197,9 @@ export function ComposerCard({
     taking === undefined ? "Attach" : (taking.attachBlockedReason ?? "Attach images");
   return (
     <div className="composer-card" {...handlers}>
+      {aboveField === undefined || aboveField === null ? null : (
+        <div className="fold composer-above-field">{aboveField}</div>
+      )}
       {taking === undefined ? null : (
         <div className="fold">
           <AttachmentShelf
@@ -199,6 +212,7 @@ export function ComposerCard({
       )}
       <MessageField
         ref={fieldRef}
+        replaceMessageRef={replaceMessageRef}
         id={fieldId}
         text={text}
         onTextChange={onTextChange}

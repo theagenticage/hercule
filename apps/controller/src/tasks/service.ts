@@ -374,6 +374,12 @@ const INITIATIVE_IS_CLOSED =
  */
 const UNTITLED_THREAD_TITLE = "Untitled thread";
 
+/**
+ * The stage of every Task a Thread makes or starts on (spec 09, "Which Task a
+ * session gets"). A Task made from things for a Thread starts here too.
+ */
+export const NEW_THREAD_TASK_STAGE: TaskStage = "exploring";
+
 /** The message for a spawn that names a finished Task. */
 const buildFinishedTaskRefusal = (stage: TaskStage): string =>
   `the task is at the stage ${stage}, and new work cannot join a finished task; ` +
@@ -1239,7 +1245,7 @@ const make = Effect.gen(function* () {
         {
           title: session.title.trim() === "" ? UNTITLED_THREAD_TITLE : session.title,
           description: "",
-          stage: "exploring",
+          stage: NEW_THREAD_TASK_STAGE,
           priority: "normal",
           labels: [],
           projectId,

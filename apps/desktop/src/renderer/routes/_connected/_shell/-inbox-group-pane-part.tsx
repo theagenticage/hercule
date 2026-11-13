@@ -19,6 +19,7 @@ export interface InboxGroupPaneMoves {
   readonly onWalkTo: (ref: string) => void;
   /** Removes the link the user made between the two ends of a pair. */
   readonly onUnlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   /** Starts the search for a thing to link to the group. */
   readonly onLink: () => void;
@@ -131,6 +132,7 @@ export function InboxGroupPanePart({
         plugins={plugins}
         onWalkTo={moves.onWalkTo}
         onUnlink={moves.onUnlink}
+        onStartThread={moves.onStartThread}
         onTakeOn={moves.onTakeOn}
         onLink={moves.onLink}
         onDismiss={moves.onDismiss}

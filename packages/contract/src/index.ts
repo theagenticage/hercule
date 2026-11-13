@@ -377,6 +377,7 @@ export {
   UsageReport,
   EMPTY_PROMPT_MESSAGE,
   MAX_INPUT_ANSWER_WAIT,
+  MAX_THREAD_THINGS,
   refuseEmptyPrompt,
 } from "./groups/session";
 export {
@@ -791,6 +792,9 @@ export {
   EntityUndoTakeOnTogetherInput,
   EntityUnlinkedPair,
   EntityUnlinkResult,
+  EvidenceEntity,
+  EntityProjectMatchInput,
+  ProjectMatch,
   type CoreSavedQueryId,
   EntityBlocks,
   ExternalEntityDetail,

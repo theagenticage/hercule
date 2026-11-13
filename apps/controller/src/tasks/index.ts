@@ -1,5 +1,6 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
+  NEW_THREAD_TASK_STAGE,
   ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
   TaskServiceLayer,

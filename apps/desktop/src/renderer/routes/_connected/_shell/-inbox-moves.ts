@@ -1,6 +1,8 @@
 /**
  * The moves of the Inbox's things (Dismiss, Take on, hand-off, Go to its Task,
- * Open at its source) and the undo line at the foot of the list. It follows
+ * Open at its source) and the undo line at the foot of the list. Start a
+ * thread is made by `-inbox-thread.tsx`, which asks this file which things it
+ * may start from and says its line here. It follows
  * the Work board's moves (`-card-moves.ts`):
  *
  * - A move shows at once on the visit (`visit.move`) and is sent after
@@ -43,6 +45,7 @@ import {
   describeInboxHandOffFailure,
   describeInboxLink,
   describeInboxLinkFailure,
+  describeInboxThreadStart,
   describeInboxTakeOn,
   describeInboxTakeOnFailure,
   describeInboxTakeOnTogether,
@@ -51,6 +54,7 @@ import {
   describeInboxUnlinkFailure,
   didTakeOnTogetherChange,
   isHandOffTakenBack,
+  listThreadStartThings,
   REFUSED_OFFLINE,
   planInboxMove,
   type InboxLineWords,
@@ -98,6 +102,12 @@ const useMoveRequest = <Variables, Result>(
   });
 
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
+
+/** What a thread starts from: its things, and the default name of its Task. */
+export interface InboxThreadStart {
+  readonly things: readonly InboxListRow[];
+  readonly title: string;
+}
 
 /**
  * What `useInboxMoves` returns. A move that takes `hoveredKey` acts on the
@@ -160,6 +170,26 @@ export interface InboxMoves {
   readonly unlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
   /** Opens the current thing at its source, or says it has no address. */
   readonly openAtSource: () => void;
+  /**
+   * Returns the things a thread may start from and the default name of its
+   * Task (see `dismiss` for which things: a thing, a group or the selection),
+   * or says why not on the undo line and returns `null`. The caller opens the
+   * start-thread dialog on them.
+   *
+   * When `isResumable` says the things already have a send that was attempted,
+   * they are returned without any refusal: a thing that shows as held by a
+   * Task may be held by that very send, and the dialog must open to retry it.
+   */
+  readonly readThreadStart: (
+    hoveredKey?: string,
+    isResumable?: (things: readonly InboxListRow[]) => boolean,
+  ) => InboxThreadStart | null;
+  /**
+   * Says that a thread started on the Task `title`, with an "Open it" button
+   * that calls `open`. A thread that started is not undone, so the line has no
+   * Undo and nothing goes on the undo stack.
+   */
+  readonly sayThreadStarted: (title: string, open: () => void) => void;
   /** Says `text` on the undo line, with no Undo. */
   readonly say: (text: string) => void;
   /**
@@ -666,6 +696,20 @@ export const useInboxMoves = ({
     linkTo,
     unlink,
     openAtSource,
+    readThreadStart: (hoveredKey, isResumable) => {
+      const target = visit.targets(hoveredKey);
+      if (target === null) return null;
+      const things = listThreadStartThings(target);
+      if (things !== undefined && things.length > 0 && isResumable?.(things) === true) {
+        return { things, title: things[0]!.title };
+      }
+      const plan = planMove("startThread", hoveredKey);
+      return plan === null ? null : { things: plan.things, title: plan.title };
+    },
+    sayThreadStarted: (title, open) => {
+      const words = describeInboxThreadStart(title);
+      say(words.text, undefined, { label: "Open it", act: open }, words.title ?? undefined);
+    },
     say: (text) => {
       say(text);
     },

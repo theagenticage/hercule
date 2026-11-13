@@ -51,6 +51,7 @@ const renderPane = (view: InboxGroupPaneView = VIEW) => {
   const calls = {
     onWalkTo: vi.fn(),
     onUnlink: vi.fn(),
+    onStartThread: vi.fn(),
     onTakeOn: vi.fn(),
     onLink: vi.fn(),
     onDismiss: vi.fn(),
@@ -109,11 +110,13 @@ describe("InboxGroupPane", () => {
     expect(screen.getByText(/so the list is cut/)).toBeTruthy();
   });
 
-  it("has Take on, Link and Dismiss all, and no hand-off", async () => {
+  it("has Start a thread on all, Take on, Link and Dismiss all, and no hand-off", async () => {
     const calls = renderPane();
+    await userEvent.click(screen.getByRole("button", { name: "Start a thread on all 2" }));
     await userEvent.click(screen.getByRole("button", { name: "Take on" }));
     await userEvent.click(screen.getByRole("button", { name: "Link another thing" }));
     await userEvent.click(screen.getByRole("button", { name: "Dismiss all 2" }));
+    expect(calls.onStartThread).toHaveBeenCalledOnce();
     expect(calls.onTakeOn).toHaveBeenCalledOnce();
     expect(calls.onLink).toHaveBeenCalledOnce();
     expect(calls.onDismiss).toHaveBeenCalledOnce();

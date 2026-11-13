@@ -36,6 +36,7 @@ import {
   createValidationError,
   createDecodeValidationError,
   InvalidState,
+  type Conflict,
   type Forbidden,
   type NotFound,
   type Session,
@@ -52,6 +53,7 @@ import {
   type UserActor,
 } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
+import { ExternalEntityService } from "../../external-entities";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
@@ -208,6 +210,11 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
 
 const NO_SUCH_PROJECT_NAMED = "no such project";
 
+/** The error message when a session starts a Thread on a new Task made from things. */
+const NEW_TASK_IS_THE_USERS =
+  "only the user may start a Thread on a new Task made from things, because taking things on is the user's own act; " +
+  "ask the user to start it, or start the Thread without newTask";
+
 /** The error message when a session without the `thread.start` grant starts a Thread. */
 const START_THREAD_NEEDS_GRANT =
   "only the user, or a session that holds the thread.start grant, may start a Thread, " +
@@ -315,8 +322,12 @@ type Refusal =
   | SettingError
   | Schema.SchemaError;
 
-/** The errors of a spawn, which also reads permission profiles. A fork takes its parent's profile. */
-type PlaceError = Refusal | GrantsError;
+/**
+ * The errors of a spawn, which also reads permission profiles (a fork takes
+ * its parent's profile) and, for a new Task made from things, refuses a thing
+ * that is already on an active Task.
+ */
+type PlaceError = Refusal | GrantsError | Conflict;
 
 /** The errors of a continue, which also fails when the parent session does not exist. */
 type ContinueError = Refusal | NotFound;
@@ -389,6 +400,7 @@ const make = Effect.gen(function* () {
   const resumableNativeSession = yield* resumable;
   const { dispatch } = yield* Dispatch;
   const textGeneration = yield* TextGeneration;
+  const externalEntities = yield* ExternalEntityService;
   const forkAfterCommit = yield* makeForkAfterCommit;
 
   /** Resolves an account and a harness (`resolveProviderAccountHarness`) in this layer's context. */
@@ -1348,14 +1360,44 @@ const make = Effect.gen(function* () {
      * With a `dedupKey` the caller can retry safely. A repeat by the same
      * actor returns the first call's session, read as it is now, and places
      * nothing; no other field of the repeat is compared. The key is looked up
-     * after the grant check and the decode, in the transaction that writes the
-     * session and before anything else in it, so a repeat succeeds even when
-     * the call could no longer be placed.
+     * after the grant check and the decode, before anything is read at a
+     * source, and again in the transaction that writes the session and before
+     * anything else in it, so a repeat succeeds even when the call could no
+     * longer be placed.
+     *
+     * With `newTask`, the Thread starts on a new Task made from External
+     * Entities, in the same transaction as the session. Only the user may
+     * send it: a session fails with `Forbidden`. Before the transaction, the
+     * things are prepared as `takeOn` prepares one, so a thing Hercule holds
+     * only in part is read at its source (`prepareThingsForTask`); an unknown
+     * thing fails with `NotFound` and one that cannot be taken on with
+     * `InvalidState`. Inside it, `takeOnAsOneTask` stores what was read and
+     * makes the Task. A thing that changed since the read, or is already on an
+     * active Task, fails the call with `Conflict`. Nothing is written when
+     * the call fails.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), createDecodeValidationError);
+        if (decoded.newTask !== undefined && actor._tag !== "user") {
+          return yield* Effect.fail(createForbiddenError("session.spawn", NEW_TASK_IS_THE_USERS));
+        }
+        // A repeat of a call that already committed returns its session before
+        // anything is read: the things may have become unreadable since (the
+        // plugin was disabled, the account lost access), and the repeat must
+        // still succeed. The same lookup runs again inside `place`'s
+        // transaction, which is the one that decides.
+        if (decoded.newTask !== undefined && decoded.dedupKey !== undefined) {
+          const savedId = yield* dedupKeys.findResultId("session.spawn", decoded.dedupKey);
+          if (savedId !== undefined) return yield* readSessionRecord(savedId);
+        }
+        // Reading the things at their source can take seconds, so it happens
+        // here, before the transaction that writes the session.
+        const prepared =
+          decoded.newTask === undefined
+            ? undefined
+            : yield* externalEntities.prepareThingsForTask(decoded.newTask.entityIds);
         const prepareSpawn = Effect.gen(function* () {
           if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
           // The calling session, when a session spawns: its spawn runs next to
@@ -1533,6 +1575,19 @@ const make = Effect.gen(function* () {
             timeouts: buildTimeouts(yield* settings.all()),
           } satisfies SessionSpec;
 
+          // The Task is made last, after every refusal that writes nothing, and
+          // before the session is stored: the session then joins it by the
+          // ordinary rule for a named Task. A Task with a chosen title is
+          // never one the generated title renames, because the join made no
+          // Task (`madeTaskId` stays undefined).
+          const madeTask =
+            decoded.newTask === undefined || prepared === undefined
+              ? undefined
+              : yield* externalEntities.takeOnAsOneTask(prepared, {
+                  title: decoded.newTask.title,
+                  projectId: Option.isSome(project) ? projectId : undefined,
+                });
+
           return {
             permissionProfileId: profileId,
             agentId: agent?.id,
@@ -1551,7 +1606,7 @@ const make = Effect.gen(function* () {
             projectId,
             taskSource: {
               _tag: "joining",
-              requestedTaskId: decoded.taskId,
+              requestedTaskId: madeTask?.taskId ?? decoded.taskId,
               callerTaskId: caller?.taskId ?? undefined,
             },
             workspace,
@@ -1705,4 +1760,5 @@ export const PlacementLayer: Layer.Layer<
   | PromotionState
   | TextGeneration
   | ProviderAccountRunners
+  | ExternalEntityService
 > = Layer.effect(Placement)(make);

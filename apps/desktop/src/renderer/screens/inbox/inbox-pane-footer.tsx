@@ -6,6 +6,7 @@ import {
 } from "@hercule/client-core/inbox";
 import { buildLook, Face } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
+import { ComposeIcon } from "../../icons/compose";
 import { LinkIcon } from "../../icons/link";
 import { TasksIcon } from "../../icons/tasks";
 import "./inbox-pane-footer.css";
@@ -91,6 +92,36 @@ export function InboxPaneLinkMove({
 }
 
 /**
+ * Renders the Start a thread button (N) of the footer, labelled "Thread". It is an icon under
+ * 460px, through the footer's container query. `words` is its accessible name, such as "Start a
+ * thread on all 3", and `onStartThread` is called when it is pressed.
+ */
+export function InboxPaneThreadButton({
+  words,
+  onStartThread,
+}: {
+  readonly words: string;
+  readonly onStartThread: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="btn btn--sm ib-pane-move has-icon"
+      title={`${words} (N)`}
+      aria-label={words}
+      aria-keyshortcuts="N"
+      onClick={onStartThread}
+    >
+      <span className="ib-pane-move-icon">
+        <ComposeIcon size={14} />
+      </span>
+      <span className="ib-pane-move-label">Thread</span>
+      <kbd aria-hidden="true">N</kbd>
+    </button>
+  );
+}
+
+/**
  * Renders the Take on button (T) of the footer. It is an icon under 460px,
  * through the footer's container query. It calls `onTakeOn` when pressed.
  */
@@ -118,10 +149,12 @@ export function InboxPaneTakeOnButton({
 }
 
 /**
- * Renders the footer of the pane of one thing: the moves that work, Take on
- * (T), the hand-off (H), and Link (L) and Dismiss (E) as icons at the end. No
- * move is filled.
+ * Renders the footer of the pane of one thing: the moves that work, Thread
+ * (N), Take on (T), the hand-off (H), and Link (L) and Dismiss (E) as icons at
+ * the end. No move is filled.
  *
+ * - Thread is left out when `isOnTask` is true: a thread starts a new Task, and
+ *   the thing is on one already.
  * - Take on is left out when `isTakenOn` is true: the user already holds the
  *   thing.
  * - `handOff` is the hand-off button, or `null` when no workflow takes the
@@ -135,19 +168,23 @@ export function InboxPaneTakeOnButton({
  *   key hints leave the buttons and stay in the tooltips.
  */
 export function InboxPaneFooter({
+  isOnTask,
   isTakenOn,
   handOff,
   isHandMenuOpen,
   handAnchorRef,
+  onStartThread,
   onTakeOn,
   onHandOff,
   onLink,
   onDismiss,
 }: {
+  readonly isOnTask: boolean;
   readonly isTakenOn: boolean;
   readonly handOff: InboxRowHandOff | null;
   readonly isHandMenuOpen: boolean;
   readonly handAnchorRef?: Ref<HTMLButtonElement>;
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onHandOff: () => void;
   readonly onLink: () => void;
@@ -157,6 +194,9 @@ export function InboxPaneFooter({
   return (
     <footer className="ib-pane-foot-box">
       <div className="ib-pane-foot">
+        {!isOnTask && (
+          <InboxPaneThreadButton words="Start a thread" onStartThread={onStartThread} />
+        )}
         {!isTakenOn && <InboxPaneTakeOnButton onTakeOn={onTakeOn} />}
         {handOff !== null && (
           <button

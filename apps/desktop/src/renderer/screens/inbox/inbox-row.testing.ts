@@ -39,6 +39,7 @@ export const buildInboxRowActions = (): InboxRowActions & {
       calls.push([modifiers.shiftKey ? "pick-shift" : "pick", ref]);
     },
     onToggleSelect: record("toggle"),
+    onStartThread: record("start"),
     onTakeOn: record("take"),
     onHandOff: record("hand"),
     onGoToTask: record("goto"),

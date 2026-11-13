@@ -87,6 +87,7 @@ function InboxSelectionPart({
   scrollRef,
   onWalk,
   onDismiss,
+  onStartThread,
   onTakeOn,
   onLink,
 }: {
@@ -96,6 +97,7 @@ function InboxSelectionPart({
   readonly scrollRef: Ref<HTMLDivElement>;
   readonly onWalk: (ref: string) => void;
   readonly onDismiss: () => void;
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
 }): JSX.Element {
@@ -113,6 +115,7 @@ function InboxSelectionPart({
       platform={bridge.platform}
       ref={scrollRef}
       onWalk={onWalk}
+      onStartThread={onStartThread}
       onTakeOn={onTakeOn}
       onLink={onLink}
       onDismiss={onDismiss}
@@ -145,6 +148,7 @@ export function InboxPanePart({
   ref,
   onWalk,
   onDismissSelection,
+  onStartThreadSelection,
   onTakeOnSelection,
   onLinkSelection,
 }: {
@@ -162,6 +166,7 @@ export function InboxPanePart({
   readonly ref: Ref<InboxPaneHandle>;
   readonly onWalk: (ref: string) => void;
   readonly onDismissSelection: () => void;
+  readonly onStartThreadSelection: () => void;
   readonly onTakeOnSelection: () => void;
   readonly onLinkSelection: () => void;
 }): JSX.Element {
@@ -194,6 +199,7 @@ export function InboxPanePart({
         scrollRef={scrollRef}
         onWalk={onWalk}
         onDismiss={onDismissSelection}
+        onStartThread={onStartThreadSelection}
         onTakeOn={onTakeOnSelection}
         onLink={onLinkSelection}
       />

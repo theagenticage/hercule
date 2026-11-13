@@ -46,6 +46,7 @@ const LOADING_BLOCKS: InboxPaneBlocks = { state: "loading" };
 
 /** The moves of the open thing, which the screen decides what to do with. */
 export interface InboxPaneMoves {
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onDismiss: () => void;
   readonly onGoToTask: () => void;
@@ -204,10 +205,12 @@ export function InboxPaneThingPart({
         onGoTo={moves.onGoTo}
       />
       <InboxPaneFooter
+        isOnTask={thing.taskId !== undefined}
         isTakenOn={thing.takenOn}
         handOff={decideHandOff(thing, thing.offers)}
         isHandMenuOpen={isHandMenuOpen}
         handAnchorRef={handAnchorRef}
+        onStartThread={moves.onStartThread}
         onTakeOn={moves.onTakeOn}
         onHandOff={moves.onHandOff}
         onLink={moves.onLink}

@@ -12,6 +12,7 @@ import {
   InboxPaneDismissButton,
   InboxPaneLinkButton,
   InboxPaneTakeOnButton,
+  InboxPaneThreadButton,
 } from "./inbox-pane-footer";
 import "./inbox-group-pane.css";
 import "./inbox-pane-head.css";
@@ -68,7 +69,7 @@ function PairEnd({
  *   `onUnlink` with the pair's two ends. It shows under the pointer or the
  *   focus and takes its room all the time, so nothing moves when it shows.
  * - `view.isCut` adds a line that says the group has more than it lists.
- * - The footer has Take on, Link and Dismiss. It has no hand-off: a group is
+ * - The footer has Thread ("Start a thread on all"), Take on, Link and Dismiss. It has no hand-off: a group is
  *   more than one thing, and a hand-off takes one.
  *
  * Every word comes in as a prop; the component decides nothing.
@@ -78,6 +79,7 @@ export function InboxGroupPane({
   plugins,
   onWalkTo,
   onUnlink,
+  onStartThread,
   onTakeOn,
   onLink,
   onDismiss,
@@ -86,6 +88,7 @@ export function InboxGroupPane({
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly onWalkTo: (ref: string) => void;
   readonly onUnlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
   readonly onDismiss: () => void;
@@ -178,6 +181,10 @@ export function InboxGroupPane({
       </div>
       <footer className="ib-pane-foot-box">
         <div className="ib-pane-foot">
+          <InboxPaneThreadButton
+            words={`Start a thread on all ${String(view.members.length)}`}
+            onStartThread={onStartThread}
+          />
           <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
           <span className="ib-pane-foot-end">
             <InboxPaneLinkButton words="Link another thing" onLink={onLink} />

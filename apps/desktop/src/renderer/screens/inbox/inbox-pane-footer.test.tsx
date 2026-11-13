@@ -5,9 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 import { InboxPaneFooter } from "./inbox-pane-footer";
 
 const renderFooter = (props: Partial<Parameters<typeof InboxPaneFooter>[0]> = {}) => {
-  const calls = { onTakeOn: vi.fn(), onHandOff: vi.fn(), onLink: vi.fn(), onDismiss: vi.fn() };
+  const calls = {
+    onStartThread: vi.fn(),
+    onTakeOn: vi.fn(),
+    onHandOff: vi.fn(),
+    onLink: vi.fn(),
+    onDismiss: vi.fn(),
+  };
   render(
     <InboxPaneFooter
+      isOnTask={false}
       isTakenOn={false}
       handOff={{ kind: "one", name: "Review PR", faceSeed: "review-pr" }}
       isHandMenuOpen={false}
@@ -19,17 +26,25 @@ const renderFooter = (props: Partial<Parameters<typeof InboxPaneFooter>[0]> = {}
 };
 
 describe("InboxPaneFooter", () => {
-  it("offers Take on, the hand-off, Link and Dismiss, and no Thread", async () => {
+  it("offers Thread, Take on, the hand-off, Link and Dismiss", async () => {
     const calls = renderFooter();
+    await userEvent.click(screen.getByRole("button", { name: "Start a thread" }));
     await userEvent.click(screen.getByRole("button", { name: "Take on" }));
     await userEvent.click(screen.getByRole("button", { name: "Hand to Review PR" }));
     await userEvent.click(screen.getByRole("button", { name: "Link to another thing" }));
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(calls.onStartThread).toHaveBeenCalledOnce();
     expect(calls.onTakeOn).toHaveBeenCalledOnce();
     expect(calls.onHandOff).toHaveBeenCalledOnce();
     expect(calls.onLink).toHaveBeenCalledOnce();
     expect(calls.onDismiss).toHaveBeenCalledOnce();
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    expect(screen.getAllByRole("button")).toHaveLength(5);
+  });
+
+  it("leaves Thread out for a thing a Task holds, which a thread would not make a new Task for", () => {
+    renderFooter({ isOnTask: true });
+    expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Take on" })).toBeTruthy();
   });
 
   it("leaves Take on out once the user has taken the thing on", () => {

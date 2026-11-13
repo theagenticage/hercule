@@ -357,6 +357,13 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/external-entities/inbox/outline",
   },
+  // Names a Project and a Resource, so the service also checks `project.read`
+  // and `resource.read`. A POST that reads and stores nothing.
+  "externalEntity.matchProject": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/match-project",
+  },
   "externalEntity.search": {
     requires: "task.read",
     method: "GET",

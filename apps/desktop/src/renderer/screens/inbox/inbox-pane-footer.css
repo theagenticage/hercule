@@ -1,7 +1,7 @@
 /* The footer: the moves that work, each with its key. The pane is its size container, so the footer
    follows the pane's width and not the window's.
    - from 460px every move has its words and its key;
-   - under 460px the hand-off comes first and Take on is an icon, its words in the tooltip;
+   - under 460px the hand-off comes first and Thread and Take on are icons, their words in the tooltip;
    - under 400px the moves drop their key hints, which stay in the tooltips;
    - a name too long even then keeps its line, and the icons wrap under it. */
 .ib-pane-foot-box {

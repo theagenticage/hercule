@@ -10,6 +10,7 @@
 import {
   MAX_INBOX_MOVED_THINGS,
   MAX_TASK_TITLE_LENGTH,
+  MAX_THREAD_THINGS,
   type EntityUnlinkedPair,
   type InboxThing,
   type WorkflowOffer,
@@ -19,7 +20,7 @@ import type { InboxEntry, InboxGroupView } from "./inbox-groups";
 import { findHolder } from "./inbox-holder";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
-export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "link";
+export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "startThread" | "link";
 
 /**
  * What a move acts on, as the visit hands it over: never inferred from a count.
@@ -92,6 +93,13 @@ export interface InboxMovePlans<Row> {
       };
   readonly handOff: { readonly kind: "handOff"; readonly thing: Row };
   readonly goToTask: { readonly kind: "goToTask"; readonly taskId: string };
+  readonly startThread: {
+    readonly kind: "startThread";
+    /** The things the thread starts from, in list order, with the rows the dialog draws. */
+    readonly things: readonly Row[];
+    /** The default name of the new Task, cut to `MAX_TASK_TITLE_LENGTH`: a group's label, else the first thing's title. */
+    readonly title: string;
+  };
   readonly link:
     | {
         readonly kind: "link";
@@ -139,12 +147,24 @@ const QUOTED_TITLE_LENGTH = 44;
 const quoteTitle = (title: string): string =>
   `“${title.length > QUOTED_TITLE_LENGTH ? `${title.slice(0, QUOTED_TITLE_LENGTH - 2)}…` : title}”`;
 
-/** Returns who has the thing, as a sentence's subject (see `findHolder`). Used for a thing the user took on. */
+/**
+ * Returns who has the thing, with the verb, as the words that start a
+ * sentence (see `findHolder`). Used for a thing the user took on.
+ */
 const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">): string => {
   const holder = findHolder(thing);
   return holder?.kind === "colleague" ? `${holder.name} has` : "You have";
 };
 
+/** Returns the same words as `describeWhoHasIt`, for the middle of a sentence, where "you" is lower case. */
+const describeWhoHasItMidSentence = (
+  thing: Pick<InboxThing, "liveWorkflows" | "takenOn">,
+): string => {
+  const holder = findHolder(thing);
+  return holder?.kind === "colleague" ? `${holder.name} has` : "you have";
+};
+
+/** The refusal every Inbox move gives while the connection is down. */
 export const REFUSED_OFFLINE =
   "You are offline, so that was not done. Try again when the connection is back.";
 
@@ -311,6 +331,72 @@ const planGoToTask = <Row extends MovedRow>(
 };
 
 /**
+ * Returns the things a thread would start from on `target`, in list order: a
+ * thing, the selected things, or the operative members of a group. Returns
+ * `undefined` for a group with members the visit holds no row for, because the
+ * dialog lists the things and the prompt names them.
+ */
+export const listThreadStartThings = <Row extends { readonly ref: string }>(
+  target: InboxMoveTarget<Row>,
+): readonly Row[] | undefined => {
+  if (target.kind === "thing") return [target.row];
+  if (target.kind === "selection") return target.rows;
+  const rowByRef = new Map(target.group.rows.map((row) => [row.ref, row]));
+  const held = target.group.members.flatMap((member) => rowByRef.get(member.ref) ?? []);
+  return held.length < target.group.members.length ? undefined : held;
+};
+
+/**
+ * Plans Start a thread: at most `MAX_THREAD_THINGS` things, none on a Task,
+ * because a thread always makes a new Task. A group whose members are not all
+ * held as rows is refused until it is opened. A group with one operative
+ * member starts from that member alone, named after it.
+ */
+const planStartThread = <Row extends MovedRow>(
+  target: InboxMoveTarget<Row>,
+): InboxMovePlan<Row, "startThread"> => {
+  const cut = (title: string): string => title.slice(0, MAX_TASK_TITLE_LENGTH);
+  const isGroup = target.kind === "group";
+  if (isGroup && target.group.size > MAX_THREAD_THINGS)
+    return refuse(
+      `This group has ${formatCount(target.group.size)} things, and a thread starts from up to ${MAX_THREAD_THINGS}. Open the group, select some of its things, then press N.`,
+    );
+  const things = listThreadStartThings(target);
+  if (things === undefined)
+    return refuse("This group has things the list has not read yet. Open the group, then press N.");
+  if (things.length > MAX_THREAD_THINGS)
+    return refuse(
+      `A thread starts from up to ${MAX_THREAD_THINGS} things, and ${formatCount(things.length)} are selected. Select fewer, then press N again.`,
+    );
+  const first = things[0];
+  if (first === undefined) return refuse("There is nothing selected to start a thread on.");
+  const taken = things.find((candidate) => candidate.taskId !== undefined);
+  if (taken !== undefined) {
+    const hasHolder = findHolder(taken) !== undefined;
+    if (things.length === 1)
+      return refuse(
+        hasHolder
+          ? `${describeWhoHasIt(taken)} this already. G goes to its Task.`
+          : `${quoteTitle(taken.title)} is on a Task already. G goes to its Task, where you can start a thread.`,
+      );
+    const where = isGroup ? "this group" : "the selection";
+    const advice = isGroup
+      ? "Open the group, select the others, then press N."
+      : "Take it out of the selection, then press N again.";
+    return refuse(
+      hasHolder
+        ? `${quoteTitle(taken.title)} is in ${where}, and ${describeWhoHasItMidSentence(taken)} it already. ${advice}`
+        : `${quoteTitle(taken.title)} is in ${where}, and it is on a Task already. ${advice}`,
+    );
+  }
+  return {
+    kind: "startThread",
+    things,
+    title: cut(isGroup && things.length > 1 ? target.group.label : first.title),
+  };
+};
+
+/**
  * Plans a link. A selection of two or more is linked at once, as a star from
  * its first row to each of the others. Rows that are already linked are not
  * skipped: the controller answers which links it wrote, and the rows do not
@@ -368,6 +454,9 @@ const planLink = <Row extends MovedRow>(
  *   the Tasks when they do not).
  * - The hand-off takes one thing, and refuses a thing no workflow can take.
  * - Go to its Task needs one thing that has a Task.
+ * - Start a thread takes a thing, a selection or a group of up to
+ *   `MAX_THREAD_THINGS` things, none of which is on a Task already, and returns
+ *   those things and the default name of the Task (see `planStartThread`).
  * - Link links the things of a selection of two or more, and opens "Link
  *   to..." for anything else (see `planLink`).
  *
@@ -388,6 +477,7 @@ export function planInboxMove<Row extends MovedRow, Move extends InboxMoveKind>(
     takeOn: () => planTakeOn(target),
     handOff: () => planHandOff(target),
     goToTask: () => planGoToTask(target),
+    startThread: () => planStartThread(target),
     link: () => planLink(target),
   };
   return planners[move]();
@@ -562,6 +652,21 @@ export const describeInboxHandOffFailure = (
 
 /** Returns the line for a thing that has no address to open at its source. */
 export const NO_SOURCE_ADDRESS = "This has no address to open at its source.";
+
+/** Returns the words for the line after a thread was started on `title`, the Task's name. */
+export const describeInboxThreadStart = (title: string): InboxLineWords => ({
+  text: "Started a thread on",
+  title,
+});
+
+/**
+ * Returns the sentence for a thread the controller refused to start: nothing
+ * was made. It adds no advice of its own, because the controller's reasons
+ * end with the advice that fits them ("Try again." for a thing that changed,
+ * "Leave it out, or start the thread on that Task." for a thing already on one).
+ */
+export const describeInboxThreadStartFailure = (title: string, reason: string): string =>
+  `${quoteTitle(title)} was not started as a thread: ${reason}.`;
 
 /** Returns how a sentence names `thing`: by its identifier, else by its quoted title. */
 const nameThing = (thing: Pick<InboxThing, "identifier" | "title">): string =>

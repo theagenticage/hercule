@@ -1515,6 +1515,23 @@ export const CLI = {
       },
     },
   },
+  "externalEntity.matchProject": {
+    command: "entity match-project",
+    help: "Finds the Project that things from other systems point at. It is the evidence behind the default Project of the start-thread dialog. Each thing's own repository is matched, through the canonical remote of Resources, to the Projects that are not deleted. Only when none of the things' own repositories matches a Project are the repositories of the things directly linked to them tried, one link away. Returns `kind` matched with the Project, the Resource, the thing the evidence is about (`thing`) and the linked thing it came through (`via`, only for a linked thing's repository); none when nothing points at a repository of a Project; ambiguous when the evidence points at more than one Project. A title is given only when some account can read that record. Needs the grants `task.read`, `project.read` and `resource.read`. Nothing is written.",
+    examples: [
+      { args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c"] },
+      {
+        args: ["1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c", "2a4b6c8d-1e3f-7a40-8c11-0d5e6f7a8b9c"],
+      },
+    ],
+    fields: {
+      ids: {
+        positional: true,
+        placeholder: "id",
+        help: "An entity's full id, as `hercule entity list` shows it. A tail is not accepted. Give up to 50, in the order you want evidence to be named: the first thing that has evidence is the one reported. Fails not_found, naming the ids, for an unknown one.",
+      },
+    },
+  },
   "externalEntity.readBlocks": {
     command: "entity blocks",
     help: "Reads the extra parts the Inbox pane draws for one thing, at most 8. They come from the source, as fields, a trend or code, and are read when you ask and are never stored. Prints them as text. A thing whose plugin offers none prints `no blocks`. Fails with invalid_state when the source could not be read. Needs the grants `task.read` and `signal.query`.",
@@ -4754,6 +4771,13 @@ export const CLI = {
         ],
         stdin: "Carry on where the other thread left off.",
       },
+      {
+        args: [
+          "--new-task",
+          '{"title":"Fix the refund flow","entityIds":["7b41d0a5-0000-7000-8000-000000000011","7b41d0a5-0000-7000-8000-000000000012"]}',
+        ],
+        stdin: "These two things are one problem. Find the cause.",
+      },
     ],
     fields: {
       prompt: {
@@ -4820,6 +4844,10 @@ export const CLI = {
         help: "The Task to join, by its id or a tail of eight or more characters; find it with `hercule task list`. A Thread joins a Task even without this flag: a Thread a session starts joins the calling session's Task, and one in an ephemeral workspace joins the Task that workspace belongs to. A Task that is done or dropped is refused; reopen it, or leave --task off.",
         resolves: "task.query",
       },
+      newTask: {
+        flag: "new-task",
+        help: 'The new Task this Thread starts, as JSON: {"title":"<title>","entityIds":["<id>", ...]}. Each id is an External Entity (a pull request or an issue on the Inbox, found with `hercule entity list`), and the user takes each on as the Thread\'s Task, so none of them may be on an active Task already. The Thread joins the Task and the title is the one given, never a generated one. Only the user may use it, and it cannot be combined with --task or --agent. Nothing is started when a thing is refused.',
+      },
       workspace: {
         flag: "workspace",
         help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for no checkout, or, when a session spawns on its own Runner, to join the calling session\'s workspace. A primary branch may be specified only when spawning from an Agent.',
@@ -4831,11 +4859,13 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
+        "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's. Or you are a session using --new-task, which is the user's own act: ask the user to start the Thread",
       invalid_state:
-        "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off",
+        "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off. Or a thing named in --new-task is a place that groups work, or Hercule cannot read it now",
       not_found:
-        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off",
+        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task is unknown: check `hercule entity list`",
+      conflict:
+        "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
     },
   },
   "session.update": {

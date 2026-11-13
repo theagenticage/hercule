@@ -28,6 +28,7 @@ import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import {
+  Conflict,
   Forbidden,
   Internal,
   InvalidState,
@@ -40,6 +41,7 @@ import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
+import { TaskTitle } from "./task-title";
 import { Branch } from "./workspace";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -559,6 +561,45 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
+ * The most things one Thread can be started on: the bound of `newTask` in
+ * `session.spawn` and of `externalEntity.matchProject`, which finds the project
+ * of the same things.
+ */
+export const MAX_THREAD_THINGS = 50;
+
+/**
+ * The new Task a Thread starts, made from External Entities ("things"). Each
+ * thing is taken on by the user, as `externalEntity.takeOn` takes one on. The
+ * ids are distinct, and the list is never empty.
+ */
+const NewThreadTask = closedStruct({
+  /** The new Task's title. A title the user chose is never replaced by a generated one. */
+  title: TaskTitle,
+  entityIds: atMost(Id, MAX_THREAD_THINGS).check(
+    Schema.isMinLength(1),
+    Schema.isUnique({ message: "Each thing can be listed once; remove the repeated id." }),
+  ),
+});
+
+type NewThreadTask = Schema.Schema.Type<typeof NewThreadTask>;
+
+/** The message for a spawn that names both a new Task and an existing one or an Agent. */
+const NEW_TASK_CONFLICT_MESSAGE =
+  "newTask starts a Thread on a new Task, so it cannot be combined with taskId or agentId. Leave newTask out to join an existing Task, or leave taskId and agentId out to start on the new Task.";
+
+/**
+ * Refuses a spawn that names `newTask` together with `taskId` or `agentId`.
+ * A new Task and a Task to join contradict each other, and an Agent's session
+ * never makes a Task. The issue points at `newTask`.
+ */
+const refuseNewTaskWithTaskOrAgent = Schema.makeFilter(
+  (payload: { readonly newTask?: unknown; readonly taskId?: string; readonly agentId?: string }) =>
+    payload.newTask !== undefined && (payload.taskId !== undefined || payload.agentId !== undefined)
+      ? { path: ["newTask"], issue: NEW_TASK_CONFLICT_MESSAGE }
+      : undefined,
+);
+
+/**
  * The payload of `session.spawn`. A spawn with an `agentId` takes its settings
  * from that Agent. A spawn with no `agentId` is a Thread. When the user starts
  * it, it takes the user's `thread.*` settings. When a session starts it, it
@@ -616,6 +657,16 @@ export const SessionSpawnInput = closedStruct({
    */
   taskId: Schema.optionalKey(Id),
   /**
+   * The new Task this Thread starts, made from these things, each taken on by
+   * the user. The Thread joins it, and its title is the one given here, never
+   * a generated one. Only the user may send it, and it is refused together
+   * with `taskId` or `agentId`. It fails `NotFound` for an unknown thing,
+   * `InvalidState` for a thing that is not work Hercule can read, and
+   * `Conflict` for a thing already on an active Task. Nothing is written when
+   * it fails.
+   */
+  newTask: Schema.optionalKey(NewThreadTask),
+  /**
    * Where the session works. When absent, a session's spawn on its caller's
    * runner joins the caller's workspace; any other spawn has no checkout.
    */
@@ -627,7 +678,7 @@ export const SessionSpawnInput = closedStruct({
    * actor and per operation.
    */
   dedupKey: Schema.optionalKey(DedupKey),
-}).check(refuseEmptyPrompt);
+}).check(refuseEmptyPrompt, refuseNewTaskWithTaskOrAgent);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
@@ -1022,7 +1073,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("spawn", "/sessions", {
       payload: SessionSpawnInput,
       success: Session,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
     }),
     HttpApiEndpoint.patch("update", "/sessions/:id", {
       params: { id: Id },

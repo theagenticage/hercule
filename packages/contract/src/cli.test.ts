@@ -138,6 +138,7 @@ const COMMANDS: Record<string, string> = {
   "externalEntity.readInboxGroup": "entity group",
   "externalEntity.readBlocks": "entity blocks",
   "externalEntity.takeOn": "entity take-on",
+  "externalEntity.matchProject": "entity match-project",
   "externalEntity.takeOnTogether": "entity take-on-together",
   "externalEntity.handOff": "entity hand-off",
   "externalEntity.undoHandOff": "entity undo-hand-off",

@@ -9,7 +9,6 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   appendToMessage,
   applyThreadChoice,
-  buildComposerPlaceholder,
   buildRecentModel,
   buildSubmission,
   findDraftSubject,
@@ -29,6 +28,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
+import { requireSignedIn, type AccountScope } from "../../app/account-scope";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { threadAndAgentSessionsQuery } from "../../app/queries";
@@ -126,8 +126,14 @@ export function DraftScreen({
   const { projects, workspaces } = catalogs;
   const { groupRows } = useSessionPresentation();
   const inspection = useMutation({
-    mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
-    onSuccess: (current) => {
+    // The scope is read when the user opens the menu and travels with the request, so an answer
+    // that arrives after another account signed in does not write into that account's cache.
+    mutationFn: ({ id, scope }: { id: string; scope: AccountScope }) => {
+      requireSignedIn(scope);
+      return client.workspace.inspect({ params: { id } });
+    },
+    onSuccess: (current, { scope }) => {
+      if (!scope.isCurrent()) return;
       queryClient.setQueryData<readonly Workspace[]>(queryKeys.workspaces(), (records) =>
         records?.map((each) => (each.id === current.id ? current : each)),
       );
@@ -288,13 +294,6 @@ export function DraftScreen({
           <DraftComposer
             view={view}
             text={pending.message.text}
-            placeholder={buildComposerPlaceholder({
-              readOnly: null,
-              busy: false,
-              active: false,
-              pick: workspace,
-              workspaces,
-            })}
             canSend={canSend}
             error={
               pending.failure ??
@@ -303,10 +302,6 @@ export function DraftScreen({
             notice={images.notice}
             attachments={images.attachments}
             skills={skills}
-            // The machine the user picked, or the joined workspace's; never the
-            // one the draft would be placed on by default, which the menu must
-            // not dim entries by.
-            runnerId={view.resolved.menuRunnerId}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
             onSignIn={setSignIn}
@@ -317,7 +312,8 @@ export function DraftScreen({
             onSubmit={submit}
             onOpenWorkspaceMenu={() => {
               if (inspection.isPending) return;
-              for (const id of view.workspaceInspectionIds) inspection.mutate(id);
+              const scope = controller.accountScopes.read();
+              for (const id of view.workspaceInspectionIds) inspection.mutate({ id, scope });
             }}
           />
           {project === undefined ? null : (

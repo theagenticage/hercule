@@ -16,6 +16,7 @@ export * from "./inbox-row";
 export * from "./inbox-group-row";
 export * from "./inbox-search";
 export * from "./inbox-moves";
+export * from "./thread-start";
 export * from "./inbox-outline";
 export * from "./inbox-asks";
 export * from "./inbox-ask-choice";

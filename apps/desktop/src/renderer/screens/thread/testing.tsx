@@ -19,7 +19,6 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { buildRouterContext } from "../../app/context";
 import { DoneMovesProvider } from "../../app/done-moves";
 import type { PendingSubmissions } from "../../app/pending-submissions";
 import { ensureShellData, ensureThreadData } from "../../app/queries";
@@ -27,6 +26,7 @@ import { useKeepRequestDrafts } from "../../app/request-drafts";
 import { SessionPresentationProvider } from "../../app/session-presentation";
 import {
   buildSidebarHandlers,
+  buildTestContext,
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -35,6 +35,7 @@ import {
   type Call,
   type FakeBridge,
   type Handler,
+  type LiveStub,
   type ThreadRecords,
 } from "../../app/testing";
 
@@ -51,6 +52,8 @@ export interface RenderedThreadPart {
   readonly client: HerculeClient;
   /** What each thread's composer holds and has not sent. */
   readonly pendingSubmissions: PendingSubmissions;
+  /** The live connection's stub, to push the rows and taps a Thread's agent writes. */
+  readonly live: LiveStub;
   /** Sends a menu command, as main does when the user picks the menu item. */
   readonly sendMenuCommand: FakeBridge["sendMenuCommand"];
 }
@@ -94,11 +97,10 @@ export const renderThreadPart = async (
     ...buildThreadHandlers(thread),
     ...handlers,
   });
-  const { bridge, sendMenuCommand } = createFakeBridge({
-    controllerUrl: CONTROLLER_URL,
-    token: "bearer",
-  });
-  const { controller, queryClient } = await buildRouterContext(bridge);
+  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const { bridge, sendMenuCommand } = fake;
+  const { context, live } = await buildTestContext(fake);
+  const { controller, queryClient } = context;
   if (controller === null) throw new Error("The fake bridge must hold a controller URL.");
   const { client } = controller;
 
@@ -155,6 +157,7 @@ export const renderThreadPart = async (
     client,
     pendingSubmissions: controller.pendingSubmissions,
     sendMenuCommand,
+    live,
   };
 };
 

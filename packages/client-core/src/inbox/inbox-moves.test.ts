@@ -26,6 +26,8 @@ import {
   describeInboxDismissalFailure,
   describeInboxHandOff,
   describeInboxTakeOn,
+  describeInboxThreadStart,
+  describeInboxThreadStartFailure,
   planInboxDrop,
   planInboxMove,
 } from "./inbox-moves";
@@ -84,6 +86,130 @@ const groupOf = (
     isFresh,
   };
 };
+
+describe("planInboxMove for Start a thread", () => {
+  const start = (target: InboxMoveTarget<Row>, isOffline = false) =>
+    planInboxMove({ move: "startThread", target, ...online, isOffline });
+  const other = offered(buildInboxThing("3", { title: "Slow page" }));
+  /** A group whose members are all held as rows, so a thread can start from them. */
+  const heldGroup = (rows: Row[]): InboxMoveTarget<Row> => {
+    const target = groupOf(rows.length);
+    if (target.kind !== "group") throw new Error("not a group");
+    const members = rows.map(({ id, ref }) => ({ id, ref, matches: true }));
+    return {
+      ...target,
+      group: { ...target.group, members, rows, unloadedCount: 0, placedBy: rows[0]! },
+    };
+  };
+
+  it("takes one thing or a selection, named after its first thing", () => {
+    expect(start(one(thing))).toEqual({
+      kind: "startThread",
+      things: [thing],
+      title: "Cache delivery slot lookups",
+    });
+    expect(start(selection(thing, other))).toEqual({
+      kind: "startThread",
+      things: [thing, other],
+      title: "Cache delivery slot lookups",
+    });
+  });
+
+  it("takes the operative members of a group, named after the group", () => {
+    expect(start(heldGroup([thing, other]))).toEqual({
+      kind: "startThread",
+      things: [thing, other],
+      title: "Checkout is slow",
+    });
+  });
+
+  it("cuts the name to what a Task title holds", () => {
+    const long = offered(buildInboxThing("6", { title: "x".repeat(MAX_TASK_TITLE_LENGTH + 20) }));
+    expect(start(one(long))).toMatchObject({ title: "x".repeat(MAX_TASK_TITLE_LENGTH) });
+  });
+
+  it("starts from a group's only operative member as that thing", () => {
+    expect(start(heldGroup([thing]))).toMatchObject({
+      things: [thing],
+      title: "Cache delivery slot lookups",
+    });
+  });
+
+  it("refuses a group with members the list has not read, and says to open it", () => {
+    expect(reasonOf(start(groupOf(3)))).toBe(
+      "This group has things the list has not read yet. Open the group, then press N.",
+    );
+  });
+
+  it("refuses offline, with the words every move uses", () => {
+    expect(reasonOf(start(one(thing), true))).toContain("You are offline");
+  });
+
+  it("refuses a thing someone has, with the words of Take on for one thing", () => {
+    expect(reasonOf(start(one(held)))).toBe("You have this already. G goes to its Task.");
+  });
+
+  it("refuses a thing on a Task nobody holds, and says where to go", () => {
+    const onTask = offered(buildInboxThing("5", { title: "Slow page", taskId: "t-9" }));
+    expect(reasonOf(start(one(onTask)))).toBe(
+      "“Slow page” is on a Task already. G goes to its Task, where you can start a thread.",
+    );
+    expect(reasonOf(start(selection(thing, onTask)))).toBe(
+      "“Slow page” is in the selection, and it is on a Task already. Take it out of the selection, then press N again.",
+    );
+    expect(reasonOf(start(heldGroup([thing, onTask])))).toBe(
+      "“Slow page” is in this group, and it is on a Task already. Open the group, select the others, then press N.",
+    );
+  });
+
+  it("names the first held thing of a selection", () => {
+    const colleague = offered(
+      buildInboxThing("4", {
+        title: "Slow page",
+        taskId: "t-4",
+        liveWorkflows: [{ workflowId: "w", name: "Mei" }],
+      }),
+    );
+    expect(reasonOf(start(selection(thing, colleague, held)))).toBe(
+      "“Slow page” is in the selection, and Mei has it already. Take it out of the selection, then press N again.",
+    );
+  });
+
+  it("refuses more things than a thread starts from, saying how many", () => {
+    const many = Array.from({ length: 51 }, (_, n) => offered(buildInboxThing(String(n + 10))));
+    expect(reasonOf(start(selection(...many)))).toBe(
+      "A thread starts from up to 50 things, and 51 are selected. Select fewer, then press N again.",
+    );
+    expect(reasonOf(start(groupOf(51)))).toBe(
+      "This group has 51 things, and a thread starts from up to 50. Open the group, select some of its things, then press N.",
+    );
+  });
+});
+
+describe("the words after starting a thread", () => {
+  it("puts the title last, and names it in a failure", () => {
+    expect(describeInboxThreadStart("Fix the cart")).toEqual({
+      text: "Started a thread on",
+      title: "Fix the cart",
+    });
+    expect(
+      describeInboxThreadStartFailure(
+        "Fix the cart",
+        "it changed while the Task was made. Try again",
+      ),
+    ).toBe(
+      "“Fix the cart” was not started as a thread: it changed while the Task was made. Try again.",
+    );
+    expect(
+      describeInboxThreadStartFailure(
+        "Fix the cart",
+        "it is already on the Task “X”. Leave it out",
+      ),
+    ).toBe(
+      "“Fix the cart” was not started as a thread: it is already on the Task “X”. Leave it out.",
+    );
+  });
+});
 
 describe("planInboxMove", () => {
   it("dismisses a thing or a selection by their ids, and refuses past the most one call takes, saying how many", () => {

@@ -1382,7 +1382,7 @@ afterEach(async () => {
  * a `LiveStub` for its live connection. The app builds its live connection
  * with no socket factory of its own, so the stub has to replace the global.
  */
-const buildTestContext = async (
+export const buildTestContext = async (
   fake: FakeBridge,
 ): Promise<{ readonly context: RouterContext; readonly live: LiveStub }> => {
   const sockets: StubSocket[] = [];

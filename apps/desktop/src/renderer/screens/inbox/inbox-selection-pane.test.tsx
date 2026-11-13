@@ -21,6 +21,7 @@ const member = (ref: string, title: string): InboxRowView => ({
 const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
   const onWalk = vi.fn();
   const onDismiss = vi.fn();
+  const onStartThread = vi.fn();
   const onTakeOn = vi.fn();
   const onLink = vi.fn();
   const members = Array.from({ length: count }, (_, index) =>
@@ -32,12 +33,13 @@ const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
       plugins={TEST_PLUGINS}
       platform={platform}
       onWalk={onWalk}
+      onStartThread={onStartThread}
       onTakeOn={onTakeOn}
       onLink={onLink}
       onDismiss={onDismiss}
     />,
   );
-  return { onWalk, onDismiss, onTakeOn, onLink };
+  return { onWalk, onDismiss, onStartThread, onTakeOn, onLink };
 };
 
 describe("InboxSelectionPane", () => {
@@ -48,10 +50,12 @@ describe("InboxSelectionPane", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
-  it("offers Take on, Link and Dismiss, and no hand-off", async () => {
-    const { onTakeOn, onLink } = renderPane(2);
+  it("offers Thread, Take on, Link and Dismiss, and no hand-off", async () => {
+    const { onStartThread, onTakeOn, onLink } = renderPane(2);
     const footer = screen.getByRole("contentinfo");
-    expect(within(footer).getAllByRole("button")).toHaveLength(3);
+    expect(within(footer).getAllByRole("button")).toHaveLength(4);
+    await userEvent.click(within(footer).getByRole("button", { name: "Start a thread on all 2" }));
+    expect(onStartThread).toHaveBeenCalledOnce();
     await userEvent.click(within(footer).getByRole("button", { name: "Take on" }));
     await userEvent.click(within(footer).getByRole("button", { name: "Link all 2" }));
     expect(onTakeOn).toHaveBeenCalledOnce();

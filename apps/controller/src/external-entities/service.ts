@@ -41,6 +41,7 @@ import {
   type EntityAddToWorkInput,
   type EntityAddToWorkResult,
   type EntityLinkInput,
+  type EntityProjectMatchInput,
   type EntityLinkResult,
   type EntityPlace,
   type EntitySearchQuery,
@@ -67,6 +68,7 @@ import {
   type InboxValues,
   type InvalidState,
   type NotFound,
+  type ProjectMatch,
   type Task,
   type TaskStage,
   type Unauthenticated,
@@ -92,6 +94,7 @@ import {
 import { resourceRepository } from "../resources";
 import { Settings } from "../settings";
 import {
+  NEW_THREAD_TASK_STAGE,
   ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
   taskRepository,
@@ -102,6 +105,7 @@ import { buildActiveEntityKind } from "./entity-records";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
+import { makeProjectMatcher } from "./project-match";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import { externalEntityInbox, type InboxEnvironment, type InboxRailSettings } from "./inbox-query";
@@ -122,9 +126,6 @@ import {
 const decodeKnownEntityBlocks = Schema.decodeUnknownEffect(
   Schema.Struct({ blocks: Schema.Array(KnownBlock).check(Schema.isMaxLength(MAX_ENTITY_BLOCKS)) }),
 );
-
-/** How many things `takeOnTogether` prepares at once: preparing one may read it at its source. */
-const MAX_CONCURRENT_PREPARATIONS = 8;
 
 /** The message of the error `readBlocks` fails with. It names no plugin and no credential. */
 const SOURCE_UNREADABLE_MESSAGE =
@@ -176,6 +177,25 @@ type Preparation =
       readonly entity: ObservedEntity;
     };
 
+/**
+ * What `prepareThingsForTask` prepared: what was read for each thing, by ref,
+ * in the order the things were given (`read: false` when the rows already held
+ * a full, readable record). `takeOnAsOneTask` takes this whole, so the things
+ * and the reads always agree.
+ */
+export interface PreparedThings {
+  readonly reads: ReadonlyMap<string, Preparation>;
+}
+
+/**
+ * The most things read at their source at once when several are prepared
+ * together. A read is a call to a tracker through the user's own account, so a
+ * selection of fifty read at once could run into the tracker's rate limit,
+ * while one read after another would make the user wait for the sum of the
+ * delays.
+ */
+const MAX_CONCURRENT_THING_READS = 4;
+
 /** Whether a Task was made for an entity, and which. */
 interface TaskForEntity {
   readonly entityId: string;
@@ -209,6 +229,10 @@ const describeMissing = (ref: string, missing: EntityMissing): string => {
   }
 };
 
+/** Names a thing in a message: its title and ref, or its ref alone when it has no title yet. */
+const describeThing = (record: Pick<TaskableEntity, "title" | "ref">): string =>
+  record.title === "" ? record.ref : `"${record.title}" (${record.ref})`;
+
 /** Builds the sentence for an undo that left the Task in place. */
 const describeUndoRefusal = (reason: TaskUndoRefusal): string => {
   switch (reason) {
@@ -235,6 +259,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const entities = yield* externalEntityRepository;
   const inbox = yield* externalEntityInbox;
+  const projectMatcher = makeProjectMatcher(sql);
   const taskRows = yield* taskRepository;
   const tasks = yield* TaskService;
   const resources = yield* resourceRepository;
@@ -358,24 +383,17 @@ const make = Effect.gen(function* () {
    *   `EntityLookups.resolve`. If the read fails, so does this call, and no
    *   Task exists. A partial answer never satisfies it.
    *
+   * `known` is the record the rows hold for `ref` (undefined when they hold
+   * none) and `catalog` the active kinds, both read by the caller, so that
+   * preparing several things reads each of them once.
+   *
    * Fails with `InvalidState` when the ref belongs to no active kind, or the
    * read does not give one full record of exactly this ref.
    */
-  const prepareEntityForTask = (ref: string): Effect.Effect<Preparation, InvalidState | SqlError> =>
-    Effect.gen(function* () {
-      const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
-      return yield* prepareKnownEntityForTask(yield* readCatalog, ref, known);
-    });
-
-  /**
-   * Prepares `ref` for a Task as `prepareEntityForTask` does, given the
-   * `catalog` and the record the rows hold now (`known`, none when there is
-   * none), so a caller that prepares many things reads them in one batch.
-   */
-  const prepareKnownEntityForTask = (
-    catalog: Catalog,
+  const prepareEntityForTask = (
     ref: string,
     known: TaskableEntity | undefined,
+    catalog: Catalog,
   ): Effect.Effect<Preparation, InvalidState | SqlError> =>
     Effect.gen(function* () {
       const owner =
@@ -529,7 +547,7 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(
             createConflictError(
-              `${ref} changed while the Task was being made, and can no longer be taken on. Try again.`,
+              `${record === undefined ? ref : describeThing(record)} changed while the Task was being made, and can no longer be taken on. Try again.`,
             ),
           );
         }
@@ -544,6 +562,27 @@ const make = Effect.gen(function* () {
     preparation: Preparation,
   ): Effect.Effect<TaskableEntity, Conflict | SqlError> =>
     Effect.map(storePreparedAndCheckEntities([{ ref, preparation }]), (records) => records[0]!);
+
+  /**
+   * Checks that none of `records` is on an active Task, with one read however
+   * many there are. Fails with `Conflict` naming the first thing that is, and
+   * that Task: a Thread cannot start on two Tasks.
+   */
+  const requireNoActiveTask = (
+    records: ReadonlyArray<TaskableEntity>,
+  ): Effect.Effect<void, Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const active = yield* taskRows.listActiveTasksForRefs(records.map(({ ref }) => ref));
+      const busy = active[0];
+      if (busy !== undefined) {
+        const record = records.find(({ ref }) => ref === busy.ref)!;
+        return yield* Effect.fail(
+          createConflictError(
+            `${describeThing(record)} is already on the Task "${busy.title}". Leave it out, or start the thread on that Task.`,
+          ),
+        );
+      }
+    });
 
   /**
    * Returns the active Task of an entity, or makes one, in one transaction.
@@ -692,7 +731,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads the entities of `ids` in one batch, in the order of `ids`, or fails
-   * with `NotFound` for the first id that has no entity.
+   * with `NotFound` naming each id that has no entity.
    */
   const readTaskableEntitiesOrFail = (
     ids: ReadonlyArray<string>,
@@ -703,14 +742,32 @@ const make = Effect.gen(function* () {
           (record) => [record.id, record] as const,
         ),
       );
-      const records: TaskableEntity[] = [];
-      for (const id of ids) {
-        const record = found.get(id);
-        if (record === undefined)
-          return yield* Effect.fail(createNotFoundError("no such external entity"));
-        records.push(record);
+      const unknown = ids.filter((id) => !found.has(id));
+      if (unknown.length > 0) {
+        return yield* Effect.fail(
+          createNotFoundError(`no such external entity: ${unknown.join(", ")}`),
+        );
       }
-      return records;
+      return ids.map((id) => found.get(id)!);
+    });
+
+  /**
+   * Prepares each of `records` for a Task as `takeOn` prepares one
+   * (`prepareEntityForTask`), a few at a time (`MAX_CONCURRENT_THING_READS`),
+   * and returns what was read by ref, in the order of `records`. Runs outside
+   * any transaction, because preparing a thing may read it at its source.
+   */
+  const prepareRecordsForTask = (
+    records: ReadonlyArray<TaskableEntity>,
+  ): Effect.Effect<ReadonlyMap<string, Preparation>, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const catalog = yield* readCatalog;
+      const prepared = yield* Effect.forEach(
+        records,
+        (record) => prepareEntityForTask(record.ref, record, catalog),
+        { concurrency: MAX_CONCURRENT_THING_READS },
+      );
+      return new Map(records.map((record, n) => [record.ref, prepared[n]!] as const));
     });
 
   /** Reads the entity of an id, or fails with `NotFound`. */
@@ -916,6 +973,22 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Finds the Project the things point at, for the start-thread dialog: see
+     * `ProjectMatch`. Fails with `NotFound` naming the ids that are unknown.
+     * Needs the grants `task.read`, `project.read` and `resource.read`,
+     * because it names a Project and a Resource.
+     */
+    matchProject: (
+      input: EntityProjectMatchInput,
+    ): Effect.Effect<ProjectMatch, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        yield* requireGrant("project.read");
+        yield* requireGrant("resource.read");
+        return yield* projectMatcher.matchProject(input);
+      }),
+
+    /**
      * Returns the group of `ref` among the things on the Inbox, in full: see
      * `InboxGroupDetail`. Needs the grants `task.read` and `signal.query`:
      * it shows no signal text, but whether a thing is on the Inbox depends on
@@ -1052,7 +1125,7 @@ const make = Effect.gen(function* () {
         if (Option.isSome(active)) {
           return { taskId: active.value.id, created: false };
         }
-        const preparation = yield* prepareEntityForTask(record.ref);
+        const preparation = yield* prepareEntityForTask(record.ref, record, yield* readCatalog);
         const made = yield* makeTaskForEntity({
           ref: record.ref,
           preparation,
@@ -1060,6 +1133,92 @@ const make = Effect.gen(function* () {
           followIfUnconcerned: false,
         });
         return { taskId: made.taskId, created: made.created };
+      }),
+
+    /**
+     * Prepares several things to be taken on together as one Task, outside
+     * any transaction, and returns what was read, for `takeOnAsOneTask`.
+     * Each thing is prepared exactly as `takeOn` prepares one
+     * (`prepareEntityForTask`): a full record of a work kind that an account
+     * reads needs no read, and any other thing is read at its source.
+     *
+     * At most 4 things are read at once (`MAX_CONCURRENT_THING_READS`).
+     *
+     * It fails with `NotFound` naming each unknown id, with `Conflict` naming
+     * the first thing already on an active Task (checked before any read, so
+     * no source is called), and with `InvalidState` naming the first thing
+     * that cannot be taken on: a place, a thing no active plugin reads, or a
+     * read that fails (the same messages as `takeOn`). Nothing is written. A caller
+     * that retries by `dedupKey` looks the key up before calling this, so a
+     * retry of a committed call never reads a source. User only.
+     */
+    prepareThingsForTask: (
+      entityIds: ReadonlyArray<string>,
+    ): Effect.Effect<
+      PreparedThings,
+      Unauthenticated | Forbidden | NotFound | InvalidState | Conflict | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const records = yield* readTaskableEntitiesOrFail(entityIds);
+        // Cheap refusal first: a thing already on an active Task fails the
+        // call before any source is read. The transaction checks again.
+        yield* requireNoActiveTask(records);
+        return { reads: yield* prepareRecordsForTask(records) };
+      }),
+
+    /**
+     * Takes several things on together as one new Task, for a Thread that
+     * starts on them, and returns the Task's id. The things are the ones
+     * `prepared` holds, as `prepareThingsForTask` returned it. The Task has the
+     * given title, the stage of a Thread's Task, priority `normal`, `projectId`,
+     * and a link to each thing, marked as taken on by the user (as `takeOn`
+     * does for one).
+     *
+     * It never reads a source, so it can run inside the caller's transaction,
+     * and it joins that transaction. First it stores what the preparation read
+     * (as `takeOn` does). Then it checks every thing against the stored
+     * rows, before it writes anything, with one read of the records and one
+     * of their active Tasks, however many things there are. It fails with:
+     *
+     * - `Conflict` for a thing that has no record any more, is no longer a
+     *   full record of an active work kind that an account reads, or whose
+     *   account can no longer read it: it changed since the preparation, and
+     *   the caller repeats;
+     * - `Conflict` naming the first thing already on an active Task, and that
+     *   Task.
+     *
+     * User only, with the grant `task.update`. The caller has checked that
+     * `projectId`, if any, is a live Project.
+     */
+    takeOnAsOneTask: (
+      prepared: PreparedThings,
+      task: { readonly title: string; readonly projectId: string | undefined },
+    ): Effect.Effect<
+      { readonly taskId: string },
+      Unauthenticated | Forbidden | NotFound | Conflict | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const records = yield* storePreparedAndCheckEntities(
+          [...prepared.reads].map(([ref, preparation]) => ({ ref, preparation })),
+        );
+        yield* requireNoActiveTask(records);
+        const refs = records.map(({ ref }) => ref);
+        // The caller prepared at least one thing, as the contract requires.
+        if (!Arr.isReadonlyArrayNonEmpty(refs)) return yield* Effect.die("no things to take on");
+        const created = yield* tasks.createTaskLinkedToRefs({
+          refs,
+          title: task.title,
+          stage: NEW_THREAD_TASK_STAGE,
+          ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+          following: false,
+        });
+        yield* announceEntityChanges({
+          entityIds: records.map(({ id }) => id),
+          affectedTaskIds: [],
+        });
+        return { taskId: created.id };
       }),
 
     /**
@@ -1126,17 +1285,9 @@ const make = Effect.gen(function* () {
           );
         }
         const shared = yield* findSharedActiveTask(records.map((record) => record.ref));
-        const catalog = yield* readCatalog;
-        // Preparing a thing may read it at its source, so the things that need
-        // it are prepared a few at a time, not all at once and not one by one.
-        const needing = records.filter((record) => !shared.refsWithTask.has(record.ref));
-        const prepared = yield* Effect.forEach(
-          needing,
-          (record) => prepareKnownEntityForTask(catalog, record.ref, record),
-          { concurrency: MAX_CONCURRENT_PREPARATIONS },
-        );
-        const preparations = new Map(
-          needing.map((record, n) => [record.ref, prepared[n]!] as const),
+        // The things that have a Task need no preparation: they are linked as they are.
+        const preparations = yield* prepareRecordsForTask(
+          records.filter((record) => !shared.refsWithTask.has(record.ref)),
         );
         return yield* makeTaskTogether({ records, preparations, title: input.title });
       }),
@@ -1400,7 +1551,7 @@ const make = Effect.gen(function* () {
             followed: false,
           };
         }
-        const preparation = yield* prepareEntityForTask(input.ref);
+        const preparation = yield* prepareEntityForTask(input.ref, known, yield* readCatalog);
         const made = yield* makeTaskForEntity({
           ref: input.ref,
           preparation,

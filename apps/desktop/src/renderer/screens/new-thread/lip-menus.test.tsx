@@ -53,6 +53,14 @@ describe("the workspace menu", () => {
     ]);
   });
 
+  it("draws the reason under the header when there is one", () => {
+    render(
+      <WorkspaceMenuContent menu={MENU} reason="On moss, in a new workspace." onPick={vi.fn()} />,
+    );
+
+    expect(document.querySelector(".pop-reason")?.textContent).toBe("On moss, in a new workspace.");
+  });
+
   it("picks the row that is clicked", async () => {
     const onPick = vi.fn<(pick: WorkspacePick) => void>();
     render(<WorkspaceMenuContent menu={MENU} onPick={onPick} />);

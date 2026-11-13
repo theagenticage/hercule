@@ -21,9 +21,12 @@ import { MenuLine } from "../thread/menu-line";
  */
 export function WorkspaceMenuContent({
   menu,
+  reason,
   onPick,
 }: {
   readonly menu: WorkspaceMenu;
+  /** Why the workspace is what it is, drawn under the header, or `null`. */
+  readonly reason?: string | null | undefined;
   readonly onPick: (pick: WorkspacePick) => void;
 }): JSX.Element {
   return (
@@ -32,6 +35,7 @@ export function WorkspaceMenuContent({
         <b>Workspace</b>
         <span>locks when the thread starts</span>
       </div>
+      {reason == null ? null : <p className="pop-reason">{reason}</p>}
       <div className="pop-sec">
         {menu.rows.map((row) => (
           <MenuLine

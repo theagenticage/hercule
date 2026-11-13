@@ -47,6 +47,11 @@ import {
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK, TIDEWATCH_PLUGIN } from "./plugins-fixture";
 import type { SidebarRecords } from "./shell-page";
+import {
+  buildThreadStartRecords,
+  withThreadStartRecords,
+  type ThreadStartRecords,
+} from "./inbox-thread-fixture";
 
 /** What the fixture knows of a thing besides the row: the values Browse, Narrow and tokens filter on. */
 interface Tags {
@@ -803,6 +808,8 @@ export interface InboxRecords {
   readonly windowWidth?: number;
   /** The width the user gave the pane, which the page keeps in `localStorage`. */
   readonly paneWidth?: number;
+  /** What the fake controller answers and starts for the start-thread dialog. */
+  readonly threadStart?: ThreadStartRecords;
 }
 
 const DETAILS = new Map(ALL_THINGS.map((thing) => [thing.id, buildInboxDetail(thing)]));
@@ -829,6 +836,13 @@ export interface InboxScene {
   readonly records: InboxRecords;
   readonly play?: Play;
 }
+
+const THREAD_START = buildThreadStartRecords(
+  ALL_THINGS.filter((thing) => thing.kind === "github/pull-request").map(({ id, identifier }) => ({
+    id,
+    identifier,
+  })),
+);
 
 const BASE: InboxRecords = {
   outline: buildInboxWorldOutline(),
@@ -945,6 +959,42 @@ const pressLinkOnRow: Play = async (page) => {
   row.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
   await waitFor(page, ".link-to-item");
 };
+
+/**
+ * Selects the rows whose text holds each of `needles`, with their ticks, then
+ * presses N, which opens the start-thread dialog on them, and returns once the
+ * controller's match of a project has answered and the dialog shows it.
+ */
+const openThreadDialog = async (page: Document, needles: ReadonlyArray<string>): Promise<void> => {
+  await waitFor(page, ".ib-row");
+  for (const needle of needles) {
+    const row = [...page.querySelectorAll<HTMLElement>(".ib-row")].find((each) =>
+      (each.textContent ?? "").includes(needle),
+    );
+    const tick = row?.querySelector<HTMLElement>(".ib-row-tick");
+    if (tick === null || tick === undefined) throw new Error(`The list has no row for ${needle}.`);
+    tick.click();
+    await nextFrame();
+  }
+  // The dialog opens with Web Animations. Chromium rasterises the chips' marks
+  // and the composer's icons a little differently from run to run once they
+  // have been animated, which no screenshot wait cures, so these states open
+  // with Reduce motion, which the dialog's motion obeys by reading this token.
+  page.documentElement.style.setProperty("--dur-2", "0s");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
+  await waitFor(page, ".thread-dialog .composer-card");
+  // The reason line says "Looking for the project" until the match answers.
+  const deadline = performance.now() + 5000;
+  while (
+    performance.now() < deadline &&
+    (page.querySelector(".thread-dialog-why")?.textContent ?? "").startsWith("Looking")
+  ) {
+    await nextFrame();
+  }
+};
+
+/** The things the `dialog` states start from: three pull requests and an error, which the controller matches to webshop. */
+const DIALOG_THINGS = ["#6244", "#6255", "#6271", "STOREFRONT-1Z9"];
 
 /** The states of the page, in the order the capture takes them. */
 export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
@@ -1154,6 +1204,35 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       await waitFor(page, ".sig.is-open .sig-answers");
     },
   },
+  {
+    name: "dialog",
+    records: { ...BASE, threadStart: THREAD_START },
+    play: (page) => openThreadDialog(page, DIALOG_THINGS),
+  },
+  {
+    // The error alone: no pull request points at a project, so the pick asks.
+    name: "dialog-unpicked",
+    records: { ...BASE, threadStart: THREAD_START },
+    play: (page) => openThreadDialog(page, ["STOREFRONT-1Z9"]),
+  },
+  {
+    name: "dialog-why",
+    records: { ...BASE, threadStart: THREAD_START },
+    play: async (page) => {
+      await openThreadDialog(page, DIALOG_THINGS);
+      (await waitFor(page, ".thread-dialog .lip-pick")).click();
+      await waitFor(page, ".project-pick-menu:popover-open");
+    },
+  },
+  {
+    name: "dialog-started",
+    records: { ...BASE, threadStart: THREAD_START },
+    play: async (page) => {
+      await openThreadDialog(page, DIALOG_THINGS);
+      (await waitFor(page, '.thread-dialog [title="Start thread"]')).click();
+      await waitFor(page, ".thread-dialog-foot");
+    },
+  },
 ];
 
 const connect = (id: string, type: string, label: string): Connection => ({
@@ -1177,7 +1256,7 @@ const PLUGINS: ReadonlyArray<PluginDetail> = [
 ];
 
 /** The sidebar's lists with the three plugins and their Connections, for a specimen that opens the Inbox. */
-export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
+export const INBOX_SIDEBAR_RECORDS: SidebarRecords = withThreadStartRecords({
   ...SPECIMEN_RECORDS,
   plugins: PLUGINS,
   connections: [
@@ -1185,4 +1264,4 @@ export const INBOX_SIDEBAR_RECORDS: SidebarRecords = {
     connect(buildId(901), "tidewatch/tidewatch", "shop"),
     connect(buildId(902), "sentry/sentry", "northwind"),
   ],
-};
+});

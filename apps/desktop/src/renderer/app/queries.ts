@@ -1150,6 +1150,20 @@ export const entityQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads which Project the things `ids` point at (`externalEntity.matchProject`),
+ * for the start-thread dialog. The key is under the entity prefix, so a push
+ * about the things reads it again, and it is the same for any order of `ids`.
+ */
+export const projectMatchQuery = (client: HerculeClient, ids: readonly string[]) =>
+  queryOptions({
+    queryKey: [...queryKeys.externalEntity(), "project-match", [...ids].sort()],
+    queryFn: ({ signal }) =>
+      client.externalEntity.matchProject({ payload: { ids: [...ids] } }, { signal }),
+    ...LIVE_KEPT_READ_OPTIONS,
+    gcTime: 30_000,
+  });
+
+/**
  * Reads what the source of one External Entity shows of it in the Inbox's pane
  * (`externalEntity.readBlocks`): the plugin's own blocks. The read goes to the
  * source, so it never retries (a source that cannot be read answers with one
