@@ -12,12 +12,14 @@ import { buildFakeInboxDetail } from "@hercule/client-core/inbox/testing";
 import type { EntitySignalLine, InboxThing, Signal } from "@hercule/contract";
 import {
   buildErrorBody,
+  holdAnswer,
   setVisibility,
   stubElementSize,
   stubIntersectionObserver,
   type Call,
 } from "../../../app/testing";
 import {
+  LOYALTY,
   OUTLINE,
   SLOTS,
   buildThingId,
@@ -260,33 +262,63 @@ describe("an answer that acts on the source", () => {
     pressUndo();
     await pass(0);
 
-    expect(readUndoLine()).toMatch(/Already sent to .*, so it can't be taken back here\./);
+    expect(readUndoLine()).toMatch(
+      /^Already sent to (.*), so it can’t be taken back here\. Answer again on \1 if it needs changing\.$/,
+    );
+  });
+
+  it("does nothing more when Undo is pressed again after the answer was sent", async () => {
+    const { calls } = await answerWithReturn();
+    await pass(HOLD_MS);
+    await pass(0);
+
+    pressUndo();
+    await pass(0);
+
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(1);
+    expect(screen.getAllByRole("treeitem")).toHaveLength(3);
   });
 });
 
+/** Types `words` into the reply box of the current ask and sends them with the box's own key. */
+const sendReply = (words: string): void => {
+  fireEvent.click(document.querySelector<HTMLElement>("[data-answer='reply']")!);
+  const box = screen.getByRole("textbox");
+  fireEvent.change(box, { target: { value: words } });
+  fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+};
+
 describe("a reply", () => {
-  it("opens its box again with its words when Undo comes after it was sent", async () => {
+  it("opens its box again with its words when Undo takes it back during the hold", async () => {
     const { calls } = await answerWithReturn(false);
-    const reply = document.querySelector<HTMLElement>("[data-answer='reply']")!;
-    fireEvent.click(reply);
-    const box = screen.getByRole("textbox");
-    fireEvent.change(box, { target: { value: "Looks good to me" } });
-    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    sendReply("Looks good to me");
     expect(readUndoLine()).toMatch(/^Reply sent to Mei on .*\. Sends in 8s\.$/);
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    pressUndo();
+    await pass(0);
+    await pass(HOLD_MS);
+
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(0);
+    expect(readUndoLine()).toBe("Not sent. The ask is open again.");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Looks good to me");
+  });
+
+  it("leaves the box shut when Undo comes after it was sent, and says so", async () => {
+    const { calls } = await answerWithReturn(false);
+    sendReply("Looks good to me");
     await pass(HOLD_MS);
     await pass(0);
     expect(callsTo(calls, ACT_REVIEW)[0]!.body).toEqual({
       actionId: "reply",
       text: "Looks good to me",
     });
-    expect(screen.queryByRole("textbox")).toBeNull();
 
     pressUndo();
     await pass(0);
-    await pass(0);
 
-    expect(readUndoLine()).toMatch(/Already sent to /);
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Looks good to me");
+    expect(readUndoLine()).toMatch(/^Already sent to /);
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 });
 
@@ -339,5 +371,159 @@ describe("a selection", () => {
     expect(
       (callsTo(calls, "POST /api/v1/external-entities/dismiss")[0]!.body as { ids: string[] }).ids,
     ).toHaveLength(2);
+  });
+});
+
+describe("the asks and blocks of the thing before", () => {
+  it("get no answer from Return, and its blocks wait for the new thing's own read", async () => {
+    const detail = holdAnswer();
+    const { calls, user } = await open(undefined, {
+      [`GET /api/v1/external-entities/${LOYALTY.id}`]: detail.handler,
+      [`GET /api/v1/external-entities/${LOYALTY.id}/blocks`]: {
+        body: { blocks: [{ type: "text", markdown: "Loyalty blocks" }] },
+      },
+    });
+
+    await user.keyboard("j");
+    // The blocks of the new thing arrive while its record is still on its way.
+    await waitFor(() => {
+      expect(callsTo(calls, `GET /api/v1/external-entities/${LOYALTY.id}/blocks`)).toHaveLength(1);
+    });
+    await user.keyboard("{Enter}");
+
+    expect(document.querySelector(".ib-pane-content")?.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("Loyalty blocks")).toBeNull();
+    expect(readUndoLine()).not.toMatch(/Approve/);
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(0);
+
+    detail.answer({ body: buildFakeInboxDetail(LOYALTY) });
+    expect(await screen.findByText("Loyalty blocks")).toBeTruthy();
+  });
+});
+
+describe("Send again", () => {
+  it("keeps the saved answer when the answer is refused because the app is offline", async () => {
+    const { calls, live, user } = await open(undefined, {
+      [ACT_REVIEW]: { status: 409, body: buildErrorBody("invalid_state", "The source said no.") },
+    });
+    await user.keyboard("]");
+    await waitFor(() => {
+      expect(readCurrentAsk()).toBe("Mei asked for your review");
+    });
+    // Approve is the ask's suggested answer: Return holds it, and a failed send leaves it saved.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await pass(HOLD_MS);
+    await pass(0);
+    vi.useRealTimers();
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(1);
+    const failed = await screen.findByRole("alert");
+    expect(failed.textContent).toMatch(/was not sent to/);
+
+    act(() => {
+      live.drop();
+    });
+    await screen.findByText(/Offline/);
+    await user.click(screen.getByRole("button", { name: "Send again" }));
+
+    expect(readUndoLine()).toMatch(/^You are offline, so that was not done\./);
+    expect(screen.getByRole("alert").textContent).toMatch(/was not sent to/);
+    expect(screen.getByRole("button", { name: "Send again" })).toBeTruthy();
+  });
+});
+
+describe("an answer that fails after the user dismissed its thing", () => {
+  it("leaves the dismissal alone", async () => {
+    const markDone = holdAnswer();
+    const { calls, user } = await open(undefined, {
+      [MARK_DONE]: markDone.handler,
+      "POST /api/v1/external-entities/dismiss": { body: {} },
+    });
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(callsTo(calls, MARK_DONE)).toHaveLength(1);
+    });
+    // The answer moved on to the next thing: go back to this one and dismiss it.
+    await user.keyboard("k");
+    await user.keyboard("e");
+    await waitFor(() => {
+      expect(screen.getAllByRole("treeitem")).toHaveLength(2);
+    });
+
+    markDone.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "The source said no."),
+    });
+
+    await waitFor(() => {
+      expect(readUndoLine()).toMatch(/was not sent to/);
+    });
+    expect(screen.queryByRole("treeitem", { name: new RegExp(SLOTS.title) })).toBeNull();
+    expect(screen.getAllByRole("treeitem")).toHaveLength(2);
+  });
+});
+
+describe("O on a selection", () => {
+  it("opens nothing and says why", async () => {
+    const open$ = vi.spyOn(window, "open").mockReturnValue(null);
+    const { user } = await open();
+    await user.keyboard("{Shift>}j{/Shift}");
+    await within(document.getElementById("inbox-pane")!).findByText("2 things selected");
+
+    await user.keyboard("o");
+
+    expect(open$).not.toHaveBeenCalled();
+    expect(readUndoLine()).toMatch(/^O opens one thing\./);
+    open$.mockRestore();
+  });
+});
+
+describe("a folded current ask", () => {
+  const THIRD_ASK = buildThingId(203);
+  const THIRD_LINE = buildLine(
+    THIRD_ASK,
+    MENTION_KIND,
+    "Tessa mentioned you",
+    "2026-11-07T08:00:00.000Z",
+  );
+  const openWithThree = () =>
+    open(undefined, {
+      [`GET /api/v1/external-entities/${SLOTS.id}`]: () =>
+        withAsks(SLOTS, [REVIEW_LINE, MENTION_LINE, THIRD_LINE]),
+      [`GET /api/v1/signals/${THIRD_ASK}`]: { body: buildSignal(THIRD_ASK, MENTION_KIND, "Third") },
+    });
+  const foldCurrentAsk = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.keyboard("]");
+    await waitFor(() => {
+      expect(readCurrentAsk()).toBe("Mei asked for your review");
+    });
+    await user.click(document.querySelector(".sig.is-current-ask .sig-head")!);
+    expect(document.querySelectorAll(".sig.is-open")).toHaveLength(0);
+  };
+
+  it("is still where ] steps on from", async () => {
+    const { user } = await openWithThree();
+    await foldCurrentAsk(user);
+
+    await user.keyboard("]");
+
+    await waitFor(() => {
+      expect(readCurrentAsk()).toBe("Tessa mentioned you");
+    });
+    expect(document.querySelectorAll(".sig.is-open")).toHaveLength(1);
+  });
+
+  it("is unfolded by Return, which answers nothing yet", async () => {
+    const { calls, user } = await openWithThree();
+    await foldCurrentAsk(user);
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".sig.is-open")).toHaveLength(1);
+    });
+    expect(readCurrentAsk()).toBe("Mei asked for your review");
+    expect(readUndoLine()).not.toMatch(/Approve/);
+    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(0);
   });
 });

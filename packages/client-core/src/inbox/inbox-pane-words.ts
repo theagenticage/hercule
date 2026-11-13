@@ -45,7 +45,7 @@ export const describeAnswerSent = (sourceName: string): string => `Sent to ${sou
 
 /** Returns the line for Undo (⌘Z) after the answer was sent, which can no longer be taken back. */
 export const describeAnswerTooLate = (sourceName: string): string =>
-  `Already sent to ${sourceName}, so it can't be taken back here.`;
+  `Already sent to ${sourceName}, so it can’t be taken back here. Answer again on ${sourceName} if it needs changing.`;
 
 /** Returns the line for Undo (⌘Z) while the answer is on its way and delivery is not confirmed. */
 export const describeAnswerSending = (sourceName: string): string =>

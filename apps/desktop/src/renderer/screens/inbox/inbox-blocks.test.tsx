@@ -97,4 +97,21 @@ describe("InboxBlocks", () => {
     expect(container.querySelector(".bk-check pre")?.textContent).toBe("error: x");
     expect(screen.getByText("11 passed")).toBeTruthy();
   });
+
+  it("sums up a change's checks with the worst first", () => {
+    const { container } = draw([
+      {
+        type: "change",
+        from: "fix/retry",
+        to: "main",
+        files: 3,
+        additions: 40,
+        deletions: 2,
+        checks: { passed: 11, failed: 1, pending: 2 },
+      },
+    ]);
+    expect(container.querySelector(".bk-checks")?.textContent).toBe(
+      "1 failing, 2 pending, 11 passed",
+    );
+  });
 });

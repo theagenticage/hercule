@@ -258,6 +258,33 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".ib-row",
     nonTextParts: [],
   },
+  // The pane in the states the default capture does not show: a Sentry issue's blocks, the pane at its
+  // narrowest, a reply box with words in it, and a thing someone has. The held answer is left out: its
+  // undo line is gone in 8 seconds, and the page changes under the metrics' probes while it waits.
+  {
+    name: "inbox-sentry",
+    path: "inbox.html?state=sentry",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
+  {
+    name: "inbox-narrow",
+    path: "inbox.html?state=narrow",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
+  {
+    name: "inbox-reply",
+    path: "inbox.html?state=reply",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
+  {
+    name: "inbox-holder",
+    path: "inbox.html?state=holder",
+    contentSelector: ".ib-row",
+    nonTextParts: [],
+  },
   {
     name: "settings-appearance",
     path: "settings-appearance.html",

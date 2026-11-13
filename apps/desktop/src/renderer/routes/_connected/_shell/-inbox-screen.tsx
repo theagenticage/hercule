@@ -14,6 +14,7 @@ import type { InboxClause } from "@hercule/contract";
 import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { useQuietValue } from "../../../app/use-quiet-value";
+import { useStableCallback } from "../../../app/use-stable-callback";
 import { inboxCountQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
@@ -36,7 +37,12 @@ import { InboxListPart } from "./-inbox-list-part";
 import { useInboxAnswers } from "./-inbox-answers";
 import { useInboxMoves } from "./-inbox-moves";
 import { useInboxKeys } from "./-use-inbox-keys";
-import { InboxPaneHeadPart, InboxPanePart, type InboxPaneHandle } from "./-inbox-pane-part";
+import {
+  InboxPaneHeadPart,
+  InboxPanePart,
+  type InboxPaneHandle,
+  type InboxPaneMoves,
+} from "./-inbox-pane-part";
 import { InboxRailPart } from "./-inbox-rail-part";
 import { InboxSearchPart, type SearchTie } from "./-inbox-search-part";
 import {
@@ -246,7 +252,12 @@ export function InboxScreen({
         moves.goToTask();
         return;
       case "openAtSource":
-        moves.openAtSource();
+        // The pane shows the selection, not the current row, so O would open a thing the user is not looking at.
+        if (isShowingSelection) {
+          moves.say(
+            "O opens one thing. Press Esc to clear the selection, then O on the thing you want.",
+          );
+        } else moves.openAtSource();
         return;
       case "showArrivals":
         showNew();
@@ -287,6 +298,34 @@ export function InboxScreen({
     }
   };
   useInboxKeys(performKey);
+  // The pane's callbacks keep their identity, so a render of the screen that changed nothing in the pane leaves it alone.
+  const takeOnInPane = useStableCallback(() => {
+    moves.takeOn();
+  });
+  const dismissInPane = useStableCallback(() => {
+    moves.dismiss();
+  });
+  const goToTaskInPane = useStableCallback(() => {
+    moves.goToTask();
+  });
+  const goToInPane = useStableCallback((ref: string) => {
+    if (snapshot.rows.some((row) => row.ref === ref)) {
+      visit.select({ kind: "focus", ref });
+    } else moves.say("That thing is not in this list.");
+  });
+  const handOffInPane = useStableCallback(() => {
+    startHandOff(undefined);
+  });
+  const walkInPane = useStableCallback((ref: string) => {
+    visit.select({ kind: "focus", ref });
+  });
+  const paneMoves: InboxPaneMoves = {
+    onTakeOn: takeOnInPane,
+    onDismiss: dismissInPane,
+    onGoToTask: goToTaskInPane,
+    onGoTo: goToInPane,
+    onHandOff: handOffInPane,
+  };
   const rowActions: InboxRowActions = {
     onPick: (ref, modifiers) => {
       visit.select(
@@ -437,31 +476,9 @@ export function InboxScreen({
             isHandMenuOpen={handMenu !== null}
             savedQueryKinds={savedQueryKinds}
             answers={answers}
-            moves={{
-              onTakeOn: () => {
-                moves.takeOn();
-              },
-              onDismiss: () => {
-                moves.dismiss();
-              },
-              onGoToTask: () => {
-                moves.goToTask();
-              },
-              onGoTo: (ref) => {
-                if (snapshot.rows.some((row) => row.ref === ref)) {
-                  visit.select({ kind: "focus", ref });
-                } else moves.say("That thing is not in this list.");
-              },
-              onHandOff: () => {
-                startHandOff(undefined);
-              },
-            }}
-            onWalk={(ref) => {
-              visit.select({ kind: "focus", ref });
-            }}
-            onDismissSelection={() => {
-              moves.dismiss();
-            }}
+            moves={paneMoves}
+            onWalk={walkInPane}
+            onDismissSelection={dismissInPane}
           />
         )
       }

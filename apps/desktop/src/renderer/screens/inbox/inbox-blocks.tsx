@@ -166,9 +166,17 @@ function Message({
   );
 }
 
+/** Returns the summary of a change's checks, the worst first: "1 failing, 2 pending, 11 passed". */
+const describeChecks = (checks: NonNullable<ChangeBlock["checks"]>): string =>
+  [
+    ...(checks.failed > 0 ? [`${String(checks.failed)} failing`] : []),
+    ...(checks.pending > 0 ? [`${String(checks.pending)} pending`] : []),
+    ...(checks.passed > 0 ? [`${String(checks.passed)} passed`] : []),
+  ].join(", ");
+
 /** Renders a change: its branch pair, its size, and its checks' summary. */
 function ChangeBlockView({ block }: { readonly block: ChangeBlock }): JSX.Element {
-  const { checks } = block;
+  const checks = block.checks === undefined ? "" : describeChecks(block.checks);
   return (
     <section className="bk bk-change">
       <p className="bk-branch">
@@ -182,15 +190,7 @@ function ChangeBlockView({ block }: { readonly block: ChangeBlock }): JSX.Elemen
         <span className="ins">+{block.additions}</span>
         <span className="del">−{block.deletions}</span>
         {block.commits !== undefined && <span>{formatCount(block.commits, "commit")}</span>}
-        {checks !== undefined && (
-          <span className="bk-checks">
-            {[
-              `${formatCount(checks.passed, "check")} passed`,
-              ...(checks.failed > 0 ? [`${String(checks.failed)} failed`] : []),
-              ...(checks.pending > 0 ? [`${String(checks.pending)} pending`] : []),
-            ].join(" · ")}
-          </span>
-        )}
+        {checks !== "" && <span className="bk-checks">{checks}</span>}
       </p>
     </section>
   );

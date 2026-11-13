@@ -11,10 +11,10 @@ import {
   chooseCurrentAsk,
   describeAnswerFailure,
   describeInterruptedAnswer,
-  listPaneAsks,
   stepAsk,
+  type PaneAsks,
 } from "@hercule/client-core/inbox";
-import { DONE_ACTION_ID, type ExternalEntityDetail, type Signal } from "@hercule/contract";
+import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 import type { AccountScope } from "../../../app/account-scope";
 import type { PendingIntent } from "../../../app/pending-intents";
@@ -34,10 +34,13 @@ import type { InboxListRow } from "./-inbox-visit";
 export interface InboxPaneAsksHandle {
   /**
    * Presses the suggested answer of the current ask, or moves the focus to its
-   * first answer when it suggests none. Returns false when no ask is current.
+   * first answer when it suggests none. A folded current ask is unfolded
+   * instead, so the next press answers it. Returns false when no ask is
+   * current. Does nothing while the pane draws the thing before's asks or is
+   * not showing, because an answer must go to the thing the user sees.
    */
   readonly answerCurrentAsk: () => boolean;
-  /** Makes the ask before (`-1`) or after (`1`) the current one current. */
+  /** Makes the ask before (`-1`) or after (`1`) the current one current, and unfolds it. */
   readonly stepAsk: (by: -1 | 1) => void;
 }
 
@@ -103,14 +106,16 @@ const focusFirstAnswer = (): void => {
  * Renders the sections of the open asks of a thing and the line that counts
  * the asks it has no section for.
  *
- * Only the current ask is unfolded, and only it is read in full
- * (`signal.read`, for its blocks and answers). The current ask is the one the
- * user unfolded last for this thing (`chosenId`: `undefined` for none yet,
- * `null` for a fold that left none open), else the newest of the signal kinds
- * the saved query is about (`savedQueryKinds`), else the newest.
+ * The current ask is the one the user chose last for this thing (`chosenId`,
+ * `undefined` for none yet), else the newest of the signal kinds the saved
+ * query is about (`savedQueryKinds`), else the newest. It stays current when
+ * the user folds it (`isFolded`), so `[` and `]` step on from it. Only an
+ * unfolded current ask is drawn open and read in full (`signal.read`, for its
+ * blocks and answers).
  *
- * `isStale` is true while `detail` is the thing before's: nothing is read for
- * it then. `ref` receives the handle the keys use.
+ * `isStale` is true while `paneAsks` are the thing before's: nothing is read for
+ * it then, and no answer is given. `isActive` is false while the pane is not
+ * showing. `ref` receives the handle the keys use.
  *
  * Orchestrating: it owns the read of the current ask, and what becomes of the
  * answers given on it.
@@ -119,10 +124,12 @@ export function InboxPaneAsks({
   client,
   scope,
   thing,
-  detail,
+  paneAsks,
   isStale,
+  isActive,
   savedQueryKinds,
   chosenId,
+  isFolded,
   reply,
   sourceName,
   timezone,
@@ -136,10 +143,13 @@ export function InboxPaneAsks({
   readonly client: HerculeClient;
   readonly scope: AccountScope;
   readonly thing: InboxListRow;
-  readonly detail: ExternalEntityDetail;
+  /** The asks of the thing's record, which this part draws as sections. */
+  readonly paneAsks: PaneAsks;
   readonly isStale: boolean;
+  readonly isActive: boolean;
   readonly savedQueryKinds: readonly string[];
-  readonly chosenId: string | null | undefined;
+  readonly chosenId: string | undefined;
+  readonly isFolded: boolean;
   readonly reply: PaneReply | null;
   readonly sourceName: string;
   readonly timezone: string;
@@ -147,17 +157,19 @@ export function InboxPaneAsks({
   readonly platform: DesktopPlatform;
   readonly answers: InboxAnswers;
   readonly ref: Ref<InboxPaneAsksHandle>;
-  /** Makes the ask `signalId` current, or with `null` folds the open one so none is. */
-  readonly onChoose: (signalId: string | null) => void;
+  /** Makes the ask `signalId` current, folded or unfolded. */
+  readonly onChoose: (signalId: string, isFolded: boolean) => void;
   readonly onReplyChange: (reply: PaneReply | null) => void;
 }): JSX.Element | null {
-  const { sections, hiddenOpenCount } = listPaneAsks(detail);
-  const currentId =
-    chosenId === null ? undefined : chooseCurrentAsk(sections, savedQueryKinds, chosenId);
+  const { sections, hiddenOpenCount } = paneAsks;
+  const currentId = chooseCurrentAsk(sections, savedQueryKinds, chosenId);
+  const isCurrentOpen = currentId !== undefined && !isFolded;
   const read = useQuery({
     ...signalQuery(client, currentId ?? ""),
-    enabled: currentId !== undefined && !isStale,
+    enabled: isCurrentOpen && !isStale,
   });
+  // The answer a key gives goes to what the user sees: this thing, in a pane that shows.
+  const canAnswer = isActive && !isStale;
   const { store, intents } = usePendingIntents(scope);
   const signal = read.data;
   const held =
@@ -166,11 +178,10 @@ export function InboxPaneAsks({
   const asker = sections.find((line) => line.id === currentId)?.asker;
 
   /** Gives the answer `actionId` of the current ask, with the words typed for it. */
-  const answer = (actionId: string, text?: string): void => {
+  const answer = (actionId: string, text?: string): boolean => {
     const action = signal?.actions.find((each) => each.id === actionId);
-    if (signal === undefined || action === undefined) return;
-    onReplyChange(null);
-    answers.answer({
+    if (signal === undefined || action === undefined) return false;
+    const isAccepted = answers.answer({
       thing,
       signalId: signal.id,
       action,
@@ -181,10 +192,13 @@ export function InboxPaneAsks({
         text === undefined
           ? undefined
           : () => {
-              onChoose(signal.id);
+              onChoose(signal.id, false);
               onReplyChange({ signalId: signal.id, actionId, draft: text });
             },
     });
+    // A refused answer leaves the box open with its words.
+    if (isAccepted) onReplyChange(null);
+    return isAccepted;
   };
   const openReply = (actionId: string): void => {
     if (currentId === undefined) return;
@@ -198,7 +212,12 @@ export function InboxPaneAsks({
   useImperativeHandle(ref, () => ({
     answerCurrentAsk: () => {
       if (currentId === undefined) return false;
-      if (held !== undefined) return true;
+      if (!canAnswer) return true;
+      if (isFolded) {
+        onChoose(currentId, false);
+        return true;
+      }
+      if (held !== undefined || signal === undefined) return true;
       const suggested = findSuggestedAnswer(
         signalAnswers.filter((each) => each.workflowId === null),
       );
@@ -211,13 +230,12 @@ export function InboxPaneAsks({
     },
     stepAsk: (by) => {
       const next = stepAsk(sections, currentId, by);
-      if (next !== undefined) onChoose(next);
+      if (next !== undefined) onChoose(next, false);
     },
   }));
 
-  if (sections.length === 0 && hiddenOpenCount === 0) return null;
   const bodyOf = (id: string): AskSectionBody => {
-    if (id !== currentId) return { state: "reading" };
+    if (id !== currentId || isFolded) return { state: "reading" };
     if (signal === undefined) {
       return read.isError
         ? {
@@ -253,9 +271,9 @@ export function InboxPaneAsks({
         },
         onRetry: () => {
           if (held === undefined || !retryable || held.intent.kind !== "signal-answer") return;
-          const { actionId, text } = held.intent;
-          store.discard(held.intent.intentId);
-          answer(actionId, text);
+          const { actionId, text, intentId } = held.intent;
+          // The saved answer goes only once the new one was accepted: offline, it stays to be sent again.
+          if (answer(actionId, text)) store.discard(intentId);
         },
         onDiscard: () => {
           if (held !== undefined) store.discard(held.intent.intentId);
@@ -271,11 +289,11 @@ export function InboxPaneAsks({
           say={line.say.say}
           asker={line.asker}
           time={formatAge(line.createdAt, now)}
-          isOpen={line.id === currentId}
+          isOpen={line.id === currentId && !isFolded}
           isCurrent={line.id === currentId}
           body={bodyOf(line.id)}
           onToggle={() => {
-            onChoose(line.id === currentId ? null : line.id);
+            onChoose(line.id, line.id === currentId && !isFolded);
           }}
         />
       ))}

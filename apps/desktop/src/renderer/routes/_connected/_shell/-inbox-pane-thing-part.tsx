@@ -14,6 +14,7 @@ import {
   describeHolderStrip,
   describePaneMeta,
   findAccountLabel,
+  listPaneAsks,
   listPaneHistory,
   listPaneLinks,
   readHolder,
@@ -35,6 +36,9 @@ import { useInboxNow } from "./-inbox-clock";
 import { InboxPaneAsks, type InboxPaneAsksHandle, type PaneReply } from "./-inbox-pane-asks";
 import { useInboxPaneBlocks } from "./-use-inbox-pane-blocks";
 import type { InboxListRow } from "./-inbox-visit";
+
+/** The blocks slot while they are read. One shared object, so stepping from one loading thing to another leaves the slot as it is. */
+const LOADING_BLOCKS: InboxPaneBlocks = { state: "loading" };
 
 /** The moves of the open thing, which the screen decides what to do with. */
 export interface InboxPaneMoves {
@@ -72,6 +76,7 @@ export function InboxPaneThingPart({
   isHandMenuOpen,
   savedQueryKinds,
   chosenAskId,
+  isAskFolded,
   reply,
   answers,
   moves,
@@ -85,12 +90,13 @@ export function InboxPaneThingPart({
   readonly isActive: boolean;
   readonly isHandMenuOpen: boolean;
   readonly savedQueryKinds: readonly string[];
-  readonly chosenAskId: string | null | undefined;
+  readonly chosenAskId: string | undefined;
+  readonly isAskFolded: boolean;
   readonly reply: PaneReply | null;
   readonly answers: InboxAnswers;
   readonly moves: InboxPaneMoves;
   readonly asksRef: Ref<InboxPaneAsksHandle>;
-  readonly onChooseAsk: (signalId: string | null) => void;
+  readonly onChooseAsk: (signalId: string, isFolded: boolean) => void;
   readonly onReplyChange: (reply: PaneReply | null) => void;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
@@ -121,15 +127,22 @@ export function InboxPaneThingPart({
   const sourceName = namePlugin(thing.source, plugins);
   const holder = readHolder(thing, username);
   const holdingHeading = describeHolderStrip(thing);
-  const paneBlocks: InboxPaneBlocks =
-    blocks.data !== undefined
+  // While the thing before's record is drawn, its title must not carry this thing's blocks.
+  const paneAsks = listPaneAsks(record);
+  const hasAsks = paneAsks.sections.length > 0 || paneAsks.hiddenOpenCount > 0;
+  const paneBlocks: InboxPaneBlocks = isStale
+    ? LOADING_BLOCKS
+    : blocks.data !== undefined
       ? {
           state: "ready",
-          content: <InboxBlocks blocks={blocks.data.blocks} timezone={timezone} now={now} />,
+          content:
+            blocks.data.blocks.length === 0 ? null : (
+              <InboxBlocks blocks={blocks.data.blocks} timezone={timezone} now={now} />
+            ),
         }
       : blocks.isError
         ? { state: "failed", words: describeBlocksUnreadable(sourceName) }
-        : { state: "loading" };
+        : LOADING_BLOCKS;
   return (
     <div className="ib-pane-content" aria-busy={isStale ? "true" : undefined} inert={isStale}>
       <InboxPaneThing
@@ -143,29 +156,33 @@ export function InboxPaneThingPart({
           dismissalReturn: describeDismissalReturn(thing, now),
         })}
         holding={
-          holder === undefined || holdingHeading === undefined
+          holder === undefined || holdingHeading === undefined || thing.taskTitle === undefined
             ? undefined
-            : { holder, heading: holdingHeading, taskName: thing.title }
+            : { holder, heading: holdingHeading, taskName: thing.taskTitle }
         }
         asks={
-          <InboxPaneAsks
-            ref={asksRef}
-            client={client}
-            scope={scope}
-            thing={thing}
-            detail={record}
-            isStale={isStale}
-            savedQueryKinds={savedQueryKinds}
-            chosenId={chosenAskId}
-            reply={reply}
-            sourceName={sourceName}
-            timezone={timezone}
-            now={now}
-            platform={bridge.platform}
-            answers={answers}
-            onChoose={onChooseAsk}
-            onReplyChange={onReplyChange}
-          />
+          hasAsks ? (
+            <InboxPaneAsks
+              ref={asksRef}
+              client={client}
+              scope={scope}
+              thing={thing}
+              paneAsks={paneAsks}
+              isStale={isStale}
+              isActive={isActive}
+              savedQueryKinds={savedQueryKinds}
+              chosenId={chosenAskId}
+              isFolded={isAskFolded}
+              reply={reply}
+              sourceName={sourceName}
+              timezone={timezone}
+              now={now}
+              platform={bridge.platform}
+              answers={answers}
+              onChoose={onChooseAsk}
+              onReplyChange={onReplyChange}
+            />
+          ) : null
         }
         blocks={paneBlocks}
         links={listPaneLinks(record, plugins)}

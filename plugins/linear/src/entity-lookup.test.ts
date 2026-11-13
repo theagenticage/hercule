@@ -311,6 +311,8 @@ describe("reading the blocks of an issue", () => {
 
     const result = await runAgainstStub(readIssueBlocks(TEST_API_KEY, issueRef), fake);
 
+    // The creator's name is not what this test is about, only that the row is there.
+    const anyText: unknown = expect.any(String);
     expect(result).toEqual(
       Result.succeed([
         {
@@ -319,7 +321,7 @@ describe("reading the blocks of an issue", () => {
             { label: "Labels", value: "Bug, Checkout" },
             { label: "Due", value: "2026-11-21" },
             { label: "Estimate", value: "3" },
-            { label: "Creator", value: expect.any(String) },
+            { label: "Creator", value: anyText },
           ],
         },
         {

@@ -4,7 +4,8 @@
  *
  * - An answer that acts on the source (a plugin's action) is held for eight
  *   seconds with Undo (`holdWithUndo`) and then sent. Undo within the hold
- *   makes the thing current again. After the send, Undo says it is too late.
+ *   makes the thing current again, and opens a reply's box with its words.
+ *   After the send, Undo says it is too late and changes nothing.
  * - Any other answer, and Done, is sent at once. Done has no Undo anywhere in
  *   the app, so its line says that.
  * - Offline, an answer is refused like every other Inbox move.
@@ -39,14 +40,18 @@ export interface ThingAnswer {
   readonly sourceName: string;
   /** The asker's name, which a reply's line names. */
   readonly replyTo?: string | undefined;
-  /** Opens the reply box again with its words, when Undo comes after the reply was sent. The thing is made current first. */
+  /** Opens the reply box again with its words, when Undo takes the held reply back. */
   readonly reopenReply?: (() => void) | undefined;
 }
 
 /** What `useInboxAnswers` returns. */
 export interface InboxAnswers {
-  /** Gives the answer `request`: held and sent after eight seconds, or sent at once. */
-  readonly answer: (request: ThingAnswer) => void;
+  /**
+   * Gives the answer `request`: held and sent after eight seconds, or sent at
+   * once. Returns false, with the reason on the undo line, when the answer was
+   * refused and nothing happened.
+   */
+  readonly answer: (request: ThingAnswer) => boolean;
   /** Ends the ask `request.signalId` here with Done. The source is not told. */
   readonly markDone: (request: Omit<ThingAnswer, "action" | "text">) => void;
 }
@@ -146,15 +151,6 @@ export const useInboxAnswers = ({
           text: describeAnswerTooLate(sourceName),
           sendingText: describeAnswerSending(sourceName),
           sentLine: describeAnswerSent(sourceName),
-          // The answer moved the current row on, so the thing is made current again to show its box.
-          ...(request.reopenReply === undefined
-            ? {}
-            : {
-                run: () => {
-                  visit.select({ kind: "focus", ref: thing.ref });
-                  request.reopenReply?.();
-                },
-              }),
         },
       },
     );
@@ -165,9 +161,12 @@ export const useInboxAnswers = ({
         visit.confirmMove(receipt);
         return;
       }
-      // Cancelled by Undo: the thing is current again. Failed: it is back with its reason in the ask.
-      if (progress === "cancelled") visit.undo(receipt);
-      else visit.failMove(receipt);
+      // Cancelled by Undo: the thing is current again and a reply's box opens with its words.
+      // Failed: the thing is back with its reason in the ask.
+      if (progress === "cancelled") {
+        visit.undo(receipt);
+        request.reopenReply?.();
+      } else visit.failMove(receipt);
       moves.tellMoved();
     });
   };
@@ -176,12 +175,12 @@ export const useInboxAnswers = ({
     answer: (request) => {
       if (isOffline) {
         moves.say(REFUSED_OFFLINE);
-        return;
+        return false;
       }
       const label = trimAnswerEllipsis(request.action.label);
       if (isAnswerHeld(request.action)) {
         hold(request, label);
-        return;
+        return true;
       }
       sendNow(
         request,
@@ -196,6 +195,7 @@ export const useInboxAnswers = ({
           }),
         undefined,
       );
+      return true;
     },
     markDone: (request) => {
       if (isOffline) {

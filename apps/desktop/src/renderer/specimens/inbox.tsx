@@ -4,10 +4,12 @@
  * `capture:ui` captures it and `ui:metrics` measures it.
  *
  * The page takes its state from `?state=<name>`, one of `INBOX_SCENES`:
- * `waits` (the default), `browse`, `search`, `empty`, `zero`, `loading`,
- * `offline`, `failing`, `selection`, `narrow`, `narrow-menu`, `width-1280`,
- * `width-1024` and `stacked-880`. Its theme comes from `?theme=` and its glass
- * from `?glass=`, as for every specimen.
+ * `waits` (the default, with pull request #6244 open in the pane), `browse`,
+ * `search`, `empty`, `zero`, `loading`, `offline`, `failing`, `selection`,
+ * `narrow` (a 360px pane), `pane-440`, `narrow-menu`, `width-1280`,
+ * `width-1024`, `stacked-880`, and the pane's other states: `blocks-failed`,
+ * `sentry`, `second-ask`, `reply`, `held`, `holder` and `returned`. Its theme
+ * comes from `?theme=` and its glass from `?glass=`, as for every specimen.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.

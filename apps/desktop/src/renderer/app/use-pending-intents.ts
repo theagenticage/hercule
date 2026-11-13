@@ -56,8 +56,7 @@ interface UndoLineForIntent {
   /**
    * Keeps the gesture on the undo stack once the intent is on its way, so the
    * next Undo reaches it and answers `text` (which says it cannot be taken
-   * back) instead of reversing an older gesture. `run` is called then too,
-   * such as to open a reply box again with its words. The undo line stays up
+   * back) instead of reversing an older gesture. The undo line stays up
    * while the intent waits and sends, then says `sentLine` without Undo.
    * Without `afterSending`, the gesture leaves the stack when the intent
    * starts `sending`, and the line runs on its own timer.
@@ -68,7 +67,6 @@ interface UndoLineForIntent {
     /** What Undo answers while the send is under way and delivery is not confirmed. */
     readonly sendingText: string;
     readonly sentLine: string;
-    readonly run?: () => void;
   };
 }
 
@@ -110,7 +108,6 @@ export const holdWithUndo = (
       if (afterSending === undefined) return Promise.reject(new Error("It was already sent."));
       // While sending, delivery is unconfirmed: say so and leave the reply box alone.
       if (progress === "sending") return Promise.resolve({ text: afterSending.sendingText });
-      afterSending.run?.();
       return Promise.resolve({ text: afterSending.text });
     },
   });

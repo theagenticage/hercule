@@ -150,6 +150,7 @@ export function InboxPaneThing({
   readonly onGoTo: (ref: string) => void;
 }): JSX.Element {
   const hasAsks = asks !== null && asks !== undefined && asks !== false;
+  const drawnMeta = meta.filter(isDrawnMetaItem);
   return (
     <div className="ib-pane-scroll">
       <h2 ref={titleRef} className="ib-pane-title" tabIndex={-1}>
@@ -161,22 +162,24 @@ export function InboxPaneThing({
           </>
         )}
       </h2>
-      <p className="ib-pane-meta">
-        {meta.filter(isDrawnMetaItem).map((item, index) => (
-          <span key={index}>
-            {item.kind === "status" ? (
-              <>
-                <EntityStatusIcon status={item.status} size={14} />
-                {item.status.label}
-              </>
-            ) : item.kind === "fact" ? (
-              <CardFactText fact={item.fact} />
-            ) : (
-              item.words
-            )}
-          </span>
-        ))}
-      </p>
+      {drawnMeta.length > 0 && (
+        <p className="ib-pane-meta">
+          {drawnMeta.map((item, index) => (
+            <span key={index}>
+              {item.kind === "status" ? (
+                <>
+                  <EntityStatusIcon status={item.status} size={14} />
+                  {item.status.label}
+                </>
+              ) : item.kind === "fact" ? (
+                <CardFactText fact={item.fact} />
+              ) : (
+                item.words
+              )}
+            </span>
+          ))}
+        </p>
+      )}
       {holding === undefined ? null : <InboxPaneHeld holding={holding} onGoToTask={onGoToTask} />}
       {hasAsks && <div className="ib-pane-asks">{asks}</div>}
       <InboxPaneBlockSlot blocks={blocks} />

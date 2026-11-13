@@ -38,7 +38,7 @@ describe("the sent, too late and failed lines", () => {
   it("name the source they were given", () => {
     expect(describeAnswerSent("Linear")).toBe("Sent to Linear.");
     expect(describeAnswerTooLate("Linear")).toBe(
-      "Already sent to Linear, so it can't be taken back here.",
+      "Already sent to Linear, so it can’t be taken back here. Answer again on Linear if it needs changing.",
     );
     expect(describeAnswerSending("Linear")).toBe(
       "It is being sent to Linear, so it can't be taken back here.",

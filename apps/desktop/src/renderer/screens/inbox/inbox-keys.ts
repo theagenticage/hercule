@@ -75,8 +75,8 @@ export interface InboxKeyPress {
   readonly isOnControl: boolean;
 }
 
-/** The moves that never repeat: a held key must not dismiss a row after row. */
-const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x"]);
+/** The moves that never repeat: a held key must not dismiss a row after row, nor Return answer a thing after thing. */
+const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x", "enter"]);
 
 /** The saved queries that have a digit: 1 to 7. The eighth place in the drawing is Triage, which is not built. */
 const LIST_DIGITS = /^[1-7]$/;

@@ -130,8 +130,10 @@ export function InboxPanePart({
   readonly onWalk: (ref: string) => void;
   readonly onDismissSelection: () => void;
 }): JSX.Element {
-  // The ask the user unfolded last for each thing; `null` is a fold that left none open.
-  const [chosenAsks, setChosenAsks] = useState<ReadonlyMap<string, string | null>>(new Map());
+  // The ask the user chose last for each thing, and whether they folded it.
+  const [chosenAsks, setChosenAsks] = useState<
+    ReadonlyMap<string, { readonly signalId: string; readonly isFolded: boolean }>
+  >(new Map());
   const [reply, setReply] = useState<PaneReply | null>(null);
   const asksRef = useRef<InboxPaneAsksHandle>(null);
   useImperativeHandle(ref, () => ({
@@ -166,13 +168,14 @@ export function InboxPanePart({
       isActive={isActive}
       isHandMenuOpen={isHandMenuOpen}
       savedQueryKinds={savedQueryKinds}
-      chosenAskId={chosenAsks.get(thing.id)}
+      chosenAskId={chosenAsks.get(thing.id)?.signalId}
+      isAskFolded={chosenAsks.get(thing.id)?.isFolded ?? false}
       reply={reply}
       answers={answers}
       moves={moves}
       asksRef={asksRef}
-      onChooseAsk={(signalId) => {
-        setChosenAsks((before) => new Map(before).set(thing.id, signalId));
+      onChooseAsk={(signalId, isFolded) => {
+        setChosenAsks((before) => new Map(before).set(thing.id, { signalId, isFolded }));
       }}
       onReplyChange={setReply}
     />

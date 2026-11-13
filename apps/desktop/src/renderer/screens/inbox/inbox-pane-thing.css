@@ -105,6 +105,10 @@
   font-size: var(--t-12);
   line-height: 16px;
 }
+/* The line that stands for blocks that could not be read keeps the blocks' distance from the asks. */
+.ib-pane-blocks.ib-pane-blocks-note {
+  margin-top: 24px;
+}
 /* The blocks' shapes while they are read, still like the other loading shapes. */
 .ib-pane-blocks-skel {
   display: flex;

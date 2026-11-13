@@ -100,6 +100,9 @@ describe("decideInboxKeyAction", () => {
 
   it("never repeats a move while a key is held, but walks while J is held", () => {
     expect(decide("e", "list", { repeat: true })).toBeNull();
+    // Holding Return must not answer one thing after another.
+    expect(decide("Enter", "list", { repeat: true })).toBeNull();
+    expect(decide("Enter", "list")).toBe("activate");
     expect(decide("j", "list", { repeat: true })).toBe("step");
   });
 

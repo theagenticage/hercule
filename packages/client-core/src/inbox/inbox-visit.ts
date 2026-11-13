@@ -209,6 +209,8 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   const rowReads = new Set<Read>();
   /** The list each move was made in, by receipt id, so an undo can find its list again. */
   const receiptQueries = new Map<number, Query>();
+  /** The ids of the moves that handled each row, oldest first, until the move is put back. */
+  const claims = new Map<string, number[]>();
   let isShowPending = false;
   let lastChange: InboxVisitChange | null = null;
   const listeners = new Set<() => void>();
@@ -416,12 +418,39 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   }
 
   /**
+   * Returns `receipt` with only the rows no later move has handled since, and
+   * takes the receipt out of the claims. A move that fails or is undone late
+   * must not reverse what the user did to the same row after it: an answer that
+   * failed after its row was dismissed leaves the dismissal alone.
+   */
+  function narrowToOwnedRows(receipt: MoveReceipt<Row>): MoveReceipt<Row> {
+    const owned = receipt.refs.filter(
+      (ref) => !(claims.get(ref) ?? []).some((id) => id > receipt.id),
+    );
+    for (const ref of receipt.refs) {
+      claims.set(
+        ref,
+        (claims.get(ref) ?? []).filter((id) => id !== receipt.id),
+      );
+    }
+    if (owned.length === receipt.refs.length) return receipt;
+    const isOwned = new Set(owned);
+    return {
+      ...receipt,
+      refs: owned,
+      entries: receipt.entries.filter((e) => isOwned.has(e.row.ref)),
+    };
+  }
+
+  /**
    * Puts a move back and reads the restored rows afresh when they are in view.
    * A receipt of an earlier visit still applies when the list shown now is the
    * same list (same query): the controller took the move back for that list.
    */
-  function putBack(receipt: MoveReceipt<Row>): void {
+  function putBack(wholeReceipt: MoveReceipt<Row>): void {
     if (state === null) return;
+    const receipt = narrowToOwnedRows(wholeReceipt);
+    if (receipt.refs.length === 0) return;
     const madeIn = receiptQueries.get(receipt.id);
     const isSameList = madeIn !== undefined && replaceEqualDeep(madeIn, state.query) === madeIn;
     if (receipt.visit !== visitId && !isSameList) return;
@@ -469,6 +498,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       const emptied =
         kind === "dismissed" && applied.state.rows.length === 0 && before.rows.length > 0;
       receiptQueries.set(id, before.query);
+      for (const ref of applied.receipt.refs) claims.set(ref, [...(claims.get(ref) ?? []), id]);
       setState(applied.state, {
         kind: emptied ? "emptied-by-move" : kind,
         refs: applied.receipt.refs,

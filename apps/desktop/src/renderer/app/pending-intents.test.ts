@@ -617,9 +617,8 @@ describe("holding with the undo line", () => {
     expect(stub.send).not.toHaveBeenCalled();
   });
 
-  it("keeps the gesture after sending, and Undo then says it was already sent and runs the action", async () => {
+  it("keeps the gesture after sending, and Undo then says it was already sent", async () => {
     const { stub, store, sayWithUndo, isOnStack, undo } = setUp();
-    const reopen = vi.fn();
     holdWithUndo(store, SIGNAL_ANSWER, {
       sayWithUndo,
       line: "Replied.",
@@ -628,7 +627,6 @@ describe("holding with the undo line", () => {
         text: "Already sent to GitHub.",
         sentLine: "Sent to GitHub.",
         sendingText: "Still being sent.",
-        run: reopen,
       },
     });
 
@@ -638,12 +636,10 @@ describe("holding with the undo line", () => {
     expect(isOnStack()).toBe(true);
 
     await expect(undo()).resolves.toEqual({ text: "Already sent to GitHub." });
-    expect(reopen).toHaveBeenCalledTimes(1);
   });
 
-  it("says it is still being sent, and leaves the reply box alone, when undone while sending", async () => {
+  it("says it is still being sent when undone while sending", async () => {
     const { store, sayWithUndo, undo } = setUp();
-    const reopen = vi.fn();
     holdWithUndo(store, SIGNAL_ANSWER, {
       sayWithUndo,
       line: "Replied.",
@@ -652,13 +648,11 @@ describe("holding with the undo line", () => {
         text: "Already sent.",
         sendingText: "Still being sent.",
         sentLine: "Sent.",
-        run: reopen,
       },
     });
     await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
 
     await expect(undo()).resolves.toEqual({ text: "Still being sent." });
-    expect(reopen).not.toHaveBeenCalled();
   });
 
   it("takes the gesture off the stack when the send fails", async () => {

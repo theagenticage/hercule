@@ -157,7 +157,8 @@
   border-radius: var(--r-sm);
   background: var(--sunken);
 }
-.bk-change code {
+/* More specific than `.bk :not(pre) > code`, which pads every other inline code. */
+.bk-change .bk-branch code {
   padding: 0;
   background: none;
 }
