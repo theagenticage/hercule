@@ -28,8 +28,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isMutationRunning, queryKeys } from "@hercule/client-core";
 import {
+  OFFLINE_MOVE_REFUSAL,
   buildThingsDraftKey,
-  describeOfflineSendRefusal,
   describeThreadStartError,
 } from "@hercule/client-core/inbox";
 import type { SavedController } from "../../../app/context";
@@ -42,12 +42,7 @@ import {
 } from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { rememberRecentModel } from "../../../app/recent-models";
-import {
-  buildThreadStartDraft,
-  isWorthKeeping,
-  type SentThread,
-  type ThreadStartDrafts,
-} from "../../../app/thread-start-drafts";
+import type { SentThread, ThreadStartDrafts } from "../../../app/thread-start-drafts";
 import type { InboxMoves } from "./-inbox-moves";
 import {
   InboxThreadDialog,
@@ -58,6 +53,10 @@ import type { InboxListSnapshot, InboxListVisit } from "./-inbox-visit";
 
 /** The key every start of a thread runs under, so a second press while one is on its way sends nothing. */
 const START_KEY = ["inbox-thread-start"];
+
+/** Loads the transcript's code, which the Inbox's chunk leaves out until a thread has started. */
+const loadThreadFirstMoments = (): Promise<unknown> =>
+  import("../../../screens/thread/thread-first-moments");
 
 const WORDS_KEPT = "Your words are kept. N on the same things opens them again.";
 
@@ -160,10 +159,13 @@ export function useInboxThread({
         openThread(session.id);
       });
       if (latest.current.openKey === sent.draftKey) {
-        // The started dialog measures the transcript as it appears, so its reads are in the
-        // cache first. When they fail, the transcript shows its own state rather than the
-        // dialog waiting.
-        await ensureThreadData(queryClient, client, session.id).catch(() => undefined);
+        // The started dialog measures the transcript as it appears, so its reads and its code
+        // are loaded first. When the reads fail, the transcript shows its own state rather
+        // than the dialog waiting.
+        await Promise.all([
+          ensureThreadData(queryClient, client, session.id).catch(() => undefined),
+          loadThreadFirstMoments(),
+        ]);
         if (!scope.isCurrent()) return;
       }
       if (latest.current.openKey === sent.draftKey) {
@@ -175,7 +177,7 @@ export function useInboxThread({
           thingCount: sent.things.length,
         });
       } else {
-        drafts.drop(sent.draftKey);
+        drafts.finish(sent.draftKey);
       }
     },
     // Kept in the draft rather than read from the mutation, so it shows also
@@ -183,8 +185,7 @@ export function useInboxThread({
     onError: (error, sent) => {
       if (!scope.isCurrent()) return;
       const failure = describeThreadStartError(sent.title, error);
-      const current = drafts.read(sent.draftKey);
-      if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure });
+      drafts.recordFailure(sent.draftKey, failure);
       // A closed dialog shows nothing, so the undo line says it.
       if (latest.current.openKey !== sent.draftKey) latest.current.moves.say(failure);
     },
@@ -207,7 +208,7 @@ export function useInboxThread({
       ]).then(
         () => {
           if (!scope.isCurrent()) return;
-          if (drafts.read(key) === undefined) drafts.write(key, buildThreadStartDraft(things));
+          drafts.open(key, things);
           setStarted(null);
           setOpenKey(key);
         },
@@ -224,43 +225,32 @@ export function useInboxThread({
     [client, drafts, queryClient, scope],
   );
 
-  /** Keeps the draft at `key` when it was changed or sent, else drops it. */
-  const settleDraft = useCallback(
-    (key: string): void => {
-      const current = drafts.read(key);
-      if (current === undefined) return;
-      if (latest.current.started !== null) {
-        drafts.drop(key);
-      } else if (isMutationRunning(queryClient, START_KEY)) {
-        // The start decides: success drops the draft and failure keeps it with its message.
-      } else if (isWorthKeeping(current)) {
-        latest.current.moves.say(WORDS_KEPT);
-      } else {
-        drafts.drop(key);
-      }
-    },
-    [drafts, queryClient],
-  );
-
   const close = useCallback((): void => {
     const { openKey: key, onClosed: tellClosed } = latest.current;
-    if (key !== null) settleDraft(key);
+    if (
+      key !== null &&
+      drafts.settle(key, {
+        isStarting: isMutationRunning(queryClient, START_KEY),
+        hasStarted: latest.current.started !== null,
+      })
+    ) {
+      latest.current.moves.say(WORDS_KEPT);
+    }
     setOpenKey(null);
     setStarted(null);
     isOpening.current = false;
     const snapshot = visit.getSnapshot();
     if (snapshot.rows.length === 0) taken.current = null;
     tellClosed(snapshot);
-  }, [settleDraft, visit]);
+  }, [drafts, queryClient, visit]);
 
   const send = useCallback(
     (sent: SentThread): void => {
       if (isMutationRunning(queryClient, START_KEY)) return;
-      const current = drafts.read(sent.draftKey);
       // The connection may have dropped since the dialog opened.
-      const offline = describeOfflineSendRefusal(latest.current.isOffline);
-      if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure: offline });
-      if (offline === null) startThread(sent);
+      const { isOffline: offline } = latest.current;
+      drafts.recordFailure(sent.draftKey, offline ? OFFLINE_MOVE_REFUSAL : null);
+      if (!offline) startThread(sent);
     },
     [drafts, queryClient, startThread],
   );
@@ -288,7 +278,7 @@ export function useInboxThread({
   useEffect(
     () => () => {
       const { openKey: key, started: wasStarted } = latest.current;
-      if (key !== null && wasStarted !== null) drafts.drop(key);
+      if (key !== null && wasStarted !== null) drafts.finish(key);
     },
     [drafts],
   );

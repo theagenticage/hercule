@@ -1,5 +1,6 @@
 import type { JSX, ReactNode, Ref } from "react";
 import {
+  buildComposerPlaceholder,
   formatAccessMode,
   setWorkspaceStartingRevision,
   type DraftView,
@@ -117,13 +118,11 @@ export interface DraftPickReasons {
 export function DraftComposer({
   view,
   text,
-  placeholder,
   canSend,
   error,
   notice,
   attachments,
   skills,
-  runnerId,
   readRecent,
   fieldRef,
   aboveField,
@@ -140,7 +139,6 @@ export function DraftComposer({
 }: {
   readonly view: DraftView;
   readonly text: string;
-  readonly placeholder: string;
   readonly canSend: boolean;
   /** The failed start's message, shown under the row, or `null`. */
   readonly error: string | null;
@@ -148,12 +146,6 @@ export function DraftComposer({
   readonly attachments: ComposerAttachments;
   /** The skills the draft would have, which the message field offers. */
   readonly skills: ComposerSkills;
-  /**
-   * The machine the user picked, or the one the workspace it joins decides;
-   * `null` while any machine will do. The model menu dims an entry by this
-   * machine, not by the one the draft would be placed on by default.
-   */
-  readonly runnerId: string | null;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
@@ -191,6 +183,16 @@ export function DraftComposer({
 }): JSX.Element {
   const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel } = view;
   const offReason = picksOffReason ?? null;
+  const placeholder = buildComposerPlaceholder({
+    readOnly: null,
+    busy: false,
+    active: false,
+    pick: fields.workspace.value,
+    workspaces: catalogs.workspaces,
+  });
+  // The machine the user picked, or the one the workspace it joins decides, never the one the
+  // draft would be placed on by default: the model menu must not dim entries by that one.
+  const runnerId = resolved.menuRunnerId;
   const { problem } = fields.machine;
   const signIn = problem?.signIn ?? null;
   const machinePick = (

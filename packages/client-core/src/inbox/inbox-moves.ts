@@ -57,7 +57,9 @@ const describeWhoHasItMidSentence = (
   return holder?.kind === "colleague" ? `${holder.name} has` : "you have";
 };
 
-const OFFLINE = "You are offline, so that was not done. Try again when the connection is back.";
+/** The refusal every Inbox move gives while the connection is down. */
+export const OFFLINE_MOVE_REFUSAL =
+  "You are offline, so that was not done. Try again when the connection is back.";
 
 /**
  * Decides whether `move` may be made on `things`, the things the move was
@@ -87,7 +89,7 @@ export const planInboxMove = ({
   readonly isOffline: boolean;
   readonly offers: CardOffers;
 }): InboxMovePlan => {
-  if (isOffline && move !== "goToTask") return refuse(OFFLINE);
+  if (isOffline && move !== "goToTask") return refuse(OFFLINE_MOVE_REFUSAL);
   const [thing] = things;
   const isOne = things.length === 1 && thing !== undefined;
   switch (move) {

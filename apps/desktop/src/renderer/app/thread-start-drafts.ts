@@ -76,7 +76,7 @@ export interface ThreadStartDraft {
  * Returns the draft of a dialog that opens on `things`: the first thing's
  * name as the Task's name, and the default starter's words.
  */
-export const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStartDraft => ({
+const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStartDraft => ({
   things,
   title: things[0]?.title ?? "",
   text: writeStarterMessage(DEFAULT_THREAD_STARTER, things),
@@ -94,17 +94,56 @@ export const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStar
  * change, because the controller may have made the thread while the answer was
  * lost, and only a retry with the same dedup key finds it again.
  */
-export const isWorthKeeping = (draft: ThreadStartDraft): boolean =>
+const isWorthKeeping = (draft: ThreadStartDraft): boolean =>
   draft.isEdited || draft.attempt !== undefined || draft.failure !== null;
 
-/** The unsent dialogs of one account scope, by `buildThingsDraftKey`. */
+/** What the user can change in a draft: the words, the name, the chips, the project and the picks. */
+export type ThreadStartDraftEdit = Partial<
+  Pick<ThreadStartDraft, "things" | "title" | "text" | "starter" | "chosenProject" | "picks">
+>;
+
+/**
+ * The unsent dialogs of one account scope, by `buildThingsDraftKey`. Every
+ * change to a draft is a verb here, so the rules of its life (when a send
+ * attempt is voided, when a draft is kept) are in one place. A verb on a key
+ * that holds no draft does nothing.
+ */
 export interface ThreadStartDrafts {
   /** Returns the draft at `key`, or `undefined`. The same object comes back until the next change at `key`. */
   readonly read: (key: string) => ThreadStartDraft | undefined;
-  /** Replaces the draft at `key`. */
-  readonly write: (key: string, draft: ThreadStartDraft) => void;
-  /** Removes the draft at `key`. Does nothing when there is none. */
-  readonly drop: (key: string) => void;
+  /** Creates the draft at `key` for `things` when there is none. An existing draft stays as it is. */
+  readonly open: (key: string, things: readonly InboxThing[]) => void;
+  /**
+   * Applies what the user changed. The draft is then no longer the one a send
+   * was made from, so its `attempt` (and its dedup key) goes, and it counts as
+   * edited. A change that is not in `patch`, such as an attached image, passes
+   * `{}`. With `answersFailure`, the failed send's message goes too, for a
+   * change that answers it.
+   */
+  readonly edit: (
+    key: string,
+    patch: ThreadStartDraftEdit,
+    options?: { readonly answersFailure?: boolean },
+  ) => void;
+  /** Records the request being sent, so "Try again" sends it as it is. */
+  readonly recordAttempt: (key: string, sent: SentThread) => void;
+  /** Records why the last send failed, or `null` for no failure. */
+  readonly recordFailure: (key: string, failure: string | null) => void;
+  /**
+   * Decides what becomes of the draft at `key` when its dialog closes, and
+   * returns whether its words were kept for the user to open again.
+   * - Once the thread started (`hasStarted`), the draft goes.
+   * - While a send is on its way (`isStarting`), it stays: success finishes it
+   *   and failure records its message.
+   * - A draft worth keeping stays, see `ThreadStartDraft.isEdited` and `attempt`.
+   * - Any other draft goes.
+   */
+  readonly settle: (
+    key: string,
+    state: { readonly isStarting: boolean; readonly hasStarted: boolean },
+  ) => boolean;
+  /** Removes the draft at `key`, because its thread started or its dialog ended. */
+  readonly finish: (key: string) => void;
   /** Removes every draft, as sign-out does. */
   readonly clear: () => void;
   /** Calls `listener` after every change, until the returned function is called. */
@@ -118,15 +157,51 @@ export const createThreadStartDrafts = (): ThreadStartDrafts => {
   const tell = (): void => {
     for (const listener of listeners) listener();
   };
+  /** Replaces the draft at `key` by `change` of it, when there is one. */
+  const update = (key: string, change: (draft: ThreadStartDraft) => ThreadStartDraft): void => {
+    const draft = drafts.get(key);
+    if (draft === undefined) return;
+    drafts.set(key, change(draft));
+    tell();
+  };
+  const finish = (key: string): void => {
+    if (drafts.delete(key)) tell();
+  };
   return {
     read: (key) => drafts.get(key),
-    write: (key, draft) => {
-      drafts.set(key, draft);
+    open: (key, things) => {
+      if (drafts.has(key)) return;
+      drafts.set(key, buildThreadStartDraft(things));
       tell();
     },
-    drop: (key) => {
-      if (drafts.delete(key)) tell();
+    edit: (key, patch, options) => {
+      update(key, (draft) => ({
+        ...draft,
+        ...patch,
+        attempt: undefined,
+        isEdited: true,
+        ...(options?.answersFailure === true ? { failure: null } : {}),
+      }));
     },
+    recordAttempt: (key, sent) => {
+      update(key, (draft) => ({ ...draft, attempt: sent }));
+    },
+    recordFailure: (key, failure) => {
+      update(key, (draft) => ({ ...draft, failure }));
+    },
+    settle: (key, { isStarting, hasStarted }) => {
+      const draft = drafts.get(key);
+      if (draft === undefined) return false;
+      if (hasStarted) {
+        finish(key);
+        return false;
+      }
+      if (isStarting) return false;
+      if (isWorthKeeping(draft)) return true;
+      finish(key);
+      return false;
+    },
+    finish,
     clear: () => {
       drafts.clear();
       tell();

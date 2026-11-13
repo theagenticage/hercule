@@ -13,13 +13,7 @@
  *   the transcript's, and the message rises from where the composer was.
  */
 import { animateValue, buildSpringCurve, isMotionReduced } from "../../app/motion";
-
-/**
- * The attribute that marks the user's first message in the transcript. The
- * start animation lifts that element from where the composer was to where it
- * now sits. A transcript with no such element fades in as a whole instead.
- */
-export const FIRST_MESSAGE_ATTRIBUTE = "data-first-message";
+import { FIRST_MESSAGE_ATTRIBUTE } from "../thread/transcript";
 
 const SCRIM_FADE_IN_MS = 220;
 const SCRIM_FADE_OUT_MS = 180;

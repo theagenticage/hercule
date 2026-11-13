@@ -9,7 +9,6 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   appendToMessage,
   applyThreadChoice,
-  buildComposerPlaceholder,
   buildRecentModel,
   buildSubmission,
   findDraftSubject,
@@ -295,13 +294,6 @@ export function DraftScreen({
           <DraftComposer
             view={view}
             text={pending.message.text}
-            placeholder={buildComposerPlaceholder({
-              readOnly: null,
-              busy: false,
-              active: false,
-              pick: workspace,
-              workspaces,
-            })}
             canSend={canSend}
             error={
               pending.failure ??
@@ -310,10 +302,6 @@ export function DraftScreen({
             notice={images.notice}
             attachments={images.attachments}
             skills={skills}
-            // The machine the user picked, or the joined workspace's; never the
-            // one the draft would be placed on by default, which the menu must
-            // not dim entries by.
-            runnerId={view.resolved.menuRunnerId}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
             onSignIn={setSignIn}

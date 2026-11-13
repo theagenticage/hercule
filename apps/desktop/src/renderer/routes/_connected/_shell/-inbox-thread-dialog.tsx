@@ -3,33 +3,24 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { useRouteContext } from "@tanstack/react-router";
 import {
   applyThreadChoice,
-  buildComposerPlaceholder,
-  buildDraftView,
   buildOptionsLabel,
   buildRecentModel,
   buildSubmission,
-  formatAccessMode,
   formatRepoName,
-  holdsMessageContent,
-  joinPhraseText,
   listProjectRepos,
   queryKeys,
   readErrorMessage,
+  type DraftView,
   type SignInTarget,
   type ThreadChoice,
-  type ThreadPicks,
 } from "@hercule/client-core";
 import {
   THREAD_STARTERS,
   buildPicksForProjectChoice,
-  buildPicksUnderChoice,
   buildThingsPromptText,
-  decideEvidenceWorkspacePick,
-  describePickReason,
-  describeProjectChoice,
-  hasProjectPick,
+  buildThreadStartView,
   writeStarterMessage,
-  type ProjectChoice,
+  type ProjectLookup,
   type ThreadStarter,
 } from "@hercule/client-core/inbox";
 import type { Workspace } from "@hercule/contract";
@@ -41,6 +32,7 @@ import { readRecentModels } from "../../../app/recent-models";
 import type {
   SentThread,
   ThreadStartDraft,
+  ThreadStartDraftEdit,
   ThreadStartDrafts,
 } from "../../../app/thread-start-drafts";
 import { buildLook } from "../../../faces";
@@ -51,11 +43,14 @@ import { pickProjectTint } from "../../../screens/project-tile";
 import { useSendOnMenuCommand } from "../../../screens/session/send-key";
 import { ThreadDialog } from "../../../screens/inbox/thread-dialog";
 import { ThingChips } from "../../../screens/inbox/thread-dialog-chips";
-import {
-  ProjectPick,
-  type ProjectPickValue,
-} from "../../../screens/inbox/thread-dialog-project-pick";
-import { ThreadFirstMoments } from "../../../screens/thread/thread-first-moments";
+import { ProjectPick } from "../../../screens/inbox/thread-dialog-project-pick";
+
+// The transcript is loaded when a thread has started, which the Inbox's own chunk leaves out.
+const ThreadFirstMoments = lazy(() =>
+  import("../../../screens/thread/thread-first-moments").then((module) => ({
+    default: module.ThreadFirstMoments,
+  })),
+);
 
 // The sign-in dialog is loaded the first time Sign in opens it (spec 17 §Performance).
 const ProviderLoginDialog = lazy(() =>
@@ -197,55 +192,36 @@ function ThreadStartForm({
 
   // The match of the previous chips is not kept while a new one loads: a project inferred from a
   // chip that was left out must not be sendable.
-  const choice: ProjectChoice =
-    draft.chosenProject === null
-      ? { kind: "none-chosen" }
-      : draft.chosenProject !== undefined
-        ? { kind: "chosen", projectId: draft.chosenProject }
-        : match.isError
-          ? // A refresh that failed after an answer leaves the old answer in `data`, which must not
-            // stay sendable. While the retry runs, the lookup is on its way again.
-            match.isFetching
-            ? { kind: "matching" }
-            : { kind: "failed", reason: readReason(match.error) }
-          : match.data !== undefined
-            ? { kind: "inferred", match: match.data }
-            : { kind: "matching" };
-  const matchedResourceId =
-    choice.kind === "inferred" && choice.match.kind === "matched"
-      ? choice.match.resourceId
-      : undefined;
-  const projectId =
-    choice.kind === "chosen"
-      ? choice.projectId
-      : choice.kind === "inferred" && choice.match.kind === "matched"
-        ? choice.match.projectId
-        : null;
-  // "No project" is a choice too: the thread then starts with no checkout.
-  const isProjectPicked = hasProjectPick(choice) || choice.kind === "none-chosen";
-  const underChoice = buildPicksUnderChoice(draft.picks, choice.kind === "none-chosen");
-  // The workspace follows the repository the match found its evidence in, unless the user picked one.
-  const picks: ThreadPicks =
-    matchedResourceId === undefined || underChoice.workspace !== undefined
-      ? underChoice
-      : {
-          ...underChoice,
-          workspace: decideEvidenceWorkspacePick(
-            listProjectRepos(reads.resources, projectId),
-            matchedResourceId,
-            reads.settings.user["thread.workspace"] ?? null,
-          ),
-        };
-  const view = buildDraftView(reads, { projectId, workspaceId: null }, picks);
-  const { projects, resources, workspaces } = view.catalogs;
-  const project = projects.find((each) => each.id === projectId);
-  const resource = resources.find((each) => each.id === matchedResourceId);
-  const names = {
-    ...(project === undefined ? {} : { projectName: project.name }),
-    ...(resource === undefined ? {} : { repositoryName: formatRepoName(resource) }),
-    hasModelProfile: project?.modelProfileId != null,
-    asksBeforeEdits: view.fields.accessMode.value === "approval-required",
-  };
+  const lookup: ProjectLookup = match.isError
+    ? // A refresh that failed after an answer leaves the old answer in `data`, which must not
+      // stay sendable. While the retry runs, the lookup is on its way again.
+      match.isFetching
+      ? { kind: "refetching" }
+      : { kind: "failed", reason: readReason(match.error) }
+    : match.data !== undefined
+      ? { kind: "answered", match: match.data }
+      : { kind: "loading" };
+  const {
+    view,
+    projectName,
+    projectPick,
+    isProjectPicked,
+    reason,
+    pickReason,
+    pickReasons,
+    lookupFailed,
+    sendBlock,
+  } = buildThreadStartView({
+    reads,
+    draft: {
+      chosenProject: draft.chosenProject,
+      picks: draft.picks,
+      text: draft.text,
+      attachments: shelf,
+    },
+    lookup,
+  });
+  const { projects, resources } = view.catalogs;
 
   const images = useComposerImages({
     storeKey: imagesKey,
@@ -256,30 +232,16 @@ function ThreadStartForm({
   });
   const skills = useDraftSkills(view);
   const { blocked } = view.fields;
-  // The message is the user's own words or an image: the things are added to it when it is sent.
-  const hasMessage = holdsMessageContent({ text: draft.text, attachments: shelf });
   // An attempt is sent as it was, so what the dialog shows now does not decide whether it can go.
   const { attempt } = draft;
   const canSend =
-    attempt !== undefined
-      ? !isStarting
-      : isProjectPicked && hasMessage && blocked === null && !isStarting && !images.sendBlocked;
+    attempt !== undefined ? !isStarting : sendBlock === null && !isStarting && !images.sendBlocked;
 
   /** Returns the draft as it is now, which a handler reads instead of the render it was made in. */
   const readLatest = (): ThreadStartDraft => drafts.read(draftKey) ?? draft;
-  /**
-   * Writes `patch` to the draft, which the user changed. The draft is no longer the one a send was
-   * made from, so its dedup key goes; `clearsFailure` also removes the failed
-   * send's message, for a change that answers it.
-   */
-  const change = (patch: Partial<ThreadStartDraft>, clearsFailure = false): void => {
-    drafts.write(draftKey, {
-      ...readLatest(),
-      ...patch,
-      attempt: undefined,
-      isEdited: true,
-      ...(clearsFailure ? { failure: null } : {}),
-    });
+  /** Records what the user changed in the draft, and removes the refusal that answered the old words. */
+  const change = (patch: ThreadStartDraftEdit, answersFailure = false): void => {
+    drafts.edit(draftKey, patch, { answersFailure });
     setRefusal(null);
   };
 
@@ -323,8 +285,8 @@ function ThreadStartForm({
       return;
     }
     // The reason line says the match is on its way, and the send follows the answer.
-    if (choice.kind === "matching") return;
-    if (!isProjectPicked) {
+    if (sendBlock === "matching") return;
+    if (sendBlock === "no-project") {
       openProjectMenuRef.current?.();
       return;
     }
@@ -353,36 +315,13 @@ function ThreadStartForm({
       things: current.things,
       attachments: shelf,
       recent: buildRecentModel(current.picks, view.resolved),
-      summary: describeStartedThread(project?.name, view),
+      summary: describeStartedThread(projectName, view),
     };
-    drafts.write(draftKey, { ...current, attempt: sent });
+    drafts.recordAttempt(draftKey, sent);
     onSend(sent);
   };
   useSendOnMenuCommand(start);
 
-  const pickValue: ProjectPickValue =
-    choice.kind === "none-chosen"
-      ? { kind: "none" }
-      : projectId !== null
-        ? { kind: "project", projectId }
-        : { kind: "unpicked" };
-  const reasonLabels = {
-    ...names,
-    accessLabel: formatAccessMode(view.fields.accessMode.value),
-    profileLabel: view.fields.model.pill.name ?? "",
-  };
-  // A match that is on its way or failed is not "nothing points at a repository", which the pick's own reason says.
-  const pickReason =
-    choice.kind === "matching" || choice.kind === "failed"
-      ? describeProjectChoice(choice, names)
-          .map((part) => part.text)
-          .join("")
-      : describePickReason("project", choice, reasonLabels);
-  const pickReasons = {
-    accessMode: describePickReason("access", choice, reasonLabels),
-    model: describePickReason("profile", choice, reasonLabels),
-    workspace: joinPhraseText(view.fields.lead ?? []),
-  };
   const error =
     refusal ??
     draft.failure ??
@@ -402,18 +341,11 @@ function ThreadStartForm({
                 title: draft.title,
                 starters: THREAD_STARTERS,
                 chosenStarter: draft.starter,
-                reason: describeProjectChoice(choice, names),
+                reason,
                 composer: (
                   <DraftComposer
                     view={view}
                     text={draft.text}
-                    placeholder={buildComposerPlaceholder({
-                      readOnly: null,
-                      busy: false,
-                      active: false,
-                      pick: view.fields.workspace.value,
-                      workspaces,
-                    })}
                     canSend={canSend}
                     error={error}
                     notice={images.notice}
@@ -430,7 +362,6 @@ function ThreadStartForm({
                       },
                     }}
                     skills={skills}
-                    runnerId={view.resolved.menuRunnerId}
                     readRecent={() => readRecentModels(controller.url)}
                     fieldRef={fieldRef}
                     fieldId="inbox-thread-message"
@@ -454,7 +385,7 @@ function ThreadStartForm({
                             Try again
                           </button>
                         ) : null}
-                        {choice.kind === "failed" ? (
+                        {lookupFailed ? (
                           <button
                             type="button"
                             className="thread-dialog-retry"
@@ -469,7 +400,7 @@ function ThreadStartForm({
                     }
                     lipStart={
                       <ProjectPick
-                        pick={pickValue}
+                        pick={projectPick}
                         reason={pickReason}
                         projects={projects.map((each) => ({
                           id: each.id,
@@ -535,7 +466,7 @@ function ThreadStartForm({
                 signIn.providerAccountId === view.resolved.config.providerAccountId &&
                 signIn.runnerId === view.fields.machine.runnerId
               ) {
-                drafts.write(draftKey, { ...readLatest(), failure: null });
+                drafts.recordFailure(draftKey, null);
               }
             }}
             onClose={() => {
@@ -554,10 +485,7 @@ function ThreadStartForm({
  * "Thread started · webshop · Opus 5.5 · High": the project (or "no project"),
  * the model, and the reasoning effort when the model has one.
  */
-const describeStartedThread = (
-  projectName: string | undefined,
-  view: ReturnType<typeof buildDraftView>,
-): string => {
+const describeStartedThread = (projectName: string | undefined, view: DraftView): string => {
   const { fields, resolved } = view;
   const effort =
     fields.options === null ? null : buildOptionsLabel(fields.options, resolved.config.options);

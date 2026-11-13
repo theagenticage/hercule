@@ -50,6 +50,13 @@ import {
   WorkDivider,
 } from "./blocks";
 
+/**
+ * The attribute the embedded layout puts on the item that holds the user's
+ * first message. The start-thread dialog reads it to lift that message from
+ * where the composer was. The page layout never sets it.
+ */
+export const FIRST_MESSAGE_ATTRIBUTE = "data-first-message";
+
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
 
@@ -335,8 +342,7 @@ export function Transcript({
   const first = virtualItems[0];
   const last = virtualItems.at(-1);
   const end = clearance + virtualizer.getTotalSize();
-  // The embedded transcript marks the user's first message so the start-thread
-  // dialog's motion can lift it from where the composer was.
+  // Only the embedded layout marks the first message (see FIRST_MESSAGE_ATTRIBUTE).
   const firstUserBlock = layout === "embedded" ? blocks.findIndex((b) => b.kind === "user") : -1;
   const firstMessageIndex = firstUserBlock === -1 ? -1 : leadCount + firstUserBlock;
 
@@ -356,7 +362,7 @@ export function Transcript({
             key={key}
             ref={virtualizer.measureElement}
             data-index={index}
-            data-first-message={index === firstMessageIndex ? "" : undefined}
+            {...(index === firstMessageIndex ? { [FIRST_MESSAGE_ATTRIBUTE]: "" } : {})}
             className="tx-item"
           >
             {index < leadCount

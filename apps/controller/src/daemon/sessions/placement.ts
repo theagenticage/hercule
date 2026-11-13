@@ -1583,9 +1583,7 @@ const make = Effect.gen(function* () {
           const madeTask =
             decoded.newTask === undefined || prepared === undefined
               ? undefined
-              : yield* externalEntities.takeOnAsOneTask({
-                  entityIds: decoded.newTask.entityIds,
-                  prepared,
+              : yield* externalEntities.takeOnAsOneTask(prepared, {
                   title: decoded.newTask.title,
                   projectId: Option.isSome(project) ? projectId : undefined,
                 });

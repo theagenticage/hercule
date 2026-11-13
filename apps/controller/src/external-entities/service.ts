@@ -151,10 +151,15 @@ type Preparation =
     };
 
 /**
- * What `prepareThingsForTask` read, by ref: for each thing, nothing when the
- * rows already held a full, readable record, or the thing as it was read.
+ * What `prepareThingsForTask` prepared: the ids of the things, in the order
+ * given, and what was read for each, by ref (nothing when the rows already held
+ * a full, readable record, or the thing as it was read). `takeOnAsOneTask`
+ * takes this whole, so the ids and the reads always describe the same things.
  */
-export type PreparedThings = ReadonlyMap<string, Preparation>;
+export interface PreparedThings {
+  readonly entityIds: ReadonlyArray<string>;
+  readonly reads: ReadonlyMap<string, Preparation>;
+}
 
 /** The most things read at their source at once when several are prepared together. */
 const MAX_CONCURRENT_THING_READS = 4;
@@ -894,7 +899,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Prepares several things to be taken on together as one Task, outside
-     * any transaction, and returns what was prepared, for `takeOnAsOneTask`.
+     * any transaction, and returns the ids and what was read, for `takeOnAsOneTask`.
      * Each thing is prepared exactly as `takeOn` prepares one
      * (`prepareEntityForTask`): a full record of a work kind that an account
      * reads needs no read, and any other thing is read at its source.
@@ -942,16 +947,16 @@ const make = Effect.gen(function* () {
           },
           { concurrency: MAX_CONCURRENT_THING_READS },
         );
-        return new Map(prepared);
+        return { entityIds, reads: new Map(prepared) };
       }),
 
     /**
      * Takes several things on together as one new Task, for a Thread that
-     * starts on them, and returns the Task's id. The Task has the given
-     * title, the stage of a Thread's Task, priority `normal`, `projectId`, and
-     * a link to each thing, marked as taken on by the user (as `takeOn` does
-     * for one). `prepared` is what `prepareThingsForTask` returned for the
-     * same ids.
+     * starts on them, and returns the Task's id. The things are the ones
+     * `prepared` holds, as `prepareThingsForTask` returned it. The Task has the
+     * given title, the stage of a Thread's Task, priority `normal`, `projectId`,
+     * and a link to each thing, marked as taken on by the user (as `takeOn`
+     * does for one).
      *
      * It never reads a source, so it can run inside the caller's transaction,
      * and it joins that transaction. First it stores what the preparation read
@@ -969,42 +974,41 @@ const make = Effect.gen(function* () {
      * User only, with the grant `task.update`. The caller has checked that
      * `projectId`, if any, is a live Project.
      */
-    takeOnAsOneTask: (input: {
-      readonly entityIds: ReadonlyArray<string>;
-      readonly prepared: PreparedThings;
-      readonly title: string;
-      readonly projectId: string | undefined;
-    }): Effect.Effect<
+    takeOnAsOneTask: (
+      prepared: PreparedThings,
+      task: { readonly title: string; readonly projectId: string | undefined },
+    ): Effect.Effect<
       { readonly taskId: string },
       Unauthenticated | Forbidden | NotFound | Conflict | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const { entityIds, reads } = prepared;
         const catalog = yield* readCatalog;
-        for (const [ref, preparation] of input.prepared) {
+        for (const [ref, preparation] of reads) {
           yield* storeReadObservation(ref, preparation, catalog);
         }
-        const found = yield* entities.readTaskableEntities(input.entityIds);
-        const unknown = input.entityIds.filter((id) => !found.has(id));
+        const found = yield* entities.readTaskableEntities(entityIds);
+        const unknown = entityIds.filter((id) => !found.has(id));
         if (unknown.length > 0) {
           return yield* Effect.fail(
             createNotFoundError(`no such external entity: ${unknown.join(", ")}`),
           );
         }
-        const records = input.entityIds.map((id) => found.get(id)!);
+        const records = entityIds.map((id) => found.get(id)!);
         for (const record of records) {
           yield* requireStillTakeable(record, describeThing(record), catalog);
         }
         yield* requireNoActiveTask(records);
-        const task = yield* tasks.createTaskLinkedToRefs({
+        const created = yield* tasks.createTaskLinkedToRefs({
           refs: records.map(({ ref }) => ref),
-          title: input.title,
+          title: task.title,
           stage: NEW_THREAD_TASK_STAGE,
-          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+          ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
           following: false,
         });
-        yield* announceEntityChanges({ entityIds: input.entityIds, affectedTaskIds: [] });
-        return { taskId: task.id };
+        yield* announceEntityChanges({ entityIds, affectedTaskIds: [] });
+        return { taskId: created.id };
       }),
 
     /**
