@@ -529,6 +529,30 @@ const MAX_REFS_PER_STATEMENT = 1000;
 /** Returns the refs sorted, each once. */
 const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
+/**
+ * Builds the record of an entity from its row and its observations: what a
+ * Task may be made from, as the rows hold it now.
+ */
+const buildTaskableEntity = (
+  row: EntityRow,
+  observations: ReadonlyArray<ObservationRow>,
+): TaskableEntity => {
+  const { status, stage } = parseStoredStatus(row.status as string | null);
+  return {
+    id: uuidToString(row.id),
+    ref: row.ref,
+    kind: (row.kind as string | null) ?? "",
+    completeness: row.completeness as "full" | "partial",
+    isWorkRecord: isWorkRecord(row),
+    title: (row.title as string | null) ?? "",
+    status,
+    stage,
+    targetRemote: readTargetRemote(row),
+    access: deriveAccess(observations),
+    hasConcern: unionConcerns(observations).length > 0,
+  };
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* claimRepository;
@@ -1554,20 +1578,31 @@ const make = Effect.gen(function* () {
         const row = found[0];
         if (row === undefined) return Option.none();
         const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
-        const { status, stage } = parseStoredStatus(row.status as string | null);
-        return Option.some({
-          id: uuidToString(row.id),
-          ref: row.ref,
-          kind: (row.kind as string | null) ?? "",
-          completeness: row.completeness as "full" | "partial",
-          isWorkRecord: isWorkRecord(row),
-          title: (row.title as string | null) ?? "",
-          status,
-          stage,
-          targetRemote: readTargetRemote(row),
-          access: deriveAccess(observations),
-          hasConcern: unionConcerns(observations).length > 0,
-        });
+        return Option.some(buildTaskableEntity(row, observations));
+      }),
+
+    /**
+     * Returns the records of the entities with these ids, as the rows hold
+     * them now, keyed by id. An id with no record is left out of the map.
+     * Like `readTaskableEntity`, it returns any kind of record. It reads the
+     * entity rows in one statement and their observations in one more, however
+     * many ids there are.
+     */
+    readTaskableEntities: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, TaskableEntity>, SqlError> =>
+      Effect.gen(function* () {
+        if (ids.length === 0) return new Map();
+        const rows = yield* sql<EntityRow>`
+          SELECT * FROM external_entities
+          WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${JSON.stringify(ids)}))`;
+        const observations = yield* readObservations(rows.map((row) => row.ref));
+        return new Map(
+          rows.map((row): [string, TaskableEntity] => [
+            uuidToString(row.id),
+            buildTaskableEntity(row, observations.get(row.ref) ?? []),
+          ]),
+        );
       }),
 
     /**

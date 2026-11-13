@@ -361,6 +361,7 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("suggestInboxValues", ({ payload }) =>
         withApiErrors(entities.suggestInboxValues(payload)),
       )
+      .handle("matchProject", ({ payload }) => withApiErrors(entities.matchProject(payload)))
       .handle("search", ({ query }) => withApiErrors(entities.search(query)))
       .handle("listSuggestions", ({ query }) => withApiErrors(entities.listSuggestions(query)))
       .handle("read", ({ params }) => withApiErrors(entities.read(params.id)))
@@ -944,6 +945,24 @@ const WorkflowDomainLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
 
 /**
+ * The External Entity service with the services it is built from: the task
+ * service, which makes the Task of a thing taken on, and the plugin host's
+ * lookups, which read a thing at its source. Placement uses it to start a
+ * Thread on a new Task made from things, so placement is provided this one
+ * layer below and the whole controller builds one External Entity service.
+ */
+const ExternalEntityDomainLayer = ExternalEntityServiceLayer.pipe(
+  Layer.provide(EntityLookupsLayer),
+  Layer.provide(TaskServiceWithPortsLayer),
+);
+
+/**
+ * Placement, provided the External Entity service it needs. It is one layer
+ * so every group that uses placement shares one instance of it.
+ */
+const PlacementDomainLayer = PlacementLayer.pipe(Layer.provide(ExternalEntityDomainLayer));
+
+/**
  * The run service with the services it is built from.
  *
  * - The run service reads workflows and calls the task service from its
@@ -966,7 +985,9 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
-      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+      Layer.provide(
+        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchLayer)),
+      ),
     ),
   ),
   Layer.provide(LiveTopicsLayer),
@@ -1091,10 +1112,7 @@ const operationServices = Layer.mergeAll(
   YourWorkLayer,
   // Taking an entity on makes a Task through the task service, and reading a
   // thing at its source goes through the plugin host's lookups.
-  ExternalEntityServiceLayer.pipe(
-    Layer.provide(EntityLookupsLayer),
-    Layer.provide(TaskServiceWithPortsLayer),
-  ),
+  ExternalEntityDomainLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
@@ -1192,7 +1210,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(ConversationServiceLayer),
     Layer.provideMerge(AssistantResponderLayer),
     Layer.provideMerge(AssistantSessionsLayer),
-    Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(PlacementDomainLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),

@@ -738,6 +738,107 @@ describe("takeOn", () => {
   });
 });
 
+describe("taking several things on as one Task", () => {
+  /** Prepares the things, then makes the Task in a transaction, as placement does around its own. */
+  const takeTogether = (
+    { service, sql }: Arranged,
+    ids: ReadonlyArray<string>,
+    title = "Both things",
+  ) =>
+    Effect.gen(function* () {
+      const prepared = yield* service.prepareThingsForTask(ids);
+      return yield* withTransaction(
+        sql,
+        service.takeOnAsOneTask({ entityIds: ids, prepared, title, projectId: undefined }),
+      );
+    });
+
+  const countLinks = (sql: SqlClient.SqlClient) =>
+    Effect.map(
+      sql<{ readonly n: number }>`SELECT count(*) AS n FROM task_entity_links`,
+      (rows) => rows[0]!.n,
+    );
+
+  it("reads a thing it holds only in part, and links one Task to both things", async () => {
+    const { taskId, title, links, resolved } = await run((arranged) =>
+      Effect.gen(function* () {
+        const { script, report, reportPartial, connectionId, entityId, sql } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        script.resolve = () => ({
+          found: { connectionId, observation: buildObservation("2") },
+        });
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const { taskId } = yield* takeTogether(arranged, ids);
+        const task = yield* arranged.tasks.read(taskId);
+        return {
+          taskId,
+          title: task.title,
+          links: yield* countLinks(sql),
+          resolved: script.resolved.map((target) => (target as { ref: string }).ref),
+        };
+      }),
+    );
+    expect(taskId).toBeDefined();
+    expect(title).toBe("Both things");
+    expect(links).toBe(2);
+    expect(resolved).toEqual([ticketRef("2")]);
+  });
+
+  it("refuses with the thing named and makes no Task when a read fails", async () => {
+    const { error, taskCount, links } = await run((arranged) =>
+      Effect.gen(function* () {
+        const { script, report, reportPartial, connectionId, entityId, countTasks, sql } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        script.resolve = () => ({ missing: "not-found" });
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const error = yield* Effect.flip(takeTogether(arranged, ids));
+        return { error, taskCount: yield* countTasks, links: yield* countLinks(sql) };
+      }),
+    );
+    expect(error).toMatchObject({ error: { code: "invalid_state" } });
+    expect((error as { error: { message: string } }).error.message).toContain(ticketRef("2"));
+    expect(taskCount).toBe(0);
+    expect(links).toBe(0);
+  });
+
+  it("refuses with a conflict when a thing loses access between the preparation and the write", async () => {
+    const { error, taskCount } = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, report, connectionId, entityId, sql, countTasks } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        const ids = [yield* entityId(ticketRef("1"))];
+        const prepared = yield* service.prepareThingsForTask(ids);
+        const entities = yield* externalEntityRepository;
+        yield* withTransaction(
+          sql,
+          entities.reportMissing({
+            connectionId,
+            ref: ticketRef("1"),
+            reason: "inaccessible",
+            environment: { now: new Date().toISOString(), activePluginIds: ["acme"] },
+          }),
+        );
+        const error = yield* Effect.flip(
+          withTransaction(
+            sql,
+            service.takeOnAsOneTask({
+              entityIds: ids,
+              prepared,
+              title: "Never made",
+              projectId: undefined,
+            }),
+          ),
+        );
+        return { error, taskCount: yield* countTasks };
+      }),
+    );
+    expect(error).toMatchObject({ error: { code: "conflict" } });
+    expect(taskCount).toBe(0);
+  });
+});
+
 describe("addToWork", () => {
   it("creates the entity and then the Task for a thing Hercule has never seen, and follows it", async () => {
     const { result, task, followed, inbox, stillThere } = await run((arranged) =>

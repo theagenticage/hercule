@@ -60,6 +60,7 @@ import {
   SignalStatus,
 } from "./signal";
 import { RunStarted } from "./run";
+import { MAX_THREAD_THINGS } from "./session";
 import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
 import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
@@ -1009,6 +1010,47 @@ export const InboxMove = Schema.Struct({
 
 export type InboxMove = Schema.Schema.Type<typeof InboxMove>;
 
+/** The input of `matchProject`: the things the user is about to start a thread on. */
+export const EntityProjectMatchInput = Schema.Struct({
+  ids: atMost(Id, MAX_THREAD_THINGS).check(Schema.isMinLength(1)),
+});
+
+export type EntityProjectMatchInput = Schema.Schema.Type<typeof EntityProjectMatchInput>;
+
+/**
+ * A thing named as evidence: its id, the identifier its Inbox row shows, and
+ * its title. The title is left out when no Connection can read the record, as
+ * the title of another record always is (spec 20 section 1.3).
+ */
+export const EntityMention = Schema.Struct({
+  id: Id,
+  identifier: Schema.optionalKey(bounded(1, 64)),
+  title: Schema.optionalKey(bounded(1, 512)),
+});
+
+export type EntityMention = Schema.Schema.Type<typeof EntityMention>;
+
+/**
+ * What `matchProject` finds. `matched` names the Project, the Resource whose
+ * canonical remote matched, the selected `thing` the evidence is about, and,
+ * when the repository is a linked thing's, that `via` thing one link away.
+ * `none` means nothing points at a repository of a Project that is not
+ * deleted. `ambiguous` means the evidence points at more than one Project.
+ */
+export const ProjectMatch = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("matched"),
+    projectId: Id,
+    resourceId: Id,
+    thing: EntityMention,
+    via: Schema.optionalKey(EntityMention),
+  }),
+  Schema.Struct({ kind: Schema.Literal("none") }),
+  Schema.Struct({ kind: Schema.Literal("ambiguous") }),
+]);
+
+export type ProjectMatch = Schema.Schema.Type<typeof ProjectMatch>;
+
 /**
  * What `read` returns: one full record of a work kind. `kindAvailable` is
  * false when the catalog no longer has an active kind: the card draws, its
@@ -1359,6 +1401,17 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       payload: InboxValueQuery,
       success: InboxValues,
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    /**
+     * Finds the Project a set of things points at: the evidence behind the
+     * default Project of the start-thread dialog. A POST that reads and stores
+     * nothing, for the reason `queryInbox` is one. Fails `NotFound`, naming the
+     * ids, for an unknown id.
+     */
+    HttpApiEndpoint.post("matchProject", "/external-entities/match-project", {
+      payload: EntityProjectMatchInput,
+      success: ProjectMatch,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.get("search", "/external-entities/search", {
       query: EntitySearchQuery,

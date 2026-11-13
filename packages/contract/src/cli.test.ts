@@ -135,6 +135,7 @@ const COMMANDS: Record<string, string> = {
   "externalEntity.queryInbox": "entity list",
   "externalEntity.read": "entity read",
   "externalEntity.takeOn": "entity take-on",
+  "externalEntity.matchProject": "entity match-project",
   "externalEntity.handOff": "entity hand-off",
   "externalEntity.undoHandOff": "entity undo-hand-off",
   "externalEntity.dismiss": "entity dismiss",

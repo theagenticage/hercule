@@ -42,9 +42,9 @@ import {
 import { EventId } from "./event-record";
 import { RunStatus } from "./run-status";
 import { Session, SessionRequest } from "./session";
+import { MAX_TASK_TITLE_LENGTH, TaskTitle } from "./task-title";
 
-/** The longest title. A title is a line, not a paragraph. */
-export const MAX_TASK_TITLE_LENGTH = 512;
+export { MAX_TASK_TITLE_LENGTH };
 
 /** The longest description. It is markdown a person or an agent writes. */
 export const MAX_TASK_DESCRIPTION_LENGTH = 64 * 1024;
@@ -148,7 +148,6 @@ export { TASK_PRIORITIES, TaskPriority } from "@hercule/plugin-host";
 /** A label: a bare string in one flat namespace. Nothing registers it. */
 export const Label = bounded(1, MAX_LABEL_LENGTH);
 
-const TaskTitle = bounded(1, MAX_TASK_TITLE_LENGTH);
 const TaskDescription = bounded(0, MAX_TASK_DESCRIPTION_LENGTH);
 
 /**

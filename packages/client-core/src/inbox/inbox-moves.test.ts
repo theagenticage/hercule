@@ -9,6 +9,8 @@ import {
   describeInboxDismissalFailure,
   describeInboxHandOff,
   describeInboxTakeOn,
+  describeInboxThreadStart,
+  describeInboxThreadStartFailure,
   planInboxMove,
 } from "./inbox-moves";
 
@@ -19,6 +21,64 @@ const oneOffer = { available: [buildWorkflowOffer("Review PR", [])], unavailable
 
 const reasonOf = (plan: ReturnType<typeof planInboxMove>): string =>
   plan.kind === "refuse" ? plan.reason : "";
+
+describe("planInboxMove for Start a thread", () => {
+  const start = (things: ReturnType<typeof buildInboxThing>[], isOffline = false) =>
+    planInboxMove({ move: "startThread", things, ...online, isOffline });
+
+  it("takes one thing or a selection", () => {
+    expect(start([thing]).kind).toBe("go");
+    expect(start([thing, buildInboxThing("3")]).kind).toBe("go");
+  });
+
+  it("refuses offline, with the words every move uses", () => {
+    expect(reasonOf(start([thing], true))).toContain("You are offline");
+  });
+
+  it("refuses a thing someone has, with the words of Take on for one thing", () => {
+    expect(reasonOf(start([held]))).toBe("You have this already. G goes to its Task.");
+  });
+
+  it("refuses a thing on a Task nobody holds, and says where to go", () => {
+    const onTask = buildInboxThing("5", { title: "Slow page", taskId: "t-9" });
+    expect(reasonOf(start([onTask]))).toBe(
+      "“Slow page” is on a Task already. G goes to its Task, where you can start a thread.",
+    );
+    expect(reasonOf(start([thing, onTask]))).toBe(
+      "“Slow page” is in the selection, and it is on a Task already. Take it out of the selection, then press N again.",
+    );
+  });
+
+  it("names the first held thing of a selection", () => {
+    const colleague = buildInboxThing("4", {
+      title: "Slow page",
+      taskId: "t-4",
+      liveWorkflows: [{ workflowId: "w", name: "Mei" }],
+    });
+    expect(reasonOf(start([thing, colleague, held]))).toBe(
+      "“Slow page” is in the selection, and Mei has it already. Take it out of the selection, then press N again.",
+    );
+  });
+
+  it("refuses more things than a thread starts from, saying how many", () => {
+    const many = Array.from({ length: 51 }, (_, n) => buildInboxThing(String(n + 10)));
+    expect(reasonOf(start(many))).toBe(
+      "A thread starts from up to 50 things, and 51 are selected. Select fewer, then press N again.",
+    );
+  });
+});
+
+describe("the words after starting a thread", () => {
+  it("puts the title last, and names it in a failure", () => {
+    expect(describeInboxThreadStart("Fix the cart")).toEqual({
+      text: "Started a thread on",
+      title: "Fix the cart",
+    });
+    expect(describeInboxThreadStartFailure("Fix the cart", "no runner")).toBe(
+      "“Fix the cart” was not started as a thread: no runner. Try again.",
+    );
+  });
+});
 
 describe("planInboxMove", () => {
   it("lets Dismiss take a selection, and refuses past the most one call takes, saying how many", () => {

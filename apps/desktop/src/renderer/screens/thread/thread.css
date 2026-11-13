@@ -8,6 +8,16 @@
 /* The book's `.tx` is a flex column with a 22px gap. Here each block is an
    item of the virtualizer, which measures it, so the gap is the item's own
    top padding, and each item is the flex column its block sits in. */
+/* A transcript in a box of its own, such as a dialog (`layout="embedded"`):
+   no header above the first block, no composer below the last, and the
+   column takes the box's width. The selector is as specific as the page's
+   `.column` and `.tx` rules in ../session/transcript.css, and comes later. */
+.column.tx.tx-embedded {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 .tx-item {
   display: flex;
   flex-direction: column;

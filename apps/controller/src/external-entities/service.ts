@@ -33,6 +33,7 @@ import {
   type EntityAddToWorkInput,
   type EntityAddToWorkResult,
   type EntityLinkInput,
+  type EntityProjectMatchInput,
   type EntityPlace,
   type EntitySearchQuery,
   type EntitySearchReply,
@@ -54,6 +55,7 @@ import {
   type InboxValues,
   type InvalidState,
   type NotFound,
+  type ProjectMatch,
   type Task,
   type TaskStage,
   type Unauthenticated,
@@ -79,6 +81,7 @@ import {
 import { resourceRepository } from "../resources";
 import { Settings } from "../settings";
 import {
+  NEW_THREAD_TASK_STAGE,
   ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
   taskRepository,
@@ -89,6 +92,7 @@ import { buildActiveEntityKind } from "./entity-records";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
+import { makeProjectMatcher } from "./project-match";
 import { claimRepository } from "./claims";
 import { ExternalEntityIngest, ExternalEntityIngestLayer, prepareObservations } from "./ingest";
 import { externalEntityInbox, type InboxEnvironment, type InboxRailSettings } from "./inbox-query";
@@ -146,6 +150,15 @@ type Preparation =
       readonly entity: ObservedEntity;
     };
 
+/**
+ * What `prepareThingsForTask` read, by ref: for each thing, nothing when the
+ * rows already held a full, readable record, or the thing as it was read.
+ */
+export type PreparedThings = ReadonlyMap<string, Preparation>;
+
+/** The most things read at their source at once when several are prepared together. */
+const MAX_CONCURRENT_THING_READS = 4;
+
 /** Whether a Task was made for an entity, and which. */
 interface TaskForEntity {
   readonly entityId: string;
@@ -179,6 +192,10 @@ const describeMissing = (ref: string, missing: EntityMissing): string => {
   }
 };
 
+/** Names a thing in a message: its title and ref, or its ref alone when it has no title yet. */
+const describeThing = (record: Pick<TaskableEntity, "title" | "ref">): string =>
+  record.title === "" ? record.ref : `"${record.title}" (${record.ref})`;
+
 /** Builds the sentence for an undo that left the Task in place. */
 const describeUndoRefusal = (reason: TaskUndoRefusal): string => {
   switch (reason) {
@@ -205,6 +222,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const entities = yield* externalEntityRepository;
   const inbox = yield* externalEntityInbox;
+  const projectMatcher = makeProjectMatcher(sql);
   const taskRows = yield* taskRepository;
   const tasks = yield* TaskService;
   const resources = yield* resourceRepository;
@@ -723,6 +741,22 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Finds the Project the things point at, for the start-thread dialog: see
+     * `ProjectMatch`. Fails with `NotFound` naming the ids that are unknown.
+     * Needs the grants `task.read`, `project.read` and `resource.read`,
+     * because it names a Project and a Resource.
+     */
+    matchProject: (
+      input: EntityProjectMatchInput,
+    ): Effect.Effect<ProjectMatch, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        yield* requireGrant("project.read");
+        yield* requireGrant("resource.read");
+        return yield* projectMatcher.matchProject(input);
+      }),
+
+    /**
      * Returns the values of one field among the things of a list, for the
      * search's suggestions. Needs the grants `task.read`, `signal.query` and
      * `connection.query`, because the values of `account` are account labels.
@@ -796,6 +830,147 @@ const make = Effect.gen(function* () {
           followIfUnconcerned: false,
         });
         return { taskId: made.taskId, created: made.created };
+      }),
+
+    /**
+     * Prepares several things to be taken on together as one Task, outside
+     * any transaction, and returns what was prepared, for `takeOnAsOneTask`.
+     * Each thing is prepared exactly as `takeOn` prepares one
+     * (`prepareEntityForTask`): a full record of a work kind that an account
+     * reads needs no read, and any other thing is read at its source.
+     *
+     * At most 4 things are read at once. A read is a call to a tracker through
+     * the user's own account, so a selection of fifty things read together
+     * could run into the tracker's rate limit, while one read after another
+     * would make the user wait for the sum of the delays.
+     *
+     * It fails with `NotFound` naming each unknown id, and with `InvalidState`
+     * naming the first thing that cannot be taken on: a place, a thing no
+     * active plugin reads, or a read that fails (the same messages as
+     * `takeOn`). Nothing is written. A repeated call prepares again, which is
+     * harmless: a thing a first call took on is a full record by then and
+     * needs no read. User only.
+     */
+    prepareThingsForTask: (
+      entityIds: ReadonlyArray<string>,
+    ): Effect.Effect<
+      PreparedThings,
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const found = yield* entities.readTaskableEntities(entityIds);
+        const unknown = entityIds.filter((id) => !found.has(id));
+        if (unknown.length > 0) {
+          return yield* Effect.fail(
+            createNotFoundError(`no such external entity: ${unknown.join(", ")}`),
+          );
+        }
+        const prepared = yield* Effect.forEach(
+          entityIds,
+          (id) =>
+            Effect.map(
+              prepareEntityForTask(found.get(id)!.ref),
+              (preparation): [string, Preparation] => [found.get(id)!.ref, preparation],
+            ),
+          { concurrency: MAX_CONCURRENT_THING_READS },
+        );
+        return new Map(prepared);
+      }),
+
+    /**
+     * Takes several things on together as one new Task, for a Thread that
+     * starts on them, and returns the Task's id. The Task has the given
+     * title, the stage of a Thread's Task, priority `normal`, `projectId`, and
+     * a link to each thing, marked as taken on by the user (as `takeOn` does
+     * for one). `prepared` is what `prepareThingsForTask` returned for the
+     * same ids.
+     *
+     * It never reads a source, so it can run inside the caller's transaction,
+     * and it joins that transaction. First it stores what the preparation read
+     * (as `takeOn` does). Then it checks every thing against the stored
+     * rows, before it writes anything, with one read of the records and one
+     * of their active Tasks, however many things there are. It fails with:
+     *
+     * - `NotFound` naming each id that has no record;
+     * - `Conflict` for a thing that is no longer a full record of an active
+     *   work kind that an account reads, or whose account can no longer read
+     *   it: it changed since the preparation, and the caller repeats;
+     * - `Conflict` naming the first thing already on an active Task, and that
+     *   Task.
+     *
+     * User only, with the grant `task.update`. The caller has checked that
+     * `projectId`, if any, is a live Project.
+     */
+    takeOnAsOneTask: (input: {
+      readonly entityIds: ReadonlyArray<string>;
+      readonly prepared: PreparedThings;
+      readonly title: string;
+      readonly projectId: string | undefined;
+    }): Effect.Effect<
+      { readonly taskId: string },
+      Unauthenticated | Forbidden | NotFound | Conflict | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+        const catalog = yield* readCatalog;
+        for (const [ref, preparation] of input.prepared) {
+          if (!preparation.read) continue;
+          const stored = yield* ingest.storeRead({
+            connectionId: preparation.connectionId,
+            observed: preparation.entity,
+            activePluginIds: catalog.activePluginIds,
+          });
+          if (!stored) {
+            return yield* Effect.fail(
+              createConflictError(
+                `${ref} was read through an account that can no longer read it. Try again.`,
+              ),
+            );
+          }
+        }
+        const found = yield* entities.readTaskableEntities(input.entityIds);
+        const unknown = input.entityIds.filter((id) => !found.has(id));
+        if (unknown.length > 0) {
+          return yield* Effect.fail(
+            createNotFoundError(`no such external entity: ${unknown.join(", ")}`),
+          );
+        }
+        const records = input.entityIds.map((id) => found.get(id)!);
+        for (const record of records) {
+          const declaration = catalog.kinds.get(record.kind)?.declaration;
+          if (
+            declaration === undefined ||
+            declaration.pace === "context" ||
+            !record.isWorkRecord ||
+            record.access !== "ok"
+          ) {
+            return yield* Effect.fail(
+              createConflictError(
+                `${describeThing(record)} changed while the Task was being made, and can no longer be taken on. Try again.`,
+              ),
+            );
+          }
+        }
+        const active = yield* taskRows.listActiveTasksForRefs(records.map(({ ref }) => ref));
+        const busy = active[0];
+        if (busy !== undefined) {
+          const record = records.find(({ ref }) => ref === busy.ref)!;
+          return yield* Effect.fail(
+            createConflictError(
+              `${describeThing(record)} is already on the Task "${busy.title}". Leave it out, or start the thread on that Task.`,
+            ),
+          );
+        }
+        const task = yield* tasks.createTaskLinkedToRefs({
+          refs: records.map(({ ref }) => ref),
+          title: input.title,
+          stage: NEW_THREAD_TASK_STAGE,
+          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+          following: false,
+        });
+        yield* announceEntityChanges({ entityIds: input.entityIds, affectedTaskIds: [] });
+        return { taskId: task.id };
       }),
 
     /**

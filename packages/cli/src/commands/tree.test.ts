@@ -362,6 +362,7 @@ describe("the placeholders a usage line shows", () => {
     "entity undo-hand-off": "<run-id>",
     "entity dismiss": "<id>...",
     "entity restore": "<id>...",
+    "entity match-project": "<id>...",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",

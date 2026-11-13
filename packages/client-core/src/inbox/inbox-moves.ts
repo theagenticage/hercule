@@ -7,12 +7,17 @@
  * puts the title of the thing last (`title`), so a line that is too narrow
  * cuts the title and never the words before it.
  */
-import { MAX_INBOX_MOVED_THINGS, type InboxThing, type WorkflowOffer } from "@hercule/contract";
+import {
+  MAX_INBOX_MOVED_THINGS,
+  MAX_THREAD_THINGS,
+  type InboxThing,
+  type WorkflowOffer,
+} from "@hercule/contract";
 import { decideHandMove, type CardOffers } from "./card-hand-off";
 import { findHolder } from "./inbox-holder";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
-export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask";
+export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "startThread";
 
 /** What may be done: go on, or refuse and say why. */
 export type InboxMovePlan =
@@ -55,6 +60,8 @@ const OFFLINE = "You are offline, so that was not done. Try again when the conne
  *   user already took on, and the hand-off a thing no workflow can take
  *   (`offers`, the offers of the one thing).
  * - Go to its Task needs one thing that has a Task.
+ * - Start a thread takes a selection of up to `MAX_THREAD_THINGS` things, none
+ *   of which someone already has (a live workflow, or the user's own Task).
  *
  * Call it with at least one thing.
  */
@@ -97,6 +104,27 @@ export const planInboxMove = ({
       return decideHandMove(offers).kind === "none"
         ? refuse(`No workflow can take this ${thing.noun.toLowerCase()} yet.`)
         : GO;
+    case "startThread": {
+      if (things.length > MAX_THREAD_THINGS)
+        return refuse(
+          `A thread starts from up to ${MAX_THREAD_THINGS} things, and ${things.length.toLocaleString("en-US")} are selected. Select fewer, then press N again.`,
+        );
+      // Starting a thread always makes a new Task, so a thing on any active Task is refused.
+      const taken = things.find((candidate) => candidate.taskId !== undefined);
+      if (taken === undefined) return GO;
+      const hasHolder = findHolder(taken) !== undefined;
+      if (isOne)
+        return refuse(
+          hasHolder
+            ? `${describeWhoHasIt(taken)} this already. G goes to its Task.`
+            : `${quoteTitle(taken.title)} is on a Task already. G goes to its Task, where you can start a thread.`,
+        );
+      return refuse(
+        hasHolder
+          ? `${quoteTitle(taken.title)} is in the selection, and ${describeWhoHasIt(taken).replace(/^You/, "you")} it already. Take it out of the selection, then press N again.`
+          : `${quoteTitle(taken.title)} is in the selection, and it is on a Task already. Take it out of the selection, then press N again.`,
+      );
+    }
     case "goToTask":
       if (!isOne) return refuse("Go to its Task takes one thing at a time.");
       return thing.taskId === undefined ? refuse("This has no Task yet. T takes it on.") : GO;
@@ -189,3 +217,13 @@ export const describeInboxHandOffFailure = (
 
 /** Returns the line for a thing that has no address to open at its source. */
 export const NO_SOURCE_ADDRESS = "This has no address to open at its source.";
+
+/** Returns the words for the line after a thread was started on `title`, the Task's name. */
+export const describeInboxThreadStart = (title: string): InboxLineWords => ({
+  text: "Started a thread on",
+  title,
+});
+
+/** Returns the sentence for a thread the controller refused to start: nothing was made. */
+export const describeInboxThreadStartFailure = (title: string, reason: string): string =>
+  `${quoteTitle(title)} was not started as a thread: ${reason}. Try again.`;

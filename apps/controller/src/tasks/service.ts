@@ -362,6 +362,12 @@ const INITIATIVE_IS_CLOSED =
  */
 const UNTITLED_THREAD_TITLE = "Untitled thread";
 
+/**
+ * The stage of every Task a Thread makes or starts on (spec 09, "Which Task a
+ * session gets"). A Task made from things for a Thread starts here too.
+ */
+export const NEW_THREAD_TASK_STAGE: TaskStage = "exploring";
+
 /** The message for a spawn that names a finished Task. */
 const buildFinishedTaskRefusal = (stage: TaskStage): string =>
   `the task is at the stage ${stage}, and new work cannot join a finished task; ` +
@@ -1217,7 +1223,7 @@ const make = Effect.gen(function* () {
         {
           title: session.title.trim() === "" ? UNTITLED_THREAD_TITLE : session.title,
           description: "",
-          stage: "exploring",
+          stage: NEW_THREAD_TASK_STAGE,
           priority: "normal",
           labels: [],
           projectId,
@@ -1245,6 +1251,38 @@ const make = Effect.gen(function* () {
         yield* tasks.recordWorkspaceTask(workspaceId, task.id, yield* nowIso);
       }
       return task;
+    });
+
+  /**
+   * Creates a Task linked to every ref in `refs`, as the user's own act of
+   * taking them on: see the service's `createTaskLinkedToRefs`, which holds the
+   * rules. Fails with `Forbidden` unless the caller is the user holding
+   * `task.update`, and with `NotFound` for a project that does not exist.
+   */
+  const createTaskLinkedToRefs = (input: {
+    readonly refs: ReadonlyArray<ExternalRef>;
+    readonly title: string;
+    readonly stage: TaskStage;
+    readonly projectId?: string;
+    readonly following: boolean;
+  }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
+    Effect.gen(function* () {
+      yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
+      yield* ensureProjectExists(input.projectId);
+      return yield* insertTask(
+        {
+          title: input.title,
+          description: "",
+          stage: input.stage,
+          priority: "normal",
+          labels: [],
+          projectId: input.projectId,
+          provenance: input.refs.map((ref) => ({ ref })),
+          following: input.following,
+          takenOn: true,
+        },
+        yield* currentStamp,
+      );
     });
 
   /**
@@ -1550,24 +1588,27 @@ const make = Effect.gen(function* () {
       readonly projectId?: string;
       readonly following: boolean;
     }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      Effect.gen(function* () {
-        yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
-        yield* ensureProjectExists(input.projectId);
-        return yield* insertTask(
-          {
-            title: input.title,
-            description: "",
-            stage: input.stage,
-            priority: "normal",
-            labels: [],
-            projectId: input.projectId,
-            provenance: [{ ref: input.ref }],
-            following: input.following,
-            takenOn: true,
-          },
-          yield* currentStamp,
-        );
-      }),
+      createTaskLinkedToRefs({ ...input, refs: [input.ref] }),
+
+    /**
+     * Creates one Task for several refs the user took on together, linked to
+     * all of them, and returns it. It is `createTaskLinkedToRef` for a list:
+     * the Task has the given title and stage, priority `normal`, one
+     * provenance entry `{ ref }` per ref, and one link per ref, each marked as
+     * taken on by the user at the same moment. The refs are distinct, and the
+     * caller has checked that none is on an active Task.
+     *
+     * Permission, failures and transaction are those of
+     * `createTaskLinkedToRef`.
+     */
+    createTaskLinkedToRefs: (input: {
+      readonly refs: ReadonlyArray<ExternalRef>;
+      readonly title: string;
+      readonly stage: TaskStage;
+      readonly projectId?: string;
+      readonly following: boolean;
+    }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      createTaskLinkedToRefs(input),
 
     /**
      * Takes back a Task that `createTaskLinkedToRef` made, by soft-deleting
