@@ -111,19 +111,26 @@ const PromptAttachments = Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENT
 export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image.";
 
 /**
- * Refuses a session prompt or input with no text and no images. It checks
- * `text` or `prompt`, whichever field the payload names its text with, so one
- * filter serves every payload that carries `attachments`. The issue points at
- * that field, so a client can show it where the user types the text.
+ * Refuses a session prompt or input with no text, no images and no context.
+ * It checks `text` or `prompt`, whichever field the payload names its text
+ * with, so one filter serves every payload that carries `attachments`. Only
+ * `session.spawn` carries `context`; a payload without it needs text or an
+ * image. The issue points at the text field, so a client can show it where the
+ * user types the text.
  */
 export const refuseEmptyPrompt = Schema.makeFilter(
   (payload: {
     readonly text?: string;
     readonly prompt?: string;
     readonly attachments?: ReadonlyArray<string>;
+    readonly context?: ReadonlyArray<unknown>;
   }) => {
     const field = payload.prompt === undefined ? "text" : "prompt";
-    if ((payload[field] ?? "").length > 0 || (payload.attachments?.length ?? 0) > 0)
+    if (
+      (payload[field] ?? "").length > 0 ||
+      (payload.attachments?.length ?? 0) > 0 ||
+      (payload.context?.length ?? 0) > 0
+    )
       return undefined;
     return { path: [field], issue: EMPTY_PROMPT_MESSAGE };
   },
@@ -568,6 +575,35 @@ export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 export const MAX_THREAD_THINGS = 50;
 
 /**
+ * The most things one session can be told about at its start. It is the same
+ * bound as `MAX_THREAD_THINGS`, because the Thread dialog sends the same list
+ * as `context` and as `newTask`.
+ */
+export const MAX_CONTEXT_REFERENCES = MAX_THREAD_THINGS;
+
+/**
+ * A reference to an External Entity ("thing", such as a pull request or an
+ * issue) that the agent is told about. The controller reads the thing's stored
+ * record and writes a short description of it after the prompt text.
+ */
+export const EntityContextReference = closedStruct({
+  kind: Schema.Literal("entity"),
+  entityId: Id,
+});
+
+export type EntityContextReference = Schema.Schema.Type<typeof EntityContextReference>;
+
+/**
+ * One piece of context sent with a prompt. Context only tells the agent about
+ * something. It never takes anything on: to make a Task of things, use
+ * `newTask`. There is one kind today, `entity`; the union is where other kinds
+ * are added.
+ */
+export const ContextReference = Schema.Union([EntityContextReference]);
+
+export type ContextReference = Schema.Schema.Type<typeof ContextReference>;
+
+/**
  * The new Task a Thread starts, made from External Entities ("things"). Each
  * thing is taken on by the user, as `externalEntity.takeOn` takes one on. The
  * ids are distinct, and the list is never empty.
@@ -611,6 +647,23 @@ export const SessionSpawnInput = closedStruct({
   prompt: PromptText,
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
+  /**
+   * Things the agent is told about with this prompt. The controller appends a
+   * short description of each after the prompt text, so the stored prompt is
+   * exactly what the agent got. It never takes a thing on: a Thread that
+   * should also own them as a Task sends `newTask` too. The list is never
+   * empty, holds each thing once, and a prompt with empty text is accepted
+   * when it has context. Fails `NotFound` for an unknown thing. Nothing is
+   * written when it fails.
+   */
+  context: Schema.optionalKey(
+    atMost(ContextReference, MAX_CONTEXT_REFERENCES).check(
+      Schema.isMinLength(1),
+      Schema.isUnique({
+        message: "Each thing can be listed once in context; remove the repeated entity id.",
+      }),
+    ),
+  ),
   /**
    * The session's role, its name for its job. Once set, a role never changes:
    * `session.update` has no `role`. A Thread spawned without one gets a

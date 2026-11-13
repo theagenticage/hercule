@@ -4778,12 +4778,19 @@ export const CLI = {
         ],
         stdin: "These two things are one problem. Find the cause.",
       },
+      {
+        args: [
+          "--context",
+          '[{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"},{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000012"}]',
+        ],
+        stdin: "Look at these two things and tell me how they relate.",
+      },
     ],
     fields: {
       prompt: {
         stdin: true,
         flag: "prompt",
-        help: "The opening prompt. It may be empty when --image is given.",
+        help: "The opening prompt. It may be empty when --image or --context is given.",
       },
       attachments: {
         upload: true,
@@ -4844,6 +4851,10 @@ export const CLI = {
         help: "The Task to join, by its id or a tail of eight or more characters; find it with `hercule task list`. A Thread joins a Task even without this flag: a Thread a session starts joins the calling session's Task, and one in an ephemeral workspace joins the Task that workspace belongs to. A Task that is done or dropped is refused; reopen it, or leave --task off.",
         resolves: "task.query",
       },
+      context: {
+        flag: "context",
+        help: 'Things to tell the agent about, as JSON: [{"kind":"entity","entityId":"<id>"}, ...]. Each id is an External Entity (found with `hercule entity list`). The controller appends a short description of each after the prompt, so the prompt may be empty when --context is given. Context never takes a thing on as a Task: use --new-task for that. The list holds 1 to 50 things, each once. Nothing is started when a thing is unknown.',
+      },
       newTask: {
         flag: "new-task",
         help: 'The new Task this Thread starts, as JSON: {"title":"<title>","entityIds":["<id>", ...]}. Each id is an External Entity (a pull request or an issue on the Inbox, found with `hercule entity list`), and the user takes each on as the Thread\'s Task, so none of them may be on an active Task already. The Thread joins the Task and the title is the one given, never a generated one. Only the user may use it, and it cannot be combined with --task or --agent. Nothing is started when a thing is refused.',
@@ -4863,7 +4874,7 @@ export const CLI = {
       invalid_state:
         "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off. Or a thing named in --new-task is a place that groups work, or Hercule cannot read it now",
       not_found:
-        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task is unknown: check `hercule entity list`",
+        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task or --context is unknown: check `hercule entity list`",
       conflict:
         "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
     },
