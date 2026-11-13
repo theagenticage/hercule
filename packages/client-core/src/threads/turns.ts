@@ -21,10 +21,12 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
+  type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
   type TodoStep,
   type TranscriptRow,
+  splitPromptContext,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
@@ -136,7 +138,10 @@ const isSteeredUserMessage = (detail: unknown): boolean => readJsonObject(detail
 /** One message sent into a turn: by the session's owner, or by another session's agent. */
 export interface ThreadUserMessage {
   readonly itemId: string;
+  /** The user's words: the text as sent, without the context block that follows them. */
   readonly text: string;
+  /** The block that tells the agent about things, when the text ended in one. Absent otherwise. */
+  readonly context?: PromptContextBlock;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
   /**
@@ -153,6 +158,18 @@ export interface ThreadUserMessage {
 }
 
 /**
+ * Splits the text of a sent message into the fields of a `ThreadUserMessage`
+ * that come from it: `text` is the user's words, and `context` is the block
+ * the controller appended, when there is one. Both the runner's
+ * `user_message` and a message still sending go through here, so the two
+ * never read a block differently.
+ */
+export const readUserWords = (sentText: string): Pick<ThreadUserMessage, "text" | "context"> => {
+  const { words, context } = splitPromptContext(sentText);
+  return context === undefined ? { text: words } : { text: words, context };
+};
+
+/**
  * Returns the message a `user_message` item's `item.started` holds. Each
  * message is kept on its own, because a message steered into a turn can come
  * from a different sender than the one that opened it. The thread's turns
@@ -164,7 +181,7 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    text: typeof text === "string" ? text : "",
+    ...readUserWords(typeof text === "string" ? text : ""),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),

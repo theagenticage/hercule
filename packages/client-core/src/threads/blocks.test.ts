@@ -10,7 +10,14 @@
  * `content.delta` rows. Times are seconds after 09:00.
  */
 import { describe, expect, it } from "vitest";
-import type { Input, OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
+import {
+  formatPromptContext,
+  type Input,
+  type OpenRequest,
+  type Session,
+  type Subagent,
+  type TranscriptRow,
+} from "@hercule/contract";
 import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
 import { buildWorkRows } from "./work-rows";
@@ -1616,6 +1623,24 @@ describe("appendSendingMessages", () => {
       EARLIER,
       { ...SENT_BLOCK, senderSessionId: sender },
     ]);
+  });
+
+  it("reads the context block of a sending message apart from the user's words", () => {
+    const block = formatPromptContext({
+      origin: { kind: "one" },
+      things: [
+        {
+          entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+          ref: "linear:issue:northwind/SHOP-142",
+          fields: [],
+        },
+      ],
+    });
+    const withContext = { ...SENDING, text: `Look into this.\n\n${block}` };
+    const [, sent] = appendSendingMessages([EARLIER], [withContext]);
+    expect(sent).toMatchObject({ text: "Look into this.", context: { text: block, lineCount: 3 } });
+    const [, plain] = appendSendingMessages([EARLIER], [SENDING]);
+    expect(plain).not.toHaveProperty("context");
   });
 
   it("returns the same list when nothing is sending", () => {

@@ -12,7 +12,7 @@
  *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
-import type { SessionRequest, TranscriptRow } from "@hercule/contract";
+import { formatPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
 import { buildTurns, readUserSender } from "./turns";
 
@@ -1675,5 +1675,60 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     });
 
     expect(readItems(rows)[0]).toMatchObject({ verb: "tool", target: "github/create_issue" });
+  });
+});
+
+describe("buildTurns: the context block in a user message", () => {
+  const THING_ID = "01a1317e-d8d3-7402-8971-cfcc37f653ca";
+  const BLOCK = formatPromptContext({
+    origin: { kind: "one" },
+    things: [
+      {
+        entityId: THING_ID,
+        ref: "linear:issue:northwind/SHOP-142",
+        title: "Show the delivery cost",
+        fields: [],
+      },
+    ],
+  });
+
+  /** Returns the first message of the turn built from one `user_message` that was sent with `text`. */
+  const readSentMessage = (text: string) => {
+    const rows = [
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+        itemId: "u1",
+        kind: "user_message",
+        detail: { text },
+      }),
+    ];
+    return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0];
+  };
+
+  it("reads the words and the block apart", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`);
+    expect(message?.text).toBe("Look into this.");
+    expect(message?.context).toMatchObject({
+      text: BLOCK,
+      lineCount: 3,
+      things: [{ entityId: THING_ID, title: "Show the delivery cost" }],
+    });
+  });
+
+  it("reads a text that is only a block as no words", () => {
+    const message = readSentMessage(BLOCK);
+    expect(message?.text).toBe("");
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("keeps a text with no block, or a near miss, whole as words", () => {
+    const nearMiss = `Look.\n\n${BLOCK.replace("hercule entity read", "hercule entity show")}`;
+    expect(readSentMessage("Fix the login bug")).not.toHaveProperty("context");
+    expect(readSentMessage(nearMiss)).toMatchObject({ text: nearMiss });
+    expect(readSentMessage(nearMiss)).not.toHaveProperty("context");
   });
 });

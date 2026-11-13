@@ -280,12 +280,13 @@ describe("sending", () => {
     const body = callsTo(calls, SPAWN)[0]!.body as {
       prompt: string;
       newTask: { title: string; entityIds: string[] };
+      context: unknown;
       dedupKey: string;
       projectId: string;
     };
     expect(body.newTask).toEqual({ title: SLOTS.title, entityIds: [SLOTS.id] });
-    expect(body.prompt).toContain(OWN_WORDS);
-    expect(body.prompt).toContain(`- ${SLOTS.identifier} "${SLOTS.title}" (${SLOTS.id})`);
+    expect(body.prompt).toBe(OWN_WORDS);
+    expect(body.context).toEqual([{ kind: "entity", entityId: SLOTS.id }]);
     expect(body.dedupKey.length).toBeGreaterThan(0);
     expect(body.projectId).toBe(WEBSHOP.id);
     expect(within(started).getByText(/^Thread started · webshop · /)).toBeTruthy();

@@ -1106,6 +1106,7 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
+  readUserWords,
   type RuntimeNote,
   type ThreadItem,
   type ThreadTurn,

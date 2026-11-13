@@ -4,12 +4,18 @@
  */
 import type { JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { readInputSender, splitQueuedInputs, type HerculeClient } from "@hercule/client-core";
+import {
+  readInputSender,
+  readUserWords,
+  splitQueuedInputs,
+  type HerculeClient,
+} from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { inputsQuery, sessionQuery } from "../../app/queries";
 import { MessageBubble } from "../bubble";
 import { useAttachmentImages } from "../use-attachment-images";
 import { AgentSentMessage } from "./agent-sent-message";
+import { WithMessageContext } from "./message-context";
 
 /**
  * Draws each message on its way into the session `sessionId`, oldest first:
@@ -43,15 +49,20 @@ export function SendingMessages({
 /** Draws one message on its way into the session, with "sending…" under its bubble. */
 function SendingMessage({ input }: { readonly input: Input }): JSX.Element | null {
   const { images, observe } = useAttachmentImages(input.attachments);
-  if (input.text === "" && images.length === 0) return null;
+  const { text, context } = readUserWords(input.text);
+  if (text === "" && images.length === 0 && context === undefined) return null;
   const senderSessionId = readInputSender(input);
   const bubble = (
-    <MessageBubble
-      text={input.text}
-      images={images}
-      imagesRef={observe}
-      embeddedHtml={senderSessionId !== undefined}
-    />
+    <WithMessageContext context={context}>
+      {text === "" && images.length === 0 ? null : (
+        <MessageBubble
+          text={text}
+          images={images}
+          imagesRef={observe}
+          embeddedHtml={senderSessionId !== undefined}
+        />
+      )}
+    </WithMessageContext>
   );
   if (senderSessionId !== undefined) {
     return (
