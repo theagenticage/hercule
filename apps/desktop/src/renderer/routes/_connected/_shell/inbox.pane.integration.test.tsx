@@ -421,7 +421,9 @@ describe("Send again", () => {
     await pass(HOLD_MS);
     await pass(0);
     vi.useRealTimers();
-    expect(callsTo(calls, ACT_REVIEW)).toHaveLength(1);
+    await waitFor(() => {
+      expect(callsTo(calls, ACT_REVIEW)).toHaveLength(1);
+    });
     const failed = await screen.findByRole("alert");
     expect(failed.textContent).toMatch(/was not sent to/);
 
@@ -546,10 +548,7 @@ const stubFrameWidth = (width: number): void => {
         this.callback = callback;
       }
       observe(): void {
-        this.callback(
-          [{ contentRect: { width } } as ResizeObserverEntry],
-          this,
-        );
+        this.callback([{ contentRect: { width } } as ResizeObserverEntry], this);
       }
       unobserve(): void {}
       disconnect(): void {}
