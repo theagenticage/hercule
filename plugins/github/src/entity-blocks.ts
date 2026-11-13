@@ -164,7 +164,7 @@ const buildDescriptionBlocks = (body: string): ReadonlyArray<EntityBlockDraft> =
     description.length <= MAX_TEXT_BLOCK_LENGTH
       ? description
       : cutText(description, MAX_TEXT_BLOCK_LENGTH - CUT_NOTICE.length) + CUT_NOTICE;
-  return [{ type: "text", markdown }];
+  return [{ type: "text", title: "Description", markdown }];
 };
 
 /**

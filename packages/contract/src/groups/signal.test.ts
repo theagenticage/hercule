@@ -70,6 +70,8 @@ describe("the fields, trend and code blocks", () => {
   const POINT = { at: "2026-11-10T00:00:00.000Z", value: 3 };
 
   it.each([
+    { type: "text", title: "Description", markdown: "Adds the delivery cost." },
+    { type: "text", markdown: "Adds the delivery cost." },
     { type: "fields", title: "Details", rows: [{ label: "Branch", value: "main" }] },
     { type: "trend", caption: "Events", points: [POINT, { ...POINT, value: 0 }] },
     { type: "code", title: "Stack", text: "a\nb", truncated: true },

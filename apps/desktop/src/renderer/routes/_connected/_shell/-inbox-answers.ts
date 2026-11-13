@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys, trimAnswerEllipsis, type HerculeClient } from "@hercule/client-core";
 import {
   ANSWER_CANCELLED,
+  ANSWER_WAITS_NOTE,
   REFUSED_OFFLINE,
   describeAnswerFailure,
   describeAnswerSending,
@@ -146,6 +147,7 @@ export const useInboxAnswers = ({
         sayWithUndo: moves.sayWithUndo,
         line: `${words.text}. ${words.note}.`,
         words: words.text,
+        overdueLine: `${words.text}. ${ANSWER_WAITS_NOTE}.`,
         cancelledText: ANSWER_CANCELLED,
         afterSending: {
           text: describeAnswerTooLate(sourceName),
@@ -155,7 +157,7 @@ export const useInboxAnswers = ({
       },
     );
     const stopWatching = store.watch(intentId, (progress) => {
-      if (progress === "sending") return;
+      if (progress === "sending" || progress === "overdue") return;
       stopWatching();
       if (progress === "sent") {
         visit.confirmMove(receipt);

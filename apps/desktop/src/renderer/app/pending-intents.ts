@@ -84,7 +84,7 @@ export type PendingIntent = IntentContent & {
 };
 
 /** What `PendingIntents.watch` reports about one intent. */
-export type IntentProgress = "sending" | "sent" | "failed" | "cancelled";
+export type IntentProgress = "overdue" | "sending" | "sent" | "failed" | "cancelled";
 
 export interface PendingIntents {
   /**
@@ -100,8 +100,9 @@ export interface PendingIntents {
    */
   readonly hold: (content: IntentContent) => string;
   /**
-   * Tells `listener` each time the intent `intentId` starts `sending`, ends
-   * `failed`, is `cancelled` by Undo, or is `sent`. The last two are reported
+   * Tells `listener` each time the intent `intentId` runs out of its window
+   * while the undo line holds it (`overdue`: it waits to be sent), starts
+   * `sending`, ends `failed`, is `cancelled` by Undo, or is `sent`. The last two are reported
    * before the intent leaves the store, because the intent's removal alone
    * cannot tell sent from cancelled. Returns a function that stops the
    * reports. Nothing is reported after `dispose`.
@@ -403,8 +404,10 @@ export const createPendingIntents = (options: {
       setTimeout(
         () => {
           timers.delete(intent.intentId);
-          if (heldByLine.has(intent.intentId)) overdue.add(intent.intentId);
-          else void transmit(intent, false);
+          if (heldByLine.has(intent.intentId)) {
+            overdue.add(intent.intentId);
+            report(intent.intentId, "overdue");
+          } else void transmit(intent, false);
         },
         intent.kind === "signal-answer" ? SIGNAL_ANSWER_HOLD_MS : UNDO_WINDOW_MS,
       ),

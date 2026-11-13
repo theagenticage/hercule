@@ -67,6 +67,7 @@ function InboxBlock({
     case "text":
       return (
         <section className="bk">
+          {block.title === undefined ? null : <h3>{block.title}</h3>}
           <div className="bk-text b-words">
             <Markdown text={block.markdown} inlineImages />
           </div>

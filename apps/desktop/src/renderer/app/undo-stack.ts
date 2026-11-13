@@ -84,6 +84,12 @@ export interface Gesture<Page> {
    * (cancelled or failed) and the line should end on its own timer.
    */
   readonly settled?: Promise<string | undefined>;
+  /**
+   * For a gesture that waits before it acts: resolves when its time has run
+   * out but the user's hold on the line keeps it from acting, with the words
+   * the line shows while it waits (still with Undo).
+   */
+  readonly overdue?: Promise<string>;
 }
 
 /**

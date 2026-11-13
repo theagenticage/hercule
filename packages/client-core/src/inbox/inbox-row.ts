@@ -282,6 +282,13 @@ const describeRowAloud = (
 };
 
 /**
+ * Returns the place `thing` lives in ("storefront-web"), or `undefined` when
+ * its face has none. The row and the pane's head both read the place here.
+ */
+export const readThingPlace = (thing: InboxThing, now: Date): string | undefined =>
+  readFieldText(thing.face?.place, now);
+
+/**
  * Returns everything the row of `thing` draws.
  *
  * The place the thing lives in is dropped from the row when it would not fit
@@ -291,7 +298,7 @@ const describeRowAloud = (
 export const describeInboxRow = (thing: InboxThing, context: InboxRowContext): InboxRowView => {
   const holder = readHolder(thing, context.userName);
   const reason = decideReason(thing, context, holder);
-  const place = readFieldText(thing.face?.place, context.now);
+  const place = readThingPlace(thing, context.now);
   const dropPlace =
     place !== undefined &&
     (reason.aside !== undefined ||

@@ -51,6 +51,11 @@ interface UndoLineForIntent {
    * intent, and rejects with "It was already sent." once it is on its way.
    */
   readonly undo?: (intentId: string) => Promise<undefined>;
+  /**
+   * What the line says while the intent is past its window but the user holds
+   * the line, so the intent waits. Without it, the line keeps its words.
+   */
+  readonly overdueLine?: string;
   /** What Undo answers after it cancelled the held intent. Without it, the line says "Put back: <words>.". */
   readonly cancelledText?: string;
   /**
@@ -81,7 +86,7 @@ interface UndoLineForIntent {
 export const holdWithUndo = (
   store: PendingIntents,
   content: IntentContent,
-  { sayWithUndo, line, words, undo, cancelledText, afterSending }: UndoLineForIntent,
+  { sayWithUndo, line, words, undo, cancelledText, overdueLine, afterSending }: UndoLineForIntent,
 ): string => {
   const intentId = store.hold(content);
   // Ends the gesture's `settled` promise: the watch below calls it when the intent is sent, cancelled or fails.
@@ -92,6 +97,13 @@ export const holdWithUndo = (
       : new Promise<string | undefined>((resolve) => {
           settle = resolve;
         });
+  let markOverdue: (waitingLine: string) => void = () => undefined;
+  const overdue =
+    overdueLine === undefined
+      ? undefined
+      : new Promise<string>((resolve) => {
+          markOverdue = resolve;
+        });
   let progress: IntentProgress | "pending" = "pending";
   const takeOffStack = sayWithUndo(line, {
     words,
@@ -100,6 +112,7 @@ export const holdWithUndo = (
       store.setHeld(intentId, isHeld);
     },
     ...(settled === undefined ? {} : { settled }),
+    ...(overdue === undefined ? {} : { overdue }),
     undo: () => {
       if (undo !== undefined) return undo(intentId);
       if (store.undo(intentId)) {
@@ -112,6 +125,10 @@ export const holdWithUndo = (
     },
   });
   const stopWatching = store.watch(intentId, (reported) => {
+    if (reported === "overdue") {
+      if (overdueLine !== undefined) markOverdue(overdueLine);
+      return;
+    }
     progress = reported;
     if (afterSending !== undefined && reported === "sending") return;
     settle(reported === "sent" ? afterSending?.sentLine : undefined);

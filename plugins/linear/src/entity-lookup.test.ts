@@ -326,6 +326,7 @@ describe("reading the blocks of an issue", () => {
         },
         {
           type: "text",
+          title: "Description",
           markdown: "Pressing the button logs a TypeError and the order is not placed.",
         },
       ]),

@@ -585,6 +585,7 @@ describe("holding with the undo line", () => {
       isOnStack: () => gesture !== null,
       hold: (isHeld: boolean) => gesture?.hold?.(isHeld),
       settled: () => gesture?.settled,
+      overdue: () => gesture?.overdue,
       undo: () => gesture?.undo(null as never),
     };
   };
@@ -684,6 +685,24 @@ describe("holding with the undo line", () => {
 
     hold(false);
     expect(stub.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the line what to say once the hold keeps the intent past its window", async () => {
+    const { store, sayWithUndo, hold, overdue } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied. Sends in 8s.",
+      words: "Replied",
+      overdueLine: "Replied. Sends when you let go.",
+    });
+    const waitingLine = vi.fn();
+    void overdue()?.then(waitingLine);
+
+    hold(true);
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS - 1);
+    expect(waitingLine).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(waitingLine).toHaveBeenCalledWith("Replied. Sends when you let go.");
   });
 
   it("settles the line with the sent words once sent, and with nothing when cancelled", async () => {
