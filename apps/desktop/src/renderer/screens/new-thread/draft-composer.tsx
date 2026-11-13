@@ -82,6 +82,13 @@ function DraftPick({
   );
 }
 
+/** The reason line of the access, model and workspace menus, see `DraftComposer`. */
+export interface DraftPickReasons {
+  readonly accessMode: string | null;
+  readonly model: string | null;
+  readonly workspace: string | null;
+}
+
 /**
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
  * page draws it: the card, see `ComposerCard`, with the shelf of attached
@@ -121,9 +128,10 @@ export function DraftComposer({
   fieldRef,
   aboveField,
   replaceMessageRef,
-  fieldId = DRAFT_MESSAGE_ID,
+  fieldId,
   lipStart,
-  picksOffReason = null,
+  picksOffReason,
+  pickReasons,
   onTextChange,
   onChoose,
   onSignIn,
@@ -154,7 +162,7 @@ export function DraftComposer({
   /** Receives the function that replaces the message as one undoable edit, see `MessageField`. */
   readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
   /**
-   * The id of the message field. Defaults to `DRAFT_MESSAGE_ID`; a second
+   * The id of the message field, `DRAFT_MESSAGE_ID` when left out; a second
    * composer on the page, such as the one in the Inbox's start-thread dialog,
    * passes its own so the ids stay unique.
    */
@@ -169,6 +177,11 @@ export function DraftComposer({
    * and branch picks are left out.
    */
   readonly picksOffReason?: string | null;
+  /**
+   * Why each pick is what it is, one muted line at the top of that pick's
+   * menu. A `null` reason draws no line. Left out, no menu has one.
+   */
+  readonly pickReasons?: DraftPickReasons;
   readonly onTextChange: (text: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
   /** Opens the sign-in a dimmed entry of the model menu, or the machine in the lip, offers. */
@@ -177,6 +190,7 @@ export function DraftComposer({
   readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
   const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel } = view;
+  const offReason = picksOffReason ?? null;
   const { problem } = fields.machine;
   const signIn = problem?.signIn ?? null;
   const machinePick = (
@@ -192,7 +206,7 @@ export function DraftComposer({
           </span>
         )
       }
-      locked={picksOffReason ?? fields.machine.locked}
+      locked={offReason ?? fields.machine.locked}
       menuLabel="Machine"
       align="end"
       width="widest"
@@ -229,7 +243,7 @@ export function DraftComposer({
         replaceMessageRef={replaceMessageRef}
         skills={skills}
         start={
-          picksOffReason === null ? (
+          offReason === null ? (
             <>
               <DraftPick
                 className="pick"
@@ -244,6 +258,7 @@ export function DraftComposer({
                   <AccessModeMenu
                     value={fields.accessMode.value}
                     rows={fields.accessMode.rows}
+                    reason={pickReasons?.accessMode ?? null}
                     onPick={(mode) => {
                       onChoose({ kind: "accessMode", value: mode });
                       close();
@@ -263,13 +278,13 @@ export function DraftComposer({
             </>
           ) : (
             <>
-              <OffPick reason={picksOffReason} glyph={<ShieldIcon size={14} />} label="Access" />
-              <OffPick reason={picksOffReason} glyph={<SlidersIcon size={14} />} label="Effort" />
+              <OffPick reason={offReason} glyph={<ShieldIcon size={14} />} label="Access" />
+              <OffPick reason={offReason} glyph={<SlidersIcon size={14} />} label="Effort" />
             </>
           )
         }
         end={
-          picksOffReason === null ? (
+          offReason === null ? (
             <ModelPick
               pill={pill}
               catalogs={catalogs}
@@ -278,15 +293,16 @@ export function DraftComposer({
               runnerId={runnerId}
               disabled={false}
               readRecent={readRecent}
+              reason={pickReasons?.model ?? null}
               onChoose={onChoose}
               onSignIn={onSignIn}
             />
           ) : (
-            <OffPick reason={picksOffReason} label="Profile" isPill />
+            <OffPick reason={offReason} label="Profile" isPill />
           )
         }
         fieldRef={fieldRef}
-        fieldId={fieldId}
+        fieldId={fieldId ?? DRAFT_MESSAGE_ID}
         // The book's draft field has the focus when the page opens, so the
         // user can type the moment the draft shows.
         autoFocus
@@ -294,7 +310,7 @@ export function DraftComposer({
       />
       <div className="lip">
         {lipStart}
-        {picksOffReason !== null ? null : (
+        {offReason !== null ? null : (
           <>
             <DraftPick
               className="lip-pick"
@@ -311,6 +327,7 @@ export function DraftComposer({
               {(close) => (
                 <WorkspaceMenuContent
                   menu={workspaceMenu}
+                  reason={pickReasons?.workspace ?? null}
                   onPick={(picked) => {
                     onChoose({ kind: "workspace", workspace: picked });
                     close();
@@ -386,22 +403,22 @@ function OffPick({
   reason,
   label,
   glyph,
-  isPill = false,
+  isPill,
 }: {
   readonly reason: string;
   readonly label: string;
   readonly glyph?: ReactNode;
-  readonly isPill?: boolean;
+  readonly isPill?: boolean | undefined;
 }): JSX.Element {
   return (
     <button
       type="button"
-      className={isPill ? "pick pick--pill is-off" : "pick is-off"}
+      className={isPill === true ? "pick pick--pill is-off" : "pick is-off"}
       aria-disabled="true"
       title={reason}
     >
       {glyph}
-      {isPill ? <span className="pick-name">{label}</span> : label}
+      {isPill === true ? <span className="pick-name">{label}</span> : label}
     </button>
   );
 }

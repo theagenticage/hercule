@@ -572,7 +572,7 @@ export const MAX_THREAD_THINGS = 50;
  * thing is taken on by the user, as `externalEntity.takeOn` takes one on. The
  * ids are distinct, and the list is never empty.
  */
-export const NewThreadTask = closedStruct({
+const NewThreadTask = closedStruct({
   /** The new Task's title. A title the user chose is never replaced by a generated one. */
   title: TaskTitle,
   entityIds: atMost(Id, MAX_THREAD_THINGS).check(
@@ -581,10 +581,10 @@ export const NewThreadTask = closedStruct({
   ),
 });
 
-export type NewThreadTask = Schema.Schema.Type<typeof NewThreadTask>;
+type NewThreadTask = Schema.Schema.Type<typeof NewThreadTask>;
 
 /** The message for a spawn that names both a new Task and an existing one or an Agent. */
-export const NEW_TASK_CONFLICT_MESSAGE =
+const NEW_TASK_CONFLICT_MESSAGE =
   "newTask starts a Thread on a new Task, so it cannot be combined with taskId or agentId. Leave newTask out to join an existing Task, or leave taskId and agentId out to start on the new Task.";
 
 /**
@@ -592,7 +592,7 @@ export const NEW_TASK_CONFLICT_MESSAGE =
  * A new Task and a Task to join contradict each other, and an Agent's session
  * never makes a Task. The issue points at `newTask`.
  */
-export const refuseNewTaskWithTaskOrAgent = Schema.makeFilter(
+const refuseNewTaskWithTaskOrAgent = Schema.makeFilter(
   (payload: { readonly newTask?: unknown; readonly taskId?: string; readonly agentId?: string }) =>
     payload.newTask !== undefined && (payload.taskId !== undefined || payload.agentId !== undefined)
       ? { path: ["newTask"], issue: NEW_TASK_CONFLICT_MESSAGE }

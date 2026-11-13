@@ -7,7 +7,7 @@
  * same things, a refusal on a thing that has a Task, and the focus going to
  * the empty state when the last row leaves.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ProjectMatch } from "@hercule/contract";
@@ -25,6 +25,7 @@ import {
   type Call,
   type Handler,
 } from "../../../app/testing";
+import { buildThreadStartDraft } from "../../../app/thread-start-drafts";
 import {
   BASKET,
   LOYALTY,
@@ -276,7 +277,7 @@ describe("sending", () => {
     };
     expect(body.newTask).toEqual({ title: SLOTS.title, entityIds: [SLOTS.id] });
     expect(body.prompt).toContain(OWN_WORDS);
-    expect(body.prompt).toContain(`- ${SLOTS.identifier} ${SLOTS.title} (${SLOTS.id})`);
+    expect(body.prompt).toContain(`- ${SLOTS.identifier} "${SLOTS.title}" (${SLOTS.id})`);
     expect(body.dedupKey.length).toBeGreaterThan(0);
     expect(body.projectId).toBe(WEBSHOP.id);
     expect(within(started).getByText(/^Thread started · webshop · /)).toBeTruthy();
@@ -403,5 +404,144 @@ describe("closing", () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(heading);
     });
+  });
+});
+
+describe("review fixes", () => {
+  const SECOND_REPOSITORY = {
+    ...WEBSHOP_REPOSITORY!,
+    id: "01a1b576-c999-7000-8000-0000000000b2",
+    canonicalRemote: "github.com/acme/storefront-api",
+    projectIds: [WEBSHOP.id],
+  };
+  const startWith = async (user: ReturnType<typeof userEvent.setup>) => {
+    const dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    return dialog;
+  };
+
+  it("starts in the repository the evidence is in, with the main workspace setting", async () => {
+    const { user, calls } = await open(
+      { ...MATCHED, resourceId: SECOND_REPOSITORY.id },
+      undefined,
+      {
+        "GET /api/v1/resources": { body: { items: [WEBSHOP_REPOSITORY, SECOND_REPOSITORY] } },
+        "GET /api/v1/settings": {
+          body: { controller: {}, user: { "thread.workspace": "primary" } },
+        },
+      },
+    );
+    const dialog = await startWith(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+
+    await waitFor(() => {
+      expect(callsTo(calls, SPAWN)).toHaveLength(1);
+    });
+    const body = callsTo(calls, SPAWN)[0]!.body as {
+      workspace: { kind: string; resourceId: string };
+    };
+    expect(body.workspace).toMatchObject({ kind: "primary", resourceId: SECOND_REPOSITORY.id });
+  });
+
+  it("sends nothing while the message is blank", async () => {
+    const { user, calls } = await open();
+    const dialog = await startWith(user);
+
+    await user.click(within(dialog).getByRole("radio", { name: "Your own words" }));
+    await user.click(within(dialog).getByRole("textbox", { name: "Message" }));
+    await user.keyboard("{Control>}{Enter}{/Control}");
+
+    expect(callsTo(calls, SPAWN)).toHaveLength(0);
+    expect(
+      within(dialog).getByRole("button", { name: "Start thread" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
+  it("says the lookup failed rather than that nothing points at a repository, and a chosen project still sends", async () => {
+    const { user, calls } = await open(() => ({
+      status: 500,
+      body: buildErrorBody("internal", "match is down"),
+    }));
+    const dialog = await openDialog(user);
+
+    await waitFor(() => {
+      expect(dialog.querySelector(".thread-dialog-why")?.textContent).toContain(
+        "Could not look up the project: match is down",
+      );
+    });
+    expect(within(dialog).getByRole("button", { name: "Try the lookup again" })).toBeTruthy();
+    expect(dialog.textContent).not.toContain("Nothing here points at a repository");
+    await user.click(
+      await within(dialog).findByRole("menuitemradio", { name: /^webshop/, hidden: true }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+
+    await waitFor(() => {
+      expect(callsTo(calls, SPAWN)).toHaveLength(1);
+    });
+  });
+
+  it("refuses to send while offline, in the composer, and keeps the draft", async () => {
+    const { user, calls, live } = await open();
+    const dialog = await startWith(user);
+
+    live.drop();
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+
+    await within(dialog).findByText(/You are offline, so that was not done/);
+    expect(callsTo(calls, SPAWN)).toHaveLength(0);
+  });
+
+  it("reopens a draft whose send was attempted on a thing that now shows as held, and retries with its dedup key", async () => {
+    const held = request(4, "Held by a Task", "Ana", {
+      taskId: "01a1b576-c999-7000-8000-000000000902",
+    });
+    const { user, calls, context } = await open(MATCHED, (inbox) => {
+      inbox.lists.waits = [held];
+    });
+    const { threadStarts } = context.controller!.accountScopes.read();
+    threadStarts.write(held.id, { ...buildThreadStartDraft([held]), dedupKey: "attempt-1" });
+
+    const dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+
+    await screen.findByRole("dialog", { name: "Thread started" });
+    expect((callsTo(calls, SPAWN)[0]!.body as { dedupKey: string }).dedupKey).toBe("attempt-1");
+  });
+
+  it("keeps a failed draft on close even though nothing was edited", async () => {
+    const { user } = await open(MATCHED, undefined, {
+      [SPAWN]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "moss is at its limit of 4 sessions"),
+      },
+    });
+    const dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    await user.click(within(dialog).getByRole("button", { name: "Start thread" }));
+    await within(dialog).findByText(/was not started as a thread/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(readUndoLine()).toContain("Your words are kept");
+    });
+  });
+
+  it("does not render the Inbox screen again for what is typed in the dialog", async () => {
+    const { user, context } = await open();
+    const dialog = await openDialog(user);
+    await within(dialog).findByRole("button", { name: `Project ${WEBSHOP.name}` });
+    // The screen reads its account scope on every render.
+    const reads = vi.spyOn(context.controller!.accountScopes, "read");
+    await user.click(within(dialog).getByRole("radio", { name: "Your own words" }));
+    await user.click(within(dialog).getByRole("textbox", { name: "Message" }));
+
+    await user.keyboard(OWN_WORDS);
+
+    expect(readMessage(dialog)).toBe(OWN_WORDS);
+    expect(reads).not.toHaveBeenCalled();
   });
 });

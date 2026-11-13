@@ -335,6 +335,10 @@ export function Transcript({
   const first = virtualItems[0];
   const last = virtualItems.at(-1);
   const end = clearance + virtualizer.getTotalSize();
+  // The embedded transcript marks the user's first message so the start-thread
+  // dialog's motion can lift it from where the composer was.
+  const firstUserBlock = layout === "embedded" ? blocks.findIndex((b) => b.kind === "user") : -1;
+  const firstMessageIndex = firstUserBlock === -1 ? -1 : leadCount + firstUserBlock;
 
   return (
     <section
@@ -348,7 +352,13 @@ export function Transcript({
           <div style={{ height: first.start - clearance }} />
         )}
         {virtualItems.map(({ index, key }) => (
-          <div key={key} ref={virtualizer.measureElement} data-index={index} className="tx-item">
+          <div
+            key={key}
+            ref={virtualizer.measureElement}
+            data-index={index}
+            data-first-message={index === firstMessageIndex ? "" : undefined}
+            className="tx-item"
+          >
             {index < leadCount
               ? lead
               : renderBlock(

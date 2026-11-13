@@ -82,6 +82,15 @@ describe("the Thread's first moments", () => {
     expect(transcript.querySelector(".column")!.classList).toContain("tx-embedded");
   });
 
+  it("marks the user's first message, for the dialog's motion to find", async () => {
+    await openFirstMoments(THREAD_FIXTURES.running);
+    const transcript = await screen.findByRole("region", { name: "Transcript" });
+
+    const marked = transcript.querySelectorAll("[data-first-message]");
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.textContent).toMatch(/The webhook tests fail about one run in five/);
+  });
+
   it("paints the words the agent streams in after the Thread opened", async () => {
     const thread = THREAD_FIXTURES.running;
     const sessionId = thread.session.id;

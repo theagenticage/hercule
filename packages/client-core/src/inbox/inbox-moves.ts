@@ -40,10 +40,21 @@ const QUOTED_TITLE_LENGTH = 44;
 const quoteTitle = (title: string): string =>
   `“${title.length > QUOTED_TITLE_LENGTH ? `${title.slice(0, QUOTED_TITLE_LENGTH - 2)}…` : title}”`;
 
-/** Returns who has the thing, as a sentence's subject (see `findHolder`). Used for a thing the user took on. */
+/**
+ * Returns who has the thing, with the verb, as the words that start a
+ * sentence (see `findHolder`). Used for a thing the user took on.
+ */
 const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">): string => {
   const holder = findHolder(thing);
   return holder?.kind === "colleague" ? `${holder.name} has` : "You have";
+};
+
+/** Returns the same words as `describeWhoHasIt`, for the middle of a sentence, where "you" is lower case. */
+const describeWhoHasItMidSentence = (
+  thing: Pick<InboxThing, "liveWorkflows" | "takenOn">,
+): string => {
+  const holder = findHolder(thing);
+  return holder?.kind === "colleague" ? `${holder.name} has` : "you have";
 };
 
 const OFFLINE = "You are offline, so that was not done. Try again when the connection is back.";
@@ -121,7 +132,7 @@ export const planInboxMove = ({
         );
       return refuse(
         hasHolder
-          ? `${quoteTitle(taken.title)} is in the selection, and ${describeWhoHasIt(taken).replace(/^You/, "you")} it already. Take it out of the selection, then press N again.`
+          ? `${quoteTitle(taken.title)} is in the selection, and ${describeWhoHasItMidSentence(taken)} it already. Take it out of the selection, then press N again.`
           : `${quoteTitle(taken.title)} is in the selection, and it is on a Task already. Take it out of the selection, then press N again.`,
       );
     }
@@ -224,6 +235,11 @@ export const describeInboxThreadStart = (title: string): InboxLineWords => ({
   title,
 });
 
-/** Returns the sentence for a thread the controller refused to start: nothing was made. */
+/**
+ * Returns the sentence for a thread the controller refused to start: nothing
+ * was made. It adds no advice of its own, because the controller's reasons
+ * end with the advice that fits them ("Try again." for a thing that changed,
+ * "Leave it out, or start the thread on that Task." for a thing already on one).
+ */
 export const describeInboxThreadStartFailure = (title: string, reason: string): string =>
-  `${quoteTitle(title)} was not started as a thread: ${reason}. Try again.`;
+  `${quoteTitle(title)} was not started as a thread: ${reason}.`;

@@ -6,10 +6,17 @@
  */
 import {
   MAX_PROMPT_LENGTH,
-  type EntityMention,
+  type EvidenceEntity,
   type InboxThing,
   type ProjectMatch,
+  type Resource,
+  type ThreadWorkspace,
 } from "@hercule/contract";
+import { ApiError, readErrorMessage } from "../errors";
+import type { ThreadPicks } from "../threads/config";
+import { decideDefaultWorkspacePick, type WorkspacePick } from "../threads/workspaces";
+import { NO_OFFERS } from "./card-hand-off";
+import { describeInboxThreadStartFailure, planInboxMove } from "./inbox-moves";
 
 /** The ways the dialog can begin its message. */
 export type ThreadStarter = "investigate" | "fix" | "reply" | "summarise" | "own";
@@ -74,22 +81,20 @@ export interface ReasonPhrase {
   readonly strong?: boolean;
 }
 
-/** Returns the sentence as one plain string, for a screen reader or a test. */
-export const joinReasonText = (parts: readonly ReasonPhrase[]): string =>
-  parts.map((part) => part.text).join("");
-
 /**
  * Where the dialog's project stands:
  * - `inferred`: the controller's reply decides, and may say there is no project.
  * - `chosen`: the user picked this Project.
  * - `none-chosen`: the user picked "No project", a choice of its own.
- * - `unpicked`: nothing is picked and no reply says why.
+ * - `matching`: nothing is picked yet because the controller's reply is on its way.
+ * - `failed`: nothing is picked because the controller could not match; `reason` says why.
  */
 export type ProjectChoice =
   | { readonly kind: "inferred"; readonly match: ProjectMatch }
   | { readonly kind: "chosen"; readonly projectId: string }
   | { readonly kind: "none-chosen" }
-  | { readonly kind: "unpicked" };
+  | { readonly kind: "matching" }
+  | { readonly kind: "failed"; readonly reason: string };
 
 /** The names a reason needs, which the choice only holds as ids. */
 export interface ProjectChoiceNames {
@@ -97,6 +102,13 @@ export interface ProjectChoiceNames {
   readonly projectName?: string;
   /** The name of the Resource (repository) a match was made on. */
   readonly repositoryName?: string;
+  /** Whether the picked Project holds a Model Profile that the thread then uses. */
+  readonly hasModelProfile?: boolean;
+  /**
+   * Whether the thread starts by asking before it edits. `false` once the user
+   * picked another access mode under "No project"; left out counts as `true`.
+   */
+  readonly asksBeforeEdits?: boolean;
 }
 
 /** Returns whether a Project is picked, and so whether the thread may start. */
@@ -108,6 +120,9 @@ const NO_REPOSITORY_WORDS: readonly ReasonPhrase[] = [
     text: "Nothing here points at a repository, so no project is picked. Choose one, or start it without code.",
   },
 ];
+const MATCHING_WORDS: readonly ReasonPhrase[] = [
+  { text: "Looking for the project these belong to." },
+];
 const AMBIGUOUS_WORDS: readonly ReasonPhrase[] = [
   {
     text: "These point at more than one project, so none is picked. Choose one, or start it without code.",
@@ -115,7 +130,7 @@ const AMBIGUOUS_WORDS: readonly ReasonPhrase[] = [
 ];
 
 /** Returns how a mention reads in a sentence: its identifier, else its quoted title, else `fallback`. */
-const nameMention = (mention: EntityMention, fallback: string): string =>
+const nameMention = (mention: EvidenceEntity, fallback: string): string =>
   mention.identifier ?? (mention.title === undefined ? fallback : `“${mention.title}”`);
 
 /** Returns the sentence part that says why a match chose its Project, without the Project's name. */
@@ -128,6 +143,10 @@ const describeMatchEvidence = (
     ? `${nameMention(match.thing, "It")} is ${place}`
     : `${nameMention(match.thing, "It")} is linked to ${nameMention(match.via, "a linked thing")}, ${place}`;
 };
+
+/** Returns the closing words of a picked Project's reason: that its profile comes along, when it has one. */
+const PROFILE_WORDS = (names: ProjectChoiceNames): string =>
+  names.hasModelProfile === true ? " Its profile comes with it." : "";
 
 /**
  * Returns the one line under the composer that says why the dialog's project
@@ -146,7 +165,7 @@ export const describeProjectChoice = (
         return [
           { text: projectName, strong: true },
           {
-            text: ` because ${describeMatchEvidence(choice.match, names)}. Its profile comes with it.`,
+            text: ` because ${describeMatchEvidence(choice.match, names)}.${PROFILE_WORDS(names)}`,
           },
         ];
       case "ambiguous":
@@ -159,17 +178,23 @@ export const describeProjectChoice = (
     case "chosen":
       return [
         { text: projectName, strong: true },
-        { text: ", which you chose. Its profile comes with it." },
+        { text: `, which you chose.${PROFILE_WORDS(names)}` },
       ];
     case "none-chosen":
       return [
         { text: "No project", strong: true },
         {
-          text: ": the agent works without code or a checkout, with your own profile, and asks before it edits anything.",
+          text: `: the agent works without code or a checkout, with your own profile${names.asksBeforeEdits === false ? "" : ", and asks before it edits anything"}.`,
         },
       ];
-    case "unpicked":
-      return NO_REPOSITORY_WORDS;
+    case "matching":
+      return MATCHING_WORDS;
+    case "failed":
+      return [
+        {
+          text: `Could not look up the project: ${choice.reason}. Choose one, or try again.`,
+        },
+      ];
   }
 };
 
@@ -185,9 +210,13 @@ export interface ThreadPickLabels extends ProjectChoiceNames {
 }
 
 /**
- * Returns the reason a popover gives for one pick. The workspace pick is not here: the dialog shows the workspace lead for it. Project and profile follow
- * the project; access is the user's own
- * default, because a Project holds a Model Profile and no access mode.
+ * Returns the reason shown for one pick: a line at the top of that pick's
+ * menu, or under the project pick. The workspace pick is not here: the dialog
+ * shows the workspace lead for it.
+ *
+ * `labels` hold the values actually sent, so no line claims more than they
+ * say: access and profile name the resolved label, and say where it comes
+ * from only in ways that hold even when the user picked it by hand.
  */
 export const describePickReason = (
   pick: ThreadPick,
@@ -200,9 +229,9 @@ export const describePickReason = (
       case "project":
         return "You chose to start it without code.";
       case "access":
-        return `${labels.accessLabel}, because with no project the agent asks before it edits anything.`;
+        return `${labels.accessLabel} is the access this thread starts with. With no project there is no checkout to edit.`;
       case "profile":
-        return "Your own profile, because no project is picked.";
+        return `${labels.profileLabel} is the model this thread starts with. No project is picked, so no project profile applies.`;
     }
   }
   if (!hasProjectPick(choice)) {
@@ -217,9 +246,9 @@ export const describePickReason = (
         ? `Picked because ${describeMatchEvidence(choice.match, labels)}.`
         : "You chose it.";
     case "access":
-      return `${labels.accessLabel} is your default access for a new thread. A project does not set it.`;
+      return `${labels.accessLabel} is the access this thread starts with. A project does not set it.`;
     case "profile":
-      return `${labels.profileLabel} is ${projectName}’s profile.`;
+      return `${labels.profileLabel} is the model this thread starts with. It begins as ${projectName}’s profile, unless you pick another.`;
   }
 };
 
@@ -228,14 +257,26 @@ export type ThingsPromptText =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "too-long"; readonly reason: string };
 
-/** Returns the line that lists one thing in the prompt: identifier, title and id. */
-const describeThingForPrompt = (thing: InboxThing): string =>
-  `- ${thing.identifier} ${thing.title} (${thing.id})`;
+/** Returns `text` on one line: every run of whitespace, newlines included, becomes one space. */
+const collapseWhitespace = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /**
- * Builds the prompt that starts the thread: `message`, a blank line, one line
- * per thing (identifier, title, id), and how to read them in full. Returns a
- * refusal, never a cut prompt, when the text would pass the prompt's length
+ * Returns the line that lists one thing in the prompt: identifier, title in
+ * quotes, and id. Titles come from outside trackers and may hold newlines, so
+ * whitespace is collapsed: a title cannot add a line of its own that reads as
+ * the user's instruction. Quotes inside the title become typographic quotes so
+ * the title cannot end its own quotation.
+ */
+const describeThingForPrompt = (thing: InboxThing): string => {
+  const title = collapseWhitespace(thing.title).replaceAll('"', "”");
+  return `- ${collapseWhitespace(thing.identifier)} "${title}" (${thing.id})`;
+};
+
+/**
+ * Builds the prompt that starts the thread: `message`, a blank line, a
+ * sentence saying the titles below are copied from their sources, one line per
+ * thing (identifier, quoted title, id), and how to read them in full. Returns
+ * a refusal, never a cut prompt, when the text would pass the prompt's length
  * limit. This stands in until the controller builds the context itself.
  */
 export const buildThingsPromptText = (
@@ -245,6 +286,7 @@ export const buildThingsPromptText = (
   const text = [
     message,
     "",
+    "The things this is about (titles as their sources give them):",
     ...things.map(describeThingForPrompt),
     "",
     "Read any of them in full with `hercule entity read <id>`.",
@@ -259,3 +301,77 @@ export const buildThingsPromptText = (
 
 /** Returns the key under which unsent words are kept for a set of things: the same for any order. */
 export const buildThingsDraftKey = (ids: readonly string[]): string => [...ids].sort().join(",");
+
+/**
+ * Returns the picks to store once the user chooses `chosen` in the project
+ * pick: a Project's id, or `null` for "No project".
+ *
+ * - The workspace pick always goes, because it names a checkout of the
+ *   Project it was made in.
+ * - "No project" also drops the access pick, so the thread starts with
+ *   `NO_PROJECT_ACCESS_MODE` (see `buildPicksUnderChoice`) until the user picks an
+ *   access mode on purpose.
+ */
+export const buildPicksForProjectChoice = (
+  picks: ThreadPicks,
+  chosen: string | null,
+): ThreadPicks => {
+  const kept = { ...picks };
+  delete kept.workspace;
+  if (chosen === null) delete kept.accessMode;
+  return kept;
+};
+
+/** The access mode a thread starts with when no project is picked: it has no checkout to protect, so it asks before it edits. */
+const NO_PROJECT_ACCESS_MODE = "approval-required";
+
+/**
+ * Returns the picks the composer shows and sends. With "No project" chosen,
+ * the access mode is `NO_PROJECT_ACCESS_MODE` unless `picks` holds one the
+ * user picked after choosing it. Otherwise `picks` as they are.
+ */
+export const buildPicksUnderChoice = (picks: ThreadPicks, isNoProject: boolean): ThreadPicks =>
+  isNoProject ? { accessMode: NO_PROJECT_ACCESS_MODE, ...picks } : picks;
+
+/**
+ * Returns the workspace a thread starts in when a match found its evidence in
+ * the repository `resourceId` of the Project whose repositories are `repos`.
+ *
+ * - With the user's workspace setting at `primary`, the repository's main
+ *   workspace, rather than the first repository's.
+ * - Otherwise the default for the Project (a new workspace with a worktree of
+ *   each repository), which already includes the repository.
+ * - A `resourceId` that is not one of `repos` leaves the Project's default.
+ */
+export const decideEvidenceWorkspacePick = (
+  repos: readonly Resource[],
+  resourceId: string | undefined,
+  preferred: ThreadWorkspace | null,
+): WorkspacePick => {
+  const holdsRepository = repos.some((repo) => repo.id === resourceId);
+  const pick = decideDefaultWorkspacePick(repos, preferred);
+  return holdsRepository && pick.kind === "primary" && resourceId !== undefined
+    ? { kind: "primary", resourceId }
+    : pick;
+};
+
+/**
+ * Returns the refusal to send a thread now, or `null` when the connection is
+ * up. It is the same sentence every Inbox move gives when offline.
+ */
+export const describeOfflineSendRefusal = (isOffline: boolean): string | null => {
+  const plan = planInboxMove({ move: "startThread", things: [], isOffline, offers: NO_OFFERS });
+  return plan.kind === "refuse" ? plan.reason : null;
+};
+
+/**
+ * Returns the sentence for a thread that failed to start on the Task `title`.
+ * The controller's refusals (an `ApiError` below 500) end with their own
+ * advice. Any other failure, such as an unreachable controller or a server
+ * error, has none, so this adds "Try again.".
+ */
+export const describeThreadStartError = (title: string, error: unknown): string => {
+  const reason = readErrorMessage(error).replace(/\.+$/, "");
+  const text = describeInboxThreadStartFailure(title, reason);
+  return error instanceof ApiError && error.status < 500 ? text : `${text} Try again.`;
+};

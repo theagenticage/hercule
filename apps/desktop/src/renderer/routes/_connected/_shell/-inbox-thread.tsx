@@ -6,29 +6,47 @@
  * - What the user writes is kept per set of things (`AccountScope.threadStarts`),
  *   so closing the dialog unsent and pressing N on the same things opens the
  *   words again. A dialog closed without a change keeps nothing.
+ * - A draft that was sent, or failed, is kept even with no change: the
+ *   controller may have made the thread while the answer was lost, and N then
+ *   reopens it (also when its things show as held by that thread's Task) so a
+ *   retry finds the thread again by its dedup key.
  * - A thread that started is not undone: the undo line says so with an "Open
  *   it" button, and nothing goes on the undo stack.
  * - Every continuation of a request first asks the account scope that the user
  *   is still the one signed in.
  */
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type JSX,
 } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { isMutationRunning, queryKeys } from "@hercule/client-core";
-import { buildThingsDraftKey, describeInboxThreadStartFailure } from "@hercule/client-core/inbox";
+import {
+  buildThingsDraftKey,
+  describeOfflineSendRefusal,
+  describeThreadStartError,
+} from "@hercule/client-core/inbox";
 import type { SavedController } from "../../../app/context";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
-import { profilesQuery, settingsQuery, threadAndAgentSessionsQuery } from "../../../app/queries";
+import {
+  ensureThreadData,
+  profilesQuery,
+  settingsQuery,
+  threadAndAgentSessionsQuery,
+} from "../../../app/queries";
 import { readReason } from "../../../app/read-reason";
 import { rememberRecentModel } from "../../../app/recent-models";
-import { buildThreadStartDraft } from "../../../app/thread-start-drafts";
+import {
+  buildThreadStartDraft,
+  isWorthKeeping,
+  type ThreadStartDrafts,
+} from "../../../app/thread-start-drafts";
 import type { InboxMoves } from "./-inbox-moves";
 import {
   InboxThreadDialog,
@@ -43,18 +61,41 @@ const START_KEY = ["inbox-thread-start"];
 
 const WORDS_KEPT = "Your words are kept. N on the same things opens them again.";
 
-/** What `useInboxThread` returns. */
+/** What `useInboxThread` returns. It changes only when the dialog opens, closes, sends or starts. */
 export interface InboxThread {
   /**
    * Opens the dialog on the things the move is for: the selection, else the
    * current row, or with `hoveredRef` that row (see `InboxMoves.dismiss`). A
    * refusal says why on the undo line and opens nothing. The dialog waits for
    * the settings and profiles it reads, so it opens a moment after the call.
+   * The function is the same for the life of the screen.
    */
   readonly open: (hoveredRef?: string) => void;
   /** The dialog while it is open, else `null`: the screen draws it with its overlays. */
   readonly element: JSX.Element | null;
 }
+
+/**
+ * Returns whether the live connection is down right now. `onStatus` calls its
+ * listener at once with the current status, so subscribing and leaving reads it.
+ */
+const isDisconnected = (live: SavedController["live"]): boolean => {
+  let status: string = "idle";
+  live.onStatus((current) => {
+    status = current;
+  })();
+  return status === "disconnected";
+};
+
+/**
+ * Returns whether a stored draft holds a send that was attempted, which may
+ * have made the thread: its things can then show as held by its own Task.
+ */
+const hasAttemptedSend = (
+  drafts: ThreadStartDrafts,
+  things: readonly { readonly id: string }[],
+): boolean =>
+  drafts.read(buildThingsDraftKey(things.map((thing) => thing.id)))?.dedupKey !== undefined;
 
 /**
  * Makes the start-thread dialog of the Inbox for `controller`, over the list
@@ -63,6 +104,9 @@ export interface InboxThread {
  * list empties after the thread's things left it, so the screen can put the
  * focus on the current row or on the empty state: the page behind a modal
  * dialog cannot take the focus while it is open.
+ *
+ * The hook never reads the draft: the dialog does, so typing in it renders the
+ * dialog alone and not the Inbox screen.
  */
 export function useInboxThread({
   controller,
@@ -77,27 +121,25 @@ export function useInboxThread({
   readonly moves: InboxMoves;
   readonly onClosed: (snapshot: InboxListSnapshot) => void;
 }): InboxThread {
-  const { client, pendingSubmissions } = controller;
+  const { client, pendingSubmissions, live } = controller;
   const { threadStarts: drafts } = scope;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const openThread = (sessionId: string): void => {
-    void navigate({ to: "/threads/$sessionId", params: { sessionId } });
-  };
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [started, setStarted] = useState<StartedThread | null>(null);
-  const draft = useSyncExternalStore(drafts.subscribe, () =>
-    openKey === null ? undefined : drafts.read(openKey),
-  );
   const isOpening = useRef(false);
   // The refs of the things a started thread took, while the list may still drop them.
   const taken = useRef<readonly string[] | null>(null);
 
   // A continuation of a request outlives the render that made it, so it reads the newest of these.
-  const latest = useRef({ openKey, started, moves, onClosed });
+  const latest = useRef({ openKey, started, moves, onClosed, navigate });
   useLayoutEffect(() => {
-    latest.current = { openKey, started, moves, onClosed };
+    latest.current = { openKey, started, moves, onClosed, navigate };
   });
+
+  const openThread = useCallback((sessionId: string): void => {
+    void latest.current.navigate({ to: "/threads/$sessionId", params: { sessionId } });
+  }, []);
 
   const start = useMutation({
     mutationKey: START_KEY,
@@ -107,7 +149,7 @@ export function useInboxThread({
     },
     // Registered here rather than passed to `mutate`, so a thread that starts
     // after the user closed the dialog is still taken in.
-    onSuccess: (session, sent) => {
+    onSuccess: async (session, sent) => {
       if (!scope.isCurrent()) return;
       // The thread screen opens on this session without reading it again.
       queryClient.setQueryData(queryKeys.session(session.id), session);
@@ -127,6 +169,13 @@ export function useInboxThread({
         openThread(session.id);
       });
       if (latest.current.openKey === sent.draftKey) {
+        // The started dialog measures the transcript as it appears, so its reads are in the
+        // cache first. When they fail, the transcript shows its own state rather than the
+        // dialog waiting.
+        await ensureThreadData(queryClient, client, session.id).catch(() => undefined);
+        if (!scope.isCurrent()) return;
+      }
+      if (latest.current.openKey === sent.draftKey) {
         // The draft stays until the dialog closes, which the started dialog is drawn from.
         setStarted({
           sessionId: session.id,
@@ -142,65 +191,88 @@ export function useInboxThread({
     // when the dialog was closed and opened again before the start failed.
     onError: (error, sent) => {
       if (!scope.isCurrent()) return;
+      const failure = describeThreadStartError(sent.title, error);
       const current = drafts.read(sent.draftKey);
-      if (current === undefined) return;
-      drafts.write(sent.draftKey, {
-        ...current,
-        failure: describeInboxThreadStartFailure(sent.title, readReason(error)),
-      });
+      if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure });
+      // A closed dialog shows nothing, so the undo line says it.
+      if (latest.current.openKey !== sent.draftKey) latest.current.moves.say(failure);
     },
   });
+  const { mutate: startThread } = start;
 
-  const open = (hoveredRef?: string): void => {
-    if (isOpening.current) return;
-    const things = moves.readStartTargets(hoveredRef);
-    if (things === null) return;
-    const key = buildThingsDraftKey(things.map((thing) => thing.id));
-    isOpening.current = true;
-    // The composer is built from these two, which no other screen reads on the way here.
-    Promise.all([
-      queryClient.ensureQueryData(settingsQuery(client)),
-      queryClient.ensureQueryData(profilesQuery(client)),
-    ]).then(
-      () => {
-        if (!scope.isCurrent()) return;
-        if (drafts.read(key) === undefined) drafts.write(key, buildThreadStartDraft(things));
-        setStarted(null);
-        setOpenKey(key);
-      },
-      (error: unknown) => {
-        isOpening.current = false;
-        if (scope.isCurrent()) {
-          moves.say(`Start a thread could not read your settings: ${readReason(error)}.`);
-        }
-      },
-    );
-  };
+  const open = useCallback(
+    (hoveredRef?: string): void => {
+      if (isOpening.current) return;
+      const things = latest.current.moves.readStartTargets(hoveredRef, (targets) =>
+        hasAttemptedSend(drafts, targets),
+      );
+      if (things === null) return;
+      const key = buildThingsDraftKey(things.map((thing) => thing.id));
+      isOpening.current = true;
+      // The composer is built from these two, which no other screen reads on the way here.
+      Promise.all([
+        queryClient.ensureQueryData(settingsQuery(client)),
+        queryClient.ensureQueryData(profilesQuery(client)),
+      ]).then(
+        () => {
+          if (!scope.isCurrent()) return;
+          if (drafts.read(key) === undefined) drafts.write(key, buildThreadStartDraft(things));
+          setStarted(null);
+          setOpenKey(key);
+        },
+        (error: unknown) => {
+          isOpening.current = false;
+          if (scope.isCurrent()) {
+            latest.current.moves.say(
+              `Start a thread could not read your settings: ${readReason(error)}.`,
+            );
+          }
+        },
+      );
+    },
+    [client, drafts, queryClient, scope],
+  );
 
-  /** Keeps what the user wrote of the draft at `key` when it was changed, else drops it. */
-  const settleDraft = (key: string): void => {
-    const current = drafts.read(key);
-    if (current === undefined) return;
-    if (started !== null) {
-      drafts.drop(key);
-    } else if (isMutationRunning(queryClient, START_KEY)) {
-      // The start decides: success drops the draft and failure keeps it with its message.
-    } else if (current.isEdited) {
-      moves.say(WORDS_KEPT);
-    } else {
-      drafts.drop(key);
-    }
-  };
+  /** Keeps the draft at `key` when it was changed or sent, else drops it. */
+  const settleDraft = useCallback(
+    (key: string): void => {
+      const current = drafts.read(key);
+      if (current === undefined) return;
+      if (latest.current.started !== null) {
+        drafts.drop(key);
+      } else if (isMutationRunning(queryClient, START_KEY)) {
+        // The start decides: success drops the draft and failure keeps it with its message.
+      } else if (isWorthKeeping(current)) {
+        latest.current.moves.say(WORDS_KEPT);
+      } else {
+        drafts.drop(key);
+      }
+    },
+    [drafts, queryClient],
+  );
 
-  const close = (): void => {
-    if (openKey !== null) settleDraft(openKey);
+  const close = useCallback((): void => {
+    const { openKey: key, onClosed: tellClosed } = latest.current;
+    if (key !== null) settleDraft(key);
     setOpenKey(null);
     setStarted(null);
     isOpening.current = false;
     const snapshot = visit.getSnapshot();
     if (snapshot.rows.length === 0) taken.current = null;
-    onClosed(snapshot);
-  };
+    tellClosed(snapshot);
+  }, [settleDraft, visit]);
+
+  const send = useCallback(
+    (sent: SentThread): void => {
+      if (isMutationRunning(queryClient, START_KEY)) return;
+      const current = drafts.read(sent.draftKey);
+      // The connection may have dropped since the dialog opened.
+      const offline = describeOfflineSendRefusal(isDisconnected(live));
+      if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure: offline });
+      if (offline === null) startThread(sent);
+    },
+    [drafts, live, queryClient, startThread],
+  );
 
   // The list drops a thing that is taken from "Someone waits on me" on its next read, which can
   // empty the list after the dialog closed. The focus then goes to the empty state, as for a move.
@@ -230,24 +302,22 @@ export function useInboxThread({
     [drafts],
   );
 
-  const element =
-    openKey === null || draft === undefined ? null : (
-      <InboxThreadDialog
-        key={openKey}
-        drafts={drafts}
-        draftKey={openKey}
-        draft={draft}
-        started={started}
-        isStarting={start.isPending}
-        onSend={(sent) => {
-          if (isMutationRunning(queryClient, START_KEY)) return;
-          const current = drafts.read(sent.draftKey);
-          if (current !== undefined) drafts.write(sent.draftKey, { ...current, failure: null });
-          start.mutate(sent);
-        }}
-        onOpenThread={openThread}
-        onClose={close}
-      />
-    );
-  return { open, element };
+  const isStarting = start.isPending;
+  const element = useMemo(
+    () =>
+      openKey === null ? null : (
+        <InboxThreadDialog
+          key={openKey}
+          drafts={drafts}
+          draftKey={openKey}
+          started={started}
+          isStarting={isStarting}
+          onSend={send}
+          onOpenThread={openThread}
+          onClose={close}
+        />
+      ),
+    [openKey, drafts, started, isStarting, send, openThread, close],
+  );
+  return useMemo(() => ({ open, element }), [open, element]);
 }

@@ -128,17 +128,23 @@ export function ThreadDialog({
     dialog.querySelector<HTMLElement>(".composer-input")?.focus({ preventScroll: true });
   }, []);
 
-  // After every commit while writing, so the change to started can start from where the composer was:
-  // by then the writing has already been replaced.
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current;
-    const card = dialog?.querySelector(".composer-card");
-    if (phase.kind !== "writing" || dialog == null || card == null) return;
-    writingSnapshotRef.current = {
-      height: dialog.offsetHeight,
-      composerTop: card.getBoundingClientRect().top - dialog.getBoundingClientRect().top,
+  /**
+   * Ref for the writing body. React calls the returned function when the
+   * body leaves, after the phase changed but before its element is removed, so
+   * the dialog is measured once, as the writing last looked, and not on every
+   * render.
+   */
+  const attachWritingBody = useCallback((body: HTMLDivElement): (() => void) => {
+    return () => {
+      const dialog = dialogRef.current;
+      const card = body.querySelector(".composer-card");
+      if (dialog === null || card === null) return;
+      writingSnapshotRef.current = {
+        height: dialog.offsetHeight,
+        composerTop: card.getBoundingClientRect().top - dialog.getBoundingClientRect().top,
+      };
     };
-  });
+  }, []);
 
   useLayoutEffect(() => {
     if (!started) return;
@@ -209,7 +215,7 @@ export function ThreadDialog({
         </button>
       </header>
       {phase.kind === "writing" ? (
-        <div ref={bodyRef} className="thread-dialog-body">
+        <div ref={attachWritingBody} className="thread-dialog-body">
           <div className="thread-dialog-starters" role="radiogroup" aria-label="Start from">
             {phase.starters.map(({ starter, label }) => (
               <StarterButton

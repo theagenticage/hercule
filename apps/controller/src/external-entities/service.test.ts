@@ -803,6 +803,29 @@ describe("taking several things on as one Task", () => {
     expect(links).toBe(0);
   });
 
+  it("refuses a thing already on an active Task before any source is read", async () => {
+    const { error, resolved } = await run((arranged) =>
+      Effect.gen(function* () {
+        const { script, service, report, reportPartial, connectionId, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        script.resolve = () => ({
+          found: { connectionId, observation: buildObservation("2") },
+        });
+        const taken = yield* entityId(ticketRef("1"));
+        yield* service.takeOn(taken);
+        const partial = yield* entityId(ticketRef("2"));
+        const error = yield* Effect.flip(service.prepareThingsForTask([partial, taken]));
+        return { error, resolved: script.resolved.length };
+      }),
+    );
+    expect(error).toMatchObject({ error: { code: "conflict" } });
+    expect((error as { error: { message: string } }).error.message).toContain(
+      "is already on the Task",
+    );
+    expect(resolved).toBe(0);
+  });
+
   it("refuses with a conflict when a thing loses access between the preparation and the write", async () => {
     const { error, taskCount } = await run((arranged) =>
       Effect.gen(function* () {

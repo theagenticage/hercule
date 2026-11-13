@@ -226,6 +226,44 @@ describe("ThreadDialog once started", () => {
   });
 });
 
+describe("ThreadDialog motion", () => {
+  it("measures the writing once, when it gives way to the thread, not on every render", () => {
+    const measure = vi.spyOn(Element.prototype, "getBoundingClientRect");
+    const composer = <div className="composer-card" />;
+    const view = render(
+      <ThreadDialog
+        phase={buildWriting({ composer })}
+        look={HERCULE_LOOK}
+        platform="linux"
+        onClose={vi.fn()}
+      />,
+    );
+    for (const title of ["a", "ab", "abc"]) {
+      view.rerender(
+        <ThreadDialog
+          phase={buildWriting({ composer, title })}
+          look={HERCULE_LOOK}
+          platform="linux"
+          onClose={vi.fn()}
+        />,
+      );
+    }
+    expect(measure).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThreadDialog
+        phase={buildStarted()}
+        look={HERCULE_LOOK}
+        platform="linux"
+        onClose={vi.fn()}
+      />,
+    );
+    // The dialog and the composer's card, once each.
+    expect(measure).toHaveBeenCalledTimes(2);
+    measure.mockRestore();
+  });
+});
+
 describe("ThingChips", () => {
   it("draws the identifier and the title of each thing, with a button to leave it out", async () => {
     const onRemove = vi.fn();
@@ -236,23 +274,6 @@ describe("ThingChips", () => {
     await userEvent.click(screen.getByRole("button", { name: "Leave #6244 out" }));
 
     expect(onRemove).toHaveBeenCalledExactlyOnceWith("b");
-  });
-
-  it("names a chip with no identifier by its title", () => {
-    render(
-      <ThingChips
-        things={[
-          THINGS[0]!,
-          { id: "c", pluginId: "slack", identifier: null, title: "Is it going out Thursday?" },
-        ]}
-        plugins={[]}
-        onRemove={vi.fn()}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: "Leave Is it going out Thursday? out" }),
-    ).toBeTruthy();
   });
 
   it("draws no button on the last chip", () => {

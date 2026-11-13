@@ -289,3 +289,19 @@
   background: color-mix(in oklab, var(--answer-fg) 16%, transparent);
   color: var(--answer-fg);
 }
+
+.thread-dialog-retry {
+  align-self: flex-start;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  line-height: 18px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.thread-dialog-retry:hover {
+  color: var(--ink);
+}

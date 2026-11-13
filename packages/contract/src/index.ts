@@ -378,10 +378,7 @@ export {
   EMPTY_PROMPT_MESSAGE,
   MAX_INPUT_ANSWER_WAIT,
   MAX_THREAD_THINGS,
-  NEW_TASK_CONFLICT_MESSAGE,
-  NewThreadTask,
   refuseEmptyPrompt,
-  refuseNewTaskWithTaskOrAgent,
 } from "./groups/session";
 export {
   Attachment,
@@ -784,7 +781,7 @@ export {
   EntityUndoTakeOnInput,
   EntityUndoTakeOnResult,
   EntityUnlinkResult,
-  EntityMention,
+  EvidenceEntity,
   EntityProjectMatchInput,
   ProjectMatch,
   type CoreSavedQueryId,

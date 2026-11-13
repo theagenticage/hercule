@@ -1360,9 +1360,10 @@ const make = Effect.gen(function* () {
      * With a `dedupKey` the caller can retry safely. A repeat by the same
      * actor returns the first call's session, read as it is now, and places
      * nothing; no other field of the repeat is compared. The key is looked up
-     * after the grant check and the decode, in the transaction that writes the
-     * session and before anything else in it, so a repeat succeeds even when
-     * the call could no longer be placed.
+     * after the grant check and the decode, before anything is read at a
+     * source, and again in the transaction that writes the session and before
+     * anything else in it, so a repeat succeeds even when the call could no
+     * longer be placed.
      *
      * With `newTask`, the Thread starts on a new Task made from External
      * Entities, in the same transaction as the session. Only the user may
@@ -1382,10 +1383,17 @@ const make = Effect.gen(function* () {
         if (decoded.newTask !== undefined && actor._tag !== "user") {
           return yield* Effect.fail(createForbiddenError("session.spawn", NEW_TASK_IS_THE_USERS));
         }
+        // A repeat of a call that already committed returns its session before
+        // anything is read: the things may have become unreadable since (the
+        // plugin was disabled, the account lost access), and the repeat must
+        // still succeed. The same lookup runs again inside `place`'s
+        // transaction, which is the one that decides.
+        if (decoded.newTask !== undefined && decoded.dedupKey !== undefined) {
+          const savedId = yield* dedupKeys.findResultId("session.spawn", decoded.dedupKey);
+          if (savedId !== undefined) return yield* readSessionRecord(savedId);
+        }
         // Reading the things at their source can take seconds, so it happens
-        // here, before the transaction that writes the session. A retry with
-        // the same `dedupKey` prepares again, which is harmless: a thing the
-        // first call took on is a full record by then and needs no read.
+        // here, before the transaction that writes the session.
         const prepared =
           decoded.newTask === undefined
             ? undefined

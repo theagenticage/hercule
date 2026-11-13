@@ -4790,7 +4790,7 @@ export const CLI = {
       not_found:
         "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task is unknown: check `hercule entity list`",
       conflict:
-        "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task",
+        "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
     },
   },
   "session.update": {

@@ -74,8 +74,21 @@ describe("the words after starting a thread", () => {
       text: "Started a thread on",
       title: "Fix the cart",
     });
-    expect(describeInboxThreadStartFailure("Fix the cart", "no runner")).toBe(
-      "“Fix the cart” was not started as a thread: no runner. Try again.",
+    expect(
+      describeInboxThreadStartFailure(
+        "Fix the cart",
+        "it changed while the Task was made. Try again",
+      ),
+    ).toBe(
+      "“Fix the cart” was not started as a thread: it changed while the Task was made. Try again.",
+    );
+    expect(
+      describeInboxThreadStartFailure(
+        "Fix the cart",
+        "it is already on the Task “X”. Leave it out",
+      ),
+    ).toBe(
+      "“Fix the cart” was not started as a thread: it is already on the Task “X”. Leave it out.",
     );
   });
 });

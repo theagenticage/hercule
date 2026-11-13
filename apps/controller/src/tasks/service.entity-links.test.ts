@@ -176,8 +176,8 @@ describe("taking on work for a ref", () => {
     const { task, links } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const task = yield* tasks.createTaskLinkedToRef({
-          ref: REF,
+        const task = yield* tasks.createTaskLinkedToRefs({
+          refs: [REF],
           title: "Review the change",
           stage: "building",
           following: true,
@@ -203,8 +203,8 @@ describe("taking on work for a ref", () => {
     const errors = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const created = yield* tasks.createTaskLinkedToRef({
-          ref: REF,
+        const created = yield* tasks.createTaskLinkedToRefs({
+          refs: [REF],
           title: "Mine",
           stage: "planned",
           following: false,
@@ -213,8 +213,8 @@ describe("taking on work for a ref", () => {
           Effect.provideService(Effect.flip(effect), CurrentActor, SESSION);
         return [
           yield* asSession(
-            tasks.createTaskLinkedToRef({
-              ref: REF,
+            tasks.createTaskLinkedToRefs({
+              refs: [REF],
               title: "x",
               stage: "planned",
               following: false,
@@ -235,8 +235,8 @@ describe("taking back a Task made for a ref", () => {
   const makeTask = Effect.gen(function* () {
     const tasks = yield* TaskService;
     yield* TestClock.adjust(A_MINUTE);
-    return yield* tasks.createTaskLinkedToRef({
-      ref: REF,
+    return yield* tasks.createTaskLinkedToRefs({
+      refs: [REF],
       title: "Take it",
       stage: "planned",
       following: false,
@@ -307,8 +307,8 @@ describe("taking back a Task made for a ref", () => {
     const { outcome, deleted } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const task = yield* tasks.createTaskLinkedToRef({
-          ref: REF,
+        const task = yield* tasks.createTaskLinkedToRefs({
+          refs: [REF],
           title: "Already done",
           stage: "done",
           following: false,

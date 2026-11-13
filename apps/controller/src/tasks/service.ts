@@ -302,7 +302,7 @@ const ONLY_THE_USER_REVERSES_HANDOFF =
   "only the user may take a handoff back: it is the user's own act, so a session or a workflow step may not; ask the user instead";
 
 /**
- * The refusal of `createTaskLinkedToRef`, `undoCreatedTask` and the Inbox
+ * The refusal of `createTaskLinkedToRefs`, `undoCreatedTask` and the Inbox
  * moves of External Entities for a caller who is not the user.
  */
 export const ONLY_THE_USER_TAKES_ON_WORK =
@@ -1568,10 +1568,13 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a Task for a ref the user took on or added to Work, linked to
-     * that ref, and returns it. The Task has the given title and stage,
-     * priority `normal`, and the provenance entry `{ ref }`, which writes the
-     * link. `following` is stored on the link: it says the user added the ref
+     * Creates one Task for the refs the user took on or added to Work, linked
+     * to all of them, and returns it (a single ref is a list of one). The Task
+     * has the given title and stage, priority `normal`, one provenance entry
+     * `{ ref }` per ref, which writes the link, and one link per ref, each
+     * marked as taken on by the user at the same moment. The refs are
+     * distinct, and the caller has checked that none is on an active Task.
+     * `following` is stored on the links: it says the user added the refs
      * from nothing that concerned them. The `task.created` event carries the
      * actor's stamp.
      *
@@ -1580,26 +1583,6 @@ const make = Effect.gen(function* () {
      * user's act on an outside thing. It fails with `Forbidden` for any other
      * caller, whatever grants they hold, and with `NotFound` if the project
      * does not exist. It runs in the caller's transaction.
-     */
-    createTaskLinkedToRef: (input: {
-      readonly ref: ExternalRef;
-      readonly title: string;
-      readonly stage: TaskStage;
-      readonly projectId?: string;
-      readonly following: boolean;
-    }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
-      createTaskLinkedToRefs({ ...input, refs: [input.ref] }),
-
-    /**
-     * Creates one Task for several refs the user took on together, linked to
-     * all of them, and returns it. It is `createTaskLinkedToRef` for a list:
-     * the Task has the given title and stage, priority `normal`, one
-     * provenance entry `{ ref }` per ref, and one link per ref, each marked as
-     * taken on by the user at the same moment. The refs are distinct, and the
-     * caller has checked that none is on an active Task.
-     *
-     * Permission, failures and transaction are those of
-     * `createTaskLinkedToRef`.
      */
     createTaskLinkedToRefs: (input: {
       readonly refs: ReadonlyArray<ExternalRef>;
@@ -1611,7 +1594,7 @@ const make = Effect.gen(function* () {
       createTaskLinkedToRefs(input),
 
     /**
-     * Takes back a Task that `createTaskLinkedToRef` made, by soft-deleting
+     * Takes back a Task that `createTaskLinkedToRefs` made, by soft-deleting
      * it, but only when it links `ref` and nothing has been added to it
      * since: no Thread, no run, no link to another ref, no edit since it was
      * created, and a stage that is not Done or Dropped. Otherwise it changes
@@ -1622,7 +1605,7 @@ const make = Effect.gen(function* () {
      * in between.
      *
      * Permission: the user only, with the grant `task.update`, as for
-     * `createTaskLinkedToRef`. It fails with `Forbidden` for any other caller.
+     * `createTaskLinkedToRefs`. It fails with `Forbidden` for any other caller.
      * It runs in the caller's transaction, or opens one.
      */
     undoCreatedTask: (

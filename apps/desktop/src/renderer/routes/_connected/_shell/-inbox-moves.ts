@@ -126,8 +126,15 @@ export interface InboxMoves {
    * Returns the things a thread may start from (see `dismiss` for which
    * things), or says why not on the undo line and returns `null`. The caller
    * opens the start-thread dialog on them.
+   *
+   * When `isResumable` says the things already have a send that was attempted,
+   * they are returned without any refusal: a thing that shows as held by a
+   * Task may be held by that very send, and the dialog must open to retry it.
    */
-  readonly readStartTargets: (hoveredRef?: string) => InboxListRow[] | null;
+  readonly readStartTargets: (
+    hoveredRef?: string,
+    isResumable?: (things: readonly InboxListRow[]) => boolean,
+  ) => InboxListRow[] | null;
   /**
    * Says that a thread started on the Task `title`, with an "Open it" button
    * that calls `open`. A thread that started is not undone, so the line has no
@@ -461,7 +468,11 @@ export const useInboxMoves = ({
     handOff,
     goToTask,
     openAtSource,
-    readStartTargets: (hoveredRef) => readAllowedTargets("startThread", hoveredRef),
+    readStartTargets: (hoveredRef, isResumable) => {
+      const things = readTargets(hoveredRef);
+      if (things.length > 0 && isResumable?.(things) === true) return things;
+      return readAllowedTargets("startThread", hoveredRef);
+    },
     sayThreadStarted: (title, open) => {
       const words = describeInboxThreadStart(title);
       say(words.text, undefined, { label: "Open it", act: open }, words.title ?? undefined);

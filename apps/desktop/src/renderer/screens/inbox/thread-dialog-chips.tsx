@@ -13,8 +13,8 @@ export interface ThingChip {
   readonly id: string;
   /** The plugin the thing comes from, which decides its mark. */
   readonly pluginId: string;
-  /** The thing's identifier in its source, such as `SHOP-142`, or `null` when it has none. */
-  readonly identifier: string | null;
+  /** The thing's identifier in its source, such as `SHOP-142`. */
+  readonly identifier: string;
   readonly title: string;
 }
 
@@ -49,12 +49,12 @@ export function ThingChips({
       {things.map((thing) => (
         <span key={thing.id} className="thread-dialog-chip" title={thing.title}>
           <PluginMark pluginId={thing.pluginId} plugins={plugins} size={MARK_SIZE} />
-          {thing.identifier === null ? null : <b>{thing.identifier}</b>}
+          <b>{thing.identifier}</b>
           <span className="thread-dialog-chip-title">{thing.title}</span>
           {removable ? (
             <button
               type="button"
-              aria-label={`Leave ${thing.identifier ?? thing.title} out`}
+              aria-label={`Leave ${thing.identifier} out`}
               onClick={() => {
                 onRemove(thing.id);
               }}

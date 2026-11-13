@@ -108,6 +108,7 @@ export function ModelPick({
   runnerId,
   disabled,
   readRecent,
+  reason,
   onChoose,
   onSignIn,
 }: {
@@ -118,6 +119,8 @@ export function ModelPick({
   readonly runnerId: string | null;
   readonly disabled: boolean;
   readonly readRecent: () => readonly RecentModel[];
+  /** Why the model is what it is, drawn as a muted line above the menu's rows, or left out. */
+  readonly reason?: string | null | undefined;
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
 }): JSX.Element {
@@ -142,32 +145,35 @@ export function ModelPick({
       }
     >
       {(close) => (
-        <ModelMenu
-          catalogs={catalogs}
-          plugins={plugins}
-          config={config}
-          kind={kind}
-          runnerId={runnerId}
-          timezone={resolveDisplayTimezone(settings?.user.timezone)}
-          readRecent={readRecent}
-          readLastOpenProfileId={() => readLastOpenProfileId(url)}
-          rememberOpenProfile={(profileId) => {
-            rememberOpenProfile(url, profileId);
-          }}
-          onChoose={(choice) => {
-            onChoose(choice);
-            close();
-          }}
-          onSignIn={
-            onSignIn === undefined
-              ? undefined
-              : (target) => {
-                  close();
-                  onSignIn(target);
-                }
-          }
-          saveProfile={saveProfile.mutateAsync}
-        />
+        <>
+          {reason == null ? null : <p className="pop-reason">{reason}</p>}
+          <ModelMenu
+            catalogs={catalogs}
+            plugins={plugins}
+            config={config}
+            kind={kind}
+            runnerId={runnerId}
+            timezone={resolveDisplayTimezone(settings?.user.timezone)}
+            readRecent={readRecent}
+            readLastOpenProfileId={() => readLastOpenProfileId(url)}
+            rememberOpenProfile={(profileId) => {
+              rememberOpenProfile(url, profileId);
+            }}
+            onChoose={(choice) => {
+              onChoose(choice);
+              close();
+            }}
+            onSignIn={
+              onSignIn === undefined
+                ? undefined
+                : (target) => {
+                    close();
+                    onSignIn(target);
+                  }
+            }
+            saveProfile={saveProfile.mutateAsync}
+          />
+        </>
       )}
     </ComposerMenu>
   );

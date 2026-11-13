@@ -1022,13 +1022,13 @@ export type EntityProjectMatchInput = Schema.Schema.Type<typeof EntityProjectMat
  * its title. The title is left out when no Connection can read the record, as
  * the title of another record always is (spec 20 section 1.3).
  */
-export const EntityMention = Schema.Struct({
+export const EvidenceEntity = Schema.Struct({
   id: Id,
   identifier: Schema.optionalKey(bounded(1, 64)),
   title: Schema.optionalKey(bounded(1, 512)),
 });
 
-export type EntityMention = Schema.Schema.Type<typeof EntityMention>;
+export type EvidenceEntity = Schema.Schema.Type<typeof EvidenceEntity>;
 
 /**
  * What `matchProject` finds. `matched` names the Project, the Resource whose
@@ -1042,8 +1042,8 @@ export const ProjectMatch = Schema.Union([
     kind: Schema.Literal("matched"),
     projectId: Id,
     resourceId: Id,
-    thing: EntityMention,
-    via: Schema.optionalKey(EntityMention),
+    thing: EvidenceEntity,
+    via: Schema.optionalKey(EvidenceEntity),
   }),
   Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({ kind: Schema.Literal("ambiguous") }),

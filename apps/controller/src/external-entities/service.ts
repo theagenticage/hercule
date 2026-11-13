@@ -5,7 +5,7 @@
  *
  * The rules this module owns:
  *
- * - A Task for an entity is made by the Task service (`createTaskLinkedToRef`
+ * - A Task for an entity is made by the Task service (`createTaskLinkedToRefs`
  *   and `undoCreatedTask`). This module never writes a Task itself.
  * - Reading a thing at its source (`EntityLookups.resolve`) takes seconds and
  *   can fail, so it never runs inside a transaction. `prepareEntityForTask`
@@ -346,13 +346,19 @@ const make = Effect.gen(function* () {
    *   `EntityLookups.resolve`. If the read fails, so does this call, and no
    *   Task exists. A partial answer never satisfies it.
    *
+   * `known` is the record the rows hold for `ref` (undefined when they hold
+   * none) and `catalog` the active kinds, both read by the caller, so that
+   * preparing several things reads each of them once.
+   *
    * Fails with `InvalidState` when the ref belongs to no active kind, or the
    * read does not give one full record of exactly this ref.
    */
-  const prepareEntityForTask = (ref: string): Effect.Effect<Preparation, InvalidState | SqlError> =>
+  const prepareEntityForTask = (
+    ref: string,
+    known: TaskableEntity | undefined,
+    catalog: Catalog,
+  ): Effect.Effect<Preparation, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      const catalog = yield* readCatalog;
-      const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
       const owner =
         known !== undefined && known.kind !== ""
           ? catalog.kinds.get(known.kind)
@@ -457,6 +463,84 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Stores what a preparation read, when it read anything, so the rows hold
+   * the full record before the caller checks them. Runs inside the caller's
+   * transaction. Fails with `Conflict` when the Connection that read the thing
+   * can no longer read it, so the caller repeats.
+   */
+  const storeReadObservation = (
+    ref: string,
+    preparation: Preparation,
+    catalog: Catalog,
+  ): Effect.Effect<void, Conflict | SqlError> =>
+    Effect.gen(function* () {
+      if (!preparation.read) return;
+      const stored = yield* ingest.storeRead({
+        connectionId: preparation.connectionId,
+        observed: preparation.entity,
+        activePluginIds: catalog.activePluginIds,
+      });
+      if (!stored) {
+        return yield* Effect.fail(
+          createConflictError(
+            `${ref} was read through an account that can no longer read it. Try again.`,
+          ),
+        );
+      }
+    });
+
+  /**
+   * Checks that the rows still hold a full record of an active work kind that
+   * an account reads, so the thing can become a Task, and returns that
+   * record. Fails with `Conflict` saying the thing changed while the Task was
+   * being made, so the caller repeats. `name` is how the message calls the
+   * thing.
+   */
+  const requireStillTakeable = (
+    record: TaskableEntity | undefined,
+    name: string,
+    catalog: Catalog,
+  ): Effect.Effect<TaskableEntity, Conflict> => {
+    const declaration =
+      record === undefined ? undefined : catalog.kinds.get(record.kind)?.declaration;
+    if (
+      record === undefined ||
+      declaration === undefined ||
+      declaration.pace === "context" ||
+      !record.isWorkRecord ||
+      record.access !== "ok"
+    ) {
+      return Effect.fail(
+        createConflictError(
+          `${name} changed while the Task was being made, and can no longer be taken on. Try again.`,
+        ),
+      );
+    }
+    return Effect.succeed(record);
+  };
+
+  /**
+   * Checks that none of `records` is on an active Task, with one read however
+   * many there are. Fails with `Conflict` naming the first thing that is, and
+   * that Task: a Thread cannot start on two Tasks.
+   */
+  const requireNoActiveTask = (
+    records: ReadonlyArray<TaskableEntity>,
+  ): Effect.Effect<void, Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const active = yield* taskRows.listActiveTasksForRefs(records.map(({ ref }) => ref));
+      const busy = active[0];
+      if (busy !== undefined) {
+        const record = records.find(({ ref }) => ref === busy.ref)!;
+        return yield* Effect.fail(
+          createConflictError(
+            `${describeThing(record)} is already on the Task "${busy.title}". Leave it out, or start the thread on that Task.`,
+          ),
+        );
+      }
+    });
+
+  /**
    * Returns the active Task of an entity, or makes one, in one transaction.
    *
    * 1. When a thing was read, checks that its Connection can still read, and
@@ -482,36 +566,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const catalog = yield* readCatalog;
         const { preparation, ref } = input;
-        if (preparation.read) {
-          const stored = yield* ingest.storeRead({
-            connectionId: preparation.connectionId,
-            observed: preparation.entity,
-            activePluginIds: catalog.activePluginIds,
-          });
-          if (!stored) {
-            return yield* Effect.fail(
-              createConflictError(
-                `${ref} was read through an account that can no longer read it. Try again.`,
-              ),
-            );
-          }
-        }
-        const record = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
-        const declaration =
-          record === undefined ? undefined : catalog.kinds.get(record.kind)?.declaration;
-        if (
-          record === undefined ||
-          declaration === undefined ||
-          declaration.pace === "context" ||
-          !record.isWorkRecord ||
-          record.access !== "ok"
-        ) {
-          return yield* Effect.fail(
-            createConflictError(
-              `${ref} changed while the Task was being made, and can no longer be taken on. Try again.`,
-            ),
-          );
-        }
+        yield* storeReadObservation(ref, preparation, catalog);
+        const record = yield* requireStillTakeable(
+          Option.getOrUndefined(yield* entities.readTaskableEntity({ ref })),
+          ref,
+          catalog,
+        );
         const active = Option.getOrUndefined(yield* markActiveTaskTakenOn(ref, record.id));
         if (active !== undefined) {
           return {
@@ -526,8 +586,8 @@ const make = Effect.gen(function* () {
         const followed = input.followIfUnconcerned && !record.hasConcern;
         const projectId =
           input.projectId ?? (yield* findProjectOfRemote(resources, record.targetRemote));
-        const task = yield* tasks.createTaskLinkedToRef({
-          ref,
+        const task = yield* tasks.createTaskLinkedToRefs({
+          refs: [ref],
           title: record.title,
           stage,
           ...(projectId === undefined ? {} : { projectId }),
@@ -822,7 +882,7 @@ const make = Effect.gen(function* () {
         if (Option.isSome(active)) {
           return { taskId: active.value.id, created: false };
         }
-        const preparation = yield* prepareEntityForTask(record.ref);
+        const preparation = yield* prepareEntityForTask(record.ref, record, yield* readCatalog);
         const made = yield* makeTaskForEntity({
           ref: record.ref,
           preparation,
@@ -844,18 +904,19 @@ const make = Effect.gen(function* () {
      * could run into the tracker's rate limit, while one read after another
      * would make the user wait for the sum of the delays.
      *
-     * It fails with `NotFound` naming each unknown id, and with `InvalidState`
-     * naming the first thing that cannot be taken on: a place, a thing no
-     * active plugin reads, or a read that fails (the same messages as
-     * `takeOn`). Nothing is written. A repeated call prepares again, which is
-     * harmless: a thing a first call took on is a full record by then and
-     * needs no read. User only.
+     * It fails with `NotFound` naming each unknown id, with `Conflict` naming
+     * the first thing already on an active Task (checked before any read, so
+     * no source is called), and with `InvalidState` naming the first thing
+     * that cannot be taken on: a place, a thing no active plugin reads, or a
+     * read that fails (the same messages as `takeOn`). Nothing is written. A caller that retries by `dedupKey` looks
+     * the key up before calling this, so a retry of a committed call never
+     * reads a source. User only.
      */
     prepareThingsForTask: (
       entityIds: ReadonlyArray<string>,
     ): Effect.Effect<
       PreparedThings,
-      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+      Unauthenticated | Forbidden | NotFound | InvalidState | Conflict | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
@@ -866,13 +927,19 @@ const make = Effect.gen(function* () {
             createNotFoundError(`no such external entity: ${unknown.join(", ")}`),
           );
         }
+        // Cheap refusal first: a thing already on an active Task fails the
+        // call before any source is read. The transaction checks again.
+        yield* requireNoActiveTask(entityIds.map((id) => found.get(id)!));
+        const catalog = yield* readCatalog;
         const prepared = yield* Effect.forEach(
           entityIds,
-          (id) =>
-            Effect.map(
-              prepareEntityForTask(found.get(id)!.ref),
-              (preparation): [string, Preparation] => [found.get(id)!.ref, preparation],
-            ),
+          (id) => {
+            const record = found.get(id)!;
+            return Effect.map(
+              prepareEntityForTask(record.ref, record, catalog),
+              (preparation): [string, Preparation] => [record.ref, preparation],
+            );
+          },
           { concurrency: MAX_CONCURRENT_THING_READS },
         );
         return new Map(prepared);
@@ -915,19 +982,7 @@ const make = Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
         const catalog = yield* readCatalog;
         for (const [ref, preparation] of input.prepared) {
-          if (!preparation.read) continue;
-          const stored = yield* ingest.storeRead({
-            connectionId: preparation.connectionId,
-            observed: preparation.entity,
-            activePluginIds: catalog.activePluginIds,
-          });
-          if (!stored) {
-            return yield* Effect.fail(
-              createConflictError(
-                `${ref} was read through an account that can no longer read it. Try again.`,
-              ),
-            );
-          }
+          yield* storeReadObservation(ref, preparation, catalog);
         }
         const found = yield* entities.readTaskableEntities(input.entityIds);
         const unknown = input.entityIds.filter((id) => !found.has(id));
@@ -938,30 +993,9 @@ const make = Effect.gen(function* () {
         }
         const records = input.entityIds.map((id) => found.get(id)!);
         for (const record of records) {
-          const declaration = catalog.kinds.get(record.kind)?.declaration;
-          if (
-            declaration === undefined ||
-            declaration.pace === "context" ||
-            !record.isWorkRecord ||
-            record.access !== "ok"
-          ) {
-            return yield* Effect.fail(
-              createConflictError(
-                `${describeThing(record)} changed while the Task was being made, and can no longer be taken on. Try again.`,
-              ),
-            );
-          }
+          yield* requireStillTakeable(record, describeThing(record), catalog);
         }
-        const active = yield* taskRows.listActiveTasksForRefs(records.map(({ ref }) => ref));
-        const busy = active[0];
-        if (busy !== undefined) {
-          const record = records.find(({ ref }) => ref === busy.ref)!;
-          return yield* Effect.fail(
-            createConflictError(
-              `${describeThing(record)} is already on the Task "${busy.title}". Leave it out, or start the thread on that Task.`,
-            ),
-          );
-        }
+        yield* requireNoActiveTask(records);
         const task = yield* tasks.createTaskLinkedToRefs({
           refs: records.map(({ ref }) => ref),
           title: input.title,
@@ -1208,7 +1242,7 @@ const make = Effect.gen(function* () {
             followed: false,
           };
         }
-        const preparation = yield* prepareEntityForTask(input.ref);
+        const preparation = yield* prepareEntityForTask(input.ref, known, yield* readCatalog);
         const made = yield* makeTaskForEntity({
           ref: input.ref,
           preparation,

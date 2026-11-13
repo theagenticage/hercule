@@ -17,7 +17,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createNotFoundError,
-  type EntityMention,
+  type EvidenceEntity,
   type EntityProjectMatchInput,
   type NotFound,
   type ProjectMatch,
@@ -50,7 +50,7 @@ interface EvidenceRow {
   readonly title: string | null;
 }
 
-const buildMention = (row: MentionRow): EntityMention => ({
+const buildMention = (row: MentionRow): EvidenceEntity => ({
   id: uuidToString(row.id),
   ...(row.identifier === null ? {} : { identifier: row.identifier }),
   ...(row.title === null ? {} : { title: row.title }),
@@ -89,7 +89,7 @@ export const makeProjectMatcher = (sql: SqlClient.SqlClient) => {
   const readSelected = (
     ids: ReadonlyArray<string>,
   ): Effect.Effect<
-    ReadonlyArray<{ readonly ref: string; readonly mention: EntityMention }>,
+    ReadonlyArray<{ readonly ref: string; readonly mention: EvidenceEntity }>,
     NotFound | SqlError
   > =>
     Effect.gen(function* () {
@@ -134,14 +134,23 @@ export const makeProjectMatcher = (sql: SqlClient.SqlClient) => {
           own.length > 0
             ? own
             : yield* findEvidence(
+                // Two joins, one per direction of the link, instead of one
+                // join on `from_ref = ... OR to_ref = ...`: SQLite cannot use
+                // an index for an OR and would scan every claim.
                 `SELECT j.key AS pos, j.value AS thing_ref, t.ref AS via_ref,
                         ${TARGET_REMOTE_SQL} AS remote
                  FROM json_each(?) j
                  JOIN external_entity_relation_claims c
-                   ON (c.from_ref = j.value OR c.to_ref = j.value) AND ${EFFECTIVE_LINK_SQL}
-                 JOIN external_entities t
-                   ON t.ref = CASE WHEN c.from_ref = j.value THEN c.to_ref ELSE c.from_ref END`,
-                [refs],
+                   ON c.from_ref = j.value AND ${EFFECTIVE_LINK_SQL}
+                 JOIN external_entities t ON t.ref = c.to_ref
+                 UNION ALL
+                 SELECT j.key AS pos, j.value AS thing_ref, t.ref AS via_ref,
+                        ${TARGET_REMOTE_SQL} AS remote
+                 FROM json_each(?) j
+                 JOIN external_entity_relation_claims c
+                   ON c.to_ref = j.value AND ${EFFECTIVE_LINK_SQL}
+                 JOIN external_entities t ON t.ref = c.from_ref`,
+                [refs, refs],
               );
         const [pick] = found;
         if (pick === undefined) return { kind: "none" };

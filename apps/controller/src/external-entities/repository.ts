@@ -1595,7 +1595,7 @@ const make = Effect.gen(function* () {
         if (ids.length === 0) return new Map();
         const rows = yield* sql<EntityRow>`
           SELECT * FROM external_entities
-          WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${JSON.stringify(ids)}))`;
+          WHERE id IN ${sql.in(ids.map(uuidFromString))}`;
         const observations = yield* readObservations(rows.map((row) => row.ref));
         return new Map(
           rows.map((row): [string, TaskableEntity] => [

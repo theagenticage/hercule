@@ -217,6 +217,35 @@ describe("session.spawn with newTask", () => {
     });
   });
 
+  it("returns the first session for a repeat even when the thing can no longer be read", async () => {
+    await withThings(async (arranged, account) => {
+      const thing = await arrange(arranged, account, "WEB-1");
+      const fields = {
+        newTask: { title: "Once", entityIds: [thing.id] },
+        dedupKey: "response-lost",
+      };
+      const first = await spawnOk(arranged, fields);
+      const afterFirst = await countRows(arranged);
+      // The thing is a partial record that no account reads now, so preparing
+      // it would fail with invalid_state if the repeat got that far.
+      await runWrite(
+        arranged,
+        arranged.harness
+          .sql`UPDATE external_entities SET completeness = 'partial' WHERE ref = ${thing.ref}`,
+      );
+      await runWrite(
+        arranged,
+        arranged.harness
+          .sql`UPDATE external_entity_observations SET access = 'inaccessible' WHERE ref = ${thing.ref}`,
+      );
+
+      const second = await spawnOk(arranged, fields);
+
+      expect(second.id).toBe(first.id);
+      expect(await countRows(arranged)).toEqual(afterFirst);
+    });
+  });
+
   it("refuses an unknown thing with not_found, and writes nothing", async () => {
     await withThings(async (arranged, account) => {
       const thing = await arrange(arranged, account, "WEB-1");

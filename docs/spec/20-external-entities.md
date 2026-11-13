@@ -539,7 +539,7 @@ Task `projectId` must be a real Project, so a Linear project or a GitHub reposit
 
 1. The evidence is first each selected thing's own `repository.target.remote`. Only when none of them reaches a live Project, it is the repositories of the things directly linked to the selected ones (a link a source or a person made, in either direction, one hop; a hint and a pending claim count for nothing).
 2. The distinct Projects of the step that produced evidence are counted: one is `matched`, with the Project, the Resource whose canonical remote matched, the first selected thing in input order that has the evidence (`thing`) and, for a linked thing's repository, that linked thing (`via`); more than one is `ambiguous`; none in either step is `none`.
-3. `thing` and `via` are an `EntityMention`: the id, the identifier the Inbox row shows, and the title only when some Connection can read that record ([section 1.3](#13-restricted-things)).
+3. `thing` and `via` are an `EvidenceEntity`: the id, the identifier the Inbox row shows, and the title only when some Connection can read that record ([section 1.3](#13-restricted-things)).
 
 ### 9.5 Link and unlink
 

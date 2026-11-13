@@ -67,7 +67,14 @@ export function ProjectPick({
   // Follows the browser's open state, which changes without React: on Esc and on a click outside.
   const [open, setOpen] = useState(false);
   // A click opens the menu through `popovertarget`, which also anchors it to the pick.
-  useImperativeHandle(openMenuRef, () => () => triggerRef.current?.click(), []);
+  // Only opens: a second call while the menu is open leaves it open.
+  useImperativeHandle(
+    openMenuRef,
+    () => () => {
+      if (!open) triggerRef.current?.click();
+    },
+    [open],
+  );
   const chosen =
     pick.kind === "project" ? projects.find((p) => p.id === pick.projectId) : undefined;
 

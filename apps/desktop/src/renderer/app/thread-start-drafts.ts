@@ -65,6 +65,15 @@ export const buildThreadStartDraft = (things: readonly InboxThing[]): ThreadStar
   failure: null,
 });
 
+/**
+ * Returns whether `draft` is worth keeping when its dialog closes: the user
+ * changed it, or a send was attempted from it. An attempt counts even with no
+ * change, because the controller may have made the thread while the answer was
+ * lost, and only a retry with the same dedup key finds it again.
+ */
+export const isWorthKeeping = (draft: ThreadStartDraft): boolean =>
+  draft.isEdited || draft.dedupKey !== undefined || draft.failure !== null;
+
 /** The unsent dialogs of one account scope, by `buildThingsDraftKey`. */
 export interface ThreadStartDrafts {
   /** Returns the draft at `key`, or `undefined`. The same object comes back until the next change at `key`. */
