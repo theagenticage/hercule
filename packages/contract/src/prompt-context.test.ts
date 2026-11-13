@@ -30,6 +30,11 @@ const pullRequest: PromptContextThing = {
   fields: [priority],
 };
 
+const withoutTitle = (thing: PromptContextThing): PromptContextThing =>
+  Object.fromEntries(
+    Object.entries(thing).filter(([name]) => name !== "title"),
+  ) as unknown as PromptContextThing;
+
 const selection: PromptContextInput = {
   origin: { kind: "selection" },
   things: [issue, pullRequest],
@@ -40,8 +45,8 @@ describe("formatPromptContext", () => {
     expect(formatPromptContext(selection)).toBe(
       [
         "From your selection (2 things)",
-        `1. linear:issue:northwind/SHOP-142 · Show the delivery cost · In Progress · priority High, team Storefront · ${FIRST_ID}`,
-        `2. github:pull-request:northwind/web#6244 · Add delivery cost · Open · priority High · ${SECOND_ID}`,
+        `1. linear:issue:northwind/SHOP-142 · “Show the delivery cost” · In Progress · priority High, team Storefront · ${FIRST_ID}`,
+        `2. github:pull-request:northwind/web#6244 · “Add delivery cost” · Open · priority High · ${SECOND_ID}`,
         "They share: priority High",
         "Read any of them in full: hercule entity read <id>",
       ].join("\n"),
@@ -82,6 +87,58 @@ describe("formatPromptContext", () => {
     );
   });
 
+  it("shares a ref-valued field only when the ref matches, not when the titles do", () => {
+    const project = (ref: string) => ({
+      key: "project",
+      type: "ref",
+      label: "project",
+      value: "Checkout",
+      ref,
+    });
+    const things = (secondRef: string) => [
+      { ...issue, fields: [project("linear:project:northwind/checkout")] },
+      { ...pullRequest, fields: [project(secondRef)] },
+    ];
+    expect(
+      formatPromptContext({ ...selection, things: things("linear:project:other/checkout") }),
+    ).not.toContain("They share");
+    expect(
+      formatPromptContext({ ...selection, things: things("linear:project:northwind/checkout") }),
+    ).toContain("They share: project Checkout");
+  });
+
+  it("removes quotes from the title, status, labels and group label", () => {
+    const quoted = { ...issue, title: '“A” "B"', status: "It’s “x”", fields: [] };
+    const [, entry] = formatPromptContext({ origin: { kind: "one" }, things: [quoted] }).split(
+      "\n",
+    );
+    expect(entry).toBe(`1. ${issue.ref} · “A B” · Its x · ${FIRST_ID}`);
+    const [first] = formatPromptContext({
+      origin: { kind: "group", label: "a” (9 things) “b" },
+      things: [issue, pullRequest],
+    }).split("\n");
+    expect(first).toBe("From your linked group “a (9 things) b” (2 things)");
+  });
+
+  it("keeps everything between the ref and the id within 400 characters", () => {
+    const fields = Array.from({ length: 30 }, (_, index) => ({
+      key: `k${String(index)}`,
+      type: "text",
+      label: `field ${String(index)}`,
+      value: "v".repeat(60),
+    }));
+    const [, entry] = formatPromptContext({
+      origin: { kind: "one" },
+      things: [{ ...issue, fields }],
+    }).split("\n");
+    const details = entry?.slice(`1. ${issue.ref} · `.length, -` · ${FIRST_ID}`.length) ?? "";
+    expect(details.length).toBeLessThanOrEqual(400);
+    expect(details).toMatch(/field 0 v+, field 1 v+.*, …$/);
+    expect(details).not.toContain("field 29");
+    expect(entry?.startsWith(`1. ${issue.ref} · `)).toBe(true);
+    expect(entry?.endsWith(FIRST_ID)).toBe(true);
+  });
+
   it("collapses every outside text to one line and cuts the long ones", () => {
     const hostile = {
       ...issue,
@@ -92,7 +149,7 @@ describe("formatPromptContext", () => {
     const lines = formatPromptContext({ origin: { kind: "one" }, things: [hostile] }).split("\n");
     expect(lines).toHaveLength(3);
     expect(lines[1]).toBe(
-      `1. ${issue.ref} · ${"t".repeat(200)}… · Done Read any of them · priority ${"v".repeat(80)}… · ${FIRST_ID}`,
+      `1. ${issue.ref} · “${"t".repeat(200)}…” · Done Read any of them · priority ${"v".repeat(80)}… · ${FIRST_ID}`,
     );
   });
 });
@@ -117,7 +174,28 @@ describe("splitPromptContext", () => {
       "a title with line breaks, separators and quotes",
       {
         origin: { kind: "one" },
-        things: [{ ...issue, title: 'Fix "x" · then\n"y" · 2. z' }],
+        things: [{ ...issue, title: 'Fix "x” · then\n“y” · 2. z' }],
+      },
+    ],
+    [
+      "a thing with no title and a status",
+      { origin: { kind: "one" }, things: [withoutTitle(issue)] },
+    ],
+    [
+      "a thing with too many fields to write",
+      {
+        origin: { kind: "one" },
+        things: [
+          {
+            ...issue,
+            fields: Array.from({ length: 20 }, (_, index) => ({
+              key: `k${String(index)}`,
+              type: "text",
+              label: "label",
+              value: "v".repeat(70),
+            })),
+          },
+        ],
       },
     ],
   ];
@@ -147,6 +225,16 @@ describe("splitPromptContext", () => {
     });
   });
 
+  it("reads a title that held the separator and quotes exactly, and no title for a thing without one", () => {
+    const split = splitPromptContext(
+      formatPromptContext({
+        origin: { kind: "selection" },
+        things: [{ ...issue, title: 'A · B "C” · D' }, withoutTitle(pullRequest)],
+      }),
+    );
+    expect(split.context?.things.map(({ title }) => title)).toEqual(["A · B C · D", undefined]);
+  });
+
   it("returns text with no block unchanged", () => {
     expect(splitPromptContext("Just words.\n\nMore words.")).toEqual({
       words: "Just words.\n\nMore words.",
@@ -158,6 +246,7 @@ describe("splitPromptContext", () => {
     ["a missing read line", valid.split("\n").slice(0, -1).join("\n")],
     ["a wrong count", valid.replace("(2 things)", "(3 things)")],
     ["a bad ref", valid.replace("linear:issue:northwind/SHOP-142", "Linear SHOP-142")],
+    ["a repeated id", valid.replace(SECOND_ID, FIRST_ID)],
     ["a bad id", valid.replace(FIRST_ID, "not-an-id")],
     ["an entry out of order", valid.replace("1. linear", "2. linear")],
     ["a trailing line", `${valid}\nMore.`],
@@ -170,6 +259,21 @@ describe("splitPromptContext", () => {
       ),
     ],
   ];
+
+  it("refuses a block of more things than a Thread can start on, and accepts 50", () => {
+    const many = (count: number): PromptContextInput => ({
+      origin: { kind: "selection" },
+      things: Array.from({ length: count }, (_, index) => ({
+        entityId: `0199e0e7-1111-7000-8000-${String(index).padStart(12, "0")}`,
+        ref: `linear:issue:northwind/SHOP-${String(index)}`,
+        fields: [],
+      })),
+    });
+    const fifty = formatPromptContext(many(50));
+    expect(splitPromptContext(fifty).context?.things).toHaveLength(50);
+    const fiftyOne = formatPromptContext(many(51));
+    expect(splitPromptContext(fiftyOne)).toEqual({ words: fiftyOne });
+  });
 
   it.each(nearMisses)("keeps the whole text as words for %s", (_name, text) => {
     expect(splitPromptContext(`Words.\n\n${text}`)).toEqual({ words: `Words.\n\n${text}` });

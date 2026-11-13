@@ -22,9 +22,4 @@ describe("MessageContext", () => {
     expect(getByText(/Context sent with it/).textContent).toBe("Context sent with it · 3 lines");
     expect(container.querySelector("pre")?.textContent).toBe(CONTEXT.text);
   });
-
-  it("says 1 line for a block of one line", () => {
-    const { getByText } = render(<MessageContext context={{ ...CONTEXT, lineCount: 1 }} />);
-    expect(getByText(/Context sent with it/).textContent).toBe("Context sent with it · 1 line");
-  });
 });

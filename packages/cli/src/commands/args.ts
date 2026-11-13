@@ -439,8 +439,12 @@ export const parseArguments = async (
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
   }
 
-  const sendsImages = command.payload.some((field) => field.uploads && field.name in payload);
-  if (reading.length > 0 && sendsImages && stdinIsTerminal) {
+  // An image or a context given on the command line can be the whole input, so
+  // a terminal is not waited on for text.
+  const hasOtherInput = command.payload.some(
+    (field) => (field.uploads || field.standsInForStdin) && field.name in payload,
+  );
+  if (reading.length > 0 && hasOtherInput && stdinIsTerminal) {
     for (const field of reading) payload[field.name] = coerceFieldValue(field, "", help);
   } else if (reading.length > 0) {
     // Strip one trailing newline, because heredocs and editors add one. Files

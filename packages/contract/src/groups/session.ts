@@ -110,31 +110,46 @@ const PromptAttachments = Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENT
 /** The message of the issue for a prompt or input with no text and no images. */
 export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image.";
 
+/** The message of the issue for a spawn with no text, no images and no context. */
+const EMPTY_SPAWN_PROMPT_MESSAGE = "A prompt needs text, an image, or context.";
+
 /**
- * Refuses a session prompt or input with no text, no images and no context.
- * It checks `text` or `prompt`, whichever field the payload names its text
- * with, so one filter serves every payload that carries `attachments`. Only
- * `session.spawn` carries `context`; a payload without it needs text or an
- * image. The issue points at the text field, so a client can show it where the
- * user types the text.
+ * Builds the filter that refuses a prompt with no text and no images, and no
+ * context when `contextCounts`. It checks `text` or `prompt`, whichever field
+ * the payload names its text with. The issue points at that field, so a client
+ * can show it where the user types the text.
  */
-export const refuseEmptyPrompt = Schema.makeFilter(
-  (payload: {
-    readonly text?: string;
-    readonly prompt?: string;
-    readonly attachments?: ReadonlyArray<string>;
-    readonly context?: ReadonlyArray<unknown>;
-  }) => {
-    const field = payload.prompt === undefined ? "text" : "prompt";
-    if (
-      (payload[field] ?? "").length > 0 ||
-      (payload.attachments?.length ?? 0) > 0 ||
-      (payload.context?.length ?? 0) > 0
-    )
-      return undefined;
-    return { path: [field], issue: EMPTY_PROMPT_MESSAGE };
-  },
-);
+const makeEmptyPromptFilter = (contextCounts: boolean) =>
+  Schema.makeFilter(
+    (payload: {
+      readonly text?: string;
+      readonly prompt?: string;
+      readonly attachments?: ReadonlyArray<string>;
+      readonly context?: ReadonlyArray<unknown>;
+    }) => {
+      const field = payload.prompt === undefined ? "text" : "prompt";
+      if (
+        (payload[field] ?? "").length > 0 ||
+        (payload.attachments?.length ?? 0) > 0 ||
+        (contextCounts && (payload.context?.length ?? 0) > 0)
+      )
+        return undefined;
+      return {
+        path: [field],
+        issue: contextCounts ? EMPTY_SPAWN_PROMPT_MESSAGE : EMPTY_PROMPT_MESSAGE,
+      };
+    },
+  );
+
+/**
+ * Refuses a session prompt or input with no text and no images. One filter
+ * serves every payload that carries `attachments`. `session.spawn` uses
+ * `refuseEmptySpawnPrompt` instead, because it can also carry context.
+ */
+export const refuseEmptyPrompt = makeEmptyPromptFilter(false);
+
+/** Refuses a spawn with no text, no images and no context. */
+const refuseEmptySpawnPrompt = makeEmptyPromptFilter(true);
 
 /**
  * The status of a session:
@@ -731,7 +746,7 @@ export const SessionSpawnInput = closedStruct({
    * actor and per operation.
    */
   dedupKey: Schema.optionalKey(DedupKey),
-}).check(refuseEmptyPrompt, refuseNewTaskWithTaskOrAgent);
+}).check(refuseEmptySpawnPrompt, refuseNewTaskWithTaskOrAgent);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 

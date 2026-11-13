@@ -7,10 +7,11 @@
 import { useState, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { namePlugin, type PluginIdentity } from "@hercule/client-core";
+import { formatContextLineCount, namePlugin, type PluginIdentity } from "@hercule/client-core";
 import {
   describeContextCard,
   describeContextCardFromBlock,
+  shouldRetryCardRead,
   type ContextCardFace,
 } from "@hercule/client-core/inbox";
 import type { PromptContextBlock } from "@hercule/contract";
@@ -56,7 +57,7 @@ function CardTrailing({
  * noun and identifier, the title, and the status with what ends its line. A
  * card that could not be read has only the source and the title.
  */
-export function ContextCardView({
+function ContextCardView({
   face,
   sourceName,
   plugins,
@@ -98,9 +99,16 @@ export function ContextCardView({
 function ContextCard({ thing }: { readonly thing: ContextThing }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { data: plugins } = useQuery(pluginsQuery(client));
-  const { data: detail } = useQuery(entityQuery(client, thing.entityId));
+  const read = useQuery({
+    ...entityQuery(client, thing.entityId),
+    retry: shouldRetryCardRead,
+  });
+  // After a failed refresh Query still holds the last answer, which is stale
+  // now (the thing was pruned, or the user lost access), so an error wins.
   const face =
-    detail === undefined ? describeContextCardFromBlock(thing) : describeContextCard(detail);
+    read.isError || read.data === undefined
+      ? describeContextCardFromBlock(thing)
+      : describeContextCard(read.data);
   const installed = plugins ?? NO_PLUGINS;
   return (
     <ContextCardView
@@ -111,17 +119,13 @@ function ContextCard({ thing }: { readonly thing: ContextThing }): JSX.Element {
   );
 }
 
-/** Returns "6 lines", or "1 line". */
-const describeLineCount = (count: number): string =>
-  `${String(count)} ${count === 1 ? "line" : "lines"}`;
-
 /**
  * Renders the fold: a button that reads "Context sent with it" and the block's
  * line count, and under it, while open, the block as sent in the mono face.
  * It is folded when it mounts, and, like a collapsed message, folded again
  * when the transcript scrolls it out of view and back.
  */
-export function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX.Element {
+function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -135,7 +139,7 @@ export function ContextFold({ context }: { readonly context: PromptContextBlock 
         }}
       >
         <ChevronRightIcon size={12} />
-        Context sent with it<span>{describeLineCount(context.lineCount)}</span>
+        Context sent with it<span>{formatContextLineCount(context)}</span>
       </button>
       {open ? <pre className="msg-ctx-body">{context.text}</pre> : null}
     </>

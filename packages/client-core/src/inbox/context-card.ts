@@ -4,14 +4,41 @@
  * kept of it when it could not.
  */
 import type { EntityFieldValue, EntityStatus, ExternalEntityDetail } from "@hercule/contract";
+import { ApiError } from "../errors";
 import { decideOpenCardFace } from "./card-face";
+
+/** How many times a card's read is tried again after it fails for a reason that may pass. */
+const MAX_CARD_READ_RETRIES = 3;
+
+/**
+ * Decides whether a card's read of its thing is tried again after it failed
+ * `failureCount` times with `error`. A thing that is gone (`not_found`) or
+ * that the user may not read (`forbidden`) will not change by asking again, so
+ * the card draws what the block kept at once. Any other failure, such as a
+ * connection that dropped, is tried again up to three times.
+ */
+export const shouldRetryCardRead = (failureCount: number, error: unknown): boolean => {
+  if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden")) {
+    return false;
+  }
+  return failureCount < MAX_CARD_READ_RETRIES;
+};
+
+/**
+ * Returns the system of an External Ref (`linear` for `linear:issue:...`),
+ * as a best guess of the plugin that owns the thing. It is used only by the
+ * card drawn from the block, when the live read is missing and the ref is all
+ * that is known: a system can be named differently from its plugin. A card
+ * that was read takes its plugin from the thing's kind instead.
+ */
+const guessPluginIdFromRef = (ref: string): string => ref.split(":")[0] ?? ref;
 
 /**
  * The words and marks of one context card. `noun`, `identifier`, `status` and
  * `trailing` are absent when nothing is known for them.
  */
 export interface ContextCardFace {
-  /** The plugin whose mark and name the card shows: the system of the thing's ref. */
+  /** The plugin whose mark and name the card shows: the thing's own plugin, or a guess from its ref when the thing was not read. */
   readonly pluginId: string;
   /** The word for one, such as "Issue". */
   readonly noun?: string;
@@ -80,13 +107,13 @@ export const describeContextCard = (detail: ExternalEntityDetail): ContextCardFa
  * Returns the card drawn from what the context block kept of a thing, for when
  * the live read of the thing is missing: not answered yet, or failed (the
  * thing is gone, or the user cannot read it). It has the source, taken from
- * the ref (`linear:issue:...` is Linear's), and the title the block kept, or
- * the ref itself when the block kept none.
+ * the ref (`linear:issue:...` is Linear's), and the title the block kept
+ * exactly as it was written, or the ref itself when the block kept none.
  */
 export const describeContextCardFromBlock = (thing: {
   readonly ref: string;
   readonly title?: string | undefined;
 }): ContextCardFace => ({
-  pluginId: thing.ref.split(":")[0] ?? thing.ref,
+  pluginId: guessPluginIdFromRef(thing.ref),
   title: thing.title === undefined || thing.title === "" ? thing.ref : thing.title,
 });

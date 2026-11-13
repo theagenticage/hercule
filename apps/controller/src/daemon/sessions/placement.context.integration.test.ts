@@ -170,8 +170,8 @@ describe("session.spawn with context", () => {
       const lines = (await readFirstInput(arranged, session)).split("\n");
       expect(lines).toEqual([
         "From your selection (2 things)",
-        expect.stringMatching(new RegExp(`^1\\. ${first.ref} · Thing WEB-1 · ${UUID}$`)),
-        expect.stringMatching(new RegExp(`^2\\. ${second.ref} · Thing WEB-2 · ${UUID}$`)),
+        expect.stringMatching(new RegExp(`^1\\. ${first.ref} · “Thing WEB-1” · ${UUID}$`)),
+        expect.stringMatching(new RegExp(`^2\\. ${second.ref} · “Thing WEB-2” · ${UUID}$`)),
         "Read any of them in full: hercule entity read <id>",
       ]);
     });
@@ -186,10 +186,20 @@ describe("session.spawn with context", () => {
       const text = await readFirstInput(arranged, session);
       expect(text).toMatch(
         new RegExp(
-          `^Fix the cart\\n\\nFrom your Inbox \\(1 thing\\)\\n1\\. ${thing.ref} · Thing WEB-1 · ${UUID}\\nRead any`,
+          `^Fix the cart\\n\\nFrom your Inbox \\(1 thing\\)\\n1\\. ${thing.ref} · “Thing WEB-1” · ${UUID}\\nRead any`,
         ),
       );
       expect(session.title).toBe("Fix the cart");
+    });
+  });
+
+  it("titles a Thread that has only context from the first thing's title", async () => {
+    await withThings(async (arranged, account) => {
+      const thing = await arrange(arranged, account, "WEB-1");
+
+      const session = await spawnOk(arranged, { prompt: "", context: ids(thing) });
+
+      expect(session.title).toBe("Thing WEB-1");
     });
   });
 
@@ -273,6 +283,27 @@ describe("session.spawn with context", () => {
     });
   });
 
+  it("names the locked label for a group whose things no account can read", async () => {
+    await withThings(async (arranged, account) => {
+      const things = [
+        await arrange(arranged, account, "WEB-1"),
+        await arrange(arranged, account, "WEB-2"),
+      ];
+      await putOnInbox(arranged, things);
+      await link(arranged, things[0]!, things[1]!);
+      await runWrite(
+        arranged,
+        arranged.harness.sql`UPDATE external_entity_observations SET access = 'inaccessible'`,
+      );
+
+      const session = await spawnOk(arranged, { context: ids(...things) });
+
+      const text = await readFirstInput(arranged, session);
+      expect(text).toMatch(/\n\nFrom your linked group “An? .+ you cannot open” \(2 things\)\n/);
+      expect(text).not.toContain("Thing WEB");
+    });
+  });
+
   it("refuses an unknown thing with not_found, and writes nothing", async () => {
     await withThings(async (arranged, account) => {
       const thing = await arrange(arranged, account, "WEB-1");
@@ -315,20 +346,28 @@ describe("session.spawn with context", () => {
     });
   });
 
-  it("refuses a session that lacks task.read, and writes nothing", async () => {
-    await withThings(async (arranged, account) => {
-      const thing = await arrange(arranged, account, "WEB-1");
-      const caller = await spawnThreadUnder(
-        arranged,
-        await createProfile(arranged, "blind-starter", ["session.spawn", "thread.start"]),
-      );
-      const before = await countRows(arranged);
+  it.each([
+    ["task.read", ["session.spawn", "thread.start", "signal.read"]],
+    ["signal.read", ["session.spawn", "thread.start", "task.read"]],
+  ] as const)(
+    "refuses a session that lacks %s, naming it, and writes nothing",
+    async (missing, grants) => {
+      await withThings(async (arranged, account) => {
+        const thing = await arrange(arranged, account, "WEB-1");
+        const caller = await spawnThreadUnder(
+          arranged,
+          await createProfile(arranged, `lacks-${missing}`, grants),
+        );
+        const before = await countRows(arranged);
 
-      const failure = await readError(await spawn(arranged, { context: ids(thing) }, caller.token));
+        const failure = await readError(
+          await spawn(arranged, { context: ids(thing) }, caller.token),
+        );
 
-      expect(failure).toMatchObject({ status: 403, code: "forbidden" });
-      expect(failure.message).toContain("task.read");
-      expect(await countRows(arranged)).toEqual(before);
-    });
-  });
+        expect(failure).toMatchObject({ status: 403, code: "forbidden" });
+        expect(failure.message).toContain(missing);
+        expect(await countRows(arranged)).toEqual(before);
+      });
+    },
+  );
 });

@@ -386,10 +386,8 @@ export {
   UsageReport,
   EMPTY_PROMPT_MESSAGE,
   MAX_INPUT_ANSWER_WAIT,
-  MAX_CONTEXT_REFERENCES,
   MAX_THREAD_THINGS,
   ContextReference,
-  EntityContextReference,
   refuseEmptyPrompt,
 } from "./groups/session";
 export {

@@ -6,8 +6,8 @@ import type { JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   readInputSender,
-  readUserWords,
   splitQueuedInputs,
+  splitSentText,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
@@ -49,9 +49,9 @@ export function SendingMessages({
 /** Draws one message on its way into the session, with "sending…" under its bubble. */
 function SendingMessage({ input }: { readonly input: Input }): JSX.Element | null {
   const { images, observe } = useAttachmentImages(input.attachments);
-  const { text, context } = readUserWords(input.text);
-  if (text === "" && images.length === 0 && context === undefined) return null;
   const senderSessionId = readInputSender(input);
+  const { text, context } = splitSentText(input.text, senderSessionId);
+  if (text === "" && images.length === 0 && context === undefined) return null;
   const bubble = (
     <WithMessageContext context={context}>
       {text === "" && images.length === 0 ? null : (

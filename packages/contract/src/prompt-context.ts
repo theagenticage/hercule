@@ -13,16 +13,19 @@
  * The block looks like this, after a blank line that ends the user's words:
  *
  *     From your linked group “Show the delivery cost” (2 things)
- *     1. linear:issue:northwind/SHOP-142 · Show the delivery cost · In Progress · priority High · <id>
- *     2. github:pull-request:northwind/web#6244 · Add delivery cost · Open · priority High · <id>
+ *     1. linear:issue:northwind/SHOP-142 · “Show the delivery cost” · In Progress · priority High · <id>
+ *     2. github:pull-request:northwind/web#6244 · “Add delivery cost” · Open · priority High · <id>
  *     They share: priority High
  *     Read any of them in full: hercule entity read <id>
  *
  * Every text that came from outside Hercule (a title, a status, a field) is
  * collapsed to one line first, so none of it can start a line of its own and
- * pass for another part of the block.
+ * pass for another part of the block. The title, the status, the field labels
+ * and the group label also lose their quotes, so the quotes around a title
+ * and a group label always mark where the text ends.
  */
-import { flattenToOneLine } from "./agent-text";
+import { flattenToOneLine, prepareForQuoting } from "./agent-text";
+import { MAX_CONTEXT_REFERENCES } from "./groups/session";
 import { ExternalRef, isId } from "./ids";
 import { Schema } from "effect";
 
@@ -31,6 +34,19 @@ const MAX_TITLE_LENGTH = 200;
 
 /** The longest field value written in the block, in characters. A longer value is cut and ends with an ellipsis. */
 const MAX_FIELD_VALUE_LENGTH = 80;
+
+/** The longest status written in the block, in characters. A longer status is cut and ends with an ellipsis. */
+const MAX_STATUS_LENGTH = 100;
+
+/**
+ * The most characters one entry spends between its ref and its id, on the
+ * title, the status and the fields together. It keeps a block of 50 things far
+ * below the prompt size limit. The agent can always read a thing in full.
+ */
+const MAX_ENTRY_DETAIL_LENGTH = 400;
+
+/** What marks an entry or a list of fields as cut short. */
+const ELLIPSIS = "…";
 
 /** What separates the parts of one entry. */
 const PART_SEPARATOR = " · ";
@@ -61,14 +77,21 @@ export type PromptContextOrigin =
 /**
  * One declared field of a thing. `key` and `type` say which field it is, and
  * `value` is the field's text as it is shown. Two things share a field when
- * they hold the same `key`, `type` and `value`; labels alone never decide it,
- * because two different fields can have the same label.
+ * they hold the same `key` and `type` and the same `ref`, or the same `value`
+ * when there is no `ref`. Labels alone never decide it, because two different
+ * fields can have the same label.
  */
 export interface PromptContextField {
   readonly key: string;
   readonly type: string;
   readonly label: string;
   readonly value: string;
+  /**
+   * The External Ref the field points at, when the field's value is a ref to
+   * another thing, such as a project. The value is then only that thing's
+   * title, and two unrelated things can have the same title.
+   */
+  readonly ref?: string;
 }
 
 /** One thing in the block. `title`, `status` and every field may be absent for a thing seen only through a signal. */
@@ -95,10 +118,9 @@ export interface PromptContextBlock {
   /** How many lines `text` has. */
   readonly lineCount: number;
   /**
-   * The things the block names, in order. `title` is what a card can show
-   * when reading the live thing fails. It is the first part after the ref
-   * and before the id, so it is the status or a field when the thing had no
-   * title: use it as a fallback only.
+   * The things the block names, in order. `title` is the thing's title as the
+   * block wrote it (cut if it was long), for a card to show when reading the
+   * live thing fails. It is absent when the thing had no title.
    */
   readonly things: readonly {
     readonly entityId: string;
@@ -113,37 +135,61 @@ const cutWithEllipsis = (text: string, maxLength: number): string => {
   return characters.length <= maxLength ? text : `${characters.slice(0, maxLength).join("")}…`;
 };
 
-const describeField = (field: PromptContextField): string =>
-  `${flattenToOneLine(field.label)} ${cutWithEllipsis(flattenToOneLine(field.value), MAX_FIELD_VALUE_LENGTH)}`;
+/** Returns text with its quotes removed and on one line, cut at `maxLength` characters with an ellipsis. */
+const prepareQuotedText = (text: string, maxLength: number): string =>
+  cutWithEllipsis(prepareForQuoting(text, Infinity), maxLength);
 
-const writeEntry = (thing: PromptContextThing, number: number): string => {
-  const title = flattenToOneLine(thing.title ?? "");
-  const status = flattenToOneLine(thing.status ?? "");
-  const fields = thing.fields
-    .filter((field) => flattenToOneLine(field.value).length > 0)
-    .map(describeField)
-    .join(", ");
-  const parts = [
-    thing.ref,
-    title.length > 0 ? cutWithEllipsis(title, MAX_TITLE_LENGTH) : "",
-    status,
-    fields,
-    thing.entityId,
-  ].filter((part) => part.length > 0);
-  return `${String(number)}. ${parts.join(PART_SEPARATOR)}`;
+const describeField = (field: PromptContextField): string =>
+  `${prepareQuotedText(field.label, MAX_TITLE_LENGTH)} ${cutWithEllipsis(flattenToOneLine(field.value), MAX_FIELD_VALUE_LENGTH)}`;
+
+const hasValue = (field: PromptContextField): boolean => flattenToOneLine(field.value).length > 0;
+
+/**
+ * Returns the title, status and fields of one thing as the parts between its
+ * ref and its id. The parts add up to at most `MAX_ENTRY_DETAIL_LENGTH`
+ * characters, separators included. Fields are written in order until the next
+ * one would not fit, and then a single ellipsis stands for the rest.
+ */
+const writeEntryDetails = (thing: PromptContextThing): string[] => {
+  const title = prepareQuotedText(thing.title ?? "", MAX_TITLE_LENGTH);
+  const status = cutWithEllipsis(
+    prepareForQuoting(thing.status ?? "", Infinity),
+    MAX_STATUS_LENGTH,
+  );
+  const parts = [title.length > 0 ? `“${title}”` : "", status].filter((part) => part.length > 0);
+  const fieldTexts = thing.fields.filter(hasValue).map(describeField);
+
+  const fits = (text: string): boolean =>
+    [...parts, text].join(PART_SEPARATOR).length <= MAX_ENTRY_DETAIL_LENGTH;
+  const written: string[] = [];
+  for (const text of fieldTexts) {
+    const next = [...written, text].join(", ");
+    if (fits(next)) {
+      written.push(text);
+      continue;
+    }
+    // Keep room for the ellipsis that replaces this field and the ones after it.
+    while (written.length > 0 && !fits(`${written.join(", ")}, ${ELLIPSIS}`)) written.pop();
+    written.push(ELLIPSIS);
+    break;
+  }
+  return written.length > 0 ? [...parts, written.join(", ")] : parts;
 };
+
+const writeEntry = (thing: PromptContextThing, number: number): string =>
+  `${String(number)}. ${[thing.ref, ...writeEntryDetails(thing), thing.entityId].join(PART_SEPARATOR)}`;
 
 /**
  * Returns the fields that at least two of the things hold with the same key,
- * type and value, written as the share line's text, or `undefined` when the
+ * type and ref (or value, for a field with no ref), written as the share line's text, or `undefined` when the
  * things share nothing. Fields come in the order they first appear.
  */
 const writeSharedFields = (things: readonly PromptContextThing[]): string | undefined => {
   const shared = new Map<string, { holders: Set<string>; text: string }>();
   for (const thing of things)
     for (const field of thing.fields) {
-      if (flattenToOneLine(field.value).length === 0) continue;
-      const identity = JSON.stringify([field.key, field.type, field.value]);
+      if (!hasValue(field)) continue;
+      const identity = JSON.stringify([field.key, field.type, field.ref ?? field.value]);
       const entry = shared.get(identity) ?? { holders: new Set(), text: describeField(field) };
       entry.holders.add(thing.entityId);
       shared.set(identity, entry);
@@ -155,8 +201,7 @@ const writeSharedFields = (things: readonly PromptContextThing[]): string | unde
 const writeOriginLine = (origin: PromptContextOrigin, count: number): string => {
   switch (origin.kind) {
     case "group":
-      // The label is a thing's title, so it is cut like one.
-      return `From your linked group “${cutWithEllipsis(flattenToOneLine(origin.label), MAX_TITLE_LENGTH)}” (${String(count)} things)`;
+      return `From your linked group “${prepareQuotedText(origin.label, MAX_TITLE_LENGTH)}” (${String(count)} things)`;
     case "selection":
       return `From your selection (${String(count)} things)`;
     case "one":
@@ -171,10 +216,16 @@ const writeOriginLine = (origin: PromptContextOrigin, count: number): string => 
  * full. The lines are joined by line feeds, with no blank line and no trailing
  * line feed.
  *
- * Each entry is `<n>. <ref> · <title> · <status> · <label value, ...> · <id>`.
- * A part with no text is left out. The title is cut at 200 characters and each
- * field value at 80, and an ellipsis marks a cut. The share line lists the
- * fields that two or more things hold with the same key, type and value.
+ * Each entry is `<n>. <ref> · “<title>” · <status> · <label value, ...> · <id>`.
+ * A part with no text is left out, so a thing with no title has no quoted
+ * part. Quotes are removed from the title, the status and the labels, and the
+ * group label, so the closing quote of a title is always the first one. The
+ * title is cut at 200 characters, the status at 100 and each field value at
+ * 80, and an ellipsis marks a cut. Everything between the ref and the id adds
+ * up to at most 400 characters: fields are written in order until the next
+ * one would not fit, and then one `…` stands for the rest. The ref and the id
+ * always stay. The share line lists the fields that two or more things hold
+ * with the same key and type and the same ref (or value, when there is no ref).
  *
  * The caller puts the block after the user's words and a blank line. The
  * caller must pass the origin that matches the things: one thing for `one`,
@@ -203,8 +254,10 @@ const readOriginCount = (line: string): number | undefined => {
 /**
  * Reads one entry line as the thing it names, or returns `undefined` when the
  * line is not entry number `number`. The line must start with its number and a
- * valid External Ref and end with an id. Only those two ends are checked,
- * because the text between them came from outside and may hold the separator.
+ * valid External Ref and end with an id. The title is read only when the part
+ * after the ref starts with an opening quote, and it ends at the first closing
+ * quote, which is exact because the title holds no quotes. The rest of the text
+ * between the ref and the id is not read.
  */
 const readEntry = (
   line: string,
@@ -219,11 +272,10 @@ const readEntry = (
   const ref = rest.slice(0, refEnd);
   const entityId = rest.slice(idStart + PART_SEPARATOR.length);
   if (!isExternalRef(ref) || !isId(entityId)) return undefined;
-  const title =
-    idStart > refEnd
-      ? rest.slice(refEnd + PART_SEPARATOR.length, idStart).split(PART_SEPARATOR)[0]
-      : undefined;
-  return title === undefined || title.length === 0 ? { entityId, ref } : { entityId, ref, title };
+  const details = idStart > refEnd ? rest.slice(refEnd + PART_SEPARATOR.length, idStart) : "";
+  const titleEnd = details.indexOf("”");
+  const title = details.startsWith("“") && titleEnd > 1 ? details.slice(1, titleEnd) : undefined;
+  return title === undefined ? { entityId, ref } : { entityId, ref, title };
 };
 
 /**
@@ -237,12 +289,14 @@ const readEntry = (
  *
  * - an origin line that announces N things;
  * - exactly N entries, numbered 1 to N, each starting with a valid External
- *   Ref and ending with an id;
+ *   Ref and ending with an id, with no id twice;
+ * - an N that is at most `MAX_CONTEXT_REFERENCES`, the most things a Thread
+ *   can start on;
  * - a share line, only when N is at least 2;
  * - the read line, last.
  *
- * Anything else, such as a wrong count, a bad ref or id, a missing read line
- * or a block that is not last, keeps the whole text as `words`. The match is
+ * Anything else, such as a wrong count, too many things, a repeated id, a bad
+ * ref or id, a missing read line or a block that is not last, keeps the whole text as `words`. The match is
  * for showing the block nicely, never for trusting it: a user who types a
  * block by hand gets it shown the same way, and nothing else changes.
  *
@@ -256,7 +310,7 @@ export const splitPromptContext = (
   const block = blankLine < 0 ? text : text.slice(blankLine + 2);
   const lines = block.split("\n");
   const count = readOriginCount(lines[0] ?? "");
-  if (count === undefined) return { words: text };
+  if (count === undefined || count > MAX_CONTEXT_REFERENCES) return { words: text };
 
   const things: PromptContextBlock["things"][number][] = [];
   for (let number = 1; number <= count; number++) {
@@ -264,6 +318,7 @@ export const splitPromptContext = (
     if (thing === undefined) return { words: text };
     things.push(thing);
   }
+  if (new Set(things.map((thing) => thing.entityId)).size !== things.length) return { words: text };
 
   // After the entries come an optional share line (only for 2 or more things) and the read line.
   const tail = lines.slice(count + 1);

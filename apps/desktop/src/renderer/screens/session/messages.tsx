@@ -134,6 +134,7 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
         <button
           type="button"
           className="bubble-toggle"
+          data-holds-place=""
           aria-expanded={open}
           onClick={() => setOpen(!open)}
         >
@@ -221,12 +222,15 @@ function SkillMessageText({
 
 /**
  * Checks whether a message's props are the same as before, for `memo`. Props
- * are compared one by one, except the context block: the transcript reads it
- * out of the message's text each time it groups its rows again, so it is a new
- * object every time, and it counts as the same when its text is.
+ * are compared one by one, except two that the transcript builds again each
+ * time it groups its rows: the context block (read out of the message's text)
+ * counts as the same when its text is, and the attachments when their ids are.
  */
 export const hasSameMessageProps = <
-  Props extends { readonly context?: PromptContextBlock | undefined },
+  Props extends {
+    readonly context?: PromptContextBlock | undefined;
+    readonly attachments: readonly Attachment[];
+  },
 >(
   previous: Props,
   next: Props,
@@ -235,7 +239,12 @@ export const hasSameMessageProps = <
     const isSame =
       key === "context"
         ? previous.context?.text === next.context?.text
-        : Object.is(previous[key as keyof Props], next[key as keyof Props]);
+        : key === "attachments"
+          ? previous.attachments.length === next.attachments.length &&
+            previous.attachments.every(
+              (attachment, index) => attachment.id === next.attachments[index]?.id,
+            )
+          : Object.is(previous[key as keyof Props], next[key as keyof Props]);
     if (!isSame) return false;
   }
   return true;

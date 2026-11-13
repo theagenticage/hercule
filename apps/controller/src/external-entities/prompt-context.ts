@@ -14,7 +14,7 @@ import type { TaskableEntity } from "./repository";
  * ISO time it counts from (an agent cannot use a relative "3d" that goes stale
  * in the transcript), and a flag as `yes` or `no`.
  */
-export const describeFieldValue = (field: EntityFieldValue): string => {
+const describeFieldValue = (field: EntityFieldValue): string => {
   switch (field.type) {
     case "text":
     case "person":
@@ -36,24 +36,27 @@ const describeField = (field: EntityFieldValue): PromptContextField => ({
   type: field.type,
   label: field.label,
   value: describeFieldValue(field),
+  // A text field that names another record also carries that record's ref,
+  // because its text is only the title and two records can share a title.
+  ...(field.type === "text" && field.ref !== undefined ? { ref: field.ref } : {}),
 });
 
 /**
  * Returns the prompt context entry of one stored record, given the declared
  * field values read for it (empty when none).
  *
- * - A full record that no Connection can read now gives only its ref and id,
- *   because its stored title and fields are what the user could once read,
- *   and a restricted thing shows nothing else. The ref already names the
- *   kind of thing.
- * - Any other record, a partial one included, gives what its rows hold: a
- *   partial record's title may be empty and its fields are those stored.
+ * - A record that no Connection can read now, whether it is full or partial,
+ *   gives only its ref and id, because its stored title, status and fields
+ *   are what the user could once read. This is the rule `buildPlace` uses for
+ *   a restricted place. The ref already names the kind of thing.
+ * - Any other record gives what its rows hold: a partial record's title may
+ *   be empty and its fields are those stored.
  */
 export const buildPromptContextThing = (
   record: TaskableEntity,
   fields: ReadonlyArray<EntityFieldValue>,
 ): PromptContextThing => {
-  if (record.completeness === "full" && record.access !== "ok") {
+  if (record.access !== "ok") {
     return { entityId: record.id, ref: record.ref, fields: [] };
   }
   return {

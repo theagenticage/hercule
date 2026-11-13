@@ -201,9 +201,13 @@ describe("hercule runner --local", () => {
     const token = "a-single-use-join-token";
     // The controller spawns its runner before it binds its port, so the first
     // attempts fail to connect. The port is held by a socket server that drops
-    // every connection until the controller "starts". Freeing the port instead
-    // and waiting would let another test file's server, bound to a free port
-    // at the same moment, take it and answer the join with a refusal.
+    // every connection until the controller "starts". Freeing the port for the
+    // whole wait would let another test file's server, bound to a free port at
+    // the same moment, take it and answer the join with a refusal. The port is
+    // free only for the moment between stopping the dropper and `Bun.serve`
+    // below. That is acceptable: both calls are synchronous, so the gap is
+    // microseconds, and a join attempt landing in it only fails to connect and
+    // is retried like the earlier ones.
     const dropper = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,

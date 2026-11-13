@@ -2730,37 +2730,59 @@ describe("the prompt context of things", () => {
       "From your selection (2 things)",
       expect.stringMatching(
         new RegExp(
-          `^1\\. ${first} · Ticket 1 · In progress · Team Storefront, Size 3 · [0-9a-f-]{36}$`,
+          `^1\\. ${first} · “Ticket 1” · In progress · Team Storefront, Size 3 · [0-9a-f-]{36}$`,
         ),
       ),
       expect.stringMatching(
-        new RegExp(`^2\\. ${second} · Ticket 2 · Todo · Team Storefront · [0-9a-f-]{36}$`),
+        new RegExp(`^2\\. ${second} · “Ticket 2” · Todo · Team Storefront · [0-9a-f-]{36}$`),
       ),
       "They share: Team Storefront",
       "Read any of them in full: hercule entity read <id>",
     ]);
   });
 
-  it("gives a thing no Connection can read only its ref and id, and a partial record what its rows hold", async () => {
+  it("gives a thing no Connection can read only its ref and id, whole or partial, and a readable partial record what its rows hold", async () => {
     const block = await run((arranged) =>
       Effect.gen(function* () {
         const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
         yield* report(connectionId, [buildObservation("1")]);
         yield* reportPartial("2");
+        yield* reportPartial("3");
         yield* withTransaction(
           sql,
-          sql`UPDATE external_entity_observations SET access = 'inaccessible' WHERE ref = ${ticketRef("1")}`,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'
+              WHERE ref IN (${ticketRef("1")}, ${ticketRef("3")})`,
         );
-        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const ids = yield* Effect.forEach(["1", "2", "3"], (key) => entityId(ticketRef(key)));
         return yield* service.buildPromptContext(ids, { kind: "selection" });
       }),
     );
-    const [, restricted, partial] = block.split("\n");
+    const [, restricted, partial, restrictedPartial] = block.split("\n");
     expect(restricted).toMatch(new RegExp(`^1\\. ${ticketRef("1")} · [0-9a-f-]{36}$`));
-    expect(partial).toMatch(new RegExp(`^2\\. ${ticketRef("2")} · Ticket 2 · [0-9a-f-]{36}$`));
+    expect(partial).toMatch(new RegExp(`^2\\. ${ticketRef("2")} · “Ticket 2” · [0-9a-f-]{36}$`));
+    expect(restrictedPartial).toMatch(new RegExp(`^3\\. ${ticketRef("3")} · [0-9a-f-]{36}$`));
   });
 
-  it("fails with not_found naming each unknown id, and with forbidden for a session without task.read", async () => {
+  it("labels a group whose label thing no Connection can read with the locked label, never its title", async () => {
+    const origin = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2"]);
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        yield* withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'`,
+        );
+        return yield* service.readPromptContextOrigin(ids);
+      }),
+    );
+    expect(origin.kind).toBe("group");
+    const label = origin.kind === "group" ? origin.label : "";
+    expect(label).toMatch(/ you cannot open$/);
+    expect(label).not.toContain("Ticket");
+  });
+
+  it("fails with not_found naming each unknown id, and with forbidden naming the missing grant of task.read and signal.read", async () => {
     const result = await run((arranged) =>
       Effect.gen(function* () {
         const { service } = arranged;
@@ -2768,6 +2790,10 @@ describe("the prompt context of things", () => {
         const withoutGrant = {
           ...A_SESSION,
           grants: ["task.update"],
+        } as unknown as Actor;
+        const withoutSignalQuery = {
+          ...A_SESSION,
+          grants: ["task.read"],
         } as unknown as Actor;
         return {
           build: yield* Effect.flip(
@@ -2781,6 +2807,13 @@ describe("the prompt context of things", () => {
               withoutGrant,
             ),
           ),
+          originWithoutSignalQuery: yield* Effect.flip(
+            Effect.provideService(
+              service.readPromptContextOrigin([id!]),
+              CurrentActor,
+              withoutSignalQuery,
+            ),
+          ),
         };
       }),
     );
@@ -2789,6 +2822,9 @@ describe("the prompt context of things", () => {
     expect(JSON.stringify(result.origin)).toContain(MISSING_ID);
     expect(result.refused).toMatchObject({
       error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+    expect(result.originWithoutSignalQuery).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
     });
   });
 });

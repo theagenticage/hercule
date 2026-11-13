@@ -1693,7 +1693,7 @@ describe("buildTurns: the context block in a user message", () => {
   });
 
   /** Returns the first message of the turn built from one `user_message` that was sent with `text`. */
-  const readSentMessage = (text: string) => {
+  const readSentMessage = (text: string, senderSessionId?: string) => {
     const rows = [
       buildRow({
         _tag: "item.started",
@@ -1703,7 +1703,7 @@ describe("buildTurns: the context block in a user message", () => {
         turnId: "t1",
         itemId: "u1",
         kind: "user_message",
-        detail: { text },
+        detail: senderSessionId === undefined ? { text } : { text, senderSessionId },
       }),
     ];
     return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0];
@@ -1723,6 +1723,13 @@ describe("buildTurns: the context block in a user message", () => {
     const message = readSentMessage(BLOCK);
     expect(message?.text).toBe("");
     expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("keeps the whole text of a message another agent sent, even when it ends in a block", () => {
+    const text = `Look into this.\n\n${BLOCK}`;
+    const message = readSentMessage(text, "s-sender");
+    expect(message).toMatchObject({ text, senderSessionId: "s-sender" });
+    expect(message).not.toHaveProperty("context");
   });
 
   it("keeps a text with no block, or a near miss, whole as words", () => {

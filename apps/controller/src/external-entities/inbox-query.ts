@@ -72,6 +72,7 @@ import {
   cutPage,
   decideGroups,
   type Group,
+  findGroupMadeOf,
   type GroupsByRef,
 } from "./inbox-groups";
 import {
@@ -1671,12 +1672,41 @@ export const externalEntityInbox = Effect.gen(function* () {
     });
 
   /**
-   * Reads the groups of the Inbox, as `queryInbox` decides them, inside one
-   * read snapshot (see `readGroups`). Inside a transaction it reads that
-   * transaction's state.
+   * Returns the label of the Inbox group whose members are exactly `refs`
+   * (in any order), or none when `refs` are not that: fewer than two refs, a
+   * ref in no group, refs of different groups, or part of a group.
+   *
+   * The groups are decided by `readGroups`, as `queryInbox` decides them, in
+   * one read snapshot. That read scans the link graph, so callers keep it
+   * off the transaction that writes. The label is the title of the group's
+   * label thing; when no Connection can read that thing, it is the locked
+   * label the Inbox's pins show for such a record, never its stored title.
    */
-  const readInboxGroups = (environment: InboxEnvironment): Effect.Effect<GroupsByRef, SqlError> =>
-    withReadSnapshot(sql, readGroups(environment));
+  const findInboxGroupMadeOf = (
+    environment: InboxEnvironment,
+    refs: ReadonlyArray<string>,
+  ): Effect.Effect<Option.Option<string>, SqlError> =>
+    withReadSnapshot(
+      sql,
+      Effect.gen(function* () {
+        const group = findGroupMadeOf(yield* readGroups(environment), refs);
+        if (group === undefined) return Option.none();
+        const [labelRecord] = yield* runStatement<{
+          readonly noun: string;
+          readonly title: string | null;
+        }>(
+          sql,
+          `SELECT t.noun, CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title
+           FROM external_entities t WHERE t.ref = ?`,
+          [group.labelRef],
+        );
+        return Option.some(
+          labelRecord === undefined
+            ? group.label
+            : (labelRecord.title ?? buildLockedLabel(labelRecord.noun)),
+        );
+      }),
+    );
 
   return {
     queryInbox,
@@ -1684,6 +1714,6 @@ export const externalEntityInbox = Effect.gen(function* () {
     readInboxOutline,
     suggestInboxValues,
     readInboxGroup,
-    readInboxGroups,
+    findInboxGroupMadeOf,
   };
 });

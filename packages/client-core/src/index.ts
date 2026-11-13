@@ -1106,7 +1106,8 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
-  readUserWords,
+  splitSentText,
+  formatContextLineCount,
   type RuntimeNote,
   type ThreadItem,
   type ThreadTurn,

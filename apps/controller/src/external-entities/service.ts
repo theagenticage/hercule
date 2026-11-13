@@ -105,7 +105,6 @@ import {
 import { announceEntityChanges } from "./announce";
 import { readFieldValues } from "./entity-fields";
 import { buildActiveEntityKind } from "./entity-records";
-import { findGroupMadeOf } from "./inbox-groups";
 import { buildPromptContextThing } from "./prompt-context";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
@@ -756,6 +755,12 @@ const make = Effect.gen(function* () {
       return ids.map((id) => found.get(id)!);
     });
 
+  /** Checks the grants a prompt's context needs: `task.read` and `signal.query`. */
+  const requireContextGrants = Effect.gen(function* () {
+    yield* requireGrant("task.read");
+    yield* requireGrant("signal.query");
+  });
+
   /**
    * Prepares each of `records` for a Task as `takeOn` prepares one
    * (`prepareEntityForTask`), a few at a time (`MAX_CONCURRENT_THING_READS`),
@@ -1054,52 +1059,55 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns where the things of `entityIds` came from, for the first line
-     * of a prompt's context block. Needs the grant `task.read`. Fails with
-     * `NotFound` naming each unknown id. It reads stored rows only.
+     * of a prompt's context block. Needs the grants `task.read` and
+     * `signal.query`: the origin shows which Inbox group the things are in,
+     * and a group depends on signals (`readInboxGroup` needs both too). Fails
+     * with `NotFound` naming each unknown id. It reads stored rows only.
      *
      * - 2 or more things that are exactly the members of one linked group on
      *   the Inbox, by the same groups the Inbox draws: `group`, with that
-     *   group's label;
+     *   group's label (a locked label when its label thing is restricted);
      * - 2 or more other things: `selection`;
      * - one thing: `one`.
      *
-     * Call it before the things are taken on: taking a thing on can remove it
-     * from the Inbox and so from its group, and the origin must be what the
-     * user saw. Pass the result to `buildPromptContext`.
+     * Call it outside any transaction, before `buildPromptContext`: deciding
+     * the groups scans the link graph, which must not run on the writer.
      */
     readPromptContextOrigin: (
       entityIds: ReadonlyArray<string>,
     ): Effect.Effect<PromptContextOrigin, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("task.read");
+        yield* requireContextGrants;
         const records = yield* readTaskableEntitiesOrFail(entityIds);
         if (records.length < 2) return { kind: "one" };
-        const groups = yield* inbox.readInboxGroups(yield* readInboxEnvironment);
-        const group = findGroupMadeOf(
-          groups,
+        const label = yield* inbox.findInboxGroupMadeOf(
+          yield* readInboxEnvironment,
           records.map(({ ref }) => ref),
         );
-        return group === undefined ? { kind: "selection" } : { kind: "group", label: group.label };
+        return Option.isNone(label) ? { kind: "selection" } : { kind: "group", label: label.value };
       }),
 
     /**
      * Returns the context block that tells an agent about the things of
      * `entityIds`, in that order, with `origin` as its first line (see
-     * `formatPromptContext`). Needs the grant `task.read`. Fails with
-     * `NotFound` naming each unknown id.
+     * `formatPromptContext`). Needs the grants `task.read` and
+     * `signal.query`. Fails with `NotFound` naming each unknown id. The
+     * records are read again here and not passed from
+     * `readPromptContextOrigin`, because they must be read after the take-on.
      *
      * It reads stored rows only, never a source: the records, their declared
      * field values, and one statement for each, however many things there
      * are. Call it after `takeOnAsOneTask` in the same transaction, so a thing
      * that was read at its source for a Task carries the fields it was stored
-     * with. A thing that no Connection can read gives only its ref and id.
+     * with. A thing that no Connection can read, whole or partial, gives only
+     * its ref and id.
      */
     buildPromptContext: (
       entityIds: ReadonlyArray<string>,
       origin: PromptContextOrigin,
     ): Effect.Effect<string, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("task.read");
+        yield* requireContextGrants;
         const records = yield* readTaskableEntitiesOrFail(entityIds);
         const environment = yield* readEnvironment;
         const values = yield* Effect.provideService(

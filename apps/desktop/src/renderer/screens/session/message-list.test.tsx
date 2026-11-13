@@ -4,7 +4,7 @@
  * out, so the test sets the scrolling element's sizes and position itself.
  */
 import type { JSX } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useMessageList } from "./message-list";
 
@@ -113,27 +113,126 @@ describe("useMessageList wheel check", () => {
   });
 });
 
-describe("useMessageList fold", () => {
-  it("stops following the bottom when a control that holds the place is clicked", () => {
-    const onBottomChange = vi.fn();
-    render(<List onBottomChange={onBottomChange} />);
-    const list = screen.getByLabelText("List");
-    Object.defineProperties(list, {
-      scrollHeight: { configurable: true, get: () => SCROLL_HEIGHT },
-      clientHeight: { configurable: true, get: () => CLIENT_HEIGHT },
-      scrollTop: { configurable: true, get: () => BOTTOM, set: () => {} },
+/** A scrolling element whose content height a test sets, so a click can grow or shrink it. */
+const layout = { contentHeight: 0, scrollTop: 0 };
+
+/** Calls the callback of the list's resize observer, as the browser does after a layout. */
+let reportResize: () => void = () => {};
+
+/** Renders a list whose button changes the content height, as a fold opening does. */
+function FoldList({
+  onBottomChange,
+  heightAfterClick,
+}: {
+  readonly onBottomChange: (atBottom: boolean) => void;
+  readonly heightAfterClick: number;
+}): JSX.Element {
+  const { scrollRef, columnRef, noteScroll } = useMessageList({
+    count: 0,
+    estimateSize,
+    getItemKey,
+    scrollMargin: 0,
+    composerStack: null,
+    onBottomChange,
+  });
+  return (
+    <section ref={scrollRef} aria-label="List" onScroll={noteScroll}>
+      <div ref={columnRef}>
+        <button
+          type="button"
+          data-holds-place=""
+          onClick={() => {
+            layout.contentHeight = heightAfterClick;
+          }}
+        >
+          Fold
+        </button>
+        <button type="button">Other</button>
+      </div>
+    </section>
+  );
+}
+
+/** Waits for the two frames the list lets a toggle settle in. */
+const waitForSettle = (): Promise<void> =>
+  new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        resolve();
+      });
     });
-
-    fireEvent.click(screen.getByRole("button", { name: "Fold" }));
-
-    expect(onBottomChange).toHaveBeenCalledExactlyOnceWith(false);
   });
 
-  it("keeps following when something else in the list is clicked", () => {
-    const onBottomChange = vi.fn();
-    render(<List onBottomChange={onBottomChange} />);
+const renderFoldList = (contentHeight: number, heightAfterClick: number) => {
+  layout.contentHeight = contentHeight;
+  layout.scrollTop = 0;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: (entries: unknown[]) => void) {
+        reportResize = () => {
+          callback([]);
+        };
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  const onBottomChange = vi.fn();
+  render(<FoldList onBottomChange={onBottomChange} heightAfterClick={heightAfterClick} />);
+  const list = screen.getByLabelText("List");
+  Object.defineProperties(list, {
+    scrollHeight: { configurable: true, get: () => Math.max(layout.contentHeight, CLIENT_HEIGHT) },
+    clientHeight: { configurable: true, get: () => CLIENT_HEIGHT },
+    scrollTop: {
+      configurable: true,
+      get: () => layout.scrollTop,
+      set: (value: number) => {
+        layout.scrollTop = Math.min(
+          value,
+          Math.max(layout.contentHeight, CLIENT_HEIGHT) - CLIENT_HEIGHT,
+        );
+      },
+    },
+  });
+  return { list, onBottomChange };
+};
 
-    fireEvent.click(screen.getByTestId("nested"));
+describe("useMessageList content that opens in place", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("follows again when the opened content still fits, so later growth follows", async () => {
+    const { list, onBottomChange } = renderFoldList(300, 500);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fold" }));
+    expect(onBottomChange).toHaveBeenLastCalledWith(false);
+    await waitForSettle();
+    expect(onBottomChange).toHaveBeenLastCalledWith(true);
+
+    layout.contentHeight = 1500;
+    reportResize();
+    expect(list.scrollTop).toBe(1500 - CLIENT_HEIGHT);
+  });
+
+  it("keeps the reader in place when the opened content grows past the view", async () => {
+    const { list, onBottomChange } = renderFoldList(700, 1500);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fold" }));
+    await waitForSettle();
+    expect(onBottomChange).toHaveBeenLastCalledWith(false);
+
+    reportResize();
+    expect(list.scrollTop).toBe(0);
+  });
+
+  it("keeps following when something else in the list is clicked", async () => {
+    const { onBottomChange } = renderFoldList(300, 500);
+
+    fireEvent.click(screen.getByRole("button", { name: "Other" }));
+    await waitForSettle();
 
     expect(onBottomChange).not.toHaveBeenCalled();
   });

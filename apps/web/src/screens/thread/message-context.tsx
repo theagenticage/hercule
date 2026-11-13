@@ -4,6 +4,7 @@
  * bubble holds the user's words; the block is kept out of the way, folded.
  */
 import type { JSX, ReactNode } from "react";
+import { formatContextLineCount } from "@hercule/client-core";
 import type { PromptContextBlock } from "@hercule/contract";
 
 // The same disclosure chevron as a details block in markdown: two borders, so
@@ -25,8 +26,7 @@ export function MessageContext({ context }: { readonly context: PromptContextBlo
   return (
     <details className="max-w-[80%]">
       <summary className={SUMMARY}>
-        Context sent with it · {String(context.lineCount)}{" "}
-        {context.lineCount === 1 ? "line" : "lines"}
+        Context sent with it · {formatContextLineCount(context)}
       </summary>
       <pre className="mt-1 rounded-card border border-line-soft bg-surface px-3 py-2 font-mono text-fine leading-5 wrap-break-word whitespace-pre-wrap text-ink">
         {context.text}

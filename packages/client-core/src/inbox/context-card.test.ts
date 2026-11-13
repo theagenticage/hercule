@@ -2,7 +2,12 @@
 import type { ExternalEntityDetail, InboxThing } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildFakeInboxDetail } from "./cards.testing";
-import { describeContextCard, describeContextCardFromBlock } from "./context-card";
+import { ApiError } from "../errors";
+import {
+  describeContextCard,
+  describeContextCardFromBlock,
+  shouldRetryCardRead,
+} from "./context-card";
 
 const THING = {
   id: "ent_1",
@@ -71,6 +76,29 @@ describe("describeContextCard", () => {
       }),
     );
     expect(card).not.toHaveProperty("trailing");
+  });
+});
+
+describe("the plugin of a card", () => {
+  it("is the entity's kind for a card that was read, and a guess from the ref's system otherwise", () => {
+    const ref = "github:pr:northwind/web#6244";
+    expect(describeContextCard(buildDetail({ ref, kind: "acme/pull-request" })).pluginId).toBe(
+      "acme",
+    );
+    expect(describeContextCardFromBlock({ ref }).pluginId).toBe("github");
+  });
+});
+
+describe("shouldRetryCardRead", () => {
+  it.each(["not_found", "forbidden"] as const)("does not retry a read refused as %s", (code) => {
+    expect(shouldRetryCardRead(1, new ApiError(code, "No."))).toBe(false);
+  });
+
+  it("retries another failure up to three times", () => {
+    const error = new ApiError("internal", "Down.");
+    expect(shouldRetryCardRead(1, error)).toBe(true);
+    expect(shouldRetryCardRead(2, error)).toBe(true);
+    expect(shouldRetryCardRead(3, error)).toBe(false);
   });
 });
 

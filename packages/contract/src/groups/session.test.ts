@@ -189,7 +189,7 @@ describe("text and images in a session prompt or input", () => {
 
   it.each(payloads)(
     "$name refuses empty text with no images, at the text field",
-    ({ schema, base, field }) => {
+    ({ name, schema, base, field }) => {
       const decode = Schema.decodeUnknownExit(schema);
       for (const payload of [
         { ...base, [field]: "" },
@@ -197,7 +197,11 @@ describe("text and images in a session prompt or input", () => {
       ]) {
         const exit = decode(payload);
         expect(exit._tag).toBe("Failure");
-        expect(String(exit)).toContain("A prompt needs text or at least one image.");
+        expect(String(exit)).toContain(
+          name === "session.spawn"
+            ? "A prompt needs text, an image, or context."
+            : "A prompt needs text or at least one image.",
+        );
         expect(String(exit)).toContain(`["${field}"]`);
       }
     },

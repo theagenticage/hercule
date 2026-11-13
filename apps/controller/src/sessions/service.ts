@@ -58,6 +58,7 @@ import {
   Id,
   INPUT_SORT_FIELDS,
   EMPTY_PROMPT_MESSAGE,
+  splitPromptContext,
   INPUT_UPDATE_FIELDS,
   refuseEmptyInputUpdate,
   InvalidState,
@@ -307,12 +308,6 @@ export interface CreateRequest {
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
   readonly prompt: string;
-  /**
-   * The user's own words, when `prompt` also holds a context block after
-   * them; `buildTitle` then reads these and never the block. `undefined` when
-   * `prompt` is all the user's words.
-   */
-  readonly promptWords?: string | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -791,8 +786,10 @@ const isAcceptableRole = Schema.is(SessionRole);
 /**
  * Builds a session's short title, trimmed and cut by `cutTitle`:
  * `chosen` when the caller chose a title, otherwise the first non-blank line
- * of the session's first prompt, otherwise the name of the prompt's first
- * image. That way a sidebar row has something to show without reading the
+ * of the user's words in the session's first prompt, otherwise the title of
+ * the first thing in the prompt's context block, otherwise the name of the
+ * prompt's first image. The context block is never read for a line of the
+ * title when the prompt has words. That way a sidebar row has something to show without reading the
  * transcript.
  */
 const buildTitle = (
@@ -800,9 +797,11 @@ const buildTitle = (
   prompt: string,
   firstAttachmentName: string | undefined,
 ): string => {
+  const { words, context } = splitPromptContext(prompt);
   const title =
     chosen ??
-    prompt.split("\n").find((line) => line.trim().length > 0) ??
+    words.split("\n").find((line) => line.trim().length > 0) ??
+    context?.things[0]?.title ??
     firstAttachmentName ??
     "";
   return cutTitle(title);
@@ -2446,7 +2445,7 @@ const make = Effect.gen(function* () {
             attachments: references,
           }),
         );
-        const title = buildTitle(open.title, open.promptWords ?? open.prompt, references[0]?.name);
+        const title = buildTitle(open.title, open.prompt, references[0]?.name);
         const joined =
           open.taskSource._tag === "fixed"
             ? undefined

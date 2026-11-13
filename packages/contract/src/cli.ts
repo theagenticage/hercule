@@ -103,6 +103,13 @@ export type FieldRow =
        * only.
        */
       readonly resolves?: OperationId;
+      /**
+       * Marks a flag that can be the whole input of a command whose text
+       * comes from stdin, as `--image` is. With this flag given, the command
+       * does not wait for stdin at a terminal and sends empty text, and an
+       * empty pipe sends empty text. Without it, a terminal is refused.
+       */
+      readonly standsInForStdin?: true;
     }
   | {
       readonly stdin: true;
@@ -4781,7 +4788,9 @@ export const CLI = {
       {
         args: [
           "--context",
-          '[{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"},{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000012"}]',
+          '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"}',
+          "--context",
+          '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000012"}',
         ],
         stdin: "Look at these two things and tell me how they relate.",
       },
@@ -4853,7 +4862,8 @@ export const CLI = {
       },
       context: {
         flag: "context",
-        help: 'Things to tell the agent about, as JSON: [{"kind":"entity","entityId":"<id>"}, ...]. Each id is an External Entity (found with `hercule entity list`). The controller appends a short description of each after the prompt, so the prompt may be empty when --context is given. Context never takes a thing on as a Task: use --new-task for that. The list holds 1 to 50 things, each once. Nothing is started when a thing is unknown.',
+        standsInForStdin: true,
+        help: 'A thing to tell the agent about, as JSON: {"kind":"entity","entityId":"<id>"}; repeat the flag for more things. The id is an External Entity (found with `hercule entity list`). The controller appends a short description of each after the prompt, so the prompt may be empty when --context is given. Context never takes a thing on as a Task: use --new-task for that. The list holds 1 to 50 things, each once. Nothing is started when a thing is unknown.',
       },
       newTask: {
         flag: "new-task",

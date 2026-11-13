@@ -94,6 +94,12 @@ export interface Field {
    */
   readonly uploads: boolean;
   /**
+   * Whether giving this flag lets the command send empty text without reading
+   * stdin at a terminal, as an uploaded image does. Set by the row's
+   * `standsInForStdin` marker.
+   */
+  readonly standsInForStdin: boolean;
+  /**
    * Whether the field is the positional `<folder>` of a skill folder, or a
    * folder of skills. The CLI sends one request per skill, with this field
    * set to the skill's folder name and the skill's tar archive as the body.
@@ -374,6 +380,7 @@ const buildField = (
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     uploads: "upload" in row && row.upload === true,
+    standsInForStdin: "standsInForStdin" in row && row.standsInForStdin === true,
     readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
     resolvesQueries: listResolvingQueries("resolvesQuery" in row ? row.resolvesQuery : undefined),

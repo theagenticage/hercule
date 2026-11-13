@@ -23,11 +23,14 @@
  *   a change below it.
  *
  * - A click on a control marked `data-holds-place` (the fold "Context sent
- *   with it") counts as leaving the bottom, before its content grows. The
- *   content then opens downward under the reader, and the control stays where
- *   it was under the pointer, instead of the list following the new bottom.
- *   Folding it again brings the reader back to the bottom when the scroll
- *   that the shorter content causes ends there.
+ *   with it", a bubble's "Show full message") opens or closes content in
+ *   place. The click counts as leaving the bottom, before the content
+ *   changes, so the content opens downward under the reader and the control
+ *   stays where it was under the pointer, instead of the list following the
+ *   new bottom. Once the layout has settled, the list follows again when the
+ *   scrolling element is at the bottom: the content still fits, or the
+ *   reader is still at the bottom. Content that grew past the view leaves
+ *   the reader reading, until they scroll back down.
  *
  * Other writers of the scroll position exist and are not part of that rule:
  * the virtualizer's initial offset and its retry of a scroll that the
@@ -316,18 +319,36 @@ export const useMessageList = ({
     };
   }, []);
 
-  const leaveBottomOnToggle = useEffectEvent((event: MouseEvent): void => {
-    if (event.target instanceof Element && event.target.closest("[data-holds-place]") !== null) {
-      setFollowing(false);
+  // The frames a click on a control that holds the place waits for the layout
+  // to settle: one for the changed content to lay out, one for the
+  // virtualizer to measure the block again and the column to follow.
+  const settleFrameRef = useRef(0);
+  const holdPlaceOnToggle = useEffectEvent((event: MouseEvent): void => {
+    if (!(event.target instanceof Element) || event.target.closest("[data-holds-place]") === null) {
+      return;
     }
+    setFollowing(false);
+    cancelAnimationFrame(settleFrameRef.current);
+    settleFrameRef.current = requestAnimationFrame(() => {
+      settleFrameRef.current = requestAnimationFrame(() => {
+        const scroller = scrollRef.current;
+        if (scroller === null) return;
+        const atBottom =
+          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOLLOW_THRESHOLD;
+        if (!atBottom) return;
+        lastScrollTopRef.current = scroller.scrollTop;
+        setFollowing(true);
+      });
+    });
   });
 
-  // Captured, so it runs before React handles the click and the content grows.
+  // Captured, so it runs before React handles the click and the content changes.
   useEffect(() => {
     const scroller = scrollRef.current!;
-    scroller.addEventListener("click", leaveBottomOnToggle, { capture: true });
+    scroller.addEventListener("click", holdPlaceOnToggle, { capture: true });
     return () => {
-      scroller.removeEventListener("click", leaveBottomOnToggle, { capture: true });
+      scroller.removeEventListener("click", holdPlaceOnToggle, { capture: true });
+      cancelAnimationFrame(settleFrameRef.current);
     };
   }, []);
 

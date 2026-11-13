@@ -4,10 +4,11 @@
  * stubbed controller.
  */
 import { describe, expect, it } from "vitest";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { buildFakeInboxDetail } from "@hercule/client-core/inbox/testing";
 import {
   formatPromptContext,
+  type Attachment,
   splitPromptContext,
   type InboxThing,
   type PromptContextBlock,
@@ -18,6 +19,12 @@ import { renderThreadPart } from "../thread/testing";
 import { hasSameMessageProps, UserMessage } from "./messages";
 
 const THREAD = THREAD_FIXTURES.finished;
+const IMAGE: Attachment = {
+  id: "01a06d02-9000-7000-8000-0000000000a1",
+  name: "shot.png",
+  mimeType: "image/png",
+  sizeBytes: 10,
+};
 const ISSUE_ID = "01a06d02-9000-7000-8000-000000000001";
 const ERROR_ID = "01a06d02-9000-7000-8000-000000000002";
 const ISSUE_REF = "linear:issue:northwind/SHOP-142";
@@ -56,7 +63,7 @@ const CONTEXT_TEXT = formatPromptContext({
   origin: { kind: "selection" },
   things: [
     { entityId: ISSUE_ID, ref: ISSUE_REF, title: "Show the delivery cost", fields: [] },
-    { entityId: ERROR_ID, ref: ERROR_REF, title: "TypeError kept in the block", fields: [] },
+    { entityId: ERROR_ID, ref: ERROR_REF, title: "TypeError · kept in the block", fields: [] },
   ],
 });
 const CONTEXT = splitPromptContext(`Look into these.\n\n${CONTEXT_TEXT}`).context!;
@@ -72,8 +79,12 @@ const drawMessage = () => (): React.JSX.Element => (
   />
 );
 
-/** Renders the message, with the controller reading the issue and the error, and the thing in `unreadable` failing. */
-const renderMessage = (unreadable?: string) =>
+/**
+ * Renders the message, with the controller reading the issue and the error,
+ * and the thing in `unreadable` failing. A handler for `refused` replaces the
+ * error's answer: it answers `not_found` while `refused.now` is true.
+ */
+const renderMessage = (unreadable?: string, refused?: { now: boolean }) =>
   renderThreadPart(drawMessage(), {
     thread: THREAD,
     handlers: {
@@ -82,8 +93,11 @@ const renderMessage = (unreadable?: string) =>
           ? { status: 404, body: buildErrorBody("not_found", "No entity has this id.") }
           : { body: ISSUE },
       [`GET /api/v1/external-entities/${ERROR_ID}`]:
-        unreadable === ERROR_ID
-          ? { status: 404, body: buildErrorBody("not_found", "No entity has this id.") }
+        unreadable === ERROR_ID || refused !== undefined
+          ? () =>
+              unreadable === ERROR_ID || refused?.now === true
+                ? { status: 404, body: buildErrorBody("not_found", "No entity has this id.") }
+                : { body: ERROR }
           : { body: ERROR },
     },
   });
@@ -106,9 +120,37 @@ describe("the cards under a message with context", () => {
     await renderMessage(ERROR_ID);
 
     await screen.findByText("SHOP-142");
-    const card = screen.getByText("TypeError kept in the block").closest("li")!;
+    const card = screen.getByText("TypeError · kept in the block").closest("li")!;
     expect(within(card).queryByText("STOREFRONT-1Z9")).toBeNull();
     expect(within(card).queryByText("Escalating")).toBeNull();
+  });
+
+  it("asks once for a thing that is gone, and does not retry", async () => {
+    const { queryClient, client } = await renderMessage(ERROR_ID);
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(entityQuery(client, ERROR_ID).queryKey)?.status).toBe(
+        "error",
+      );
+    });
+    expect(
+      queryClient.getQueryState(entityQuery(client, ERROR_ID).queryKey)?.fetchFailureCount,
+    ).toBe(1);
+  });
+
+  it("draws the block's card, not the old values, when a refresh fails", async () => {
+    const refused = { now: false };
+    const { queryClient, client } = await renderMessage(undefined, refused);
+    await screen.findByText("1,211 events");
+
+    refused.now = true;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: entityQuery(client, ERROR_ID).queryKey });
+    });
+
+    const card = (await screen.findByText("TypeError · kept in the block")).closest("li")!;
+    expect(within(card).queryByText("STOREFRONT-1Z9")).toBeNull();
+    expect(within(card).queryByText("1,211 events")).toBeNull();
   });
 
   it("draws a fact that changes again, without drawing the other card", async () => {
@@ -117,7 +159,7 @@ describe("the cards under a message with context", () => {
     expect(error.querySelector(".is-ticked")).toBeNull();
     const issue = screen.getByText("SHOP-142").closest("li")!;
 
-    await act(async () => {
+    act(() => {
       queryClient.setQueryData(entityQuery(client, ERROR_ID).queryKey, {
         ...ERROR,
         face: { fact: { key: "events", type: "number", label: "Events", number: 1212 } },
@@ -176,9 +218,15 @@ it("draws a message with no context as before", async () => {
 });
 
 describe("hasSameMessageProps", () => {
-  const props: { text: string; context: PromptContextBlock | undefined; steered: boolean } = {
+  const props: {
+    text: string;
+    context: PromptContextBlock | undefined;
+    attachments: Attachment[];
+    steered: boolean;
+  } = {
     text: "Hello",
     context: CONTEXT,
+    attachments: [IMAGE],
     steered: false,
   };
 
@@ -186,6 +234,17 @@ describe("hasSameMessageProps", () => {
     const again = splitPromptContext(`Look into these.\n\n${CONTEXT_TEXT}`).context!;
     expect(again).not.toBe(CONTEXT);
     expect(hasSameMessageProps(props, { ...props, context: again })).toBe(true);
+  });
+
+  it("counts attachments read again with the same ids as the same", () => {
+    expect(hasSameMessageProps(props, { ...props, attachments: [{ ...IMAGE }] })).toBe(true);
+    expect(hasSameMessageProps(props, { ...props, attachments: [] })).toBe(false);
+    expect(
+      hasSameMessageProps(props, {
+        ...props,
+        attachments: [{ ...IMAGE, id: "01a06d02-9000-7000-8000-0000000000aa" }],
+      }),
+    ).toBe(false);
   });
 
   it("tells a message with other words, or other context, or none, from the same one", () => {

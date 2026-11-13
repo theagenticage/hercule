@@ -281,7 +281,6 @@ export function Transcript({
           <AgentSentMessage
             senderSessionId={block.senderSessionId}
             text={block.text}
-            context={block.context}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}

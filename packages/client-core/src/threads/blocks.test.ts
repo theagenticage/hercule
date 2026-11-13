@@ -1643,6 +1643,24 @@ describe("appendSendingMessages", () => {
     expect(plain).not.toHaveProperty("context");
   });
 
+  it("keeps the whole text of a message another agent sent, even when it ends in a block", () => {
+    const block = formatPromptContext({
+      origin: { kind: "one" },
+      things: [
+        {
+          entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+          ref: "linear:issue:northwind/SHOP-142",
+          fields: [],
+        },
+      ],
+    });
+    const text = `Look into this.\n\n${block}`;
+    const fromAgent = { ...SENDING, text, actor: "session:01a12f36-0000-7000-8000-0000000000aa" };
+    const [, sent] = appendSendingMessages([EARLIER], [fromAgent]);
+    expect(sent).toMatchObject({ text });
+    expect(sent).not.toHaveProperty("context");
+  });
+
   it("returns the same list when nothing is sending", () => {
     const blocks = [EARLIER];
     expect(appendSendingMessages(blocks, [])).toBe(blocks);

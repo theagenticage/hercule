@@ -163,11 +163,28 @@ export interface ThreadUserMessage {
  * the controller appended, when there is one. Both the runner's
  * `user_message` and a message still sending go through here, so the two
  * never read a block differently.
+ *
+ * Only the owner's messages are split. A message another session's agent sent
+ * (`senderSessionId` is set) keeps its whole text as words: an agent could
+ * otherwise hide text behind the fold, and make the app read the ids of
+ * things it chose.
  */
-export const readUserWords = (sentText: string): Pick<ThreadUserMessage, "text" | "context"> => {
+export const splitSentText = (
+  sentText: string,
+  senderSessionId: string | undefined,
+): Pick<ThreadUserMessage, "text" | "context"> => {
+  if (senderSessionId !== undefined) return { text: sentText };
   const { words, context } = splitPromptContext(sentText);
   return context === undefined ? { text: words } : { text: words, context };
 };
+
+/**
+ * Returns the line count of a context block as the fold under a message
+ * writes it, such as "6 lines". A block has at least three lines (the origin,
+ * one entry and the read line), so the count is never one.
+ */
+export const formatContextLineCount = (context: PromptContextBlock): string =>
+  `${String(context.lineCount)} lines`;
 
 /**
  * Returns the message a `user_message` item's `item.started` holds. Each
@@ -181,7 +198,7 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    ...readUserWords(typeof text === "string" ? text : ""),
+    ...splitSentText(typeof text === "string" ? text : "", senderSessionId),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
