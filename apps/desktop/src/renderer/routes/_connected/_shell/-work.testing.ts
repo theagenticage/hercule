@@ -171,32 +171,48 @@ export const buildDetail = (card: WorkCard, overrides: Partial<TaskDetail> = {})
 export const listCalls = (calls: readonly Call[], route: string): readonly Call[] =>
   calls.filter((call) => `${call.method} ${call.path}` === route);
 
-/** How long the tests wait for an undo window they shortened, in milliseconds. */
-export const SHORT_WINDOW_MS = 1_500;
+/** The timers of undo windows the test holds, by their handle, until it ends them. */
+const heldWindows = new Map<unknown, () => void>();
 
 /**
- * Makes the undo window of a held answer `SHORT_WINDOW_MS` long, by shortening
- * the one timer of that length. Fake timers cannot be used here: Testing
- * Library's `findBy` and `waitFor` wait on a timer of their own, which a fake
- * clock never fires.
+ * Holds every undo window (the timer of `UNDO_WINDOW_MS`) open until
+ * `endUndoWindow` is called, however long the test takes. A window on a real
+ * clock, even a shortened one, can run out before a slow machine has checked
+ * what the test checks inside it, and Undo is gone by then. Fake timers cannot
+ * be used: Testing Library's `waitFor` waits on a timer of its own, which a
+ * fake clock never fires.
  */
-export const shortenUndoWindow = (): void => {
+export const holdUndoWindow = (): void => {
+  heldWindows.clear();
   const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
   vi.spyOn(globalThis, "setTimeout").mockImplementation(((
     callback: () => void,
     delay?: number,
     ...rest: unknown[]
-  ) =>
-    realSetTimeout(
-      callback,
-      delay === UNDO_WINDOW_MS ? SHORT_WINDOW_MS : delay,
-      ...rest,
-    )) as typeof setTimeout);
+  ) => {
+    if (delay !== UNDO_WINDOW_MS) return realSetTimeout(callback, delay, ...rest);
+    // A real timer that never runs in the test's time keeps a handle `clearTimeout` accepts.
+    const handle = realSetTimeout(() => undefined, 2 ** 31 - 1);
+    heldWindows.set(handle, callback);
+    return handle;
+  }) as typeof setTimeout);
+  vi.spyOn(globalThis, "clearTimeout").mockImplementation(((
+    handle?: Parameters<typeof clearTimeout>[0],
+  ) => {
+    heldWindows.delete(handle);
+    realClearTimeout(handle);
+  }) as typeof clearTimeout);
 };
 
-/** Waits longer than the shortened undo window, so a send that was going to happen has. */
-export const waitOutUndoWindow = (): Promise<void> =>
-  act(() => new Promise<void>((resolve) => setTimeout(resolve, SHORT_WINDOW_MS * 2)));
+/** Ends every held undo window that Undo did not cancel, so the answers it held are sent. */
+export const endUndoWindow = async (): Promise<void> => {
+  const ended = [...heldWindows.values()];
+  heldWindows.clear();
+  await act(async () => {
+    for (const end of ended) end();
+  });
+};
 
 /** Returns `calls` to `route` with a body, such as `PATCH /api/v1/tasks/<id>`, as the bodies they sent. */
 export const readBodies = (calls: readonly Call[], route: string): readonly unknown[] =>
