@@ -448,8 +448,15 @@ describe("the asks and blocks of the thing before", () => {
 
 describe("Send again", () => {
   it("keeps the saved answer when the answer is refused because the app is offline", async () => {
+    // After the drop the controller stays unreachable, so the app cannot reconnect (its first retry
+    // comes after one second) between the drop and the click, however slow the machine is.
+    let isUnreachable = false;
     const { calls, live, user } = await open(undefined, {
       [ACT_REVIEW]: { status: 409, body: buildErrorBody("invalid_state", "The source said no.") },
+      "POST /api/v1/auth/ws-ticket": () =>
+        isUnreachable
+          ? { status: 503, body: buildErrorBody("unavailable", "The controller is down.") }
+          : { body: { ticket: "ws-ticket" } },
     });
     await user.keyboard("]");
     await waitFor(() => {
@@ -467,6 +474,7 @@ describe("Send again", () => {
     const failed = await screen.findByRole("alert");
     expect(failed.textContent).toMatch(/was not sent to/);
 
+    isUnreachable = true;
     act(() => {
       live.drop();
     });

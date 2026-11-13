@@ -230,6 +230,7 @@ export const PANE_BLOCKS: ReadonlyMap<number, EntityBlocks> = new Map<number, En
         },
         {
           type: "text",
+          title: "Description",
           markdown:
             "Adds the delivery cost to the payment step's summary, rounded the way the invoice rounds it. Closes SHOP-142.",
         },
@@ -251,6 +252,7 @@ export const PANE_BLOCKS: ReadonlyMap<number, EntityBlocks> = new Map<number, En
         },
         {
           type: "text",
+          title: "Description",
           markdown:
             "Moves `OrderSchema` and its codecs to `@northwind/shared` so the mobile app can import them. No behaviour change.",
         },
@@ -296,6 +298,7 @@ export const PANE_BLOCKS: ReadonlyMap<number, EntityBlocks> = new Map<number, En
         },
         {
           type: "text",
+          title: "Description",
           markdown:
             "Shoppers only see the delivery cost once they reach the payment step, and 14% of them leave there. Show it on the basket and on the delivery step, with the same rounding Finance uses on the invoice.",
         },
