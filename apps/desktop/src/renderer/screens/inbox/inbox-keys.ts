@@ -32,7 +32,9 @@ export type InboxKeyAction =
   | { readonly kind: "narrow" }
   | { readonly kind: "toggleKeys" }
   | { readonly kind: "nextRegion"; readonly backwards: boolean }
-  | { readonly kind: "openPane" }
+  | { readonly kind: "activate" }
+  | { readonly kind: "stepAsk"; readonly by: 1 | -1 }
+  | { readonly kind: "scrollPane"; readonly back: boolean }
   | { readonly kind: "focusList" };
 
 /**
@@ -73,8 +75,8 @@ export interface InboxKeyPress {
   readonly isOnControl: boolean;
 }
 
-/** The moves that never repeat: a held key must not dismiss a row after row. */
-const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x"]);
+/** The moves that never repeat: a held key must not dismiss a row after row, nor Return answer a thing after thing. */
+const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x", "enter"]);
 
 /** The saved queries that have a digit: 1 to 7. The eighth place in the drawing is Triage, which is not built. */
 const LIST_DIGITS = /^[1-7]$/;
@@ -127,7 +129,13 @@ export const decideInboxKeyAction = (
     case ".":
       return { kind: "showArrivals" };
     case "enter":
-      return { kind: "openPane" };
+      return { kind: "activate" };
+    case "[":
+      return { kind: "stepAsk", by: -1 };
+    case "]":
+      return { kind: "stepAsk", by: 1 };
+    case " ":
+      return { kind: "scrollPane", back: press.shiftKey };
     default:
       return null;
   }
@@ -145,7 +153,9 @@ export const buildInboxKeyRows = (platform: DesktopPlatform): readonly InboxKeyR
   ["⇧J ⇧K", "Select a range while moving"],
   ["X", "Select, or unselect"],
   [platform === "mac" ? "⌘A" : "Ctrl A", "Select every thing that is loaded"],
-  ["Return", "Open the pane, when it lies over the list"],
+  ["Return", "Open the pane when it lies over the list, else answer the open ask"],
+  ["[ ]", "The ask before and after, in the pane"],
+  ["Space ⇧Space", "Scroll the pane by a page"],
   ["E", "Dismiss, all of the selection at once"],
   ["T", "Take on: a Task on Work"],
   ["H", "Hand off to an agent"],

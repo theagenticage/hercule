@@ -10,6 +10,9 @@ import {
   type ChangeBlock,
   type CheckRow,
   type ChecksBlock,
+  type CodeBlock,
+  type FieldsBlock,
+  type TrendBlock,
   type KnownBlock,
   type MessagesBlock,
   type Person,
@@ -121,6 +124,25 @@ const formatChecks = (block: ChecksBlock): ReadonlyArray<string> => [
   ].join(", "),
 ];
 
+/** Returns the lines of a fields block: its title, then a `label: value` line per row. */
+const formatFields = (block: FieldsBlock): ReadonlyArray<string> => [
+  ...(block.title === undefined ? [] : [block.title]),
+  ...block.rows.map((row) => `${row.label}: ${row.value}`),
+];
+
+/** Returns the lines of a trend block: its caption, then an `at: value` line per point, oldest first. */
+const formatTrend = (block: TrendBlock): ReadonlyArray<string> => [
+  block.caption,
+  ...block.points.map((point) => `${point.at}: ${String(point.value)}`),
+];
+
+/** Returns the lines of a code block: its title, then its text, indented. */
+const formatCode = (block: CodeBlock): ReadonlyArray<string> => [
+  ...(block.title === undefined ? [] : [block.title]),
+  ...block.text.split("\n").map((line) => `    ${line}`),
+  ...(block.truncated === true ? ["(the text is cut short here)"] : []),
+];
+
 /** Returns the lines of one block, or the one line for a block of an unknown type. */
 const formatBlock = (block: Block): ReadonlyArray<string> => {
   if (!isKnownBlock(block)) return [UNKNOWN_BLOCK_TEXT];
@@ -133,6 +155,12 @@ const formatBlock = (block: Block): ReadonlyArray<string> => {
       return formatChange(block);
     case "checks":
       return formatChecks(block);
+    case "fields":
+      return formatFields(block);
+    case "trend":
+      return formatTrend(block);
+    case "code":
+      return formatCode(block);
   }
 };
 

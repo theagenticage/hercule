@@ -371,6 +371,11 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/external-entities/:id",
   },
+  "externalEntity.readBlocks": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/:id/blocks",
+  },
   "externalEntity.takeOn": {
     requires: "task.update",
     method: "POST",

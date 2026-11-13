@@ -717,6 +717,35 @@ describe("moves", () => {
     });
   });
 
+  describe("a move that fails after a later move handled the same row", () => {
+    it("leaves the later dismissal alone", async () => {
+      const { visit } = await opened(rows("a", "b", "c"));
+      const taken = visit.move("taken", ["a"]);
+      visit.move("dismissed", ["a"]);
+      visit.failMove(taken);
+      expect(refsOf(visit)).toEqual(["b", "c"]);
+    });
+
+    it("still reverses the rows the later move did not handle", async () => {
+      const { visit } = await opened(rows("a", "b", "c"));
+      const taken = visit.move("taken", ["a", "b"]);
+      visit.move("dismissed", ["a"]);
+      visit.failMove(taken);
+      expect(refsOf(visit)).toEqual(["b", "c"]);
+      expect(visit.getSnapshot().current).toBe("b");
+    });
+
+    it("owns the row again once the later move was undone", async () => {
+      const { visit } = await opened(rows("a", "b"));
+      const taken = visit.move("taken", ["a"]);
+      const dismissed = visit.move("dismissed", ["a"]);
+      visit.undo(dismissed);
+      visit.failMove(taken);
+      expect(refsOf(visit)).toEqual(["a", "b"]);
+      expect(visit.getSnapshot().current).toBe("a");
+    });
+  });
+
   describe("undo", () => {
     it("restores rows at their old index and makes the first current, even after a refresh", async () => {
       const { fake, visit } = await opened(rows("a", "b", "c", "d"));

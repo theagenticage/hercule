@@ -10,10 +10,15 @@ import {
   listHeldMerges,
   listUnsentAnswers,
   UNDO_WINDOW_MS,
+  type IntentProgress,
   type IntentContent,
   type IntentStorage,
   type PendingIntents,
 } from "./pending-intents";
+import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
+import type { CardMover } from "./card-mover";
+import type { Gesture } from "./undo-stack";
+import { holdWithUndo } from "./use-pending-intents";
 
 /** The details the controller puts on a refusal that means the Request is closed. */
 const CLOSED = { reason: "request-closed" };
@@ -150,7 +155,12 @@ describe.each(KINDS)("a held %s", (_kind, content) => {
     const reopened = open(storage, send);
     expect(reopened.getSnapshot()).toHaveLength(2);
     expect(reopened.getSnapshot()).toMatchObject([
-      { intentId: pendingId, state: "failed", failure: { reason: "interrupted" }, ...content },
+      {
+        intentId: pendingId,
+        state: "failed",
+        failure: { reason: "interrupted-while-sending" },
+        ...content,
+      },
       { state: "failed", failure: { reason: "interrupted" }, ...content },
     ]);
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 3);
@@ -440,5 +450,271 @@ describe("showing unsent answers on another Task", () => {
     intents.subscribe(listener);
     intents.moveFailedAnswers("task-1", "task-9");
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+const SIGNAL_ANSWER: IntentContent = {
+  kind: "signal-answer",
+  signalId: "signal-1",
+  entityId: "entity-1",
+  actionId: "reply",
+  text: "On it",
+  sourceName: "GitHub",
+};
+
+describe("a held signal answer", () => {
+  let stub: ReturnType<typeof createSend>;
+  let storage: IntentStorage;
+  let intents: PendingIntents;
+  beforeEach(() => {
+    storage = createMemoryStorage();
+    stub = createSend();
+    intents = open(storage, stub.send);
+  });
+
+  it("waits 8 seconds where the other kinds wait 5", async () => {
+    intents.hold(SIGNAL_ANSWER);
+    intents.hold(MERGE);
+
+    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
+    expect(stub.send).toHaveBeenCalledTimes(1);
+    expect(stub.send).toHaveBeenCalledWith(expect.objectContaining(MERGE));
+
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS - UNDO_WINDOW_MS - 1);
+    expect(stub.send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stub.send).toHaveBeenLastCalledWith(expect.objectContaining(SIGNAL_ANSWER));
+  });
+
+  it("keeps waiting past its window while held, and is sent at once when released", async () => {
+    const intentId = intents.hold(SIGNAL_ANSWER);
+    intents.setHeld(intentId, true);
+
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS * 3);
+    expect(stub.send).not.toHaveBeenCalled();
+    expect(intents.getSnapshot()).toMatchObject([{ state: "pending" }]);
+
+    intents.setHeld(intentId, false);
+    expect(stub.send).toHaveBeenCalledTimes(1);
+    expect(intents.getSnapshot()).toMatchObject([{ state: "sending" }]);
+  });
+
+  it("is sent when its window ends if it was released early", async () => {
+    const intentId = intents.hold(SIGNAL_ANSWER);
+    intents.setHeld(intentId, true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    intents.setHeld(intentId, false);
+    expect(stub.send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS - 2_000);
+    expect(stub.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports sending, then sent before the intent leaves the store", async () => {
+    const intentId = intents.hold(SIGNAL_ANSWER);
+    const reports: Array<[IntentProgress, number]> = [];
+    intents.watch(intentId, (progress) => {
+      reports.push([progress, intents.getSnapshot().length]);
+    });
+
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    stub.calls[0]?.resolve();
+    await settle();
+
+    expect(reports).toEqual([
+      ["sending", 1],
+      ["sent", 1],
+    ]);
+    expect(intents.getSnapshot()).toEqual([]);
+  });
+
+  it("reports cancelled on Undo and failed on a refusal", async () => {
+    const cancelled = intents.hold(SIGNAL_ANSWER);
+    const reports: IntentProgress[] = [];
+    intents.watch(cancelled, (progress) => reports.push(progress));
+    intents.undo(cancelled);
+    expect(reports).toEqual(["cancelled"]);
+
+    const refused = intents.hold(SIGNAL_ANSWER);
+    const refusedReports: IntentProgress[] = [];
+    intents.watch(refused, (progress) => refusedReports.push(progress));
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    stub.calls[0]?.reject(new Error("The source refused."));
+    await settle();
+    expect(refusedReports).toEqual(["sending", "failed"]);
+  });
+});
+
+describe("an intent found again after the app closed", () => {
+  it("says it was not sent when it was pending, and that it may have been sent when it was sending", async () => {
+    const storage = createMemoryStorage();
+    const stub = createSend();
+    const before = open(storage, stub.send);
+    const sendingId = before.hold(SIGNAL_ANSWER);
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    const stillPendingId = before.hold(MERGE);
+    before.dispose();
+
+    const after = open(storage, vi.fn());
+    const failureOf = (intentId: string) =>
+      after.getSnapshot().find((each) => each.intentId === intentId)?.failure;
+    expect(failureOf(stillPendingId)).toEqual({
+      reason: "interrupted",
+      message: "The app closed before this was sent.",
+    });
+    expect(failureOf(sendingId)?.reason).toBe("interrupted-while-sending");
+    expect(failureOf(sendingId)?.message).toMatch(/may have been sent/);
+  });
+});
+
+describe("holding with the undo line", () => {
+  const setUp = () => {
+    const stub = createSend();
+    const store = open(createMemoryStorage(), stub.send);
+    let gesture: Gesture<CardMover> | null = null;
+    const sayWithUndo = vi.fn((_text: string, offered: Gesture<CardMover>) => {
+      gesture = offered;
+      return () => {
+        gesture = null;
+      };
+    });
+    return {
+      stub,
+      store,
+      sayWithUndo,
+      isOnStack: () => gesture !== null,
+      hold: (isHeld: boolean) => gesture?.hold?.(isHeld),
+      settled: () => gesture?.settled,
+      undo: () => gesture?.undo(null as never),
+    };
+  };
+
+  it("takes the gesture off the stack once sending, as before", async () => {
+    const { store, sayWithUndo, isOnStack } = setUp();
+    holdWithUndo(store, MERGE, { sayWithUndo, line: "Merged.", words: "Merged" });
+    expect(isOnStack()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS);
+    expect(isOnStack()).toBe(false);
+  });
+
+  it("cancels the intent on Undo while pending", async () => {
+    const { stub, store, sayWithUndo, undo } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
+    });
+
+    await undo();
+    expect(store.getSnapshot()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    expect(stub.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps the gesture after sending, and Undo then says it was already sent", async () => {
+    const { stub, store, sayWithUndo, isOnStack, undo } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    stub.calls[0]?.resolve();
+    await settle();
+    expect(isOnStack()).toBe(true);
+
+    await expect(undo()).resolves.toEqual({ text: "Already sent to GitHub." });
+  });
+
+  it("says it is still being sent when undone while sending", async () => {
+    const { store, sayWithUndo, undo } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent.",
+        sendingText: "Still being sent.",
+        sentLine: "Sent.",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+
+    await expect(undo()).resolves.toEqual({ text: "Still being sent." });
+  });
+
+  it("takes the gesture off the stack when the send fails", async () => {
+    const { stub, store, sayWithUndo, isOnStack } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent to GitHub.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    stub.calls[0]?.reject(new Error("The source refused."));
+    await settle();
+
+    expect(isOnStack()).toBe(false);
+  });
+
+  it("waits while the user holds the line, and is sent when the line lets go", async () => {
+    const { stub, store, sayWithUndo, hold } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, { sayWithUndo, line: "Replied.", words: "Replied" });
+
+    hold(true);
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS * 2);
+    expect(stub.send).not.toHaveBeenCalled();
+
+    hold(false);
+    expect(stub.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles the line with the sent words once sent, and with nothing when cancelled", async () => {
+    const { stub, store, sayWithUndo, settled, undo } = setUp();
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
+    });
+    await vi.advanceTimersByTimeAsync(SIGNAL_ANSWER_HOLD_MS);
+    stub.calls[0]?.resolve();
+    await settle();
+    await expect(settled()).resolves.toBe("Sent to GitHub.");
+
+    holdWithUndo(store, SIGNAL_ANSWER, {
+      sayWithUndo,
+      line: "Replied.",
+      words: "Replied",
+      afterSending: {
+        text: "Already sent.",
+        sentLine: "Sent to GitHub.",
+        sendingText: "Still being sent.",
+      },
+    });
+    const cancelledLine = settled();
+    await undo();
+    await expect(cancelledLine).resolves.toBeUndefined();
   });
 });

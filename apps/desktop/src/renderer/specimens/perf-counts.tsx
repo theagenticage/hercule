@@ -108,6 +108,7 @@ function buildInboxWorld(): {
           id: CORE_SAVED_QUERY_IDS.waits,
           name: "Someone waits on me",
           order: "waiting",
+          signalKinds: [],
           count: WORLD_SIZE,
         },
       ],
@@ -120,6 +121,13 @@ function buildInboxWorld(): {
     [...things, arrival].map((thing) => [
       `GET /api/v1/external-entities/${thing.id}`,
       { body: buildFakeInboxDetail(thing) },
+    ]),
+  );
+  // The pane reads the blocks of the open thing from its source: this world's things show none.
+  const blocks = Object.fromEntries(
+    [...things, arrival].map((thing) => [
+      `GET /api/v1/external-entities/${thing.id}/blocks`,
+      { body: { blocks: [] } },
     ]),
   );
   return {
@@ -137,6 +145,7 @@ function buildInboxWorld(): {
       "POST /api/v1/external-entities/dismiss": { body: {} },
       "POST /api/v1/external-entities/restore": { body: {} },
       ...details,
+      ...blocks,
     },
     changes: {
       arrive: () => {

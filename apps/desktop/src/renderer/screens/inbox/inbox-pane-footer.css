@@ -1,0 +1,104 @@
+/* The footer: the moves that work, each with its key. The pane is its size container, so the footer
+   follows the pane's width and not the window's.
+   - from 460px every move has its words and its key;
+   - under 460px the hand-off comes first and Take on is an icon, its words in the tooltip;
+   - under 400px the moves drop their key hints, which stay in the tooltips;
+   - a name too long even then keeps its line, and the icons wrap under it. */
+.ib-pane-foot-box {
+  flex: none;
+  container: pane-foot / inline-size;
+}
+.ib-pane-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 12px 20px 12px 24px;
+  border-top: 1px solid var(--divider);
+  background: var(--pane-fill);
+}
+.ib-pane-move {
+  min-width: 0;
+  height: 28px;
+  gap: 6px;
+  padding: 0 7px 0 10px;
+}
+.ib-pane-move-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+/* The hand-off names who gets the thing, always in full: it is never cut and never only a face. */
+.ib-pane-move--hand {
+  flex: none;
+}
+.ib-pane-move kbd {
+  flex: none;
+}
+.ib-pane-foot-end {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: -6px;
+}
+.ib-pane-faces {
+  display: inline-flex;
+  flex: none;
+}
+.ib-pane-faces svg {
+  flex: none;
+  width: 18px;
+}
+.ib-pane-move .ib-pane-faces .cr {
+  margin-left: -2px;
+}
+.ib-pane-faces > * + * {
+  margin-left: -6px;
+}
+.ib-pane-move-icon {
+  display: none;
+  color: var(--muted);
+}
+.ib-pane-move-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ib-pane-dismiss {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+@container pane-foot (max-width: 459px) {
+  .ib-pane-foot {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ib-pane-move--hand {
+    order: -1;
+  }
+  .ib-pane-move.has-icon {
+    width: 30px;
+    padding: 0;
+  }
+  .ib-pane-move.has-icon .ib-pane-move-icon {
+    display: inline-grid;
+    color: inherit;
+  }
+  .ib-pane-move.has-icon .ib-pane-move-label,
+  .ib-pane-move.has-icon kbd {
+    display: none;
+  }
+}
+@container pane-foot (max-width: 399px) {
+  .ib-pane-move kbd {
+    display: none;
+  }
+  .ib-pane-move--hand {
+    padding-right: 10px;
+  }
+}

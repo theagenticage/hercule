@@ -16,6 +16,7 @@ import {
   type EntityRecognition,
   type EntityResolution,
 } from "@hercule/plugin-host";
+import { readItemBlocks } from "./entity-blocks";
 import { ISSUE_KIND, PULL_REQUEST_KIND } from "./entity-kinds";
 import {
   buildItemObservation,
@@ -188,4 +189,6 @@ export const githubEntityLookup: EntityLookup = {
   search: (_connection, context, query) => withToken(context, (token) => searchItems(token, query)),
   resolve: (_connection, context, target) =>
     withToken(context, (token) => resolveItem(token, target)),
+  readBlocks: (_connection, context, ref) =>
+    withToken(context, (token) => readItemBlocks(token, ref)),
 };

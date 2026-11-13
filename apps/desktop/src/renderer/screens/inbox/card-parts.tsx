@@ -1,23 +1,5 @@
 import type { JSX } from "react";
-import type { EntityStatus } from "@hercule/contract";
 import type { CardFact } from "@hercule/client-core/inbox";
-import { EntityStatusIcon } from "../desk";
-
-/** Renders a status as its shape and its word in ink: the first thing on a row, and the line of a place's head. */
-export function CardStatus({
-  status,
-  size,
-}: {
-  readonly status: EntityStatus;
-  readonly size: number;
-}): JSX.Element {
-  return (
-    <span className="card-status">
-      <EntityStatusIcon status={status} size={size} />
-      <span>{status.label}</span>
-    </span>
-  );
-}
 
 /**
  * Renders a fact in its fixed form. A delta draws its gain and its loss in

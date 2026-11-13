@@ -1,13 +1,18 @@
 /**
  * The pending intents: what the user decided and the app holds back for the
- * undo line before it sends. Two kinds share the store:
+ * undo line before it sends. Three kinds share the store:
  *
  * - `answer`: the answers to a question a Thread asked, sent with
  *   `session.respondToQuestion`;
- * - `merge`: one Task merged into another, sent with `task.merge`.
+ * - `merge`: one Task merged into another, sent with `task.merge`;
+ * - `signal-answer`: an answer to a signal that acts on its source (a plugin
+ *   action, perhaps with a typed reply), sent with `signal.act`.
  *
- * An intent is `pending` for `UNDO_WINDOW_MS`, during which Undo cancels it.
- * Then it is `sending`, and then it either succeeds, which removes it, or
+ * An intent is `pending` for its window, during which Undo cancels it: 8
+ * seconds for a `signal-answer`, which cannot be taken back once the source
+ * has it, and `UNDO_WINDOW_MS` for the others. While the undo line that shows
+ * the intent is under the pointer or holds the focus, a `pending` intent whose
+ * window has run out waits (`setHeld`). Then it is `sending`, and then it either succeeds, which removes it, or
  * fails, which keeps it as `failed` with its content and the error's message,
  * so the user can send it again or discard it.
  *
@@ -17,13 +22,15 @@
  * unfinished intents to storage under a key made of the controller and the
  * signed-in user. A new store with the same key finds them again as `failed`
  * and never sends them by itself: the app may have quit while one was
- * `sending`, so sending it again could send it twice. Another controller or
+ * `sending`, so sending it again could send it twice. An intent that was
+ * only `pending` was never sent, and its failure says so. Another controller or
  * user has another key and sees nothing.
  *
  * There is no queue for being offline. A send that cannot reach the
  * controller is a failed intent.
  */
 import { isRequestClosed, readErrorMessage } from "@hercule/client-core";
+import { SIGNAL_ANSWER_HOLD_MS } from "@hercule/client-core/inbox";
 import type { FailureReason } from "@hercule/client-core/work";
 import type { SessionRespondToQuestionInput } from "@hercule/contract";
 
@@ -47,6 +54,18 @@ export type IntentContent =
       readonly taskId: string;
       /** The Task that stays. */
       readonly intoTaskId: string;
+    }
+  | {
+      readonly kind: "signal-answer";
+      readonly signalId: string;
+      /** The External Entity the signal is about, whose detail the answer changes. */
+      readonly entityId: string;
+      /** The action the user took, which the source runs. */
+      readonly actionId: string;
+      /** The typed reply, when the action has a field. */
+      readonly text?: string;
+      /** The name of the source, such as "GitHub", for the words about the answer after a restart. */
+      readonly sourceName: string;
     };
 
 export interface IntentFailure {
@@ -64,6 +83,9 @@ export type PendingIntent = IntentContent & {
   readonly failure: IntentFailure | null;
 };
 
+/** What `PendingIntents.watch` reports about one intent. */
+export type IntentProgress = "sending" | "sent" | "failed" | "cancelled";
+
 export interface PendingIntents {
   /**
    * Returns the held intents, oldest first. The same array comes back until
@@ -78,6 +100,22 @@ export interface PendingIntents {
    */
   readonly hold: (content: IntentContent) => string;
   /**
+   * Tells `listener` each time the intent `intentId` starts `sending`, ends
+   * `failed`, is `cancelled` by Undo, or is `sent`. The last two are reported
+   * before the intent leaves the store, because the intent's removal alone
+   * cannot tell sent from cancelled. Returns a function that stops the
+   * reports. Nothing is reported after `dispose`.
+   */
+  readonly watch: (intentId: string, listener: (progress: IntentProgress) => void) => () => void;
+  /**
+   * Makes a `pending` intent whose window has run out wait while `isHeld` is
+   * true, and sends it at once when `isHeld` becomes false and it is overdue.
+   * Holding does not lengthen the window: an intent released before its
+   * window ran out is sent when the window ends. Does nothing for an intent
+   * that is not `pending`.
+   */
+  readonly setHeld: (intentId: string, isHeld: boolean) => void;
+  /**
    * Cancels the intent and removes it. Works only while it is `pending`:
    * returns false for a `sending` or `failed` intent, or an unknown id, and
    * changes nothing.
@@ -86,8 +124,8 @@ export interface PendingIntents {
   /**
    * Sends a `failed` intent again at once, with no undo window. Resolves
    * when the send ended, and never rejects: a failure becomes the intent's
-   * `failure`. Does nothing for an intent that is not `failed`, and after
-   * `dispose`.
+   * `failure`. Does nothing for an intent that is not `failed`, and
+   * after `dispose`.
    */
   readonly retry: (intentId: string) => Promise<void>;
   /** Removes a `failed` intent. Does nothing for any other state. */
@@ -211,15 +249,21 @@ const decideFailureReason = (
   return isRetry ? "no-longer-open" : "closed-before-sent";
 };
 
-const INTERRUPTED: IntentFailure = {
+const NOT_SENT: IntentFailure = {
   reason: "interrupted",
   message: "The app closed before this was sent.",
+};
+
+const MAYBE_SENT: IntentFailure = {
+  reason: "interrupted-while-sending",
+  message: "The app closed while this was being sent. It may have been sent.",
 };
 
 /**
  * Reads the intents stored under `key`. Returns none when nothing is stored
  * or the text cannot be read. An intent that was `pending` or `sending` comes
- * back `failed` as `interrupted`.
+ * back `failed`: as `interrupted` (not sent) when it was `pending`, and as
+ * `interrupted-while-sending` (it may have been sent) when it was `sending`.
  */
 const loadIntents = (storage: IntentStorage, key: string): readonly PendingIntent[] => {
   let stored: unknown;
@@ -235,7 +279,7 @@ const loadIntents = (storage: IntentStorage, key: string): readonly PendingInten
       : {
           ...intent,
           state: "failed",
-          failure: INTERRUPTED,
+          failure: intent.state === "pending" ? NOT_SENT : MAYBE_SENT,
         },
   );
 };
@@ -245,9 +289,16 @@ const isStoredIntent = (value: unknown): value is PendingIntent => {
   const intent = value as Record<string, unknown>;
   const hasStrings = (...fields: string[]): boolean =>
     fields.every((field) => typeof intent[field] === "string");
-  if (!hasStrings("intentId", "taskId")) return false;
+  if (!hasStrings("intentId")) return false;
   if (intent.state !== "pending" && intent.state !== "sending" && intent.state !== "failed")
     return false;
+  if (intent.kind === "signal-answer") {
+    return (
+      hasStrings("signalId", "entityId", "actionId", "sourceName") &&
+      (intent.text === undefined || typeof intent.text === "string")
+    );
+  }
+  if (!hasStrings("taskId")) return false;
   if (intent.kind === "merge") return hasStrings("intoTaskId");
   return (
     intent.kind === "answer" &&
@@ -278,6 +329,11 @@ export const createPendingIntents = (options: {
   let isDisposed = false;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<() => void>();
+  const watchers = new Map<string, Set<(progress: IntentProgress) => void>>();
+  // Intents the undo line holds, and the held intents whose window ran out
+  // while it did: those are sent the moment the line lets go.
+  const heldByLine = new Set<string>();
+  const overdue = new Set<string>();
 
   // The in-memory list is the truth and storage is a best-effort copy for
   // the next start. A write that fails (the quota is full) is logged and never
@@ -308,9 +364,21 @@ export const createPendingIntents = (options: {
     );
   };
 
+  const report = (intentId: string, progress: IntentProgress): void => {
+    if (isDisposed) return;
+    for (const listener of watchers.get(intentId) ?? []) listener(progress);
+    if (progress === "sent" || progress === "cancelled") watchers.delete(intentId);
+  };
+  const forgetHold = (intentId: string): void => {
+    heldByLine.delete(intentId);
+    overdue.delete(intentId);
+  };
+
   const transmit = async (intent: PendingIntent, isRetry: boolean): Promise<void> => {
     if (isDisposed) return;
+    forgetHold(intent.intentId);
     change(intent.intentId, { state: "sending", failure: null });
+    report(intent.intentId, "sending");
     try {
       await send(intent);
     } catch (error) {
@@ -321,9 +389,26 @@ export const createPendingIntents = (options: {
           message: readErrorMessage(error),
         },
       });
+      report(intent.intentId, "failed");
       return;
     }
+    report(intent.intentId, "sent");
     commit(intents.filter((each) => each.intentId !== intent.intentId));
+  };
+
+  /** Starts the window of a `pending` intent. At its end the intent is sent, unless the undo line holds it. */
+  const startWindow = (intent: PendingIntent): void => {
+    timers.set(
+      intent.intentId,
+      setTimeout(
+        () => {
+          timers.delete(intent.intentId);
+          if (heldByLine.has(intent.intentId)) overdue.add(intent.intentId);
+          else void transmit(intent, false);
+        },
+        intent.kind === "signal-answer" ? SIGNAL_ANSWER_HOLD_MS : UNDO_WINDOW_MS,
+      ),
+    );
   };
 
   return {
@@ -345,19 +430,33 @@ export const createPendingIntents = (options: {
       };
       if (isDisposed) return intent.intentId;
       commit([...intents, intent]);
-      timers.set(
-        intent.intentId,
-        setTimeout(() => {
-          timers.delete(intent.intentId);
-          void transmit(intent, false);
-        }, UNDO_WINDOW_MS),
-      );
+      startWindow(intent);
       return intent.intentId;
+    },
+    watch: (intentId, listener) => {
+      const own = watchers.get(intentId) ?? new Set();
+      own.add(listener);
+      watchers.set(intentId, own);
+      return () => {
+        own.delete(listener);
+      };
+    },
+    setHeld: (intentId, isHeld) => {
+      if (find(intentId)?.state !== "pending") return;
+      if (isHeld) {
+        heldByLine.add(intentId);
+        return;
+      }
+      heldByLine.delete(intentId);
+      const intent = find(intentId);
+      if (intent !== undefined && overdue.delete(intentId)) void transmit(intent, false);
     },
     undo: (intentId) => {
       if (find(intentId)?.state !== "pending") return false;
       clearTimeout(timers.get(intentId));
       timers.delete(intentId);
+      forgetHold(intentId);
+      report(intentId, "cancelled");
       commit(intents.filter((intent) => intent.intentId !== intentId));
       return true;
     },
@@ -366,8 +465,9 @@ export const createPendingIntents = (options: {
       if (intent?.state === "failed") await transmit(intent, true);
     },
     discard: (intentId) => {
-      if (find(intentId)?.state === "failed")
-        commit(intents.filter((intent) => intent.intentId !== intentId));
+      if (find(intentId)?.state !== "failed") return;
+      watchers.delete(intentId);
+      commit(intents.filter((intent) => intent.intentId !== intentId));
     },
     moveFailedAnswers: (fromTaskId, toTaskId) => {
       const moved = listUnsentAnswers(intents, fromTaskId).map((intent) => intent.intentId);
@@ -382,6 +482,9 @@ export const createPendingIntents = (options: {
       isDisposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      heldByLine.clear();
+      overdue.clear();
+      watchers.clear();
     },
   };
 };

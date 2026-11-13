@@ -1,0 +1,107 @@
+/* The answers of one signal in the Inbox's pane, drawn by `InboxAnswers`. The
+   sizes, spacing and colours are the signed-off drawing's `.sig-answers`,
+   `.sig-desc` and `.reply` rules, on the app's tokens. */
+.sig-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sig-answers .btn kbd {
+  margin-left: 2px;
+}
+.sig-done {
+  margin-left: auto;
+}
+.sig-desc {
+  min-height: 16px;
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.sig-desc b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+
+/* An answer on its way, or whose box is open: pressed in, with no key. */
+.sig-answers .btn.is-pressed {
+  background: var(--selected);
+  box-shadow: inset 0 0 0 1px var(--btn-rim);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.sig-answers .btn.is-pressed kbd {
+  display: none;
+}
+/* An answer that was not sent: what happened, then the two things to do. */
+.sig-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.sig-failed[data-state="interrupted"] {
+  color: var(--muted);
+}
+.sig-failed > span {
+  flex: 1 1 100%;
+}
+
+/* The reply box of an answer with a field. */
+.sig-reply {
+  margin-top: 12px;
+  padding: 8px;
+  border-radius: var(--r-sm);
+  background: var(--composer-fill);
+  box-shadow: inset 0 0 0 1px var(--composer-line);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sig-reply {
+    animation: sig-reply-arrive 180ms var(--m-ease) both;
+  }
+}
+@keyframes sig-reply-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.sig-reply textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+  line-height: 20px;
+}
+.sig-reply textarea::placeholder {
+  color: var(--muted);
+}
+.sig-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sig-reply-as {
+  margin-right: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* On the composer's fill the app's faint key hint falls under AA in Nile; muted keeps it legible. */
+.sig-reply kbd {
+  color: var(--muted);
+}
+.sig-reply .btn--answer kbd {
+  color: var(--answer-fg);
+}

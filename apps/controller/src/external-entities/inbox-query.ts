@@ -102,7 +102,7 @@ import {
   type SortTuple,
   type SqlValue,
 } from "./inbox-relation";
-import { findSavedQuery, listSavedQueries } from "./saved-queries";
+import { findSavedQuery, listQuerySignalKinds, listSavedQueries } from "./saved-queries";
 import { buildSignalSay } from "./signal-lines";
 import { buildWorkflowOfferTarget, makeEntityRowReads } from "./entity-reads";
 import { makeWorkflowOfferReads } from "./workflow-offer-reads";
@@ -543,6 +543,8 @@ const readSourceCounts = (
 interface PageRow {
   readonly ref: string;
   readonly task_id: Uint8Array | null;
+  /** The active Task's title, read in the page statement. Null when `task_id` is. */
+  readonly task_title: string | null;
   readonly oldest_ask: string | null;
   readonly upd: string;
   readonly grp: number;
@@ -557,6 +559,7 @@ interface MemberRow {
   readonly id: Uint8Array;
   readonly ref: string;
   readonly task_id: Uint8Array | null;
+  readonly task_title: string | null;
   readonly oldest_ask: string | null;
   readonly upd: string;
   readonly grp: number;
@@ -681,7 +684,7 @@ export const externalEntityInbox = Effect.gen(function* () {
   /** Builds the things of a page, in the order of `rows`, from the batched reads of their refs. */
   const hydrate = (
     environment: InboxEnvironment,
-    rows: ReadonlyArray<Pick<PageRow, "ref" | "task_id" | "oldest_ask">>,
+    rows: ReadonlyArray<Pick<PageRow, "ref" | "task_id" | "task_title" | "oldest_ask">>,
   ): Effect.Effect<
     { readonly things: ReadonlyArray<InboxThing>; readonly offerSets: InboxFirstPage["offerSets"] },
     SqlError
@@ -761,7 +764,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           askKinds: found[0] === undefined ? [] : (JSON.parse(found[0].kinds) as Array<string>),
           openKinds: openKinds.get(page.ref) ?? [],
           ...(page.oldest_ask === null ? {} : { waitingSince: page.oldest_ask }),
-          ...(taskId === undefined ? {} : { taskId }),
+          ...(taskId === undefined ? {} : { taskId, taskTitle: page.task_title! }),
           takenOn: taken.has(page.ref),
           liveWorkflows: taskId === undefined ? [] : (liveWorkflows.get(taskId) ?? []),
           ...(row.dismissed_at === null ? {} : { dismissedAt: row.dismissed_at }),
@@ -930,7 +933,8 @@ export const externalEntityInbox = Effect.gen(function* () {
               ROW_NUMBER() OVER (PARTITION BY g.unit ORDER BY ${order}) AS rn
             FROM matched m JOIN grouped g ON g.ref = m.ref)
           WHERE rn = 1)
-       SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.unit
+       SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
+              m.oldest_ask, m.upd, m.grp, m.unit
          ${options.withTotal ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
        FROM placed m WHERE ${where.sql}
        ORDER BY ${order} LIMIT ?`,
@@ -960,8 +964,10 @@ export const externalEntityInbox = Effect.gen(function* () {
     return runStatement<MemberRow>(
       sql,
       `WITH ${eligible.sql}
-       SELECT m.id, m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.matches FROM (
-         SELECT e.id, e.ref, e.task_id, e.oldest_ask, e.source_updated_at AS upd,
+       SELECT m.id, m.ref, m.task_id, m.task_title, m.oldest_ask, m.upd, m.grp, m.matches FROM (
+         SELECT e.id, e.ref, e.task_id,
+           (SELECT t.title FROM tasks t WHERE t.id = e.task_id) AS task_title,
+           e.oldest_ask, e.source_updated_at AS upd,
            CASE WHEN e.oldest_ask IS NULL THEN 1 ELSE 0 END AS grp,
            CASE WHEN ${selection.filter.sql} THEN 1 ELSE 0 END AS matches
          FROM eligible e) m
@@ -1027,7 +1033,7 @@ export const externalEntityInbox = Effect.gen(function* () {
       });
       const membersByUnit = yield* readMembersByUnit(environment, selection, groups, keptGroups);
 
-      const rows: Array<Pick<PageRow, "ref" | "task_id" | "oldest_ask">> = [];
+      const rows: Array<Pick<PageRow, "ref" | "task_id" | "task_title" | "oldest_ask">> = [];
       for (const { unit, take } of cut.kept) {
         if (!groups.has(unit.row.ref)) rows.push(unit.row);
         else rows.push(...membersByUnit.get(unit.key)!.slice(0, take));
@@ -1154,7 +1160,8 @@ export const externalEntityInbox = Effect.gen(function* () {
       const rows = yield* runStatement<PageRow>(
         sql,
         `WITH ${matched.sql}
-         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
+         SELECT m.ref, m.task_id, (SELECT t.title FROM tasks t WHERE t.id = m.task_id) AS task_title,
+                m.oldest_ask, m.upd, m.grp
          FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
         [...matched.params, MAX_INBOX_HELD_REFS],
       );
@@ -1409,6 +1416,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           name: query.name,
           order: query.order,
           ...(query.source === undefined ? {} : { source: query.source }),
+          signalKinds: listQuerySignalKinds(query),
           count: readCountColumn(index),
         })),
         sources: sourceIds.map((source) => {

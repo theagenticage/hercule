@@ -4,7 +4,7 @@
  *
  * - `recognize` is pure. It asks every active plugin's lookup what the text
  *   names, with no credentials and no request.
- * - `search` and `resolve` call one plugin's lookup through its eligible
+ * - `search`, `resolve` and `readBlocks` call one plugin's lookup through its eligible
  *   Connections: `connected` or `error`, of a plugin that is active, oldest
  *   first. Credentials are read by the plugin at the moment of each call, and
  *   no call runs inside a transaction.
@@ -30,6 +30,7 @@ import {
   AuthError,
   ConnectionUnavailable,
   PluginError,
+  type EntityBlockDraft,
   type EntityLookup,
   type EntityLookupContext,
   type EntityObservation,
@@ -54,6 +55,9 @@ export const LOOKUP_TIMEOUT_SECONDS = 8;
 
 /** The most Connections `resolve` asks. Eligible Connections beyond them are left out. */
 export const MAX_RESOLVE_CONNECTIONS = 8;
+
+/** The most Connections `readBlocks` asks, one after another, until one answers. */
+export const MAX_READ_BLOCKS_CONNECTIONS = 3;
 
 /** The most Connections `search` asks. Eligible Connections beyond them are left out. */
 export const MAX_SEARCH_CONNECTIONS = 4;
@@ -89,6 +93,14 @@ export type DecidedResolution =
   | { readonly ambiguous: ReadonlyArray<string> }
   | { readonly incomplete: true }
   | { readonly unavailable: true };
+
+/**
+ * What `readBlocks` returns: the drafts a Connection read (an empty list is
+ * an answer), or `unreadable` when no Connection answered.
+ */
+export type BlocksOutcome =
+  | { readonly blocks: ReadonlyArray<EntityBlockDraft> }
+  | { readonly unreadable: true };
 
 /** How one call to a lookup ended. */
 type Asked<A> =
@@ -376,6 +388,47 @@ const make = Effect.gen(function* () {
           incomplete: round === "incomplete",
           outcome: "results",
         };
+      }),
+
+    /**
+     * Reads the blocks the Inbox pane draws for the thing `ref` of the plugin
+     * `pluginId`, through its eligible Connections, one after another, at
+     * most 3: first those in `preferredConnectionIds` (the ones that observed
+     * the thing), then the others, each group oldest first, and stops at the first one that answers. An empty
+     * list is an answer. It never reads the thing with `resolve` first.
+     *
+     * Answers `{ blocks: [] }` without asking any Connection when the plugin
+     * is not active or its lookup has no `readBlocks`. Answers `unreadable`
+     * when no Connection is eligible, or each one asked failed or timed out.
+     */
+    readBlocks: (
+      pluginId: string,
+      ref: string,
+      preferredConnectionIds: ReadonlyArray<string>,
+    ): Effect.Effect<BlocksOutcome> =>
+      Effect.gen(function* () {
+        const found = yield* findLookupSource(pluginId);
+        const readBlocks = Option.isSome(found) ? found.value.lookup.readBlocks : undefined;
+        if (Option.isNone(found) || readBlocks === undefined) return { blocks: [] };
+        const { source } = found.value;
+        const eligible = yield* listEligibleConnections(source);
+        // Connections that observed the thing go first, in the caller's order
+        // (the likeliest reader first), because another account may not see
+        // it at all. The others follow, oldest first.
+        const preferred = preferredConnectionIds.flatMap((id) =>
+          eligible.filter((connection) => connection.id === id),
+        );
+        const ordered = [
+          ...preferred,
+          ...eligible.filter((connection) => !preferredConnectionIds.includes(connection.id)),
+        ];
+        for (const connection of ordered.slice(0, MAX_READ_BLOCKS_CONNECTIONS)) {
+          const answer = yield* ask(source, connection, (ingestConnection, context) =>
+            readBlocks(ingestConnection, context, ref),
+          );
+          if (answer.status === "answered") return { blocks: answer.value };
+        }
+        return { unreadable: true };
       }),
 
     /**

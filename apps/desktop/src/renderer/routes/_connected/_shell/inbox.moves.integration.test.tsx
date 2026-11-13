@@ -526,22 +526,15 @@ describe("the hand-off", () => {
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 
-  it("refuses a selection of several things from the pane's workflow rows, as H does", async () => {
+  it("offers no hand-off in the pane of a selection of several things, only Dismiss", async () => {
     const { user, calls } = await open(handable);
     await user.keyboard("x");
     await user.keyboard("j");
     await user.keyboard("x");
 
-    const row = await within(document.getElementById("inbox-pane")!).findByRole("button", {
-      name: /Review PR/,
-    });
-    // A pane that has just opened takes no pointer for a moment.
-    await waitFor(() => {
-      expect(document.querySelector("[data-arming]")).toBeNull();
-    });
-    await user.click(row);
-
-    await waitForUndoLine("Hand-off takes one thing at a time.");
+    const pane = document.getElementById("inbox-pane")!;
+    expect(await within(pane).findByRole("button", { name: "Dismiss all 2" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /Hand to/ })).toBeNull();
     expect(callsTo(calls, handOffPath(SLOTS.id))).toHaveLength(0);
   });
 

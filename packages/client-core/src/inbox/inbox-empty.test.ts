@@ -6,9 +6,9 @@ import { decideInboxEmpty } from "./inbox-empty";
 const counts = (everything: number, updates: number) =>
   buildInboxOutline({
     savedQueries: [
-      { id: "waits", name: "Someone waits on me", order: "waiting", count: 0 },
-      { id: "updates", name: "Updates", order: "newest", count: updates },
-      { id: "everything", name: "Everything", order: "newest", count: everything },
+      { id: "waits", name: "Someone waits on me", order: "waiting", signalKinds: [], count: 0 },
+      { id: "updates", name: "Updates", order: "newest", signalKinds: [], count: updates },
+      { id: "everything", name: "Everything", order: "newest", signalKinds: [], count: everything },
     ],
   });
 

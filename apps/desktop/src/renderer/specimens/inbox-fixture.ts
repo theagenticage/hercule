@@ -15,6 +15,7 @@
  */
 import type {
   Connection,
+  EntityBlocks,
   ExternalEntityDetail,
   InboxOutline,
   InboxFacet,
@@ -25,19 +26,23 @@ import type {
   InboxValues,
   InboxThing,
   PluginDetail,
+  Signal,
 } from "@hercule/contract";
 import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import { buildInboxAsk, buildWorkflowOffer } from "@hercule/client-core/inbox/testing";
+import {
+  buildAskSignal,
+  buildId,
+  DETAIL_EXTRAS,
+  hoursAgo,
+  MENTION,
+  PANE_BLOCKS,
+  REGRESSED,
+  REVIEW,
+} from "./inbox-pane-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK, TIDEWATCH_PLUGIN } from "./plugins-fixture";
 import type { SidebarRecords } from "./shell-page";
-
-const HOUR_MS = 3_600_000;
-
-/** Returns the moment `hours` hours before the specimen's clock, as an ISO timestamp. */
-const hoursAgo = (hours: number): string => new Date(SPECIMEN_NOW - hours * HOUR_MS).toISOString();
-
-const buildId = (n: number): string => `01a2f000-0000-7000-8000-${String(n).padStart(12, "0")}`;
 
 /** What the fixture knows of a thing besides the row: the values Browse, Narrow and tokens filter on. */
 interface Tags {
@@ -53,10 +58,6 @@ interface Item {
   /** The saved queries the thing belongs to, besides Everything. */
   readonly lists: ReadonlyArray<string>;
 }
-
-const REVIEW = "github/review-requested";
-const MENTION = "github/mentioned";
-const REGRESSED = "sentry/regressed";
 
 const OFFER_SETS = {
   "github/pull-request": [
@@ -285,6 +286,7 @@ const ITEMS: ReadonlyArray<Item> = [
     2,
     {
       taskId: buildId(800),
+      taskTitle: "Show the delivery cost on the basket",
       takenOn: true,
       arrival: 0,
       liveWorkflows: [{ workflowId: buildId(700), name: "Review PR" }],
@@ -301,21 +303,60 @@ const ITEMS: ReadonlyArray<Item> = [
   ticket(9, 163, "Gift cards: show the balance after payment", "Gift cards", ["updates"], 9),
   ticket(10, 171, "Search relevance: boost exact SKU matches", "Search relevance", ["updates"], 44),
   ticket(11, 178, "Loyalty points: round down on refunds", "Loyalty points", ["updates"], 70),
+  // Dismissed a day ago with Theo's review request open; Kwame's mention since brings it back.
+  // It is on Everything only, so the list of what waits stays as the other states draw it.
+  pullRequest(
+    12,
+    6230,
+    "Drop the unused wishlist endpoints",
+    [
+      {
+        kind: REVIEW,
+        noun: "review request",
+        asker: "Theo",
+        say: "Theo asked for your review",
+        hours: 48,
+      },
+      { kind: MENTION, noun: "mention", asker: "Kwame", say: "Kwame mentioned you", hours: 0.4 },
+    ],
+    "platform-core",
+    { dismissedAt: hoursAgo(24) },
+    [],
+  ),
 ];
 
 const ALL_THINGS: ReadonlyArray<InboxThing> = ITEMS.map((item) => item.thing);
 
 /** The saved queries, with the same words the controller's core list has. */
 const SAVED_QUERIES: InboxOutline["savedQueries"] = [
-  { id: CORE_SAVED_QUERY_IDS.waits, name: "Someone waits on me", order: "waiting", count: 6 },
-  { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", count: 2 },
-  { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", count: 3 },
-  { id: CORE_SAVED_QUERY_IDS.held, name: "With Hercule", order: "newest", count: 1 },
-  { id: CORE_SAVED_QUERY_IDS.everything, name: "Everything", order: "newest", count: ITEMS.length },
+  {
+    id: CORE_SAVED_QUERY_IDS.waits,
+    name: "Someone waits on me",
+    order: "waiting",
+    signalKinds: [],
+    count: 6,
+  },
+  { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", signalKinds: [], count: 2 },
+  { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", signalKinds: [], count: 3 },
+  {
+    id: CORE_SAVED_QUERY_IDS.held,
+    name: "With Hercule",
+    order: "newest",
+    signalKinds: [],
+    count: 1,
+  },
+  {
+    id: CORE_SAVED_QUERY_IDS.everything,
+    name: "Everything",
+    order: "newest",
+    signalKinds: [],
+    count: ITEMS.length,
+  },
   {
     id: "github/review-requests",
     name: "Review requests",
     order: "waiting",
+    signalKinds: [],
     source: "github",
     count: 3,
   },
@@ -514,7 +555,10 @@ export const answerInboxValues = (query: InboxValueQuery): InboxValues => {
   return { values: values.map((value) => ({ ...value, source: "tidewatch" })) };
 };
 
-/** Builds what the pane reads for `thing`: a plain detail with no signals. */
+/** Returns the number the fixture gave the thing `id`, which `buildId` made the id from. */
+const readItemNumber = (id: string): number => Number(id.slice(-12));
+
+/** Builds what the pane reads for `thing`: its asks as signal lines, and what its extras add. */
 export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
   id: thing.id,
   ref: thing.ref,
@@ -548,13 +592,25 @@ export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
   links: [],
   hints: [],
   conflicts: [],
-  signals: [],
+  signals: thing.asks.map((ask) => ({
+    id: ask.id,
+    kind: ask.kind,
+    title: ask.say.say,
+    ...(ask.asker === undefined ? {} : { asker: ask.asker }),
+    priority: "normal" as const,
+    status: "open" as const,
+    createdAt: ask.createdAt,
+    say: ask.say,
+    snoozed: false,
+    asks: true,
+  })),
   openCount: thing.askCount,
   signalCount: thing.askCount,
   timeline: [],
   peers: [],
   offers: OFFER_SETS[thing.offerSetId as keyof typeof OFFER_SETS] ?? [],
   actingConnections: [],
+  ...DETAIL_EXTRAS.get(readItemNumber(thing.id)),
 });
 
 /** Everything the specimen reads of the Inbox besides the shell's lists. */
@@ -566,6 +622,10 @@ export interface InboxRecords {
   readonly answerValues: (query: InboxValueQuery) => InboxValues;
   /** What the pane reads for a thing, by id. */
   readonly details: ReadonlyMap<string, ExternalEntityDetail>;
+  /** What `signal.read` returns for each ask, by the ask's id. */
+  readonly signals: ReadonlyMap<string, Signal>;
+  /** What the source shows of a thing, by the thing's id. `"fails"` plays a source that cannot be read. */
+  readonly blocks: ReadonlyMap<string, EntityBlocks | "fails">;
   /** Whether the live connection is down, which draws the offline pill. */
   readonly isOffline?: boolean;
   /** The selector of what the page draws last, when that is not a row or an empty state. */
@@ -577,6 +637,19 @@ export interface InboxRecords {
 }
 
 const DETAILS = new Map(ALL_THINGS.map((thing) => [thing.id, buildInboxDetail(thing)]));
+
+const SIGNALS = new Map(
+  ALL_THINGS.flatMap((thing) =>
+    thing.asks.map((ask) => [ask.id, buildAskSignal(thing, ask)] as const),
+  ),
+);
+
+const BLOCKS = new Map(
+  ALL_THINGS.flatMap((thing) => {
+    const blocks = PANE_BLOCKS.get(readItemNumber(thing.id));
+    return blocks === undefined ? [] : [[thing.id, blocks] as const];
+  }),
+);
 
 /** What the page does after it draws: presses what a user would press. */
 type Play = (page: Document) => Promise<void>;
@@ -593,6 +666,8 @@ const BASE: InboxRecords = {
   answer: answerInboxQuery,
   answerValues: answerInboxValues,
   details: DETAILS,
+  signals: SIGNALS,
+  blocks: BLOCKS,
 };
 
 const nextFrame = (): Promise<void> =>
@@ -620,9 +695,53 @@ const typeSearch = async (page: Document, words: string): Promise<void> => {
   await nextFrame();
 };
 
+/** Returns the first element that matches `selector` and holds `words`, or `undefined`. */
+const findByText = (page: Document, selector: string, words: string): HTMLElement | undefined =>
+  [...page.querySelectorAll<HTMLElement>(selector)].find((each) =>
+    (each.textContent ?? "").includes(words),
+  );
+
+/** Presses the row of the list that holds `words`, as a click does, so the pane opens its thing. */
+const openRow = async (page: Document, words: string): Promise<void> => {
+  const deadline = performance.now() + 5000;
+  let row = findByText(page, ".ib-row", words);
+  while (row === undefined && performance.now() < deadline) {
+    await nextFrame();
+    row = findByText(page, ".ib-row", words);
+  }
+  if (row === undefined) throw new Error(`The list has no row with "${words}".`);
+  row.click();
+  await waitFor(page, ".ib-pane-title");
+};
+
+/** Presses the item of the rail whose name holds `words`, and waits for the list it opens. */
+const openRailItem = async (page: Document, words: string): Promise<void> => {
+  await waitFor(page, "[data-rail-item]");
+  const item = findByText(page, "[data-rail-item]", words);
+  if (item === undefined) throw new Error(`The rail has no item with "${words}".`);
+  item.click();
+  await waitFor(page, ".ib-row");
+};
+
+/**
+ * Waits until the pane has read what it draws for the open thing: the answers
+ * of its current ask and, with `hasBlocks`, what its source shows of it
+ * (blocks, or the line that says they could not be read).
+ */
+const settlePane = async (page: Document, hasBlocks = true): Promise<void> => {
+  await waitFor(page, ".sig.is-open .sig-answers");
+  if (hasBlocks) await waitFor(page, ".ib-pane-blocks:not(.ib-pane-blocks-skel)");
+};
+
+/** Opens pull request #6244, the thing the drawing's pane is drawn for, and waits for the whole pane. */
+const openPullRequest: Play = async (page) => {
+  await openRow(page, "#6244");
+  await settlePane(page);
+};
+
 /** The states of the page, in the order the capture takes them. */
 export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
-  { name: "waits", records: BASE },
+  { name: "waits", records: BASE, play: openPullRequest },
   {
     name: "browse",
     records: BASE,
@@ -693,9 +812,11 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
         tick.click();
         await nextFrame();
       }
+      await waitFor(page, ".ib-pane-members");
     },
   },
-  { name: "narrow", records: { ...BASE, paneWidth: 360 } },
+  { name: "narrow", records: { ...BASE, paneWidth: 360 }, play: openPullRequest },
+  { name: "pane-440", records: { ...BASE, paneWidth: 440 }, play: openPullRequest },
   {
     name: "narrow-menu",
     records: BASE,
@@ -704,9 +825,90 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       await waitFor(page, ".ib-narrow-heading");
     },
   },
-  { name: "width-1280", records: { ...BASE, windowWidth: 1280 } },
-  { name: "width-1024", records: { ...BASE, windowWidth: 1024 } },
+  { name: "width-1280", records: { ...BASE, windowWidth: 1280 }, play: openPullRequest },
+  { name: "width-1024", records: { ...BASE, windowWidth: 1024 }, play: openPullRequest },
   { name: "stacked-880", records: { ...BASE, windowWidth: 880 } },
+  {
+    // The source cannot be read: the pane draws one quiet line where its blocks would be.
+    name: "blocks-failed",
+    records: { ...BASE, blocks: new Map([[buildId(1), "fails" as const]]) },
+    play: async (page) => {
+      await openRow(page, "#6244");
+      await waitFor(page, ".ib-pane-blocks-note");
+    },
+  },
+  {
+    // A Sentry issue: one ask, and a trend, fields and a stack trace for blocks.
+    name: "sentry",
+    records: BASE,
+    play: async (page) => {
+      await openRow(page, "STOREFRONT-1Z9");
+      await settlePane(page);
+    },
+  },
+  {
+    // The second ask unfolded, which makes it the current one.
+    name: "second-ask",
+    records: BASE,
+    play: async (page) => {
+      await openPullRequest(page);
+      const head = findByText(page, ".sig-head", "Mei");
+      if (head === undefined) throw new Error("The pane has no ask from Mei.");
+      head.click();
+      await waitFor(page, ".sig.is-open.is-current-ask [data-answer=approve]");
+    },
+  },
+  {
+    // A reply box open, with words typed that the draft keeps.
+    name: "reply",
+    records: BASE,
+    play: async (page) => {
+      await openPullRequest(page);
+      (await waitFor(page, "[data-answer=reply]")).click();
+      const box = await waitFor(page, ".sig-reply textarea");
+      if (!(box instanceof HTMLTextAreaElement))
+        throw new Error("The reply box is not a textarea.");
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        box,
+        "Yes. Finance asked for the invoice's rounding, so I'll move it after VAT today.",
+      );
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      await nextFrame();
+    },
+  },
+  {
+    // An answer that acts on the source, pressed and held: the undo line says when it is sent.
+    name: "held",
+    records: BASE,
+    play: async (page) => {
+      await openRow(page, "#6213");
+      await settlePane(page);
+      (await waitFor(page, "[data-answer=approve]")).click();
+      await waitFor(page, ".undo-text, .side-toast-text");
+      // The pane moved on to the next thing and took the focus with it; a pointer press shows no ring.
+      if (page.activeElement instanceof HTMLElement) page.activeElement.blur();
+    },
+  },
+  {
+    // A thing someone has: the strip under its meta line says who, and goes to the Task.
+    name: "holder",
+    records: BASE,
+    play: async (page) => {
+      await openRailItem(page, "With Hercule");
+      await waitFor(page, ".ib-pane-held");
+      await waitFor(page, ".ib-pane-blocks:not(.ib-pane-blocks-skel)");
+    },
+  },
+  {
+    // A thing that came back after a dismissal: the meta line says what brought it back.
+    name: "returned",
+    records: BASE,
+    play: async (page) => {
+      await openRailItem(page, "Everything");
+      await openRow(page, "#6230");
+      await waitFor(page, ".sig.is-open .sig-answers");
+    },
+  },
 ];
 
 const connect = (id: string, type: string, label: string): Connection => ({

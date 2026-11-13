@@ -168,6 +168,42 @@ describe("formatBlocksAsText", () => {
     );
   });
 
+  it("prints a fields block as its title and a label: value line per row", () => {
+    expect(
+      formatBlocksAsText([
+        {
+          type: "fields",
+          title: "Details",
+          rows: [
+            { label: "Milestone", value: "v4.2" },
+            { label: "Branch", value: "fix/login" },
+          ],
+        },
+      ]),
+    ).toBe("Details\nMilestone: v4.2\nBranch: fix/login");
+  });
+
+  it("prints a trend block as its caption and a line per point, oldest first", () => {
+    expect(
+      formatBlocksAsText([
+        {
+          type: "trend",
+          caption: "Events per day",
+          points: [
+            { at: "2026-11-10T00:00:00.000Z", value: 4 },
+            { at: "2026-11-11T00:00:00.000Z", value: 9.5 },
+          ],
+        },
+      ]),
+    ).toBe("Events per day\n2026-11-10T00:00:00.000Z: 4\n2026-11-11T00:00:00.000Z: 9.5");
+  });
+
+  it("prints a code block indented, and says when it was cut", () => {
+    expect(
+      formatBlocksAsText([{ type: "code", title: "Stack", text: "a\nb", truncated: true }]),
+    ).toBe("Stack\n    a\n    b\n(the text is cut short here)");
+  });
+
   it("prints one line for a block of a type it does not know, and keeps the blocks around it", () => {
     expect(
       formatBlocksAsText([

@@ -710,6 +710,9 @@ export type EntityResolution =
   | { readonly missing: EntityMissing }
   | { readonly outOfScope: true };
 
+/** One block a plugin returns; the core checks it against the contract's Block. */
+export type EntityBlockDraft = { readonly type: string; readonly [field: string]: unknown };
+
 /**
  * Searching, recognizing and reading things at the source, for the Add button
  * on Work. A lookup runs outside any transaction, and the host gives each call
@@ -738,4 +741,14 @@ export interface EntityLookup {
     context: EntityLookupContext,
     target: EntityRecognition,
   ) => Effect.Effect<EntityResolution, AuthError | PluginError>;
+  /**
+   * Reads the blocks the Inbox pane draws for the thing `ref`, at most 8, in
+   * order. Optional. Fails with AuthError when the credentials were rejected,
+   * PluginError for any other failure (including the thing not being found).
+   */
+  readonly readBlocks?: (
+    connection: IngestConnection,
+    context: EntityLookupContext,
+    ref: string,
+  ) => Effect.Effect<ReadonlyArray<EntityBlockDraft>, AuthError | PluginError>;
 }

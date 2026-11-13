@@ -78,7 +78,8 @@ const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">):
   return holder?.kind === "colleague" ? `${holder.name} has` : "You have";
 };
 
-const OFFLINE = "You are offline, so that was not done. Try again when the connection is back.";
+export const REFUSED_OFFLINE =
+  "You are offline, so that was not done. Try again when the connection is back.";
 
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
@@ -124,7 +125,7 @@ export const planInboxMove = ({
   readonly isOffline: boolean;
   readonly offers: CardOffers;
 }): InboxMovePlan => {
-  if (isOffline && move !== "goToTask") return refuse(OFFLINE);
+  if (isOffline && move !== "goToTask") return refuse(REFUSED_OFFLINE);
   // A selection of one row acts as that row.
   const only =
     target.kind === "thing"

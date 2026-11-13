@@ -157,17 +157,35 @@ describe("Inbox", () => {
     const secondTitle = await readRowTitle(second);
     expect(firstTitle).not.toBe(secondTitle);
     await expect.poll(() => first.getAttribute("class")).toContain("is-current");
-    await expect.poll(() => pane.locator(".open-card-title").textContent()).toBe(firstTitle);
+    await expect
+      .poll(() =>
+        pane
+          .locator(".ib-pane-title")
+          .evaluate((element) => element.firstChild?.textContent?.trim()),
+      )
+      .toBe(firstTitle);
 
     // A click puts the focus in the list, where J moves the current row on and the pane follows.
     await first.click();
     await page.keyboard.press("j");
     await expect.poll(() => second.getAttribute("class")).toContain("is-current");
     expect(await first.getAttribute("class")).not.toContain("is-current");
-    await expect.poll(() => pane.locator(".open-card-title").textContent()).toBe(secondTitle);
+    await expect
+      .poll(() =>
+        pane
+          .locator(".ib-pane-title")
+          .evaluate((element) => element.firstChild?.textContent?.trim()),
+      )
+      .toBe(secondTitle);
     await page.keyboard.press("k");
     await expect.poll(() => first.getAttribute("class")).toContain("is-current");
-    await expect.poll(() => pane.locator(".open-card-title").textContent()).toBe(firstTitle);
+    await expect
+      .poll(() =>
+        pane
+          .locator(".ib-pane-title")
+          .evaluate((element) => element.firstChild?.textContent?.trim()),
+      )
+      .toBe(firstTitle);
 
     // A token narrows the list to the things its field matches, and removing it widens it again.
     await page.getByRole("combobox", { name: "Search the Inbox" }).click();
@@ -206,7 +224,13 @@ describe("Inbox", () => {
     await first.waitFor();
     const title = await readRowTitle(first);
     const ref = (await first.getAttribute("data-ref"))!;
-    await expect.poll(() => pane.locator(".open-card-title").textContent()).toBe(title);
+    await expect
+      .poll(() =>
+        pane
+          .locator(".ib-pane-title")
+          .evaluate((element) => element.firstChild?.textContent?.trim()),
+      )
+      .toBe(title);
 
     await first.click();
     await page.keyboard.press("t");
