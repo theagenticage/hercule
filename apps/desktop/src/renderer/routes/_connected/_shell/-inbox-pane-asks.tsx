@@ -118,7 +118,8 @@ const focusFirstAnswer = (): void => {
  *
  * `isStale` is true while `paneAsks` are the thing before's: nothing is read for
  * it then, and no answer is given. `isActive` is false while the pane is not
- * showing. `ref` receives the handle the keys use.
+ * showing. `isRested` gates the read of the current ask, so holding J reads
+ * no ask of the rows it passes. `ref` receives the handle the keys use.
  *
  * Orchestrating: it owns the read of the current ask, and what becomes of the
  * answers given on it.
@@ -130,6 +131,7 @@ export function InboxPaneAsks({
   paneAsks,
   isStale,
   isActive,
+  isRested,
   savedQueryKinds,
   chosenId,
   isFolded,
@@ -150,6 +152,8 @@ export function InboxPaneAsks({
   readonly paneAsks: PaneAsks;
   readonly isStale: boolean;
   readonly isActive: boolean;
+  /** True once the thing has been current long enough for its asks to be read from the source. */
+  readonly isRested: boolean;
   readonly savedQueryKinds: readonly string[];
   readonly chosenId: string | undefined;
   readonly isFolded: boolean;
@@ -172,7 +176,7 @@ export function InboxPaneAsks({
   const canRead = isActive && !isStale;
   const read = useQuery({
     ...signalQuery(client, currentId ?? ""),
-    enabled: isCurrentOpen && canRead,
+    enabled: isCurrentOpen && canRead && isRested,
   });
   const { store, intents } = usePendingIntents(scope);
   const signal = read.data;

@@ -22,6 +22,7 @@ import {
 } from "@hercule/client-core/inbox";
 import type { AccountScope } from "../../../app/account-scope";
 import {
+  entityBlocksQuery,
   entityQuery,
   inboxOutlineQuery,
   pluginsQuery,
@@ -35,7 +36,7 @@ import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import type { InboxAnswers } from "./-inbox-answers";
 import { useInboxNow } from "./-inbox-clock";
 import { InboxPaneAsks, type InboxPaneAsksHandle, type PaneReply } from "./-inbox-pane-asks";
-import { useInboxPaneBlocks } from "./-use-inbox-pane-blocks";
+import { useRestedThing } from "./-use-rested-thing";
 import type { InboxListRow } from "./-inbox-visit";
 
 /** The blocks slot while they are read. One shared object, so stepping from one loading thing to another leaves the slot as it is. */
@@ -111,7 +112,10 @@ export function InboxPaneThingPart({
     enabled: isActive,
     placeholderData: keepPreviousData,
   });
-  const blocks = useInboxPaneBlocks(client, thing.id, isActive);
+  const isRested = useRestedThing(thing.id, isActive);
+  // A read that is out when the user steps on is aborted through the query's signal. No data shows for a
+  // thing whose blocks were not read yet, so the blocks of one thing never show under another's title.
+  const blocks = useQuery({ ...entityBlocksQuery(client, thing.id), enabled: isRested });
   const record = detail.data;
   if (record === undefined) {
     return detail.isError ? (
@@ -172,6 +176,7 @@ export function InboxPaneThingPart({
               paneAsks={paneAsks}
               isStale={isStale}
               isActive={isActive}
+              isRested={isRested}
               savedQueryKinds={savedQueryKinds}
               chosenId={chosenAskId}
               isFolded={isAskFolded}

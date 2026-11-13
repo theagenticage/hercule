@@ -6452,6 +6452,69 @@ The first launch of each run, a thread open with no Inbox, is the same app code 
 - **Reload reads: met on the number of requests, not shown on time.** A reload reads each key about twice, against 3 on the old screen. The longest read was not measured again.
 - **Walking with J: still missed.** It still misses the 2 ms style and layout bar on about 2 frames per key. The first is the key's own restyle (about 90 elements) plus about 1 ms of layout; the second is the pane detail's first paint (about 2 ms). Rogier allowed it as an exception on 2026-11-12 (recorded on the wiki page "Exceptions to the desktop performance rule"); [#1143](https://github.com/theagenticage/hercule/issues/1143) closes it.
 
+**The Inbox's pane (#1123), measured 2026-11-13 on Linux,** in the desktop container (`pnpm --filter @hercule/desktop perf:counts:container`) and with `bun run scripts/compare-bundle.ts` (base `origin/main`), for [#1123](https://github.com/theagenticage/hercule/issues/1123). Counts and bytes only. **Timings are not measured:** the host was loaded, so a before and after reading would mean nothing. Memory, frame times and wakeups are a cost review, reasoned from the code, and not a measurement.
+
+**Cost review** (reasoned, not measured):
+
+- **Processes:** none added.
+- **Idle:** no recurring timer. A blocks read leaves one react-query `gcTime` timeout, and a read of the current ask leaves another; neither repeats. The 250 ms trailing delay (`useRestedThing`) before the blocks read and the ask's read runs only after a step moves the current row, and is cancelled by the next step.
+- **Work per streamed token:** none. The pane does not subscribe to any stream.
+- **Memory:** the blocks of a thing stay cached for the 60 s `gcTime` after the pane leaves it. Reply drafts stay in memory per account and per (signal, answer) until the window closes.
+- **Requests when a thing opens:** its detail, then the current ask's `signal.read` (when the thing has an open ask that is unfolded), then its blocks after 250 ms. The blocks read is one GraphQL request to the source, through at most 3 Connections, and a thing with no `readBlocks` hook answers `{ blocks: [] }` without one.
+
+**Counts check,** the Inbox world of `specimens/perf-counts.tsx`, which now gives each of its 300 things one open asking line and answers `GET /signals/<id>` for it, so the pane's read of the current ask is counted. Before this change the world held no asks and the check could not see that read. Baseline is the one in `apps/desktop/perf-counts.baseline.json` before this change; the figures come from the 27 counts that rose.
+
+| Inbox step | requests | restyled | renders | elements |
+|---|---:|---:|---:|---:|
+| open | 51 -> 52 | 375 -> 394 | 477 -> 495 | 995 -> 1,014 |
+| open a card | 1 | 199 -> 238 | 24 -> 36 | 999 -> 1,017 |
+| click the first row | 0 -> 2 | 138 -> 159 | 22 -> 43 | 995 -> 1,014 |
+| J x50 | 50 -> 51 | 15,227 -> 17,115 | 1,587 -> 2,150 | 1,220 -> 1,239 |
+| E dismisses the current thing | 3 -> 4 | 432 -> 476 | 93 -> 120 | 1,222 -> 1,241 |
+| Cmd+Z undoes it | 2 | 340 -> 364 | 128 -> 155 | 1,220 -> 1,239 |
+| Show the arrival | 3 -> 4 | 489 -> 533 | 450 -> 477 | 995 -> 1,014 |
+| a push about a thing the list holds, a push with a new arrival | 4 | not worse | not worse | +19 |
+
+Idle: `idle/inbox/longTimeouts` 5 -> 7 (one for the blocks read, one for the ask's read; each runs once and does not recur).
+
+Why each count rose:
+
+- **Requests, +1 per thing that opens and rests:** after the thing has been current for 250 ms, the pane reads the current ask whole (`signal.read`), gated by the same rule as the blocks read (`useRestedThing`). J x50 sends one, for the row it ends on, not one per row passed (the first version of the pane sent 49, 50 -> 99). On `click the first row` the +2 are the ask and the blocks of the row, which now land in that step because their 250 ms ends there.
+- **Elements, +19 at rest on every Inbox step, +19 more when a card opens:** the pane's structure (head, section of the ask, answers, footer) and the blocks' loading shape.
+- **Renders and restyled on J x50, +563 and +1,888 (35% and 12% more):** each row passed draws the ask section from its record's lines (no read needed), which is more components per pane render. The read adds none per row passed. The pane's first measurement against the old screen put J x50 at 1,880 renders before the fixes and 1,587 after them; with asks in the world it is 2,150.
+- **Renders, +12 to +27 on the single steps, +21 on `click the first row`:** the same section, drawn once per step, and the rested thing's reads landing.
+- **Controller bytes (Inbox page, refresh, rows, outline):** each row carries its Task's title (`taskTitle`), and the outline carries `signalKinds`: +790 bytes on a 200-row page, +85 on the outline.
+
+**Bundle,** `bun run scripts/compare-bundle.ts`, base `origin/main`, in bytes:
+
+| Measure | Before | After | Delta |
+|---|---:|---:|---:|
+| main, all files | 265,428 | 265,556 | +128 |
+| main, all files, gzipped | 88,846 | 88,864 | +18 |
+| preload, all files | 1,659 | 1,659 | 0 |
+| renderer, all files | 4,774,619 | 4,811,179 | +36,560 (+0.8%) |
+| renderer, all files, gzipped | 1,743,385 | 1,755,263 | +11,878 (+0.7%) |
+| renderer first screen, gzipped | 522,091 | 523,042 | +951 (+0.2%) |
+| main startup files, minified | 174,548 | 174,548 | 0 |
+
+| Chunk, minified | Before | After | Delta |
+|---|---:|---:|---:|
+| `inbox.js` | 149,041 | 170,962 | +21,921 (+14.7%) |
+| `inbox-blocks-parts.js` (added) | 0 | 4,833 | +4,833 |
+| `inbox-blocks-parts.css` (added) | 0 | 4,177 | +4,177 |
+| `first-screen.js` | 1,425,086 | 1,428,166 | +3,080 |
+| `use-undo-line.js` | 2,951 | 4,519 | +1,568 |
+| `arrow.js` | 66,080 | 67,417 | +1,337 |
+| `use-answer-signal.js` (deleted) | 962 | 0 | -962 |
+| `inbox.css` | 37,443 | 38,231 | +788 |
+| `first-screen.css` | 85,019 | 85,458 | +439 |
+| `intake.js` | 140,474 | 140,057 | -417 |
+| `work.js` | 244,923 | 244,613 | -310 |
+
+The pane is most of the Inbox chunk's growth. The two block renderers load only when a thing shows blocks (`inbox-blocks-parts`), so they are not in the first screen. `use-undo-line` grew with the held-answer line (the undo line that says what will be sent, and that it sends when let go). The counts check's own bundle rows read 4,812,724 bytes and 1,755,511 gzipped for the renderer and 523,362 for the first screen, a little above this table, because the tree changed between the two runs.
+
+**Not measured:** memory, frame times, wakeups and launch time, on Linux or on a Mac. The counts above are the whole evidence for the Inbox's step costs.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

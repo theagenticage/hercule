@@ -19,6 +19,7 @@ import {
   type Call,
 } from "../../../app/testing";
 import {
+  BASKET,
   LOYALTY,
   OUTLINE,
   QUERY_PATH,
@@ -356,6 +357,45 @@ describe("the blocks of the source", () => {
 
     expect(await screen.findByText(/couldn't be read just now\./)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Approve/ })).toBeTruthy();
+  });
+});
+
+describe("the read of the current ask", () => {
+  it("waits until the row has rested, so walking down the list with J reads none of the rows it passes", async () => {
+    const passedAsk = buildThingId(203);
+    const restedAsk = buildThingId(204);
+    const readsOf = (calls: readonly Call[], id: string) =>
+      callsTo(calls, `GET /api/v1/signals/${id}`);
+    const { calls } = await open(undefined, {
+      [`GET /api/v1/external-entities/${LOYALTY.id}`]: () =>
+        withAsks(LOYALTY, [
+          buildLine(passedAsk, MENTION_KIND, "Omar mentioned you", "2026-11-07T10:00:00.000Z"),
+        ]),
+      [`GET /api/v1/external-entities/${BASKET.id}`]: () =>
+        withAsks(BASKET, [
+          buildLine(restedAsk, MENTION_KIND, "Tessa mentioned you", "2026-11-07T10:00:00.000Z"),
+        ]),
+      [`GET /api/v1/signals/${passedAsk}`]: {
+        body: buildSignal(passedAsk, MENTION_KIND, "Mention"),
+      },
+      [`GET /api/v1/signals/${restedAsk}`]: {
+        body: buildSignal(restedAsk, MENTION_KIND, "Mention"),
+      },
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    fireEvent.keyDown(document.body, { key: "j" });
+    await pass(100);
+    fireEvent.keyDown(document.body, { key: "j" });
+    await pass(100);
+
+    expect(readsOf(calls, passedAsk)).toHaveLength(0);
+    expect(readsOf(calls, restedAsk)).toHaveLength(0);
+
+    await pass(300);
+
+    expect(readsOf(calls, passedAsk)).toHaveLength(0);
+    expect(readsOf(calls, restedAsk)).toHaveLength(1);
   });
 });
 

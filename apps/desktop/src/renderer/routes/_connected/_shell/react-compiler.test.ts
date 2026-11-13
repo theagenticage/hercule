@@ -73,7 +73,7 @@ const PATHS = [
   join(HERE, "-inbox-screen.tsx"),
   join(HERE, "-inbox-search-part.tsx"),
   join(HERE, "-use-inbox-keys.ts"),
-  join(HERE, "-use-inbox-pane-blocks.ts"),
+  join(HERE, "-use-rested-thing.ts"),
   join(HERE, "../../../app/use-quiet-value.ts"),
   join(HERE, "../../../app/use-stable-callback.ts"),
   join(HERE, "work.tsx"),
