@@ -95,8 +95,8 @@ const useArming = (): boolean => {
 };
 
 /**
- * Renders the move rows of a card: `hand` (the Hand to rows, or nothing), then Take on and Dismiss, or the
- * move to its Task, or why there are none.
+ * Renders the move rows of a card: `hand` (the Hand to rows, or nothing), then Start a thread (only when
+ * `onStartThread` is given), Take on and Dismiss, or the move to its Task, or why there are none.
  * The rows carry `data-arming` and take no pointer while the sheet is new (`useArming`).
  */
 function OpenCardMoves({
@@ -104,6 +104,7 @@ function OpenCardMoves({
   hand,
   pluginName,
   userMonogram,
+  onStartThread,
   onTake,
   onDismiss,
   onSeeTask,
@@ -112,6 +113,7 @@ function OpenCardMoves({
   readonly hand: ReactNode;
   readonly pluginName: string;
   readonly userMonogram: string;
+  readonly onStartThread?: (() => void) | undefined;
   readonly onTake: () => void;
   readonly onDismiss: () => void;
   readonly onSeeTask: (taskId: string) => void;
@@ -142,6 +144,13 @@ function OpenCardMoves({
     <div className="open-card-ledger" data-arming={isArming ? "" : undefined}>
       {isOff && <p className="open-card-why">{moves.reason}</p>}
       {hand}
+      {onStartThread === undefined ? null : (
+        <button type="button" className="open-card-row" disabled={isOff} onClick={onStartThread}>
+          <span className="open-card-label">Start a thread</span>
+          <span className="open-card-says">An agent starts on it, on a new Task.</span>
+          <kbd>N</kbd>
+        </button>
+      )}
       <button type="button" className="open-card-row" disabled={isOff} onClick={onTake}>
         <span className="open-card-label">
           <span className="open-card-you" aria-hidden="true">
@@ -187,6 +196,7 @@ export function OpenCardBody({
   userMonogram,
   onClose,
   onWalk,
+  onStartThread,
   onTake,
   onDismiss,
   onSeeTask,
@@ -205,6 +215,8 @@ export function OpenCardBody({
   readonly hand: ReactNode;
   readonly onClose: () => void;
   readonly onWalk?: ((ref: string) => void) | undefined;
+  /** Starts a thread on the card, on a new Task. With none, the sheet offers no Start a thread. */
+  readonly onStartThread?: (() => void) | undefined;
   readonly onTake: () => void;
   readonly onDismiss: () => void;
   readonly onSeeTask: (taskId: string) => void;
@@ -256,6 +268,7 @@ export function OpenCardBody({
         hand={hand}
         pluginName={pluginName}
         userMonogram={userMonogram}
+        onStartThread={onStartThread}
         onTake={onTake}
         onDismiss={onDismiss}
         onSeeTask={onSeeTask}

@@ -733,6 +733,13 @@ const seedQueryCache = (
   }
   queryClient.setQueryData(settingsQuery(client).queryKey, { controller: {}, user: {} });
   queryClient.setQueryData(profilesQuery(client).queryKey, []);
+  // The Inbox's start-thread dialog starts from the user's thread settings.
+  if (inbox?.threadStart !== undefined) {
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: inbox.threadStart.settings,
+    });
+  }
   queryClient.setQueryData(localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey, null);
   if (draft !== undefined) {
     queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
@@ -986,11 +993,13 @@ const seedQueryCache = (
       user: { timezone: "UTC" },
     });
   }
-  if (thread !== undefined) {
-    const sessionId = thread.session.id;
-    queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
-    queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
-    queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+  // The Inbox's start-thread dialog shows the thread its fake controller starts, read from the same records.
+  const opened = thread ?? inbox?.threadStart?.started;
+  if (opened !== undefined) {
+    const sessionId = opened.session.id;
+    queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, opened.session);
+    queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, opened.transcript);
+    queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, opened.queuedInputs);
     // The Bureau book draws a thread with no subagents.
     queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
     // The Bureau book draws no skill chip, so the thread has no skills.
@@ -998,7 +1007,7 @@ const seedQueryCache = (
       items: [],
       skipped: [],
     });
-    if (thread.profiles === null) {
+    if (opened.profiles === null) {
       // A failed read keeps the list read before it, here an empty one, and
       // the dock reads the profiles again only after a read that succeeded.
       queryClient
@@ -1008,10 +1017,10 @@ const seedQueryCache = (
           status: "error",
           error: new Error("The permission profiles could not be read."),
         });
-    } else if (thread.profiles !== undefined) {
-      queryClient.setQueryData(profilesQuery(client).queryKey, thread.profiles);
+    } else if (opened.profiles !== undefined) {
+      queryClient.setQueryData(profilesQuery(client).queryKey, opened.profiles);
     }
-    if (thread.syncing === true) {
+    if (opened.syncing === true) {
       // A read that never answers, on top of the rows just stored: the
       // marker watches the transcript's query while it reads.
       const { queryKey } = transcriptQuery(client, sessionId);
@@ -1022,7 +1031,7 @@ const seedQueryCache = (
         staleTime: 0,
       });
     }
-    for (const sender of thread.senders ?? []) {
+    for (const sender of opened.senders ?? []) {
       queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender.session);
     }
   }
@@ -1583,6 +1592,17 @@ async function mountShellSpecimen(
           if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
             const query = JSON.parse(await new Request(url, init).text()) as InboxValueQuery;
             return answerJson(inbox.answerValues(query));
+          }
+          // The start-thread dialog matches its things to a Project, then starts the thread.
+          if (init?.method === "POST" && inbox.threadStart !== undefined) {
+            if (url.endsWith("/api/v1/external-entities/match-project")) {
+              const { ids } = JSON.parse(await new Request(url, init).text()) as {
+                ids: readonly string[];
+              };
+              return answerJson(inbox.threadStart.matchProject(ids));
+            }
+            if (url.endsWith("/api/v1/sessions"))
+              return answerJson(inbox.threadStart.started.session);
           }
           const detail = inbox.details.get(url.slice(url.lastIndexOf("/") + 1));
           return (init?.method ?? "GET") === "GET" &&

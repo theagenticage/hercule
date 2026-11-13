@@ -347,7 +347,7 @@ describe("session.spawn with newTask", () => {
 
       expect(failure).toMatchObject({ status: 400, code: "validation" });
       expect(failure.issues).toMatchObject([
-        { path: ["newTask"], message: expect.stringContaining("taskId or agentId") },
+        { path: ["newTask"], message: expect.stringContaining("taskId or agentId") as unknown },
       ]);
       expect(await countRows(arranged)).toEqual(before);
     });

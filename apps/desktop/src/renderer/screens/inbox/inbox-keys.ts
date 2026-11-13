@@ -22,6 +22,7 @@ export type InboxKeyAction =
   | { readonly kind: "selectAll" }
   | { readonly kind: "stepBack" }
   | { readonly kind: "dismiss" }
+  | { readonly kind: "startThread" }
   | { readonly kind: "takeOn" }
   | { readonly kind: "handOff" }
   | { readonly kind: "goToTask" }
@@ -74,7 +75,7 @@ export interface InboxKeyPress {
 }
 
 /** The moves that never repeat: a held key must not dismiss a row after row. */
-const ONE_PRESS_KEYS = new Set(["e", "t", "h", "g", "o", "x"]);
+const ONE_PRESS_KEYS = new Set(["e", "n", "t", "h", "g", "o", "x"]);
 
 /** The saved queries that have a digit: 1 to 7. The eighth place in the drawing is Triage, which is not built. */
 const LIST_DIGITS = /^[1-7]$/;
@@ -114,6 +115,8 @@ export const decideInboxKeyAction = (
       return { kind: "toggleSelect" };
     case "e":
       return { kind: "dismiss" };
+    case "n":
+      return { kind: "startThread" };
     case "t":
       return { kind: "takeOn" };
     case "h":
@@ -147,6 +150,7 @@ export const buildInboxKeyRows = (platform: DesktopPlatform): readonly InboxKeyR
   [platform === "mac" ? "⌘A" : "Ctrl A", "Select every thing that is loaded"],
   ["Return", "Open the pane, when it lies over the list"],
   ["E", "Dismiss, all of the selection at once"],
+  ["N", "Start a thread: a Task on Work with a thread on it"],
   ["T", "Take on: a Task on Work"],
   ["H", "Hand off to an agent"],
   ["G", "Go to its Task"],

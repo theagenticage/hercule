@@ -854,7 +854,12 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { holdsMessageContent, readThreadConfig } from "./threads/config";
-export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
+export {
+  buildDraftView,
+  type DraftAddress,
+  type DraftReads,
+  type DraftView,
+} from "./threads/draft-view";
 export type {
   MessageDraft,
   Thread,
@@ -1067,6 +1072,7 @@ export {
   type DraftSubject,
   findDraftSubject,
   isJoinable,
+  formatRepoName,
   joinLabelText,
   joinPhraseText,
   listProjectRepos,

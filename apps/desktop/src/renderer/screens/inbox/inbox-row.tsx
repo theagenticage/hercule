@@ -10,6 +10,7 @@ import { buildLook, Face, UserAvatar } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
 import { ArrowIcon } from "../../icons/arrow";
 import { CheckIcon } from "../../icons/check";
+import { ComposeIcon } from "../../icons/compose";
 import { TasksIcon } from "../../icons/tasks";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
@@ -28,6 +29,7 @@ export interface InboxRowActions {
   readonly onPick: (ref: string, modifiers: InboxClickModifiers) => void;
   /** The row's tick was pressed. */
   readonly onToggleSelect: (ref: string) => void;
+  readonly onStartThread: (ref: string) => void;
   readonly onTakeOn: (ref: string) => void;
   readonly onHandOff: (ref: string) => void;
   readonly onGoToTask: (ref: string) => void;
@@ -104,6 +106,19 @@ function RowMoves({
         </button>
       ) : (
         <>
+          <button
+            type="button"
+            className="ib-row-act"
+            tabIndex={-1}
+            title="Start a thread (N)"
+            aria-label="Start a thread"
+            aria-keyshortcuts="N"
+            onClick={() => {
+              actions.onStartThread(ref);
+            }}
+          >
+            <ComposeIcon size={14} />
+          </button>
           <button
             type="button"
             className="ib-row-act"

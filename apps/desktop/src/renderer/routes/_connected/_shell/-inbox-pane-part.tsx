@@ -27,6 +27,7 @@ import { useOpenCardClock } from "../../../screens/inbox/use-open-card-clock";
 
 /** The moves of the open thing, which the screen decides what to do with. */
 export interface InboxPaneMoves {
+  readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onDismiss: () => void;
   readonly onGoToTask: (taskId: string) => void;
@@ -174,6 +175,7 @@ export function InboxPanePart({
           />
         }
         onClose={moves.onClose}
+        onStartThread={moves.onStartThread}
         onTake={moves.onTakeOn}
         onDismiss={moves.onDismiss}
         onSeeTask={moves.onGoToTask}

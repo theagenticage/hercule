@@ -41,6 +41,7 @@ describe("decideInboxKeyAction", () => {
     });
     expect(decide("x", "list")).toBe("toggleSelect");
     expect(decide("e", "list")).toBe("dismiss");
+    expect(decide("n", "list")).toBe("startThread");
     expect(decide("t", "list")).toBe("takeOn");
     expect(decide("h", "list")).toBe("handOff");
     expect(decide("g", "list")).toBe("goToTask");

@@ -6,6 +6,7 @@
  * - the undo stack (Undo must not reach the next user);
  * - the card moves the controller has not answered yet;
  * - the pending intents, with their undo-window timers;
+ * - the Inbox's unsent start-thread dialogs;
  * - the check a request makes before it goes on with its answer.
  *
  * A request that waits (a read before a spawn, a Try again on its way) can end
@@ -33,6 +34,7 @@ import {
   type IntentStorage,
   type PendingIntents,
 } from "./pending-intents";
+import { createThreadStartDrafts, type ThreadStartDrafts } from "./thread-start-drafts";
 import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
@@ -58,6 +60,8 @@ export interface AccountScope {
   readonly pendingCardMoves: PendingCardMoves;
   /** The answers and merges the app holds back for the undo line before it sends them. */
   readonly pendingIntents: PendingIntents;
+  /** The Inbox's start-thread dialogs that were closed unsent, which N on the same things opens again. */
+  readonly threadStarts: ThreadStartDrafts;
   /**
    * Returns whether this user is still the one signed in. It is `false` once
    * the scope is closed, and once the client no longer holds the token the
@@ -174,6 +178,7 @@ export const createAccountScopes = ({
         username,
         undoStack: createUndoStack(),
         pendingCardMoves: createPendingCardMoves(),
+        threadStarts: createThreadStartDrafts(),
         pendingIntents: createPendingIntents({
           storage,
           storageKey: buildPendingIntentsKey(controllerUrl, username),
@@ -188,6 +193,7 @@ export const createAccountScopes = ({
           scope.pendingIntents.dispose();
           scope.undoStack.clear();
           scope.pendingCardMoves.clear();
+          scope.threadStarts.clear();
         },
       };
       return scope;

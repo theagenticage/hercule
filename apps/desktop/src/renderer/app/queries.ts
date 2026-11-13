@@ -1138,6 +1138,20 @@ export const entityQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads which Project the things `ids` point at (`externalEntity.matchProject`),
+ * for the start-thread dialog. The key is under the entity prefix, so a push
+ * about the things reads it again, and it is the same for any order of `ids`.
+ */
+export const projectMatchQuery = (client: HerculeClient, ids: readonly string[]) =>
+  queryOptions({
+    queryKey: [...queryKeys.externalEntity(), "project-match", [...ids].sort()],
+    queryFn: ({ signal }) =>
+      client.externalEntity.matchProject({ payload: { ids: [...ids] } }, { signal }),
+    ...LIVE_KEPT_READ_OPTIONS,
+    gcTime: 30_000,
+  });
+
+/**
  * Reads whether any live Task has a failed run, for the sidebar's dot, which
  * shows on every screen. The answer is one boolean, so the dot has no number.
  * A plain `task` push reads it again, and the controller sends one when a

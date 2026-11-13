@@ -1,6 +1,8 @@
 /**
  * The moves of the Inbox's things (Dismiss, Take on, hand-off, Go to its Task,
- * Open at its source) and the undo line at the foot of the list. It follows
+ * Open at its source) and the undo line at the foot of the list. Start a
+ * thread is made by `-inbox-thread.tsx`, which asks this file which things it
+ * may start from and says its line here. It follows
  * the Work board's moves (`-card-moves.ts`):
  *
  * - A move shows at once on the visit (`visit.move`) and is sent after
@@ -35,6 +37,7 @@ import {
   describeInboxDismissalFailure,
   describeInboxHandOff,
   describeInboxHandOffFailure,
+  describeInboxThreadStart,
   describeInboxTakeOn,
   describeInboxTakeOnFailure,
   isHandOffTakenBack,
@@ -119,6 +122,18 @@ export interface InboxMoves {
   readonly goToTask: (hoveredRef?: string) => void;
   /** Opens the current thing at its source, or says it has no address. */
   readonly openAtSource: () => void;
+  /**
+   * Returns the things a thread may start from (see `dismiss` for which
+   * things), or says why not on the undo line and returns `null`. The caller
+   * opens the start-thread dialog on them.
+   */
+  readonly readStartTargets: (hoveredRef?: string) => InboxListRow[] | null;
+  /**
+   * Says that a thread started on the Task `title`, with an "Open it" button
+   * that calls `open`. A thread that started is not undone, so the line has no
+   * Undo and nothing goes on the undo stack.
+   */
+  readonly sayThreadStarted: (title: string, open: () => void) => void;
   /** Says `text` on the undo line, with no Undo. */
   readonly say: (text: string) => void;
   /** What the undo line shows. */
@@ -446,6 +461,11 @@ export const useInboxMoves = ({
     handOff,
     goToTask,
     openAtSource,
+    readStartTargets: (hoveredRef) => readAllowedTargets("startThread", hoveredRef),
+    sayThreadStarted: (title, open) => {
+      const words = describeInboxThreadStart(title);
+      say(words.text, undefined, { label: "Open it", act: open }, words.title ?? undefined);
+    },
     say: (text) => {
       say(text);
     },

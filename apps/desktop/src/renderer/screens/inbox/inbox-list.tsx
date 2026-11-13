@@ -37,6 +37,7 @@ const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-r
 const ROW_ACTION_NAMES = [
   "onPick",
   "onToggleSelect",
+  "onStartThread",
   "onTakeOn",
   "onHandOff",
   "onGoToTask",

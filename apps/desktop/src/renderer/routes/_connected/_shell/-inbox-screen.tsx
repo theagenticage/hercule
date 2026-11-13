@@ -32,6 +32,7 @@ import { useInboxVisit, type InboxListRow } from "./-inbox-visit";
 import { InboxHandMenuPart } from "./-inbox-hand-part";
 import { InboxListPart } from "./-inbox-list-part";
 import { useInboxMoves } from "./-inbox-moves";
+import { useInboxThread } from "./-inbox-thread";
 import { useInboxKeys } from "./-use-inbox-keys";
 import { InboxPaneHeadPart, InboxPanePart } from "./-inbox-pane-part";
 import { InboxRailPart } from "./-inbox-rail-part";
@@ -69,7 +70,8 @@ interface HandMenu {
  *
  * It also holds what the keys and the moves share: the keys (`useInboxKeys`
  * names an action, and `performKey` does it), the moves (`useInboxMoves`) and
- * where the keyboard focus goes after a move.
+ * where the keyboard focus goes after a move. The start-thread dialog is
+ * `useInboxThread`'s, and it is drawn with the overlays.
  */
 export function InboxScreen({
   controller,
@@ -141,15 +143,24 @@ export function InboxScreen({
       focusList();
     }
   };
+  const accountScope = controller.accountScopes.read();
   const moves = useInboxMoves({
     client,
-    scope: controller.accountScopes.read(),
+    scope: accountScope,
     visit,
     isOffline: offlineSince !== null,
     openTask: (taskId) => {
       void navigate({ to: "/work", search: { task: taskId } });
     },
     onMoved: followMove,
+  });
+  // The dialog cannot take the focus back while it is open, so `followMove` runs when it closes.
+  const thread = useInboxThread({
+    controller,
+    scope: accountScope,
+    visit,
+    moves,
+    onClosed: followMove,
   });
   const openHandMenu = (thing: InboxListRow | null, ref: string): void => {
     if (thing === null) return;
@@ -202,6 +213,9 @@ export function InboxScreen({
         return;
       case "dismiss":
         moves.dismiss();
+        return;
+      case "startThread":
+        thread.open();
         return;
       case "takeOn":
         moves.takeOn();
@@ -259,6 +273,9 @@ export function InboxScreen({
     },
     onToggleSelect: (ref) => {
       visit.select({ kind: "toggle", ref });
+    },
+    onStartThread: (ref) => {
+      thread.open(ref);
     },
     onTakeOn: moves.takeOn,
     onHandOff: (ref) => {
@@ -387,6 +404,9 @@ export function InboxScreen({
             thing={currentThing}
             offers={currentThing.offers}
             moves={{
+              onStartThread: () => {
+                thread.open();
+              },
               onTakeOn: () => {
                 moves.takeOn();
               },
@@ -450,6 +470,7 @@ export function InboxScreen({
               }}
             />
           )}
+          {thread.element}
         </>
       }
     />

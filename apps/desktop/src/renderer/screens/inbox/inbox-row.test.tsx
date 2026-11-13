@@ -140,18 +140,21 @@ describe("InboxRow", () => {
     expect(screen.getByRole("button", { name: "Unselect" })).toBeTruthy();
   });
 
-  it("offers Take on, the hand-off and Dismiss, each naming its key, and calls back with its reference", async () => {
+  it("offers Start a thread, Take on, the hand-off and Dismiss, each naming its key, and calls back with its reference", async () => {
     const user = userEvent.setup();
     const { actions } = renderRow({
       handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" },
     });
+    expect(screen.getByTitle("Start a thread (N)")).toBeTruthy();
     expect(screen.getByTitle("Take on (T)")).toBeTruthy();
     expect(screen.getByTitle("Hand to Agent review (H)")).toBeTruthy();
     expect(screen.getByTitle("Dismiss (E)")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
     await user.click(screen.getByRole("button", { name: "Take on" }));
     await user.click(screen.getByRole("button", { name: "Hand to Agent review" }));
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(actions.calls).toEqual([
+      ["start", "a"],
       ["take", "a"],
       ["hand", "a"],
       ["dismiss", "a"],
@@ -179,12 +182,13 @@ describe("InboxRow", () => {
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
   });
 
-  it("offers Go to its Task and Dismiss, and no Take on or hand-off, for a thing a Task holds", async () => {
+  it("offers Go to its Task and Dismiss, and no Start a thread, Take on or hand-off, for a thing a Task holds", async () => {
     const user = userEvent.setup();
     const { actions } = renderRow({
       held: true,
       handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" },
     });
+    expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Take on" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
     expect(screen.getByTitle("Go to its Task (G)")).toBeTruthy();
