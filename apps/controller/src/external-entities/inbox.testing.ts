@@ -68,6 +68,8 @@ export const inbox = {
     Effect.flatMap(externalEntityInbox, (reads) => reads.countInbox(...args)),
   readInboxOutline: (...args: Parameters<Inbox["readInboxOutline"]>) =>
     Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxOutline(...args)),
+  readInboxGroup: (...args: Parameters<Inbox["readInboxGroup"]>) =>
+    Effect.flatMap(externalEntityInbox, (reads) => reads.readInboxGroup(...args)),
   suggestInboxValues: (...args: Parameters<Inbox["suggestInboxValues"]>) =>
     Effect.flatMap(externalEntityInbox, (reads) => reads.suggestInboxValues(...args)),
 };

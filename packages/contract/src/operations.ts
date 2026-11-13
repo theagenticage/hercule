@@ -339,6 +339,13 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/external-entities/inbox/values",
   },
+  // Reads the group of one thing: its members and the links between them. It
+  // shows no signal text, so `task.read` is all it needs.
+  "externalEntity.readInboxGroup": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/inbox/group",
+  },
   "externalEntity.countInbox": {
     requires: "task.read",
     method: "GET",
@@ -373,6 +380,16 @@ const TABLE = {
     requires: "task.update",
     method: "POST",
     path: "/api/v1/external-entities/:id/take-on/undo",
+  },
+  "externalEntity.takeOnTogether": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/take-on",
+  },
+  "externalEntity.undoTakeOnTogether": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/take-on/undo",
   },
   // Handing off starts a run, and undoing it cancels one, so the grants are
   // the run operations'. Both are the user's own: a session token is refused

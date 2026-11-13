@@ -1677,7 +1677,7 @@ This text replaces the Inbox of [#1032](https://github.com/theagenticage/hercule
 - **The route** is `/inbox`, in `routes/_connected/_shell/inbox.tsx`, a chunk of its own (rule 6 of [Rules](#rules)), exporting `Route` with `staticData: { title: "Inbox" }`. Its loader starts the first page of the saved query in the URL and waits for the outline (`externalEntity.readInboxOutline`), which the rail, the search and the list head draw from. The sidebar's counts are shell data and are already read. Its components are in `screens/inbox/` and what it works out is in `@hercule/client-core/inbox`, a subpath that is not part of the library's index.
 - **The way in** is the sidebar's **Inbox** row beside Intake, with a plain grey number: the count of "Someone waits on me", hidden at 0. One 6px marigold dot shows when `newestArrival` of the counts is above the value this client acknowledged ([./20-external-entities.md](./20-external-entities.md#84-counts-the-outline-and-the-new-mark)). Go › Inbox is a native item in `main/menu.ts` ([Native behaviour](#native-behaviour)). **Intake keeps its row, its count and everything else.** The drawing's end state, where the Inbox takes Intake's row, waits for [#1048](https://github.com/theagenticage/hercule/issues/1048), on Rogier's word.
 - **What the Inbox leaves out for now.** Each of these comes with its own ticket, and until then the Inbox shows nothing in its place, never a dead control:
-  - groups of linked things: the list is flat ([#1124](https://github.com/theagenticage/hercule/issues/1124)), and with them Link (L) and drag to link;
+  - ~~groups of linked things: the list is flat, and with them Link (L) and drag to link~~ *(Amended 2026-11-13, [#1124](https://github.com/theagenticage/hercule/issues/1124).)* These come with [#1124](https://github.com/theagenticage/hercule/issues/1124); the moves are in [The moves and keys](#the-moves-and-keys), and what a group is, in [./20-external-entities.md](./20-external-entities.md#86-groups-of-linked-things);
   - Triage, its rail entry and the `8` key ([#1125](https://github.com/theagenticage/hercule/issues/1125)), and Start a thread (N) ([#1126](https://github.com/theagenticage/hercule/issues/1126));
   - the pane's own content: the pane is the frame, and shows the open-card body that the Inbox had before, until [#1123](https://github.com/theagenticage/hercule/issues/1123) replaces it;
   - the offline outbox ([#1138](https://github.com/theagenticage/hercule/issues/1138)).
@@ -1793,7 +1793,7 @@ The search is a combobox over the list (`aria-expanded`, `aria-activedescendant`
 - **The head** has the mark, "GitHub · Pull request · storefront-web", and the account when the source has several. At its end it has an icon button that opens the thing at its source and the ⋯ menu, which holds Open at its source (O) and the width choices.
 - **The footer** holds the core's moves, each with its key: Take on (T), the hand-off (H), Go to its Task (G) when there is one, and Dismiss (E).
 - **The pane follows the current row** in the same frame as a key. A held J never blanks it, so it swaps with no fade. When nothing is current (an empty list, all clear, nothing matching) the pane fades over 140ms and then the list takes its room.
-- **A selection** of two or more things, or one that is not the current row, shows in the pane as what is in it, with Take on and Dismiss ([#1123](https://github.com/theagenticage/hercule/issues/1123) builds it). Until then the pane keeps showing the current row, and the selection bar and the keys carry the moves. Take on refuses on a selection, for now, as [The moves and keys](#the-moves-and-keys) says.
+- **A selection** of two or more things, or one that is not the current row, shows in the pane as what is in it, with Take on and Dismiss ([#1123](https://github.com/theagenticage/hercule/issues/1123) builds it). Until then the pane keeps showing the current row, and the selection bar and the keys carry the moves. *(Amended 2026-11-13, [#1124](https://github.com/theagenticage/hercule/issues/1124).)* Take on works on a selection, as [The moves and keys](#the-moves-and-keys) says.
 
 ### The moves and keys
 
@@ -1805,9 +1805,10 @@ A move answers in the same frame, and the controller call follows. Every move ha
 | X | Select, or unselect | ⇧-click a range, ⌘-click one, ⌘A all that is loaded |
 | Return | Open the pane for the row (under 1032 the pane slides in). In the pane, the open ask's suggested answer | |
 | O | Open at its source | |
-| E | Dismiss | Dismisses all of them in one atomic call, with one undo |
-| T | **Take on**: a Task on Work. `externalEntity.takeOn` | Refuses, with the reason |
-| H | Hand off: at once with one workflow, the menu with several. Single things only | Refuses, with the reason |
+| E | Dismiss | Dismisses all of them in one atomic call, with one undo. On a group it dismisses every member, with one undo |
+| T | **Take on**: a Task on Work. `externalEntity.takeOn` | One Task for the selection, or for a group, named after the group (`externalEntity.takeOnTogether`) |
+| H | Hand off: at once with one workflow, the menu with several. Single things only | Refuses, with the reason. So does a group |
+| L | **Link**: on one thing, opens "Link to…", a search over the Inbox; on a group, the same, linking the thing to the group | Links the selection (`externalEntity.link`) |
 | G | Go to its Task | |
 | ⌘Z | Undo, from one stack ([The shared layer](#the-shared-layer)) | |
 | `.` | Show what is new | |
@@ -1821,14 +1822,16 @@ A move answers in the same frame, and the controller call follows. Every move ha
 - **Take on** was called "Take it" before. T is named "Take on" wherever the move appears: the buttons, the tooltips, the undo line and the keys sheet.
 - **Dismiss and restore take several things** in one call, all or nothing, up to 1,000. A selection of more than 1,000 refuses, with the reason. The undo is one `restore` of the same things.
 - **Hand off** is [Handing a thing to an agent](#handing-a-thing-to-an-agent). H moves the current row on at once: the row after it becomes current as the hand-off starts.
-- **Take on and the hand-off on a selection** refuse, for now, with a reason in the undo line. E on a selection works.
+- *(Amended 2026-11-13, [#1124](https://github.com/theagenticage/hercule/issues/1124).)* **Take on, Link and Dismiss work on a group or a selection; the hand-off refuses on both**, with the reason in the undo line, until workflows can take several things in one run ([#1128](https://github.com/theagenticage/hercule/issues/1128)). A group is acted on by its members' ids, which the group's reply carries (`members`), so no other read is needed.
+- **Groups.** T on a group or a selection makes one Task for all of it, titled with the group's label (the first thing the client sends is the label thing, which gives the Task its stage and Project). When some of the things already have a Task and they all share one, the others are linked to it. When they are on two or more different Tasks, the move refuses, and the line names the Tasks. A group of more than 1,000 members refuses E and T, saying so.
+- **Linking.** L on a selection links its things to each other. Dragging a row onto another links them, and the dropped card flies into the group. Unlink takes one link out. All three call `externalEntity.link` and `unlink`, and go on the shared undo stack: the undo of a link unlinks only when the call answered `created: true`, so undoing a repeated link never removes one the user made before.
 - **Single keys belong to the list and the pane** (WCAG 2.1.4). In the rail, the bar, the keys sheet or a menu they do nothing, so speech input and a stray key never act on a row nobody is looking at. `/` and `?` work from anywhere outside a field, and Esc goes back to the list. The only keys with a modifier are ⌘A, ⌘Z and ⌘-click. An open menu owns the keyboard: ↑ ↓ move, Return picks, Esc closes and gives the focus back, Tab leaves.
 - **Return on a focused button is that button's.** Only in the list does Return open the pane.
 - **Moves refuse with a reason** where they do not apply, in the undo line: a thing a live Task holds says who has it, G with no Task says so, a kind that is not available says why, and a selection that is too large says how many it may be.
 - **After a move** the next row becomes current and has the focus, so the same key handles the next. When the move leaves nothing current, the focus goes to the empty state's heading.
 - **Offline, moves refuse** and the undo line says so. Nothing is queued until the outbox of [#1138](https://github.com/theagenticage/hercule/issues/1138) exists.
 - **A failed move** rolls back, and the undo line says why. Take on refuses when the thing could not be read, or changed under it (`conflict`), and the user can try again.
-- **Undo.** The shared stack goes as far back as the user likes, from any view. A dismissal undoes with `restore`. A Take on that made a Task undoes with `undoTakeOn`, and the line says why when the Task has been touched since. ⌘Z puts back the current row too. The undo line stays while the pointer or the focus is on it. It sits centred on the list, and its text puts the thing's title last, so the title shortens first. When a hand-off ended only some of the asks, the line says what stays: "Omar's mention stays with you".
+- **Undo.** The shared stack goes as far back as the user likes, from any view. A dismissal undoes with `restore`. A Take on that made a Task undoes with `undoTakeOn`, and the line says why when the Task has been touched since. *(Amended 2026-11-13, [#1124](https://github.com/theagenticage/hercule/issues/1124).)* A Take on together undoes with `undoTakeOnTogether`, which takes back only what that call wrote: the Task it made, or the links it added to an existing Task and the taken mark it set. A dismissal of a group is one `restore`. ⌘Z puts back the current row too. The undo line stays while the pointer or the focus is on it. It sits centred on the list, and its text puts the thing's title last, so the title shortens first. When a hand-off ended only some of the asks, the line says what stays: "Omar's mention stays with you".
 
 ### Handing a thing to an agent
 
@@ -1892,7 +1895,7 @@ The list orders it "Longest waiting first": things with an ask by their oldest a
 | Draws the rail | `externalEntity.readInboxOutline`, in `inboxOutlineQuery`, under a key inside the `inbox` prefix (`queryKeys.inboxOutline()`), so the pushes that refresh the pages refresh it. It is not shell data: the route's loader prefetches it |
 | Suggests values | `externalEntity.suggestInboxValues`, as the search is typed |
 | Reads one thing for the pane | `externalEntity.read`, under `queryKeys.externalEntity(id)` |
-| Takes on, dismisses, undoes | `externalEntity.takeOn`, `dismiss` (several things), `restore` (several) and `undoTakeOn`, as mutations |
+| Takes on, dismisses, undoes | `externalEntity.takeOn`, `takeOnTogether`, `dismiss` (several things), `restore` (several), `undoTakeOn` and `undoTakeOnTogether`, as mutations. Links with `link` and `unlink` |
 | Hands off, takes back | `externalEntity.handOff` and `undoHandOff`, as mutations. The offers come with the page |
 | Keeps pins and folds | The user settings `inbox.pins` and `inbox.browseFolded` |
 

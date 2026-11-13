@@ -357,9 +357,11 @@ describe("the placeholders a usage line shows", () => {
   const NAMED: Record<string, string> = {
     "entity search": "<source> <text>",
     "entity add-to-work": "<ref>",
+    "entity group": "<ref>",
     "entity link": "<ref>",
     "entity unlink": "<ref>",
     "entity undo-hand-off": "<run-id>",
+    "entity take-on-together": "<id>...",
     "entity dismiss": "<id>...",
     "entity restore": "<id>...",
     "secret set": "<owner-kind> <owner-id> <name>",

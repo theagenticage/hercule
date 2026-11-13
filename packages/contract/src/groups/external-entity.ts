@@ -60,7 +60,7 @@ import {
   SignalStatus,
 } from "./signal";
 import { RunStarted } from "./run";
-import { MAX_SEARCH_TEXT_LENGTH, TaskPriority, TaskStage } from "./task";
+import { MAX_SEARCH_TEXT_LENGTH, MAX_TASK_TITLE_LENGTH, TaskPriority, TaskStage } from "./task";
 import { MAX_INPUT_ANSWERED_SIGNAL_KINDS, MAX_WORKFLOW_NAME_LENGTH } from "./workflow-definition";
 
 export { ENTITY_CONCERNS, EntityRepository, MAX_ENTITY_FACTS };
@@ -763,6 +763,83 @@ export const InboxThing = Schema.Struct({
 export type InboxThing = Schema.Schema.Type<typeof InboxThing>;
 
 /**
+ * One member of an `InboxGroup`. `id` is the thing's id, so a move that takes
+ * ids needs no other read, even for a member that is not on the page.
+ * `matches` is true when the member answers the list's query; the others are
+ * in the group but drawn quieter.
+ */
+export const InboxGroupMember = Schema.Struct({
+  id: Id,
+  ref: ExternalRef,
+  matches: Schema.Boolean,
+});
+
+export type InboxGroupMember = Schema.Schema.Type<typeof InboxGroupMember>;
+
+/**
+ * A group of linked things in one reply of `queryInbox`: things on the Inbox
+ * that are linked to each other, directly or through other members, by a
+ * source or by a person. A thing that is not on the Inbox joins nothing, so it
+ * never bridges two groups. A group has at least two members.
+ *
+ * A group stands in the list where its first member that answers the list's
+ * query stands.
+ *
+ * - `labelRef` is the member the group is named after: the one whose kind lasts
+ *   longest, then the oldest, then the lowest ref. It names the group in one
+ *   reply only, and it changes when the members change.
+ * - `label` is the title of `labelRef`, so a reply can draw the group's row
+ *   without that member.
+ * - `members` are the members that answer the list's query first, then the
+ *   others, each part in the list's order. The first member is the one that
+ *   places the group in the list. At most `MAX_INBOX_MOVED_THINGS` are listed.
+ *   The `things` of a `first` or `next` reply hold the members that fit in the
+ *   page; a `rows` or `refresh` reply holds only the held members that are
+ *   still on the list, so the client reads the rows of the other members when
+ *   it needs them.
+ * - `size` is how many members the group has. It is above `members.length`
+ *   only when the group has more than `MAX_INBOX_MOVED_THINGS`.
+ */
+export const InboxGroup = Schema.Struct({
+  labelRef: ExternalRef,
+  label: bounded(1, 512),
+  members: atMost(InboxGroupMember, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(2)),
+  size: Schema.Int,
+});
+
+export type InboxGroup = Schema.Schema.Type<typeof InboxGroup>;
+
+/** The input of `readInboxGroup`: any thing of the group. */
+export const InboxGroupQuery = Schema.Struct({ ref: ExternalRef });
+
+export type InboxGroupQuery = Schema.Schema.Type<typeof InboxGroupQuery>;
+
+/**
+ * What `readInboxGroup` returns: the group a thing is in among the things on
+ * the Inbox, in full, for the pane that shows it. The group is the one
+ * `queryInbox` draws (same members, same label), read apart from any list's
+ * query. A thing that is linked to nothing on the Inbox is a group of one.
+ *
+ * - `labelRef` and `label` are as in `InboxGroup`.
+ * - `members` are drawn as peers: the label thing first, the others sorted by
+ *   ref. At most `MAX_INBOX_MOVED_THINGS` are listed.
+ * - `links` are the links between two members, each pair once under its
+ *   firmest claim, in the order the claims were made. A client offers Unlink
+ *   on a link whose `hasPersonClaim` is true. At most `MAX_GRAPH_EDGES` are
+ *   listed.
+ * - `complete` is false when `members` or `links` were cut by those bounds.
+ */
+export const InboxGroupDetail = Schema.Struct({
+  labelRef: ExternalRef,
+  label: bounded(1, 512),
+  members: atMost(EntityPeer, MAX_INBOX_MOVED_THINGS),
+  links: atMost(EntityLink, MAX_GRAPH_EDGES),
+  complete: Schema.Boolean,
+});
+
+export type InboxGroupDetail = Schema.Schema.Type<typeof InboxGroupDetail>;
+
+/**
  * One value of a facet, with how many things in the result hold it. `value`
  * is what a clause sends: the stored text, or the ref of a context record.
  * `label` is what the row shows: the record's title when the value is a
@@ -817,6 +894,8 @@ const InboxOfferSets = Schema.Record(
 export const InboxFirstPage = Schema.Struct({
   mode: Schema.Literal("first"),
   things: atMost(InboxThing, MAX_INBOX_PAGE),
+  /** The groups whose members are in `things`, in order. A thing that is in no group's `members` stands alone. */
+  groups: atMost(InboxGroup, MAX_INBOX_PAGE),
   nextCursor: Schema.optionalKey(bounded(1, 512)),
   total: Schema.Int,
   order: InboxOrder,
@@ -830,6 +909,8 @@ export type InboxFirstPage = Schema.Schema.Type<typeof InboxFirstPage>;
 export const InboxNextPage = Schema.Struct({
   mode: Schema.Literal("next"),
   things: atMost(InboxThing, MAX_INBOX_PAGE),
+  /** The groups whose members are in `things`, in order. A thing that is in no group's `members` stands alone. */
+  groups: atMost(InboxGroup, MAX_INBOX_PAGE),
   nextCursor: Schema.optionalKey(bounded(1, 512)),
   offerSets: InboxOfferSets,
 });
@@ -838,17 +919,24 @@ export type InboxNextPage = Schema.Schema.Type<typeof InboxNextPage>;
 
 /**
  * The held rows of `refresh` and `rows` that are still on the list, in the
- * list's order. A held ref that is not here has left the list.
+ * list's order. A held thing is on the list when it answers the query, or
+ * when it is a member of a group that has a member that answers (it is then
+ * drawn quieter). `groups` describe the groups that those things belong to. A
+ * held ref that is not in `things` has left the list.
  */
 const InboxHeldRows = {
   things: atMost(InboxThing, MAX_INBOX_HELD_REFS),
+  /** The groups whose members are in `things`, in order. A thing that is in no group's `members` stands alone. */
+  groups: atMost(InboxGroup, MAX_INBOX_HELD_REFS),
   offerSets: InboxOfferSets,
 };
 
 /**
  * The reply to `refresh`: the first page, and the held rows that are still on
  * the list but not on that page, both read at one moment. A held ref that is
- * on neither has left the list.
+ * on neither has left the list. Both halves are read in one snapshot, so a
+ * group that is in `first.groups` and in `held.groups` has identical members
+ * and the same label in both.
  */
 export const InboxRefresh = Schema.Struct({
   mode: Schema.Literal("refresh"),
@@ -1093,6 +1181,48 @@ export const EntityUndoTakeOnResult = Schema.Struct({
 export type EntityUndoTakeOnResult = Schema.Schema.Type<typeof EntityUndoTakeOnResult>;
 
 /**
+ * The input of `takeOnTogether`: the things to take on as one piece of work,
+ * and the title of the Task when one is made. The client puts the thing that
+ * names the group first, because the new Task takes its stage and its Project
+ * from the first thing.
+ */
+export const EntityTakeOnTogetherInput = Schema.Struct({
+  ids: atMost(Id, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(2)),
+  title: bounded(1, MAX_TASK_TITLE_LENGTH),
+});
+
+export type EntityTakeOnTogetherInput = Schema.Schema.Type<typeof EntityTakeOnTogetherInput>;
+
+/**
+ * What `takeOnTogether` returns: the one Task that now holds all the things,
+ * whether this call made it, and what it wrote:
+ *
+ * - `added`: the things it linked to the Task. When it joined an existing
+ *   Task, this leaves out the things the Task already linked.
+ * - `taken`: the things whose link it marked as taken on by the user. It holds
+ *   `added` and every thing the Task already linked that was not taken yet.
+ * - `takenAt`: the time it wrote on those links.
+ *
+ * Pass the whole reply to `undoTakeOnTogether` to take the call back.
+ */
+export const EntityTakeOnTogetherResult = Schema.Struct({
+  taskId: Id,
+  created: Schema.Boolean,
+  added: atMost(Id, MAX_INBOX_MOVED_THINGS),
+  taken: atMost(Id, MAX_INBOX_MOVED_THINGS),
+  takenAt: Timestamp,
+});
+
+export type EntityTakeOnTogetherResult = Schema.Schema.Type<typeof EntityTakeOnTogetherResult>;
+
+/** The input of `undoTakeOnTogether`: the reply of the `takeOnTogether` call to take back. */
+export const EntityUndoTakeOnTogetherInput = EntityTakeOnTogetherResult;
+
+export type EntityUndoTakeOnTogetherInput = Schema.Schema.Type<
+  typeof EntityUndoTakeOnTogetherInput
+>;
+
+/**
  * The input of `handOff`, beside the entity's id in the path: the workflow to
  * hand the thing to, and the account that acts. Without `connectionId` the
  * first of the thing's acting Connections acts.
@@ -1301,6 +1431,16 @@ export const EntityLinkInput = Schema.Struct({ fromRef: ExternalRef, toRef: Exte
 export type EntityLinkInput = Schema.Schema.Type<typeof EntityLinkInput>;
 
 /**
+ * What `link` returns. `created` is true when this call wrote the user's own
+ * claim, and false when the user had already linked the pair, in either
+ * direction, so nothing changed. A caller that wants to undo the link removes
+ * it only when `created` is true.
+ */
+export const EntityLinkResult = Schema.Struct({ created: Schema.Boolean });
+
+export type EntityLinkResult = Schema.Schema.Type<typeof EntityLinkResult>;
+
+/**
  * What `unlink` returns. `removed` is false when the user had made no link
  * between the two. `remaining` is the firmest claim still joining them, when a
  * source or a text claim is left: only the user's own claim can be removed.
@@ -1360,6 +1500,17 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
       success: InboxValues,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
+    /**
+     * Returns the group of one thing among the things on the Inbox, in full:
+     * its members and the links between them. Fails with `NotFound` when the
+     * thing is not on the Inbox. A POST that reads and stores nothing, for the
+     * reason `queryInbox` is one: the ref is not an id, and is read from a body.
+     */
+    HttpApiEndpoint.post("readInboxGroup", "/external-entities/inbox/group", {
+      payload: InboxGroupQuery,
+      success: InboxGroupDetail,
+      error: [Unauthenticated, Forbidden, NotFound, Internal],
+    }),
     HttpApiEndpoint.get("search", "/external-entities/search", {
       query: EntitySearchQuery,
       success: EntitySearchReply,
@@ -1395,6 +1546,35 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
     HttpApiEndpoint.post("undoTakeOn", "/external-entities/:id/take-on/undo", {
       params: { id: Id },
       payload: EntityUndoTakeOnInput,
+      success: EntityUndoTakeOnResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Takes several things on as one piece of work. None of them has an
+     * active Task: one Task is made, linked to all of them, with the given
+     * title, and the stage and Project of the first thing. All of them
+     * already on the same Task: the others are linked to it. They are all
+     * marked as taken on by the user. Things on two or more different Tasks
+     * fail `InvalidState`, naming the Tasks, as does a place or a thing that
+     * could not be read. Fails `NotFound` for an unknown id, and `Conflict`
+     * when a thing changed while the Task was being made and the call should
+     * be repeated. User only. Nothing is written on the sources.
+     */
+    HttpApiEndpoint.post("takeOnTogether", "/external-entities/take-on", {
+      payload: EntityTakeOnTogetherInput,
+      success: EntityTakeOnTogetherResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
+    }),
+    /**
+     * Takes back a `takeOnTogether` call, as far as is safe. A Task the call
+     * made is deleted only when nothing was added to it since, as for
+     * `undoTakeOn`. A Task the call joined loses the links in `added`
+     * and the taken mark that the call set on links that already existed, each
+     * only while the link still holds the time that call wrote. Otherwise
+     * nothing changes and `reason` says why. User only.
+     */
+    HttpApiEndpoint.post("undoTakeOnTogether", "/external-entities/take-on/undo", {
+      payload: EntityUndoTakeOnTogetherInput,
       success: EntityUndoTakeOnResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
@@ -1460,11 +1640,12 @@ export const externalEntity = HttpApiGroup.make("externalEntity")
     /**
      * Links two things, as the user's own claim (`person`). The target may be a
      * ref nobody has read yet; it is read on the next refresh. The source is
-     * never told. User only: a session cannot link.
+     * never told. Answers whether this call wrote the claim. User only: a session
+     * cannot link.
      */
     HttpApiEndpoint.post("link", "/external-entities/links", {
       payload: EntityLinkInput,
-      success: Schema.Struct({}),
+      success: EntityLinkResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**

@@ -4,6 +4,7 @@ export {
   TaskService,
   TaskServiceLayer,
   type CreatedTaskUndo,
+  type JoinedRefsUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
   type FailureRestoration,

@@ -980,6 +980,248 @@ describe("undoTakeOn", () => {
   });
 });
 
+describe("takeOnTogether and undoTakeOnTogether", () => {
+  /** Reads the links of a Task: the ref, and whether and when the user took it on. */
+  const readLinks = (sql: SqlClient.SqlClient, taskId: string) =>
+    Effect.map(
+      sql<{ readonly ref: string; readonly taken_at: string | null }>`
+        SELECT ref, taken_at FROM task_entity_links
+        WHERE task_id = ${uuidFromString(taskId)} ORDER BY ref`,
+      (rows) => rows.map((row) => [row.ref, row.taken_at !== null] as const),
+    );
+
+  it("makes one Task for things that have none, linked and taken, with the stage of the first", async () => {
+    const { result, links, task, taskCount, ids } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [
+            buildObservation("1", { status: "doing" }),
+            buildObservation("2"),
+          ]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const result = yield* service.takeOnTogether({ ids, title: "Both tickets" });
+          return {
+            result,
+            ids,
+            links: yield* readLinks(sql, result.taskId),
+            task: yield* tasks.read(result.taskId),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(result).toMatchObject({ created: true, added: ids, taken: ids });
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+    expect(task).toMatchObject({ title: "Both tickets", stage: "building" });
+    expect(taskCount).toBe(1);
+  });
+
+  it("joins the Task that things share, adding only the new links and taking every link on", async () => {
+    const { result, links, taskCount, earlierId } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const one = yield* entityId(ticketRef("1"));
+          const two = yield* entityId(ticketRef("2"));
+          // A Task that something else made: its link is not taken on yet.
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }],
+          });
+          const result = yield* service.takeOnTogether({ ids: [one, two], title: "Unused" });
+          return {
+            result: { ...result, one, two },
+            earlierId: earlier.id,
+            links: yield* readLinks(sql, earlier.id),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(result).toMatchObject({
+      taskId: earlierId,
+      created: false,
+      added: [result.two],
+      taken: [result.one, result.two],
+    });
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+    expect(taskCount).toBe(1);
+  });
+
+  it("refuses things on two different Tasks, naming them, and writes nothing", async () => {
+    const { error, taskCount } = await run(
+      ({ service, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const one = yield* entityId(ticketRef("1"));
+          const two = yield* entityId(ticketRef("2"));
+          yield* service.takeOn(one);
+          yield* service.takeOn(two);
+          const error = yield* Effect.flip(
+            service.takeOnTogether({ ids: [one, two], title: "Together" }),
+          );
+          return { error, taskCount: yield* countTasks };
+        }),
+    );
+    expect(error).toMatchObject({ error: { code: "invalid_state" } });
+    expect(JSON.stringify(error)).toContain("Ticket 1");
+    expect(JSON.stringify(error)).toContain("Ticket 2");
+    expect(taskCount).toBe(2);
+  });
+
+  it("fails like takeOn for a place or an unknown id, and for a session, and makes no Task", async () => {
+    const { place, unknown, session, taskCount } = await run(
+      ({ service, report, connectionId, entityId, countTasks }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [
+            buildObservation("1"),
+            {
+              kind: "project",
+              ref: projectRef("harbour"),
+              title: "Harbour",
+              fields: { key: "HARBOUR" },
+              concerns: [],
+              sourceUpdatedAt: "2026-03-01T00:00:00.000Z",
+            },
+          ]);
+          const one = yield* entityId(ticketRef("1"));
+          const harbour = yield* entityId(projectRef("harbour"));
+          return {
+            place: yield* Effect.flip(service.takeOnTogether({ ids: [one, harbour], title: "x" })),
+            unknown: yield* Effect.flip(
+              service.takeOnTogether({
+                ids: [one, "0199e0e7-9999-7000-8000-000000000000"],
+                title: "x",
+              }),
+            ),
+            session: yield* Effect.flip(
+              Effect.provideService(
+                service.takeOnTogether({ ids: [one, harbour], title: "x" }),
+                CurrentActor,
+                A_SESSION,
+              ),
+            ),
+            taskCount: yield* countTasks,
+          };
+        }),
+    );
+    expect(place).toMatchObject({ error: { code: "invalid_state" } });
+    expect(unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(session).toMatchObject({ error: { code: "forbidden" } });
+    expect(taskCount).toBe(0);
+  });
+
+  it("deletes the Task it made when nothing was added, and keeps it once it was edited", async () => {
+    const { undone, kept, gone } = await run(({ service, tasks, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const first = yield* service.takeOnTogether({ ids, title: "First" });
+        const undone = yield* service.undoTakeOnTogether(first);
+        const second = yield* service.takeOnTogether({ ids, title: "Second" });
+        yield* tasks.update({ id: second.taskId, title: "Renamed" });
+        return {
+          undone,
+          kept: yield* service.undoTakeOnTogether(second),
+          gone: yield* Effect.flip(tasks.read(first.taskId)),
+        };
+      }),
+    );
+    expect(undone).toEqual({ undone: true });
+    expect(kept.undone).toBe(false);
+    expect(kept.reason).toContain("edited");
+    expect(gone).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("takes back a join: removes what it linked, clears what it took on, keeps the Task", async () => {
+    const { undone, links, stillLive } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }],
+          });
+          const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+          const undone = yield* service.undoTakeOnTogether(joined);
+          return {
+            undone,
+            links: yield* readLinks(sql, earlier.id),
+            stillLive: (yield* tasks.read(earlier.id)).id === earlier.id,
+          };
+        }),
+    );
+    expect(undone).toEqual({ undone: true });
+    expect(links).toEqual([[ticketRef("1"), false]]);
+    expect(stillLive).toBe(true);
+  });
+
+  it("has a real undo when every thing already links the Task: it clears the taken mark", async () => {
+    const { joined, undone, links } = await run(
+      ({ service, tasks, sql, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+          const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+          const earlier = yield* tasks.create({
+            title: "Earlier",
+            description: "",
+            stage: "planned",
+            provenance: [{ ref: ticketRef("1") }, { ref: ticketRef("2") }],
+          });
+          const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+          const undone = yield* service.undoTakeOnTogether(joined);
+          return { joined, undone, links: yield* readLinks(sql, earlier.id) };
+        }),
+    );
+    expect(joined).toMatchObject({ created: false, added: [] });
+    expect(joined.taken).toHaveLength(2);
+    expect(undone).toEqual({ undone: true });
+    expect(links).toEqual([
+      [ticketRef("1"), false],
+      [ticketRef("2"), false],
+    ]);
+  });
+
+  it("refuses to undo a join when a link no longer holds the time the call wrote", async () => {
+    const { undone, links } = await run(({ service, tasks, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        const earlier = yield* tasks.create({
+          title: "Earlier",
+          description: "",
+          stage: "planned",
+          provenance: [{ ref: ticketRef("1") }],
+        });
+        const joined = yield* service.takeOnTogether({ ids, title: "Unused" });
+        // Something else took the second link on again, later.
+        yield* withTransaction(
+          sql,
+          sql`UPDATE task_entity_links SET taken_at = '2030-01-01T00:00:00.000Z'
+              WHERE task_id = ${uuidFromString(earlier.id)} AND ref = ${ticketRef("2")}`,
+        );
+        const undone = yield* service.undoTakeOnTogether(joined);
+        return { undone, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(undone.undone).toBe(false);
+    expect(undone.reason).toContain("changed");
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+});
+
 describe("after a merge", () => {
   it("gives the survivor to a take-on, a read and the Inbox, and keeps the older link of a shared ref", async () => {
     const { before, after, taken, takenOther, inbox, links } = await run(
@@ -1439,16 +1681,16 @@ describe("link and unlink", () => {
     const count = await run(({ service, sql, report, connectionId }) =>
       Effect.gen(function* () {
         yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
-        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
-        yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
-        yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
+        const first = yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        const again = yield* service.link({ fromRef: ticketRef("1"), toRef: ticketRef("2") });
+        const reversed = yield* service.link({ fromRef: ticketRef("2"), toRef: ticketRef("1") });
         const rows = yield* sql<{ readonly n: number }>`
           SELECT count(*) AS n FROM external_entity_relation_claims`;
-        return rows[0]!.n;
+        return { count: rows[0]!.n, created: [first, again, reversed].map((r) => r.created) };
       }),
     );
 
-    expect(count).toBe(1);
+    expect(count).toEqual({ count: 1, created: [true, false, false] });
   });
 
   it("removes only the person's claim, in either direction, and says what a source's claim leaves", async () => {

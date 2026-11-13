@@ -108,6 +108,17 @@ const make = Effect.gen(function* () {
         UPDATE task_entity_facts SET voided_at = ${at}
         WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref} AND voided_at IS NULL`),
 
+    /** Voids every fact of the Task's pairs with `refs` that is not voided yet, in one statement. */
+    voidFactsOfRefs: (
+      taskId: string,
+      refs: ReadonlyArray<string>,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE task_entity_facts SET voided_at = ${at}
+        WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}
+          AND voided_at IS NULL`),
+
     /**
      * Returns the facts with these ids, by id, voided ones included: a voided
      * fact still says why a card is where it is. An id with no fact is left

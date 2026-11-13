@@ -358,6 +358,9 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("queryInbox", ({ payload }) => withApiErrors(entities.queryInbox(payload)))
       .handle("countInbox", () => withApiErrors(entities.countInbox()))
       .handle("readInboxOutline", () => withApiErrors(entities.readInboxOutline()))
+      .handle("readInboxGroup", ({ payload }) =>
+        withApiErrors(entities.readInboxGroup(payload.ref)),
+      )
       .handle("suggestInboxValues", ({ payload }) =>
         withApiErrors(entities.suggestInboxValues(payload)),
       )
@@ -367,6 +370,10 @@ const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handle
       .handle("takeOn", ({ params }) => withApiErrors(entities.takeOn(params.id)))
       .handle("undoTakeOn", ({ params, payload }) =>
         withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),
+      )
+      .handle("takeOnTogether", ({ payload }) => withApiErrors(entities.takeOnTogether(payload)))
+      .handle("undoTakeOnTogether", ({ payload }) =>
+        withApiErrors(entities.undoTakeOnTogether(payload)),
       )
       .handle("handOff", ({ params, payload }) =>
         withApiErrors(handoffs.handOff(params.id, payload)),

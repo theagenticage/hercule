@@ -48,6 +48,87 @@ describe("hercule task link and task unlink", () => {
   });
 });
 
+describe("hercule entity link", () => {
+  it.each([
+    [true, "Linked."],
+    [false, "Already linked. Nothing changed."],
+  ] as const)("prints what the reply says when created is %s", (created, line) => {
+    const lines = renderHuman(
+      { kind: "value", value: { created } },
+      lookUpCommand("entity", "link"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([line]);
+  });
+});
+
+describe("hercule entity group", () => {
+  const peer = (ref: string, title: string) => ({
+    ref,
+    kind: "acme/ticket",
+    noun: "Ticket",
+    title,
+    yours: false,
+    restricted: false,
+  });
+
+  it("prints the label, the members and who made each link", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          labelRef: "acme:ticket:a",
+          label: "Ticket a",
+          members: [peer("acme:ticket:a", "Ticket a"), peer("acme:ticket:b", "Ticket b")],
+          links: [
+            {
+              fromRef: "acme:ticket:a",
+              toRef: "acme:ticket:b",
+              claim: { type: "source", plugin: "acme" },
+              hasPersonClaim: true,
+            },
+          ],
+          complete: true,
+        },
+      },
+      lookUpCommand("entity", "group"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "group  Ticket a (2 things)",
+      "  acme:ticket:a  Ticket a",
+      "  acme:ticket:b  Ticket b",
+      "links",
+      "  acme:ticket:a - acme:ticket:b  source acme, you too",
+    ]);
+  });
+
+  it("says when the group was cut", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          labelRef: "acme:ticket:a",
+          label: "Ticket a",
+          members: [peer("acme:ticket:a", "Ticket a")],
+          links: [],
+          complete: false,
+        },
+      },
+      lookUpCommand("entity", "group"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "group  Ticket a (1 thing)",
+      "  acme:ticket:a  Ticket a",
+      "the group is larger than this reply: members or links were cut",
+    ]);
+  });
+});
+
 describe("hercule session spawn", () => {
   it("prints the session and a hint with the command that reads its transcript", () => {
     const lines = renderHuman(

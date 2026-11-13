@@ -1489,6 +1489,17 @@ export const CLI = {
   // Exists only for the search box of the desktop app: it suggests values of a
   // field while the user types. A terminal types the value it knows.
   "externalEntity.suggestInboxValues": { hidden: true },
+  "externalEntity.readInboxGroup": {
+    command: "entity group",
+    help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Fails with not_found when the thing is not on the Inbox.",
+    examples: [{ args: ["github:pr:acme/webshop#87"] }],
+    fields: {
+      ref: {
+        positional: true,
+        help: "The external ref of any thing in the group, as `hercule entity list` shows it.",
+      },
+    },
+  },
   "externalEntity.read": {
     command: "entity read",
     help: "Reads one thing from another system in full. It gives its facts, status, repository, why it concerns you, the Task that has it, the places above it, what it is linked to, any claim the graph refused, the signals about it (open ones first, at most 50), what changed at its source, the fields its kind declares that have a value (`fields`, in declaration order) and the card face drawn from them (`face`, null for the generic card), the linked things that have no card, the workflows it can be handed to (offers) and the accounts that can act. Needs the grants `task.read`, `signal.query`, `workflow.query` and `connection.query`. Only a pull request, ticket or error can be read; a place such as a repository fails with not_found.",
@@ -1511,6 +1522,36 @@ export const CLI = {
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "externalEntity.takeOnTogether": {
+    command: "entity take-on-together",
+    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns the Task's id, whether this call made it, and the ids of the things it linked. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
+    examples: [
+      {
+        args: [
+          "1f3a9c2e-7b2d-7a40-8c11-0d5e6f7a8b9c",
+          "2a4b6c8d-1e3f-7a40-8c11-0d5e6f7a8b9c",
+          "--title",
+          "Fix the login redirect",
+        ],
+      },
+    ],
+    fields: {
+      ids: {
+        positional: true,
+        placeholder: "id",
+        help: "An entity's full id, as `hercule entity list` shows it. A tail is not accepted. Give at least two. The first one gives the new Task its stage and Project.",
+      },
+      title: {
+        flag: "title",
+        help: "The title of the Task, when one is made. Ignored when the things join a Task that already exists.",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the things are on two or more different Tasks, or one is a place or cannot be read; the message says which. Take them on one at a time, or merge the Tasks first",
+    },
   },
   "externalEntity.handOff": {
     command: "entity hand-off",
@@ -1567,6 +1608,9 @@ export const CLI = {
   // remove the Task that a take-on or an add-to-work created. A terminal
   // removes a Task with `task delete`.
   "externalEntity.undoTakeOn": { hidden: true },
+  // Exists only for the undo line that follows `takeOnTogether`, as `undoTakeOn`
+  // does: it needs the whole reply of the call it takes back.
+  "externalEntity.undoTakeOnTogether": { hidden: true },
   "externalEntity.dismiss": {
     command: "entity dismiss",
     help: "Takes things off your Inbox, as you, all or none in one call. They keep their history and nothing is told to their source. An ask raised on a thing after you dismissed it brings it back; a new concern, an ask that was open when you dismissed it, or a signal that asks nothing does not. `hercule entity restore` brings them back at once. At most 1000 things.",
@@ -1661,7 +1705,7 @@ export const CLI = {
 
   "externalEntity.link": {
     command: "entity link",
-    help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing. Remove it with `hercule entity unlink`.",
+    help: "Links two things from other systems, as your own claim. A linked ticket and pull request show together on the Inbox and on Work. The second thing may be one Hercule has not read yet; it is read on the next refresh. Nothing is written on either source. Repeating a link changes nothing, and the reply says so. Remove it with `hercule entity unlink`.",
     examples: [
       {
         args: [

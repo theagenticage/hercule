@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { InboxGroup } from "@hercule/contract";
 import {
   createInboxVisit,
   type FirstPage,
@@ -55,14 +56,33 @@ function fakeReader() {
       };
       calls.push(call);
     });
+  // Replies may leave out the groups: a reply of things only is a reply with no group.
+  type Plain<T> = Omit<T, "groups"> & { groups?: T extends { groups: infer G } ? G : never };
   const reader: InboxReader<Row, string> = {
-    readFirst: (query, signal) => make<FirstPage<Row>>("first", query, signal),
-    readNext: (query, after, signal) => make<NextPage<Row>>("next", query, signal, { after }),
+    readFirst: (query, signal) =>
+      make<Plain<FirstPage<Row>>>("first", query, signal).then((page) => ({ groups: [], ...page })),
+    readNext: (query, after, signal) =>
+      make<Plain<NextPage<Row>>>("next", query, signal, { after }).then((page) => ({
+        groups: [],
+        ...page,
+      })),
     refresh: (query, held, signal) =>
-      make<{ firstPage: FirstPage<Row>; heldRows: readonly Row[] }>("refresh", query, signal, {
-        held,
-      }),
-    readRows: (query, held, signal) => make<readonly Row[]>("rows", query, signal, { held }),
+      make<{
+        firstPage: Plain<FirstPage<Row>>;
+        heldRows: readonly Row[];
+        heldGroups?: readonly InboxGroup[];
+      }>("refresh", query, signal, { held }).then((reply) => ({
+        heldGroups: [],
+        ...reply,
+        firstPage: { groups: [], ...reply.firstPage },
+      })),
+    readRows: (query, held, signal) =>
+      make<readonly Row[] | { rows: readonly Row[]; groups: readonly InboxGroup[] }>(
+        "rows",
+        query,
+        signal,
+        { held },
+      ).then((reply) => ("rows" in reply ? reply : { rows: reply, groups: [] })),
   };
   return {
     reader,
@@ -82,6 +102,7 @@ const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const firstPage = (items: Row[], more = false): FirstPage<Row> => ({
   rows: items,
+  groups: [],
   nextCursor: more ? "cursor" : undefined,
   total: items.length,
   order: "waiting",
@@ -919,22 +940,406 @@ describe("selection and current row", () => {
 describe("what a move acts on", () => {
   it("from the keyboard: the current row, or the selection when there is one", async () => {
     const { visit } = await opened(rows("a", "b", "c"));
-    expect(visit.targets()).toEqual(["a"]);
+    expect(visit.targets()).toEqual({ kind: "thing", row: row("a") });
     visit.select({ kind: "toggle", ref: "c" });
     visit.select({ kind: "toggle", ref: "a" });
-    expect(visit.targets()).toEqual(["a", "c"]);
+    expect(visit.targets()).toEqual({ kind: "selection", rows: [row("a"), row("c")] });
   });
 
   it("from a hover button: that row, unless it is selected, then the selection", async () => {
     const { visit } = await opened(rows("a", "b", "c"));
     visit.select({ kind: "toggle", ref: "a" });
     visit.select({ kind: "toggle", ref: "b" });
-    expect(visit.targets("c")).toEqual(["c"]);
-    expect(visit.targets("b")).toEqual(["a", "b"]);
+    expect(visit.targets("c")).toEqual({ kind: "thing", row: row("c") });
+    expect(visit.targets("b")).toEqual({ kind: "selection", rows: [row("a"), row("b")] });
   });
 
-  it("is empty for an empty list", async () => {
+  it("is nothing for an empty list", async () => {
     const { visit } = await opened([]);
-    expect(visit.targets()).toEqual([]);
+    expect(visit.targets()).toBeNull();
+  });
+});
+
+describe("groups", () => {
+  /** A group of linked things: `matching` answer the query, `quiet` do not. */
+  const group = (labelRef: string, matching: string[], quiet: string[] = []): InboxGroup => ({
+    labelRef,
+    label: `Group ${labelRef}`,
+    members: [
+      ...matching.map((ref) => ({ id: `id-${ref}`, ref, matches: true })),
+      ...quiet.map((ref) => ({ id: `id-${ref}`, ref, matches: false })),
+    ],
+    size: matching.length + quiet.length,
+  });
+
+  async function openedGroups(
+    items: Row[],
+    groups: InboxGroup[],
+    { more = false, isSearch = false }: { more?: boolean; isSearch?: boolean } = {},
+  ) {
+    const fake = fakeReader();
+    const time = { now: 0 };
+    const visit = createInboxVisit(fake.reader, { now: () => time.now, isSearch: () => isSearch });
+    visit.open("list-1");
+    fake.open("first").resolve({ ...firstPage(items, more), groups });
+    await settle();
+    return { fake, visit, time };
+  }
+
+  /** Answers the open refresh with a first page, its groups, and the held rows still in. */
+  async function answerRefreshGroups(
+    fake: Fake,
+    items: Row[],
+    groups: InboxGroup[],
+    { stillIn = [], heldGroups = [] }: { stillIn?: Row[]; heldGroups?: InboxGroup[] } = {},
+  ): Promise<void> {
+    fake
+      .open("refresh")
+      .resolve({ firstPage: { ...firstPage(items), groups }, heldRows: stillIn, heldGroups });
+    await settle();
+  }
+
+  const keysOf = (visit: InboxVisit<Row, string>) =>
+    visit.getSnapshot().entries.map((entry) => entry.key);
+  const headOf = (visit: InboxVisit<Row, string>, key: string) => {
+    const entry = visit.getSnapshot().entries.find((candidate) => candidate.key === key);
+    if (entry?.kind !== "head") throw new Error(`no head ${key}`);
+    return entry.group;
+  };
+
+  it("keeps a group's key, fold and current entry when a read names it after another member", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c", "d"), [
+      group("a", ["a", "b", "c"]),
+    ]);
+    visit.fold({ kind: "open" });
+    visit.select({ kind: "focus", ref: "b" });
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c", "d"), [
+      { ...group("a", ["a", "b", "c"]), labelRef: "b", label: "Group b" },
+    ]);
+    expect(keysOf(visit)).toEqual(["group:1", "a", "b", "c", "d"]);
+    expect(headOf(visit, "group:1")).toMatchObject({ label: "Group b", isOpen: true });
+    expect(visit.getSnapshot().current).toBe("b");
+  });
+
+  it("keeps the key with the first part of a split group and lets the other part inherit the fold", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c", "d"), [
+      group("a", ["a", "b", "c", "d"]),
+    ]);
+    visit.fold({ kind: "open" });
+    visit.select({ kind: "focus", ref: "c" });
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c", "d"), [
+      group("a", ["a", "b"]),
+      group("c", ["c", "d"]),
+    ]);
+    expect(keysOf(visit)).toEqual(["group:1", "a", "b", "group:2", "c", "d"]);
+    expect(headOf(visit, "group:2").isOpen).toBe(true);
+    expect(visit.getSnapshot().current).toBe("c");
+  });
+
+  it("keeps the key with the larger part of a merge, and the current entry survives", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c", "d", "e"), [
+      group("a", ["a", "b", "c"]),
+      group("d", ["d", "e"]),
+    ]);
+    visit.fold({ kind: "open", key: "group:2" });
+    visit.select({ kind: "focus", ref: "d" });
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c", "d", "e"), [
+      group("a", ["a", "b", "c", "d", "e"]),
+    ]);
+    expect(keysOf(visit)).toEqual(["group:1"]);
+    expect(visit.getSnapshot().current).toBe("group:1");
+  });
+
+  it("dissolves a group the read no longer has, and a current head goes to its first member", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c"), [group("a", ["a", "b"])]);
+    expect(visit.getSnapshot().current).toBe("group:1");
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c"), []);
+    expect(keysOf(visit)).toEqual(["a", "b", "c"]);
+    expect(visit.getSnapshot().current).toBe("a");
+  });
+
+  it("does not take a group member the visit does not hold for an arrival, and drops a held ref that left", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c"), [group("a", ["a", "b", "c"])]);
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "b", "x"])]);
+    const snapshot = visit.getSnapshot();
+    expect(snapshot.arrivals).toBe(0);
+    expect(snapshot.rows.map((r) => r.ref)).toEqual(["a", "b"]);
+    expect(headOf(visit, "group:1").size).toBe(3);
+    expect(fake.count("rows")).toBe(0);
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a"), []);
+    expect(keysOf(visit)).toEqual(["a"]);
+  });
+
+  it("does not let a refresh issued before an undo drop or regroup the restored members", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c", "d"), [
+      group("a", ["a", "b", "c"]),
+    ]);
+    const receipt = visit.move("dismissed", ["a", "b", "c"]);
+    expect(keysOf(visit)).toEqual(["d"]);
+    visit.confirmMove(receipt);
+    visit.pushArrived();
+    const early = fake.open("refresh");
+    visit.undo(receipt);
+    expect(keysOf(visit)).toEqual(["group:1", "d"]);
+    early.resolve({
+      firstPage: { ...firstPage(rows("d")), groups: [] },
+      heldRows: [],
+      heldGroups: [],
+    });
+    await settle();
+    expect(visit.getSnapshot().rows.map((r) => r.ref)).toEqual(["a", "b", "c", "d"]);
+    expect(keysOf(visit)).toEqual(["group:1", "d"]);
+    expect(visit.getSnapshot().current).toBe("group:1");
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("d"), []);
+    expect(visit.getSnapshot().rows.map((r) => r.ref)).toEqual(["d"]);
+  });
+
+  it("does not draw a dismissed group's members again while the dismissal is on its way", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c", "x"), [group("a", ["a", "b"])], {
+      more: true,
+    });
+    const receipt = visit.move("dismissed", ["a", "b"]);
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c", "x"), [group("a", ["a", "b"])]);
+    expect(keysOf(visit)).toEqual(["c", "x"]);
+    visit.viewportChanged(0, 1);
+    fake.open("next").resolve({ rows: rows("a", "b", "y"), groups: [group("a", ["a", "b"])] });
+    await settle();
+    expect(keysOf(visit)).toEqual(["c", "x", "y"]);
+    visit.confirmMove(receipt);
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("c", "x"), [], { stillIn: rows("y") });
+    expect(visit.getSnapshot().arrivals).toBe(0);
+    expect(keysOf(visit)).toEqual(["c", "x", "y"]);
+  });
+
+  it("dismisses an open group with one receipt and moves on past its last member", async () => {
+    const { visit } = await openedGroups(rows("a", "b", "c", "d"), [group("a", ["a", "b", "c"])]);
+    visit.fold({ kind: "open" });
+    visit.select({ kind: "toggle", ref: "a" });
+    const receipt = visit.move("dismissed", ["a", "b", "c"]);
+    expect(receipt.refs).toEqual(["a", "b", "c"]);
+    const snapshot = visit.getSnapshot();
+    expect(keysOf(visit)).toEqual(["d"]);
+    expect(snapshot.current).toBe("d");
+    expect(snapshot.selection.size).toBe(0);
+  });
+
+  it("keeps a group whose last matching member was dismissed until a read drops it", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "q1", "q2"), [
+      group("a", ["a"], ["q1", "q2"]),
+    ]);
+    visit.move("dismissed", ["a"]);
+    expect(keysOf(visit)).toEqual(["group:1"]);
+    expect(headOf(visit, "group:1")).toMatchObject({ matchingCount: 0, placedBy: undefined });
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("q1", "q2"), []);
+    expect(keysOf(visit)).toEqual(["q1", "q2"]);
+  });
+
+  it("ignores a reply with groups that belongs to a list that was switched away from", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b"), [group("a", ["a", "b"])]);
+    visit.pushArrived();
+    const late = fake.open("refresh");
+    visit.open("list-2");
+    await answerFirst(fake, rows("x", "y"));
+    late.resolve({
+      firstPage: { ...firstPage(rows("a", "b")), groups: [group("a", ["a", "b"])] },
+      heldRows: [],
+      heldGroups: [],
+    });
+    await settle();
+    expect(keysOf(visit)).toEqual(["x", "y"]);
+  });
+
+  it("counts an arrival inside a held group once, keeps it out of the group's move, and seats it under the head after Show", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b"), [group("a", ["a", "b"])]);
+    visit.fold({ kind: "open" });
+    const arrived = [row("x", "x", 5), row("a"), row("b")];
+    const withX = [group("x", ["x", "a", "b"])];
+    visit.pushArrived();
+    await answerRefreshGroups(fake, arrived, withX);
+    expect(visit.getSnapshot().arrivals).toBe(1);
+    const target = visit.targets("group:1");
+    expect(target).toMatchObject({ kind: "group", size: 2 });
+    expect(target?.kind === "group" && target.members.map((m) => m.ref)).toEqual(["a", "b"]);
+    visit.show();
+    await answerRefreshGroups(fake, arrived, withX);
+    expect(visit.getSnapshot().arrivals).toBe(0);
+    expect(keysOf(visit)).toEqual(["group:1", "x", "a", "b"]);
+  });
+
+  describe("selection", () => {
+    it("selects a head's matching members with X, all of them with ⇧X, and toggles back", async () => {
+      const { visit } = await openedGroups(rows("a", "b", "q", "d"), [
+        group("a", ["a", "b"], ["q"]),
+      ]);
+      visit.select({ kind: "toggle", ref: "group:1" });
+      expect([...visit.getSnapshot().selection]).toEqual(["a", "b"]);
+      expect(headOf(visit, "group:1").tick).toBe("all");
+      visit.select({ kind: "toggle", ref: "group:1" });
+      expect(visit.getSnapshot().selection.size).toBe(0);
+      visit.select({ kind: "toggle", ref: "group:1", whole: true });
+      expect([...visit.getSnapshot().selection]).toEqual(["a", "b", "q"]);
+      visit.select({ kind: "toggle", ref: "group:1", whole: true });
+      expect(visit.getSnapshot().selection.size).toBe(0);
+    });
+
+    it("ticks some when only a member is selected, and a fold keeps the selection", async () => {
+      const { visit } = await openedGroups(rows("a", "b", "d"), [group("a", ["a", "b"])]);
+      visit.fold({ kind: "open" });
+      visit.select({ kind: "toggle", ref: "a" });
+      expect(headOf(visit, "group:1").tick).toBe("some");
+      visit.fold({ kind: "close", key: "group:1" });
+      expect([...visit.getSnapshot().selection]).toEqual(["a"]);
+    });
+
+    it("selects a range over entries without repeating a ref, and ⌘A takes things and head matches", async () => {
+      const { visit } = await openedGroups(rows("a", "b", "q", "d"), [
+        group("a", ["a", "b"], ["q"]),
+      ]);
+      visit.fold({ kind: "open" });
+      visit.select({ kind: "focus", ref: "group:1" });
+      visit.step(1, true);
+      visit.step(1, true);
+      visit.step(1, true);
+      visit.step(1, true);
+      expect([...visit.getSnapshot().selection].sort()).toEqual(["a", "b", "d", "q"]);
+      visit.select({ kind: "all" });
+      expect([...visit.getSnapshot().selection].sort()).toEqual(["a", "b", "d"]);
+    });
+  });
+
+  it("steps over heads, members and the more line, and ← goes to the head", async () => {
+    const refs = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"];
+    const { visit } = await openedGroups(rows(...refs, "z"), [group("m1", refs)]);
+    visit.step(1);
+    expect(visit.getSnapshot().current).toBe("z");
+    visit.step(-1);
+    visit.fold({ kind: "open" });
+    expect(keysOf(visit)).toEqual(["group:1", "m1", "m2", "m3", "m4", "m5", "group:1:more", "z"]);
+    visit.step(1);
+    expect(visit.getSnapshot().current).toBe("m1");
+    visit.fold({ kind: "close" });
+    expect(visit.getSnapshot().current).toBe("group:1");
+    visit.select({ kind: "focus", ref: "m3" });
+    visit.fold({ kind: "close", key: "group:1" });
+    expect(visit.getSnapshot().current).toBe("group:1");
+    expect(headOf(visit, "group:1").isOpen).toBe(false);
+  });
+
+  it("shows 5 of a group of 8, matching members first, and Show more makes the first new member current", async () => {
+    const refs = ["m1", "m2", "q1", "q2", "q3", "q4", "q5", "q6"];
+    const { visit } = await openedGroups(rows(...refs), [group("m1", ["m1", "m2"], refs.slice(2))]);
+    visit.fold({ kind: "open" });
+    expect(keysOf(visit).slice(1, 6)).toEqual(["m1", "m2", "q1", "q2", "q3"]);
+    const more = visit.getSnapshot().entries.at(-1);
+    expect(more).toMatchObject({ kind: "more", hiddenCount: 3 });
+    visit.select({ kind: "focus", ref: "group:1:more" });
+    visit.fold({ kind: "showMore" });
+    expect(keysOf(visit)).toHaveLength(9);
+    expect(visit.getSnapshot().current).toBe("q4");
+  });
+
+  describe("the first E on a group that just came under the keys", () => {
+    const setup = async () => {
+      const made = await openedGroups(rows("a", "b", "c", "d", "e"), [
+        group("a", ["a", "b"]),
+        group("c", ["c", "d"]),
+      ]);
+      made.time.now = 1000;
+      return made;
+    };
+    const isFresh = (visit: InboxVisit<Row, string>, hoveredKey?: string) => {
+      const target = visit.targets(hoveredKey);
+      return target?.kind === "group" ? target.isFresh : undefined;
+    };
+
+    it("is fresh for 599 ms and not at 600 ms", async () => {
+      const { visit, time } = await setup();
+      visit.move("dismissed", ["a", "b"]);
+      expect(visit.getSnapshot().current).toBe("group:2");
+      time.now = 1599;
+      expect(isFresh(visit)).toBe(true);
+      time.now = 1600;
+      expect(isFresh(visit)).toBe(false);
+    });
+
+    it("is cleared by a step and by an undo", async () => {
+      const { visit } = await setup();
+      const receipt = visit.move("dismissed", ["a", "b"]);
+      visit.step(1);
+      visit.step(-1);
+      expect(isFresh(visit)).toBe(false);
+      visit.undo(receipt);
+      expect(isFresh(visit)).toBe(false);
+    });
+
+    it("is never fresh from a hover or a selection", async () => {
+      const { visit } = await setup();
+      visit.move("dismissed", ["a", "b"]);
+      expect(isFresh(visit, "group:2")).toBe(false);
+      visit.select({ kind: "toggle", ref: "e" });
+      expect(visit.targets()?.kind).toBe("selection");
+    });
+
+    it("is not set by a read that moved the current entry", async () => {
+      const { fake, visit } = await setup();
+      visit.pushArrived();
+      await answerRefreshGroups(fake, rows("c", "d", "e"), [group("c", ["c", "d"])]);
+      expect(visit.getSnapshot().current).toBe("group:2");
+      expect(isFresh(visit)).toBe(false);
+    });
+  });
+
+  describe("in a search", () => {
+    it("opens a group for a hit besides its label, not for a label alone, and an explicit close wins", async () => {
+      const { visit } = await openedGroups(
+        rows("a", "b", "c", "d"),
+        [group("a", ["a", "b"]), group("c", ["c"], ["d"])],
+        { isSearch: true },
+      );
+      expect(headOf(visit, "group:1").isOpen).toBe(true);
+      expect(headOf(visit, "group:2").isOpen).toBe(false);
+      visit.fold({ kind: "close", key: "group:1" });
+      expect(headOf(visit, "group:1").isOpen).toBe(false);
+    });
+
+    it("forgets the folds when another list opens", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), [group("a", ["a", "b"])]);
+      visit.fold({ kind: "open" });
+      visit.open("list-2");
+      fake
+        .open("first")
+        .resolve({ ...firstPage(rows("a", "b")), groups: [group("a", ["a", "b"])] });
+      await settle();
+      expect(headOf(visit, "group:1").isOpen).toBe(false);
+    });
+  });
+
+  it("keeps the identity of the entries across a read that changes nothing, and across a step", async () => {
+    const { fake, visit } = await openedGroups(rows("a", "b", "c"), [group("a", ["a", "b"])]);
+    const before = visit.getSnapshot().entries;
+    visit.pushArrived();
+    await answerRefreshGroups(fake, rows("a", "b", "c"), [group("a", ["a", "b"])]);
+    expect(visit.getSnapshot().entries).toBe(before);
+    visit.step(1);
+    expect(visit.getSnapshot().entries).toBe(before);
+  });
+
+  it("keeps a group that a read did not cover, such as one far from the viewport", async () => {
+    const items = Array.from({ length: 900 }, (_, i) => row(`t${i}`));
+    const far = group("t890", ["t890", "t891"]);
+    const { fake, visit } = await openedGroups(items, [far], { more: false });
+    visit.pushArrived();
+    await answerRefreshGroups(fake, items.slice(0, 200), [], { stillIn: items.slice(200, 400) });
+    expect(headOf(visit, "group:1")).toMatchObject({ labelRef: "t890", size: 2 });
   });
 });

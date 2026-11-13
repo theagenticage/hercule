@@ -8,8 +8,11 @@
  * module composes them into statements and reads only what it shows:
  *
  * - A page is one statement that finds, filters, counts, orders and cuts the
- *   things (keyset pages of `MAX_INBOX_PAGE`), then batched reads for the
- *   refs of that page alone.
+ *   units (keyset pages of `MAX_INBOX_PAGE` things), then batched reads for the
+ *   refs of that page alone. A unit is a group of linked things or a thing
+ *   that is in no group (`inbox-groups.ts`). The groups come from one
+ *   statement over the links among the things on the Inbox, read once per
+ *   snapshot.
  * - The counts are a fixed handful of statements, whatever the number of
  *   things, sources, saved queries or pins.
  *
@@ -17,14 +20,17 @@
  */
 import { createHash } from "node:crypto";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createValidationError,
   MAX_ENTITY_SIGNALS,
+  MAX_GRAPH_EDGES,
   MAX_INBOX_ACCOUNTS,
   MAX_INBOX_ASKS,
   MAX_INBOX_HELD_REFS,
+  MAX_INBOX_MOVED_THINGS,
   MAX_INBOX_PAGE,
   MAX_INBOX_PAGE_FACET_VALUES,
   MAX_INBOX_RAIL_FACET_VALUES,
@@ -33,6 +39,9 @@ import {
   type InboxCounts,
   type InboxFacet,
   type InboxFirstPage,
+  type InboxGroup,
+  type InboxGroupDetail,
+  type InboxGroupMember,
   type InboxList,
   type InboxOutline,
   type InboxQuery,
@@ -55,6 +64,17 @@ import {
   type EntityEnvironment,
 } from "./entity-records";
 import { readFieldValues, type EntityFieldValues } from "./entity-fields";
+import { EFFECTIVE_LINK_SQL, makeEntityLinkReads, readLinksAmong } from "./entity-links";
+import { makeInboxPopulation } from "./inbox-population";
+import { timelineRepository } from "./timeline";
+import {
+  buildInboxGroup,
+  cutPage,
+  decideGroups,
+  findUnitKey,
+  type Group,
+  type GroupsByRef,
+} from "./inbox-groups";
 import {
   compileInboxFilter,
   escapeLike,
@@ -72,6 +92,7 @@ import {
   buildTakenOfRefs,
   CORE_KEYS,
   isCoreKey,
+  joinConditions,
   OBSERVING_SQL,
   ORDER_BY,
   parseSourceOfKind,
@@ -525,8 +546,49 @@ interface PageRow {
   readonly oldest_ask: string | null;
   readonly upd: string;
   readonly grp: number;
+  /** The key of the unit the row places: the label ref of its group, or its own ref. */
+  readonly unit: string;
   /** Only on the first page. */
   readonly total?: number;
+}
+
+/** A member of a group, as the members statement returns it. */
+interface MemberRow {
+  readonly id: Uint8Array;
+  readonly ref: string;
+  readonly task_id: Uint8Array | null;
+  readonly oldest_ask: string | null;
+  readonly upd: string;
+  readonly grp: number;
+  /** 1 when the member answers the query of the list. */
+  readonly matches: number;
+}
+
+/** What `readGroups` reads: a link as its two ends, or a thing that is an end of some link. */
+interface GroupRow {
+  readonly ref: string;
+  readonly other_ref: string | null;
+  readonly kind: string | null;
+  readonly title: string | null;
+  readonly created_at: string | null;
+}
+
+/** Converts a row of the members statement to the member a reply lists. */
+const describeMember = (member: MemberRow): InboxGroupMember => ({
+  id: uuidToString(member.id),
+  ref: member.ref,
+  matches: member.matches === 1,
+});
+
+/** The things of a reply, the groups they form, and where the reply ended. */
+interface UnitsRead {
+  readonly things: ReadonlyArray<InboxThing>;
+  readonly groups: ReadonlyArray<InboxGroup>;
+  readonly offerSets: InboxFirstPage["offerSets"];
+  /** The placing row of the last unit the reply holds, which a cursor continues after. */
+  readonly lastRow: PageRow | undefined;
+  /** True when units were left for a later page. */
+  readonly more: boolean;
 }
 
 /** One open ask of a thing, as the asks statement returns it. */
@@ -547,6 +609,9 @@ export const externalEntityInbox = Effect.gen(function* () {
   const signals = yield* signalRepository;
   const runs = yield* runRepository;
   const offerReads = yield* makeWorkflowOfferReads;
+  const timeline = yield* timelineRepository;
+  const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
+  const population = makeInboxPopulation(sql);
   const { readEntities, readObservations } = makeEntityRowReads(sql);
 
   /** Runs a read of the field table with this client. */
@@ -616,7 +681,7 @@ export const externalEntityInbox = Effect.gen(function* () {
   /** Builds the things of a page, in the order of `rows`, from the batched reads of their refs. */
   const hydrate = (
     environment: InboxEnvironment,
-    rows: ReadonlyArray<PageRow>,
+    rows: ReadonlyArray<Pick<PageRow, "ref" | "task_id" | "oldest_ask">>,
   ): Effect.Effect<
     { readonly things: ReadonlyArray<InboxThing>; readonly offerSets: InboxFirstPage["offerSets"] },
     SqlError
@@ -732,41 +797,286 @@ export const externalEntityInbox = Effect.gen(function* () {
     });
 
   /**
+   * Reads the groups of the Inbox: one statement for every link whose two ends
+   * are both on the Inbox (the eligible things, before any query), with the
+   * facts that electing a group's label needs. A link joins things only when a
+   * source or a person made it, and a thing that is not on the Inbox joins
+   * nothing. The cost follows the links, not the number of things.
+   */
+  const readGroups = (environment: InboxEnvironment): Effect.Effect<GroupsByRef, SqlError> =>
+    Effect.gen(function* () {
+      const eligible = buildEligibleEntities(environment);
+      const rows = yield* runStatement<GroupRow>(
+        sql,
+        `WITH ${eligible.sql},
+          on_inbox AS MATERIALIZED (SELECT ref FROM eligible),
+          links AS MATERIALIZED (
+            SELECT DISTINCT c.from_ref AS a, c.to_ref AS b
+            FROM on_inbox o
+              CROSS JOIN external_entity_relation_claims c
+                ON c.from_ref = o.ref AND ${EFFECTIVE_LINK_SQL} AND c.from_ref <> c.to_ref
+              CROSS JOIN on_inbox o2 ON o2.ref = c.to_ref),
+          ends AS (SELECT a AS ref FROM links UNION SELECT b FROM links)
+         SELECT l.a AS ref, l.b AS other_ref, NULL AS kind, NULL AS title, NULL AS created_at
+         FROM links l
+         UNION ALL
+         SELECT e.ref, NULL, e.kind, e.title, COALESCE(e.source_created_at, e.first_observed_at)
+         FROM external_entities e WHERE e.ref IN (SELECT ref FROM ends)`,
+        eligible.params,
+      );
+      const lasting = new Map(
+        (environment.activeEntityKinds ?? []).map((kind) => [kind.kind, kind.lasting ?? 0]),
+      );
+      return decideGroups(
+        rows.flatMap((row) =>
+          row.kind === null
+            ? []
+            : [{ ref: row.ref, kind: row.kind, title: row.title!, createdAt: row.created_at! }],
+        ),
+        rows.flatMap((row) =>
+          row.other_ref === null ? [] : [{ fromRef: row.ref, toRef: row.other_ref }],
+        ),
+        lasting,
+      );
+    });
+
+  /**
+   * Reads the group of `ref` among the things on the Inbox, in full, or none
+   * when `ref` is not on the Inbox. The group is decided by `readGroups`, as
+   * `queryInbox` decides it, inside one read snapshot.
+   *
+   * - A thing linked to nothing on the Inbox is a group of one, titled by its
+   *   peer (its ref when the peer is restricted and shows no title).
+   * - Members are the label thing, then the others sorted by ref, cut at
+   *   `MAX_INBOX_MOVED_THINGS`; `links` are cut at `MAX_GRAPH_EDGES`.
+   *   `complete` is false when either was cut.
+   *
+   * A fixed number of statements however large the group is: the groups, the
+   * eligibility of `ref` (only when it is in no group), the members' records,
+   * observations and latest changes, and the links.
+   */
+  const readInboxGroup = (
+    environment: InboxEnvironment,
+    ref: string,
+  ): Effect.Effect<Option.Option<InboxGroupDetail>, SqlError> =>
+    withReadSnapshot(
+      sql,
+      Effect.gen(function* () {
+        const group = (yield* readGroups(environment)).get(ref);
+        if (
+          group === undefined &&
+          !(yield* population.listEligibleRefs([ref], environment)).has(ref)
+        ) {
+          return Option.none();
+        }
+        const everyone = group?.memberRefs ?? [ref];
+        const labelRef = group?.labelRef ?? ref;
+        const shown = [labelRef, ...everyone.filter((member) => member !== labelRef)].slice(
+          0,
+          MAX_INBOX_MOVED_THINGS,
+        );
+        const found = yield* linkReads.listPeers(new Set(), shown, environment.activeEntityKinds);
+        const peers = new Map(found.map((peer) => [peer.ref, peer] as const));
+        const members = shown.flatMap((member) => peers.get(member) ?? []);
+        const { links, complete: linksComplete } =
+          shown.length < 2
+            ? { links: [], complete: true }
+            : yield* readLinksAmong(sql, shown, MAX_GRAPH_EDGES);
+        return Option.some({
+          labelRef,
+          label: group?.label ?? peers.get(ref)?.title ?? ref,
+          members,
+          links,
+          complete: shown.length === everyone.length && linksComplete,
+        });
+      }),
+    );
+
+  /**
+   * Reads the rows that place the units of a list: one row for each unit that
+   * has a member answering the selection, which is its first matching member in
+   * the list's order. A lone thing places itself. The rows are in the list's
+   * order, after `tuple` when there is one, at most `limit` of them. With
+   * `onlyRefs`, only those things are looked at (the whole of every unit that
+   * is wanted). One statement.
+   *
+   * A group is ranked here, before the keyset, so a cursor that continues after
+   * a unit's placing row never meets the group again. Only the things in a
+   * group are ranked in a window, so the cost of a list with few groups is the
+   * cost of a list with none.
+   */
+  const readPlacingRows = (
+    matched: ReturnType<typeof buildMatchedEntities>,
+    selection: Selection,
+    groups: GroupsByRef,
+    options: {
+      readonly tuple: SortTuple | undefined;
+      readonly limit: number;
+      readonly withTotal: boolean;
+    },
+  ) => {
+    const order = ORDER_BY[selection.list.order];
+    const where = buildKeyset(selection.list.order, options.tuple);
+    return runStatement<PageRow>(
+      sql,
+      `WITH ${matched.sql},
+        grouped(ref, unit) AS (SELECT key, value FROM json_each(?)),
+        placed AS (
+          SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.ref AS unit
+          FROM matched m WHERE m.ref NOT IN (SELECT ref FROM grouped)
+          UNION ALL
+          SELECT ref, task_id, oldest_ask, upd, grp, unit FROM (
+            SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, g.unit,
+              ROW_NUMBER() OVER (PARTITION BY g.unit ORDER BY ${order}) AS rn
+            FROM matched m JOIN grouped g ON g.ref = m.ref)
+          WHERE rn = 1)
+       SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.unit
+         ${options.withTotal ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
+       FROM placed m WHERE ${where.sql}
+       ORDER BY ${order} LIMIT ?`,
+      [
+        ...matched.params,
+        JSON.stringify(
+          Object.fromEntries([...groups].map(([ref, group]) => [ref, group.labelRef])),
+        ),
+        ...where.params,
+        options.limit,
+      ],
+    );
+  };
+
+  /**
+   * Reads every member of `refs`: the ones that answer the selection first,
+   * then the others, each part in the list's order. One statement, over those
+   * refs alone. A member is on the Inbox, so it has a row whether it answers
+   * or not.
+   */
+  const readMembers = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    refs: ReadonlyArray<string>,
+  ) => {
+    const eligible = buildEligibleEntities(environment, refs);
+    return runStatement<MemberRow>(
+      sql,
+      `WITH ${eligible.sql}
+       SELECT m.id, m.ref, m.task_id, m.oldest_ask, m.upd, m.grp, m.matches FROM (
+         SELECT e.id, e.ref, e.task_id, e.oldest_ask, e.source_updated_at AS upd,
+           CASE WHEN e.oldest_ask IS NULL THEN 1 ELSE 0 END AS grp,
+           CASE WHEN ${selection.filter.sql} THEN 1 ELSE 0 END AS matches
+         FROM eligible e) m
+       ORDER BY m.matches DESC, ${ORDER_BY[selection.list.order]}`,
+      [...eligible.params, ...selection.filter.params],
+    );
+  };
+
+  /**
+   * Reads the members of `wanted` in one batch and returns them by the label
+   * ref of their group, each list with the members that answer the selection
+   * first.
+   */
+  const readMembersByUnit = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    groups: GroupsByRef,
+    wanted: ReadonlyArray<Group>,
+  ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<MemberRow>>, SqlError> =>
+    Effect.gen(function* () {
+      const byUnit = new Map<string, Array<MemberRow>>();
+      if (wanted.length === 0) return byUnit;
+      const members = yield* readMembers(
+        environment,
+        selection,
+        wanted.flatMap((group) => group.memberRefs),
+      );
+      for (const member of members) {
+        const key = findUnitKey(groups, member.ref);
+        const unitMembers = byUnit.get(key) ?? [];
+        unitMembers.push(member);
+        byUnit.set(key, unitMembers);
+      }
+      return byUnit;
+    });
+
+  /**
+   * Cuts `placing`, the rows that place the units in list order, to `budget`
+   * things (see `cutPage`), reads the members of the groups it keeps in one
+   * batch, and hydrates the things of the page. The things of a unit are
+   * contiguous, in the list's order. Of a group that the cut shortens, the
+   * reply holds its first members, but its `InboxGroup` still names them all.
+   */
+  const readUnits = (
+    environment: InboxEnvironment,
+    selection: Selection,
+    groups: GroupsByRef,
+    placing: ReadonlyArray<PageRow>,
+    budget: number,
+  ): Effect.Effect<UnitsRead, SqlError> =>
+    Effect.gen(function* () {
+      const cut = cutPage(
+        placing.map((row) => ({
+          key: row.unit,
+          size: groups.get(row.ref)?.memberRefs.length ?? 1,
+          row,
+        })),
+        budget,
+      );
+      const keptGroups = cut.kept.flatMap(({ unit }) => {
+        const group = groups.get(unit.row.ref);
+        return group === undefined ? [] : [group];
+      });
+      const membersByUnit = yield* readMembersByUnit(environment, selection, groups, keptGroups);
+
+      const rows: Array<Pick<PageRow, "ref" | "task_id" | "oldest_ask">> = [];
+      for (const { unit, take } of cut.kept) {
+        if (!groups.has(unit.row.ref)) rows.push(unit.row);
+        else rows.push(...membersByUnit.get(unit.key)!.slice(0, take));
+      }
+      const inboxGroups = keptGroups.map((group) =>
+        buildInboxGroup(group, membersByUnit.get(group.labelRef)!.map(describeMember)),
+      );
+      const { things, offerSets } = yield* hydrate(environment, rows);
+      return {
+        things,
+        groups: inboxGroups,
+        offerSets,
+        lastRow: cut.kept.at(-1)?.unit.row,
+        more: cut.more,
+      };
+    });
+
+  /**
    * Reads one page of the selection after `tuple` (the first page when it is
-   * absent). One statement for the rows, then the batched reads of their
-   * details. The first page also counts the whole result.
+   * absent): the statement for the rows that place the units, one for the
+   * members of its groups, then the batched reads of the details. The first
+   * page also counts the whole result.
    */
   const readPage = (
     environment: InboxEnvironment,
     selection: Selection,
+    groups: GroupsByRef,
     tuple: SortTuple | undefined,
   ) =>
     Effect.gen(function* () {
       const { list, filter, hash } = selection;
       const matched = buildMatchedEntities(environment, filter);
-      const where = buildKeyset(list.order, tuple);
-      const rows = yield* runStatement<PageRow>(
-        sql,
-        `WITH ${matched.sql}
-         SELECT m.ref, m.task_id, m.oldest_ask, m.upd, m.grp
-           ${tuple === undefined ? ", (SELECT COUNT(*) FROM matched) AS total" : ""}
-         FROM matched m WHERE ${where.sql}
-         ORDER BY ${ORDER_BY[list.order]} LIMIT ?`,
-        [...matched.params, ...where.params, MAX_INBOX_PAGE + 1],
-      );
-      const pageRows = rows.slice(0, MAX_INBOX_PAGE);
-      const last = pageRows.at(-1);
+      const placing = yield* readPlacingRows(matched, selection, groups, {
+        tuple,
+        limit: MAX_INBOX_PAGE + 1,
+        withTotal: tuple === undefined,
+      });
+      const read = yield* readUnits(environment, selection, groups, placing, MAX_INBOX_PAGE);
       const nextCursor =
-        rows.length > MAX_INBOX_PAGE && last !== undefined
-          ? encodeCursor(hash, buildSortTuple(list.order, last))
+        read.more && read.lastRow !== undefined
+          ? encodeCursor(hash, buildSortTuple(list.order, read.lastRow))
           : undefined;
-      const { things, offerSets } = yield* hydrate(environment, pageRows);
       return {
         matched,
-        things,
-        offerSets,
+        things: read.things,
+        groups: read.groups,
+        offerSets: read.offerSets,
         // A first page has no keyset, so it has no rows only when nothing matches.
-        total: rows[0]?.total ?? 0,
+        total: placing[0]?.total ?? 0,
         ...(nextCursor === undefined ? {} : { nextCursor }),
       };
     });
@@ -775,9 +1085,10 @@ export const externalEntityInbox = Effect.gen(function* () {
   const readFirstPage = (
     environment: InboxEnvironment,
     selection: Selection,
+    groups: GroupsByRef,
   ): Effect.Effect<InboxFirstPage, SqlError> =>
     Effect.gen(function* () {
-      const page = yield* readPage(environment, selection, undefined);
+      const page = yield* readPage(environment, selection, groups, undefined);
       const facetFields = listFacetFields(selection.fields);
       const { accounts } = yield* readSourceCounts(sql, page.matched);
       const facetRows = yield* readFacetRows(
@@ -790,6 +1101,7 @@ export const externalEntityInbox = Effect.gen(function* () {
       return {
         mode: "first",
         things: page.things,
+        groups: page.groups,
         ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
         total: page.total,
         order: selection.list.order,
@@ -799,18 +1111,46 @@ export const externalEntityInbox = Effect.gen(function* () {
     });
 
   /**
-   * Reads the things of `held` that still belong to the selection, in the
-   * list's order. One statement for the rows, then the batched reads of their
-   * details. A held ref that no longer belongs, or was pruned, is not in the
-   * reply.
+   * Reads the things of `held` that are still on the list, in the list's
+   * order, and describes the groups they are in. A held thing is on the list
+   * when it answers the selection, or when it is a member of a group that has
+   * a member that answers (the group is on the list, and the thing is drawn
+   * quieter in it). One statement for the members of the groups of the held
+   * things, one for the rows, then the batched reads of the details. A held
+   * ref that is not on the list, or was pruned, is not in the reply. Members
+   * that are not held are not hydrated: the group only names them.
    */
   const readHeldRows = (
     environment: InboxEnvironment,
     selection: Selection,
+    groups: GroupsByRef,
     held: ReadonlyArray<string>,
   ) =>
     Effect.gen(function* () {
-      const matched = buildMatchedEntities(environment, selection.filter, undefined, held);
+      const heldGroups = [
+        ...new Map(
+          held.flatMap((ref) => {
+            const group = groups.get(ref);
+            return group === undefined ? [] : [[group.labelRef, group] as const];
+          }),
+        ).values(),
+      ];
+      const membersByUnit = yield* readMembersByUnit(environment, selection, groups, heldGroups);
+      // A held member that does not answer stays when some member of its group does.
+      const heldSet = new Set(held);
+      const quiet = [...membersByUnit.values()].flatMap((members) =>
+        members.some((member) => member.matches === 1)
+          ? members.filter((member) => member.matches === 0 && heldSet.has(member.ref))
+          : [],
+      );
+      const onList = joinConditions("OR", [
+        selection.filter,
+        {
+          sql: "e.ref IN (SELECT value FROM json_each(?))",
+          params: [JSON.stringify(quiet.map((member) => member.ref))],
+        },
+      ]);
+      const matched = buildMatchedEntities(environment, onList, undefined, held);
       const rows = yield* runStatement<PageRow>(
         sql,
         `WITH ${matched.sql}
@@ -818,7 +1158,17 @@ export const externalEntityInbox = Effect.gen(function* () {
          FROM matched m ORDER BY ${ORDER_BY[selection.list.order]} LIMIT ?`,
         [...matched.params, MAX_INBOX_HELD_REFS],
       );
-      return yield* hydrate(environment, rows);
+      const groupsOfThings = new Set(rows.map((row) => groups.get(row.ref)?.labelRef));
+      const { things, offerSets } = yield* hydrate(environment, rows);
+      return {
+        things,
+        groups: heldGroups
+          .filter((group) => groupsOfThings.has(group.labelRef))
+          .map((group) =>
+            buildInboxGroup(group, membersByUnit.get(group.labelRef)!.map(describeMember)),
+          ),
+        offerSets,
+      };
     });
 
   /**
@@ -851,14 +1201,20 @@ export const externalEntityInbox = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (query.mode) {
         case "first":
-          return yield* readFirstPage(environment, selection);
+          return yield* readFirstPage(environment, selection, yield* readGroups(environment));
         case "next": {
           const tuple = decodeCursor(query.after, selection.hash, selection.list.order);
           if (typeof tuple === "string") return yield* failValidation(["after"], tuple);
-          const page = yield* readPage(environment, selection, tuple);
+          const page = yield* readPage(
+            environment,
+            selection,
+            yield* readGroups(environment),
+            tuple,
+          );
           return {
             mode: "next",
             things: page.things,
+            groups: page.groups,
             ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
             offerSets: page.offerSets,
           };
@@ -866,13 +1222,16 @@ export const externalEntityInbox = Effect.gen(function* () {
         case "rows":
           return {
             mode: "rows",
-            ...(yield* readHeldRows(environment, selection, [...new Set(query.held)])),
+            ...(yield* readHeldRows(environment, selection, yield* readGroups(environment), [
+              ...new Set(query.held),
+            ])),
           };
         case "refresh": {
-          const first = yield* readFirstPage(environment, selection);
+          const groups = yield* readGroups(environment);
+          const first = yield* readFirstPage(environment, selection, groups);
           const onFirstPage = new Set(first.things.map((thing) => thing.ref));
           const rest = [...new Set(query.held)].filter((ref) => !onFirstPage.has(ref));
-          const held = yield* readHeldRows(environment, selection, rest);
+          const held = yield* readHeldRows(environment, selection, groups, rest);
           return { mode: "refresh", first, held } as const;
         }
       }
@@ -1245,5 +1604,5 @@ export const externalEntityInbox = Effect.gen(function* () {
       return { values };
     });
 
-  return { queryInbox, countInbox, readInboxOutline, suggestInboxValues };
+  return { queryInbox, countInbox, readInboxOutline, suggestInboxValues, readInboxGroup };
 });

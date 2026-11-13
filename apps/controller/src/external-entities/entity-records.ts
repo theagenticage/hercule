@@ -141,6 +141,8 @@ export interface ActiveEntityKind {
   /** The singular noun, such as "Pull request". */
   readonly noun: string;
   readonly refPrefix: string;
+  /** How long a thing of this kind lasts, from 0 to 3. Left out means 0. A group of linked things is named after its most lasting member. */
+  readonly lasting?: number;
   /** The fields the kind declares, in display order. Left out when it declares none. */
   readonly fields?: ReadonlyArray<QualifiedEntityFieldDeclaration>;
   /** What the kind's card shows beyond the generic card. Left out for the generic card. */
@@ -152,12 +154,14 @@ export const buildActiveEntityKind = (declaration: {
   readonly word: string;
   readonly noun: string;
   readonly refPrefix: string;
+  readonly lasting?: number;
   readonly fields?: ReadonlyArray<QualifiedEntityFieldDeclaration>;
   readonly face?: CardFaceDeclaration;
 }): ActiveEntityKind => ({
   kind: declaration.word,
   noun: declaration.noun,
   refPrefix: declaration.refPrefix,
+  ...(declaration.lasting === undefined ? {} : { lasting: declaration.lasting }),
   ...(declaration.fields === undefined ? {} : { fields: declaration.fields }),
   ...(declaration.face === undefined ? {} : { face: declaration.face }),
 });
