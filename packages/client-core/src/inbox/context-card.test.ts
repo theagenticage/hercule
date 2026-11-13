@@ -60,6 +60,20 @@ describe("describeContextCard", () => {
     });
   });
 
+  it("says the facts are the last known ones when the thing lost access", () => {
+    expect(describeContextCard(buildCard({ access: "inaccessible" })).lastKnownNote).toBe(
+      "Last known state - you can no longer open it",
+    );
+    expect(describeContextCard(buildCard({ access: "deleted" })).lastKnownNote).toBe(
+      "Last known state - deleted at the source",
+    );
+  });
+
+  it("adds no note for a thing that can be read, or whose access is not given", () => {
+    expect(describeContextCard(buildCard({ access: "ok" }))).not.toHaveProperty("lastKnownNote");
+    expect(describeContextCard(buildCard())).not.toHaveProperty("lastKnownNote");
+  });
+
   it("falls back to the ref when the thing has no title", () => {
     const untitled = buildCard();
     delete (untitled as { title?: string }).title;

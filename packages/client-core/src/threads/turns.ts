@@ -762,7 +762,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event, !sawUserMessage));
+          turn.userMessages.push(buildUserMessage(event, !agent.isSubagent && !sawUserMessage));
           sawUserMessage = true;
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);

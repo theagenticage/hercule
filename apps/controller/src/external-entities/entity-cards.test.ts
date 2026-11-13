@@ -47,9 +47,20 @@ describe("buildEntityCard", () => {
       title: "Fix the cart",
       status: { shape: "half", tone: "active", label: "In progress" },
       card: "compact",
+      access: "ok",
       face,
       restricted: false,
     });
+  });
+
+  it("gives a record that lost access its last known facts and says how it lost it", () => {
+    for (const access of ["inaccessible", "deleted"] as const) {
+      expect(buildEntityCard(record({ access }), null, [ticketKind])).toMatchObject({
+        title: "Fix the cart",
+        access,
+        restricted: false,
+      });
+    }
   });
 
   it("leaves out the identifier and title a partial record does not hold yet", () => {

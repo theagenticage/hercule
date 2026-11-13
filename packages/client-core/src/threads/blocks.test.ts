@@ -1594,6 +1594,18 @@ describe("buildThreadBlocks: the context block of a user message", () => {
     expect(later).toMatchObject({ text });
     expect(later).not.toHaveProperty("context");
   });
+
+  it("keeps the whole brief of a subagent, even when it ends in a block", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 1, text),
+      buildTurnCompleted("t1", 2),
+    ];
+    const subagentAgent = { ...agent, isSubagent: true };
+    const [brief] = buildThreadBlocks(rows, subagentAgent).filter((each) => each.kind === "user");
+    expect(brief).toMatchObject({ text });
+    expect(brief).not.toHaveProperty("context");
+  });
 });
 
 describe("appendSendingMessages", () => {

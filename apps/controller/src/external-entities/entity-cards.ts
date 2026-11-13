@@ -15,9 +15,9 @@ import type { TaskableEntity } from "./repository";
  * - A restricted place (`isRestrictedPlace`) gives only its id, ref, kind and
  *   noun, with no face and no `card`: its stored title, status and fields are
  *   what the user could once read.
- * - Any other record gives what its rows hold, including a full record that
- *   lost access (its last known facts). A partial record may have no
- *   identifier, title or `card` yet, and then the card leaves them out.
+ * - Any other record gives what its rows hold and its `access`, including a
+ *   full record that lost access (its last known facts). A partial record may
+ *   have no identifier, title or `card` yet, and then the card leaves them out.
  *
  * `face` is the card face read for the record, null when its kind declares
  * none. A partial record may have no kind stored; the card then takes the
@@ -44,6 +44,7 @@ export const buildEntityCard = (
     ...(record.identifier === "" ? {} : { identifier: record.identifier }),
     ...(record.title === "" ? {} : { title: record.title }),
     ...(record.status === undefined ? {} : { status: record.status }),
+    access: record.access,
     face,
     restricted: false,
   };

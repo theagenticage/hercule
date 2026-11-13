@@ -38,7 +38,31 @@ export interface ContextCardFace {
    * "Storefront", which a card draws beside the status.
    */
   readonly trailing?: { readonly kind: "fact" | "place"; readonly text: string };
+  /**
+   * Present when the thing lost access: the words that say its facts are the
+   * last known ones, such as "Last known state - you can no longer open it".
+   * A card draws them under the status line.
+   */
+  readonly lastKnownNote?: string;
 }
+
+/**
+ * Returns the words that qualify the facts of a thing that lost access, or
+ * `undefined` for a thing that can be read. `deleted` is worded as a fact
+ * only because a source said so for certain; any other lost access is that
+ * the user's Connections can no longer open the thing.
+ */
+const describeLostAccess = (access: EntityCard["access"]): string | undefined => {
+  switch (access) {
+    case "inaccessible":
+      return "Last known state - you can no longer open it";
+    case "deleted":
+      return "Last known state - deleted at the source";
+    case "ok":
+    case undefined:
+      return undefined;
+  }
+};
 
 /**
  * Returns the words of a field of the card's face, or `undefined` when the
@@ -70,7 +94,8 @@ const readFaceWords = (field: EntityFieldValue | undefined): string | undefined 
  * live number, such as "1,211 events") or, when it has none, the place the
  * thing lives in. A restricted thing (no Connection can read it) is a locked
  * card with only its source and noun, worded like the locked rows of a pane:
- * its title is never drawn.
+ * its title is never drawn. A thing that lost access keeps its last known
+ * facts and carries a `lastKnownNote` that says they are not current.
  */
 export const describeContextCard = (card: EntityCard): ContextCardFace => {
   const pluginId = readEntityPluginId(card.kind);
@@ -86,6 +111,7 @@ export const describeContextCard = (card: EntityCard): ContextCardFace => {
       : place === undefined
         ? undefined
         : ({ kind: "place", text: place } as const);
+  const lastKnownNote = describeLostAccess(card.access);
   return {
     pluginId,
     noun: card.noun,
@@ -93,6 +119,7 @@ export const describeContextCard = (card: EntityCard): ContextCardFace => {
     title: card.title ?? card.ref,
     ...(status === undefined ? {} : { status }),
     ...(trailing === undefined ? {} : { trailing }),
+    ...(lastKnownNote === undefined ? {} : { lastKnownNote }),
   };
 };
 

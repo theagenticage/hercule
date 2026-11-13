@@ -2897,9 +2897,10 @@ describe("readCards", () => {
       restricted: false,
       title: "Ticket 1",
       card: "compact",
+      access: "inaccessible",
       face: {},
     });
-    expect(cards[1]).toMatchObject({ restricted: false, title: "Ticket 2" });
+    expect(cards[1]).toMatchObject({ restricted: false, title: "Ticket 2", access: "ok" });
     expect(Object.keys(cards[2]!).sort()).toEqual(
       ["face", "id", "kind", "noun", "ref", "restricted"].sort(),
     );

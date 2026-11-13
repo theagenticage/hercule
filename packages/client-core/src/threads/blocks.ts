@@ -533,7 +533,7 @@ export const buildThreadBlocks = (
         turn.lastStartedItemId = event.itemId;
         if (event.kind === "user_message") {
           closeStretch(turn, event.at);
-          const isFirstMessage = !sawUserMessage;
+          const isFirstMessage = !agent.isSubagent && !sawUserMessage;
           sawUserMessage = true;
           slots.push({
             kind: "user",

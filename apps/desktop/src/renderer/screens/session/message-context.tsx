@@ -55,7 +55,8 @@ function CardTrailing({
 /**
  * Renders one card from its words: the source's mark and name with the thing's
  * noun and identifier, the title, and the status with what ends its line. A
- * card that could not be read has only the source and the title.
+ * thing that lost access adds a faint line saying its facts are the last
+ * known. A card that could not be read has only the source and the title.
  */
 function ContextCardView({
   face,
@@ -88,6 +89,9 @@ function ContextCardView({
           )}
           {trailing === undefined ? null : <CardTrailing trailing={trailing} />}
         </p>
+      )}
+      {face.lastKnownNote === undefined ? null : (
+        <p className="msg-card-note">{face.lastKnownNote}</p>
       )}
     </li>
   );

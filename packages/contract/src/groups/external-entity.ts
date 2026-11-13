@@ -884,9 +884,10 @@ export type EntityCardsQuery = Schema.Schema.Type<typeof EntityCardsQuery>;
  *
  * A `restricted` card is a place no Connection can read now (spec 20 section
  * 1.3): it holds only `id`, `ref`, `kind`, `noun` and `restricted` true, with
- * a null `face` and no `card`, identifier, title or status. A full record
- * that lost access is not restricted: it keeps its last known facts, as
- * `EntityRecord` does. A record that Hercule holds only in part (seen through
+ * a null `face` and no `card`, identifier, title, status or `access`. A full
+ * record that lost access is not restricted: it keeps its last known facts, as
+ * `EntityRecord` does, and its `access` says so (`inaccessible` or `deleted`),
+ * so a client shows those facts as last known rather than current. A record that Hercule holds only in part (seen through
  * a signal) gives what its rows hold, so its `title` and `card` may be absent.
  * `card` says whether the kind draws a rich or a compact card, for the rule
  * that a compact card hides a status of the `norm` tone. `face` is null for a
@@ -902,6 +903,8 @@ export const EntityCard = Schema.Struct({
   identifier: Schema.optionalKey(entityFields.identifier),
   title: Schema.optionalKey(entityFields.title),
   status: entityFields.status,
+  /** Absent on a restricted card, which holds no facts to qualify. */
+  access: Schema.optionalKey(entityFields.access),
   face: Schema.NullOr(CardFace),
   restricted: Schema.Boolean,
 });

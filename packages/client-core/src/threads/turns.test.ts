@@ -30,6 +30,7 @@ const buildAgentAskingAbout = (...itemIds: readonly string[]): AgentState => ({
     detail: { command: "ls -la" },
   })),
   model: "claude-sonnet-5",
+  isSubagent: false,
 });
 
 const AGENT_ASKING_NOTHING = buildAgentAskingAbout();
@@ -1745,6 +1746,24 @@ describe("buildTurns: the context block in a user message", () => {
       expect(message).toMatchObject({ text });
       expect(message).not.toHaveProperty("context");
     }
+  });
+
+  it("keeps the whole brief of a subagent, even when it ends in a block", () => {
+    const text = `Investigate this.\n\n${BLOCK}`;
+    const row = buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T10:00:00.000Z",
+      turnId: "t1",
+      itemId: "u1",
+      kind: "user_message",
+      detail: { text },
+    });
+    const message = buildTurns([row], { ...AGENT_ASKING_NOTHING, isSubagent: true }).turns[0]
+      ?.userMessages[0];
+    expect(message).toMatchObject({ text });
+    expect(message).not.toHaveProperty("context");
   });
 
   it("keeps a text with no block, or a near miss, whole as words", () => {

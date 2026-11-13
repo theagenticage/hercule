@@ -153,6 +153,16 @@ describe("the cards under a message with context", () => {
     expect(screen.queryByText("TypeError · kept in the block")).toBeNull();
   });
 
+  it("keeps the last known facts of a thing that lost access, and says they are last known", async () => {
+    await renderMessage(() => [ISSUE, { ...ERROR, access: "inaccessible" }]);
+
+    const error = (await screen.findByText("STOREFRONT-1Z9")).closest("li")!;
+    expect(within(error).getByText("Escalating")).toBeTruthy();
+    expect(within(error).getByText("Last known state - you can no longer open it")).toBeTruthy();
+    const issue = screen.getByText("SHOP-142").closest("li")!;
+    expect(within(issue).queryByText(/Last known state/)).toBeNull();
+  });
+
   it("asks once when the read is refused for good, and does not retry", async () => {
     const { queryClient, client, calls } = await renderMessage(undefined, { now: true });
 
