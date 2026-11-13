@@ -29,6 +29,7 @@ import {
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  MAX_PROMPT_LENGTH,
   MEMORY_CORE,
   refuseEmptyPrompt,
   SESSION_CONTINUE_FIELDS,
@@ -352,6 +353,12 @@ interface Placing {
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /**
+   * The user's own words, when `prompt` also holds a context block after
+   * them. The title and its generation use these and never the block.
+   * Undefined when `prompt` is all the user's words.
+   */
+  readonly promptWords?: string;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
@@ -944,6 +951,7 @@ const make = Effect.gen(function* () {
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
+            promptWords: open.promptWords,
             attachments: open.attachments,
             title: open.title,
             role: open.role,
@@ -1059,8 +1067,9 @@ const make = Effect.gen(function* () {
         // titled by its caller's work, and a message with only images has no
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
-        if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt, madeTaskId);
+        const words = open.promptWords ?? open.prompt;
+        if (open.agentId === undefined && words.trim() !== "") {
+          yield* startThreadTitle(session.id, words, madeTaskId);
         }
         return session;
       }),
@@ -1375,6 +1384,15 @@ const make = Effect.gen(function* () {
      * makes the Task. A thing that changed since the read, or is already on an
      * active Task, fails the call with `Conflict`. Nothing is written when
      * the call fails.
+     *
+     * With `context`, the controller appends a block that describes those
+     * things after the user's words (`buildPromptContext`), and that text is
+     * the session's first input. `context` needs `task.read`, refused before
+     * any source is read, and works with or without `newTask`: the two lists
+     * are independent. The block's origin is read before the take-on and its
+     * entries after it, in the same transaction. A prompt that grows past
+     * `MAX_PROMPT_LENGTH` fails with `Validation` at `context`. The title and
+     * its generation use the user's words only.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
@@ -1388,10 +1406,18 @@ const make = Effect.gen(function* () {
         // plugin was disabled, the account lost access), and the repeat must
         // still succeed. The same lookup runs again inside `place`'s
         // transaction, which is the one that decides.
-        if (decoded.newTask !== undefined && decoded.dedupKey !== undefined) {
+        const contextEntityIds = decoded.context?.map((reference) => reference.entityId);
+        if (
+          (decoded.newTask !== undefined || contextEntityIds !== undefined) &&
+          decoded.dedupKey !== undefined
+        ) {
           const savedId = yield* dedupKeys.findResultId("session.spawn", decoded.dedupKey);
           if (savedId !== undefined) return yield* readSessionRecord(savedId);
         }
+        // The context is read inside the transaction, which checks the grant
+        // again. Checking it here too refuses a caller without it before any
+        // source is read for `newTask`.
+        if (contextEntityIds !== undefined) yield* requireGrant("task.read");
         // Reading the things at their source can take seconds, so it happens
         // here, before the transaction that writes the session.
         const prepared =
@@ -1575,6 +1601,14 @@ const make = Effect.gen(function* () {
             timeouts: buildTimeouts(yield* settings.all()),
           } satisfies SessionSpec;
 
+          // The origin of the context is read before the take-on, which can
+          // remove the things from the Inbox and so from the group the user
+          // saw.
+          const contextOrigin =
+            contextEntityIds === undefined
+              ? undefined
+              : yield* externalEntities.readPromptContextOrigin(contextEntityIds);
+
           // The Task is made last, after every refusal that writes nothing, and
           // before the session is stored: the session then joins it by the
           // ordinary rule for a named Task. A Task with a chosen title is
@@ -1588,6 +1622,29 @@ const make = Effect.gen(function* () {
                   projectId: Option.isSome(project) ? projectId : undefined,
                 });
 
+          // The entries are read after the take-on, so a thing that was read
+          // at its source for the Task carries the fields it was stored with.
+          const contextBlock =
+            contextEntityIds === undefined || contextOrigin === undefined
+              ? undefined
+              : yield* externalEntities.buildPromptContext(contextEntityIds, contextOrigin);
+          const prompt =
+            contextBlock === undefined
+              ? decoded.prompt
+              : decoded.prompt === ""
+                ? contextBlock
+                : `${decoded.prompt}\n\n${contextBlock}`;
+          if (prompt.length > MAX_PROMPT_LENGTH) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["context"],
+                  message: `The words and the description of the context together are ${String(prompt.length)} characters, and a prompt holds at most ${String(MAX_PROMPT_LENGTH)}. Send fewer things or shorter words.`,
+                },
+              ]),
+            );
+          }
+
           return {
             permissionProfileId: profileId,
             agentId: agent?.id,
@@ -1598,7 +1655,8 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             parentSessionId: undefined,
             spec,
-            prompt: decoded.prompt,
+            prompt,
+            ...(contextBlock === undefined ? {} : { promptWords: decoded.prompt }),
             attachments: decoded.attachments ?? [],
             title: undefined,
             role: decoded.role,

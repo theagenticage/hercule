@@ -1,6 +1,12 @@
 /** Tests how things on the Inbox form groups, how a group is named, and how a page is cut into units. */
 import { describe, expect, it } from "vitest";
-import { buildInboxGroup, cutPage, decideGroups, type GroupCandidate } from "./inbox-groups";
+import {
+  buildInboxGroup,
+  cutPage,
+  decideGroups,
+  findGroupMadeOf,
+  type GroupCandidate,
+} from "./inbox-groups";
 
 const thing = (ref: string, createdAt = "2026-01-01T00:00:00.000Z", kind = "acme/ticket") =>
   ({ ref, kind, title: `Title ${ref}`, createdAt }) satisfies GroupCandidate;
@@ -135,5 +141,28 @@ describe("buildInboxGroup", () => {
     expect(built.members).toHaveLength(1000);
     expect(built.members[0]!.ref).toBe("m0");
     expect(built.size).toBe(1005);
+  });
+});
+
+describe("findGroupMadeOf", () => {
+  const groups = decideGroups(
+    [thing("a"), thing("b"), thing("c"), thing("d"), thing("e")],
+    [link("a", "b"), link("b", "c"), link("d", "e")],
+    noKinds,
+  );
+
+  it("finds the group whose members are exactly the refs, in any order", () => {
+    expect(findGroupMadeOf(groups, ["c", "a", "b"])?.labelRef).toBe(groups.get("a")!.labelRef);
+  });
+
+  it("finds nothing for part of a group, for more than a group, or for two groups", () => {
+    expect(findGroupMadeOf(groups, ["a", "b"])).toBeUndefined();
+    expect(findGroupMadeOf(groups, ["a", "b", "c", "d"])).toBeUndefined();
+    expect(findGroupMadeOf(groups, ["a", "d"])).toBeUndefined();
+  });
+
+  it("finds nothing for a ref in no group, or for fewer than two refs", () => {
+    expect(findGroupMadeOf(groups, ["a", "b", "zzz"])).toBeUndefined();
+    expect(findGroupMadeOf(groups, ["a"])).toBeUndefined();
   });
 });

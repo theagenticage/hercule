@@ -69,6 +69,8 @@ import {
   type InvalidState,
   type NotFound,
   type ProjectMatch,
+  formatPromptContext,
+  type PromptContextOrigin,
   type Task,
   type TaskStage,
   type Unauthenticated,
@@ -101,7 +103,10 @@ import {
   type TaskUndoRefusal,
 } from "../tasks";
 import { announceEntityChanges } from "./announce";
+import { readFieldValues } from "./entity-fields";
 import { buildActiveEntityKind } from "./entity-records";
+import { findGroupMadeOf } from "./inbox-groups";
+import { buildPromptContextThing } from "./prompt-context";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
@@ -1044,6 +1049,72 @@ const make = Effect.gen(function* () {
         return yield* Option.match(found, {
           onNone: () => Effect.fail(createNotFoundError("no such external entity")),
           onSome: Effect.succeed,
+        });
+      }),
+
+    /**
+     * Returns where the things of `entityIds` came from, for the first line
+     * of a prompt's context block. Needs the grant `task.read`. Fails with
+     * `NotFound` naming each unknown id. It reads stored rows only.
+     *
+     * - 2 or more things that are exactly the members of one linked group on
+     *   the Inbox, by the same groups the Inbox draws: `group`, with that
+     *   group's label;
+     * - 2 or more other things: `selection`;
+     * - one thing: `one`.
+     *
+     * Call it before the things are taken on: taking a thing on can remove it
+     * from the Inbox and so from its group, and the origin must be what the
+     * user saw. Pass the result to `buildPromptContext`.
+     */
+    readPromptContextOrigin: (
+      entityIds: ReadonlyArray<string>,
+    ): Effect.Effect<PromptContextOrigin, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        const records = yield* readTaskableEntitiesOrFail(entityIds);
+        if (records.length < 2) return { kind: "one" };
+        const groups = yield* inbox.readInboxGroups(yield* readInboxEnvironment);
+        const group = findGroupMadeOf(
+          groups,
+          records.map(({ ref }) => ref),
+        );
+        return group === undefined ? { kind: "selection" } : { kind: "group", label: group.label };
+      }),
+
+    /**
+     * Returns the context block that tells an agent about the things of
+     * `entityIds`, in that order, with `origin` as its first line (see
+     * `formatPromptContext`). Needs the grant `task.read`. Fails with
+     * `NotFound` naming each unknown id.
+     *
+     * It reads stored rows only, never a source: the records, their declared
+     * field values, and one statement for each, however many things there
+     * are. Call it after `takeOnAsOneTask` in the same transaction, so a thing
+     * that was read at its source for a Task carries the fields it was stored
+     * with. A thing that no Connection can read gives only its ref and id.
+     */
+    buildPromptContext: (
+      entityIds: ReadonlyArray<string>,
+      origin: PromptContextOrigin,
+    ): Effect.Effect<string, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.read");
+        const records = yield* readTaskableEntitiesOrFail(entityIds);
+        const environment = yield* readEnvironment;
+        const values = yield* Effect.provideService(
+          readFieldValues(
+            records.map(({ ref }) => ref),
+            environment.activeEntityKinds,
+          ),
+          SqlClient.SqlClient,
+          sql,
+        );
+        return formatPromptContext({
+          origin,
+          things: records.map((record) =>
+            buildPromptContextThing(record, values.get(record.ref)?.fields ?? []),
+          ),
         });
       }),
 

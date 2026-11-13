@@ -155,7 +155,8 @@ const writeSharedFields = (things: readonly PromptContextThing[]): string | unde
 const writeOriginLine = (origin: PromptContextOrigin, count: number): string => {
   switch (origin.kind) {
     case "group":
-      return `From your linked group “${flattenToOneLine(origin.label)}” (${String(count)} things)`;
+      // The label is a thing's title, so it is cut like one.
+      return `From your linked group “${cutWithEllipsis(flattenToOneLine(origin.label), MAX_TITLE_LENGTH)}” (${String(count)} things)`;
     case "selection":
       return `From your selection (${String(count)} things)`;
     case "one":

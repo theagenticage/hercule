@@ -307,6 +307,12 @@ export interface CreateRequest {
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /**
+   * The user's own words, when `prompt` also holds a context block after
+   * them; `buildTitle` then reads these and never the block. `undefined` when
+   * `prompt` is all the user's words.
+   */
+  readonly promptWords?: string | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -2440,7 +2446,7 @@ const make = Effect.gen(function* () {
             attachments: references,
           }),
         );
-        const title = buildTitle(open.title, open.prompt, references[0]?.name);
+        const title = buildTitle(open.title, open.promptWords ?? open.prompt, references[0]?.name);
         const joined =
           open.taskSource._tag === "fixed"
             ? undefined

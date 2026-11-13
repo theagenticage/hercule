@@ -1670,5 +1670,20 @@ export const externalEntityInbox = Effect.gen(function* () {
       return { values };
     });
 
-  return { queryInbox, countInbox, readInboxOutline, suggestInboxValues, readInboxGroup };
+  /**
+   * Reads the groups of the Inbox, as `queryInbox` decides them, inside one
+   * read snapshot (see `readGroups`). Inside a transaction it reads that
+   * transaction's state.
+   */
+  const readInboxGroups = (environment: InboxEnvironment): Effect.Effect<GroupsByRef, SqlError> =>
+    withReadSnapshot(sql, readGroups(environment));
+
+  return {
+    queryInbox,
+    countInbox,
+    readInboxOutline,
+    suggestInboxValues,
+    readInboxGroup,
+    readInboxGroups,
+  };
 });

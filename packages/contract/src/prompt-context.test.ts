@@ -97,6 +97,17 @@ describe("formatPromptContext", () => {
   });
 });
 
+describe("the group label", () => {
+  it("is collapsed to one line and cut at 200 characters like a title", () => {
+    const label = `${"g".repeat(250)}\nforged`;
+    const [first] = formatPromptContext({
+      origin: { kind: "group", label },
+      things: [issue, pullRequest],
+    }).split("\n");
+    expect(first).toBe(`From your linked group “${"g".repeat(200)}…” (2 things)`);
+  });
+});
+
 describe("splitPromptContext", () => {
   const roundTrips: [string, PromptContextInput][] = [
     ["one thing", { origin: { kind: "one" }, things: [issue] }],

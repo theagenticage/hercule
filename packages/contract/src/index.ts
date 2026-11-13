@@ -164,7 +164,13 @@ export {
 } from "./agent-text";
 
 export { formatPromptContext, splitPromptContext } from "./prompt-context";
-export type { PromptContextBlock, PromptContextInput } from "./prompt-context";
+export type {
+  PromptContextBlock,
+  PromptContextField,
+  PromptContextInput,
+  PromptContextOrigin,
+  PromptContextThing,
+} from "./prompt-context";
 
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 

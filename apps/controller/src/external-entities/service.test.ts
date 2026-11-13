@@ -51,6 +51,7 @@ import { signalRepository } from "../signals/repository";
 import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
+import { replaceFieldRows } from "./entity-fields";
 import { SettingsLayer } from "../settings";
 import { narrowInboxReply } from "./inbox.testing";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
@@ -71,6 +72,10 @@ const TICKET_KIND: EntityKindDeclaration = {
     doing: { shape: "half", tone: "active", word: "In progress", stage: "building" },
     backlog: { shape: "dashed", tone: "quiet", word: "Backlog" },
   },
+  fields: [
+    { key: "team", label: "Team", type: "text" },
+    { key: "size", label: "Size", type: "number" },
+  ],
   facts: [],
   reasons: {},
 };
@@ -2651,5 +2656,139 @@ describe("what a card shows of the live work on its Task", () => {
         (_, index) => `Workflow ${String(MAX_LIVE_WORKFLOWS + 1 - index)}`,
       ),
     );
+  });
+});
+
+describe("the prompt context of things", () => {
+  const MISSING_ID = "0199f0b7-0000-7000-8000-00000000dead";
+
+  /** Reports the tickets, makes each live Task-free thing show on the Inbox, and returns their ids. */
+  const arrangeTickets = (
+    arranged: Pick<Arranged, "report" | "connectionId" | "entityId">,
+    keys: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      yield* arranged.report(
+        arranged.connectionId,
+        keys.map((key) => buildObservation(key)),
+      );
+      return yield* Effect.forEach(keys, (key) => arranged.entityId(ticketRef(key)));
+    });
+
+  it("reads the origin as a group only when the things are exactly one linked group of the Inbox", async () => {
+    const origins = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2", "3", "4"]);
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        yield* service.link({ fromRef: ticketRef("2"), toRefs: [ticketRef("3")] });
+        return {
+          group: yield* service.readPromptContextOrigin([ids[2]!, ids[0]!, ids[1]!]),
+          subset: yield* service.readPromptContextOrigin([ids[0]!, ids[1]!]),
+          superset: yield* service.readPromptContextOrigin(ids),
+          unlinked: yield* service.readPromptContextOrigin([ids[0]!, ids[3]!]),
+          one: yield* service.readPromptContextOrigin([ids[0]!]),
+        };
+      }),
+    );
+    expect(origins.group).toEqual({ kind: "group", label: "Ticket 1" });
+    expect(origins.subset).toEqual({ kind: "selection" });
+    expect(origins.superset).toEqual({ kind: "selection" });
+    expect(origins.unlinked).toEqual({ kind: "selection" });
+    expect(origins.one).toEqual({ kind: "one" });
+  });
+
+  it("writes each thing with its ref, title, status label, declared fields and id, and what they share", async () => {
+    const block = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2"]);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`UPDATE external_entities SET status = ${JSON.stringify({ shape: "half", tone: "active", label: "In progress" })} WHERE ref = ${ticketRef("1")}`;
+            yield* replaceFieldRows([
+              {
+                ref: ticketRef("1"),
+                fields: [
+                  { key: "team", text_value: "Storefront", number_value: null },
+                  { key: "size", text_value: null, number_value: 3 },
+                ],
+              },
+              {
+                ref: ticketRef("2"),
+                fields: [{ key: "team", text_value: "Storefront", number_value: null }],
+              },
+            ]);
+          }),
+        );
+        return yield* service.buildPromptContext(ids, { kind: "selection" });
+      }),
+    );
+    const [first, second] = [ticketRef("1"), ticketRef("2")];
+    expect(block.split("\n")).toEqual([
+      "From your selection (2 things)",
+      expect.stringMatching(
+        new RegExp(
+          `^1\\. ${first} · Ticket 1 · In progress · Team Storefront, Size 3 · [0-9a-f-]{36}$`,
+        ),
+      ),
+      expect.stringMatching(
+        new RegExp(`^2\\. ${second} · Ticket 2 · Todo · Team Storefront · [0-9a-f-]{36}$`),
+      ),
+      "They share: Team Storefront",
+      "Read any of them in full: hercule entity read <id>",
+    ]);
+  });
+
+  it("gives a thing no Connection can read only its ref and id, and a partial record what its rows hold", async () => {
+    const block = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        yield* withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible' WHERE ref = ${ticketRef("1")}`,
+        );
+        const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))];
+        return yield* service.buildPromptContext(ids, { kind: "selection" });
+      }),
+    );
+    const [, restricted, partial] = block.split("\n");
+    expect(restricted).toMatch(new RegExp(`^1\\. ${ticketRef("1")} · [0-9a-f-]{36}$`));
+    expect(partial).toMatch(new RegExp(`^2\\. ${ticketRef("2")} · Ticket 2 · [0-9a-f-]{36}$`));
+  });
+
+  it("fails with not_found naming each unknown id, and with forbidden for a session without task.read", async () => {
+    const result = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service } = arranged;
+        const [id] = yield* arrangeTickets(arranged, ["1"]);
+        const withoutGrant = {
+          ...A_SESSION,
+          grants: ["task.update"],
+        } as unknown as Actor;
+        return {
+          build: yield* Effect.flip(
+            service.buildPromptContext([id!, MISSING_ID], { kind: "selection" }),
+          ),
+          origin: yield* Effect.flip(service.readPromptContextOrigin([MISSING_ID, id!])),
+          refused: yield* Effect.flip(
+            Effect.provideService(
+              service.buildPromptContext([id!], { kind: "one" }),
+              CurrentActor,
+              withoutGrant,
+            ),
+          ),
+        };
+      }),
+    );
+    expect(result.build).toMatchObject({ error: { code: "not_found" } });
+    expect(JSON.stringify(result.build)).toContain(MISSING_ID);
+    expect(JSON.stringify(result.origin)).toContain(MISSING_ID);
+    expect(result.refused).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
   });
 });
