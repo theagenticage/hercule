@@ -90,9 +90,7 @@ const open = async (
       // empty list would pass or fail by the order of two reads.
       const dismissed = new Set((call.body as { ids: readonly string[] }).ids);
       for (const [name, things] of Object.entries(inbox.lists)) {
-        inbox.lists[name as keyof FakeInbox["lists"]] = things.filter(
-          (thing) => !dismissed.has(thing.id),
-        );
+        inbox.lists[name] = things.filter((thing) => !dismissed.has(thing.id));
       }
       return { body: {} };
     },
