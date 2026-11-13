@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEntries,
+  buildMoreKey,
   findEntryKey,
   gatherGroupRows,
+  parseMoreKey,
   reconcileGroups,
   removeMembers,
   settleKey,
@@ -99,11 +101,44 @@ describe("buildEntries", () => {
     ]);
   });
 
-  it("draws a group with one held member as a thing", () => {
-    expect(entriesOf(["a", "b"], [held("group:1", "a", "x")]).map((e) => e.kind)).toEqual([
-      "thing",
-      "thing",
+  it("draws a group with one held member as a head that counts the members not loaded", () => {
+    const entries = entriesOf(["a", "b"], [held("group:1", "a", "x")]);
+    expect(entries.map((e) => e.kind)).toEqual(["head", "thing"]);
+    expect(entries[0]).toMatchObject({
+      kind: "head",
+      group: { isCut: true, unloadedCount: 1, size: 2 },
+    });
+  });
+
+  it("numbers a member within its group and counts the group's size, not the loaded rows", () => {
+    const groups = [{ ...held("group:1", "x", "a", "b"), size: 9 }];
+    const entries = entriesOf(["a", "b"], groups, {
+      folds: new Map([["group:1", { isOpen: true }]]),
+    });
+    expect(entries.map((e) => e.kind === "member" && [e.position, e.of])).toEqual([
+      false,
+      [2, 9],
+      [3, 9],
     ]);
+  });
+
+  it("says on the more line how many held members it hides and how many are not loaded yet", () => {
+    const refs = Array.from({ length: 8 }, (_, n) => `m${n}`);
+    const groups = [{ ...held("group:1", ...refs), size: 12 }];
+    const entries = entriesOf(refs, groups, { folds: new Map([["group:1", { isOpen: true }]]) });
+    expect(entries.at(-1)).toMatchObject({
+      kind: "more",
+      key: "group:1:more",
+      hiddenCount: 3,
+      unloadedCount: 4,
+    });
+  });
+
+  it("builds and parses the key of a group's more line, and parses nothing else", () => {
+    expect(buildMoreKey("group:3")).toBe("group:3:more");
+    expect(parseMoreKey("group:3:more")).toBe("group:3");
+    expect(parseMoreKey("group:3")).toBeNull();
+    expect(parseMoreKey("github:pr:1")).toBeNull();
   });
 
   it("ticks all when every held matching member is selected and some when a quiet one is", () => {

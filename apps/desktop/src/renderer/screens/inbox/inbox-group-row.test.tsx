@@ -1,6 +1,6 @@
 /** Tests what the head of a group draws, its two separate targets, and its tree item attributes; and the members and "Show N more" line that hang under it. */
 import type { InboxGroupRowView } from "@hercule/client-core/inbox";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { InboxGroupMore } from "./inbox-group-more";
@@ -20,11 +20,18 @@ const VIEW: InboxGroupRowView = {
 
 /** Renders a head with callbacks that record their calls. */
 const renderHead = (
-  state: { isOpen?: boolean; tick?: "none" | "some" | "all"; isCurrent?: boolean } = {},
+  state: {
+    isOpen?: boolean;
+    tick?: "none" | "some" | "all";
+    isCurrent?: boolean;
+    unloadedCount?: number;
+  } = {},
 ) => {
   const onPick = vi.fn();
   const onToggleSelect = vi.fn();
   const onToggleOpen = vi.fn();
+  const onTakeOn = vi.fn();
+  const onDismiss = vi.fn();
   render(
     <InboxGroupRow
       view={VIEW}
@@ -32,12 +39,22 @@ const renderHead = (
       isCurrent={state.isCurrent ?? false}
       isOpen={state.isOpen ?? false}
       tick={state.tick ?? "none"}
+      unloadedCount={state.unloadedCount ?? 0}
       onPick={onPick}
       onToggleSelect={onToggleSelect}
       onToggleOpen={onToggleOpen}
+      onTakeOn={onTakeOn}
+      onDismiss={onDismiss}
     />,
   );
-  return { head: screen.getByRole("treeitem"), onPick, onToggleSelect, onToggleOpen };
+  return {
+    head: screen.getByRole("treeitem"),
+    onPick,
+    onToggleSelect,
+    onToggleOpen,
+    onTakeOn,
+    onDismiss,
+  };
 };
 
 describe("InboxGroupRow", () => {
@@ -99,7 +116,46 @@ describe("InboxGroupRow", () => {
   it("makes the row current when pressed outside its buttons", async () => {
     const { head, onPick } = renderHead();
     await userEvent.setup().click(within(head).getByText("Retry a failed card payment"));
-    expect(onPick).toHaveBeenCalledWith("group:1");
+    expect(onPick).toHaveBeenCalledWith("group:1", {
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    });
+  });
+
+  it("passes the modifier keys of a click on the row, so Shift and Command select as on a thing's row", async () => {
+    const { head, onPick } = renderHead();
+    const user = userEvent.setup();
+    await user.keyboard("{Shift>}");
+    await user.click(within(head).getByText("Retry a failed card payment"));
+    await user.keyboard("{/Shift}{Meta>}");
+    await user.click(within(head).getByText("Retry a failed card payment"));
+    const modifiersOf = (call: readonly unknown[]): unknown => call[1];
+    expect(onPick.mock.calls.map(modifiersOf)).toEqual([
+      { shiftKey: true, metaKey: false, ctrlKey: false },
+      { shiftKey: false, metaKey: true, ctrlKey: false },
+    ]);
+  });
+
+  it("offers Take on and Dismiss all under the pointer, each acting on the group's key and not selecting or unfolding it", async () => {
+    const { head, onTakeOn, onDismiss, onPick, onToggleOpen } = renderHead();
+    const user = userEvent.setup();
+    await user.click(within(head).getByRole("button", { name: "Take on" }));
+    await user.click(within(head).getByRole("button", { name: "Dismiss all 14 things" }));
+    expect(onTakeOn).toHaveBeenCalledWith("group:1");
+    expect(onDismiss).toHaveBeenCalledWith("group:1");
+    expect(onPick).not.toHaveBeenCalled();
+    expect(onToggleOpen).not.toHaveBeenCalled();
+    expect(within(head).getByRole("button", { name: "Take on" }).title).toBe("Take on (T)");
+  });
+
+  it("says how many members are not loaded yet, apart from its count, and says nothing when all are", () => {
+    const all = renderHead();
+    expect(all.head.getAttribute("aria-label")).toBe(VIEW.label);
+    cleanup();
+    const cut = renderHead({ unloadedCount: 3 });
+    expect(cut.head.getAttribute("aria-label")).toBe(`${VIEW.label}. 3 not loaded yet`);
+    expect(within(cut.head).getByText("14 things").title).toBe("3 not loaded yet");
   });
 
   it("names the fold for what pressing it does", () => {
@@ -109,17 +165,22 @@ describe("InboxGroupRow", () => {
 });
 
 describe("InboxRow as a member of a group", () => {
-  const renderMember = (member: { isQuiet: boolean; isLast: boolean }) => {
+  const renderMember = (member: {
+    isQuiet: boolean;
+    isLast: boolean;
+    position?: number;
+    of?: number;
+  }) => {
     render(
       <InboxRow
         view={buildInboxRowView("m")}
         plugins={TEST_PLUGINS}
-        position={1}
-        size={4}
+        position={9}
+        size={40}
         current={false}
         selected={false}
         actions={buildInboxRowActions()}
-        member={member}
+        member={{ position: 1, of: 2, ...member }}
       />,
     );
     return screen.getByRole("treeitem");
@@ -133,6 +194,12 @@ describe("InboxRow as a member of a group", () => {
     expect(row.className).toContain("is-last");
   });
 
+  it("counts its place within its group, not within the whole list", () => {
+    const row = renderMember({ isQuiet: false, isLast: false, position: 3, of: 5 });
+    expect(row.getAttribute("aria-posinset")).toBe("3");
+    expect(row.getAttribute("aria-setsize")).toBe("5");
+  });
+
   it("is drawn in full when it answers the query and is not the last", () => {
     const row = renderMember({ isQuiet: false, isLast: false });
     expect(row.className).not.toContain("is-outside-query");
@@ -141,12 +208,36 @@ describe("InboxRow as a member of a group", () => {
 });
 
 describe("InboxGroupMore", () => {
+  it("says quietly how many members are not loaded yet, and nothing when all are", () => {
+    const { rerender } = render(
+      <InboxGroupMore
+        groupKey="group:1"
+        hiddenCount={9}
+        unloadedCount={0}
+        isCurrent={false}
+        onShowMore={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/not loaded yet/)).toBeNull();
+    rerender(
+      <InboxGroupMore
+        groupKey="group:1"
+        hiddenCount={9}
+        unloadedCount={4}
+        isCurrent={false}
+        onShowMore={() => {}}
+      />,
+    );
+    expect(screen.getByText("· 4 not loaded yet")).toBeTruthy();
+  });
+
   it("says how many members are hidden and shows them when pressed", async () => {
     const onShowMore = vi.fn();
     render(
       <InboxGroupMore
         groupKey="group:1"
         hiddenCount={9}
+        unloadedCount={0}
         isCurrent={false}
         onShowMore={onShowMore}
       />,

@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { MAX_ACTING_CONNECTIONS, MAX_LIVE_WORKFLOWS, type ExternalRef } from "@hercule/contract";
 import {
   HOST_API,
@@ -466,6 +467,31 @@ describe("takeOn", () => {
         });
       }
     }
+  });
+
+  it("refuses the group of a thing to a session without the grants for the Inbox's text, and reads it with them", async () => {
+    const result = await run(({ service, report, connectionId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [buildObservation("1")]);
+        const as = (grants: ReadonlyArray<string>) =>
+          Effect.provideService(service.readInboxGroup(ticketRef("1")), CurrentActor, {
+            ...A_SESSION,
+            grants,
+          } as unknown as Actor);
+        return {
+          noSignals: yield* Effect.flip(as(["task.read"])),
+          noTasks: yield* Effect.flip(as(["signal.read"])),
+          allowed: yield* as(["task.read", "signal.read"]),
+        };
+      }),
+    );
+    expect(result.noSignals).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
+    });
+    expect(result.noTasks).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+    expect(result.allowed.labelRef).toBe(ticketRef("1"));
   });
 
   it("refuses a place, saying why", async () => {
@@ -1087,16 +1113,16 @@ describe("undoTakeOn", () => {
   });
 });
 
-describe("takeOnTogether and undoTakeOnTogether", () => {
-  /** Reads the links of a Task: the ref, and whether and when the user took it on. */
-  const readLinks = (sql: SqlClient.SqlClient, taskId: string) =>
-    Effect.map(
-      sql<{ readonly ref: string; readonly taken_at: string | null }>`
-        SELECT ref, taken_at FROM task_entity_links
-        WHERE task_id = ${uuidFromString(taskId)} ORDER BY ref`,
-      (rows) => rows.map((row) => [row.ref, row.taken_at !== null] as const),
-    );
+/** Reads the links of a Task: the ref, and whether and when the user took it on. */
+const readLinks = (sql: SqlClient.SqlClient, taskId: string) =>
+  Effect.map(
+    sql<{ readonly ref: string; readonly taken_at: string | null }>`
+      SELECT ref, taken_at FROM task_entity_links
+      WHERE task_id = ${uuidFromString(taskId)} ORDER BY ref`,
+    (rows) => rows.map((row) => [row.ref, row.taken_at !== null] as const),
+  );
 
+describe("takeOnTogether and undoTakeOnTogether", () => {
   it("makes one Task for things that have none, linked and taken, with the stage of the first", async () => {
     const { result, links, task, taskCount, ids } = await run(
       ({ service, tasks, sql, report, connectionId, entityId, countTasks }) =>
@@ -1322,6 +1348,138 @@ describe("takeOnTogether and undoTakeOnTogether", () => {
     );
     expect(undone.undone).toBe(false);
     expect(undone.reason).toContain("changed");
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+});
+
+describe("takeOnTogether sends a fixed number of statements", () => {
+  // Each thing the Task links also gets a first-sight fact and its event: two
+  // statements per thing that the facts ledger writes one at a time. They are
+  // left out of the count, which is about the reads, the preparation and the links.
+  it("sends as many statements for 24 things as for 4, apart from the facts and their events, whether it makes the Task or joins one", async () => {
+    const count = (things: number, joins: boolean) =>
+      run(({ service, tasks, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          const keys = Array.from({ length: things }, (_, index) => String(index));
+          yield* report(
+            connectionId,
+            keys.map((key) => buildObservation(key)),
+          );
+          const ids = yield* Effect.forEach(keys, (key) => entityId(ticketRef(key)));
+          if (joins) {
+            yield* tasks.create({
+              title: "Earlier",
+              description: "",
+              stage: "planned",
+              provenance: [{ ref: ticketRef("0") }],
+            });
+          }
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          const result = yield* service.takeOnTogether({ ids, title: "Together" }).pipe(record);
+          expect(result.created).toBe(!joins);
+          return statements.filter(
+            (text) => !text.includes("INTO events") && !text.includes("INTO task_entity_facts"),
+          ).length;
+        }),
+      );
+    expect(await count(24, false)).toBe(await count(4, false));
+    expect(await count(24, true)).toBe(await count(4, true));
+  });
+});
+
+describe("undoTakeOnTogether refuses a receipt that does not match the links", () => {
+  /** A Task that links ticket 1 already; taking both tickets on together joins it and links ticket 2. */
+  const joinEarlierTask = ({
+    service,
+    tasks,
+    sql,
+    report,
+    connectionId,
+    entityId,
+  }: Parameters<Parameters<typeof run>[0]>[0]) =>
+    Effect.gen(function* () {
+      yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+      const ids = [yield* entityId(ticketRef("1")), yield* entityId(ticketRef("2"))] as const;
+      const earlier = yield* tasks.create({
+        title: "Earlier",
+        description: "",
+        stage: "planned",
+        provenance: [{ ref: ticketRef("1") }],
+      });
+      const joined = yield* service.takeOnTogether({ ids: [...ids], title: "Unused" });
+      return { ids, earlier, joined, sql };
+    });
+
+  it("never removes a link that an older call wrote, whatever `added` says", async () => {
+    const { undone, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { ids, earlier, joined, sql } = yield* joinEarlierTask(context);
+        // Ticket 1 was linked before the call and only marked taken by it.
+        const undone = yield* context.service.undoTakeOnTogether({
+          ...joined,
+          added: [ids[0], ids[1]],
+        });
+        return { undone, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(undone.undone).toBe(false);
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+
+  it("refuses a receipt whose `added` is not part of `taken`, and changes nothing", async () => {
+    const { undone, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { ids, earlier, joined, sql } = yield* joinEarlierTask(context);
+        const undone = yield* context.service.undoTakeOnTogether({
+          ...joined,
+          added: [ids[1]],
+          taken: [ids[0]],
+        });
+        return { undone, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(undone.undone).toBe(false);
+    expect(links).toEqual([
+      [ticketRef("1"), true],
+      [ticketRef("2"), true],
+    ]);
+  });
+
+  it("refuses a stale receipt: a link that is written again at another time is not the one it names", async () => {
+    const { rewrittenWhole, rewrittenLinkOnly, links } = await run((context) =>
+      Effect.gen(function* () {
+        const { earlier, joined, sql } = yield* joinEarlierTask(context);
+        const rewrite = (statement: Effect.Effect<unknown, unknown, never>) =>
+          withTransaction(sql, statement);
+        yield* rewrite(
+          sql`UPDATE task_entity_links SET linked_at = '2030-01-01T00:00:00.000Z',
+                taken_at = '2030-01-01T00:00:00.000Z'
+              WHERE task_id = ${uuidFromString(earlier.id)} AND ref = ${ticketRef("2")}`,
+        );
+        const rewrittenWhole = yield* context.service.undoTakeOnTogether(joined);
+        // The link is marked taken as the receipt says, but it was written at another time.
+        yield* rewrite(
+          sql`UPDATE task_entity_links SET taken_at = ${joined.takenAt}
+              WHERE task_id = ${uuidFromString(earlier.id)} AND ref = ${ticketRef("2")}`,
+        );
+        const rewrittenLinkOnly = yield* context.service.undoTakeOnTogether(joined);
+        return { rewrittenWhole, rewrittenLinkOnly, links: yield* readLinks(sql, earlier.id) };
+      }),
+    );
+    expect(rewrittenWhole.undone).toBe(false);
+    expect(rewrittenLinkOnly.undone).toBe(false);
     expect(links).toEqual([
       [ticketRef("1"), true],
       [ticketRef("2"), true],

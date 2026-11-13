@@ -122,15 +122,17 @@ describe("cutPage", () => {
 });
 
 describe("buildInboxGroup", () => {
-  const group = decideGroups(
-    [thing("a"), thing("b"), thing("c")],
-    [link("a", "b"), link("b", "c")],
-    noKinds,
-  ).get("a")!;
+  /** The group of the chain of `refs`, each linked to the next. */
+  const chain = (refs: ReadonlyArray<string>) =>
+    decideGroups(
+      refs.map((ref) => thing(ref)),
+      refs.slice(1).map((ref, index) => link(refs[index]!, ref)),
+      noKinds,
+    ).get(refs[0]!)!;
   const member = (ref: string, matches: boolean) => ({ id: `id-${ref}`, ref, matches });
 
   it("lists the members that match first, then the others, each part in the order given", () => {
-    const built = buildInboxGroup(group, [
+    const built = buildInboxGroup(chain(["a", "b", "c", "d"]), [
       member("c", false),
       member("a", true),
       member("b", false),
@@ -140,11 +142,12 @@ describe("buildInboxGroup", () => {
     expect(built.size).toBe(4);
   });
 
-  it("lists the first 1000 members of a larger group and still counts them all", () => {
-    const many = Array.from({ length: 1005 }, (_, index) => member(`m${index}`, index === 1004));
-    const built = buildInboxGroup(group, many);
+  it("lists the first 1000 members of a larger group and counts them all from the group", () => {
+    const refs = Array.from({ length: 1005 }, (_, index) => `m${index}`);
+    const read = refs.slice(0, 1000).map((ref, index) => member(ref, index === 999));
+    const built = buildInboxGroup(chain(refs), read);
     expect(built.members).toHaveLength(1000);
-    expect(built.members[0]!.ref).toBe("m1004");
+    expect(built.members[0]!.ref).toBe("m999");
     expect(built.size).toBe(1005);
   });
 });

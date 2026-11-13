@@ -1,6 +1,7 @@
-import type { JSX, Ref } from "react";
+import type { JSX } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type { InboxGroupPaneEnd, InboxGroupPaneView } from "@hercule/client-core/inbox";
+import type { InboxThing } from "@hercule/contract";
 import { LinkIcon } from "../../icons/link";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
@@ -26,6 +27,15 @@ export function InboxGroupHead({ words }: { readonly words: string }): JSX.Eleme
     </p>
   );
 }
+
+/** The two ends of a pair as the line about an unlink names them: by identifier, else by title. */
+export type UnlinkedEnd = Pick<InboxThing, "ref" | "identifier" | "title">;
+
+/** Returns `end` of the pair as what an unlink names it by. The pair knows the end's name, not both its identifier and title, so the name fills the one it is. */
+const readUnlinkedEnd = (ref: string, end: InboxGroupPaneEnd): UnlinkedEnd =>
+  end.isIdentifier
+    ? { ref, identifier: end.name, title: "" }
+    : { ref, identifier: "", title: end.name };
 
 /** Renders one end of a pair: the source's mark, then the identifier (never cut) or else the title (cut with an ellipsis). */
 function PairEnd({
@@ -56,19 +66,17 @@ function PairEnd({
  *   walks to that thing.
  * - A pair names its two ends on one line and, on the line under it, who says
  *   they are linked. A pair the user claims has Unlink there, which calls
- *   `onUnlink` with the two references. It shows under the pointer or the
+ *   `onUnlink` with the pair's two ends. It shows under the pointer or the
  *   focus and takes its room all the time, so nothing moves when it shows.
  * - `view.isCut` adds a line that says the group has more than it lists.
  * - The footer has Take on, Link and Dismiss. It has no hand-off: a group is
  *   more than one thing, and a hand-off takes one.
- * - `titleRef` is the title, which takes the focus when the pane opens.
  *
  * Every word comes in as a prop; the component decides nothing.
  */
 export function InboxGroupPane({
   view,
   plugins,
-  titleRef,
   onWalkTo,
   onUnlink,
   onTakeOn,
@@ -77,9 +85,8 @@ export function InboxGroupPane({
 }: {
   readonly view: InboxGroupPaneView;
   readonly plugins: ReadonlyArray<PluginIdentity>;
-  readonly titleRef?: Ref<HTMLHeadingElement> | undefined;
   readonly onWalkTo: (ref: string) => void;
-  readonly onUnlink: (fromRef: string, toRef: string) => void;
+  readonly onUnlink: (first: UnlinkedEnd, second: UnlinkedEnd) => void;
   readonly onTakeOn: () => void;
   readonly onLink: () => void;
   readonly onDismiss: () => void;
@@ -87,7 +94,7 @@ export function InboxGroupPane({
   return (
     <>
       <div className="ib-pane-scroll">
-        <h2 ref={titleRef} className="ib-pane-title" tabIndex={-1}>
+        <h2 className="ib-pane-title" tabIndex={-1}>
           {view.title}
         </h2>
         <p className="ib-pane-meta">
@@ -139,9 +146,7 @@ export function InboxGroupPane({
               <li key={`${pair.fromRef}|${pair.toRef}`} className="ib-group-pair">
                 <span className="ib-group-pair-line">
                   <PairEnd end={pair.from} plugins={plugins} />
-                  <span className="ib-group-pair-dash" aria-hidden="true">
-                    —
-                  </span>
+                  <span className="ib-group-pair-dash" aria-hidden="true" />
                   <PairEnd end={pair.to} plugins={plugins} />
                 </span>
                 <span className="ib-group-pair-claim">
@@ -152,7 +157,10 @@ export function InboxGroupPane({
                       className="ib-group-unlink"
                       aria-label={`Unlink ${pair.from.name} and ${pair.to.name}`}
                       onClick={() => {
-                        onUnlink(pair.fromRef, pair.toRef);
+                        onUnlink(
+                          readUnlinkedEnd(pair.fromRef, pair.from),
+                          readUnlinkedEnd(pair.toRef, pair.to),
+                        );
                       }}
                     >
                       Unlink

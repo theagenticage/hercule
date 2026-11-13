@@ -147,7 +147,12 @@ function describeEntry(
         kind: "member",
         key: entry.key,
         view: describeStableRow(entry.row, order, now, userName),
-        member: { isQuiet: !entry.answersQuery, isLast: entry.isLast },
+        member: {
+          isQuiet: !entry.matches,
+          isLast: entry.isLast,
+          position: entry.position,
+          of: entry.of,
+        },
       };
     case "head": {
       const { group } = entry;
@@ -163,6 +168,7 @@ function describeEntry(
         }),
         isOpen: group.isOpen,
         tick: group.tick,
+        unloadedCount: group.unloadedCount,
       };
     }
     case "more":
@@ -171,6 +177,7 @@ function describeEntry(
         key: entry.key,
         groupKey: entry.groupKey,
         hiddenCount: entry.hiddenCount,
+        unloadedCount: entry.unloadedCount,
       };
   }
 }

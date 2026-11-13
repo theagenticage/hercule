@@ -33,12 +33,13 @@ export interface InboxGroupRowView {
 }
 
 /**
- * Returns the held members that ask the user something and that no Task holds,
- * most pressing first: the longest wait comes first.
+ * Returns the held members that ask the user something that is not taken, most
+ * pressing first: the longest wait comes first. A Task a hand-off made does not
+ * change that: the row counts only the asks the hand-off did not answer.
  */
 const listAskingMembers = (rows: readonly InboxThing[]): InboxThing[] =>
   rows
-    .filter((row) => row.askCount > 0 && row.taskId === undefined)
+    .filter((row) => row.askCount > 0)
     .sort((a, b) => (a.waitingSince ?? "").localeCompare(b.waitingSince ?? ""));
 
 /**

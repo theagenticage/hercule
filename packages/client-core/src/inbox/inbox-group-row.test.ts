@@ -42,11 +42,12 @@ const groupOf = (
   label: "Retry a failed card payment",
   size: rows.length,
   isCut: false,
+  unloadedCount: 0,
   isOpen: false,
   placedBy: rows[0],
   rows,
-  matchingCount: rows.length,
-  matchingRefs: rows.map((row) => row.ref),
+  matchCount: rows.length,
+  matchRefs: rows.map((row) => row.ref),
   tick: "none",
   ...overrides,
 });
@@ -86,10 +87,16 @@ describe("describeInboxGroupRow", () => {
     });
   });
 
-  it("counts members, not asks, and leaves out members a Task holds", () => {
+  it("counts members, not asks, and a member with a Task still asks when an ask is left", () => {
     const twoAsks = asking("1", "Mei", 4, { askCount: 3 });
-    const held = asking("2", "Omar", 40, { taskId: "task-1" });
-    const view = describeInboxGroupRow(groupOf([twoAsks, held]), CONTEXT);
+    const handed = asking("2", "Omar", 40, { taskId: "task-1" });
+    const view = describeInboxGroupRow(groupOf([twoAsks, handed]), CONTEXT);
+    expect(view.reason).toMatchObject({ who: "Omar", more: 1 });
+  });
+
+  it("does not count a member with a Task and no ask left", () => {
+    const quiet = asking("2", "Omar", 40, { taskId: "task-1", askCount: 0, asks: [] });
+    const view = describeInboxGroupRow(groupOf([asking("1", "Mei", 4), quiet]), CONTEXT);
     expect(view.reason).toMatchObject({ who: "Mei", more: 0 });
   });
 

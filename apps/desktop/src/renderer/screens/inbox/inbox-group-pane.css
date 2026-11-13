@@ -49,6 +49,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The drawing's long dash between the two ends. It is drawn here, not typed in the markup, so no screen reader reads it. */
+.ib-group-pair-dash::before {
+  content: "\2014";
+}
 .ib-group-pair-dash {
   flex: none;
   margin: 0 4px;

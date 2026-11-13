@@ -800,11 +800,12 @@ const make = Effect.gen(function* () {
     requestedId: string,
     patch: TaskPatch,
     actor: string,
+    writtenAt?: string,
   ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const at = yield* nowIso;
+        const at = writtenAt ?? (yield* nowIso);
         const before = yield* readLiveTaskOrFail(requestedId);
         // A merged id lands on the survivor, and everything below is about it.
         const id = before.id;
@@ -917,9 +918,10 @@ const make = Effect.gen(function* () {
 
         const newRefs = yield* tasks.update(id, edit, appended, at, actor);
         // Naming a ref is asking for the link, so an earlier unlink of it no longer holds.
-        for (const entry of appended) {
-          if (entry.ref !== undefined) yield* facts.unsuppress(id, entry.ref);
-        }
+        yield* facts.unsuppress(
+          id,
+          appended.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
+        );
         // A finished Task waits for no summary. Taking it back to a live stage,
         // changing the words a summary reads, or linking a new outside thing
         // makes the summary out of date.
@@ -1665,14 +1667,21 @@ const make = Effect.gen(function* () {
             const task = yield* readLiveTaskOrFail(input.taskId);
             const linkedBefore = yield* tasks.listLinkedRefs(task.id, input.refs);
             const added = input.refs.filter((ref) => !linkedBefore.has(ref));
+            // One instant for the new links' `linked_at` and for `takenAt`, so
+            // `undoJoinedRefs` can tell a link this call wrote from an older one.
+            const takenAt = yield* nowIso;
             // The refs are new here, so the write is not a no-op and cannot fail on the patch.
             const joined =
               added.length === 0
                 ? task
                 : yield* Effect.orDie(
-                    updateTask(task.id, { provenance: added.map((ref) => ({ ref })) }, actor),
+                    updateTask(
+                      task.id,
+                      { provenance: added.map((ref) => ({ ref })) },
+                      actor,
+                      takenAt,
+                    ),
                   );
-            const takenAt = yield* nowIso;
             const marked = yield* tasks.markLinksTaken(task.id, input.refs, takenAt, actor);
             const taken = input.refs.filter((ref) => marked.has(ref));
             yield* announceEntitiesOfRefs(input.refs);
@@ -1684,17 +1693,25 @@ const make = Effect.gen(function* () {
     /**
      * Takes back what `joinTaskWithRefs` did, given what it returned: removes
      * the links in `added` and clears the taken mark of the other links in
-     * `taken`. It does so only when every ref in `taken` is still marked taken
-     * at exactly `takenAt` on the Task (`TaskRepository.listLinksTakenAt`), a
-     * fact of one row. Otherwise it changes nothing and returns
-     * `{ undone: false, reason }`: `task-gone` for a Task that does not exist
-     * or is deleted, `link-changed` for a link that is gone, or that was
-     * marked again by something else.
+     * `taken`. All checks run before any write, and one failed check refuses
+     * everything. It does so only when:
+     *
+     * - every ref in `added` is also in `taken`, as `joinTaskWithRefs` returns
+     *   them;
+     * - every ref in `taken` is still marked taken at exactly `takenAt` on the
+     *   Task (`TaskRepository.listLinksTakenAt`);
+     * - every ref in `added` is a link that was written at exactly `takenAt`
+     *   too (`TaskRepository.listLinksWrittenAt`), so a reply that names an
+     *   older link, forged or from a stale call, never deletes it.
+     *
+     * Otherwise it changes nothing and returns `{ undone: false, reason }`:
+     * `task-gone` for a Task that does not exist or is deleted, `link-changed`
+     * for a reply that does not match the links, a link that is gone, or one
+     * that was marked again by something else.
      *
      * Removed links go as `unlinkEntity` removes them, with their Facts, but
      * the refs are not recorded as unlinked by hand: an undo is not the user's
-     * decision to keep the thing away, so a scan may link it again. `added`
-     * is part of `taken`, as `joinTaskWithRefs` returns them.
+     * decision to keep the thing away, so a scan may link it again.
      *
      * Permission: the user only, with the grant `task.update`. It runs in the
      * caller's transaction, or opens one.
@@ -1712,6 +1729,9 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const stage = yield* tasks.readStage(input.taskId);
             if (Option.isNone(stage)) return { undone: false, reason: "task-gone" } as const;
+            if (!input.added.every((ref) => input.taken.includes(ref))) {
+              return { undone: false, reason: "link-changed" } as const;
+            }
             const stillTaken = yield* tasks.listLinksTakenAt(
               input.taskId,
               input.taken,
@@ -1719,6 +1739,16 @@ const make = Effect.gen(function* () {
             );
             if (stillTaken.length !== input.taken.length) {
               return { undone: false, reason: "link-changed" } as const;
+            }
+            if (Arr.isReadonlyArrayNonEmpty(input.added)) {
+              const stillWritten = yield* tasks.listLinksWrittenAt(
+                input.taskId,
+                input.added,
+                input.takenAt,
+              );
+              if (stillWritten.length !== input.added.length) {
+                return { undone: false, reason: "link-changed" } as const;
+              }
             }
             const at = yield* nowIso;
             const kept = input.taken.filter((ref) => !input.added.includes(ref));
@@ -1728,7 +1758,8 @@ const make = Effect.gen(function* () {
               yield* linked.recordLandingFact(input.taskId);
               if (!isFinishedStage(stage.value)) yield* markSummaryDirty(input.taskId);
             }
-            if (Arr.isReadonlyArrayNonEmpty(kept)) yield* tasks.clearLinksTaken(input.taskId, kept);
+            if (Arr.isReadonlyArrayNonEmpty(kept))
+              yield* tasks.clearLinksTaken(input.taskId, kept, input.takenAt);
             yield* announce({ _tag: "record", topic: "task", id: input.taskId, kind: "updated" });
             yield* announceEntitiesOfRefs(input.taken);
             return { undone: true } as const;

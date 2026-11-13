@@ -1,14 +1,19 @@
 import type { PluginIdentity } from "@hercule/client-core";
 import type { InboxGroupRowView } from "@hercule/client-core/inbox";
 import { memo, type JSX, type MouseEvent } from "react";
+import { ArchiveIcon } from "../../icons/archive";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { CheckIcon } from "../../icons/check";
 import { LinkIcon } from "../../icons/link";
 import { MinusIcon } from "../../icons/minus";
+import { TasksIcon } from "../../icons/tasks";
 import { PluginMark } from "../../marks";
-import { ReasonLine, TimeFigure } from "./inbox-row";
+import { ReasonLine, TimeFigure, type InboxClickModifiers } from "./inbox-row";
 import "./inbox-list.css";
 import "./inbox-group-row.css";
+
+/** Returns how a group says that `count` of its members are not read yet. */
+export const describeUnloaded = (count: number): string => `${String(count)} not loaded yet`;
 
 /** The size of the link glyph in the first line's lead, and of the chevron on the second line. */
 const GLYPH_SIZE = 14;
@@ -30,12 +35,18 @@ const SOURCE_MARK_SIZE = 12;
  * 24px tall each, one above the other. The tick draws the selection of the
  * group: `some` draws a dash and `all` a check. A tick pressed with Shift down
  * calls `onToggleSelect` with `whole` true: the group's members that do not
- * answer the query too.
+ * answer the query too. A click on the row itself calls `onPick` with the
+ * modifier keys down, so Shift extends the selection and Command or Control
+ * toggles the group in it, as on a thing's row.
+ *
+ * Under the pointer the head offers Take on and "Dismiss all N", which act
+ * on the group (or on the selection, when the group is in it). There is no
+ * thread button yet: starting a thread on a group waits for the thread slice.
  *
  * The head is a tree item at level 1 whose `aria-expanded` is `isOpen`, and
  * it is selected when the selection holds all of the group. Its key is its
  * `data-ref`. The row is memoized: it draws again only when its props change,
- * which holds while the three callbacks keep their identity.
+ * which holds while the callbacks keep their identity.
  */
 export const InboxGroupRow = memo(function InboxGroupRow({
   view,
@@ -43,9 +54,12 @@ export const InboxGroupRow = memo(function InboxGroupRow({
   isCurrent,
   isOpen,
   tick,
+  unloadedCount,
   onPick,
   onToggleSelect,
   onToggleOpen,
+  onTakeOn,
+  onDismiss,
 }: {
   readonly view: InboxGroupRowView;
   /** The plugins the sources' marks are drawn from. */
@@ -54,17 +68,27 @@ export const InboxGroupRow = memo(function InboxGroupRow({
   readonly isOpen: boolean;
   /** Whether the selection holds none, some or all of the group. */
   readonly tick: "none" | "some" | "all";
-  /** The row was clicked outside its two buttons: it becomes current. */
-  readonly onPick: (key: string) => void;
+  /** How many of the group's members the list holds no row for yet: the head says so apart from its count. */
+  readonly unloadedCount: number;
+  /** The row was clicked outside its buttons: it becomes current, or the selection changes by `modifiers`. */
+  readonly onPick: (key: string, modifiers: InboxClickModifiers) => void;
   /** The tick was pressed. `whole` is true with Shift down. */
   readonly onToggleSelect: (key: string, whole: boolean) => void;
   readonly onToggleOpen: (key: string) => void;
+  /** Take on was pressed on the row. */
+  readonly onTakeOn: (key: string) => void;
+  /** "Dismiss all" was pressed on the row. */
+  readonly onDismiss: (key: string) => void;
 }): JSX.Element {
   const { key, reason } = view;
   const pick = (event: MouseEvent<HTMLDivElement>): void => {
     // A press on one of the row's own buttons is that button's.
     if (event.target instanceof Element && event.target.closest("button") !== null) return;
-    onPick(key);
+    onPick(key, {
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+    });
   };
   const classes = ["ib-row", "ib-row--group"];
   if (isCurrent) classes.push("is-current");
@@ -80,7 +104,9 @@ export const InboxGroupRow = memo(function InboxGroupRow({
       aria-level={1}
       aria-expanded={isOpen ? "true" : "false"}
       aria-selected={tick === "all"}
-      aria-label={view.label}
+      aria-label={
+        unloadedCount > 0 ? `${view.label}. ${describeUnloaded(unloadedCount)}` : view.label
+      }
       tabIndex={isCurrent ? 0 : -1}
       data-ref={key}
       onClick={pick}
@@ -134,8 +160,41 @@ export const InboxGroupRow = memo(function InboxGroupRow({
               />
             ))}
           </span>
-          <span className="ib-row-id">{view.count}</span>
+          <span
+            className="ib-row-id"
+            title={unloadedCount > 0 ? describeUnloaded(unloadedCount) : undefined}
+          >
+            {view.count}
+          </span>
         </span>
+      </span>
+      <span className="ib-row-acts">
+        <button
+          type="button"
+          className="ib-row-act"
+          tabIndex={-1}
+          title="Take on (T)"
+          aria-label="Take on"
+          aria-keyshortcuts="T"
+          onClick={() => {
+            onTakeOn(key);
+          }}
+        >
+          <TasksIcon size={14} />
+        </button>
+        <button
+          type="button"
+          className="ib-row-act"
+          tabIndex={-1}
+          title={`Dismiss all ${view.count} (E)`}
+          aria-label={`Dismiss all ${view.count}`}
+          aria-keyshortcuts="E"
+          onClick={() => {
+            onDismiss(key);
+          }}
+        >
+          <ArchiveIcon size={14} />
+        </button>
       </span>
     </div>
   );

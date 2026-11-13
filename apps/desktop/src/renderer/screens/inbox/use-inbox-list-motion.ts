@@ -257,6 +257,11 @@ export function useInboxListMotion({
     const nowTops = buildEntryTops(rows, rowHeight);
     const elements = collectDrawnRows(scroll);
     const flying = findFlyingThings(was.rows, rows, wasIndex);
+    // The link was written, so this change of the list is the link drawn. The dropped thing flies to its row even
+    // when the row kept its group, such as a group that another thing joined.
+    if (dropped?.isLinked === true && wasIndex.has(dropped.key) && nowIndex.has(dropped.key)) {
+      flying.add(dropped.key);
+    }
 
     // Rows still sliding from the last change are read before anything is written.
     const isBusy = [...elements.values()].some(
@@ -329,9 +334,10 @@ export function useInboxListMotion({
         speed: isDropped ? dropped.speed : undefined,
       });
     }
-    // A copy let go for a thing that now has no row of its own has nowhere to fly.
-    if (droppedRef.current !== null && !nowIndex.has(droppedRef.current.key)) {
-      fadeOutDroppedCopy(droppedRef.current);
+    // A copy let go for a thing that now has no row of its own, or whose row is too far to fly to, has nowhere to fly.
+    const waiting = droppedRef.current;
+    if (waiting !== null && (waiting.isLinked || !nowIndex.has(waiting.key))) {
+      fadeOutDroppedCopy(waiting);
       droppedRef.current = null;
     }
     if (left.length > 0) {

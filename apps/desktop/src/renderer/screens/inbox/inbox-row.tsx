@@ -29,6 +29,10 @@ export interface InboxRowMember {
   readonly isQuiet: boolean;
   /** True for the last line of the group, where the hairline that joins the members ends. */
   readonly isLast: boolean;
+  /** The member's place among the group's members the list holds, from 1. */
+  readonly position: number;
+  /** How many members of the group the list holds. A member's `aria-setsize`: the group is the set, not the whole list. */
+  readonly of: number;
 }
 
 /** What a row calls back with, every one given the row's reference. */
@@ -185,7 +189,8 @@ function RowMoves({
  *
  * The row is a tree item at level 1, or at level 2 as a `member` of an open
  * group: indented to the group's title, hanging from its chevron on a hairline. `position` is its place among `size`
- * rows, one based, because a virtual list draws only some of them. Only the
+ * rows, one based, because a virtual list draws only some of them; a member's place is
+ * counted within its group instead (`member.position` of `member.of`). Only the
  * current row is in the tab order.
  *
  * The row is memoized, so a render of the list draws again only the rows
@@ -236,8 +241,8 @@ export const InboxRow = memo(function InboxRow({
       className={classes.join(" ")}
       role="treeitem"
       aria-level={member === undefined ? 1 : 2}
-      aria-posinset={position}
-      aria-setsize={size}
+      aria-posinset={member === undefined ? position : member.position}
+      aria-setsize={member === undefined ? size : member.of}
       aria-selected={selected}
       aria-label={view.label}
       tabIndex={current ? 0 : -1}

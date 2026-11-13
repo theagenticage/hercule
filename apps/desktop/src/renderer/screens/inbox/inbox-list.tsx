@@ -1,4 +1,5 @@
 import type { PluginIdentity } from "@hercule/client-core";
+import type { GroupKey } from "@hercule/client-core/inbox";
 import {
   memo,
   useCallback,
@@ -20,7 +21,7 @@ import type { DroppedCopy } from "./inbox-flights";
 import { InboxGroupMore } from "./inbox-group-more";
 import { InboxGroupRow } from "./inbox-group-row";
 import type { InboxListEntry } from "./inbox-list-entry";
-import { InboxRow, type InboxRowActions } from "./inbox-row";
+import { InboxRow, type InboxClickModifiers, type InboxRowActions } from "./inbox-row";
 import {
   ASIDE_PX,
   FADE_EASING,
@@ -43,14 +44,14 @@ const readRowHeight = (): number => readLengths({ row: "--list-height-two-line-r
 
 /** What a group's head and its "Show N more" line call back with. Each is given the group's key. */
 export interface InboxGroupActions {
-  /** The head was clicked: it becomes current. */
-  readonly onPickGroup: (key: string) => void;
+  /** The head was clicked: it becomes current, or the selection changes by `modifiers`. */
+  readonly onPickGroup: (key: string, modifiers: InboxClickModifiers) => void;
   /** The head's tick was pressed; `whole` (with Shift) selects every member and not only those that answer the query. */
   readonly onToggleGroupSelect: (key: string, whole: boolean) => void;
   /** The head's chevron was pressed: the group opens or closes. */
   readonly onToggleGroupOpen: (key: string) => void;
   /** "Show N more" was pressed. */
-  readonly onShowMore: (groupKey: string) => void;
+  readonly onShowMore: (groupKey: GroupKey) => void;
   /**
    * A row was dropped on another by hand: links the thing `fromKey` with the
    * thing or group `toKey`. Returns whether a link was written; `false` sends the
@@ -108,10 +109,13 @@ export interface InboxListHandle {
    */
   readonly findHandAnchor: (ref: string) => HTMLElement | null;
   /**
-   * Returns the line with the key `key` (a thing's ref or a group's key), which
-   * "Link to..." opens under. Returns `null` when the line is not drawn.
+   * Scrolls the line with the key `key` (a thing's ref or a group's key) into
+   * view, which "Link to..." opens under, and returns its element once the
+   * list has drawn it. Returns `null` when the list has no such line. Only
+   * the lines in and near the view are drawn, so a line far away is drawn
+   * after the scroll, and only the newest request is answered.
    */
-  readonly findRowAnchor: (key: string) => HTMLElement | null;
+  readonly revealLine: (key: string) => Promise<HTMLElement | null>;
 }
 
 /**
@@ -160,9 +164,12 @@ const InboxLineBody = memo(function InboxLineBody({
           isCurrent={isCurrent}
           isOpen={entry.isOpen}
           tick={entry.tick}
+          unloadedCount={entry.unloadedCount}
           onPick={actions?.onPickGroup ?? NO_CALL}
           onToggleSelect={actions?.onToggleGroupSelect ?? NO_CALL}
           onToggleOpen={actions?.onToggleGroupOpen ?? NO_CALL}
+          onTakeOn={actions?.onTakeOn ?? NO_CALL}
+          onDismiss={actions?.onDismiss ?? NO_CALL}
         />
       );
     case "more":
@@ -170,6 +177,7 @@ const InboxLineBody = memo(function InboxLineBody({
         <InboxGroupMore
           groupKey={entry.groupKey}
           hiddenCount={entry.hiddenCount}
+          unloadedCount={entry.unloadedCount}
           isCurrent={isCurrent}
           onShowMore={actions?.onShowMore ?? NO_CALL}
         />
@@ -231,11 +239,12 @@ function LeavingCopy({
 /**
  * Renders the Inbox list: the entries in the order given, as a tree of items
  * with real selection. An entry is a thing, a group's head, one of its
- * members, or its "Show N more" line (`InboxListEntry`); each is one line of
- * the same height.
+ * members, or its "Show N more" line (`InboxListEntry`); each is one line, and
+ * every line is as tall as a row except "Show N more", which is shorter.
  *
- * - The list is virtual (`useVirtualLines`): only the rows in view and a few
- *   past each edge are drawn, because every row is the same height.
+ * - The list is virtual (`useVirtualLines`): only the lines in view and a few
+ *   past each edge are drawn, because the height of each line is known
+ *   without measuring it (`buildEntryTops`).
  * - The current entry (`currentKey`) is told by a puck under the rows: a fill
  *   with a 2px edge on its left, and the focus ring when the keyboard holds
  *   the list. The puck jumps in the same frame as the current row, and the
@@ -304,12 +313,13 @@ export function InboxList({
   const carryRef = useRef<HTMLDivElement>(null);
   const droppedRef = useRef<DroppedCopy | null>(null);
   const items = entries.map((entry, index) => ({ key: entry.key, entry, index }));
-  const { lines, totalSize, firstDrawnIndex, lastDrawnIndex, selectedIndex } = useVirtualLines({
-    items,
-    scrollRef,
-    estimateSize,
-    selectedKey: currentKey,
-  });
+  const { lines, totalSize, firstDrawnIndex, lastDrawnIndex, selectedIndex, scrollToKey } =
+    useVirtualLines({
+      items,
+      scrollRef,
+      estimateSize,
+      selectedKey: currentKey,
+    });
   const { leavingRows, removeLeavingRow } = useInboxListMotion({
     rows: entries,
     listId,
@@ -334,13 +344,42 @@ export function InboxList({
     [rowActions],
   );
 
+  // The request of `revealLine` that waits for its line to be drawn.
+  const revealing = useRef<{
+    readonly key: string;
+    readonly resolve: (line: HTMLElement | null) => void;
+  } | null>(null);
+  const findLine = (key: string): HTMLElement | null =>
+    scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(key)}"]`) ?? null;
+  // After every draw, answers the request that waits for a line the scroll has now brought in.
+  useLayoutEffect(() => {
+    const waiting = revealing.current;
+    if (waiting === null) return;
+    const line = findLine(waiting.key);
+    if (line === null) return;
+    revealing.current = null;
+    waiting.resolve(line);
+  });
+
   useImperativeHandle(handle, () => ({
     findHandAnchor: (ref) => {
       const row = scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`);
       return row?.querySelector<HTMLElement>("[data-hand-anchor]") ?? row ?? null;
     },
-    findRowAnchor: (key) =>
-      scrollRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(key)}"]`) ?? null,
+    revealLine: (key) => {
+      revealing.current?.resolve(null);
+      revealing.current = null;
+      const drawn = findLine(key);
+      if (drawn !== null) {
+        drawn.scrollIntoView({ block: "nearest" });
+        return Promise.resolve(drawn);
+      }
+      if (!entries.some((entry) => entry.key === key)) return Promise.resolve(null);
+      scrollToKey(key);
+      return new Promise((resolve) => {
+        revealing.current = { key, resolve };
+      });
+    },
   }));
 
   // The least scroll that brings the current row clear of both edges, with the fade at the foot counted out of the view.

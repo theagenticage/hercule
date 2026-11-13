@@ -73,6 +73,7 @@ describe("describeInboxGroupPane members", () => {
     const rows = new Map([
       [pull.ref, askingRow(pull.ref, "2026-11-07T10:00:00.000Z")],
       [bare.ref, askingRow(bare.ref, "2026-11-06T10:00:00.000Z")],
+      [issue.ref, buildInboxThing("1", { ref: issue.ref })],
     ]);
     const view = describeInboxGroupPane(detail(), context(rows));
     expect(view.members.map((member) => member.ref)).toEqual([bare.ref, pull.ref, issue.ref]);
@@ -87,7 +88,8 @@ describe("describeInboxGroupPane members", () => {
 
   it("falls back to the status, then the noun, for a member the Inbox holds no row for", () => {
     const view = describeInboxGroupPane(detail(), context());
-    expect(view.waiting).toBe("Nothing in it waits on you");
+    // No row at all: it is not known what waits, so the pane does not claim zero.
+    expect(view.waiting).toBe("Not all of it is loaded, so it is not known what waits on you");
     expect(view.members.map((member) => member.why.rest)).toEqual([
       "In Progress",
       "Pull request",
@@ -96,8 +98,26 @@ describe("describeInboxGroupPane members", () => {
     expect(view.members[2]?.title).toBe("Issue");
   });
 
-  it("says 'waits' for one member", () => {
+  it("says 'waits' for one member, and that the others are not loaded when they have no row", () => {
     const rows = new Map([[pull.ref, askingRow(pull.ref, "2026-11-07T10:00:00.000Z")]]);
+    expect(describeInboxGroupPane(detail(), context(rows)).waiting).toBe(
+      "1 of them waits on you so far",
+    );
+    const all = new Map([
+      [pull.ref, askingRow(pull.ref, "2026-11-07T10:00:00.000Z")],
+      [issue.ref, buildInboxThing("1", { ref: issue.ref })],
+      [bare.ref, buildInboxThing("3", { ref: bare.ref })],
+    ]);
+    expect(describeInboxGroupPane(detail(), context(all)).waiting).toBe("1 of them waits on you");
+  });
+
+  it("counts a member whose Task a hand-off made when it still has an ask left", () => {
+    const handed = { ...askingRow(pull.ref, "2026-11-07T10:00:00.000Z"), taskId: "task-1" };
+    const rows = new Map([
+      [pull.ref, handed],
+      [issue.ref, buildInboxThing("1", { ref: issue.ref })],
+      [bare.ref, buildInboxThing("3", { ref: bare.ref })],
+    ]);
     expect(describeInboxGroupPane(detail(), context(rows)).waiting).toBe("1 of them waits on you");
   });
 });

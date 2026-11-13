@@ -123,6 +123,9 @@ const decodeKnownEntityBlocks = Schema.decodeUnknownEffect(
   Schema.Struct({ blocks: Schema.Array(KnownBlock).check(Schema.isMaxLength(MAX_ENTITY_BLOCKS)) }),
 );
 
+/** How many things `takeOnTogether` prepares at once: preparing one may read it at its source. */
+const MAX_CONCURRENT_PREPARATIONS = 8;
+
 /** The message of the error `readBlocks` fails with. It names no plugin and no credential. */
 const SOURCE_UNREADABLE_MESSAGE =
   "The source could not be read right now. Try again later, or open the thing at its source.";
@@ -360,8 +363,21 @@ const make = Effect.gen(function* () {
    */
   const prepareEntityForTask = (ref: string): Effect.Effect<Preparation, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      const catalog = yield* readCatalog;
       const known = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
+      return yield* prepareKnownEntityForTask(yield* readCatalog, ref, known);
+    });
+
+  /**
+   * Prepares `ref` for a Task as `prepareEntityForTask` does, given the
+   * `catalog` and the record the rows hold now (`known`, none when there is
+   * none), so a caller that prepares many things reads them in one batch.
+   */
+  const prepareKnownEntityForTask = (
+    catalog: Catalog,
+    ref: string,
+    known: TaskableEntity | undefined,
+  ): Effect.Effect<Preparation, InvalidState | SqlError> =>
+    Effect.gen(function* () {
       const owner =
         known !== undefined && known.kind !== ""
           ? catalog.kinds.get(known.kind)
@@ -467,19 +483,20 @@ const make = Effect.gen(function* () {
 
   /**
    * Stores what `prepareEntityForTask` read, when it read, and returns the
-   * record of `ref` after checking it again: the exact ref, a full record,
-   * `access: ok` and an active kind that is not a place. Fails with
-   * `Conflict` when the Connection that read the thing can no longer read it,
-   * or the record no longer qualifies, so the caller repeats. Runs in the
-   * caller's transaction and never resolves.
+   * records of the things in the order of `items`, each checked again: the
+   * exact ref, a full record, `access: ok` and an active kind that is not a
+   * place. Fails with `Conflict` when the Connection that read a thing can no
+   * longer read it, or a record no longer qualifies, so the caller repeats.
+   * The records are read in one batch after the stores. Runs in the caller's
+   * transaction and never resolves.
    */
-  const storePreparedAndCheckEntity = (
-    ref: string,
-    preparation: Preparation,
-  ): Effect.Effect<TaskableEntity, Conflict | SqlError> =>
+  const storePreparedAndCheckEntities = (
+    items: ReadonlyArray<{ readonly ref: string; readonly preparation: Preparation }>,
+  ): Effect.Effect<ReadonlyArray<TaskableEntity>, Conflict | SqlError> =>
     Effect.gen(function* () {
       const catalog = yield* readCatalog;
-      if (preparation.read) {
+      for (const { ref, preparation } of items) {
+        if (!preparation.read) continue;
         const stored = yield* ingest.storeRead({
           connectionId: preparation.connectionId,
           observed: preparation.entity,
@@ -493,24 +510,40 @@ const make = Effect.gen(function* () {
           );
         }
       }
-      const record = Option.getOrUndefined(yield* entities.readTaskableEntity({ ref }));
-      const declaration =
-        record === undefined ? undefined : catalog.kinds.get(record.kind)?.declaration;
-      if (
-        record === undefined ||
-        declaration === undefined ||
-        declaration.pace === "context" ||
-        !record.isWorkRecord ||
-        record.access !== "ok"
-      ) {
-        return yield* Effect.fail(
-          createConflictError(
-            `${ref} changed while the Task was being made, and can no longer be taken on. Try again.`,
-          ),
-        );
+      const found = new Map(
+        (yield* entities.readTaskableEntities({ refs: items.map((item) => item.ref) })).map(
+          (record) => [record.ref, record] as const,
+        ),
+      );
+      const checked: TaskableEntity[] = [];
+      for (const { ref } of items) {
+        const record = found.get(ref);
+        const declaration =
+          record === undefined ? undefined : catalog.kinds.get(record.kind)?.declaration;
+        if (
+          record === undefined ||
+          declaration === undefined ||
+          declaration.pace === "context" ||
+          !record.isWorkRecord ||
+          record.access !== "ok"
+        ) {
+          return yield* Effect.fail(
+            createConflictError(
+              `${ref} changed while the Task was being made, and can no longer be taken on. Try again.`,
+            ),
+          );
+        }
+        checked.push(record);
       }
-      return record;
+      return checked;
     });
+
+  /** Stores and checks one prepared thing: see `storePreparedAndCheckEntities`. */
+  const storePreparedAndCheckEntity = (
+    ref: string,
+    preparation: Preparation,
+  ): Effect.Effect<TaskableEntity, Conflict | SqlError> =>
+    Effect.map(storePreparedAndCheckEntities([{ ref, preparation }]), (records) => records[0]!);
 
   /**
    * Returns the active Task of an entity, or makes one, in one transaction.
@@ -609,18 +642,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const refs = Arr.map(input.records, (record) => record.ref);
         const shared = yield* findSharedActiveTask(refs);
-        const checked: TaskableEntity[] = [];
-        for (const record of input.records) {
-          checked.push(
-            shared.refsWithTask.has(record.ref)
-              ? record
-              : yield* storePreparedAndCheckEntity(
-                  record.ref,
-                  input.preparations.get(record.ref) ?? { read: false },
-                ),
-          );
-        }
-        const idOf = (ref: string) => checked.find((record) => record.ref === ref)!.id;
+        const unprepared = input.records.filter((record) => !shared.refsWithTask.has(record.ref));
+        const stored = new Map(
+          (yield* storePreparedAndCheckEntities(
+            unprepared.map((record) => ({
+              ref: record.ref,
+              preparation: input.preparations.get(record.ref) ?? { read: false },
+            })),
+          )).map((record) => [record.ref, record] as const),
+        );
+        const checked = input.records.map((record) => stored.get(record.ref) ?? record);
+        const findIdOfRef = (ref: string) => checked.find((record) => record.ref === ref)!.id;
         const ids = checked.map((record) => record.id);
         const first = checked[0]!;
         if (shared.taskId === undefined) {
@@ -646,12 +678,35 @@ const make = Effect.gen(function* () {
         return {
           taskId: joined.task.id,
           created: false,
-          added: joined.added.map(idOf),
-          taken: joined.taken.map(idOf),
+          added: joined.added.map(findIdOfRef),
+          taken: joined.taken.map(findIdOfRef),
           takenAt: joined.takenAt,
         };
       }),
     );
+
+  /**
+   * Reads the entities of `ids` in one batch, in the order of `ids`, or fails
+   * with `NotFound` for the first id that has no entity.
+   */
+  const readTaskableEntitiesOrFail = (
+    ids: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<TaskableEntity>, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const found = new Map(
+        (yield* entities.readTaskableEntities({ ids })).map(
+          (record) => [record.id, record] as const,
+        ),
+      );
+      const records: TaskableEntity[] = [];
+      for (const id of ids) {
+        const record = found.get(id);
+        if (record === undefined)
+          return yield* Effect.fail(createNotFoundError("no such external entity"));
+        records.push(record);
+      }
+      return records;
+    });
 
   /** Reads the entity of an id, or fails with `NotFound`. */
   const readTaskableEntityOrFail = (
@@ -857,14 +912,18 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the group of `ref` among the things on the Inbox, in full: see
-     * `InboxGroupDetail`. Shows no signal text, so it needs only `task.read`.
-     * Fails with `NotFound` when `ref` is not on the Inbox.
+     * `InboxGroupDetail`. Needs the grants `task.read` and `signal.query`:
+     * it shows no signal text, but whether a thing is on the Inbox depends on
+     * its signals, and the `NotFound` for a thing that is not would reveal
+     * that, as `countInbox` would. Fails with `NotFound` when `ref` is not on
+     * the Inbox.
      */
     readInboxGroup: (
       ref: string,
     ): Effect.Effect<InboxGroupDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
+        yield* requireGrant("signal.query");
         const found = yield* inbox.readInboxGroup(yield* readInboxEnvironment, ref);
         return yield* Option.match(found, {
           onNone: () => Effect.fail(createNotFoundError("that thing is not on the Inbox")),
@@ -1052,7 +1111,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
-        const records = yield* Effect.forEach(input.ids, readTaskableEntityOrFail);
+        const records = yield* readTaskableEntitiesOrFail(input.ids);
         if (!Arr.isReadonlyArrayNonEmpty(records) || new Set(input.ids).size !== input.ids.length) {
           return yield* Effect.fail(
             createInvalidStateError(
@@ -1061,12 +1120,18 @@ const make = Effect.gen(function* () {
           );
         }
         const shared = yield* findSharedActiveTask(records.map((record) => record.ref));
-        const preparations = new Map<string, Preparation>();
-        for (const record of records) {
-          if (!shared.refsWithTask.has(record.ref)) {
-            preparations.set(record.ref, yield* prepareEntityForTask(record.ref));
-          }
-        }
+        const catalog = yield* readCatalog;
+        // Preparing a thing may read it at its source, so the things that need
+        // it are prepared a few at a time, not all at once and not one by one.
+        const needing = records.filter((record) => !shared.refsWithTask.has(record.ref));
+        const prepared = yield* Effect.forEach(
+          needing,
+          (record) => prepareKnownEntityForTask(catalog, record.ref, record),
+          { concurrency: MAX_CONCURRENT_PREPARATIONS },
+        );
+        const preparations = new Map(
+          needing.map((record, n) => [record.ref, prepared[n]!] as const),
+        );
         return yield* makeTaskTogether({ records, preparations, title: input.title });
       }),
 
@@ -1089,7 +1154,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireUserActor("task.update", ONLY_THE_USER_TAKES_ON_WORK);
         const readRefs = (ids: ReadonlyArray<string>) =>
-          Effect.map(Effect.forEach(ids, readTaskableEntityOrFail), (records) =>
+          Effect.map(readTaskableEntitiesOrFail(ids), (records) =>
             records.map((record) => record.ref),
           );
         const takenRefs = yield* readRefs(input.taken);

@@ -5,10 +5,8 @@
  * its Undo unlinks only the pairs that call wrote, and H refuses a group.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { answerFakeInboxQuery } from "@hercule/client-core/inbox/testing";
-import type { InboxGroup, InboxQuery, InboxReply } from "@hercule/contract";
 import {
   setVisibility,
   stubElementSize,
@@ -20,9 +18,14 @@ import {
   LOYALTY,
   QUERY_PATH,
   SLOTS,
+  SLOTS_AND_LOYALTY,
+  answerGroupedWith,
+  callsTo,
   defaultInbox,
   openInbox,
-  type FakeInbox,
+  pressUndo,
+  readUndoLine,
+  waitForUndoLine,
 } from "./-inbox.testing";
 
 beforeEach(() => {
@@ -45,52 +48,8 @@ const LINK = `${BASE}/links`;
 const UNLINK = `${BASE}/links/remove`;
 const TASK_ID = "01a1b576-c999-7000-8000-000000000902";
 
-/** Slots and Loyalty are linked; Basket stands alone. */
-const GROUP: InboxGroup = {
-  labelRef: SLOTS.ref,
-  label: SLOTS.title,
-  members: [
-    { id: SLOTS.id, ref: SLOTS.ref, matches: true },
-    { id: LOYALTY.id, ref: LOYALTY.ref, matches: true },
-  ],
-  size: 2,
-};
-
-/** Answers a read as the controller would, with `GROUP` named in every reply that holds its members. */
-const answerGrouped = (inbox: FakeInbox, call: Call): { body: InboxReply } => {
-  const reply = answerFakeInboxQuery(inbox, call.body as InboxQuery);
-  const groups = [GROUP];
-  switch (reply.mode) {
-    case "refresh":
-      return {
-        body: {
-          ...reply,
-          first: { ...reply.first, groups },
-          held: { ...reply.held, groups },
-        },
-      };
-    default:
-      return { body: { ...reply, groups } };
-  }
-};
-
-const callsTo = (calls: readonly Call[], path: string): readonly Call[] =>
-  calls.filter((call) => `${call.method} ${call.path}` === path);
-
-const readUndoLine = (): string =>
-  document.querySelector(".ib .undo-line .undo-text")?.textContent ?? "";
-
-const waitForUndoLine = (text: string): Promise<void> =>
-  waitFor(() => {
-    expect(readUndoLine()).toContain(text);
-  });
-
-const pressUndo = (user: ReturnType<typeof userEvent.setup>): Promise<void> =>
-  user.click(
-    within(document.querySelector<HTMLElement>(".ib .undo-line")!).getByRole("button", {
-      name: /Undo/,
-    }),
-  );
+const GROUP = SLOTS_AND_LOYALTY;
+const answerGrouped = answerGroupedWith([GROUP]);
 
 /** Opens the Inbox with Slots and Loyalty linked, and waits for the group's row. */
 const openGrouped = async (handlers: Parameters<typeof openInbox>[1] = {}) => {

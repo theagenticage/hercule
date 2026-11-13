@@ -340,7 +340,8 @@ const TABLE = {
     path: "/api/v1/external-entities/inbox/values",
   },
   // Reads the group of one thing: its members and the links between them. It
-  // shows no signal text, so `task.read` is all it needs.
+  // shows no signal text, but a thing is on the Inbox because of its signals,
+  // so the service also checks `signal.query`, as `countInbox` does.
   "externalEntity.readInboxGroup": {
     requires: "task.read",
     method: "POST",

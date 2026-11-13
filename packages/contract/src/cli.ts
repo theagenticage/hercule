@@ -1471,6 +1471,10 @@ export const CLI = {
         flag: "after",
         help: "With --mode next: the nextCursor of the previous page of this same list and search. A cursor of another query is refused, and so is --after with any other mode.",
       },
+      // A smaller first page for the search box of the desktop app's Link to...
+      // dialog. A command line pages with --mode next, and `--limit` is a
+      // paging flag the CLI keeps for itself.
+      limit: { hidden: true },
       // The refs a client holds: a command line cannot name hundreds of them.
       held: { hidden: true },
     },
@@ -1491,7 +1495,7 @@ export const CLI = {
   "externalEntity.suggestInboxValues": { hidden: true },
   "externalEntity.readInboxGroup": {
     command: "entity group",
-    help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Fails with not_found when the thing is not on the Inbox.",
+    help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Needs the grants `task.read` and `signal.query`. Fails with not_found when the thing is not on the Inbox.",
     examples: [{ args: ["github:pr:acme/webshop#87"] }],
     fields: {
       ref: {
@@ -1536,7 +1540,7 @@ export const CLI = {
   },
   "externalEntity.takeOnTogether": {
     command: "entity take-on-together",
-    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns the Task's id, whether this call made it, and the ids of the things it linked. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
+    help: "Takes several things on as one Task, linked to all of them. Marks them as taken on by you, and nothing is written on the sources. When none has a Task, one Task is made with the given title, at the stage and in the Project of the first thing. When they are all on the same Task, the others are linked to it and no second Task is made. Returns `taskId`, `created` (whether this call made the Task), `added` (the ids it linked to the Task), `taken` (the ids whose link it marked as taken on by you) and `takenAt` (when it marked them). The title is not used when the things join a Task that already exists. Fails with invalid_state when the things are on two or more different Tasks (it names them), or when one is a place or cannot be read.",
     examples: [
       {
         args: [

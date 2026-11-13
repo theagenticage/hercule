@@ -165,7 +165,8 @@ export const cutPage = <Unit extends PageUnit>(
  * list's order with whether each answers the query. The members that answer
  * come first, then the others, each part keeping the list's order, so the
  * first member is the one that places the group. The list is cut to
- * `MAX_INBOX_MOVED_THINGS`; `size` stays the full count.
+ * `MAX_INBOX_MOVED_THINGS`; `size` is the number of refs the group has, which
+ * `members` may hold fewer of.
  */
 export const buildInboxGroup = (
   group: Group,
@@ -177,5 +178,5 @@ export const buildInboxGroup = (
     ...members.filter((member) => member.matches),
     ...members.filter((member) => !member.matches),
   ].slice(0, MAX_INBOX_MOVED_THINGS),
-  size: members.length,
+  size: group.memberRefs.length,
 });

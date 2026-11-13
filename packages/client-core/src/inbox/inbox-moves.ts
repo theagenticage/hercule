@@ -23,7 +23,7 @@ export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "lin
 /**
  * What a move acts on, as the visit hands it over: never inferred from a count.
  *
- * - `thing`: one row.
+ * - `thing`: one row, with the group it is a member of.
  * - `group`: a group of linked things, under the keys as one row.
  *   - `labelRef` and `label` are the member the group is named after and its title.
  *   - `members` is every member the group names, with its id, minus the ones the
@@ -35,12 +35,22 @@ export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "lin
  * - `selection`: the rows the user selected.
  */
 export type InboxMoveTarget<Row extends { readonly ref: string } = InboxThing> =
-  | { readonly kind: "thing"; readonly row: Row }
+  | {
+      readonly kind: "thing";
+      readonly row: Row;
+      /** The refs of the group the thing is a member of, or none when it stands alone. */
+      readonly groupMemberRefs: readonly string[];
+    }
   | {
       readonly kind: "group";
       readonly labelRef: string;
       readonly label: string;
-      readonly members: ReadonlyArray<{ readonly id: string; readonly ref: string }>;
+      readonly members: ReadonlyArray<{
+        readonly id: string;
+        readonly ref: string;
+        /** True when the member answers the list's query. */
+        readonly matches: boolean;
+      }>;
       readonly rows: ReadonlyArray<Row>;
       readonly size: number;
       readonly isFresh: boolean;
@@ -61,6 +71,24 @@ export interface InboxLineWords {
   readonly text: string;
   readonly title: string | null;
 }
+
+/** Returns the things a target stands for that the list holds: the thing, the group's held members, the selection's rows. */
+export const listTargetThings = <Row extends { readonly ref: string }>(
+  target: InboxMoveTarget<Row>,
+): readonly Row[] => (target.kind === "thing" ? [target.row] : target.rows);
+
+/**
+ * Returns the one thing a target is: a thing, or a selection of just one row.
+ * Returns `undefined` for a group, an empty selection and a selection of several.
+ */
+export const findSingleThing = <Row extends { readonly ref: string }>(
+  target: InboxMoveTarget<Row>,
+): Row | undefined =>
+  target.kind === "thing"
+    ? target.row
+    : target.kind === "selection" && target.rows.length === 1
+      ? target.rows[0]
+      : undefined;
 
 const GO: InboxMovePlan = { kind: "go" };
 const refuse = (reason: string): InboxMovePlan => ({ kind: "refuse", reason });
@@ -127,12 +155,7 @@ export const planInboxMove = ({
 }): InboxMovePlan => {
   if (isOffline && move !== "goToTask") return refuse(REFUSED_OFFLINE);
   // A selection of one row acts as that row.
-  const only =
-    target.kind === "thing"
-      ? target.row
-      : target.kind === "selection" && target.rows.length === 1
-        ? target.rows[0]
-        : undefined;
+  const only = findSingleThing(target);
   switch (move) {
     case "dismiss":
       if (target.kind === "group") {
@@ -167,8 +190,8 @@ export const planInboxMove = ({
       if (only === undefined)
         return refuse(
           target.kind === "group"
-            ? "Hand-off takes one thing at a time. Open the group and pick one, or start a thread on all of it with N."
-            : `Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want, or start a thread on all ${formatCount(target.kind === "selection" ? target.rows.length : 0)} with N.`,
+            ? "Hand-off takes one thing at a time. Open the group and pick one."
+            : "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
         );
       return decideHandMove(offers).kind === "none"
         ? refuse(`No workflow can take this ${only.noun.toLowerCase()} yet.`)
@@ -209,6 +232,20 @@ export const buildTakeOnTogether = (
     return { ids: target.rows.map((row) => row.id), title: cut(target.rows[0]!.title) };
   return null;
 };
+
+/**
+ * Returns `group` (a move target or a head) as one end of a link: the member it is named
+ * after, titled with the group's label and with no identifier, because a group
+ * has none of its own.
+ */
+export const buildGroupLinkEnd = (group: {
+  readonly labelRef: string;
+  readonly label: string;
+}): Pick<InboxThing, "ref" | "identifier" | "title"> => ({
+  ref: group.labelRef,
+  identifier: "",
+  title: group.label,
+});
 
 /**
  * Returns the pairs to link for L on a selection: a star from the first row to
@@ -272,19 +309,27 @@ export const describeInboxDismissal = (things: readonly InboxThing[]): InboxLine
     : { text: `Dismissed ${things.length.toLocaleString("en-US")} things`, title: null };
 
 /**
- * Returns the words for the line after the group `label` of `count` things was
- * dismissed. `outside` is how many of its things do not answer the current list.
+ * Returns the words for the line after the group `target` was dismissed: its
+ * label and how many things it has, and how many of its members do not answer
+ * the current list ("not in this list").
  */
 export const describeInboxGroupDismissal = (
-  label: string,
-  count: number,
-  outside: number,
-): InboxLineWords => ({
-  text: `Dismissed the group ${quoteTitle(label)}: ${formatCount(count)} things${
-    outside > 0 ? `, ${formatCount(outside)} of them not in this list` : ""
-  }`,
-  title: null,
-});
+  target: Extract<InboxMoveTarget, { kind: "group" }>,
+): InboxLineWords => {
+  const outside = target.members.filter((member) => !member.matches).length;
+  return {
+    text: `Dismissed the group ${quoteTitle(target.label)}: ${formatCount(target.size)} things${
+      outside > 0 ? `, ${formatCount(outside)} of them not in this list` : ""
+    }`,
+    title: null,
+  };
+};
+
+/** Returns the words for the line after what `target` stood for was dismissed: a group, or things listed by title. */
+export const describeInboxTargetDismissal = (target: InboxMoveTarget): InboxLineWords =>
+  target.kind === "group"
+    ? describeInboxGroupDismissal(target)
+    : describeInboxDismissal(listTargetThings(target));
 
 /** The words for the line after an undo put dismissed things back. */
 export const DISMISSAL_UNDONE = "Back in your Inbox.";
@@ -348,6 +393,10 @@ export const describeInboxLink = (
     : { text: `Linked ${formatCount(things.length)} things`, title: null };
 };
 
+/** Returns the sentence for a link the controller refused or could not save. */
+export const describeInboxLinkFailure = (reason: string): string =>
+  `The link did not save: ${reason}. Try again.`;
+
 /** The words for the line after an undo took a link away again. */
 export const LINK_UNDONE = "Unlinked. The sources were never told.";
 
@@ -370,15 +419,40 @@ export const describeInboxUnlink = (
 /** The words for the line after an undo linked two things again. */
 export const UNLINK_UNDONE = "Linked again.";
 
+/** Returns the sentence for an unlink the controller refused or could not save. */
+export const describeInboxUnlinkFailure = (reason: string): string =>
+  `The link was not removed: ${reason}. Try again.`;
+
+/** What `externalEntity.takeOnTogether` answered, as far as the words and the undo need it. */
+export interface TakeOnTogetherOutcome {
+  readonly created: boolean;
+  readonly added: readonly string[];
+  readonly taken: readonly string[];
+}
+
+/**
+ * Returns true when a take on together wrote something that an undo can take
+ * back: a Task, a link to it or a taken mark. A call that changed nothing has
+ * nothing to undo.
+ */
+export const didTakeOnTogetherChange = (outcome: TakeOnTogetherOutcome): boolean =>
+  outcome.created || outcome.added.length > 0 || outcome.taken.length > 0;
+
 /**
  * Returns the words for the line after a group or a selection was taken on
- * under one Task, titled `title`. `created` is false when the things joined a
- * Task that already existed.
+ * under one Task, titled `title`. When the things joined a Task that already
+ * existed, the line says so; when they were all on it and marked already, it
+ * says nothing changed.
  */
-export const describeInboxTakeOnTogether = (title: string, created: boolean): InboxLineWords => ({
-  text: created ? "Took on, a Task on Work" : "Added to its Task on Work",
-  title,
-});
+export const describeInboxTakeOnTogether = (
+  title: string,
+  outcome: TakeOnTogetherOutcome,
+): InboxLineWords => {
+  if (outcome.created) return { text: "Took on, a Task on Work", title };
+  return didTakeOnTogetherChange(outcome)
+    ? { text: "Added to its Task on Work", title }
+    : { text: "Already on its Task on Work, so nothing changed", title };
+};
 
 /** Returns the words for the line after an undo of a take on together; `created` is whether the call made the Task. */
 export const describeInboxTakeOnTogetherUndone = (created: boolean): string =>

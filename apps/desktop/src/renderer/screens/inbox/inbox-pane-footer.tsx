@@ -74,7 +74,7 @@ export function InboxPaneLinkButton({
   return (
     <button
       type="button"
-      className="icon-btn ib-pane-dismiss"
+      className="icon-btn ib-pane-link"
       title={`${words} (L)`}
       aria-label={words}
       aria-keyshortcuts="L"

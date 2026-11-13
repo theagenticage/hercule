@@ -20,6 +20,15 @@ export type MoreKey = `${GroupKey}:more`;
 /** Returns true when `key` is the key of a group's head. */
 export const isGroupKey = (key: string): key is GroupKey => /^group:\d+$/.test(key);
 
+/** Returns the key of the "Show N more" line of the group `groupKey`. */
+export const buildMoreKey = (groupKey: GroupKey): MoreKey => `${groupKey}:more`;
+
+/** Returns the key of the group whose "Show N more" line has the key `key`, or `null` when `key` is not such a key. */
+export const parseMoreKey = (key: string): GroupKey | null => {
+  const groupKey = key.endsWith(":more") ? key.slice(0, -":more".length) : key;
+  return key !== groupKey && isGroupKey(groupKey) ? groupKey : null;
+};
+
 /** A group as the visit holds it: the reply's fields plus the key the visit gave it. */
 export interface HeldGroup {
   readonly key: GroupKey;
@@ -49,17 +58,19 @@ export interface InboxGroupView<Row> {
   readonly labelRef: string;
   readonly label: string;
   readonly size: number;
-  /** True when the group has more members than the reply listed, so some are out of reach of a move. */
+  /** True when the group has members the visit holds no row for. */
   readonly isCut: boolean;
+  /** How many members the visit holds no row for: `size` less the held members. They are read when the group is shown open. */
+  readonly unloadedCount: number;
   readonly isOpen: boolean;
   /** The first held member that answers the query: its time, ask and marks draw the head. */
   readonly placedBy: Row | undefined;
   /** The held members, in member order. */
   readonly rows: readonly Row[];
-  /** How many members answer the query, held or not. */
-  readonly matchingCount: number;
-  /** The refs of the held members that answer the query. */
-  readonly matchingRefs: readonly string[];
+  /** How many members answer the query (`matches`), held or not. */
+  readonly matchCount: number;
+  /** The refs of the held members that answer the query (`matches`). */
+  readonly matchRefs: readonly string[];
   /** Whether the selection holds all, some or none of the group. */
   readonly tick: "none" | "some" | "all";
 }
@@ -73,11 +84,12 @@ export type InboxEntry<Row> =
       readonly key: string;
       readonly row: Row;
       readonly groupKey: GroupKey;
-      /** From 1, among the members shown. */
+      /** The member's place in its group, from 1, in member order: for `aria-posinset`. */
       readonly position: number;
-      /** How many members the visit holds. */
+      /** How many members the group has, held or not: for `aria-setsize`. */
       readonly of: number;
-      readonly answersQuery: boolean;
+      /** True when the member answers the list's query; the others are drawn quieter. */
+      readonly matches: boolean;
       /** True for the last line of the group, which ends the line that joins its members. */
       readonly isLast: boolean;
     }
@@ -85,18 +97,22 @@ export type InboxEntry<Row> =
       readonly kind: "more";
       readonly key: MoreKey;
       readonly groupKey: GroupKey;
+      /** How many held members the line hides. */
       readonly hiddenCount: number;
+      /** How many members the group has that the visit holds no row for yet. */
+      readonly unloadedCount: number;
     };
 
 interface Placed<Row> {
   readonly group: HeldGroup;
-  /** The held members, in member order. At least two. */
+  /** The held members, in member order. At least one. */
   readonly held: readonly Row[];
 }
 
 /**
- * Works out which held rows form a group. A group with fewer than two held
- * members is not drawn as a group. A ref in two groups belongs to the first.
+ * Works out which held rows form a group. A group is drawn as a group when it
+ * holds at least one member (a group has two members or more by construction),
+ * so a group the page cut still has its head. A ref in two groups belongs to the first.
  */
 function placeGroups<Row extends { readonly ref: string }>(
   rows: readonly Row[],
@@ -109,7 +125,7 @@ function placeGroups<Row extends { readonly ref: string }>(
       const row = rowByRef.get(member.ref);
       return row === undefined || placedByRef.has(member.ref) ? [] : [row];
     });
-    if (held.length < 2) continue;
+    if (held.length < 1) continue;
     const placed = { group, held };
     for (const row of held) placedByRef.set(row.ref, placed);
   }
@@ -138,8 +154,21 @@ export function gatherGroupRows<Row extends { readonly ref: string }>(
 }
 
 /**
- * Builds the entries the list draws, in order. A group with two or more held
- * members draws a head and, when open, its members; the others are things.
+ * Returns whether the list shows the members of `group`: when the user opened
+ * it, else (with no choice) in a search when a member other than its label
+ * answers the query.
+ */
+export const isGroupOpen = (
+  group: HeldGroup,
+  fold: GroupFold | undefined,
+  isSearch: boolean,
+): boolean =>
+  fold?.isOpen ??
+  (isSearch && group.members.some((member) => member.matches && member.ref !== group.labelRef));
+
+/**
+ * Builds the entries the list draws, in order. A group with a held member
+ * draws a head and, when open, its members; the others are things.
  *
  * - A group is open when the user opened it. With no choice, it is open in a
  *   search when a member other than its label answers the query, so a hit
@@ -178,10 +207,7 @@ function pushGroup<Row extends { readonly ref: string }>(
 ): void {
   const matches = new Map(group.members.map((member) => [member.ref, member.matches]));
   const matchingRows = held.filter((row) => matches.get(row.ref) === true);
-  const isOpen =
-    fold?.isOpen ??
-    (input.isSearch &&
-      group.members.some((member) => member.matches && member.ref !== group.labelRef));
+  const isOpen = isGroupOpen(group, fold, input.isSearch);
   const selected = held.filter((row) => input.selection.has(row.ref));
   const isEveryMatchSelected =
     matchingRows.length > 0 && matchingRows.every((row) => input.selection.has(row.ref));
@@ -193,12 +219,13 @@ function pushGroup<Row extends { readonly ref: string }>(
       labelRef: group.labelRef,
       label: group.label,
       size: group.size,
-      isCut: group.size > group.members.length,
+      isCut: group.size > held.length,
+      unloadedCount: group.size - held.length,
       isOpen,
       placedBy: matchingRows[0],
       rows: held,
-      matchingCount: group.members.filter((member) => member.matches).length,
-      matchingRefs: matchingRows.map((row) => row.ref),
+      matchCount: group.members.filter((member) => member.matches).length,
+      matchRefs: matchingRows.map((row) => row.ref),
       tick: isEveryMatchSelected ? "all" : selected.length > 0 ? "some" : "none",
     },
   });
@@ -208,20 +235,27 @@ function pushGroup<Row extends { readonly ref: string }>(
       ? held
       : held.slice(0, COLLAPSED_SHOWN);
   const hiddenCount = held.length - shown.length;
+  const placeOf = new Map(group.members.map((member, index) => [member.ref, index + 1]));
   shown.forEach((row, index) => {
     entries.push({
       kind: "member",
       key: row.ref,
       row,
       groupKey: group.key,
-      position: index + 1,
-      of: held.length,
-      answersQuery: matches.get(row.ref) === true,
+      position: placeOf.get(row.ref) ?? index + 1,
+      of: group.size,
+      matches: matches.get(row.ref) === true,
       isLast: hiddenCount === 0 && index === shown.length - 1,
     });
   });
   if (hiddenCount > 0) {
-    entries.push({ kind: "more", key: `${group.key}:more`, groupKey: group.key, hiddenCount });
+    entries.push({
+      kind: "more",
+      key: buildMoreKey(group.key),
+      groupKey: group.key,
+      hiddenCount,
+      unloadedCount: group.size - held.length,
+    });
   }
 }
 
@@ -229,10 +263,10 @@ function pushGroup<Row extends { readonly ref: string }>(
  * Returns the refs a selection acts on for `entry`: a head's held members that
  * answer the query, a thing's or a member's own ref, and nothing for a "more" line.
  */
-export function entryRefs(entry: InboxEntry<{ readonly ref: string }>): readonly string[] {
+export function listSelectionRefs(entry: InboxEntry<{ readonly ref: string }>): readonly string[] {
   switch (entry.kind) {
     case "head":
-      return entry.group.matchingRefs;
+      return entry.group.matchRefs;
     case "thing":
     case "member":
       return [entry.row.ref];
@@ -245,7 +279,7 @@ export function entryRefs(entry: InboxEntry<{ readonly ref: string }>): readonly
  * Returns the refs of every row `entry` stands for, aligned with `entries`: a
  * head and its "more" line stand for all the held members of the group.
  */
-export function listEntryRows(
+export function listRefsOfEntries(
   entries: readonly InboxEntry<{ readonly ref: string }>[],
 ): (readonly string[])[] {
   const rowsOfGroup = new Map<GroupKey, readonly string[]>();
@@ -301,7 +335,7 @@ export function settleKey(
   if (newKeys.has(key)) return key;
   const shown = findEntryKey(newEntries, key);
   if (shown !== null) return shown;
-  const groupKey = key.endsWith(":more") ? key.slice(0, -":more".length) : key;
+  const groupKey = parseMoreKey(key) ?? key;
   if (isGroupKey(groupKey)) {
     if (newKeys.has(groupKey)) return groupKey;
     const members = oldGroups.find((group) => group.key === groupKey)?.members ?? [];

@@ -23,6 +23,7 @@ import {
 import {
   buildRowCopy,
   discardDroppedCopy,
+  fadeOutDroppedCopy,
   placeCopy,
   raiseShadow,
   readCopyPlace,
@@ -45,7 +46,7 @@ const LEAN_PER_SPEED = 1.25;
 /** How long the hand must be still, in milliseconds, before the row stands up straight. */
 const STRAIGHTEN_AFTER_MS = 90;
 
-/** How long a dropped copy waits for the link to show in the list, in milliseconds, before it goes home. */
+/** How long a dropped copy waits for the written link to show in the list, in milliseconds, before it fades away. */
 const LINK_WAIT_MS = 3000;
 
 /** The attribute on the page's root that tells the stylesheet a row is in the hand. */
@@ -235,6 +236,7 @@ export const createInboxDrag = (options: InboxDragOptions): { readonly destroy: 
         key,
         copy,
         speed,
+        isLinked: false,
         release: () => {
           window.clearTimeout(waitTimer);
           if (dropped.current === waiting) dropped.current = null;
@@ -247,9 +249,20 @@ export const createInboxDrag = (options: InboxDragOptions): { readonly destroy: 
         waiting.release();
         sendCopyHome(copy, row, speed);
       };
+      // A link that was written but never changed the list leaves nothing to fly to, and the copy must not go
+      // home while the undo line says "Linked": it fades where it is.
+      const fadeAway = (): void => {
+        if (dropped.current !== waiting) return;
+        dropped.current = null;
+        fadeOutDroppedCopy(waiting);
+      };
       void options.linkRows(key, toKey).then((isLinked) => {
-        if (!isLinked) goHome();
-        else waitTimer = window.setTimeout(goHome, LINK_WAIT_MS);
+        if (!isLinked) {
+          goHome();
+          return;
+        }
+        waiting.isLinked = true;
+        waitTimer = window.setTimeout(fadeAway, LINK_WAIT_MS);
       }, goHome);
     },
     cancel: (carry, isPointerUp) => {

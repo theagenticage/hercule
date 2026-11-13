@@ -4,8 +4,15 @@ import { describe, expect, it } from "vitest";
 import { NO_OFFERS } from "./card-hand-off";
 import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
 import {
+  buildGroupLinkEnd,
   buildHandedThing,
   buildLinkPairs,
+  describeInboxLinkFailure,
+  describeInboxTargetDismissal,
+  describeInboxUnlinkFailure,
+  didTakeOnTogetherChange,
+  findSingleThing,
+  listTargetThings,
   buildTakeOnTogether,
   describeInboxDismissal,
   describeInboxGroupDismissal,
@@ -29,7 +36,7 @@ const oneOffer = { available: [buildWorkflowOffer("Review PR", [])], unavailable
 const reasonOf = (plan: ReturnType<typeof planInboxMove>): string =>
   plan.kind === "refuse" ? plan.reason : "";
 
-const one = (row: InboxThing): InboxMoveTarget => ({ kind: "thing", row });
+const one = (row: InboxThing): InboxMoveTarget => ({ kind: "thing", row, groupMemberRefs: [] });
 const selection = (...rows: InboxThing[]): InboxMoveTarget => ({ kind: "selection", rows });
 const groupOf = (
   count: number,
@@ -38,6 +45,7 @@ const groupOf = (
   const members = Array.from({ length: count }, (_, n) => ({
     id: `id-${n}`,
     ref: `acme:ticket:${n}`,
+    matches: true,
   }));
   return {
     kind: "group",
@@ -126,13 +134,11 @@ describe("planInboxMove", () => {
         }),
       ),
     ).toBe(
-      "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want, or start a thread on all 2 with N.",
+      "Hand-off takes one thing at a time. Press Esc to clear the selection, then H on the thing you want.",
     );
     expect(
       reasonOf(planInboxMove({ move: "handOff", target: groupOf(3), ...online, offers: oneOffer })),
-    ).toBe(
-      "Hand-off takes one thing at a time. Open the group and pick one, or start a thread on all of it with N.",
-    );
+    ).toBe("Hand-off takes one thing at a time. Open the group and pick one.");
   });
 
   it("lets Take on join a Task the user did not take on, such as a signal's", () => {
@@ -275,10 +281,14 @@ describe("what the undo line says", () => {
 
 describe("the undo line for linking, groups and take on together", () => {
   it("names a dismissed group, and how many of its things were not in the list", () => {
-    expect(describeInboxGroupDismissal("Checkout is slow", 5, 0).text).toBe(
+    const target = (matches: boolean[]) =>
+      groupOf(matches.length, {
+        members: matches.map((m, n) => ({ id: `id-${n}`, ref: `acme:ticket:${n}`, matches: m })),
+      }) as Extract<InboxMoveTarget, { kind: "group" }>;
+    expect(describeInboxGroupDismissal(target([true, true, true, true, true])).text).toBe(
       "Dismissed the group “Checkout is slow”: 5 things",
     );
-    expect(describeInboxGroupDismissal("Checkout is slow", 5, 2).text).toBe(
+    expect(describeInboxGroupDismissal(target([true, true, true, false, false])).text).toBe(
       "Dismissed the group “Checkout is slow”: 5 things, 2 of them not in this list",
     );
   });
@@ -316,12 +326,64 @@ describe("the undo line for linking, groups and take on together", () => {
   });
 
   it("says whether a take on together made the Task or joined one, with the title last", () => {
-    expect(describeInboxTakeOnTogether("Checkout is slow", true)).toEqual({
+    const made = { created: true, added: ["a", "b"], taken: ["a", "b"] };
+    const joined = { created: false, added: ["b"], taken: ["a", "b"] };
+    expect(describeInboxTakeOnTogether("Checkout is slow", made)).toEqual({
       text: "Took on, a Task on Work",
       title: "Checkout is slow",
     });
-    expect(describeInboxTakeOnTogether("Checkout is slow", false).text).toBe(
+    expect(describeInboxTakeOnTogether("Checkout is slow", joined).text).toBe(
       "Added to its Task on Work",
+    );
+  });
+
+  it("says a take on together that changed nothing is on its Task already, with nothing to undo", () => {
+    const nothing = { created: false, added: [], taken: [] };
+    expect(didTakeOnTogetherChange(nothing)).toBe(false);
+    expect(describeInboxTakeOnTogether("Checkout is slow", nothing).text).toBe(
+      "Already on its Task on Work, so nothing changed",
+    );
+    expect(didTakeOnTogetherChange({ ...nothing, taken: ["a"] })).toBe(true);
+  });
+});
+
+describe("reading a target", () => {
+  it("finds the one thing of a thing or of a selection of one, and none for a group or several", () => {
+    expect(findSingleThing(one(thing))).toBe(thing);
+    expect(findSingleThing(selection(thing))).toBe(thing);
+    expect(findSingleThing(selection(thing, held))).toBeUndefined();
+    expect(findSingleThing(selection())).toBeUndefined();
+    expect(findSingleThing(groupOf(3))).toBeUndefined();
+  });
+
+  it("lists the things a target stands for", () => {
+    expect(listTargetThings(one(thing))).toEqual([thing]);
+    expect(listTargetThings(selection(thing, held))).toEqual([thing, held]);
+    expect(listTargetThings(groupOf(3, { rows: [thing] }))).toEqual([thing]);
+  });
+
+  it("words a dismissal by the kind of target", () => {
+    expect(describeInboxTargetDismissal(one(thing))).toEqual({
+      text: "Dismissed",
+      title: "Cache delivery slot lookups",
+    });
+    expect(describeInboxTargetDismissal(groupOf(3)).text).toContain("Dismissed the group");
+  });
+
+  it("names a group as one end of a link by its label, with no identifier", () => {
+    expect(buildGroupLinkEnd({ labelRef: "acme:ticket:1", label: "Checkout is slow" })).toEqual({
+      ref: "acme:ticket:1",
+      identifier: "",
+      title: "Checkout is slow",
+    });
+  });
+
+  it("words link and unlink failures with one full stop before the advice", () => {
+    expect(describeInboxLinkFailure("the controller is busy")).toBe(
+      "The link did not save: the controller is busy. Try again.",
+    );
+    expect(describeInboxUnlinkFailure("the controller is busy")).toBe(
+      "The link was not removed: the controller is busy. Try again.",
     );
   });
 });

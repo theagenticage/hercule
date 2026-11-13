@@ -83,8 +83,22 @@ describe("InboxGroupPane", () => {
     const calls = renderPane();
     expect(screen.getAllByRole("button", { name: /^Unlink/ })).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "Unlink #6244 and Cache the cost" }));
-    expect(calls.onUnlink).toHaveBeenCalledWith("github:pull:6244", "github:issue:9");
+    // The pair names an end by its identifier, else its title; the ends carry what the line after the unlink names them by.
+    expect(calls.onUnlink).toHaveBeenCalledWith(
+      { ref: "github:pull:6244", identifier: "#6244", title: "" },
+      { ref: "github:issue:9", identifier: "", title: "Cache the cost" },
+    );
     expect(screen.getByText("GitHub reports this")).toBeTruthy();
+  });
+
+  it("draws the dash between a pair's ends with the stylesheet, so it is no text for a screen reader", () => {
+    renderPane();
+    const dashes = document.querySelectorAll(".ib-group-pair-dash");
+    expect(dashes).toHaveLength(2);
+    for (const dash of dashes) {
+      expect(dash.textContent).toBe("");
+      expect(dash.getAttribute("aria-hidden")).toBe("true");
+    }
   });
 
   it("says the list was cut only when the read was", () => {
@@ -104,6 +118,16 @@ describe("InboxGroupPane", () => {
     expect(calls.onLink).toHaveBeenCalledOnce();
     expect(calls.onDismiss).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
+  });
+
+  it("gives the Link button a class of its own, apart from Dismiss's", () => {
+    renderPane();
+    expect(screen.getByRole("button", { name: "Link another thing" }).className).toContain(
+      "ib-pane-link",
+    );
+    expect(screen.getByRole("button", { name: "Link another thing" }).className).not.toContain(
+      "ib-pane-dismiss",
+    );
   });
 });
 

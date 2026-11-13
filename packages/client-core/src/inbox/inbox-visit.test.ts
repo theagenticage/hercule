@@ -977,7 +977,7 @@ describe("selection and current row", () => {
 describe("what a move acts on", () => {
   it("from the keyboard: the current row, or the selection when there is one", async () => {
     const { visit } = await opened(rows("a", "b", "c"));
-    expect(visit.targets()).toEqual({ kind: "thing", row: row("a") });
+    expect(visit.targets()).toEqual({ kind: "thing", row: row("a"), groupMemberRefs: [] });
     visit.select({ kind: "toggle", ref: "c" });
     visit.select({ kind: "toggle", ref: "a" });
     expect(visit.targets()).toEqual({ kind: "selection", rows: [row("a"), row("c")] });
@@ -987,7 +987,7 @@ describe("what a move acts on", () => {
     const { visit } = await opened(rows("a", "b", "c"));
     visit.select({ kind: "toggle", ref: "a" });
     visit.select({ kind: "toggle", ref: "b" });
-    expect(visit.targets("c")).toEqual({ kind: "thing", row: row("c") });
+    expect(visit.targets("c")).toEqual({ kind: "thing", row: row("c"), groupMemberRefs: [] });
     expect(visit.targets("b")).toEqual({ kind: "selection", rows: [row("a"), row("b")] });
   });
 
@@ -1175,7 +1175,7 @@ describe("groups", () => {
     ]);
     visit.move("dismissed", ["a"]);
     expect(keysOf(visit)).toEqual(["group:1"]);
-    expect(headOf(visit, "group:1")).toMatchObject({ matchingCount: 0, placedBy: undefined });
+    expect(headOf(visit, "group:1")).toMatchObject({ matchCount: 0, placedBy: undefined });
     visit.pushArrived();
     await answerRefreshGroups(fake, rows("q1", "q2"), []);
     expect(keysOf(visit)).toEqual(["q1", "q2"]);
@@ -1378,6 +1378,131 @@ describe("groups", () => {
     visit.pushArrived();
     await answerRefreshGroups(fake, items.slice(0, 200), [], { stillIn: items.slice(200, 400) });
     expect(headOf(visit, "group:1")).toMatchObject({ labelRef: "t890", size: 2 });
+  });
+
+  describe("a dismissed group with members the visit holds no row for", () => {
+    /** Rows a, b are on the page; x belongs to the group but is not held. */
+    const cutGroup = () => group("a", ["a", "b", "x"]);
+
+    it("hides the unheld member too, so a read cannot bring it back as an arrival or into the group", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), [cutGroup()]);
+      const receipt = visit.move("dismissed", ["a", "b", "x"]);
+      expect(receipt.refs).toEqual(["a", "b", "x"]);
+      expect(receipt.entries.map((e) => e.row.ref)).toEqual(["a", "b"]);
+      visit.pushArrived();
+      expect(fake.open("refresh").held).toContain("x");
+      await answerRefreshGroups(fake, [row("x", "x", 9), ...rows("a", "b", "c")], [cutGroup()]);
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(keysOf(visit)).toEqual(["c"]);
+    });
+
+    it("keeps the member out for a read issued before the undo, and gives the group back whole", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b", "c"), [cutGroup()]);
+      const receipt = visit.move("dismissed", ["a", "b", "x"]);
+      visit.confirmMove(receipt);
+      visit.pushArrived();
+      const early = fake.open("refresh");
+      visit.undo(receipt);
+      expect(keysOf(visit)).toEqual(["group:1", "c"]);
+      expect(headOf(visit, "group:1")).toMatchObject({ size: 3, isCut: true, unloadedCount: 1 });
+      early.resolve({
+        firstPage: { ...firstPage([row("x", "x", 9), row("c")]), groups: [] },
+        heldRows: [],
+        heldGroups: [],
+      });
+      await settle();
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(keysOf(visit)).toEqual(["group:1", "c"]);
+      expect(headOf(visit, "group:1").size).toBe(3);
+    });
+
+    it("asks about every hidden member in a refresh, at most half the window, and the rest of the window is rows", async () => {
+      const members = Array.from({ length: 450 }, (_, n) => `m${n}`);
+      const items = [...members.slice(0, 5).map((ref) => row(ref)), row("z")];
+      const { fake, visit } = await openedGroups(items, [group("m0", members)]);
+      visit.move("dismissed", members);
+      visit.pushArrived();
+      const { held } = fake.open("refresh");
+      expect(held).toHaveLength(201);
+      expect(held!.slice(0, 200)).toEqual(members.slice(0, 200));
+      expect(held![200]).toBe("z");
+    });
+  });
+
+  describe("a group the page cut", () => {
+    /** The page holds a; x and y belong to the group but are not on the page. */
+    const cut = () => group("a", ["a", "x", "y"]);
+
+    it("is drawn as a head with one held member, and says how many members are not loaded", async () => {
+      const { visit } = await openedGroups(rows("a", "b"), [cut()]);
+      expect(keysOf(visit)).toEqual(["group:1", "b"]);
+      expect(headOf(visit, "group:1")).toMatchObject({ isCut: true, unloadedCount: 2, size: 3 });
+    });
+
+    it("reads the rows of its unheld members when it opens, and the head is whole afterwards", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), [cut()]);
+      expect(fake.count("rows")).toBe(0);
+      visit.fold({ kind: "open" });
+      const read = fake.open("rows");
+      expect(read.held).toEqual(["x", "y"]);
+      read.resolve({ rows: rows("x", "y"), groups: [cut()] });
+      await settle();
+      expect(keysOf(visit)).toEqual(["group:1", "a", "x", "y", "b"]);
+      expect(headOf(visit, "group:1")).toMatchObject({ isCut: false, unloadedCount: 0 });
+      expect(visit.getSnapshot().arrivals).toBe(0);
+      expect(fake.count("rows")).toBe(1);
+    });
+
+    it("drops a member the read says is gone from the group", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), [cut()]);
+      visit.fold({ kind: "open" });
+      fake.open("rows").resolve({ rows: rows("x"), groups: [group("a", ["a", "x"])] });
+      await settle();
+      expect(keysOf(visit)).toEqual(["group:1", "a", "x", "b"]);
+      expect(headOf(visit, "group:1")).toMatchObject({ size: 2, isCut: false });
+      expect(fake.count("rows")).toBe(1);
+    });
+
+    it("never reads a closed group's members, nor a member that is hidden or waits behind N new", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), [
+        group("a", ["a", "b", "x", "y"]),
+      ]);
+      visit.viewportChanged(0, 1);
+      expect(fake.count("rows")).toBe(0);
+      visit.move("dismissed", ["x"]);
+      visit.fold({ kind: "open" });
+      expect(fake.open("rows").held).toEqual(["y"]);
+    });
+
+    it("reads the members of a group a search opens, as soon as the first page is in", async () => {
+      const { fake } = await openedGroups(rows("a", "b"), [cut()], { isSearch: true });
+      expect(fake.open("rows").held).toEqual(["x", "y"]);
+    });
+
+    it("reads again for a member a link made, which the page did not hold", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), []);
+      visit.linkMade(["a", "z"]);
+      await answerRefreshGroups(fake, rows("a", "b"), [group("a", ["a", "z"])]);
+      expect(fake.open("rows").held).toEqual(["z"]);
+      fake.open("rows").resolve({ rows: rows("z"), groups: [group("a", ["a", "z"])] });
+      await settle();
+      expect(keysOf(visit)).toEqual(["group:1", "a", "z", "b"]);
+    });
+
+    it("keeps a read in flight from being asked twice", async () => {
+      const { fake, visit } = await openedGroups(rows("a", "b"), [cut()]);
+      visit.fold({ kind: "open" });
+      visit.viewportChanged(0, 1);
+      visit.viewportChanged(0, 2);
+      expect(fake.count("rows")).toBe(1);
+    });
+  });
+
+  it("offers a member's own group as the refs a link picker leaves out", async () => {
+    const { visit } = await openedGroups(rows("a", "b", "c"), [group("a", ["a", "b"])]);
+    visit.fold({ kind: "open" });
+    expect(visit.targets("b")).toMatchObject({ kind: "thing", groupMemberRefs: ["a", "b"] });
+    expect(visit.targets("c")).toMatchObject({ kind: "thing", groupMemberRefs: [] });
   });
 
   describe("a link the user made", () => {

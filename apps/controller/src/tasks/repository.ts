@@ -766,10 +766,11 @@ const make = Effect.gen(function* () {
   ];
 
   /**
-   * Links the Task to each ref its new provenance entries carry. A pair that
-   * is already linked keeps its row, so the oldest `linked_at` stays and the
-   * active Task of a ref does not change when the Task is updated. Returns
-   * the refs that are new links, in the order the entries name them.
+   * Links the Task to each ref its new provenance entries carry, in one
+   * statement. A pair that is already linked keeps its row, so the oldest
+   * `linked_at` stays and the active Task of a ref does not change when the
+   * Task is updated. Returns the refs that are new links, in the order the
+   * entries name them.
    */
   const insertLinks = (
     taskId: Uint8Array,
@@ -780,41 +781,56 @@ const make = Effect.gen(function* () {
       readonly following: boolean;
       readonly takenOn: boolean;
     },
-  ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-    Effect.map(
-      Effect.forEach(
-        entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref])),
-        (ref) => sql<{ readonly ref: string }>`
-          INSERT INTO task_entity_links
-            (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
-          VALUES (${taskId}, ${ref}, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
-                  ${link.takenOn ? link.at : null}, ${link.takenOn ? link.actor : null})
-          ON CONFLICT (task_id, ref) DO NOTHING
-          RETURNING ref
-        `,
-      ),
-      (inserted) => inserted.flatMap((rows) => rows.map((row) => row.ref)),
+  ): Effect.Effect<ReadonlyArray<string>, SqlError> => {
+    const refs = [
+      ...new Set(entries.flatMap((entry) => (entry.ref === undefined ? [] : [entry.ref]))),
+    ];
+    if (refs.length === 0) return Effect.succeed([]);
+    return Effect.map(
+      sql<{ readonly ref: string }>`
+        INSERT INTO task_entity_links
+          (task_id, ref, linked_at, linked_by, following, taken_at, taken_by)
+        SELECT ${taskId}, value, ${link.at}, ${link.actor}, ${link.following ? 1 : 0},
+               ${link.takenOn ? link.at : null}, ${link.takenOn ? link.actor : null}
+        FROM json_each(${JSON.stringify(refs)}) WHERE true
+        ON CONFLICT (task_id, ref) DO NOTHING
+        RETURNING ref
+      `,
+      (rows) => {
+        const inserted = new Set(rows.map((row) => row.ref));
+        return refs.filter((ref) => inserted.has(ref));
+      },
     );
+  };
 
+  /** Appends the provenance entries to the Task, in one statement. */
   const insertProvenance = (
     taskId: Uint8Array,
     entries: ReadonlyArray<ProvenanceInput>,
     at: string,
     actor: string,
-  ) =>
-    Effect.forEach(
-      entries,
-      (entry) => sql`
-        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, merged_task_id,
-                                     at, actor)
-        VALUES (${mintUuid()}, ${taskId}, ${entry.ref ?? null}, ${entry.eventId ?? null},
-                ${entry.runId === undefined ? null : uuidFromString(entry.runId)},
-                ${entry.signalId === undefined ? null : uuidFromString(entry.signalId)},
-                ${entry.mergedTaskId === undefined ? null : uuidFromString(entry.mergedTaskId)},
-                ${at}, ${actor})
-      `,
-      { discard: true },
+  ): Effect.Effect<void, SqlError> => {
+    if (entries.length === 0) return Effect.void;
+    const params = entries.flatMap((entry) => [
+      mintUuid(),
+      taskId,
+      entry.ref ?? null,
+      entry.eventId ?? null,
+      entry.runId === undefined ? null : uuidFromString(entry.runId),
+      entry.signalId === undefined ? null : uuidFromString(entry.signalId),
+      entry.mergedTaskId === undefined ? null : uuidFromString(entry.mergedTaskId),
+      at,
+      actor,
+    ]);
+    return Effect.asVoid(
+      sql.unsafe(
+        `INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, merged_task_id,
+                                      at, actor)
+         VALUES ${entries.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+        params,
+      ),
     );
+  };
 
   /** Returns true if a project exists and has not been deleted. */
   const isLiveProject = (id: string): Effect.Effect<boolean, SqlError> =>
@@ -1699,14 +1715,37 @@ const make = Effect.gen(function* () {
         (rows) => rows.map((row) => row.ref),
       ),
 
-    /** Clears the taken mark (`taken_at` and `taken_by`) of the Task's links to `refs`, in one statement. */
+    /**
+     * Returns those of `refs` whose link to the live Task was written at
+     * exactly `at` and is marked taken at exactly `at`: the links one
+     * take-on made, as opposed to an older link it only marked.
+     */
+    listLinksWrittenAt: (
+      taskId: string,
+      refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<ExternalRef>, SqlError> =>
+      Effect.map(
+        sql<{ readonly ref: string }>`
+          SELECT l.ref FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+          WHERE l.task_id = ${uuidFromString(taskId)} AND tasks.deleted_at IS NULL
+            AND l.ref IN ${sql.in(refs)} AND l.linked_at = ${at} AND l.taken_at = ${at}`,
+        (rows) => rows.map((row) => row.ref),
+      ),
+
+    /**
+     * Clears the taken mark (`taken_at` and `taken_by`) of the Task's links to
+     * `refs` that are marked taken at exactly `takenAt`, in one statement.
+     */
     clearLinksTaken: (
       taskId: string,
       refs: Arr.NonEmptyReadonlyArray<ExternalRef>,
+      takenAt: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE task_entity_links SET taken_at = NULL, taken_by = NULL
-            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}`,
+            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}
+              AND taken_at = ${takenAt}`,
       ),
 
     /** Returns those of `refs` that the Task, taken as it is, links, in one statement. */

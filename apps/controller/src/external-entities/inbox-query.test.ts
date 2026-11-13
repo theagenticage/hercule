@@ -20,7 +20,7 @@ import { taskRepository } from "../tasks";
 import type { ActiveEntityKind } from "./entity-records";
 import { replaceFieldRows } from "./entity-fields";
 import type { InboxEnvironment } from "./inbox-query";
-import { inbox, type InboxSelection } from "./inbox.testing";
+import { inbox, narrowInboxReply, type InboxSelection } from "./inbox.testing";
 import { externalEntityRepository } from "./repository";
 
 const BASE = Date.parse("2026-03-01T00:00:00.000Z");
@@ -1705,6 +1705,109 @@ describe("groups of linked things", () => {
     ]);
   });
 
+  it("takes the label from the member of the most lasting kind that the environment declares", async () => {
+    const STORY_KIND = "acme/story";
+    const story: ActiveEntityKind = { ...TICKET, kind: STORY_KIND, lasting: 3 };
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const ticket = yield* insertTicket({ key: "ticket", title: "The ticket", updated: 10 });
+        const tale = yield* insertTicket({ key: "tale", title: "The story", updated: 20 });
+        yield* sql`UPDATE external_entities SET kind = ${STORY_KIND} WHERE ref = ${tale}`;
+        yield* linkTickets(ticket, tale);
+        const labelWith = (kinds: ReadonlyArray<ActiveEntityKind>) =>
+          Effect.map(
+            inbox.readFirstPage(environment(100, { activeEntityKinds: [...kinds] }), {
+              list: everything,
+            }),
+            (page) => page.groups[0]!.label,
+          );
+        return {
+          storyLasts: yield* labelWith([{ ...TICKET, lasting: 1 }, story]),
+          ticketLasts: yield* labelWith([
+            { ...TICKET, lasting: 3 },
+            { ...story, lasting: 1 },
+          ]),
+        };
+      }),
+    );
+    expect(result.storyLasts).toBe("The story");
+    expect(result.ticketLasts).toBe("The ticket");
+  });
+
+  it("reads at most `limit` things in a first page, keeping a group whole when it fits", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        // A group of three (the newest), then three lone things.
+        const a = yield* insertTicket({ key: "a", updated: 60 });
+        const b = yield* insertTicket({ key: "b", updated: 59 });
+        const c = yield* insertTicket({ key: "c", updated: 58 });
+        yield* linkTickets(a, b);
+        yield* linkTickets(b, c);
+        for (const [key, updated] of [
+          ["x", 30],
+          ["y", 20],
+          ["z", 10],
+        ] as const) {
+          yield* insertTicket({ key, updated });
+        }
+        const read = (limit: number) =>
+          Effect.map(
+            inbox.queryInbox(environment(100), { mode: "first", list: everything, limit }),
+            (reply) => narrowInboxReply("first", reply),
+          );
+        return { two: yield* read(2), four: yield* read(4), all: yield* read(200) };
+      }),
+    );
+    // The first group is larger than the page, so it is cut to the page.
+    expect(refsOf(result.two)).toEqual(["a", "b"]);
+    expect(result.two.groups[0]!.size).toBe(3);
+    expect(result.two.total).toBe(6);
+    expect(result.two.nextCursor).toBeDefined();
+    // The group and one lone thing fit.
+    expect(refsOf(result.four)).toEqual(["a", "b", "c", "x"]);
+    expect(result.four.nextCursor).toBeDefined();
+    expect(refsOf(result.all)).toEqual(["a", "b", "c", "x", "y", "z"]);
+    expect(result.all.nextCursor).toBeUndefined();
+  });
+
+  it("lists the first 1000 members of a larger group, those that match first, and counts them all", async () => {
+    const result = await run(() =>
+      Effect.gen(function* () {
+        const refs: Array<string> = [];
+        for (let index = 0; index < 1005; index++) {
+          refs.push(
+            yield* insertTicket({
+              key: `m${String(index).padStart(4, "0")}`,
+              updated: 2000 - index,
+            }),
+          );
+          if (index > 0) yield* linkTickets(refs[index - 1]!, refs[index]!);
+        }
+        // Only the oldest member asks, so it is the last in the list's own order.
+        yield* raise(refs[1004]!, REVIEW, 5);
+        const first = yield* list(3000, { list: everything });
+        const matching = yield* list(3000, {
+          list: everything,
+          clauses: [{ key: "asks", op: "is", value: true }],
+        });
+        const rows = yield* inbox.readRows(environment(3000), { list: everything }, [refs[2]!]);
+        return { first, matching, rows };
+      }),
+    );
+    for (const group of [result.first.groups[0]!, result.rows.groups[0]!]) {
+      expect(group.size).toBe(1005);
+      expect(group.members).toHaveLength(1000);
+    }
+    // The member that answers the query is first, though the list's order puts it last.
+    expect(result.matching.groups[0]!.members[0]).toMatchObject({
+      ref: "acme:ticket:m1004",
+      matches: true,
+    });
+    expect(result.matching.groups[0]!.members).toHaveLength(1000);
+    expect(refsOf(result.matching)[0]).toBe("m1004");
+  });
+
   it("sends the same number of statements for a list with no links as with many", async () => {
     const countStatements = (things: number, linked: boolean) =>
       run(() =>
@@ -1747,10 +1850,11 @@ describe("groups of linked things", () => {
     expect(few.groups).toBe(3);
     expect(many.groups).toBe(30);
     expect({ ...many, groups: 0 }).toEqual({ ...few, groups: 0 });
-    // The links statement runs for every read; the members statement only when a group is read.
-    expect(few.first).toBe(none.first + 1);
-    expect(few.rows).toBe(none.rows + 1);
-    expect(few.refresh).toBe(none.refresh + 1);
+    // The links statement runs for every read. With links there is one more
+    // statement for their ends, and one for the members of the groups read.
+    expect(few.first).toBe(none.first + 2);
+    expect(few.rows).toBe(none.rows + 2);
+    expect(few.refresh).toBe(none.refresh + 2);
   });
 });
 

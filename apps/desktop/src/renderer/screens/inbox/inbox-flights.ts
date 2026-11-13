@@ -11,6 +11,7 @@
 import {
   animateValue,
   copyElementWithoutIds,
+  isMotionReduced,
   trackBody,
   type MotionBody,
   type Velocity,
@@ -47,6 +48,12 @@ export interface DroppedCopy {
   readonly copy: RowCopy;
   /** The speed the hand gave the copy when it let go. */
   readonly speed: Velocity;
+  /**
+   * True once the controller has written the link. The next change of the list
+   * is then the link drawn, and the copy lands on its row wherever that row
+   * stands, even when the row kept its group.
+   */
+  isLinked: boolean;
   /** Puts the row in the page back at full weight and stops waiting. Called once the flight has taken the copy. */
   readonly release: () => void;
 }
@@ -249,7 +256,8 @@ export const discardDroppedCopy = (dropped: DroppedCopy): void => {
 /**
  * Fades the copy that was let go where it is, in 120 ms, and puts the row it
  * was lifted from back. For a link that left the thing with no row of its own,
- * such as one into a group that stays folded.
+ * such as one into a group that stays folded. Under Reduce motion the copy is
+ * gone at once.
  */
 export const fadeOutDroppedCopy = (dropped: DroppedCopy): void => {
   dropped.release();
@@ -258,6 +266,10 @@ export const fadeOutDroppedCopy = (dropped: DroppedCopy): void => {
     body.clear();
     element.remove();
   };
+  if (isMotionReduced()) {
+    remove();
+    return;
+  }
   const fade = element.animate([{ opacity: 1 }, { opacity: 0 }], {
     duration: LANDING_FADE_MS,
     easing: "ease-out",

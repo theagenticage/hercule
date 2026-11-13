@@ -21,7 +21,7 @@
  */
 import { replaceEqualDeep } from "@tanstack/query-core";
 import type { InboxFacet, InboxGroup, InboxOrder } from "@hercule/contract";
-import { entryRefs, type InboxEntry } from "./inbox-groups";
+import { listSelectionRefs, type InboxEntry } from "./inbox-groups";
 import type { InboxMoveTarget } from "./inbox-moves";
 import {
   HELD_WINDOW,
@@ -36,6 +36,7 @@ import {
   confirmHidden,
   listMoveTargets,
   listShownRows,
+  listUnloadedMembers,
   openLinkedGroup,
   moveCurrent,
   pickWindow,
@@ -53,7 +54,8 @@ import {
 
 export type { FirstPage, FoldChange, InboxVisitRow, MoveReceipt, NextPage, SelectionChange };
 export type { InboxMoveTarget };
-export type { GroupKey, InboxEntry, InboxGroupView } from "./inbox-groups";
+export { buildMoreKey, parseMoreKey } from "./inbox-groups";
+export type { GroupKey, InboxEntry, InboxGroupView, MoreKey } from "./inbox-groups";
 
 /**
  * How the visit reads. `Query` is opaque to the visit (the scope and search
@@ -228,7 +230,7 @@ const NO_ENTRIES: readonly never[] = [];
  * `firstIndex` to `lastIndex` stand for, or `undefined` when none stands for a row.
  * A head stands for all the held members of its group.
  */
-function viewedRows<Row extends InboxVisitRow>(
+function findViewedRowRange<Row extends InboxVisitRow>(
   rows: readonly Row[],
   entries: readonly InboxEntry<Row>[],
   firstIndex: number,
@@ -238,7 +240,7 @@ function viewedRows<Row extends InboxVisitRow>(
   const seen = entries
     .slice(Math.max(0, firstIndex), lastIndex + 1)
     .flatMap((entry) =>
-      entry.kind === "head" ? entry.group.rows.map((row) => row.ref) : entryRefs(entry),
+      entry.kind === "head" ? entry.group.rows.map((row) => row.ref) : listSelectionRefs(entry),
     )
     .flatMap((ref) => indexOf.get(ref) ?? []);
   if (seen.length === 0) return undefined;
@@ -402,6 +404,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
           options.isSearch?.(current.query) ?? false,
         );
         commit();
+        readStaleRows();
       },
       (error: unknown) => {
         if (read.controller.signal.aborted || opening !== current) return;
@@ -416,10 +419,15 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     if (state === null) return;
     const query = state.query;
     cancelRowReads();
+    // A dismissed group hides every member, so the hidden refs may outnumber the window.
+    // They take at most half of it and the rest are asked in the refreshes after.
+    const hidden = [...state.hidden.keys()].slice(0, HELD_WINDOW / 2);
     const held = [
-      ...state.hidden.keys(),
-      ...pickWindow(state.rows, viewport.first, viewport.last).map((row) => row.ref),
-    ].slice(0, HELD_WINDOW);
+      ...hidden,
+      ...pickWindow(state.rows, viewport.first, viewport.last)
+        .map((row) => row.ref)
+        .slice(0, HELD_WINDOW - hidden.length),
+    ];
     const read = startRead(held);
     refreshing = read;
     const link = pendingLink;
@@ -453,15 +461,24 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     setState(takeArrivals(state), { kind: "arrived", refs });
   }
 
-  /** Reads the rows in the window that missed the latest push and that no read in flight covers. */
+  /**
+   * Reads the rows that are missing or old: the rows in the window that missed
+   * the latest push, then the members of the open groups that the visit holds no
+   * row for (so a group the page cut fills in). Asks about at most `HELD_WINDOW`
+   * refs and none that a read in flight covers.
+   */
   function readStaleRows(): void {
     if (state === null) return;
     const current = state;
     const covered = (ref: string): boolean =>
       [refreshing, ...rowReads].some((read) => read?.ticket.gen === pushGen && read.refs.has(ref));
-    const stale = pickWindow(current.rows, viewport.first, viewport.last)
-      .map((row) => row.ref)
-      .filter((ref) => (current.freshAt.get(ref) ?? -1) < pushGen && !covered(ref));
+    const isBeingRead = (ref: string): boolean => [...rowReads].some((read) => read.refs.has(ref));
+    const stale = [
+      ...pickWindow(current.rows, viewport.first, viewport.last)
+        .map((row) => row.ref)
+        .filter((ref) => (current.freshAt.get(ref) ?? -1) < pushGen && !covered(ref)),
+      ...listUnloadedMembers(current).filter((ref) => !isBeingRead(ref)),
+    ].slice(0, HELD_WINDOW);
     if (stale.length === 0) return;
     const read = startRead(stale);
     rowReads.add(read);
@@ -471,6 +488,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         const accepted = acceptRead(read);
         if (accepted === null) return;
         setState(applyRowsRead(accepted, { ...reply, asked: stale }, read.ticket));
+        readStaleRows();
       },
       () => {
         rowReads.delete(read);
@@ -491,6 +509,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         if (accepted === null) return;
         nextPage = null;
         setState(applyNextPage(accepted, { ...page, after }, read.ticket));
+        readStaleRows();
       },
       () => {
         // The next time the viewport nears the end reads this page again.
@@ -588,7 +607,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     viewportChanged(firstIndex, lastIndex) {
       if (state === null) return;
       const entries = snapshot.entries;
-      viewport = viewedRows(state.rows, entries, firstIndex, lastIndex) ?? viewport;
+      viewport = findViewedRowRange(state.rows, entries, firstIndex, lastIndex) ?? viewport;
       if (lastIndex >= entries.length - 1 - NEAR_END_ROWS) readNextPage();
       readStaleRows();
     },
@@ -627,7 +646,9 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       if (state !== null) setState(applySelectionChange(state, change));
     },
     fold(change) {
-      if (state !== null) setState(applyFold(state, change));
+      if (state === null) return;
+      setState(applyFold(state, change));
+      readStaleRows();
     },
     targets(hoveredKey) {
       return state === null ? null : listMoveTargets(state, hoveredKey, now());

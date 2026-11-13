@@ -232,4 +232,38 @@ describe("InboxList", () => {
     );
     expect(handle.current!.findHandAnchor("gone")).toBeNull();
   });
+
+  describe("revealLine", () => {
+    const renderForReveal = () => {
+      const handle = createRef<InboxListHandle>();
+      render(
+        <InboxList
+          listId="waits"
+          label="Someone waits on me"
+          entries={buildRows(60)}
+          plugins={TEST_PLUGINS}
+          currentKey="thing-0"
+          selection={new Set()}
+          actions={buildListActions()}
+          onViewportChange={() => {}}
+          handle={handle}
+        />,
+      );
+      return handle;
+    };
+
+    it("answers a line that is drawn at once, after bringing it into view", async () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      const handle = renderForReveal();
+      const line = await handle.current!.revealLine("thing-2");
+      expect(line).toBe(screen.getByRole("treeitem", { name: /Title of thing-2\./ }));
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    });
+
+    it("answers null for a line the list does not have", async () => {
+      const handle = renderForReveal();
+      expect(await handle.current!.revealLine("gone")).toBeNull();
+    });
+  });
 });

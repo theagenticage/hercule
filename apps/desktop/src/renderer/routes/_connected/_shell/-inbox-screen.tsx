@@ -7,6 +7,8 @@ import {
   OPEN_AT_SOURCE_NEEDS_ONE_THING,
   THING_NOT_IN_LIST,
   addInboxClause,
+  buildGroupLinkEnd,
+  buildMoreKey,
   nameInboxScope,
   typeInboxSearch,
   type InboxScope,
@@ -17,18 +19,14 @@ import { acknowledgeInboxArrival } from "../../../app/inbox-arrival";
 import { WORKFLOW_TOPICS, useScreenTopicsLive } from "../../../app/live";
 import { useQuietValue } from "../../../app/use-quiet-value";
 import { useStableCallback } from "../../../app/use-stable-callback";
-import {
-  inboxCountQuery,
-  inboxGroupQuery,
-  inboxOutlineQuery,
-  pluginsQuery,
-  userQuery,
-} from "../../../app/queries";
+import { inboxCountQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../../../app/queries";
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import type { SavedController } from "../../../app/context";
 import { KeysSheet, UndoLine } from "../../../screens/desk";
+import type { UnlinkedEnd } from "../../../screens/inbox/inbox-group-pane";
 import { InboxFrame } from "../../../screens/inbox/inbox-frame";
+import type { InboxClickModifiers } from "../../../screens/inbox/inbox-row";
 import { INBOX_PANE_ID } from "../../../screens/inbox/inbox-pane-frame";
 import { buildInboxKeyRows, type InboxKeyAction } from "../../../screens/inbox/inbox-keys";
 import { focusNextInboxRegion } from "../../../screens/inbox/inbox-regions";
@@ -73,6 +71,23 @@ import {
 const SEARCH_QUIET_MS = 200;
 
 const NO_KINDS: readonly string[] = [];
+
+/** What the undo line says when a row is dropped on a line of its own group. */
+const ALREADY_IN_ONE_GROUP = "These are in one group already.";
+
+/**
+ * Returns the end of a link that the list line `entry` stands for: the thing
+ * itself, or for a group's head the thing the group is named after. Returns
+ * `undefined` for a "Show N more" line, which links nothing.
+ */
+const readLinkEnd = (entry: InboxListSnapshot["entries"][number]): LinkedThing | undefined => {
+  if (entry.kind === "head") {
+    return buildGroupLinkEnd(entry.group);
+  }
+  return entry.kind === "thing" || entry.kind === "member"
+    ? { ref: entry.row.ref, identifier: entry.row.identifier, title: entry.row.title }
+    : undefined;
+};
 
 /** "Link to..." while it is open: what it links from, and the element it opens under. */
 interface LinkMenu {
@@ -231,9 +246,9 @@ export function InboxScreen({
     const head = entries.find(
       (entry) => entry.kind === "head" && entry.group.rows.some((row) => row.ref === ref),
     );
-    if (head === undefined) return;
+    if (head?.kind !== "head") return;
     visit.fold({ kind: "open", key: head.key });
-    visit.fold({ kind: "showMore", key: `${head.key}:more` });
+    visit.fold({ kind: "showMore", key: buildMoreKey(head.key) });
   };
   /** Makes `ref` the one thing the pane shows: ends a selection, opens the group that holds it, and slides the pane over the list when it lies closed. */
   const showThing = (ref: string): void => {
@@ -265,15 +280,19 @@ export function InboxScreen({
   };
   /**
    * Opens "Link to..." under the line the pick links from, whether the keys or
-   * the pane's Link button asked for it. The line is scrolled into view first,
-   * so the popover has a line to sit under.
+   * the pane's Link button asked for it. The line is scrolled into view first
+   * (it may be far from the view, and then not drawn), so the popover has a
+   * line to sit under. A selection of one thing links that thing, so the
+   * popover sits under its line even when it is not the current line.
    */
   const openLinkMenu = (pick: InboxLinkPick | null): void => {
     if (pick === null) return;
-    const anchor = listRef.current?.findRowAnchor(pick.anchorKey);
-    if (anchor === null || anchor === undefined) return;
-    anchor.scrollIntoView({ block: "nearest" });
-    setLinkMenu({ pick, anchor });
+    const { selection } = snapshot;
+    const lineKey =
+      selection.size === 1 && selection.has(pick.from.ref) ? pick.from.ref : pick.anchorKey;
+    void listRef.current?.revealLine(lineKey).then((anchor) => {
+      if (anchor !== null) setLinkMenu({ pick, anchor });
+    });
   };
   const startLink = (ref: string | undefined): void => {
     openLinkMenu(moves.startLink(ref));
@@ -384,10 +403,13 @@ export function InboxScreen({
         focusNextInboxRegion(action.backwards, { isStacked, isPaneOpen });
         return;
       case "activate": {
-        // Return unfolds a group, and a "Show N more" line shows them.
+        // Return unfolds a group, and a "Show N more" line shows them. On a group that is open already, in a
+        // window too narrow for the pane to sit beside the list, it slides the pane in, as on a thing.
         const entry = snapshot.entries.find((candidate) => candidate.key === snapshot.current);
-        if (entry?.kind === "head") visit.fold({ kind: "open" });
-        else if (entry?.kind === "more") visit.fold({ kind: "showMore" });
+        if (entry?.kind === "head") {
+          if (entry.group.isOpen && isStacked && !isPaneOpen) setIsPaneOpen(true);
+          else visit.fold({ kind: "open" });
+        } else if (entry?.kind === "more") visit.fold({ kind: "showMore" });
         else if (isStacked && !isPaneOpen) {
           if (isReady && snapshot.current !== null) setIsPaneOpen(true);
         } else paneRef.current?.answerCurrentAsk();
@@ -422,17 +444,8 @@ export function InboxScreen({
   const linkInPane = useStableCallback(() => {
     startLink(undefined);
   });
-  /** Unlinks two members of the open group, named from the group the pane has read. */
-  const unlinkInPane = useStableCallback((fromRef: string, toRef: string) => {
-    const members =
-      currentGroupMember === undefined
-        ? undefined
-        : queryClient.getQueryData(inboxGroupQuery(client, currentGroupMember).queryKey)?.members;
-    const name = (ref: string): LinkedThing => {
-      const peer = members?.find((member) => member.ref === ref);
-      return { ref, identifier: peer?.identifier ?? "", title: peer?.title ?? ref };
-    };
-    moves.unlink(name(fromRef), name(toRef));
+  const unlinkInPane = useStableCallback((first: UnlinkedEnd, second: UnlinkedEnd) => {
+    moves.unlink(first, second);
   });
   const paneMoves: InboxPaneMoves = {
     onTakeOn: takeOnInPane,
@@ -449,17 +462,19 @@ export function InboxScreen({
     onLink: linkInPane,
     onDismiss: dismissInPane,
   };
+  /** A click on a line of the list (a thing's row or a group's head): Shift extends the selection, Command or Control toggles the line in it, else the line becomes current. */
+  const pickLine = (key: string, modifiers: InboxClickModifiers): void => {
+    visit.select(
+      modifiers.shiftKey
+        ? { kind: "extendTo", ref: key }
+        : modifiers.metaKey || modifiers.ctrlKey
+          ? { kind: "toggle", ref: key }
+          : { kind: "focus", ref: key },
+    );
+    setIsPaneOpen(true);
+  };
   const rowActions: InboxListActions = {
-    onPick: (ref, modifiers) => {
-      visit.select(
-        modifiers.shiftKey
-          ? { kind: "extendTo", ref }
-          : modifiers.metaKey || modifiers.ctrlKey
-            ? { kind: "toggle", ref }
-            : { kind: "focus", ref },
-      );
-      setIsPaneOpen(true);
-    },
+    onPick: pickLine,
     onToggleSelect: (ref) => {
       visit.select({ kind: "toggle", ref });
     },
@@ -469,10 +484,7 @@ export function InboxScreen({
     },
     onGoToTask: moves.goToTask,
     onDismiss: moves.dismiss,
-    onPickGroup: (key) => {
-      visit.select({ kind: "focus", ref: key });
-      setIsPaneOpen(true);
-    },
+    onPickGroup: pickLine,
     onToggleGroupSelect: (key, whole) => {
       visit.select({ kind: "toggle", ref: key, whole });
     },
@@ -481,22 +493,33 @@ export function InboxScreen({
       visit.fold({ kind: entry?.kind === "head" && entry.group.isOpen ? "close" : "open", key });
     },
     onShowMore: (groupKey) => {
-      visit.fold({ kind: "showMore", key: `${groupKey}:more` });
+      visit.fold({ kind: "showMore", key: buildMoreKey(groupKey) });
     },
-    onLinkThings: async (fromKey, toKey) => {
+    onLinkThings: async (carriedKey, targetKey) => {
       const { entries } = visit.getSnapshot();
-      const readEnd = (key: string): LinkedThing | undefined => {
-        const entry = entries.find((candidate) => candidate.key === key);
-        if (entry?.kind === "head") {
-          return { ref: entry.group.labelRef, identifier: "", title: entry.group.label };
-        }
-        return entry?.kind === "thing" || entry?.kind === "member"
-          ? { ref: entry.row.ref, identifier: entry.row.identifier, title: entry.row.title }
-          : undefined;
-      };
-      const from = readEnd(fromKey);
-      const to = readEnd(toKey);
-      return from !== undefined && to !== undefined && (await moves.linkTo(to, from));
+      const carried = entries.find((candidate) => candidate.key === carriedKey);
+      const target = entries.find((candidate) => candidate.key === targetKey);
+      if (carried === undefined || target === undefined) return false;
+      const carriedGroup = carried.kind === "member" ? carried.groupKey : undefined;
+      const targetGroup =
+        target.kind === "head"
+          ? target.key
+          : target.kind === "member"
+            ? target.groupKey
+            : undefined;
+      // Two things of one group are in it already, however they were linked, so there is nothing to write.
+      if (carriedGroup !== undefined && carriedGroup === targetGroup) {
+        moves.say(ALREADY_IN_ONE_GROUP);
+        return false;
+      }
+      const carriedEnd = readLinkEnd(carried);
+      const targetEnd = readLinkEnd(target);
+      // The line names the thing dropped on first and the carried thing second, as the drawing does.
+      return (
+        carriedEnd !== undefined &&
+        targetEnd !== undefined &&
+        (await moves.linkTo(targetEnd, carriedEnd))
+      );
     },
   };
   /**
@@ -605,7 +628,11 @@ export function InboxScreen({
       paneHead={
         paneThing === undefined ? (
           currentGroupMember === undefined ? null : (
-            <InboxGroupHeadPart client={client} memberRef={currentGroupMember} />
+            <InboxGroupHeadPart
+              client={client}
+              memberRef={currentGroupMember}
+              isActive={isPaneVisible}
+            />
           )
         ) : (
           <InboxPaneHeadPart

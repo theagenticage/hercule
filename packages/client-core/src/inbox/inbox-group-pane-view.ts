@@ -56,7 +56,11 @@ export interface InboxGroupPanePair {
 /** Everything the pane of a group draws below its head. */
 export interface InboxGroupPaneView {
   readonly title: string;
-  /** "2 of them wait on you", or "Nothing in it waits on you". */
+  /**
+   * "2 of them wait on you", or "Nothing in it waits on you". A member the Inbox
+   * holds no row for is not known to wait or not, so the words say so instead of
+   * counting it as not waiting.
+   */
   readonly waiting: string;
   readonly members: readonly InboxGroupPaneMember[];
   readonly pairs: readonly InboxGroupPanePair[];
@@ -73,9 +77,23 @@ export interface InboxGroupPaneContext {
   readonly now: Date;
 }
 
-/** Returns whether the row is an ask the user is to answer: it asks and no Task holds it. */
+/**
+ * Returns whether the row waits on the user: it has an open ask that is not
+ * taken. A Task that a hand-off made does not change that, because the row only
+ * counts the asks the hand-off did not answer.
+ */
 const isWaitingOnUser = (row: InboxThing | undefined): row is InboxThing =>
-  row !== undefined && row.askCount > 0 && row.taskId === undefined;
+  row !== undefined && row.askCount > 0;
+
+/** Returns the pane's line about how many members wait on the user, given whether the Inbox holds a row for every member. */
+const describeWaiting = (waitingCount: number, isEveryMemberKnown: boolean): string => {
+  if (waitingCount === 0)
+    return isEveryMemberKnown
+      ? "Nothing in it waits on you"
+      : "Not all of it is loaded, so it is not known what waits on you";
+  const words = `${String(waitingCount)} of them ${waitingCount === 1 ? "waits" : "wait"} on you`;
+  return isEveryMemberKnown ? words : `${words} so far`;
+};
 
 /**
  * Returns the head's words for the group: "Linked · 4 things in Linear,
@@ -149,12 +167,10 @@ export const describeInboxGroupPane = (
   const waitingCount = detail.members.filter((peer) =>
     isWaitingOnUser(context.rows.get(peer.ref)),
   ).length;
+  const isEveryMemberKnown = detail.members.every((peer) => context.rows.has(peer.ref));
   return {
     title: detail.label,
-    waiting:
-      waitingCount === 0
-        ? "Nothing in it waits on you"
-        : `${String(waitingCount)} of them ${waitingCount === 1 ? "waits" : "wait"} on you`,
+    waiting: describeWaiting(waitingCount, isEveryMemberKnown),
     members: ordered.map((peer) => buildMember(peer, context.rows.get(peer.ref), context)),
     pairs: detail.links.map((link) => ({
       fromRef: link.fromRef,

@@ -27,6 +27,7 @@ const HEAD: InboxListEntry = {
   },
   isOpen: true,
   tick: "none",
+  unloadedCount: 0,
 };
 
 const thing = (ref: string): InboxListEntry => ({
@@ -43,10 +44,14 @@ const ENTRIES: ReadonlyArray<InboxListEntry> = [
   {
     ...thing("gamma"),
     kind: "member",
-    member: { isQuiet: false, isLast: false },
+    member: { isQuiet: false, isLast: false, position: 1, of: 2 },
   } as InboxListEntry,
-  { ...thing("delta"), kind: "member", member: { isQuiet: false, isLast: true } } as InboxListEntry,
-  { kind: "more", key: "group:1:more", groupKey: "group:1", hiddenCount: 3 },
+  {
+    ...thing("delta"),
+    kind: "member",
+    member: { isQuiet: false, isLast: true, position: 2, of: 2 },
+  } as InboxListEntry,
+  { kind: "more", key: "group:1:more", groupKey: "group:1", hiddenCount: 3, unloadedCount: 0 },
 ];
 
 interface Setup {
@@ -207,6 +212,23 @@ describe("carrying a row", () => {
     await answerLink(false);
     expect(carried()).toBeNull();
     expect(row("alpha").hasAttribute("data-lifted")).toBe(false);
+  });
+
+  it("fades the copy where it is, and does not send it home, when a written link never changes the list", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const where: { current: string | null } = { current: null };
+    const { row, answerLink } = renderList(where);
+    press(row("alpha"));
+    moveTo(100, 110);
+    where.current = "beta";
+    moveTo(100, 150);
+    letGo(100, 150);
+    await answerLink(true);
+    expect(carried()).not.toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(3100));
+    expect(carried()).toBeNull();
+    expect(row("alpha").hasAttribute("data-lifted")).toBe(false);
+    vi.useRealTimers();
   });
 
   it("drops on a group's head as a link to the group", () => {

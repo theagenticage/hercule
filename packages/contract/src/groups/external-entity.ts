@@ -657,7 +657,11 @@ const InboxHeldRefs = atMost(ExternalRef, MAX_INBOX_HELD_REFS);
  * The query of `queryInbox`: one selection, read in one of four modes.
  *
  * - `first` reads the first page of the selection, with the total and the
- *   facets of the whole result.
+ *   facets of the whole result. `limit` (1 to `MAX_INBOX_PAGE`, default
+ *   `MAX_INBOX_PAGE`) is the most things the page holds, so a client that only
+ *   needs a few results, such as a search box, reads a small page. A group is
+ *   still read whole when it fits in `limit`; a first group larger than
+ *   `limit` is cut to it. Nothing else in the reply changes.
  * - `next` reads the page after `after`, the `nextCursor` of an earlier page
  *   of the same selection. A cursor of another selection, or one that does not
  *   decode, fails with `validation`.
@@ -672,7 +676,13 @@ const InboxHeldRefs = atMost(ExternalRef, MAX_INBOX_HELD_REFS);
  * CLI uses `first` and `next`.
  */
 export const InboxQuery = Schema.Union([
-  closedStruct({ mode: Schema.Literal("first"), ...InboxSelectionFields }),
+  closedStruct({
+    mode: Schema.Literal("first"),
+    ...InboxSelectionFields,
+    limit: Schema.optionalKey(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_INBOX_PAGE })),
+    ),
+  }),
   closedStruct({ mode: Schema.Literal("next"), ...InboxSelectionFields, after: bounded(1, 512) }),
   closedStruct({
     mode: Schema.Literal("refresh"),
@@ -809,7 +819,7 @@ export const InboxGroup = Schema.Struct({
   labelRef: ExternalRef,
   label: bounded(1, 512),
   members: atMost(InboxGroupMember, MAX_INBOX_MOVED_THINGS).check(Schema.isMinLength(2)),
-  size: Schema.Int,
+  size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
 });
 
 export type InboxGroup = Schema.Schema.Type<typeof InboxGroup>;

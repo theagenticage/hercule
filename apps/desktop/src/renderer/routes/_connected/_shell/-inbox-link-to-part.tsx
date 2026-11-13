@@ -1,46 +1,14 @@
-import { useState, type JSX } from "react";
-import { keepPreviousData, queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { useMemo, useState, type JSX } from "react";
+import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import type { HerculeClient } from "@hercule/client-core";
 import type { InboxThing } from "@hercule/contract";
-import { LIVE_KEPT_READ_OPTIONS, pluginsQuery } from "../../../app/queries";
+import { pluginsQuery } from "../../../app/queries";
 import { useQuietValue } from "../../../app/use-quiet-value";
 import { InboxLinkTo, type InboxLinkToResult } from "../../../screens/inbox/inbox-link-to";
+import { MAX_LINK_TO_RESULTS, linkToThingsQuery } from "./-inbox-link-to-results";
 
 /** How long typing stops before the search is read, in milliseconds. */
 const QUIET_MS = 150;
-
-/** How many results the popover shows at most. */
-const MAX_RESULTS = 6;
-
-/**
- * Reads the first page of the Inbox's Everything list, narrowed by `text`
- * (no text narrows nothing). A newer text replaces an older read, which
- * aborts, and the previous page stays in view until the new one arrives.
- */
-const linkToResultsQuery = (client: HerculeClient, text: string) =>
-  queryOptions({
-    queryKey: [...queryKeys.inbox(), "link-to", text],
-    queryFn: async ({ signal }): Promise<readonly InboxThing[]> => {
-      const reply = await client.externalEntity.queryInbox(
-        {
-          payload: {
-            mode: "first",
-            list: { savedQuery: "everything" },
-            ...(text === "" ? {} : { text }),
-          },
-        },
-        { signal },
-      );
-      if (reply.mode !== "first") {
-        throw new Error(`The Inbox answered a read in first mode in ${reply.mode} mode.`);
-      }
-      return reply.things;
-    },
-    placeholderData: keepPreviousData,
-    retry: false,
-    ...LIVE_KEPT_READ_OPTIONS,
-    gcTime: 30_000,
-  });
 
 /**
  * Renders "Link to..." for one thing or one group, and searches the Inbox
@@ -50,9 +18,12 @@ const linkToResultsQuery = (client: HerculeClient, text: string) =>
  *   is being linked. `fromLabel` names it in the field ("#6213").
  * - `memberRefs` are the refs of a group's members. Neither they nor
  *   `fromRef` are offered, because linking them changes nothing.
- * - The popover opens with the first page of Everything. Typing narrows it
- *   by text; the read waits for a short quiet, and sets no timer while
- *   nothing is typed. At most 6 things are shown.
+ * - The popover opens with a small first page of Everything. Typing narrows
+ *   it by text; the read waits for a short quiet, and sets no timer while
+ *   nothing is typed. At most 6 things are shown. A group's member that
+ *   does not answer the typed text is not offered (`listLinkableThings`), and
+ *   a push on the Inbox does not read the results again while the popover is
+ *   open (`linkToThingsQuery`).
  * - Picking a result calls `onLink(fromRef, to)`, with `to` the picked thing's
  *   ref, identifier and title so the caller can name it, and `onClose`. The link
  *   itself, and its undo, belong to the caller.
@@ -79,11 +50,16 @@ export function InboxLinkToPart({
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
   const text = useQuietValue(query.trim(), QUIET_MS);
-  const { data: things = [] } = useQuery(linkToResultsQuery(client, text));
+  const excluded = useMemo(() => new Set([fromRef, ...memberRefs]), [fromRef, memberRefs]);
+  const { data: things = [] } = useQuery({
+    ...linkToThingsQuery(client, fromRef, text, excluded),
+    placeholderData: keepPreviousData,
+  });
 
+  // The read left these out already; a thing of an older read may have joined the group since.
   const results: InboxLinkToResult[] = things
-    .filter((thing) => thing.ref !== fromRef && !memberRefs.includes(thing.ref))
-    .slice(0, MAX_RESULTS)
+    .filter((thing) => !excluded.has(thing.ref))
+    .slice(0, MAX_LINK_TO_RESULTS)
     .map(({ ref, identifier, title, source }) => ({ ref, identifier, title, source }));
 
   return (

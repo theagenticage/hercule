@@ -36,23 +36,28 @@ import {
   NO_SOURCE_ADDRESS,
   TAKE_ON_UNDONE,
   UNLINK_UNDONE,
+  buildGroupLinkEnd,
   buildHandedThing,
   buildLinkPairs,
   buildTakeOnTogether,
   decideHandMove,
   describeHandOffUndo,
-  describeInboxDismissal,
   describeInboxDismissalFailure,
-  describeInboxGroupDismissal,
   describeInboxHandOff,
   describeInboxHandOffFailure,
   describeInboxLink,
+  describeInboxLinkFailure,
   describeInboxTakeOn,
   describeInboxTakeOnFailure,
   describeInboxTakeOnTogether,
   describeInboxTakeOnTogetherUndone,
+  describeInboxTargetDismissal,
   describeInboxUnlink,
+  describeInboxUnlinkFailure,
+  didTakeOnTogetherChange,
+  findSingleThing,
   isHandOffTakenBack,
+  listTargetThings,
   REFUSED_OFFLINE,
   planInboxMove,
   type CardOffers,
@@ -132,41 +137,27 @@ const linkEveryPair = async (
   return { created };
 };
 
-/** Returns the things a target stands for that the list holds: the thing, the group's held members, the selection. */
-const readThings = (target: InboxMoveTarget<InboxListRow>): readonly InboxListRow[] =>
-  target.kind === "thing" ? [target.row] : target.rows;
-
-/** Returns the one thing a target is: a thing, or a selection of just one; `undefined` otherwise. */
-const readOnlyThing = (target: InboxMoveTarget<InboxListRow>): InboxListRow | undefined =>
-  target.kind === "thing"
-    ? target.row
-    : target.kind === "selection" && target.rows.length === 1
-      ? target.rows[0]
-      : undefined;
+/**
+ * Unlinks `pairs` one after the other. It stops at the first failure and
+ * returns it, or returns `undefined` when every pair is unlinked.
+ */
+const unlinkEveryPair = async (
+  client: HerculeClient,
+  pairs: readonly LinkPair[],
+): Promise<Error | undefined> => {
+  for (const pair of pairs) {
+    try {
+      await client.externalEntity.unlink({ payload: pair });
+    } catch (failure) {
+      return failure instanceof Error ? failure : new Error(readReason(failure));
+    }
+  }
+  return undefined;
+};
 
 /** Returns the workflows the target's first thing can be handed to; a group has none, as it is never handed. */
 const readOffers = (target: InboxMoveTarget<InboxListRow>): CardOffers =>
-  readThings(target)[0]?.offers ?? NO_OFFERS;
-
-/**
- * Returns the words for the line after `target` was dismissed. A group counts
- * the members of it that do not answer the list as being outside it.
- */
-const describeDismissal = (
-  target: InboxMoveTarget<InboxListRow>,
-  entries: InboxListSnapshot["entries"],
-): InboxLineWords => {
-  if (target.kind !== "group") return describeInboxDismissal(readThings(target));
-  const head = entries.find(
-    (entry) => entry.kind === "head" && entry.group.labelRef === target.labelRef,
-  );
-  const matching = head?.kind === "head" ? head.group.matchingCount : target.members.length;
-  return describeInboxGroupDismissal(
-    target.label,
-    target.size,
-    Math.max(0, target.members.length - matching),
-  );
-};
+  listTargetThings(target)[0]?.offers ?? NO_OFFERS;
 
 const NOT_SAVED = "That move did not save, so there is nothing to put back.";
 
@@ -379,7 +370,7 @@ export const useInboxMoves = ({
     hoveredKey: string | undefined,
   ): InboxListRow | null => {
     const planned = planTarget(move, hoveredKey);
-    return planned === null ? null : (readOnlyThing(planned.target) ?? null);
+    return planned === null ? null : (findSingleThing(planned.target) ?? null);
   };
 
   /** Tells the screen what is current once a move or an undo has changed the list. */
@@ -391,7 +382,7 @@ export const useInboxMoves = ({
     const planned = planTarget("dismiss", hoveredKey);
     if (planned === null) return;
     const { target } = planned;
-    const things = readThings(target);
+    const things = listTargetThings(target);
     const ids =
       target.kind === "group"
         ? target.members.map((member) => member.id)
@@ -400,7 +391,7 @@ export const useInboxMoves = ({
       target.kind === "group"
         ? target.members.map((member) => member.ref)
         : things.map((thing) => thing.ref);
-    const words = describeDismissal(target, visit.getSnapshot().entries);
+    const words = describeInboxTargetDismissal(target);
     const failed = target.kind === "group" ? [{ title: target.label }] : things;
     const receipt = visit.move("dismissed", refs);
     tellMoved();
@@ -447,19 +438,21 @@ export const useInboxMoves = ({
     const refs =
       target.kind === "group"
         ? target.members.map((member) => member.ref)
-        : readThings(target).map((thing) => thing.ref);
+        : listTargetThings(target).map((thing) => thing.ref);
     const receipt = visit.move("taken", refs);
     tellMoved();
     const request = takeOnTogetherRequest.mutateAsync(together);
     const wasChanged = request.then(
       (result) => {
         visit.confirmMove(receipt);
-        return result.created || result.added.length > 0 || result.taken.length > 0;
+        return didTakeOnTogetherChange(result);
       },
       () => false,
     );
     const gesture: Gesture<CardMover> = {
-      words: joinGestureWords(describeInboxTakeOnTogether(together.title, true)),
+      words: joinGestureWords(
+        describeInboxTakeOnTogether(together.title, { created: true, added: [], taken: [] }),
+      ),
       undo: () =>
         reverseMove.mutateAsync(async () => {
           if (!(await wasChanged)) throw new Error(NOT_SAVED);
@@ -480,7 +473,7 @@ export const useInboxMoves = ({
     request.then(
       async (result) => {
         if (!isCurrent()) return;
-        const words = describeInboxTakeOnTogether(together.title, result.created);
+        const words = describeInboxTakeOnTogether(together.title, result);
         say(
           words.text,
           (await wasChanged) ? gesture : undefined,
@@ -505,7 +498,7 @@ export const useInboxMoves = ({
       takeOnTogether(planned.target, together);
       return;
     }
-    const thing = readOnlyThing(planned.target);
+    const thing = findSingleThing(planned.target);
     if (thing === undefined) return;
     const receipt = visit.move("taken", [thing.ref]);
     tellMoved();
@@ -681,8 +674,10 @@ export const useInboxMoves = ({
           if (!(await wasLinked)) throw new Error(NOT_SAVED);
           const { created } = await request;
           requireSignedIn(scope);
-          for (const pair of created) await client.externalEntity.unlink({ payload: pair });
+          // An unlink that fails part way has still taken some pairs away, so the list reads again either way.
+          const failure = await unlinkEveryPair(client, created);
           visit.pushArrived();
+          if (failure !== undefined) throw failure;
           return { text: LINK_UNDONE };
         }),
     };
@@ -693,7 +688,7 @@ export const useInboxMoves = ({
       if (created.length > 0) visit.linkMade(created.flatMap((pair) => [pair.fromRef, pair.toRef]));
       if (failure !== undefined) {
         say(
-          `The link did not save: ${readReason(failure)}. Try again.`,
+          describeInboxLinkFailure(readReason(failure)),
           created.length > 0 ? gesture : undefined,
         );
         return;
@@ -714,25 +709,25 @@ export const useInboxMoves = ({
     if (planned === null) return null;
     const { target, plan } = planned;
     if (plan.kind === "go") {
-      void linkPairs(buildLinkPairs(target), readThings(target));
+      void linkPairs(buildLinkPairs(target), listTargetThings(target));
       return null;
     }
     const anchorKey = hoveredKey ?? visit.getSnapshot().current;
     if (anchorKey === null) return null;
     if (target.kind === "group") {
       return {
-        from: { ref: target.labelRef, identifier: "", title: target.label },
+        from: buildGroupLinkEnd(target),
         fromLabel: target.label,
         memberRefs: target.members.map((member) => member.ref),
         anchorKey,
       };
     }
-    const thing = readOnlyThing(target);
+    const thing = findSingleThing(target);
     if (thing === undefined) return null;
     return {
       from: thing,
       fromLabel: thing.identifier !== "" ? thing.identifier : thing.title,
-      memberRefs: [],
+      memberRefs: target.kind === "thing" ? target.groupMemberRefs : [],
       anchorKey,
     };
   };
@@ -777,7 +772,7 @@ export const useInboxMoves = ({
       },
       (error: unknown) => {
         if (!isCurrent()) return;
-        say(`The link was not removed: ${readReason(error)}. Try again.`);
+        say(describeInboxUnlinkFailure(readReason(error)));
       },
     );
   };

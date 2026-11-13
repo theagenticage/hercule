@@ -567,13 +567,12 @@ interface MemberRow {
   readonly matches: number;
 }
 
-/** What `readGroups` reads: a link as its two ends, or a thing that is an end of some link. */
+/** What `readGroups` reads of a thing that is at the end of a link and on the Inbox. */
 interface GroupRow {
   readonly ref: string;
-  readonly other_ref: string | null;
-  readonly kind: string | null;
-  readonly title: string | null;
-  readonly created_at: string | null;
+  readonly kind: string;
+  readonly title: string;
+  readonly created_at: string;
 }
 
 /** Converts a row of the members statement to the member a reply lists. */
@@ -800,45 +799,47 @@ export const externalEntityInbox = Effect.gen(function* () {
     });
 
   /**
-   * Reads the groups of the Inbox: one statement for every link whose two ends
-   * are both on the Inbox (the eligible things, before any query), with the
-   * facts that electing a group's label needs. A link joins things only when a
-   * source or a person made it, and a thing that is not on the Inbox joins
-   * nothing. The cost follows the links, not the number of things.
+   * Reads the groups of the Inbox: the links that join things (a link a source
+   * or a person made), then, for the things at the ends of those links only,
+   * whether they are on the Inbox and the facts that electing a group's label
+   * needs. A link counts only when both its ends are on the Inbox, and a thing
+   * that is not on the Inbox joins nothing. The first statement reads the
+   * claims of the links, so the cost follows the number of links, not the
+   * number of things on the Inbox; with no links there is no second statement.
    */
   const readGroups = (environment: InboxEnvironment): Effect.Effect<GroupsByRef, SqlError> =>
     Effect.gen(function* () {
-      const eligible = buildEligibleEntities(environment);
-      const rows = yield* runStatement<GroupRow>(
+      const pairs = yield* runStatement<{ readonly a: string; readonly b: string }>(
         sql,
-        `WITH ${eligible.sql},
-          on_inbox AS MATERIALIZED (SELECT ref FROM eligible),
-          links AS MATERIALIZED (
-            SELECT DISTINCT c.from_ref AS a, c.to_ref AS b
-            FROM on_inbox o
-              CROSS JOIN external_entity_relation_claims c
-                ON c.from_ref = o.ref AND ${EFFECTIVE_LINK_SQL} AND c.from_ref <> c.to_ref
-              CROSS JOIN on_inbox o2 ON o2.ref = c.to_ref),
-          ends AS (SELECT a AS ref FROM links UNION SELECT b FROM links)
-         SELECT l.a AS ref, l.b AS other_ref, NULL AS kind, NULL AS title, NULL AS created_at
-         FROM links l
-         UNION ALL
-         SELECT e.ref, NULL, e.kind, e.title, COALESCE(e.source_created_at, e.first_observed_at)
-         FROM external_entities e WHERE e.ref IN (SELECT ref FROM ends)`,
-        eligible.params,
+        `SELECT DISTINCT c.from_ref AS a, c.to_ref AS b
+         FROM external_entity_relation_claims c
+         WHERE ${EFFECTIVE_LINK_SQL} AND c.from_ref <> c.to_ref`,
+        [],
       );
       const lasting = new Map(
         (environment.activeEntityKinds ?? []).map((kind) => [kind.kind, kind.lasting ?? 0]),
       );
+      if (pairs.length === 0) return decideGroups([], [], lasting);
+      const ends = [...new Set(pairs.flatMap((pair) => [pair.a, pair.b]))];
+      const eligible = buildEligibleEntities(environment, ends);
+      const things = yield* runStatement<GroupRow>(
+        sql,
+        `WITH ${eligible.sql}
+         SELECT e.ref, e.kind, e.title, COALESCE(e.source_created_at, e.first_observed_at) AS created_at
+         FROM eligible e`,
+        eligible.params,
+      );
+      const onInbox = new Set(things.map((thing) => thing.ref));
       return decideGroups(
-        rows.flatMap((row) =>
-          row.kind === null
-            ? []
-            : [{ ref: row.ref, kind: row.kind, title: row.title!, createdAt: row.created_at! }],
-        ),
-        rows.flatMap((row) =>
-          row.other_ref === null ? [] : [{ fromRef: row.ref, toRef: row.other_ref }],
-        ),
+        things.map((row) => ({
+          ref: row.ref,
+          kind: row.kind,
+          title: row.title,
+          createdAt: row.created_at,
+        })),
+        pairs
+          .filter((pair) => onInbox.has(pair.a) && onInbox.has(pair.b))
+          .map((pair) => ({ fromRef: pair.a, toRef: pair.b })),
         lasting,
       );
     });
@@ -956,29 +957,46 @@ export const externalEntityInbox = Effect.gen(function* () {
   };
 
   /**
-   * Reads every member of `refs`: the ones that answer the selection first,
-   * then the others, each part in the list's order. One statement, over those
-   * refs alone. A member is on the Inbox, so it has a row whether it answers
-   * or not.
+   * Reads the members of the groups `wanted`: the ones that answer the
+   * selection first, then the others, each part in the list's order, at most
+   * `MAX_INBOX_MOVED_THINGS` of each group. One statement, over the refs of
+   * those groups alone. A member is on the Inbox, so it has a row whether it
+   * answers or not. The cut is made per group in the statement, so a group of
+   * thousands sends only what a reply holds.
    */
   const readMembers = (
     environment: InboxEnvironment,
     selection: Selection,
-    refs: ReadonlyArray<string>,
+    wanted: ReadonlyArray<Group>,
   ) => {
+    const refs = wanted.flatMap((group) => group.memberRefs);
     const eligible = buildEligibleEntities(environment, refs);
+    const order = ORDER_BY[selection.list.order];
     return runStatement<MemberRow>(
       sql,
       `WITH ${eligible.sql}
        SELECT m.id, m.ref, m.task_id, m.task_title, m.oldest_ask, m.upd, m.grp, m.matches FROM (
-         SELECT e.id, e.ref, e.task_id,
-           (SELECT t.title FROM tasks t WHERE t.id = e.task_id) AS task_title,
-           e.oldest_ask, e.source_updated_at AS upd,
-           CASE WHEN e.oldest_ask IS NULL THEN 1 ELSE 0 END AS grp,
-           CASE WHEN ${selection.filter.sql} THEN 1 ELSE 0 END AS matches
-         FROM eligible e) m
-       ORDER BY m.matches DESC, ${ORDER_BY[selection.list.order]}`,
-      [...eligible.params, ...selection.filter.params],
+         SELECT m.id, m.ref, m.task_id, m.task_title, m.oldest_ask, m.upd, m.grp, m.matches,
+           ROW_NUMBER() OVER (PARTITION BY u.value ORDER BY m.matches DESC, ${order}) AS rn
+         FROM (
+           SELECT e.id, e.ref, e.task_id,
+             (SELECT t.title FROM tasks t WHERE t.id = e.task_id) AS task_title,
+             e.oldest_ask, e.source_updated_at AS upd,
+             CASE WHEN e.oldest_ask IS NULL THEN 1 ELSE 0 END AS grp,
+             CASE WHEN ${selection.filter.sql} THEN 1 ELSE 0 END AS matches
+           FROM eligible e) m
+         JOIN json_each(?) u ON u.key = m.ref) m
+       WHERE m.rn <= ${MAX_INBOX_MOVED_THINGS}
+       ORDER BY m.matches DESC, ${order}`,
+      [
+        ...eligible.params,
+        ...selection.filter.params,
+        JSON.stringify(
+          Object.fromEntries(
+            wanted.flatMap((group) => group.memberRefs.map((ref) => [ref, group.labelRef])),
+          ),
+        ),
+      ],
     );
   };
 
@@ -996,11 +1014,7 @@ export const externalEntityInbox = Effect.gen(function* () {
     Effect.gen(function* () {
       const byUnit = new Map<string, Array<MemberRow>>();
       if (wanted.length === 0) return byUnit;
-      const members = yield* readMembers(
-        environment,
-        selection,
-        wanted.flatMap((group) => group.memberRefs),
-      );
+      const members = yield* readMembers(environment, selection, wanted);
       for (const member of members) {
         const key = findUnitKey(groups, member.ref);
         const unitMembers = byUnit.get(key) ?? [];
@@ -1068,16 +1082,17 @@ export const externalEntityInbox = Effect.gen(function* () {
     selection: Selection,
     groups: GroupsByRef,
     tuple: SortTuple | undefined,
+    budget: number,
   ) =>
     Effect.gen(function* () {
       const { list, filter, hash } = selection;
       const matched = buildMatchedEntities(environment, filter);
       const placing = yield* readPlacingRows(matched, selection, groups, {
         tuple,
-        limit: MAX_INBOX_PAGE + 1,
+        limit: budget + 1,
         withTotal: tuple === undefined,
       });
-      const read = yield* readUnits(environment, selection, groups, placing, MAX_INBOX_PAGE);
+      const read = yield* readUnits(environment, selection, groups, placing, budget);
       const nextCursor =
         read.more && read.lastRow !== undefined
           ? encodeCursor(hash, buildSortTuple(list.order, read.lastRow))
@@ -1093,14 +1108,15 @@ export const externalEntityInbox = Effect.gen(function* () {
       };
     });
 
-  /** Reads the first page of the selection with its total and its facets. */
+  /** Reads the first page of the selection, at most `budget` things, with its total and its facets. */
   const readFirstPage = (
     environment: InboxEnvironment,
     selection: Selection,
     groups: GroupsByRef,
+    budget: number,
   ): Effect.Effect<InboxFirstPage, SqlError> =>
     Effect.gen(function* () {
-      const page = yield* readPage(environment, selection, groups, undefined);
+      const page = yield* readPage(environment, selection, groups, undefined, budget);
       const facetFields = listFacetFields(selection.fields);
       const { accounts } = yield* readSourceCounts(sql, page.matched);
       const facetRows = yield* readFacetRows(
@@ -1218,7 +1234,12 @@ export const externalEntityInbox = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (query.mode) {
         case "first":
-          return yield* readFirstPage(environment, selection, yield* readGroups(environment));
+          return yield* readFirstPage(
+            environment,
+            selection,
+            yield* readGroups(environment),
+            query.limit ?? MAX_INBOX_PAGE,
+          );
         case "next": {
           const tuple = decodeCursor(query.after, selection.hash, selection.list.order);
           if (typeof tuple === "string") return yield* failValidation(["after"], tuple);
@@ -1227,6 +1248,7 @@ export const externalEntityInbox = Effect.gen(function* () {
             selection,
             yield* readGroups(environment),
             tuple,
+            MAX_INBOX_PAGE,
           );
           return {
             mode: "next",
@@ -1245,7 +1267,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           };
         case "refresh": {
           const groups = yield* readGroups(environment);
-          const first = yield* readFirstPage(environment, selection, groups);
+          const first = yield* readFirstPage(environment, selection, groups, MAX_INBOX_PAGE);
           const onFirstPage = new Set(first.things.map((thing) => thing.ref));
           const rest = [...new Set(query.held)].filter((ref) => !onFirstPage.has(ref));
           const held = yield* readHeldRows(environment, selection, groups, rest);
