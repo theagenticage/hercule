@@ -287,6 +287,34 @@ describe("the message field", () => {
     expect(readFieldText(readField())).toBe("abc");
   });
 
+  it("replaces the whole message as one edit that ⌘Z takes back, step by step", async () => {
+    const user = userEvent.setup();
+    const replaceMessageRef: { current: ((text: string) => void) | null } = { current: null };
+    const { onTextChange } = renderField({ replaceMessageRef });
+    await user.type(readField(), "my words");
+    onTextChange.mockClear();
+
+    act(() => replaceMessageRef.current!("First\nstarter"));
+    expect(readFieldText(readField())).toBe("First\nstarter");
+    expect(onTextChange).toHaveBeenLastCalledWith("First\nstarter");
+    act(() => replaceMessageRef.current!("Second starter"));
+    expect(readFieldText(readField())).toBe("Second starter");
+
+    await user.keyboard("{Meta>}z{/Meta}");
+    expect(readFieldText(readField())).toBe("First\nstarter");
+    await user.keyboard("{Meta>}z{/Meta}");
+    expect(readFieldText(readField())).toBe("my words");
+  });
+
+  it("replaces the message from a field that has no focus, and focuses it", () => {
+    const replaceMessageRef: { current: ((text: string) => void) | null } = { current: null };
+    renderField({ text: "old", replaceMessageRef });
+    expect(document.activeElement).not.toBe(readField());
+    act(() => replaceMessageRef.current!("new"));
+    expect(readFieldText(readField())).toBe("new");
+    expect(document.activeElement).toBe(readField());
+  });
+
   it("undoes and redoes on the historyUndo and historyRedo input events", async () => {
     const user = userEvent.setup();
     renderField();

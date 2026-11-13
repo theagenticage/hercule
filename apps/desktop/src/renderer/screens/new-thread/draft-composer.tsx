@@ -118,6 +118,8 @@ export function DraftComposer({
   runnerId,
   readRecent,
   fieldRef,
+  aboveField,
+  replaceMessageRef,
   onTextChange,
   onChoose,
   onSignIn,
@@ -143,6 +145,10 @@ export function DraftComposer({
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
+  /** Content inside the card above the field, see `ComposerCard`. */
+  readonly aboveField?: ReactNode;
+  /** Receives the function that replaces the message as one undoable edit, see `MessageField`. */
+  readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
   readonly onTextChange: (text: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
   /** Opens the sign-in a dimmed entry of the model menu, or the machine in the lip, offers. */
@@ -199,6 +205,8 @@ export function DraftComposer({
         error={error}
         notice={notice}
         attachments={attachments}
+        aboveField={aboveField}
+        replaceMessageRef={replaceMessageRef}
         skills={skills}
         start={
           <>
