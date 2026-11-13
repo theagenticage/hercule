@@ -2,7 +2,8 @@
  * The counts check of a desktop change (spec 17 §Performance › The counts
  * check): `pnpm --filter @hercule/desktop perf:counts`. It measures what a
  * change costs in counts, which do not depend on how busy the machine is, and
- * compares them with the committed baseline, `apps/desktop/perf-counts.baseline.json`.
+ * reports them beside a baseline: on a pull request in CI, main's latest
+ * counts. It informs and fails on no count.
  *
  * Three parts run at the same time:
  *
@@ -17,31 +18,35 @@
  *   requests, elements restyled, React renders and elements of each step, and
  *   what stays pending while idle.
  *
- * It writes `apps/desktop/out/perf-counts/` (git-ignored):
+ * The baseline is `apps/desktop/out/perf-counts.baseline.json` (git-ignored).
+ * `--write-baseline` writes it from the run instead of comparing: run it on
+ * `main`, then run without it on a branch. CI restores main's counts into it.
+ * Without the file, the report shows the counts with nothing to compare.
+ *
+ * It writes `apps/desktop/out/perf-counts/`:
  *
  * - `counts.json`, every count of the run;
- * - `report.md`, the report it prints;
+ * - `report.md`, the report it prints (scripts/perf-counts-report.ts), which
+ *   CI posts on the pull request;
  * - `steps.json`, every request and every component's renders of each step;
  * - the logs of the build and the speed tests.
  *
- * It exits with 0 when no count is worse than the
- * baseline and no key is missing on either side, and with 1 otherwise
- * (scripts/perf-counts-ratchet.ts says how counts are compared).
- *
- * When a count is worse on purpose, accept it with `--write-baseline`, which
- * writes the baseline from this run and exits with 0. Commit the file and
- * give the reason in the pull request.
+ * It exits with 1 only when it cannot measure: a build or speed test fails, a
+ * step does not settle, the app sends a request the fake controller does not
+ * answer, or a counter counts nothing as a screen opens.
  *
  * Chromium needs its system libraries. On a Linux machine without them, run
- * `perf:counts:container`, which runs this script in the desktop container.
+ * `perf:counts:container`, which runs this script in the desktop container
+ * on the checkout itself. On a Mac, run `perf:counts` directly: the container
+ * works in a copy without the git-ignored baseline, so it could not compare.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { formatCountsReport, compareCounts } from "./perf-counts-ratchet.ts";
+import { formatCountsReport } from "./perf-counts-report.ts";
 import { measureScreens, type ScreenCounts } from "./perf-counts-screens.ts";
 import { startSpecimenServer } from "./sheet-server.ts";
 import { formatBaseline, parseBaseline } from "./ui-ratchet.ts";
@@ -49,7 +54,7 @@ import { formatBaseline, parseBaseline } from "./ui-ratchet.ts";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 const repositoryDir = fileURLToPath(new URL("../../..", import.meta.url));
 const outDir = join(packageDir, "out/perf-counts");
-const baselinePath = join(packageDir, "perf-counts.baseline.json");
+const baselinePath = join(packageDir, "out/perf-counts.baseline.json");
 
 /** The speed tests whose counts the check keeps. */
 const SPEED_TESTS = [
@@ -177,10 +182,7 @@ async function measureScreenCounts(): Promise<{ counts: Record<string, number>; 
   // Every request and every component's renders of each step, to compare two runs by.
   await writeFile(join(outDir, "steps.json"), `${JSON.stringify(screens, null, 2)}\n`);
   const counts: Record<string, number> = {};
-  const notes: string[] = [
-    "## What each step sent and rendered most",
-    "Every component's renders are in `steps.json`, beside this report.",
-  ];
+  const notes: string[] = ["Every component's renders of each step are in `steps.json`."];
   for (const [screen, { steps, idle }] of Object.entries(screens)) {
     for (const [step, measured] of steps) {
       for (const metric of ["requests", "restyled", "renders", "rowRenders", "elements"] as const) {
@@ -201,7 +203,7 @@ async function measureScreenCounts(): Promise<{ counts: Record<string, number>; 
   return { counts, notes: notes.join("\n") };
 }
 
-async function main(): Promise<number> {
+async function main(): Promise<void> {
   const { values } = parseArgs({
     options: { "write-baseline": { type: "boolean", default: false } },
   });
@@ -223,25 +225,15 @@ async function main(): Promise<number> {
     console.log(
       `Wrote ${String(Object.keys(current).length)} counts to ${baselinePath} in ${seconds} s.`,
     );
-    return 0;
+    return;
   }
-  let baseline: Record<string, number>;
-  try {
-    baseline = parseBaseline(await readFile(baselinePath, "utf8"));
-  } catch (error) {
-    throw new Error(
-      `Could not read the baseline ${baselinePath}. Write one with --write-baseline.`,
-      {
-        cause: error,
-      },
-    );
-  }
-  const comparison = compareCounts(current, baseline);
-  const report = formatCountsReport(current, baseline, comparison, screens.notes);
+  const baseline = existsSync(baselinePath)
+    ? parseBaseline(await readFile(baselinePath, "utf8"))
+    : null;
+  const report = formatCountsReport(current, baseline, screens.notes);
   await writeFile(join(outDir, "report.md"), report);
   console.log(report);
   console.log(`The counts check took ${seconds} s.`);
-  return comparison.passed ? 0 : 1;
 }
 
-process.exitCode = await main();
+await main();

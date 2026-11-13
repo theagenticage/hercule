@@ -1777,8 +1777,9 @@ function findScrollContainers(): Element[] {
 /**
  * Focuses the target `collectTargets` gave this id, as a keyboard user would
  * (`focusVisible`), without scrolling anything into view. Returns whether the
- * element is now the active element and matches `:focus-visible`. Fails when
- * no element has the id.
+ * element is now the active element and matches `:focus-visible`, or that it
+ * was replaced: no element has the id any more, because focusing an earlier
+ * target re-rendered it. A replaced target focuses nothing.
  *
  * A target focused by an earlier call is blurred first, so a caller that
  * checks many targets in a row needs one call per target, and one
@@ -1787,7 +1788,7 @@ function findScrollContainers(): Element[] {
 export function focusTarget(id: number): FocusOutcome {
   const element = document.querySelector(`[${TARGET_ATTRIBUTE}="${id}"]`);
   if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
-    throw new Error(`No focusable element carries the target id ${id}. Call collectTargets first.`);
+    return { focused: false, replaced: true };
   }
   if (focusSnapshot !== undefined) blurTarget();
   scrollContainers ??= findScrollContainers();
@@ -1807,7 +1808,10 @@ export function focusTarget(id: number): FocusOutcome {
     preventScroll: true,
   };
   (element as HTMLElement).focus(options);
-  return { focused: document.activeElement === element && element.matches(":focus-visible") };
+  return {
+    focused: document.activeElement === element && element.matches(":focus-visible"),
+    replaced: false,
+  };
 }
 
 /**

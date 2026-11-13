@@ -20,7 +20,7 @@
  */
 // The probe comes first, so it is in place before React loads; the fixed clock
 // next, because the app's age clock reads the time as soon as its module loads.
-import { hasPendingFrame, readProbe } from "./perf-probe";
+import { hasPendingWork, readProbe } from "./perf-probe";
 import "./fixed-clock";
 import "../styles/base-layer.css";
 import { createRoot } from "react-dom/client";
@@ -301,7 +301,7 @@ window.perfCounts = {
   readProbe,
   isIdle: () => context.queryClient.isFetching() === 0 && context.queryClient.isMutating() === 0,
   isStill: () =>
-    !hasPendingFrame() &&
+    !hasPendingWork() &&
     document
       .getAnimations()
       .every(
