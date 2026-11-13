@@ -82,6 +82,21 @@ describe("InboxBlocks", () => {
     expect(items[1]?.textContent).toBe("and 2 more");
   });
 
+  it("keeps a markdown list in a message inside the message's text, apart from the block's own items", () => {
+    const { container } = draw([
+      {
+        type: "messages",
+        omitted: 0,
+        messages: [
+          { author: { name: "Mei" }, at: "2026-11-12T08:00:00.000Z", text: "- `a` one\n- two" },
+        ],
+      },
+    ]);
+    // The stylesheet lays out only `.bk-msgs > li` as avatar plus text, so the list's `li` must sit deeper.
+    expect(container.querySelectorAll(".bk-msgs > li")).toHaveLength(1);
+    expect(container.querySelectorAll(".bk-msg-text li")).toHaveLength(2);
+  });
+
   it("draws a change's branches and size, and the failed checks with their log", () => {
     const { container } = draw([
       { type: "change", from: "fix/retry", to: "main", files: 3, additions: 40, deletions: 2 },

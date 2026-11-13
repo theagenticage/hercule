@@ -16,6 +16,9 @@ export type PaneMetaItem =
   | { readonly kind: "words"; readonly words: string }
   | { readonly kind: "fact"; readonly fact: CardFact };
 
+/** The record the meta line is made from: the fields say which relation the person has to the thing. */
+type PaneMetaRecord = EntityRecord & Pick<ExternalEntityDetail, "fields">;
+
 /** What the meta line adds to the facts the record holds. */
 export interface PaneMetaContext {
   /** The moment the "updated" age is counted back from. */
@@ -28,16 +31,19 @@ export interface PaneMetaContext {
 
 /**
  * Returns the words about who the thing is to the user: "Assigned to you",
- * "You opened it", or the name of the person it belongs to, such as "Mei’s".
- * Returns `undefined` when the record names no one. An assignment shows here
- * because a thing that only concerns the user, and asks nothing, has no ask
- * section to say so.
+ * "You opened it", or the person the record names, worded by the field of the
+ * kind that holds them: "Mei opened it" for an author, "Mei’s" for an
+ * assignee. Returns `undefined` when the record names no one. An assignment
+ * shows here because a thing that only concerns the user, and asks nothing,
+ * has no ask section to say so.
  */
-const describeWho = (record: EntityRecord): string | undefined => {
+const describeWho = (record: PaneMetaRecord): string | undefined => {
   if (record.concerns.includes("assigned")) return "Assigned to you";
   if (record.concerns.includes("opened")) return "You opened it";
-  if (record.person !== undefined && !record.yours) return `${record.person.name}’s`;
-  return undefined;
+  if (record.person === undefined || record.yours) return undefined;
+  const name = record.person.name;
+  const relation = record.fields.find((field) => field.type === "person" && field.text === name);
+  return relation?.key === "author" ? `${name} opened it` : `${name}’s`;
 };
 
 /**
@@ -48,7 +54,7 @@ const describeWho = (record: EntityRecord): string | undefined => {
  * the open card draws it.
  */
 export const describePaneMeta = (
-  record: EntityRecord,
+  record: PaneMetaRecord,
   context: PaneMetaContext,
 ): readonly PaneMetaItem[] => {
   const face = decideOpenCardFace(record);
