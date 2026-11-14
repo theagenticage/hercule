@@ -1,7 +1,7 @@
 /**
  * The motion of a hand-off. On H the row's wait rolls up out of its slot as
  * the colleague's face rolls in (`rollHandedRow`), 170ms later the face takes
- * a knock and the sentence rolls to "{Workflow} has it", and then the mark
+ * a knock and the sentence rolls to "{Workflow} running", and then the mark
  * flies to Work (`flyHandedMarkToWork`).
  *
  * The flight that ends a hand-off: the mark of the thing handed leaves its row
@@ -123,7 +123,7 @@ export const rollHandedRow = (ref: string, change: () => void): { readonly cance
     );
   };
   // The face rolls in only where the row now shows one: with asks left, the wait stays.
-  if (newSlot.classList.contains("ib-row-time--held")) {
+  if (newSlot.classList.contains("ib-row-time--task")) {
     clips.push(layOldCopy(row, slotBox, oldSlot));
     lines.push(newSlot.parentElement);
     rollUp(oldSlot, newSlot, 0);

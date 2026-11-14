@@ -15,6 +15,7 @@ interface Row {
   readonly ref: string;
   readonly title: string;
   readonly arrival: number;
+  readonly task?: { readonly id: string };
 }
 const row = (ref: string, title = ref, arrival = 0): Row => ({ ref, title, arrival });
 const rows = (...refs: string[]) => refs.map((ref) => row(ref));
@@ -608,6 +609,35 @@ describe("freshness against the pushes", () => {
     read.resolve([row("t900", "stale answer")]);
     await settle();
     expect(visit.getSnapshot().rows[900]!.title).toBe("t900");
+  });
+});
+
+describe("a change to some Tasks", () => {
+  const onTask = (ref: string, taskId: string): Row => ({ ...row(ref), task: { id: taskId } });
+
+  it("reads again when a row the list holds is on one of the Tasks", async () => {
+    const { fake, visit } = await opened([onTask("a", "t-1"), row("b")]);
+    visit.tasksChanged(["t-1"]);
+    expect(fake.count("refresh")).toBe(1);
+  });
+
+  it("reads nothing when no row is on one of the Tasks and no read is under way", async () => {
+    const { fake, visit } = await opened([onTask("a", "t-1"), row("b")]);
+    visit.tasksChanged(["t-9"]);
+    expect(fake.count("refresh")).toBe(0);
+    expect(fake.count("first")).toBe(1);
+  });
+
+  it("reads the first page again when the change comes while it is still being read", async () => {
+    const fake = fakeReader();
+    const visit = createInboxVisit(fake.reader);
+    visit.open("list-1");
+    const stale = fake.open("first");
+    visit.tasksChanged(["t-1"]);
+    expect(stale.signal.aborted).toBe(true);
+    await answerFirst(fake, [onTask("a", "t-1")]);
+    expect(fake.count("first")).toBe(2);
+    expect(refsOf(visit)).toEqual(["a"]);
   });
 });
 

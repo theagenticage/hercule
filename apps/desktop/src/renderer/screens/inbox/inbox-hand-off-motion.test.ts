@@ -47,10 +47,10 @@ const handOff = (row: HTMLElement, { keepsWait }: { keepsWait: boolean }): (() =
   return () => {
     const slot = row.querySelector(".ib-row-time")!;
     if (!keepsWait) {
-      slot.className = "ib-row-time ib-row-time--held";
+      slot.className = "ib-row-time ib-row-time--task";
       slot.textContent = "face";
     }
-    row.querySelector(".ib-row-why")!.textContent = "Review PR has it";
+    row.querySelector(".ib-row-why")!.textContent = "Review PR running";
   };
 };
 
@@ -117,7 +117,7 @@ describe("rollHandedRow", () => {
 
     rollHandedRow("r1", handOff(row, { keepsWait: false }));
 
-    expect(row.querySelector(".ib-row-why")!.textContent).toBe("Review PR has it");
+    expect(row.querySelector(".ib-row-why")!.textContent).toBe("Review PR running");
     expect(played).toHaveLength(0);
     expect(row.querySelector(".ib-roll-clip")).toBeNull();
   });

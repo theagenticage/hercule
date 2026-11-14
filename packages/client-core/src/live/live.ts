@@ -101,10 +101,16 @@ export type LiveInvalidateHandler = (
   push: LiveInvalidatePush,
 ) => void;
 
-/** What a mutable topic's push says: which records changed, and how. */
+/**
+ * What a mutable topic's push says: which records changed, and how. `derived`
+ * is true for a push about what is worked out from a record rather than the
+ * record itself, such as a Task's card when one of its sessions changes
+ * status (see `buildQueryKeys`).
+ */
 export interface LiveInvalidatePush {
   readonly ids: ReadonlyArray<string>;
   readonly kind: "created" | "updated" | "deleted";
+  readonly derived: boolean;
 }
 
 /**
@@ -339,7 +345,7 @@ export const createLive = (options: LiveOptions): Live => {
           message.conversationIds,
           message.derived,
         ),
-        { ids: message.ids, kind: message.kind },
+        { ids: message.ids, kind: message.kind, derived: message.derived === true },
       );
     });
   };

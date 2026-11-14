@@ -1065,7 +1065,7 @@ describe("addToWork", () => {
     expect(task).toMatchObject({ stage: "building", title: "Ticket 9" });
     expect(followed).toEqual(["following"]);
     expect(inbox.things.map((card) => card.ref)).toEqual([ticketRef("9")]);
-    expect(inbox.things[0]).toMatchObject({ taskId: task.id });
+    expect(inbox.things[0]).toMatchObject({ task: { id: task.id } });
     expect(stillThere).toEqual(["following"]);
   });
 
@@ -1704,7 +1704,7 @@ describe("after a merge", () => {
             after: (yield* service.read(one)).taskId,
             taken: yield* service.takeOn(one),
             takenOther: yield* service.takeOn(two),
-            inbox: (yield* readEverything(service)).things.map((card) => [card.ref, card.taskId]),
+            inbox: (yield* readEverything(service)).things.map((card) => [card.ref, card.task?.id]),
             links: yield* sql<{ readonly following: number; readonly linked_at: string }>`
               SELECT following, linked_at FROM task_entity_links
               WHERE task_id = ${uuidFromString(survivor.id)} AND ref = ${ticketRef("1")}`,
@@ -2636,6 +2636,54 @@ describe("what a card shows of the live work on its Task", () => {
       ],
       [ticketRef("2"), []],
       [ticketRef("3"), []],
+    ]);
+  });
+
+  /** Inserts a Thread of `taskId` in `status`: a session with no agent, which is what makes it a Thread. */
+  const insertThread = (
+    sql: SqlClient.SqlClient,
+    thread: { readonly taskId: string; readonly status: "queued" | "busy" | "idle" | "exited" },
+  ) =>
+    withTransaction(
+      sql,
+      sql`
+        INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
+                              requested_access_mode, access_mode, spec, title, status, created_at,
+                              last_activity_at, task_id, harness_id)
+        VALUES (${uuidFromString(uuidToString(mintUuid()))}, randomblob(16), randomblob(16),
+                randomblob(16), 'default', 'default', '{}', 'A thread', ${thread.status},
+                '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z',
+                ${uuidFromString(thread.taskId)}, 'test/test')`,
+    );
+
+  it("counts the working Threads of each card's Task, and no idle or ended one", async () => {
+    const tasks = await run(({ service, sql, report, connectionId, entityId }) =>
+      Effect.gen(function* () {
+        yield* report(connectionId, [
+          buildObservation("1"),
+          buildObservation("2"),
+          buildObservation("3"),
+        ]);
+        const busy = yield* service.takeOn(yield* entityId(ticketRef("1")));
+        const quiet = yield* service.takeOn(yield* entityId(ticketRef("2")));
+        yield* insertThread(sql, { taskId: busy.taskId, status: "busy" });
+        yield* insertThread(sql, { taskId: busy.taskId, status: "queued" });
+        yield* insertThread(sql, { taskId: busy.taskId, status: "idle" });
+        yield* insertThread(sql, { taskId: quiet.taskId, status: "idle" });
+        yield* insertThread(sql, { taskId: quiet.taskId, status: "exited" });
+        const inbox = yield* readEverything(service);
+        return {
+          ids: { busy: busy.taskId, quiet: quiet.taskId },
+          things: inbox.things.map(
+            (card) => [card.ref, card.task?.id, card.task?.workingThreadCount] as const,
+          ),
+        };
+      }),
+    );
+    expect(tasks.things).toEqual([
+      [ticketRef("1"), tasks.ids.busy, 2],
+      [ticketRef("2"), tasks.ids.quiet, 0],
+      [ticketRef("3"), undefined, undefined],
     ]);
   });
 

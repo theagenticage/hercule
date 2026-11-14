@@ -21,7 +21,7 @@ export const buildInboxRowView = (
   identifier: "#6244",
   label: `Title of ${ref}. Mei asked for your review`,
   handOff: null,
-  held: false,
+  isOnTask: false,
   ...overrides,
 });
 
@@ -42,7 +42,7 @@ export const buildInboxRowActions = (): InboxRowActions & {
     onStartThread: record("start"),
     onTakeOn: record("take"),
     onHandOff: record("hand"),
-    onGoToTask: record("goto"),
+    onViewTask: record("goto"),
     onDismiss: record("dismiss"),
   };
 };

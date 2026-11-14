@@ -153,10 +153,9 @@ export function InboxPaneTakeOnButton({
  * (N), Take on (T), the hand-off (H), and Link (L) and Dismiss (E) as icons at
  * the end. No move is filled.
  *
- * - Thread is left out when `isOnTask` is true: a thread starts a new Task, and
- *   the thing is on one already.
- * - Take on is left out when `isTakenOn` is true: the user already holds the
- *   thing.
+ * - Thread and Take on are left out when `isOnTask` is true: each makes a new
+ *   Task, and the thing is on one already. View task, in the pane's Task
+ *   strip, goes there.
  * - `handOff` is the hand-off button, or `null` when no workflow takes the
  *   thing. With one workflow it shows that workflow's face and its whole name,
  *   and its accessible name is "Hand to <name>". With several it shows the
@@ -169,7 +168,6 @@ export function InboxPaneTakeOnButton({
  */
 export function InboxPaneFooter({
   isOnTask,
-  isTakenOn,
   handOff,
   isHandMenuOpen,
   handAnchorRef,
@@ -180,7 +178,6 @@ export function InboxPaneFooter({
   onDismiss,
 }: {
   readonly isOnTask: boolean;
-  readonly isTakenOn: boolean;
   readonly handOff: InboxRowHandOff | null;
   readonly isHandMenuOpen: boolean;
   readonly handAnchorRef?: Ref<HTMLButtonElement>;
@@ -195,9 +192,11 @@ export function InboxPaneFooter({
     <footer className="ib-pane-foot-box">
       <div className="ib-pane-foot">
         {!isOnTask && (
-          <InboxPaneThreadButton words="Start a thread" onStartThread={onStartThread} />
+          <>
+            <InboxPaneThreadButton words="Start a thread" onStartThread={onStartThread} />
+            <InboxPaneTakeOnButton onTakeOn={onTakeOn} />
+          </>
         )}
-        {!isTakenOn && <InboxPaneTakeOnButton onTakeOn={onTakeOn} />}
         {handOff !== null && (
           <button
             type="button"

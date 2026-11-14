@@ -619,12 +619,12 @@ describe("the hand-off", () => {
         body: buildErrorBody("invalid_state", "Review PR already works on its Task."),
       },
     });
-    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR has it");
+    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR running");
 
     await user.keyboard("h");
 
     await waitForUndoLine("was not handed to Review PR");
-    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR has it");
+    expect(getRow(SLOTS.title).getAttribute("aria-label")).not.toContain("Review PR running");
   });
 
   it("draws the row as handed while the controller has not answered", async () => {
@@ -635,7 +635,7 @@ describe("the hand-off", () => {
     await user.keyboard("h");
 
     await waitFor(() => {
-      expect(getRow(SLOTS.title).getAttribute("aria-label")).toContain("Review PR has it");
+      expect(getRow(SLOTS.title).getAttribute("aria-label")).toContain("Review PR running");
     });
   });
 
@@ -667,14 +667,18 @@ describe("Narrow", () => {
   });
 });
 
-describe("Go to its Task, Open at its source and the keys sheet", () => {
-  it("refuses Go to its Task for a thing no Task has, and goes to the Task of one that has", async () => {
+describe("View task, Open at its source and the keys sheet", () => {
+  it("refuses View task for a thing no Task has, and goes to the Task of one that has", async () => {
     const { user, router } = await open((inbox) => {
-      inbox.lists.waits = [SLOTS, { ...LOYALTY, taskId: TASK_ID }, BASKET];
+      inbox.lists.waits = [
+        SLOTS,
+        { ...LOYALTY, task: { id: TASK_ID, title: "Its Task", workingThreadCount: 0 } },
+        BASKET,
+      ];
     });
 
     await user.keyboard("g");
-    await waitForUndoLine("This has no Task yet. T takes it on.");
+    await waitForUndoLine("This is on no Task yet. T takes it on.");
     await user.keyboard("j");
     await user.keyboard("g");
 

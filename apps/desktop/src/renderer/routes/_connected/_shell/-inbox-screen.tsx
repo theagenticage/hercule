@@ -339,8 +339,8 @@ export function InboxScreen({
       case "handOff":
         startHandOff(undefined);
         return;
-      case "goToTask":
-        moves.goToTask();
+      case "viewTask":
+        moves.viewTask();
         return;
       case "link":
         startLink(undefined);
@@ -395,8 +395,8 @@ export function InboxScreen({
   const dismissInPane = useStableCallback(() => {
     moves.dismiss();
   });
-  const goToTaskInPane = useStableCallback(() => {
-    moves.goToTask();
+  const viewTaskInPane = useStableCallback(() => {
+    moves.viewTask();
   });
   const goToInPane = useStableCallback((ref: string) => {
     walkTo(ref);
@@ -418,7 +418,7 @@ export function InboxScreen({
     onStartThread: startThreadInPane,
     onTakeOn: takeOnInPane,
     onDismiss: dismissInPane,
-    onGoToTask: goToTaskInPane,
+    onViewTask: viewTaskInPane,
     onGoTo: goToInPane,
     onHandOff: handOffInPane,
     onLink: linkInPane,
@@ -454,7 +454,7 @@ export function InboxScreen({
     onHandOff: (ref) => {
       startHandOff(ref);
     },
-    onGoToTask: moves.goToTask,
+    onViewTask: moves.viewTask,
     onDismiss: moves.dismiss,
     onPickGroup: pickLine,
     onToggleGroupSelect: (key, whole) => {

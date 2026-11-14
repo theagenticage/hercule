@@ -2,7 +2,12 @@
 import type { EntityFieldValue, InboxOrder, InboxThing } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { NO_OFFERS, partitionOffers } from "./card-hand-off";
-import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
+import {
+  buildActiveTask,
+  buildInboxAsk,
+  buildInboxThing,
+  buildWorkflowOffer,
+} from "./cards.testing";
 import { describeInboxRow, type InboxRowContext } from "./inbox-row";
 
 const NOW = new Date("2026-11-12T12:00:00.000Z");
@@ -23,7 +28,6 @@ const describe_ = (
   describeInboxRow(thing, {
     order: "waiting",
     now: NOW,
-    userName: "Rogier",
     offers: NO_OFFERS,
     ...context,
   });
@@ -91,32 +95,32 @@ describe("describeInboxRow reason", () => {
     expect(describe_(buildInboxThing("1")).reason).toMatchObject({ rest: "Ticket", quiet: true });
   });
 
-  it("says who has a thing that asks nothing", () => {
-    const colleague = buildInboxThing("1", {
-      taskId: "task-1",
+  it("says what runs on the Task of a thing that asks nothing", () => {
+    const reviewed = buildInboxThing("1", {
+      task: buildActiveTask("task-1", { workingThreadCount: 1 }),
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
-    const you = buildInboxThing("1", { taskId: "task-1", takenOn: true });
 
-    expect(describe_(colleague).reason).toMatchObject({ rest: "Review PR has it", quiet: true });
-    expect(describe_(you).reason).toMatchObject({ rest: "You took it on", quiet: true });
+    expect(describe_(reviewed).reason).toMatchObject({
+      rest: "Review PR running · 1 thread working",
+      quiet: true,
+    });
   });
 
-  it("shows no holder mark for a Task the user did not take on", () => {
-    const signalsTask = buildInboxThing("1", { taskId: "task-1", takenOn: false });
+  it("says what the thing is when nothing runs on its Task, whatever made the Task", () => {
+    const onTask = buildInboxThing("1", { task: buildActiveTask("task-1") });
 
-    expect(describe_(signalsTask).reason).toMatchObject({ rest: "Ticket", quiet: true });
-    expect(describe_(signalsTask).time).not.toMatchObject({ kind: "holder" });
+    expect(describe_(onTask).reason).toMatchObject({ rest: "Ticket", quiet: true });
   });
 
-  it("adds who has the rest when a workflow has the thing and an ask is left", () => {
+  it("adds what runs on the Task when an ask is left", () => {
     const thing = asked(2, {
-      taskId: "task-1",
+      task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
 
     expect(describe_(thing).reason).toMatchObject({
-      aside: "Review PR has the rest",
+      aside: "Review PR running",
       quiet: false,
     });
   });
@@ -184,28 +188,38 @@ describe("describeInboxRow time", () => {
     });
   });
 
-  it("shows the holder in the time's place when no ask is left, in either order", () => {
-    const colleague = buildInboxThing("1", {
-      taskId: "task-1",
+  it("shows the Task in the time's place when no ask is left, in either order", () => {
+    const reviewed = buildInboxThing("1", {
+      task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
-    const you = buildInboxThing("1", { taskId: "task-1", takenOn: true });
+    const quiet = buildInboxThing("1", { task: buildActiveTask("task-1", { title: "Fix it" }) });
+    const justHanded = buildInboxThing("1", {
+      liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
+    });
 
     for (const order of ["waiting", "newest"] as const) {
-      expect(describe_(colleague, { order }).time).toEqual({
-        kind: "holder",
-        holder: { kind: "colleague", faceSeed: "wf-review", words: "Review PR has it" },
+      expect(describe_(reviewed, { order }).time).toEqual({
+        kind: "task",
+        faceSeed: "wf-review",
+        words: "Review PR running",
       });
-      expect(describe_(you, { order }).time).toEqual({
-        kind: "holder",
-        holder: { kind: "you", name: "Rogier", words: "You took it on" },
+      expect(describe_(quiet, { order }).time).toEqual({
+        kind: "task",
+        faceSeed: undefined,
+        words: "On the Task “Fix it”",
+      });
+      expect(describe_(justHanded, { order }).time).toEqual({
+        kind: "task",
+        faceSeed: "wf-review",
+        words: "Review PR running",
       });
     }
   });
 
-  it("shows the wait, not the holder, while an ask is left for the user", () => {
+  it("shows the wait, not the Task, while an ask is left for the user", () => {
     const thing = asked(72, {
-      taskId: "task-1",
+      task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
 
@@ -232,8 +246,8 @@ describe("describeInboxRow place", () => {
 
   it.each([
     [
-      "says who has the rest",
-      { liveWorkflows: [{ workflowId: "wf", name: "Review PR" }], taskId: "t" },
+      "says what runs on its Task",
+      { liveWorkflows: [{ workflowId: "wf", name: "Review PR" }], task: buildActiveTask("t") },
     ],
     ["says it came back", { dismissedAt: hoursAgo(26) }],
   ])("drops the place when the row %s", (_name, overrides) => {
@@ -276,9 +290,11 @@ describe("describeInboxRow hand-off", () => {
     });
   });
 
-  it("says whether a Task holds the thing", () => {
-    expect(describe_(thing).held).toBe(false);
-    expect(describe_(buildInboxThing("1", { taskId: "task-1" })).held).toBe(true);
+  it("says whether the thing is on a Task", () => {
+    expect(describe_(thing).isOnTask).toBe(false);
+    expect(describe_(buildInboxThing("1", { task: buildActiveTask("task-1") })).isOnTask).toBe(
+      true,
+    );
   });
 });
 
@@ -302,14 +318,14 @@ describe("describeInboxRow label", () => {
     );
   });
 
-  it("keeps the place the row dropped, and says who has the rest", () => {
+  it("keeps the place the row dropped, and says what runs on its Task", () => {
     const thing = asked(2, {
       face: { place: text("repository", "storefront-web-platform-xy") },
-      taskId: "task-1",
+      task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf", name: "Review PR" }],
     });
 
-    expect(describe_(thing).label).toContain("Review PR has the rest");
+    expect(describe_(thing).label).toContain("Review PR running");
     expect(describe_(thing).label).toContain("in storefront-web-platform-xy");
   });
 });

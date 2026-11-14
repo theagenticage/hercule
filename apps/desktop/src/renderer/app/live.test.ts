@@ -20,7 +20,12 @@ import {
   type TrackingRead,
 } from "@hercule/client-core";
 import type { HandoffLeg, TrackingRun } from "@hercule/contract";
-import { invalidateForPush, listenForInboxPushes, useSubagentsLive } from "./live";
+import {
+  invalidateForPush,
+  listenForInboxPushes,
+  useSubagentsLive,
+  type InboxPushChange,
+} from "./live";
 import {
   handoffLegQuery,
   signalsClearedTodayQuery,
@@ -167,7 +172,7 @@ const buildCachedTracking = () => {
 describe("invalidateForPush", () => {
   it("marks Tracking and the detail of the Task whose run a push names out of date, and no other detail", () => {
     const { queryClient, isStale } = buildCachedTracking();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-new"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-new"], kind: "updated", derived: false });
     expect(isStale(queryKeys.tracking())).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
@@ -176,7 +181,11 @@ describe("invalidateForPush", () => {
 
   it("marks the details of every Task a push names a run of", () => {
     const { queryClient, isStale } = buildCachedTracking();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-new", "r-two"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], {
+      ids: ["r-new", "r-two"],
+      kind: "updated",
+      derived: false,
+    });
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-untracked"))).toBe(false);
@@ -184,7 +193,11 @@ describe("invalidateForPush", () => {
 
   it("marks Tracking and every detail out of date for a run that was created, which a re-run is", () => {
     const { queryClient, isStale } = buildCachedTracking();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
+    invalidateForPush(queryClient, "run", [], {
+      ids: ["r-other"],
+      kind: "created",
+      derived: false,
+    });
     expect(isStale(queryKeys.tracking())).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
@@ -193,7 +206,7 @@ describe("invalidateForPush", () => {
 
   it("marks Tracking and every detail out of date for a push that names no ids", () => {
     const { queryClient, isStale } = buildCachedTracking();
-    invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated", derived: false });
     expect(isStale(queryKeys.tracking())).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
@@ -201,7 +214,7 @@ describe("invalidateForPush", () => {
 
   it("leaves Tracking and its details alone for a run of no tracked Task", () => {
     const { queryClient, isStale } = buildCachedTracking();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated", derived: false });
     expect(isStale(queryKeys.tracking())).toBe(false);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(false);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
@@ -212,6 +225,7 @@ describe("invalidateForPush", () => {
     invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-1"]), {
       ids: ["t-1"],
       kind: "updated",
+      derived: false,
     });
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
@@ -306,6 +320,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-1"]), {
       ids: ["t-1"],
       kind: "updated",
+      derived: false,
     });
     expect(isStale(all)).toBe(true);
     expect(isStale(github)).toBe(true);
@@ -317,6 +332,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-other"]), {
       ids: ["t-other"],
       kind: "updated",
+      derived: false,
     });
     expect(isStale(all)).toBe(false);
     expect(isStale(github)).toBe(false);
@@ -324,7 +340,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
 
   it("leaves the Done lists alone for a run push that names an unrelated run", () => {
     const { queryClient, isStale, all, github } = buildCachedDoneLists();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated", derived: false });
     expect(isStale(all)).toBe(false);
     expect(isStale(github)).toBe(false);
   });
@@ -333,7 +349,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     "marks every Done list out of date for a run push that names the held leg's run %s",
     (runId) => {
       const { queryClient, isStale, all, github, clearedToday } = buildCachedDoneLists();
-      invalidateForPush(queryClient, "run", [], { ids: [runId], kind: "updated" });
+      invalidateForPush(queryClient, "run", [], { ids: [runId], kind: "updated", derived: false });
       expect(isStale(all)).toBe(true);
       expect(isStale(github)).toBe(true);
       expect(isStale(clearedToday)).toBe(false);
@@ -342,7 +358,11 @@ describe("invalidateForPush for Intake's Done lists", () => {
 
   it("marks the Done lists out of date for a run that was created", () => {
     const { queryClient, isStale, all } = buildCachedDoneLists();
-    invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
+    invalidateForPush(queryClient, "run", [], {
+      ids: ["r-other"],
+      kind: "created",
+      derived: false,
+    });
     expect(isStale(all)).toBe(true);
   });
 
@@ -352,7 +372,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     const held = queryClient.getQueryData(all);
     queryClient.setQueryData(github, held);
     queryClient.setQueryData(all, { pages: [{ items: [], legs: [] }], pageParams: [undefined] });
-    invalidateForPush(queryClient, "run", [], { ids: ["r-live"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-live"], kind: "updated", derived: false });
     expect(isStale(all)).toBe(true);
     expect(isStale(github)).toBe(true);
   });
@@ -362,7 +382,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     // A push that names no ids affects any leg. The cleared-today pages hold
     // no `legs`; reading them as a Done list's would throw.
     expect(() => {
-      invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated" });
+      invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated", derived: false });
     }).not.toThrow();
     expect(isStale(clearedToday)).toBe(false);
   });
@@ -374,7 +394,11 @@ describe("invalidateForPush for Intake's Done lists", () => {
       runId: "r-solo",
       liveRunIds: ["r-solo-live"],
     });
-    invalidateForPush(queryClient, "run", [], { ids: ["r-solo-live"], kind: "updated" });
+    invalidateForPush(queryClient, "run", [], {
+      ids: ["r-solo-live"],
+      kind: "updated",
+      derived: false,
+    });
     expect(isStale(solo)).toBe(true);
   });
 
@@ -394,6 +418,7 @@ describe("invalidateForPush for Intake's Done lists", () => {
     invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-other"]), {
       ids: ["t-other"],
       kind: "updated",
+      derived: false,
     });
     fake.releaseHeldLegRead();
 
@@ -437,6 +462,7 @@ describe("invalidateForPush for the Inbox's keys", () => {
     invalidateForPush(queryClient, "signal", [queryKeys.inbox()], {
       ids: ["s-1"],
       kind: "updated",
+      derived: false,
     });
     await waitFor(() => {
       expect(startedWith).toEqual([0, 0]);
@@ -448,6 +474,7 @@ describe("invalidateForPush for the Inbox's keys", () => {
     invalidateForPush(queryClient, "signal", [queryKeys.inbox()], {
       ids: ["s-2"],
       kind: "updated",
+      derived: false,
     });
 
     await waitFor(() => {
@@ -461,7 +488,7 @@ describe("invalidateForPush for the Inbox's keys", () => {
 const waitPastPushWindow = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 120));
 
 describe("invalidateForPush for pushes of one change on several topics", () => {
-  const push = { ids: ["e-1"], kind: "updated" } as const;
+  const push = { ids: ["e-1"], kind: "updated", derived: false } as const;
 
   /** Returns a client whose Inbox page, outline, count and entity reads are counted by key. */
   const buildCountedInboxReads = async () => {
@@ -500,6 +527,7 @@ describe("invalidateForPush for pushes of one change on several topics", () => {
       invalidateForPush(queryClient, topic, buildQueryKeys(topic, []), {
         ids: [],
         kind: "updated",
+        derived: false,
       });
     }
     await waitPastPushWindow();
@@ -541,7 +569,7 @@ describe("invalidateForPush for pushes of one change on several topics", () => {
 });
 
 describe("listenForInboxPushes", () => {
-  const push = { ids: ["e-1"], kind: "updated" } as const;
+  const push = { ids: ["e-1"], kind: "updated", derived: false } as const;
 
   it("calls the listener once for the pushes that name the Inbox's keys, however many keys and topics", async () => {
     const queryClient = new QueryClient();
@@ -589,5 +617,42 @@ describe("listenForInboxPushes", () => {
     await waitPastPushWindow();
 
     expect(calls).toBe(0);
+  });
+});
+describe("listenForInboxPushes with derived task pushes", () => {
+  const derived = { ids: ["t-1", "t-2"], kind: "updated", derived: true } as const;
+  const keysOf = (push: { readonly ids: readonly string[]; readonly derived: boolean }) =>
+    buildQueryKeys("task", push.ids, undefined, push.derived ? true : undefined);
+
+  it("names the Tasks of the derived pushes of one window, once", async () => {
+    const queryClient = new QueryClient();
+    const changes: InboxPushChange[] = [];
+    const stop = listenForInboxPushes(queryClient, (change) => {
+      changes.push(change);
+    });
+
+    invalidateForPush(queryClient, "task", keysOf(derived), derived);
+    const later = { ids: ["t-3"], kind: "updated", derived: true } as const;
+    invalidateForPush(queryClient, "task", keysOf(later), later);
+    await waitPastPushWindow();
+    stop();
+
+    expect(changes).toEqual([{ kind: "tasks", taskIds: ["t-1", "t-2", "t-3"] }]);
+  });
+
+  it("says the whole Inbox changed when a push in the same window named its keys", async () => {
+    const queryClient = new QueryClient();
+    const changes: InboxPushChange[] = [];
+    const stop = listenForInboxPushes(queryClient, (change) => {
+      changes.push(change);
+    });
+
+    invalidateForPush(queryClient, "task", keysOf(derived), derived);
+    const plain = { ids: ["t-1"], kind: "updated", derived: false } as const;
+    invalidateForPush(queryClient, "task", keysOf(plain), plain);
+    await waitPastPushWindow();
+    stop();
+
+    expect(changes).toEqual([{ kind: "inbox" }]);
   });
 });

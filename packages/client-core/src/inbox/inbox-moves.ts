@@ -17,10 +17,9 @@ import {
 } from "@hercule/contract";
 import { decideHandMove, type CardOffers } from "./card-hand-off";
 import type { InboxEntry, InboxGroupView } from "./inbox-groups";
-import { findHolder } from "./inbox-holder";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
-export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "startThread" | "link";
+export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "viewTask" | "startThread" | "link";
 
 /**
  * What a move acts on, as the visit hands it over: never inferred from a count.
@@ -92,7 +91,7 @@ export interface InboxMovePlans<Row> {
         readonly title: string;
       };
   readonly handOff: { readonly kind: "handOff"; readonly thing: Row };
-  readonly goToTask: { readonly kind: "goToTask"; readonly taskId: string };
+  readonly viewTask: { readonly kind: "viewTask"; readonly taskId: string };
   readonly startThread: {
     readonly kind: "startThread";
     /** The things the thread starts from, in list order, with the rows the dialog draws. */
@@ -146,23 +145,6 @@ const QUOTED_TITLE_LENGTH = 44;
 /** Returns `title` in quotes for the middle of a sentence, cut with an ellipsis when it is long. */
 const quoteTitle = (title: string): string =>
   `“${title.length > QUOTED_TITLE_LENGTH ? `${title.slice(0, QUOTED_TITLE_LENGTH - 2)}…` : title}”`;
-
-/**
- * Returns who has the thing, with the verb, as the words that start a
- * sentence (see `findHolder`). Used for a thing the user took on.
- */
-const describeWhoHasIt = (thing: Pick<InboxThing, "liveWorkflows" | "takenOn">): string => {
-  const holder = findHolder(thing);
-  return holder?.kind === "colleague" ? `${holder.name} has` : "You have";
-};
-
-/** Returns the same words as `describeWhoHasIt`, for the middle of a sentence, where "you" is lower case. */
-const describeWhoHasItMidSentence = (
-  thing: Pick<InboxThing, "liveWorkflows" | "takenOn">,
-): string => {
-  const holder = findHolder(thing);
-  return holder?.kind === "colleague" ? `${holder.name} has` : "you have";
-};
 
 /** The refusal every Inbox move gives while the connection is down. */
 export const REFUSED_OFFLINE =
@@ -296,11 +278,11 @@ const planTakeOn = <Row extends MovedRow>(
   }
   const only = findSingleThing(target);
   if (only === undefined) return refuse("There is nothing selected to take on.");
-  // A thing with a Task the user did not take on (a signal's, a hand-off's) may be taken on:
-  // the controller marks that Task as taken instead of making another.
-  return only.takenOn
-    ? refuse(`${describeWhoHasIt(only)} this already. G goes to its Task.`)
-    : { kind: "takeOn", thing: only };
+  // Taking on a thing makes its Task, so a thing on a Task already has nothing to take on.
+  // Its asks end when they are answered or marked Done.
+  return only.task === undefined
+    ? { kind: "takeOn", thing: only }
+    : refuse("This is on a Task already. G views it.");
 };
 
 /** Plans a hand-off: one thing, which some workflow can take. */
@@ -319,15 +301,15 @@ const planHandOff = <Row extends MovedRow>(
     : { kind: "handOff", thing: only };
 };
 
-/** Plans Go to its Task: one thing that has a Task. */
-const planGoToTask = <Row extends MovedRow>(
+/** Plans View task: one thing that is on a Task. */
+const planViewTask = <Row extends MovedRow>(
   target: InboxMoveTarget<Row>,
-): InboxMovePlan<Row, "goToTask"> => {
+): InboxMovePlan<Row, "viewTask"> => {
   const only = findSingleThing(target);
-  if (only === undefined) return refuse("Go to its Task takes one thing at a time.");
-  return only.taskId === undefined
-    ? refuse("This has no Task yet. T takes it on.")
-    : { kind: "goToTask", taskId: only.taskId };
+  if (only === undefined) return refuse("View task takes one thing at a time.");
+  return only.task === undefined
+    ? refuse("This is on no Task yet. T takes it on.")
+    : { kind: "viewTask", taskId: only.task.id };
 };
 
 /**
@@ -370,23 +352,16 @@ const planStartThread = <Row extends MovedRow>(
     );
   const first = things[0];
   if (first === undefined) return refuse("There is nothing selected to start a thread on.");
-  const taken = things.find((candidate) => candidate.taskId !== undefined);
-  if (taken !== undefined) {
-    const hasHolder = findHolder(taken) !== undefined;
+  const onTask = things.find((candidate) => candidate.task !== undefined);
+  if (onTask !== undefined) {
     if (things.length === 1)
-      return refuse(
-        hasHolder
-          ? `${describeWhoHasIt(taken)} this already. G goes to its Task.`
-          : `${quoteTitle(taken.title)} is on a Task already. G goes to its Task, where you can start a thread.`,
-      );
+      return refuse("This is on a Task already. G views it, and you can start a thread there.");
     const where = isGroup ? "this group" : "the selection";
     const advice = isGroup
       ? "Open the group, select the others, then press N."
       : "Take it out of the selection, then press N again.";
     return refuse(
-      hasHolder
-        ? `${quoteTitle(taken.title)} is in ${where}, and ${describeWhoHasItMidSentence(taken)} it already. ${advice}`
-        : `${quoteTitle(taken.title)} is in ${where}, and it is on a Task already. ${advice}`,
+      `${quoteTitle(onTask.title)} is in ${where}, and it is on a Task already. ${advice}`,
     );
   }
   return {
@@ -442,7 +417,7 @@ const planLink = <Row extends MovedRow>(
 /**
  * Decides whether `move` may be made on `target`, and returns what to send.
  *
- * - Every move but Go to its Task needs the connection, because the outbox
+ * - Every move but View task needs the connection, because the outbox
  *   that would hold a move for later does not exist yet.
  * - Dismiss takes a thing, a whole group or a selection, up to
  *   `MAX_INBOX_MOVED_THINGS` things, in one call. A group cut by that bound is
@@ -453,7 +428,7 @@ const planLink = <Row extends MovedRow>(
  *   controller joins them when they all share one Task, and refuses and names
  *   the Tasks when they do not).
  * - The hand-off takes one thing, and refuses a thing no workflow can take.
- * - Go to its Task needs one thing that has a Task.
+ * - View task needs one thing that is on a Task.
  * - Start a thread takes a thing, a selection or a group of up to
  *   `MAX_THREAD_THINGS` things, none of which is on a Task already, and returns
  *   those things and the default name of the Task (see `planStartThread`).
@@ -471,12 +446,12 @@ export function planInboxMove<Row extends MovedRow, Move extends InboxMoveKind>(
   readonly target: InboxMoveTarget<Row>;
   readonly isOffline: boolean;
 }): InboxMovePlan<Row, Move> {
-  if (isOffline && move !== "goToTask") return refuse(REFUSED_OFFLINE);
+  if (isOffline && move !== "viewTask") return refuse(REFUSED_OFFLINE);
   const planners: { readonly [M in InboxMoveKind]: () => InboxMovePlan<Row, M> } = {
     dismiss: () => planDismiss(target),
     takeOn: () => planTakeOn(target),
     handOff: () => planHandOff(target),
-    goToTask: () => planGoToTask(target),
+    viewTask: () => planViewTask(target),
     startThread: () => planStartThread(target),
     link: () => planLink(target),
   };
@@ -546,9 +521,9 @@ export function planInboxDrop(
 }
 
 /**
- * Returns `thing` as it reads once `offer` has it: the workflow is live on it,
+ * Returns `thing` as it reads once it is handed to `offer`: the workflow is live on it,
  * and the asks the workflow answers are gone. A thing left with no ask has no
- * wait, so its row shows who has it. The row shows this at once, until the
+ * wait, so its row shows the workflow running. The row shows this at once, until the
  * next read of the list says what the controller made of the hand-off.
  */
 export const buildHandedThing = (thing: InboxThing, offer: WorkflowOffer): InboxThing => {

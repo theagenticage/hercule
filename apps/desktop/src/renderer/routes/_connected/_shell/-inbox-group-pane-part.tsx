@@ -6,7 +6,7 @@ import {
   describeInboxGroupPane,
   type InboxLinkEnd,
 } from "@hercule/client-core/inbox";
-import { inboxGroupQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { inboxGroupQuery, pluginsQuery } from "../../../app/queries";
 import { InboxGroupHead, InboxGroupPane } from "../../../screens/inbox/inbox-group-pane";
 import { InboxPaneSkeleton } from "../../../screens/inbox/inbox-states";
 import { useInboxNow } from "./-inbox-clock";
@@ -91,7 +91,6 @@ export function InboxGroupPanePart({
   readonly moves: InboxGroupPaneMoves;
 }): JSX.Element {
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const { username } = useSuspenseQuery(userQuery(client)).data;
   const gate = useReadGate(memberRef, isActive, false);
   const group = useQuery({
     ...inboxGroupQuery(client, memberRef),
@@ -120,7 +119,7 @@ export function InboxGroupPanePart({
       <InboxPaneSkeleton />
     );
   }
-  const view = describeInboxGroupPane(detail, { plugins, rows, userName: username, now });
+  const view = describeInboxGroupPane(detail, { plugins, rows, now });
   return (
     <div
       className="ib-pane-content"

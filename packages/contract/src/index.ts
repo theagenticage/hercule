@@ -834,6 +834,7 @@ export {
   InboxRefresh,
   InboxReply,
   InboxRows,
+  InboxActiveTask,
   InboxThing,
   InboxValueQuery,
   InboxValues,

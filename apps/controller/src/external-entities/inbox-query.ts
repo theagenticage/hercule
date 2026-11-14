@@ -54,6 +54,7 @@ import {
 import { CORE_INBOX_FIELDS, type InboxClause } from "@hercule/plugin-host";
 import { uuidFromString, uuidToString, withReadSnapshot } from "../db";
 import { runRepository } from "../runs";
+import { sessionRepository } from "../sessions";
 import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
@@ -90,7 +91,6 @@ import {
   buildMatchedEntities,
   buildSortTuple,
   buildSourceOfKindSql,
-  buildTakenOfRefs,
   CORE_KEYS,
   isCoreKey,
   joinConditions,
@@ -601,6 +601,7 @@ export const externalEntityInbox = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const signals = yield* signalRepository;
   const runs = yield* runRepository;
+  const sessions = yield* sessionRepository;
   const offerReads = yield* makeWorkflowOfferReads;
   const timeline = yield* timelineRepository;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
@@ -651,26 +652,6 @@ export const externalEntityInbox = Effect.gen(function* () {
     );
   };
 
-  /**
-   * Reads which of `refs` the user took on: the ones whose active Task link
-   * has a `taken_at`. One statement. It is apart from the page statement
-   * because joining it there changes the plan of a narrowed page for the worse.
-   */
-  const readTakenRefs = (
-    refs: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlySet<string>, SqlError> => {
-    if (refs.length === 0) return Effect.succeed(new Set());
-    const own = buildTakenOfRefs(refs);
-    return Effect.map(
-      runStatement<{ readonly ref: string }>(
-        sql,
-        `WITH ${own.sql} SELECT ref FROM taken`,
-        own.params,
-      ),
-      (rows) => new Set(rows.map((row) => row.ref)),
-    );
-  };
-
   /** Builds the things of a page, in the order of `rows`, from the batched reads of their refs. */
   const hydrate = (
     environment: InboxEnvironment,
@@ -687,7 +668,6 @@ export const externalEntityInbox = Effect.gen(function* () {
       const refs = present.map((row) => row.ref);
       const observations = yield* readObservations(refs);
       const asks = yield* readAsks(environment, refs);
-      const taken = yield* readTakenRefs(refs);
       const openKinds = yield* signals.listOpenKindsByThread(refs, MAX_ENTITY_SIGNALS);
       const fieldValues: ReadonlyMap<string, EntityFieldValues> = yield* withSql(
         readFieldValues(refs, environment.activeEntityKinds),
@@ -700,6 +680,7 @@ export const externalEntityInbox = Effect.gen(function* () {
         row.task_id === null ? [] : [uuidToString(row.task_id)],
       );
       const liveWorkflows = yield* runs.listLiveWorkflowsOfTasks(taskIds, MAX_LIVE_WORKFLOWS);
+      const workingThreads = yield* sessions.countWorkingThreadsOfTasks(taskIds);
       // Every ask is of a kind the registry declares (`askingKinds`), so it has a noun.
       const nouns = new Map(environment.signalKinds.map((kind) => [kind.kind, kind.noun]));
       const activePluginIds = new Set(environment.activePluginIds);
@@ -754,8 +735,15 @@ export const externalEntityInbox = Effect.gen(function* () {
           askKinds: found[0] === undefined ? [] : (JSON.parse(found[0].kinds) as Array<string>),
           openKinds: openKinds.get(page.ref) ?? [],
           ...(page.oldest_ask === null ? {} : { waitingSince: page.oldest_ask }),
-          ...(taskId === undefined ? {} : { taskId, taskTitle: page.task_title! }),
-          takenOn: taken.has(page.ref),
+          ...(taskId === undefined
+            ? {}
+            : {
+                task: {
+                  id: taskId,
+                  title: page.task_title!,
+                  workingThreadCount: workingThreads.get(taskId) ?? 0,
+                },
+              }),
           liveWorkflows: taskId === undefined ? [] : (liveWorkflows.get(taskId) ?? []),
           ...(row.dismissed_at === null ? {} : { dismissedAt: row.dismissed_at }),
           arrival: row.arrival_sequence ?? 0,

@@ -1,5 +1,5 @@
 /**
- * The moves of the Inbox's things (Dismiss, Take on, hand-off, Go to its Task,
+ * The moves of the Inbox's things (Dismiss, Take on, hand-off, View task,
  * Open at its source) and the undo line at the foot of the list. Start a
  * thread is made by `-inbox-thread.tsx`, which asks this file which things it
  * may start from and says its line here. It follows
@@ -148,7 +148,7 @@ export interface InboxMoves {
     connectionId: string | undefined,
   ) => void;
   /** Goes to the Task of the one thing the move is for, or says it has none. */
-  readonly goToTask: (hoveredKey?: string) => void;
+  readonly viewTask: (hoveredKey?: string) => void;
   /**
    * Starts a link of what the move is for. A selection of two or more things
    * is linked at once (a star from the first) and `null` comes back. One
@@ -177,8 +177,8 @@ export interface InboxMoves {
    * start-thread dialog on them.
    *
    * When `isResumable` says the things already have a send that was attempted,
-   * they are returned without any refusal: a thing that shows as held by a
-   * Task may be held by that very send, and the dialog must open to retry it.
+   * they are returned without any refusal: a thing that shows as on a
+   * Task may be on the Task that very send made, and the dialog must open to retry it.
    */
   readonly readThreadStart: (
     hoveredKey?: string,
@@ -215,7 +215,7 @@ const joinGestureWords = ({ text, title }: InboxLineWords): string =>
 
 /**
  * Makes the moves of the Inbox for `client`, for the user of `scope`, over
- * the list `visit` holds. `isOffline` makes every move but Go to its Task
+ * the list `visit` holds. `isOffline` makes every move but View task
  * refuse. `openTask` opens a Task on Work. `onMoved` is called with the
  * snapshot a move or an undo left, so the screen can move the focus to the
  * row that is current now, or to the empty state when none is.
@@ -408,7 +408,7 @@ export const useInboxMoves = ({
         say(
           line.text,
           (await wasChanged) ? gesture : undefined,
-          { label: "Go to the Task", act: () => latest.current.openTask(result.taskId) },
+          { label: "View task", act: () => latest.current.openTask(result.taskId) },
           line.title ?? undefined,
         );
       },
@@ -566,8 +566,8 @@ export const useInboxMoves = ({
     return move.kind === "several" ? thing : null;
   };
 
-  const goToTask = (hoveredKey?: string): void => {
-    const plan = planMove("goToTask", hoveredKey);
+  const viewTask = (hoveredKey?: string): void => {
+    const plan = planMove("viewTask", hoveredKey);
     if (plan !== null) latest.current.openTask(plan.taskId);
   };
 
@@ -691,7 +691,7 @@ export const useInboxMoves = ({
     takeOn,
     startHandOff,
     handOff,
-    goToTask,
+    viewTask,
     startLink,
     linkTo,
     unlink,

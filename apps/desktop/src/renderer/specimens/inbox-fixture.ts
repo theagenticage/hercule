@@ -130,7 +130,6 @@ const pullRequest = (
     askCount: asks.length,
     askKinds: [...new Set(asks.map((ask) => ask.kind))],
     openKinds: [...new Set(asks.map((ask) => ask.kind))],
-    takenOn: false,
     arrival: 0,
     ...(asks.length === 0
       ? {}
@@ -174,7 +173,6 @@ const ticket = (
     askCount: 0,
     askKinds: [],
     openKinds: [],
-    takenOn: false,
     arrival: 0,
     liveWorkflows: [],
     offerSetId: "none",
@@ -286,7 +284,6 @@ const ITEMS: ReadonlyArray<Item> = [
       askCount: 1,
       askKinds: [REGRESSED],
       openKinds: [REGRESSED],
-      takenOn: false,
       arrival: 0,
       waitingSince: hoursAgo(1),
       accounts: [buildId(902)],
@@ -300,9 +297,11 @@ const ITEMS: ReadonlyArray<Item> = [
     ["mine", "with-hercule"],
     2,
     {
-      taskId: buildId(800),
-      taskTitle: "Show the delivery cost on the basket",
-      takenOn: true,
+      task: {
+        id: buildId(800),
+        title: "Show the delivery cost on the basket",
+        workingThreadCount: 0,
+      },
       arrival: 0,
       liveWorkflows: [{ workflowId: buildId(700), name: "Review PR" }],
     },
@@ -750,7 +749,7 @@ export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
   url: thing.url,
   ...(thing.status === undefined ? {} : { status: thing.status }),
   lifecycle: "open",
-  yours: thing.taskId !== undefined,
+  yours: thing.task !== undefined,
   facts: [],
   concerns: [],
   access: "ok",
@@ -759,7 +758,7 @@ export const buildInboxDetail = (thing: InboxThing): ExternalEntityDetail => ({
   sourceUpdatedAt: thing.sourceUpdatedAt,
   firstObservedAt: hoursAgo(72),
   ...(thing.waitingSince === undefined ? {} : { waitingSince: thing.waitingSince }),
-  ...(thing.taskId === undefined ? {} : { taskId: thing.taskId }),
+  ...(thing.task === undefined ? {} : { taskId: thing.task.id }),
   ancestors: [],
   contextComplete: true,
   kindAvailable: true,
@@ -1159,7 +1158,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       if (row === undefined) throw new Error("The rail lists no Checkout revamp.");
       row.click();
       await waitFor(page, ".ib-row");
-      await waitFor(page, ".ib-pane-held");
+      await waitFor(page, ".ib-pane-task");
       await waitFor(page, ".ib-pane-blocks:not(.ib-pane-blocks-skel)");
     },
   },
@@ -1336,12 +1335,12 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     },
   },
   {
-    // A thing someone has: the strip under its meta line says who, and goes to the Task.
-    name: "holder",
+    // A thing on a Task: the strip under its meta line names the Task, says what runs on it, and views it.
+    name: "task",
     records: BASE,
     play: async (page) => {
       await openRailItem(page, "With Hercule");
-      await waitFor(page, ".ib-pane-held");
+      await waitFor(page, ".ib-pane-task");
       await waitFor(page, ".ib-pane-blocks:not(.ib-pane-blocks-skel)");
     },
   },

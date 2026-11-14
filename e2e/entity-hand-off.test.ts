@@ -628,7 +628,7 @@ describe("handing a pull request to a workflow from its card", () => {
       actor: "user",
     });
     expect(await readSignal(REVIEWED.signals[1]!.id)).toMatchObject({ status: "open" });
-    expect((await readCard(REVIEWED.id)).card.taskId).toBe(taskId);
+    expect((await readCard(REVIEWED.id)).card.task?.id).toBe(taskId);
   }, 60_000);
 
   it("renders run.taskId in a step, which records a provenance ref on the Task", async () => {
@@ -723,7 +723,7 @@ describe("taking a handoff back before its first step started", () => {
       expect(await readRun(handed.runId)).toMatchObject({ status: "cancelled" });
       const reading = await runAsUser(["task", "read", handed.taskId, "--json"]);
       expect(reading.code).not.toBe(0);
-      expect((await readCard(HELD_UP.id)).card.taskId).toBeUndefined();
+      expect((await readCard(HELD_UP.id)).card.task?.id).toBeUndefined();
       // An undo does not bring ended signals back.
       expect(await readSignal(HELD_UP.signals[0]!.id)).toMatchObject({
         status: "resolved",
@@ -752,7 +752,7 @@ describe("handing off from Intake and from the card", () => {
     const runId = resolved.resolution!.runId!;
     const { taskId } = await readRun(runId);
     expect(taskId).toBeDefined();
-    expect((await readCard(FROM_INTAKE.id)).card.taskId).toBe(taskId);
+    expect((await readCard(FROM_INTAKE.id)).card.task?.id).toBe(taskId);
 
     const refused = await runAsUser([
       "entity",

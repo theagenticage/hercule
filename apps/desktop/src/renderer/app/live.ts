@@ -118,31 +118,55 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
  */
 const SHARED_READ_WINDOW_MS = 50;
 
+/**
+ * What the pushes of one window changed for the Inbox:
+ * - `inbox`: a push named the Inbox's keys, so any row may have changed;
+ * - `tasks`: only derived `task` pushes came, about `taskIds`. Such a push
+ *   (a session or a run of the Task changed status, its summary was written)
+ *   changes what a row on one of those Tasks shows, but never which rows the
+ *   list holds, and it comes for every turn of every Thread.
+ */
+export type InboxPushChange =
+  | { readonly kind: "inbox" }
+  | { readonly kind: "tasks"; readonly taskIds: ReadonlyArray<string> };
+
+type InboxPushListener = (change: InboxPushChange) => void;
+
 /** Who listens for the Inbox's pushes, by the query client the pushes reach. */
-const inboxPushListeners = new WeakMap<QueryClient, Set<() => void>>();
+const inboxPushListeners = new WeakMap<QueryClient, Set<InboxPushListener>>();
 
 /** What the pushes of one window have named, by the query client they reached. */
 interface GatheredPushes {
   readonly keys: Map<string, LiveQueryKey>;
   namesInbox: boolean;
+  readonly taskIds: Set<string>;
 }
 const gatheredPushes = new WeakMap<QueryClient, GatheredPushes>();
 
 /**
- * Remembers that `keys` need a read, and starts one read of each, and one
- * call of each Inbox listener, when the window of `SHARED_READ_WINDOW_MS` that
- * the first push opened ends.
+ * Remembers that `keys` need a read, and that the Tasks `taskIds` changed,
+ * and starts one read of each key, and one call of each Inbox listener, when
+ * the window of `SHARED_READ_WINDOW_MS` that the first push opened ends.
  */
-const queueSharedReads = (queryClient: QueryClient, keys: ReadonlyArray<LiveQueryKey>): void => {
+const queueSharedReads = (
+  queryClient: QueryClient,
+  keys: ReadonlyArray<LiveQueryKey>,
+  taskIds: ReadonlyArray<string> = [],
+): void => {
   let gathered = gatheredPushes.get(queryClient);
   if (gathered === undefined) {
-    const opened: GatheredPushes = { keys: new Map(), namesInbox: false };
+    const opened: GatheredPushes = { keys: new Map(), namesInbox: false, taskIds: new Set() };
     gathered = opened;
     gatheredPushes.set(queryClient, opened);
     setTimeout(() => {
       gatheredPushes.delete(queryClient);
-      if (opened.namesInbox) {
-        for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener();
+      const change: InboxPushChange | undefined = opened.namesInbox
+        ? { kind: "inbox" }
+        : opened.taskIds.size > 0
+          ? { kind: "tasks", taskIds: [...opened.taskIds] }
+          : undefined;
+      if (change !== undefined) {
+        for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener(change);
       }
       for (const queryKey of opened.keys.values()) {
         void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
@@ -153,21 +177,22 @@ const queueSharedReads = (queryClient: QueryClient, keys: ReadonlyArray<LiveQuer
     gathered.keys.set(JSON.stringify(queryKey), queryKey);
     if (queryKey[0] === queryKeys.inbox()[0]) gathered.namesInbox = true;
   }
+  for (const taskId of taskIds) gathered.taskIds.add(taskId);
 };
 
 /**
- * Calls `listener` once for the pushes that name the Inbox's keys within one
- * window (`SHARED_READ_WINDOW_MS`), on any topic, as the shell and the screens
- * deliver them to `invalidateForPush`.
+ * Calls `listener` once for the pushes of one window (`SHARED_READ_WINDOW_MS`)
+ * that change the Inbox, on any topic, as the shell and the screens deliver
+ * them to `invalidateForPush`, with what they changed (`InboxPushChange`).
  * Returns a function that stops. The Inbox visit listens through this
  * instead of subscribing to topics itself: a new subscription is answered
  * with a first push that would read the list again right after it opened.
  */
 export const listenForInboxPushes = (
   queryClient: QueryClient,
-  listener: () => void,
+  listener: InboxPushListener,
 ): (() => void) => {
-  const listeners = inboxPushListeners.get(queryClient) ?? new Set<() => void>();
+  const listeners = inboxPushListeners.get(queryClient) ?? new Set<InboxPushListener>();
   inboxPushListeners.set(queryClient, listeners);
   listeners.add(listener);
   return () => {
@@ -207,7 +232,10 @@ export const invalidateForPush = (
   push: LiveInvalidatePush,
 ): void => {
   const sharedKeys = keys.filter((queryKey) => SHARED_READ_KEYS.has(queryKey[0] as string));
-  if (sharedKeys.length > 0) queueSharedReads(queryClient, sharedKeys);
+  const changedTaskIds = topic === "task" && push.derived ? push.ids : [];
+  if (sharedKeys.length > 0 || changedTaskIds.length > 0) {
+    queueSharedReads(queryClient, sharedKeys, changedTaskIds);
+  }
   for (const queryKey of keys) {
     if (!SHARED_READ_KEYS.has(queryKey[0] as string)) {
       invalidateWithoutCancelling(queryClient, queryKey);

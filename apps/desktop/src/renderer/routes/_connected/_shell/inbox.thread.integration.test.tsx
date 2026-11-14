@@ -146,7 +146,11 @@ describe("opening the dialog", () => {
 
   it("refuses a thing that is on a Task already, says why on the undo line and opens nothing", async () => {
     const held = request(4, "Held by a Task", "Ana", {
-      taskId: "01a1b576-c999-7000-8000-000000000902",
+      task: {
+        id: "01a1b576-c999-7000-8000-000000000902",
+        title: "Its Task",
+        workingThreadCount: 0,
+      },
     });
     const { user } = await open(MATCHED, (inbox) => {
       inbox.lists.waits = [held];
@@ -155,7 +159,7 @@ describe("opening the dialog", () => {
     await user.keyboard("n");
 
     await waitFor(() => {
-      expect(readUndoLine()).toContain("G goes to its Task");
+      expect(readUndoLine()).toContain("G views it");
     });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -527,10 +531,19 @@ describe("review fixes", () => {
     });
     // The controller made the Task while the reply was lost, so the row now shows as held.
     lost = false;
-    inbox.lists.waits = [{ ...plain, taskId: "01a1b576-c999-7000-8000-000000000902" }];
+    inbox.lists.waits = [
+      {
+        ...plain,
+        task: {
+          id: "01a1b576-c999-7000-8000-000000000902",
+          title: "Its Task",
+          workingThreadCount: 0,
+        },
+      },
+    ];
     await context.queryClient.invalidateQueries();
     await waitFor(() => {
-      expect(readUndoLine()).not.toContain("G goes to its Task");
+      expect(readUndoLine()).not.toContain("G views it");
     });
 
     dialog = await openDialog(user);

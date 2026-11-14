@@ -326,7 +326,7 @@ describe("who is on the Inbox", () => {
   it("names the active Task on a thing that has one, and only then", async () => {
     const things = await run(() =>
       Effect.gen(function* () {
-        const held = yield* insertTicket({ key: "held" });
+        const onTask = yield* insertTicket({ key: "on-task" });
         yield* insertTicket({ key: "free" });
         const tasks = yield* taskRepository;
         yield* tasks.insert({
@@ -337,18 +337,18 @@ describe("who is on the Inbox", () => {
           priority: "normal",
           labels: [],
           projectId: undefined,
-          provenance: [{ ref: held }],
+          provenance: [{ ref: onTask }],
           at: at(1),
           actor: "user",
         });
         return {
-          held,
+          onTask,
           things: (yield* list(2, { list: { savedQuery: "everything" } })).things,
         };
       }),
     );
     expect(
-      things.things.map((thing) => [thing.ref === things.held, thing.taskTitle]).sort(),
+      things.things.map((thing) => [thing.ref === things.onTask, thing.task?.title]).sort(),
     ).toEqual([
       [false, undefined],
       [true, "Checkout flaky on Safari"],

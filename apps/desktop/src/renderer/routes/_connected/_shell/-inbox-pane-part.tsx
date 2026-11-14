@@ -11,7 +11,7 @@ import {
 } from "@hercule/client-core/inbox";
 import type { InboxOrder } from "@hercule/contract";
 import type { AccountScope } from "../../../app/account-scope";
-import { pluginsQuery, userQuery } from "../../../app/queries";
+import { pluginsQuery } from "../../../app/queries";
 import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
 import {
   InboxSelectionHead,
@@ -96,10 +96,9 @@ function InboxSelectionPart({
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const { username } = useSuspenseQuery(userQuery(client)).data;
   const now = useInboxNow(members);
   const views: InboxRowView[] = members.map((row) =>
-    describeInboxRow(row, { order, now, userName: username, offers: row.offers }),
+    describeInboxRow(row, { order, now, offers: row.offers }),
   );
   return (
     <InboxSelectionPane

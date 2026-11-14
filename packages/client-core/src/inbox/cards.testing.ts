@@ -11,6 +11,7 @@ import type {
   InboxReply,
   EntityRecord,
   EntitySignalLine,
+  InboxActiveTask,
   InboxAsk,
   InboxCounts,
   InboxOutline,
@@ -188,7 +189,6 @@ export const buildInboxThing = (id: string, overrides: Partial<InboxThing> = {})
   askCount: 0,
   askKinds: [],
   openKinds: [],
-  takenOn: false,
   arrival: 0,
   liveWorkflows: [],
   offerSetId: "none",
@@ -358,3 +358,9 @@ export const answerFakeInboxQuery = (inbox: FakeInbox, query: InboxQuery): Inbox
     },
   };
 };
+
+/** Returns an active Task for a thing of a test: `id`, a title, and no working Thread unless `overrides` says so. */
+export const buildActiveTask = (
+  id: string,
+  overrides: Partial<InboxActiveTask> = {},
+): InboxActiveTask => ({ id, title: "Its Task", workingThreadCount: 0, ...overrides });

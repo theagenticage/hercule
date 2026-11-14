@@ -15,7 +15,7 @@ const member = (ref: string, title: string): InboxRowView => ({
   identifier: `#${ref}`,
   label: `${title}. Mei asked for your review`,
   handOff: null,
-  held: false,
+  isOnTask: false,
 });
 
 const renderPane = (count: number, platform: "mac" | "linux" = "mac") => {
