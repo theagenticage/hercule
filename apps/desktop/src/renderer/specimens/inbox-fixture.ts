@@ -1335,8 +1335,8 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
     },
   },
   {
-    // A thing someone has: the strip under its meta line says who, and goes to the Task.
-    name: "holder",
+    // A thing on a Task: the strip under its meta line names the Task, says what runs on it, and views it.
+    name: "task",
     records: BASE,
     play: async (page) => {
       await openRailItem(page, "With Hercule");

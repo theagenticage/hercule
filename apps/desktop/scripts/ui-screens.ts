@@ -289,8 +289,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
-    name: "inbox-holder",
-    path: "inbox.html?state=holder",
+    name: "inbox-task",
+    path: "inbox.html?state=task",
     contentSelector: ".ib-row",
     nonTextParts: [],
   },
