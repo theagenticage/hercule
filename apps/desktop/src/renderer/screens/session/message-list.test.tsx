@@ -6,7 +6,7 @@
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useMessageList } from "./message-list";
+import { HOLDS_PLACE_PROPS, useMessageList } from "./message-list";
 
 const SCROLL_HEIGHT = 5000;
 const CLIENT_HEIGHT = 800;
@@ -33,7 +33,7 @@ function List({
     <section ref={scrollRef} aria-label="List" onScroll={noteScroll}>
       <div ref={columnRef}>
         <div data-testid="nested" />
-        <button type="button" data-holds-place="">
+        <button type="button" {...HOLDS_PLACE_PROPS}>
           Fold
         </button>
       </div>
@@ -140,7 +140,7 @@ function FoldList({
       <div ref={columnRef}>
         <button
           type="button"
-          data-holds-place=""
+          {...HOLDS_PLACE_PROPS}
           onClick={() => {
             layout.contentHeight = heightAfterClick;
           }}

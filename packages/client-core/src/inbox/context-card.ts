@@ -3,10 +3,11 @@
  * context: the live thing when it could be read, and what the context block
  * kept of it when it could not.
  */
-import type { EntityCard, EntityFieldValue, EntityStatus } from "@hercule/contract";
+import type { EntityCard, EntityStatus } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
 import { describeLockedRow } from "../desk/relation-rows";
 import { decideShownStatus } from "./card-face";
+import { formatWholeNumber, readFieldWords } from "./field-words";
 
 /**
  * Returns the system of an External Ref (`linear` for `linear:issue:...`),
@@ -65,29 +66,6 @@ const describeLostAccess = (access: EntityCard["access"]): string | undefined =>
 };
 
 /**
- * Returns the words of a field of the card's face, or `undefined` when the
- * field has none to draw. Text, a person and an enum are their text. A number
- * is written whole with its label ("1,211 events"), so a count that changes
- * by a few still shows the change. Every other type is left out: an age
- * changes with the clock, and a card has no timer to redraw it.
- */
-const readFaceWords = (field: EntityFieldValue | undefined): string | undefined => {
-  if (field === undefined) return undefined;
-  switch (field.type) {
-    case "text":
-    case "person":
-    case "enum":
-      return field.text === "" ? undefined : field.text;
-    case "number":
-      return `${field.number.toLocaleString("en-GB")} ${field.label.toLowerCase()}`;
-    case "money":
-    case "age":
-    case "bool":
-      return undefined;
-  }
-};
-
-/**
  * Returns the card of a thing that was read: its source, noun, identifier,
  * title and status (left out on a compact card when it is of the `norm` tone,
  * as on the Inbox's cards), and at the end of the status line the face's fact (the
@@ -103,8 +81,8 @@ export const describeContextCard = (card: EntityCard): ContextCardFace => {
     return { pluginId, noun: card.noun, title: describeLockedRow(card), isLocked: true };
   }
   const status = decideShownStatus(card.card, card.status);
-  const fact = readFaceWords(card.face?.fact);
-  const place = readFaceWords(card.face?.place);
+  const fact = readFieldWords(card.face?.fact, formatWholeNumber);
+  const place = readFieldWords(card.face?.place, formatWholeNumber);
   const trailing =
     fact !== undefined
       ? ({ kind: "fact", text: fact } as const)

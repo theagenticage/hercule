@@ -12,7 +12,7 @@
  *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
-import { formatPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
+import { appendPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
 import { buildTurns, readUserSender } from "./turns";
 
@@ -1681,7 +1681,7 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
 
 describe("buildTurns: the context block in a user message", () => {
   const THING_ID = "01a1317e-d8d3-7402-8971-cfcc37f653ca";
-  const BLOCK = formatPromptContext({
+  const BLOCK = appendPromptContext("", {
     origin: { kind: "one" },
     things: [
       {

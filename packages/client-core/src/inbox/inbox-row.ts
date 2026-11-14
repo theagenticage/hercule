@@ -4,8 +4,9 @@
  * everything in it is decided here as plain values, so the row component only
  * draws them.
  */
-import type { EntityFieldValue, EntityStatus, InboxOrder, InboxThing } from "@hercule/contract";
+import type { EntityStatus, InboxOrder, InboxThing } from "@hercule/contract";
 import { listAvailableHandOffs, type CardOffers } from "./card-hand-off";
+import { formatCompactNumber, readFieldWords } from "./field-words";
 import { describeWaitSince, measureSpan, type Span, type WaitLevel } from "./card-wait";
 import { findHolder } from "./inbox-holder";
 
@@ -96,50 +97,6 @@ const PLACE_AND_IDENTIFIER_LIMIT = 26;
 /** How many faces the hand-off button of a row shows when several workflows fit. */
 const HAND_OFF_FACES = 3;
 
-/** Returns a number as the row writes it: "950", "1.2k", "34k", "1.5M". */
-const formatCompactNumber = (value: number): string => {
-  if (Math.abs(value) < 1000) return String(value);
-  const scaled = (value / (Math.abs(value) < 1e6 ? 1000 : 1e6)).toFixed(
-    Math.abs(value) < 10_000 || Math.abs(value) >= 1e6 ? 1 : 0,
-  );
-  return `${scaled.replace(/\.0$/, "")}${Math.abs(value) < 1e6 ? "k" : "M"}`;
-};
-
-const currencyFormats = new Map<string, Intl.NumberFormat>();
-
-/** Returns an amount in its currency, such as "£1,200.00". Builds each currency's formatter once, because building one is slow and a list formats many rows. */
-const formatMoney = (amount: number, currency: string): string => {
-  let format = currencyFormats.get(currency);
-  if (format === undefined) {
-    format = new Intl.NumberFormat("en-GB", { style: "currency", currency });
-    currencyFormats.set(currency, format);
-  }
-  return format.format(amount);
-};
-
-/**
- * Returns what a field value says in one short phrase, or `undefined` when it
- * says nothing: a `false` flag, or text with no characters. A number comes with
- * its label ("1.2k events"), a flag is its label, an age is its time ("3d").
- */
-const readFieldText = (field: EntityFieldValue | undefined, now: Date): string | undefined => {
-  if (field === undefined) return undefined;
-  switch (field.type) {
-    case "text":
-    case "person":
-    case "enum":
-      return field.text === "" ? undefined : field.text;
-    case "number":
-      return `${formatCompactNumber(field.number)} ${field.label.toLowerCase()}`;
-    case "money":
-      return formatMoney(field.amount, field.currency);
-    case "age":
-      return measureSpan(field.since, now).text;
-    case "bool":
-      return field.value ? field.label : undefined;
-  }
-};
-
 /** Returns an age as it follows "ago": "1d ago", or "just now" for less than a minute. */
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
@@ -209,8 +166,8 @@ export const decideReason = (
     if (holder !== undefined) return { rest: holder.words, more: 0, quiet: true };
     const words = [
       thing.status?.label,
-      readFieldText(thing.face?.context, context.now),
-      readFieldText(thing.face?.fact, context.now),
+      readFieldWords(thing.face?.context, formatCompactNumber, context.now),
+      readFieldWords(thing.face?.fact, formatCompactNumber, context.now),
     ].filter((word): word is string => word !== undefined);
     return { rest: words.length === 0 ? thing.noun : words.join(" · "), more: 0, quiet: true };
   }
@@ -286,7 +243,7 @@ const describeRowAloud = (
  * its face has none. The row and the pane's head both read the place here.
  */
 export const readThingPlace = (thing: InboxThing, now: Date): string | undefined =>
-  readFieldText(thing.face?.place, now);
+  readFieldWords(thing.face?.place, formatCompactNumber, now);
 
 /**
  * Returns everything the row of `thing` draws.

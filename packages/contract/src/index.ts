@@ -163,10 +163,9 @@ export {
   removeTerminalControls,
 } from "./agent-text";
 
-export { formatPromptContext, splitPromptContext } from "./prompt-context";
+export { appendPromptContext, splitPromptContext } from "./prompt-context";
 export type {
   PromptContextBlock,
-  PromptContextField,
   PromptContextInput,
   PromptContextOrigin,
   PromptContextThing,

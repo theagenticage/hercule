@@ -21,16 +21,15 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
-  type Input,
   type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
   type TodoStep,
   type TranscriptRow,
-  splitPromptContext,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { findFirstMessageItemId, splitSentText } from "./first-message";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -157,49 +156,6 @@ export interface ThreadUserMessage {
   /** The session whose agent sent the message. Absent when the owner sent it. */
   readonly senderSessionId?: string;
 }
-
-/**
- * Splits the text of a sent message into the fields of a `ThreadUserMessage`
- * that come from it: `text` is the user's words, and `context` is the block
- * the controller appended, when there is one. Both the runner's
- * `user_message` and a message still sending go through here, so the two
- * never read a block differently.
- *
- * Only the session's first message is split, whoever sent it. The controller
- * appends a block only when it spawns a session, and that spawn is always the
- * session's first input. Any later message keeps its whole text as words: an
- * agent could otherwise hide text behind the fold, or make the app read the
- * ids of things it chose, by typing a block into a message to itself.
- */
-export const splitSentText = (
-  sentText: string,
-  isFirstMessage: boolean,
-): Pick<ThreadUserMessage, "text" | "context"> => {
-  if (!isFirstMessage) return { text: sentText };
-  const { words, context } = splitPromptContext(sentText);
-  return context === undefined ? { text: words } : { text: words, context };
-};
-
-/**
- * Checks whether the transcript `rows` hold a `user_message` already, which
- * makes any message that comes after it not the session's first.
- */
-export const holdsUserMessage = (rows: readonly TranscriptRow[]): boolean =>
-  rows.some(({ event }) => event._tag === "item.started" && event.kind === "user_message");
-
-/**
- * Checks whether `input`, one of the messages still on its way into the
- * session (`sending`, oldest first), is the session's first message. That is
- * so when the transcript holds no message yet (`transcriptHoldsMessage`) and
- * `input` is the oldest one sending. The first input of a session is
- * carried by its start, so it is still sending until its message reaches the
- * transcript.
- */
-export const isFirstSendingInput = (
-  transcriptHoldsMessage: boolean,
-  sending: readonly Input[],
-  input: Input,
-): boolean => !transcriptHoldsMessage && sending[0] === input;
 
 /**
  * Returns the message a `user_message` item's `item.started` holds. Each
@@ -723,7 +679,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
-  let sawUserMessage = false;
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
     const event: HarnessEvent = row.event;
@@ -762,8 +718,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event, !agent.isSubagent && !sawUserMessage));
-          sawUserMessage = true;
+          turn.userMessages.push(buildUserMessage(event, event.itemId === firstMessageItemId));
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);

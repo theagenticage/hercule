@@ -21,6 +21,7 @@ import {
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { readFetchedUrl, readToolCallName, summarizeTodoList } from "./item-detail";
+import { findFirstMessageItemId, splitSendingTexts } from "./first-message";
 import { findOpenItem } from "./open-item";
 import { readInputSender } from "./sender";
 import {
@@ -29,8 +30,6 @@ import {
   buildUpdatedItem,
   buildUnknownEventMessage,
   buildUserMessage,
-  isFirstSendingInput,
-  splitSentText,
   describeToolCallTarget,
   type ThreadItem,
   type ThreadUserMessage,
@@ -428,7 +427,7 @@ export const buildThreadBlocks = (
   const openRequestIds = new Set(parkedRequests.map((request) => request.requestId));
   const awaitingItemIds = new Set(parkedRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
-  let sawUserMessage = false;
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
   const turns = new Map<string, BuildingTurn>();
   const agents = new Map<string, BuildingAgent>();
   const workItems = new Map<
@@ -533,12 +532,10 @@ export const buildThreadBlocks = (
         turn.lastStartedItemId = event.itemId;
         if (event.kind === "user_message") {
           closeStretch(turn, event.at);
-          const isFirstMessage = !agent.isSubagent && !sawUserMessage;
-          sawUserMessage = true;
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
-            ...buildUserMessage(event, isFirstMessage),
+            ...buildUserMessage(event, event.itemId === firstMessageItemId),
             at: event.at,
           });
           turn.boundary = event.at;
@@ -820,7 +817,8 @@ const findFaceAgent = (
  * block, but above a closing status line, so the agent's status stays the
  * last line. Each block is keyed by its input, is marked `sending`, and
  * names the session whose agent sent it, when another session's agent did
- * (`readInputSender`).
+ * (`readInputSender`). `rows` are the transcript rows `blocks` were built
+ * from: they decide whether the oldest input is the session's first message.
  *
  * Returns `blocks` itself when nothing is sending, so a memoized list keeps
  * its identity.
@@ -828,16 +826,17 @@ const findFaceAgent = (
 export const appendSendingMessages = (
   blocks: readonly ThreadBlock[],
   sending: readonly Input[],
+  rows: readonly TranscriptRow[],
 ): readonly ThreadBlock[] => {
   if (sending.length === 0) return blocks;
-  const transcriptHoldsMessage = blocks.some((block) => block.kind === "user");
-  const messages = sending.map((input): UserBlock => {
+  const sentTexts = splitSendingTexts(rows, sending);
+  const messages = sending.map((input, index): UserBlock => {
     const senderSessionId = readInputSender(input);
     return {
       kind: "user",
       key: `sending:${input.id}`,
       itemId: input.id,
-      ...splitSentText(input.text, isFirstSendingInput(transcriptHoldsMessage, sending, input)),
+      ...sentTexts[index]!,
       attachments: input.attachments,
       skills: [],
       steered: false,

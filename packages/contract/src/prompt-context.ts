@@ -6,8 +6,8 @@
  * description of each thing after the user's words. The prompt the agent gets
  * is stored as it is, so the transcript later has only text to show. A client
  * that wants to draw the block as cards, not as a wall of text, finds it again
- * with `splitPromptContext`. Both directions live here so the block has one
- * spelling: the controller writes it with `formatPromptContext`, and clients
+ * with `splitPromptContext`. Both directions live here so the prompt has one
+ * spelling: the controller writes it with `appendPromptContext`, and clients
  * read it with `splitPromptContext`.
  *
  * The block looks like this, after a blank line that ends the user's words:
@@ -27,6 +27,7 @@
  * backticks and semicolons are part of what a thing says.
  */
 import { flattenToOneLine } from "./agent-text";
+import type { EntityFieldValue } from "./groups/external-entity";
 import { MAX_CONTEXT_REFERENCES } from "./groups/session";
 import { ExternalRef, isId } from "./ids";
 import { Schema } from "effect";
@@ -76,26 +77,6 @@ export type PromptContextOrigin =
   | { readonly kind: "selection" }
   | { readonly kind: "one" };
 
-/**
- * One declared field of a thing. `key` and `type` say which field it is, and
- * `value` is the field's text as it is shown. Two things share a field when
- * they hold the same `key` and `type` and the same `ref`, or the same `value`
- * when there is no `ref`. Labels alone never decide it, because two different
- * fields can have the same label.
- */
-export interface PromptContextField {
-  readonly key: string;
-  readonly type: string;
-  readonly label: string;
-  readonly value: string;
-  /**
-   * The External Ref the field points at, when the field's value is a ref to
-   * another thing, such as a project. The value is then only that thing's
-   * title, and two unrelated things can have the same title.
-   */
-  readonly ref?: string;
-}
-
 /** One thing in the block. `title`, `status` and every field may be absent for a thing seen only through a signal. */
 export interface PromptContextThing {
   readonly entityId: string;
@@ -104,10 +85,11 @@ export interface PromptContextThing {
   readonly title?: string;
   /** The label of the thing's status, such as `In Progress`. */
   readonly status?: string;
-  readonly fields: readonly PromptContextField[];
+  /** The thing's declared field values, written into its entry and compared for the share line. */
+  readonly fields: readonly EntityFieldValue[];
 }
 
-/** Everything `formatPromptContext` needs to write a block. `things` holds one thing for `one`, and 2 or more for the other origins. */
+/** Everything `appendPromptContext` needs to write a block. `things` holds one thing for `one`, and 2 or more for the other origins. */
 export interface PromptContextInput {
   readonly origin: PromptContextOrigin;
   readonly things: readonly PromptContextThing[];
@@ -146,10 +128,52 @@ const cutWithEllipsis = (text: string, maxLength: number): string => {
 const prepareExternalText = (text: string, maxLength: number): string =>
   cutWithEllipsis(flattenToOneLine(text).replace(/[“”]/g, '"'), maxLength);
 
-const describeField = (field: PromptContextField): string =>
-  `${prepareExternalText(field.label, MAX_TITLE_LENGTH)} ${prepareExternalText(field.value, MAX_FIELD_VALUE_LENGTH)}`;
+/**
+ * Returns a field's value as the text the prompt shows next to its label.
+ * Numbers are written plainly, money as `<amount> <currency>`, an age as the
+ * ISO time it counts from (an agent cannot use a relative "3d" that goes stale
+ * in a transcript), and a flag as `yes` or `no`.
+ */
+const writeFieldValue = (field: EntityFieldValue): string => {
+  switch (field.type) {
+    case "text":
+    case "person":
+    case "enum":
+      return field.text;
+    case "number":
+      return String(field.number);
+    case "money":
+      return `${String(field.amount)} ${field.currency}`;
+    case "age":
+      return field.since;
+    case "bool":
+      return field.value ? "yes" : "no";
+  }
+};
 
-const hasValue = (field: PromptContextField): boolean => flattenToOneLine(field.value).length > 0;
+const writeField = (field: EntityFieldValue): string =>
+  `${prepareExternalText(field.label, MAX_TITLE_LENGTH)} ${prepareExternalText(writeFieldValue(field), MAX_FIELD_VALUE_LENGTH)}`;
+
+const hasValue = (field: EntityFieldValue): boolean =>
+  flattenToOneLine(writeFieldValue(field)).length > 0;
+
+/**
+ * Returns what makes two fields the same field for the share line: the key,
+ * the type, and then the ref the field points at, or else its value. Labels
+ * alone never decide it, because two different fields can have the same
+ * label. A text field that names another thing is compared by that thing's
+ * ref, because its value is only the title and two unrelated things can have
+ * the same title. The tag keeps a ref and a plain value apart, because a text
+ * value may look exactly like a ref.
+ */
+const buildFieldIdentity = (field: EntityFieldValue): string =>
+  JSON.stringify([
+    field.key,
+    field.type,
+    ...(field.type === "text" && field.ref !== undefined
+      ? ["ref", field.ref]
+      : ["value", writeFieldValue(field)]),
+  ]);
 
 /**
  * Returns the title, status and fields of one thing as the parts between its
@@ -161,7 +185,7 @@ const writeEntryDetails = (thing: PromptContextThing): string[] => {
   const title = prepareExternalText(thing.title ?? "", MAX_TITLE_LENGTH);
   const status = prepareExternalText(thing.status ?? "", MAX_STATUS_LENGTH);
   const parts = [title.length > 0 ? `“${title}”` : "", status].filter((part) => part.length > 0);
-  const fieldTexts = thing.fields.filter(hasValue).map(describeField);
+  const fieldTexts = thing.fields.filter(hasValue).map(writeField);
 
   const fits = (text: string): boolean =>
     [...parts, text].join(PART_SEPARATOR).length <= MAX_ENTRY_DETAIL_LENGTH;
@@ -186,7 +210,7 @@ const writeEntry = (thing: PromptContextThing, number: number): string =>
 /**
  * Returns the text of the share line: the fields that at least two of the
  * things hold with the same key and type, and the same ref (or the same
- * value, for a field with no ref). Returns `undefined` when the things share
+ * value, for a field with no ref; see `buildFieldIdentity`). Returns `undefined` when the things share
  * nothing. Fields come in the order they first appear.
  */
 const writeSharedFields = (things: readonly PromptContextThing[]): string | undefined => {
@@ -194,14 +218,8 @@ const writeSharedFields = (things: readonly PromptContextThing[]): string | unde
   for (const thing of things)
     for (const field of thing.fields) {
       if (!hasValue(field)) continue;
-      // The tag keeps a ref and a plain value apart: a text value may look
-      // exactly like a ref.
-      const identity = JSON.stringify([
-        field.key,
-        field.type,
-        ...(field.ref === undefined ? ["value", field.value] : ["ref", field.ref]),
-      ]);
-      const entry = shared.get(identity) ?? { holders: new Set(), text: describeField(field) };
+      const identity = buildFieldIdentity(field);
+      const entry = shared.get(identity) ?? { holders: new Set(), text: writeField(field) };
       entry.holders.add(thing.entityId);
       shared.set(identity, entry);
     }
@@ -242,12 +260,11 @@ const writeOriginLine = (origin: PromptContextOrigin, count: number): string => 
  * - The share line lists the fields that two or more things hold with the
  *   same key and type, and the same ref (or value, when there is no ref).
  *
- * The caller puts the block after the user's words and a blank line. The
- * caller must pass the origin that matches the things: one thing for `one`,
- * and two or more for `group` and `selection`. `splitPromptContext` refuses a
- * block that does not match.
+ * The origin must match the things: one thing for `one`, and two or more for
+ * `group` and `selection`. `splitPromptContext` refuses a block that does not
+ * match.
  */
-export const formatPromptContext = (input: PromptContextInput): string => {
+const formatPromptContext = (input: PromptContextInput): string => {
   const lines = [
     writeOriginLine(input.origin, input.things.length),
     ...input.things.map((thing, index) => writeEntry(thing, index + 1)),
@@ -256,6 +273,25 @@ export const formatPromptContext = (input: PromptContextInput): string => {
   if (shared !== undefined) lines.push(`${SHARE_LINE_PREFIX}${shared}`);
   lines.push(READ_LINE);
   return lines.join("\n");
+};
+
+/** What ends the user's words and starts the block. */
+const BLOCK_SEPARATOR = "\n\n";
+
+/**
+ * Returns the prompt an agent gets: the user's `words`, a blank line, and the
+ * block that describes the things of `input` (see `formatPromptContext` for
+ * the block's shape). When `words` is empty the prompt is only the block.
+ * `splitPromptContext` takes the result apart again into the same words and
+ * block.
+ *
+ * Words that end in line feeds are kept as they are: the blank line goes after
+ * them. The caller checks the length of the result against
+ * `MAX_PROMPT_LENGTH`.
+ */
+export const appendPromptContext = (words: string, input: PromptContextInput): string => {
+  const block = formatPromptContext(input);
+  return words === "" ? block : `${words}${BLOCK_SEPARATOR}${block}`;
 };
 
 /** Returns how many things the origin line announces, or `undefined` when the line is not an origin line. */
@@ -303,7 +339,7 @@ const readEntry = (
  *
  * It finds the block only as the whole last paragraph (the text after the
  * last blank line), or as the whole text when the text is only a block. The
- * block must be exactly what `formatPromptContext` writes:
+ * block must be exactly what `appendPromptContext` writes:
  *
  * - an origin line that announces N things;
  * - exactly N entries, numbered 1 to N, each starting with a valid External
@@ -325,8 +361,8 @@ const readEntry = (
 export const splitPromptContext = (
   text: string,
 ): { readonly words: string; readonly context?: PromptContextBlock } => {
-  const blankLine = text.lastIndexOf("\n\n");
-  const block = blankLine < 0 ? text : text.slice(blankLine + 2);
+  const blankLine = text.lastIndexOf(BLOCK_SEPARATOR);
+  const block = blankLine < 0 ? text : text.slice(blankLine + BLOCK_SEPARATOR.length);
   const lines = block.split("\n");
   const count = readOriginCount(lines[0] ?? "");
   if (count === undefined || count > MAX_CONTEXT_REFERENCES) return { words: text };

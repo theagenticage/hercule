@@ -133,6 +133,8 @@ export type FieldRow =
       readonly upload: true;
       readonly flag: string;
       readonly help: string;
+      /** Same meaning as on the plain flag row above. */
+      readonly standsInForStdin?: true;
     }
   | {
       /**
@@ -4807,6 +4809,7 @@ export const CLI = {
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },
@@ -4940,6 +4943,7 @@ export const CLI = {
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the text (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },
@@ -5081,6 +5085,7 @@ export const CLI = {
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },

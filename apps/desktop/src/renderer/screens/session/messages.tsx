@@ -30,6 +30,7 @@ import { SentImages } from "../attachments/sent-images";
 import { useCopyResult } from "../use-copy-result";
 import { Markdown } from "./markdown";
 import { MessageContext } from "./message-context";
+import { HOLDS_PLACE_PROPS } from "./message-list";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
 import { useSessionSkills } from "./use-session-skills";
 import type { AttachOpenParagraph } from "./use-session-live";
@@ -134,7 +135,7 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
         <button
           type="button"
           className="bubble-toggle"
-          data-holds-place=""
+          {...HOLDS_PLACE_PROPS}
           aria-expanded={open}
           onClick={() => setOpen(!open)}
         >

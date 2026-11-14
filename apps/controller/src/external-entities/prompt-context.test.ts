@@ -1,11 +1,12 @@
 /**
- * Tests how a stored record and its field values become the entry of a
- * prompt's context block. Which records are restricted is tested through the
- * service, where the access of a record is read from its observations.
+ * Tests how stored records and their field values become the input of a
+ * prompt's context block: the entry of each thing and the block's origin.
+ * Which records are restricted is also tested through the service, where the
+ * access of a record is read from its observations.
  */
 import { describe, expect, it } from "vitest";
 import type { EntityFieldValue } from "@hercule/contract";
-import { buildPromptContextThing } from "./prompt-context";
+import { buildPromptContextOrigin, buildPromptContextThing } from "./prompt-context";
 import type { TaskableEntity } from "./repository";
 
 const identity = { key: "k", label: "Label" };
@@ -28,36 +29,39 @@ const record = (overrides: Partial<TaskableEntity> = {}): TaskableEntity => ({
   ...overrides,
 });
 
-const valueOf = (field: EntityFieldValue) =>
-  buildPromptContextThing(record(), [field]).fields[0]!.value;
-
 describe("buildPromptContextThing", () => {
-  it.each<[EntityFieldValue, string]>([
-    [{ ...identity, type: "text", text: "Storefront" }, "Storefront"],
-    [{ ...identity, type: "person", text: "Mei" }, "Mei"],
-    [{ ...identity, type: "enum", value: "high", text: "High" }, "High"],
-    [{ ...identity, type: "number", number: 3.5 }, "3.5"],
-    [{ ...identity, type: "money", amount: 1200, currency: "GBP" }, "1200 GBP"],
-    [{ ...identity, type: "age", since: "2026-03-01T00:00:00.000Z" }, "2026-03-01T00:00:00.000Z"],
-    [{ ...identity, type: "bool", value: true }, "yes"],
-    [{ ...identity, type: "bool", value: false }, "no"],
-  ])("writes the field %j as %s", (field, text) => {
-    expect(valueOf(field)).toBe(text);
-  });
-
-  it("carries the ref of a text field that names another record, so equal titles stay apart", () => {
-    const thing = buildPromptContextThing(record(), [
-      { ...identity, type: "text", text: "Checkout", ref: "acme:project:9" },
-    ]);
-    expect(thing.fields).toEqual([
-      { key: "k", type: "text", label: "Label", value: "Checkout", ref: "acme:project:9" },
-    ]);
-  });
-
-  it("gives a record its title and the label of its status", () => {
-    expect(buildPromptContextThing(record(), [])).toMatchObject({
+  it("gives a record its title, the label of its status and its field values", () => {
+    const field: EntityFieldValue = { ...identity, type: "text", text: "Checkout" };
+    expect(buildPromptContextThing(record(), [field])).toMatchObject({
       title: "Fix the cart",
       status: "In progress",
+      fields: [field],
+    });
+  });
+
+  it("leaves out the title of a record that has none", () => {
+    expect(buildPromptContextThing(record({ title: "" }), [])).not.toHaveProperty("title");
+  });
+});
+
+describe("buildPromptContextOrigin", () => {
+  const first = record({ ref: "acme:ticket:1", title: "First" });
+  const second = record({ ref: "acme:ticket:2", title: "Second" });
+
+  it("is one for a single record, a selection for records with no label, and a group with a label", () => {
+    expect(buildPromptContextOrigin(undefined, [first])).toEqual({ kind: "one" });
+    expect(buildPromptContextOrigin(undefined, [first, second])).toEqual({ kind: "selection" });
+    expect(buildPromptContextOrigin(second.ref, [first, second])).toEqual({
+      kind: "group",
+      label: "Second",
+    });
+  });
+
+  it("labels a group by the locked label when its label thing is a restricted place", () => {
+    const locked = record({ ref: "acme:ticket:2", isWorkRecord: false, access: "inaccessible" });
+    expect(buildPromptContextOrigin(locked.ref, [first, locked])).toEqual({
+      kind: "group",
+      label: "A ticket you cannot open",
     });
   });
 });

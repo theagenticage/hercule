@@ -6,7 +6,7 @@
  * short transcript.
  */
 import {
-  formatPromptContext,
+  appendPromptContext,
   type ProjectMatch,
   type Resource,
   type SettingsState,
@@ -102,7 +102,7 @@ export interface ContextThingSource {
 const buildSteps = (things: ReadonlyArray<ContextThingSource>): ReadonlyArray<TranscriptStep> => [
   [0, { _tag: "turn.started", turnId: TURN_ID, model: CLAUDE_OPUS.slug }],
   ...runItem([0, 0], "it-ask", "user_message", {
-    text: `${USER_WORDS}\n\n${formatPromptContext({
+    text: appendPromptContext(USER_WORDS, {
       origin: { kind: "selection" },
       things: things.map((thing) => ({
         entityId: thing.id,
@@ -112,9 +112,9 @@ const buildSteps = (things: ReadonlyArray<ContextThingSource>): ReadonlyArray<Tr
         fields:
           thing.place === undefined
             ? []
-            : [{ key: "project", type: "text", label: "project", value: thing.place }],
+            : [{ key: "project", type: "text", label: "project", text: thing.place }],
       })),
-    })}`,
+    }),
   }),
   ...runTool([2, 3], "it-read-1", "command_execution", "Bash", {
     command: "hercule entity read ent_shop142",

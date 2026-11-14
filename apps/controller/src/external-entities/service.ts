@@ -72,7 +72,7 @@ import {
   type InvalidState,
   type NotFound,
   type ProjectMatch,
-  formatPromptContext,
+  type PromptContextInput,
   type Task,
   type TaskStage,
   type Unauthenticated,
@@ -108,11 +108,7 @@ import { announceEntityChanges } from "./announce";
 import { readFieldValues } from "./entity-fields";
 import { buildActiveEntityKind, isRestrictedPlace } from "./entity-records";
 import { buildEntityCard } from "./entity-cards";
-import {
-  buildPromptContextOrigin,
-  buildPromptContextThing,
-  type PromptContextOriginSource,
-} from "./prompt-context";
+import { buildPromptContextOrigin, buildPromptContextThing } from "./prompt-context";
 import { listEntityKindSources, type EntityKindSource } from "./workflow-offers";
 import { isPendingTarget } from "./pending-target";
 import { findProjectOfRemote } from "./project-of-remote";
@@ -1108,50 +1104,40 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns where the things of `entityIds` came from, for the first line
-     * of a prompt's context block, before the text of a group's label is
-     * known. Needs the grants `task.read` and `signal.query`: the origin shows
-     * which Inbox group the things are in, and a group depends on signals
-     * (`readInboxGroup` needs both too). Fails with `NotFound` naming each
-     * unknown id. It reads stored rows only.
-     *
-     * - 2 or more things that are exactly the members of one linked group on
-     *   the Inbox, by the same groups the Inbox draws: `group`, with the ref
-     *   of the group's label thing;
-     * - 2 or more other things: `selection`;
-     * - one thing: `one`.
+     * Returns the ref of the label thing of the Inbox group that the things of
+     * `entityIds` make up, or `undefined` when they are not exactly one group
+     * (one thing, or 2 or more things that are not a whole group). The group
+     * is decided by the same groups the Inbox draws: 2 or more things that
+     * are exactly the members of one linked group on the Inbox. Needs the
+     * grants `task.read` and `signal.query`, because a group depends on
+     * signals (`readInboxGroup` needs both too). Fails with `NotFound` naming
+     * each unknown id. It reads stored rows only.
      *
      * Call it outside any transaction, before `buildPromptContext`: deciding
      * the groups scans the link graph, which must not run on the writer.
      */
-    readPromptContextOrigin: (
+    readGroupLabelRef: (
       entityIds: ReadonlyArray<string>,
-    ): Effect.Effect<
-      PromptContextOriginSource,
-      Unauthenticated | Forbidden | NotFound | SqlError
-    > =>
+    ): Effect.Effect<string | undefined, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireContextGrants;
         const records = yield* readTaskableEntitiesOrFail(entityIds);
-        if (records.length < 2) return { kind: "one" };
+        if (records.length < 2) return undefined;
         const labelRef = yield* inbox.findInboxGroupLabelRef(
           yield* readInboxEnvironment,
           records.map(({ ref }) => ref),
         );
-        return Option.isNone(labelRef)
-          ? { kind: "selection" }
-          : { kind: "group", labelRef: labelRef.value };
+        return Option.getOrUndefined(labelRef);
       }),
 
     /**
-     * Returns the context block that tells an agent about the things of
-     * `entityIds`, in that order, with `origin` as its first line (see
-     * `formatPromptContext`). Needs the grants `task.read` and
-     * `signal.query`. Fails with `NotFound` naming each unknown id. The
-     * records are read again here and not passed from
-     * `readPromptContextOrigin`, because they must be read after the take-on.
-     * For a group, the label text comes from the label thing's record read
-     * here, so access revoked since `readPromptContextOrigin` is respected.
+     * Returns what describes the things of `entityIds`, in that order, to an
+     * agent: the input of `appendPromptContext`. `labelRef` is the result of
+     * `readGroupLabelRef`. Needs the grants `task.read` and `signal.query`.
+     * Fails with `NotFound` naming each unknown id. The records are read again
+     * here, because they must be read after the take-on. For a group, the
+     * label text comes from the label thing's record read here, so access
+     * revoked since `readGroupLabelRef` is respected.
      *
      * It reads stored rows only, never a source: the records, their declared
      * field values, and one statement for each, however many things there
@@ -1162,8 +1148,8 @@ const make = Effect.gen(function* () {
      */
     buildPromptContext: (
       entityIds: ReadonlyArray<string>,
-      origin: PromptContextOriginSource,
-    ): Effect.Effect<string, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      labelRef: string | undefined,
+    ): Effect.Effect<PromptContextInput, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireContextGrants;
         const records = yield* readTaskableEntitiesOrFail(entityIds);
@@ -1176,12 +1162,12 @@ const make = Effect.gen(function* () {
           SqlClient.SqlClient,
           sql,
         );
-        return formatPromptContext({
-          origin: buildPromptContextOrigin(origin, records),
+        return {
+          origin: buildPromptContextOrigin(labelRef, records),
           things: records.map((record) =>
             buildPromptContextThing(record, values.get(record.ref)?.fields ?? []),
           ),
-        });
+        };
       }),
 
     /**

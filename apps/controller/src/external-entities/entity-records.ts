@@ -213,8 +213,12 @@ export const deriveAccess = (
  * full work record, and no Connection can read it now. Such a record shows no
  * title, identifier or URL anywhere, only its kind and noun. A full work
  * record that lost access is not restricted: it keeps its last known facts and
- * shows its `access`. One rule for every place that draws a thing outside the
- * Inbox's own queries.
+ * shows its `access`.
+ *
+ * Three places use this rule when they draw a thing outside the Inbox's own
+ * queries: the context block of a prompt (`buildPromptContextThing`), the
+ * cards (`buildEntityCard`) and the label of a linked group
+ * (`buildPromptContextOrigin`).
  */
 export const isRestrictedPlace = (record: {
   readonly isWorkRecord: boolean;

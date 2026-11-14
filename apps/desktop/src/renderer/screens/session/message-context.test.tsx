@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import {
-  formatPromptContext,
+  appendPromptContext,
   type Attachment,
   splitPromptContext,
   type EntityCard,
@@ -54,7 +54,7 @@ const ERROR: EntityCard = {
 };
 const CARDS_PATH = "POST /api/v1/external-entities/cards";
 
-const CONTEXT_TEXT = formatPromptContext({
+const CONTEXT_TEXT = appendPromptContext("", {
   origin: { kind: "selection" },
   things: [
     { entityId: ISSUE_ID, ref: ISSUE_REF, title: "Show the delivery cost", fields: [] },

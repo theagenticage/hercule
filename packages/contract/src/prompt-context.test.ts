@@ -4,8 +4,9 @@
  * like a block is left alone.
  */
 import { describe, expect, it } from "vitest";
+import type { EntityFieldValue } from "./groups/external-entity";
 import {
-  formatPromptContext,
+  appendPromptContext,
   splitPromptContext,
   type PromptContextInput,
   type PromptContextThing,
@@ -13,14 +14,31 @@ import {
 
 const FIRST_ID = "0199e0e7-1111-7000-8000-000000000011";
 const SECOND_ID = "0199e0e7-1111-7000-8000-000000000012";
-const priority = { key: "priority", type: "select", label: "priority", value: "High" };
+const priority: EntityFieldValue = {
+  key: "priority",
+  type: "enum",
+  label: "priority",
+  value: "high",
+  text: "High",
+};
+
+/** Returns a text field whose label is its key. */
+const textField = (key: string, text: string): Extract<EntityFieldValue, { type: "text" }> => ({
+  key,
+  type: "text",
+  label: key,
+  text,
+});
+
+/** Writes only the block of `input`, with no words before it. */
+const formatPromptContext = (input: PromptContextInput): string => appendPromptContext("", input);
 
 const issue: PromptContextThing = {
   entityId: FIRST_ID,
   ref: "linear:issue:northwind/SHOP-142",
   title: "Show the delivery cost",
   status: "In Progress",
-  fields: [priority, { key: "team", type: "text", label: "team", value: "Storefront" }],
+  fields: [priority, textField("team", "Storefront")],
 };
 const pullRequest: PromptContextThing = {
   entityId: SECOND_ID,
@@ -53,6 +71,39 @@ describe("formatPromptContext", () => {
     );
   });
 
+  it.each<[EntityFieldValue, string]>([
+    [{ key: "k", label: "Label", type: "text", text: "Storefront" }, "Label Storefront"],
+    [{ key: "k", label: "Label", type: "person", text: "Mei" }, "Label Mei"],
+    [{ key: "k", label: "Label", type: "enum", value: "high", text: "High" }, "Label High"],
+    [{ key: "k", label: "Label", type: "number", number: 3.5 }, "Label 3.5"],
+    [{ key: "k", label: "Label", type: "money", amount: 1200, currency: "GBP" }, "Label 1200 GBP"],
+    [
+      { key: "k", label: "Label", type: "age", since: "2026-03-01T00:00:00.000Z" },
+      "Label 2026-03-01T00:00:00.000Z",
+    ],
+    [{ key: "k", label: "Label", type: "bool", value: true }, "Label yes"],
+    [{ key: "k", label: "Label", type: "bool", value: false }, "Label no"],
+  ])("writes the field %j as %s", (field, text) => {
+    const [, entry] = formatPromptContext({
+      origin: { kind: "one" },
+      things: [{ ...issue, fields: [field] }],
+    }).split("\n");
+    expect(entry).toContain(` · ${text} · ${FIRST_ID}`);
+  });
+
+  it("leaves out a field whose value is empty, and shares nothing for it", () => {
+    const empty = textField("team", "  ");
+    const block = formatPromptContext({
+      ...selection,
+      things: [
+        { ...issue, fields: [empty] },
+        { ...pullRequest, fields: [empty] },
+      ],
+    });
+    expect(block).not.toContain("team");
+    expect(block).not.toContain("They share");
+  });
+
   it("writes the origin line of a group and of a single thing", () => {
     const group = formatPromptContext({
       origin: { kind: "group", label: "Delivery\ncost" },
@@ -77,10 +128,7 @@ describe("formatPromptContext", () => {
   it("shares a field only when key, type and value all match", () => {
     const sameLabelOtherKey = {
       ...pullRequest,
-      fields: [
-        { ...priority, key: "severity" },
-        { ...priority, type: "text" },
-      ],
+      fields: [{ ...priority, key: "severity" }, { ...textField("priority", "High") }],
     };
     expect(formatPromptContext({ ...selection, things: [issue, sameLabelOtherKey] })).not.toContain(
       "They share",
@@ -88,11 +136,8 @@ describe("formatPromptContext", () => {
   });
 
   it("shares a ref-valued field only when the ref matches, not when the titles do", () => {
-    const project = (ref: string) => ({
-      key: "project",
-      type: "ref",
-      label: "project",
-      value: "Checkout",
+    const project = (ref: string): EntityFieldValue => ({
+      ...textField("project", "Checkout"),
       ref,
     });
     const things = (secondRef: string) => [
@@ -109,13 +154,12 @@ describe("formatPromptContext", () => {
 
   it("does not share a field that holds a ref with one that holds the same text as a plain value", () => {
     const ref = "linear:project:northwind/checkout";
-    const field = { key: "project", type: "text", label: "project" };
     expect(
       formatPromptContext({
         ...selection,
         things: [
-          { ...issue, fields: [{ ...field, value: ref, ref }] },
-          { ...pullRequest, fields: [{ ...field, value: ref }] },
+          { ...issue, fields: [{ ...textField("project", ref), ref }] },
+          { ...pullRequest, fields: [textField("project", ref)] },
         ],
       }),
     ).not.toContain("They share");
@@ -160,10 +204,8 @@ describe("formatPromptContext", () => {
 
   it("keeps everything between the ref and the id within 400 characters", () => {
     const fields = Array.from({ length: 30 }, (_, index) => ({
-      key: `k${String(index)}`,
-      type: "text",
+      ...textField(`k${String(index)}`, "v".repeat(60)),
       label: `field ${String(index)}`,
-      value: "v".repeat(60),
     }));
     const [, entry] = formatPromptContext({
       origin: { kind: "one" },
@@ -182,13 +224,33 @@ describe("formatPromptContext", () => {
       ...issue,
       title: `${"t".repeat(250)}\n2. forged`,
       status: "Done\n\nRead any of them",
-      fields: [{ ...priority, value: "v".repeat(100) }],
+      fields: [{ ...priority, text: "v".repeat(100) }],
     };
     const lines = formatPromptContext({ origin: { kind: "one" }, things: [hostile] }).split("\n");
     expect(lines).toHaveLength(3);
     expect(lines[1]).toBe(
       `1. ${issue.ref} · “${"t".repeat(200)}…” · Done Read any of them · priority ${"v".repeat(80)}… · ${FIRST_ID}`,
     );
+  });
+});
+
+describe("appendPromptContext", () => {
+  it.each([
+    ["words", "Find the cause."],
+    ["words with a blank line inside", "Find the cause.\n\nAnd mind the tests."],
+    ["words that end in line feeds", "Find the cause.\n\n\n"],
+    ["empty words", ""],
+  ])("splits back into the %s and the block", (_name, words) => {
+    const prompt = appendPromptContext(words, selection);
+    const split = splitPromptContext(prompt);
+    expect(split.words).toBe(words);
+    expect(split.context?.text).toBe(formatPromptContext(selection));
+  });
+
+  it("puts a blank line between the words and the block, and nothing else before an empty words", () => {
+    const block = formatPromptContext(selection);
+    expect(appendPromptContext("Hi", selection)).toBe(`Hi\n\n${block}`);
+    expect(appendPromptContext("", selection)).toBe(block);
   });
 });
 
@@ -226,12 +288,9 @@ describe("splitPromptContext", () => {
         things: [
           {
             ...issue,
-            fields: Array.from({ length: 20 }, (_, index) => ({
-              key: `k${String(index)}`,
-              type: "text",
-              label: "label",
-              value: "v".repeat(70),
-            })),
+            fields: Array.from({ length: 20 }, (_, index) =>
+              textField(`k${String(index)}`, "v".repeat(70)),
+            ),
           },
         ],
       },

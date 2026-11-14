@@ -19,6 +19,7 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import { LockIcon } from "../../icons/lock";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
+import { HOLDS_PLACE_PROPS } from "./message-list";
 import "./message-context.css";
 
 /** What the cards draw with before the plugins are read, and when that read fails. One shared list. */
@@ -53,20 +54,27 @@ function CardTrailing({
 }
 
 /**
- * Renders one card from its words: the source's mark and name with the thing's
- * noun and identifier, the title, and the status with what ends its line. A
- * thing that lost access adds a faint line saying its facts are the last
- * known. A card that could not be read has only the source and the title.
+ * Renders the card of `thing` from `card`, the thing's light read: the
+ * source's mark and name with the thing's noun and identifier, the title, and
+ * the status with what ends its line. Without `card` (the read has not
+ * answered, or the reply left the thing out because it was pruned) the card
+ * draws what the block kept: the source and the title. A thing that lost
+ * access adds a faint line saying its facts are the last known.
+ *
+ * It is `memo`: Query keeps a card that did not change as the same object, so
+ * when one card of a message changes, only that card draws again.
  */
-function ContextCardView({
-  face,
-  sourceName,
+const ContextCard = memo(function ContextCard({
+  thing,
+  card,
   plugins,
 }: {
-  readonly face: ContextCardFace;
-  readonly sourceName: string;
+  readonly thing: ContextThing;
+  readonly card: EntityCard | undefined;
   readonly plugins: ReadonlyArray<PluginIdentity>;
 }): JSX.Element {
+  const face = card === undefined ? describeContextCardFromBlock(thing) : describeContextCard(card);
+  const sourceName = namePlugin(face.pluginId, plugins);
   const { status, trailing } = face;
   return (
     <li className={face.isLocked === true ? "msg-card is-locked" : "msg-card"}>
@@ -95,33 +103,6 @@ function ContextCardView({
       )}
     </li>
   );
-}
-
-/**
- * Renders the card of `thing` from `card`, the thing's light read. Without it
- * (the read has not answered, or the reply left the thing out because it was
- * pruned) the card draws what the block kept: the source and the title.
- *
- * It is `memo`: Query keeps a card that did not change as the same object, so
- * when one card of a message changes, only that card draws again.
- */
-const ContextCard = memo(function ContextCard({
-  thing,
-  card,
-  plugins,
-}: {
-  readonly thing: ContextThing;
-  readonly card: EntityCard | undefined;
-  readonly plugins: ReadonlyArray<PluginIdentity>;
-}): JSX.Element {
-  const face = card === undefined ? describeContextCardFromBlock(thing) : describeContextCard(card);
-  return (
-    <ContextCardView
-      face={face}
-      sourceName={namePlugin(face.pluginId, plugins)}
-      plugins={plugins}
-    />
-  );
 });
 
 /**
@@ -137,7 +118,7 @@ function ContextFold({ context }: { readonly context: PromptContextBlock }): JSX
       <button
         type="button"
         className="msg-ctx"
-        data-holds-place=""
+        {...HOLDS_PLACE_PROPS}
         aria-expanded={open}
         onClick={() => {
           setOpen(!open);

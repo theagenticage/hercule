@@ -15,7 +15,13 @@ import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { MAX_ACTING_CONNECTIONS, MAX_LIVE_WORKFLOWS, type ExternalRef } from "@hercule/contract";
+import {
+  appendPromptContext,
+  MAX_ACTING_CONNECTIONS,
+  MAX_LIVE_WORKFLOWS,
+  type ExternalRef,
+  type PromptContextInput,
+} from "@hercule/contract";
 import {
   HOST_API,
   registerConnectionType,
@@ -2676,27 +2682,30 @@ describe("the prompt context of things", () => {
       return yield* Effect.forEach(keys, (key) => arranged.entityId(ticketRef(key)));
     });
 
-  it("reads the origin as a group only when the things are exactly one linked group of the Inbox", async () => {
-    const origins = await run((arranged) =>
+  /** Writes the block of the things, as a prompt with no words has it. */
+  const writeBlock = (input: PromptContextInput): string => appendPromptContext("", input);
+
+  it("reads a group label only when the things are exactly one linked group of the Inbox", async () => {
+    const labels = await run((arranged) =>
       Effect.gen(function* () {
         const { service } = arranged;
         const ids = yield* arrangeTickets(arranged, ["1", "2", "3", "4"]);
         yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
         yield* service.link({ fromRef: ticketRef("2"), toRefs: [ticketRef("3")] });
         return {
-          group: yield* service.readPromptContextOrigin([ids[2]!, ids[0]!, ids[1]!]),
-          subset: yield* service.readPromptContextOrigin([ids[0]!, ids[1]!]),
-          superset: yield* service.readPromptContextOrigin(ids),
-          unlinked: yield* service.readPromptContextOrigin([ids[0]!, ids[3]!]),
-          one: yield* service.readPromptContextOrigin([ids[0]!]),
+          group: yield* service.readGroupLabelRef([ids[2]!, ids[0]!, ids[1]!]),
+          subset: yield* service.readGroupLabelRef([ids[0]!, ids[1]!]),
+          superset: yield* service.readGroupLabelRef(ids),
+          unlinked: yield* service.readGroupLabelRef([ids[0]!, ids[3]!]),
+          one: yield* service.readGroupLabelRef([ids[0]!]),
         };
       }),
     );
-    expect(origins.group).toEqual({ kind: "group", labelRef: ticketRef("1") });
-    expect(origins.subset).toEqual({ kind: "selection" });
-    expect(origins.superset).toEqual({ kind: "selection" });
-    expect(origins.unlinked).toEqual({ kind: "selection" });
-    expect(origins.one).toEqual({ kind: "one" });
+    expect(labels.group).toBe(ticketRef("1"));
+    expect(labels.subset).toBeUndefined();
+    expect(labels.superset).toBeUndefined();
+    expect(labels.unlinked).toBeUndefined();
+    expect(labels.one).toBeUndefined();
   });
 
   it("writes each thing with its ref, title, status label, declared fields and id, and what they share", async () => {
@@ -2723,7 +2732,7 @@ describe("the prompt context of things", () => {
             ]);
           }),
         );
-        return yield* service.buildPromptContext(ids, { kind: "selection" });
+        return writeBlock(yield* service.buildPromptContext(ids, undefined));
       }),
     );
     const [first, second] = [ticketRef("1"), ticketRef("2")];
@@ -2755,7 +2764,7 @@ describe("the prompt context of things", () => {
               WHERE ref IN (${ticketRef("1")}, ${ticketRef("3")})`,
         );
         const ids = yield* Effect.forEach(["1", "2", "3"], (key) => entityId(ticketRef(key)));
-        return yield* service.buildPromptContext(ids, { kind: "selection" });
+        return writeBlock(yield* service.buildPromptContext(ids, undefined));
       }),
     );
     const [, lostAccess, partial, place] = block.split("\n");
@@ -2772,7 +2781,7 @@ describe("the prompt context of things", () => {
         const { service, sql } = arranged;
         const ids = yield* arrangeTickets(arranged, ["1", "2"]);
         yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
-        const origin = yield* service.readPromptContextOrigin(ids);
+        const labelRef = yield* service.readGroupLabelRef(ids);
         // The label thing becomes a place nobody can read after the groups were decided.
         yield* withTransaction(
           sql,
@@ -2782,11 +2791,11 @@ describe("the prompt context of things", () => {
                        WHERE ref = ${ticketRef("1")}`;
           }),
         );
-        return yield* service.buildPromptContext(ids, origin);
+        return writeBlock(yield* service.buildPromptContext(ids, labelRef));
       }),
     );
-    const [origin] = block.split("\n");
-    expect(origin).toBe("From your linked group “A ticket you cannot open” (2 things)");
+    const [firstLine] = block.split("\n");
+    expect(firstLine).toBe("From your linked group “A ticket you cannot open” (2 things)");
     expect(block).not.toContain("Ticket 1");
   });
 
@@ -2804,20 +2813,18 @@ describe("the prompt context of things", () => {
           grants: ["task.read"],
         } as unknown as Actor;
         return {
-          build: yield* Effect.flip(
-            service.buildPromptContext([id!, MISSING_ID], { kind: "selection" }),
-          ),
-          origin: yield* Effect.flip(service.readPromptContextOrigin([MISSING_ID, id!])),
+          build: yield* Effect.flip(service.buildPromptContext([id!, MISSING_ID], undefined)),
+          labelRef: yield* Effect.flip(service.readGroupLabelRef([MISSING_ID, id!])),
           refused: yield* Effect.flip(
             Effect.provideService(
-              service.buildPromptContext([id!], { kind: "one" }),
+              service.buildPromptContext([id!], undefined),
               CurrentActor,
               withoutGrant,
             ),
           ),
-          originWithoutSignalQuery: yield* Effect.flip(
+          labelRefWithoutSignalQuery: yield* Effect.flip(
             Effect.provideService(
-              service.readPromptContextOrigin([id!]),
+              service.readGroupLabelRef([id!]),
               CurrentActor,
               withoutSignalQuery,
             ),
@@ -2827,11 +2834,11 @@ describe("the prompt context of things", () => {
     );
     expect(result.build).toMatchObject({ error: { code: "not_found" } });
     expect(JSON.stringify(result.build)).toContain(MISSING_ID);
-    expect(JSON.stringify(result.origin)).toContain(MISSING_ID);
+    expect(JSON.stringify(result.labelRef)).toContain(MISSING_ID);
     expect(result.refused).toMatchObject({
       error: { code: "forbidden", details: { grant: "task.read" } },
     });
-    expect(result.originWithoutSignalQuery).toMatchObject({
+    expect(result.labelRefWithoutSignalQuery).toMatchObject({
       error: { code: "forbidden", details: { grant: "signal.read" } },
     });
   });

@@ -24,15 +24,16 @@ import {
 } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
+  appendPromptContext,
   createForbiddenError,
   Id,
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  flattenToOneLine,
   MAX_PROMPT_LENGTH,
   MEMORY_CORE,
   refuseEmptyPrompt,
-  splitPromptContext,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   createValidationError,
@@ -92,6 +93,7 @@ import {
   dedupKeyRepository,
   type DedupOperation,
   type TaskSource,
+  type TitleParts,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
@@ -358,6 +360,8 @@ interface Placing {
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
   readonly title: string | undefined;
+  /** The words and the first thing's title of a prompt with a context block; undefined when the prompt is all words. */
+  readonly titleParts?: TitleParts | undefined;
   /** The session's role, or undefined for none. */
   readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
@@ -420,10 +424,9 @@ const make = Effect.gen(function* () {
    * title it was given from the message, and the role it was spawned with, if
    * any.
    *
-   * The model reads the user's words when there are any. Only a message with
-   * no words, such as one that is only a context block, goes to it whole, so
-   * text that came from outside Hercule stays away from the title model when
-   * the user wrote something.
+   * `titleInput` is what the model reads: the user's words when there are
+   * any, and the whole message otherwise, so text that came from outside
+   * Hercule stays away from the title model when the user wrote something.
    *
    * `madeTaskId` is the Task made for this Thread, if the join made one. It is
    * handed on to `setGeneratedTitleAndRole`, which renames that Task together
@@ -431,14 +434,12 @@ const make = Effect.gen(function* () {
    */
   const startThreadTitle = (
     sessionId: string,
-    firstMessage: string,
+    titleInput: string,
     madeTaskId: string | undefined,
   ): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
       Effect.gen(function* () {
-        const { words } = splitPromptContext(firstMessage);
-        const titleInput = words.trim() === "" ? firstMessage : words;
         // The service checks the answer against the JSON Schema, and
         // `ThreadTitleAndRole` has no check that JSON Schema leaves out, so the
         // answer always decodes. Either failure keeps the cut-short title.
@@ -955,6 +956,7 @@ const make = Effect.gen(function* () {
             prompt: open.prompt,
             attachments: open.attachments,
             title: open.title,
+            titleParts: open.titleParts,
             role: open.role,
             kind: open.kind,
             payload: open.payload,
@@ -1069,7 +1071,12 @@ const make = Effect.gen(function* () {
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
         if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt, madeTaskId);
+          const words = open.titleParts?.words ?? open.prompt;
+          yield* startThreadTitle(
+            session.id,
+            words.trim() === "" ? open.prompt : words,
+            madeTaskId,
+          );
         }
         return session;
       }),
@@ -1394,9 +1401,10 @@ const make = Effect.gen(function* () {
      * and stays off the writer. Its entries are read after the take-on, inside
      * the transaction. A prompt that grows past
      * `MAX_PROMPT_LENGTH` fails with `Validation` at `context`. The Thread's
-     * title is made from the user's words (`buildTitle`), and so is its
-     * generation (`startThreadTitle`). A Thread with context and no words
-     * gets a title from the first thing, and a generated one from the block.
+     * title is made from the user's words (`titleParts` and `buildTitle`), and
+     * so is its generation (`startThreadTitle`). A Thread with context and no
+     * words gets a title from the first thing, and a generated one from the
+     * block.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
@@ -1428,7 +1436,7 @@ const make = Effect.gen(function* () {
             ? undefined
             : {
                 entityIds: contextEntityIds,
-                origin: yield* externalEntities.readPromptContextOrigin(contextEntityIds),
+                labelRef: yield* externalEntities.readGroupLabelRef(contextEntityIds),
               };
         // Reading the things at their source can take seconds, so it happens
         // here, before the transaction that writes the session.
@@ -1628,16 +1636,14 @@ const make = Effect.gen(function* () {
 
           // The entries are read after the take-on, so a thing that was read
           // at its source for the Task carries the fields it was stored with.
-          const contextBlock =
+          const promptContext =
             context === undefined
               ? undefined
-              : yield* externalEntities.buildPromptContext(context.entityIds, context.origin);
+              : yield* externalEntities.buildPromptContext(context.entityIds, context.labelRef);
           const prompt =
-            contextBlock === undefined
+            promptContext === undefined
               ? decoded.prompt
-              : decoded.prompt === ""
-                ? contextBlock
-                : `${decoded.prompt}\n\n${contextBlock}`;
+              : appendPromptContext(decoded.prompt, promptContext);
           if (prompt.length > MAX_PROMPT_LENGTH) {
             return yield* Effect.fail(
               createValidationError([
@@ -1662,6 +1668,15 @@ const make = Effect.gen(function* () {
             prompt,
             attachments: decoded.attachments ?? [],
             title: undefined,
+            titleParts:
+              promptContext === undefined
+                ? undefined
+                : {
+                    words: decoded.prompt,
+                    firstThingTitle: promptContext.things
+                      .map((thing) => flattenToOneLine(thing.title ?? ""))
+                      .find((title) => title.length > 0),
+                  },
             role: decoded.role,
             kind: "session.spawned",
             projectId,

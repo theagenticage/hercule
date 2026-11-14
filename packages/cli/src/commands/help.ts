@@ -319,7 +319,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     // its own, so wrapping can never split it.
     const one = onStdin.length === 1 ? onStdin[0]! : undefined;
     const alternatives = command.payload
-      .filter((field) => field.uploads || field.standsInForStdin)
+      .filter((field) => field.standsInForStdin)
       .map((field) => `--${field.spelling}`);
     const rule =
       one !== undefined

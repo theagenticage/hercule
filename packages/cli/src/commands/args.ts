@@ -442,7 +442,7 @@ export const parseArguments = async (
   // An image or a context given on the command line can be the whole input, so
   // a terminal is not waited on for text.
   const hasOtherInput = command.payload.some(
-    (field) => (field.uploads || field.standsInForStdin) && field.name in payload,
+    (field) => field.standsInForStdin && field.name in payload,
   );
   if (reading.length > 0 && hasOtherInput && stdinIsTerminal) {
     for (const field of reading) payload[field.name] = coerceFieldValue(field, "", help);

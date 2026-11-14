@@ -55,6 +55,15 @@ import { useShowsClassicScrollbar } from "./classic-scrollbar";
  */
 export const HEADER_CLEARANCE = 108;
 
+/** The attribute that marks a control whose click opens or closes content in place. */
+const HOLDS_PLACE_ATTRIBUTE = "data-holds-place";
+
+/**
+ * Props to spread on a control that opens or closes content in place, so the
+ * list holds the reader's place when it is clicked (see the rules above).
+ */
+export const HOLDS_PLACE_PROPS = { [HOLDS_PLACE_ATTRIBUTE]: "" } as const;
+
 /**
  * The space below the last block before the composer is measured: the
  * book's `.tx { padding-bottom: 360px }`, which transcript.css also sets.
@@ -324,7 +333,10 @@ export const useMessageList = ({
   // virtualizer to measure the block again and the column to follow.
   const settleFrameRef = useRef(0);
   const holdPlaceOnToggle = useEffectEvent((event: MouseEvent): void => {
-    if (!(event.target instanceof Element) || event.target.closest("[data-holds-place]") === null) {
+    if (
+      !(event.target instanceof Element) ||
+      event.target.closest(`[${HOLDS_PLACE_ATTRIBUTE}]`) === null
+    ) {
       return;
     }
     setFollowing(false);
