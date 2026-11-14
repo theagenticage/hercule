@@ -1,7 +1,7 @@
 /**
  * The motion of a hand-off. On H the row's wait rolls up out of its slot as
  * the colleague's face rolls in (`rollHandedRow`), 170ms later the face takes
- * a knock and the sentence rolls to "{Workflow} has it", and then the mark
+ * a knock and the sentence rolls to "{Workflow} running", and then the mark
  * flies to Work (`flyHandedMarkToWork`).
  *
  * The flight that ends a hand-off: the mark of the thing handed leaves its row

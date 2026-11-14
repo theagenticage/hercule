@@ -31,12 +31,12 @@ export type InboxPaneBlocks =
  */
 function InboxPaneTask({
   task,
-  onGoToTask,
+  onViewTask,
 }: {
   readonly task: PaneTaskStrip;
-  readonly onGoToTask: () => void;
+  readonly onViewTask: () => void;
 }): JSX.Element {
-  const [faceSeed] = task.faceSeeds;
+  const { faceSeed } = task;
   return (
     <div className="ib-pane-task">
       <span className="ib-pane-task-mark">
@@ -50,7 +50,7 @@ function InboxPaneTask({
         <b>{task.title}</b>
         {task.activity}
       </span>
-      <button type="button" className="btn btn--sm" aria-keyshortcuts="G" onClick={onGoToTask}>
+      <button type="button" className="btn btn--sm" aria-keyshortcuts="G" onClick={onViewTask}>
         View task
         <kbd aria-hidden="true">G</kbd>
       </button>
@@ -80,14 +80,14 @@ function InboxPaneBlockSlot({ blocks }: { readonly blocks: InboxPaneBlocks }): J
 
 /**
  * Renders the pane's content for one thing, to sit above its footer: its
- * title with the identifier after it, the meta line, who holds it, then the
+ * title with the identifier after it, the meta line, the Task it is on, then the
  * asks and the blocks, what is linked to it and what happened.
  *
  * - `meta` is the meta line, item by item in the order shown. The separators
  *   between items are drawn by CSS, so no item starts with a dot and a wrapped
  *   line never starts or ends with one.
  * - `task` is the strip of the Task the thing is on, or `undefined` when it
- *   is on none. `onGoToTask` is called by its View task button.
+ *   is on none. `onViewTask` is called by its View task button.
  * - `asks` holds the signal sections and is drawn first, then `blocks`.
  * - `links` is the Linked section, left out when empty.
  * - `history` is What happened, newest first, left out when empty.
@@ -107,7 +107,7 @@ export function InboxPaneThing({
   history,
   plugins,
   ref,
-  onGoToTask,
+  onViewTask,
   onGoTo,
 }: {
   readonly title: string;
@@ -120,7 +120,7 @@ export function InboxPaneThing({
   readonly history: ReadonlyArray<PaneHistoryLine>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly ref?: Ref<HTMLDivElement>;
-  readonly onGoToTask: () => void;
+  readonly onViewTask: () => void;
   readonly onGoTo: (ref: string) => void;
 }): JSX.Element {
   const hasAsks = asks !== null && asks !== undefined && asks !== false;
@@ -153,7 +153,7 @@ export function InboxPaneThing({
           ))}
         </p>
       )}
-      {task === undefined ? null : <InboxPaneTask task={task} onGoToTask={onGoToTask} />}
+      {task === undefined ? null : <InboxPaneTask task={task} onViewTask={onViewTask} />}
       {hasAsks && <div className="ib-pane-asks">{asks}</div>}
       <InboxPaneBlockSlot blocks={blocks} />
       {links.length > 0 && (

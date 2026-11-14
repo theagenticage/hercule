@@ -42,7 +42,7 @@ export const buildInboxRowActions = (): InboxRowActions & {
     onStartThread: record("start"),
     onTakeOn: record("take"),
     onHandOff: record("hand"),
-    onGoToTask: record("goto"),
+    onViewTask: record("goto"),
     onDismiss: record("dismiss"),
   };
 };

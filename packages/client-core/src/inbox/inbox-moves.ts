@@ -19,7 +19,7 @@ import { decideHandMove, type CardOffers } from "./card-hand-off";
 import type { InboxEntry, InboxGroupView } from "./inbox-groups";
 
 /** The moves of a thing that the Inbox's keys and buttons make. */
-export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "goToTask" | "startThread" | "link";
+export type InboxMoveKind = "dismiss" | "takeOn" | "handOff" | "viewTask" | "startThread" | "link";
 
 /**
  * What a move acts on, as the visit hands it over: never inferred from a count.
@@ -91,7 +91,7 @@ export interface InboxMovePlans<Row> {
         readonly title: string;
       };
   readonly handOff: { readonly kind: "handOff"; readonly thing: Row };
-  readonly goToTask: { readonly kind: "goToTask"; readonly taskId: string };
+  readonly viewTask: { readonly kind: "viewTask"; readonly taskId: string };
   readonly startThread: {
     readonly kind: "startThread";
     /** The things the thread starts from, in list order, with the rows the dialog draws. */
@@ -302,14 +302,14 @@ const planHandOff = <Row extends MovedRow>(
 };
 
 /** Plans View task: one thing that is on a Task. */
-const planGoToTask = <Row extends MovedRow>(
+const planViewTask = <Row extends MovedRow>(
   target: InboxMoveTarget<Row>,
-): InboxMovePlan<Row, "goToTask"> => {
+): InboxMovePlan<Row, "viewTask"> => {
   const only = findSingleThing(target);
   if (only === undefined) return refuse("View task takes one thing at a time.");
   return only.task === undefined
     ? refuse("This is on no Task yet. T takes it on.")
-    : { kind: "goToTask", taskId: only.task.id };
+    : { kind: "viewTask", taskId: only.task.id };
 };
 
 /**
@@ -352,8 +352,8 @@ const planStartThread = <Row extends MovedRow>(
     );
   const first = things[0];
   if (first === undefined) return refuse("There is nothing selected to start a thread on.");
-  const taken = things.find((candidate) => candidate.task !== undefined);
-  if (taken !== undefined) {
+  const onTask = things.find((candidate) => candidate.task !== undefined);
+  if (onTask !== undefined) {
     if (things.length === 1)
       return refuse("This is on a Task already. G views it, and you can start a thread there.");
     const where = isGroup ? "this group" : "the selection";
@@ -361,7 +361,7 @@ const planStartThread = <Row extends MovedRow>(
       ? "Open the group, select the others, then press N."
       : "Take it out of the selection, then press N again.";
     return refuse(
-      `${quoteTitle(taken.title)} is in ${where}, and it is on a Task already. ${advice}`,
+      `${quoteTitle(onTask.title)} is in ${where}, and it is on a Task already. ${advice}`,
     );
   }
   return {
@@ -446,12 +446,12 @@ export function planInboxMove<Row extends MovedRow, Move extends InboxMoveKind>(
   readonly target: InboxMoveTarget<Row>;
   readonly isOffline: boolean;
 }): InboxMovePlan<Row, Move> {
-  if (isOffline && move !== "goToTask") return refuse(REFUSED_OFFLINE);
+  if (isOffline && move !== "viewTask") return refuse(REFUSED_OFFLINE);
   const planners: { readonly [M in InboxMoveKind]: () => InboxMovePlan<Row, M> } = {
     dismiss: () => planDismiss(target),
     takeOn: () => planTakeOn(target),
     handOff: () => planHandOff(target),
-    goToTask: () => planGoToTask(target),
+    viewTask: () => planViewTask(target),
     startThread: () => planStartThread(target),
     link: () => planLink(target),
   };
@@ -521,7 +521,7 @@ export function planInboxDrop(
 }
 
 /**
- * Returns `thing` as it reads once `offer` has it: the workflow is live on it,
+ * Returns `thing` as it reads once it is handed to `offer`: the workflow is live on it,
  * and the asks the workflow answers are gone. A thing left with no ask has no
  * wait, so its row shows the workflow running. The row shows this at once, until the
  * next read of the list says what the controller made of the hand-off.

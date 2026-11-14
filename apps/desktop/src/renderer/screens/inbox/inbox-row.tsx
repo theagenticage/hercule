@@ -46,7 +46,7 @@ export interface InboxRowActions {
   readonly onStartThread: (ref: string) => void;
   readonly onTakeOn: (ref: string) => void;
   readonly onHandOff: (ref: string) => void;
-  readonly onGoToTask: (ref: string) => void;
+  readonly onViewTask: (ref: string) => void;
   readonly onDismiss: (ref: string) => void;
 }
 
@@ -121,7 +121,7 @@ function RowMoves({
           aria-label="View task"
           aria-keyshortcuts="G"
           onClick={() => {
-            actions.onGoToTask(ref);
+            actions.onViewTask(ref);
           }}
         >
           <ArrowIcon size={14} />

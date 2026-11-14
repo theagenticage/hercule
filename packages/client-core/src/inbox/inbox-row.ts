@@ -37,7 +37,7 @@ export interface InboxRowReason {
   readonly rest: string;
   /** How many more asks the thing has: drawn as a "+1" chip, nothing when 0. */
   readonly more: number;
-  /** What follows the sentence, such as "dismissed 1d ago" or "Review PR has the rest". Drawn after a dot. */
+  /** What follows the sentence, such as "dismissed 1d ago" or "Review PR running". Drawn after a dot. */
   readonly aside?: string | undefined;
   /** True for a thing that asks nothing: its sentence is drawn faint. */
   readonly quiet: boolean;
@@ -137,7 +137,7 @@ export const decideTime = (thing: InboxThing, context: InboxRowContext): InboxRo
  * Decides the sentence of the second line.
  *
  * - With asks, it is the newest ask's sentence with the asker set apart, "+n"
- *   for the other asks, and an aside: who has the rest, or that the thing came
+ *   for the other asks, and an aside: what runs on its Task, or that the thing came
  *   back after a dismissal.
  * - A thing that asks nothing, with something running on its Task, says what
  *   runs (`describeTaskActivity`).
@@ -159,13 +159,11 @@ export const decideReason = (
     ].filter((word): word is string => word !== undefined);
     return { rest: words.length === 0 ? thing.noun : words.join(" · "), more: 0, quiet: true };
   }
-  const [workflow] = thing.liveWorkflows;
   const aside =
-    workflow !== undefined
-      ? `${workflow.name} has the rest`
-      : thing.dismissedAt === undefined
-        ? undefined
-        : `dismissed ${formatAgo(measureSpan(thing.dismissedAt, context.now))}`;
+    describeTaskActivity(thing) ??
+    (thing.dismissedAt === undefined
+      ? undefined
+      : `dismissed ${formatAgo(measureSpan(thing.dismissedAt, context.now))}`);
   const sentence = newest.say.say;
   const { asker } = newest;
   // A person raised the ask when the sentence starts with their name; a system's ask has none to set apart.

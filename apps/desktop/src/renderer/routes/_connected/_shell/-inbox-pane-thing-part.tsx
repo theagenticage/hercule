@@ -47,7 +47,7 @@ export interface InboxPaneMoves {
   readonly onStartThread: () => void;
   readonly onTakeOn: () => void;
   readonly onDismiss: () => void;
-  readonly onGoToTask: () => void;
+  readonly onViewTask: () => void;
   /** Shows the thing linked to the open one, or says it is not in the list. */
   readonly onGoTo: (ref: string) => void;
   /** Starts the hand-off: hands at once with one workflow, else opens the menu under the button. */
@@ -192,7 +192,7 @@ export function InboxPaneThingPart({
         history={listPaneHistory(record, now)}
         plugins={plugins}
         ref={scrollRef}
-        onGoToTask={moves.onGoToTask}
+        onViewTask={moves.onViewTask}
         onGoTo={moves.onGoTo}
       />
       <InboxPaneFooter

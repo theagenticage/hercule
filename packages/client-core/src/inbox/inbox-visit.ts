@@ -160,6 +160,15 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
   /** Tells the visit the controller changed: it reads the visible window again. */
   readonly pushArrived: () => void;
   /**
+   * Tells the visit the Tasks `taskIds` changed in a way that never changes
+   * which rows the list holds, such as a Thread of one starting a turn. It
+   * reads again, as `pushArrived` does, only when a row is on one of those
+   * Tasks, or when a read is under way: that read's reply may predate the
+   * change and hold a row on one of them. Otherwise it reads nothing, so the
+   * turns of Threads on other Tasks cost the list no read.
+   */
+  readonly tasksChanged: (taskIds: readonly string[]) => void;
+  /**
    * Tells the visit the user just linked things: `refs` are the things the
    * link joined. Reads like `pushArrived` does (cancelling the read in flight
    * and reading again). When the first read issued after this call is
@@ -593,6 +602,11 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     commit();
   }
 
+  /** Returns true while any read of the list is under way. */
+  function isReading(): boolean {
+    return opening !== null || refreshing !== null || nextPage !== null || rowReads.size > 0;
+  }
+
   return {
     open(query) {
       cancelAll();
@@ -607,6 +621,12 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       opening = null;
     },
     pushArrived,
+    tasksChanged(taskIds) {
+      const changed = new Set(taskIds);
+      const holdsOne =
+        state?.rows.some((row) => row.task !== undefined && changed.has(row.task.id)) ?? false;
+      if (holdsOne || isReading()) pushArrived();
+    },
     linkMade(refs) {
       if (opening === null && state !== null) pendingLink = { refs };
       pushArrived();

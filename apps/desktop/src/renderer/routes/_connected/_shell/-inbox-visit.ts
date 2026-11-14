@@ -18,7 +18,7 @@ import {
   type InboxVisitSnapshot,
 } from "@hercule/client-core/inbox";
 import type { InboxFirstPage, InboxQuery, InboxReply, InboxThing } from "@hercule/contract";
-import { listenForInboxPushes, listenForTaskActivity } from "../../../app/live";
+import { listenForInboxPushes } from "../../../app/live";
 import type { InboxSelection } from "../../../app/queries";
 import { isWindowVisible, useWindowVisible } from "../../../app/window-visibility";
 import { isSearching } from "./-inbox-scope";
@@ -101,8 +101,8 @@ export function buildInboxReader(client: HerculeClient): InboxReader<InboxListRo
  *
  * - A new `selection` opens a new list; the previous rows stay until its
  *   first page arrives.
- * - Every push for the Inbox is one `pushArrived`, and so is a push about
- *   what runs on the Task of a row the list holds. While the window is hidden
+ * - Every push for the Inbox is one `pushArrived`, and a push that only
+ *   changed some Tasks is one `tasksChanged`. While the window is hidden
  *   nothing is read: the push is remembered, and the window showing again
  *   delivers it.
  * - Unmounting closes the visit, which cancels its reads.
@@ -135,27 +135,28 @@ export function useInboxVisit(
     visit.open(latestSelection.current);
   }, [visit, selectionKey]);
 
-  const hasMissedPush = useRef(false);
+  // What changed while the window was hidden, delivered once when it shows again.
+  const missed = useRef<{ isInbox: boolean; readonly taskIds: Set<string> }>({
+    isInbox: false,
+    taskIds: new Set(),
+  });
+  useEffect(
+    () =>
+      listenForInboxPushes(queryClient, (change) => {
+        if (isWindowVisible()) {
+          if (change.kind === "inbox") visit.pushArrived();
+          else visit.tasksChanged(change.taskIds);
+        } else if (change.kind === "inbox") missed.current.isInbox = true;
+        else for (const taskId of change.taskIds) missed.current.taskIds.add(taskId);
+      }),
+    [queryClient, visit],
+  );
   useEffect(() => {
-    const deliver = (): void => {
-      if (isWindowVisible()) visit.pushArrived();
-      else hasMissedPush.current = true;
-    };
-    const stopInbox = listenForInboxPushes(queryClient, deliver);
-    const stopActivity = listenForTaskActivity(queryClient, (taskIds) => {
-      const named = new Set(taskIds);
-      const rows = visit.getSnapshot().rows;
-      if (rows.some((row) => row.task !== undefined && named.has(row.task.id))) deliver();
-    });
-    return () => {
-      stopInbox();
-      stopActivity();
-    };
-  }, [queryClient, visit]);
-  useEffect(() => {
-    if (!isVisible || !hasMissedPush.current) return;
-    hasMissedPush.current = false;
-    visit.pushArrived();
+    if (!isVisible) return;
+    const { isInbox, taskIds } = missed.current;
+    missed.current = { isInbox: false, taskIds: new Set() };
+    if (isInbox) visit.pushArrived();
+    else if (taskIds.size > 0) visit.tasksChanged([...taskIds]);
   }, [isVisible, visit]);
 
   return { visit, snapshot };

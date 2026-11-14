@@ -158,14 +158,14 @@ export interface PaneTaskStrip {
   readonly title: string;
   /** What runs on the Task, or "Nothing running". */
   readonly activity: string;
-  /** The ids of the workflows running on the Task, newest first: each is drawn as its face. */
-  readonly faceSeeds: ReadonlyArray<string>;
+  /** The id of the newest workflow running on the Task, whose face the strip draws; `undefined` when none runs. */
+  readonly faceSeed?: string | undefined;
 }
 
 /**
  * Returns the strip of the Task `thing` is on, or `undefined` when it is on
- * none. It shows whatever made the Task (Take on, a Thread, a hand-off or a
- * signal), and its activity uses the row's words (`describeTaskActivity`).
+ * none. It shows the Task however it was made, and its activity uses the
+ * row's words (`describeTaskActivity`).
  */
 export const describePaneTask = (
   thing: Pick<InboxThing, "task" | "liveWorkflows">,
@@ -175,5 +175,5 @@ export const describePaneTask = (
     : {
         title: thing.task.title,
         activity: describeTaskActivity(thing) ?? "Nothing running",
-        faceSeeds: thing.liveWorkflows.map((workflow) => workflow.workflowId),
+        faceSeed: thing.liveWorkflows[0]?.workflowId,
       };

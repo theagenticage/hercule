@@ -113,14 +113,14 @@ describe("describeInboxRow reason", () => {
     expect(describe_(onTask).reason).toMatchObject({ rest: "Ticket", quiet: true });
   });
 
-  it("adds who has the rest when a workflow has the thing and an ask is left", () => {
+  it("adds what runs on the Task when an ask is left", () => {
     const thing = asked(2, {
       task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf-review", name: "Review PR" }],
     });
 
     expect(describe_(thing).reason).toMatchObject({
-      aside: "Review PR has the rest",
+      aside: "Review PR running",
       quiet: false,
     });
   });
@@ -246,7 +246,7 @@ describe("describeInboxRow place", () => {
 
   it.each([
     [
-      "says who has the rest",
+      "says what runs on its Task",
       { liveWorkflows: [{ workflowId: "wf", name: "Review PR" }], task: buildActiveTask("t") },
     ],
     ["says it came back", { dismissedAt: hoursAgo(26) }],
@@ -318,14 +318,14 @@ describe("describeInboxRow label", () => {
     );
   });
 
-  it("keeps the place the row dropped, and says who has the rest", () => {
+  it("keeps the place the row dropped, and says what runs on its Task", () => {
     const thing = asked(2, {
       face: { place: text("repository", "storefront-web-platform-xy") },
       task: buildActiveTask("task-1"),
       liveWorkflows: [{ workflowId: "wf", name: "Review PR" }],
     });
 
-    expect(describe_(thing).label).toContain("Review PR has the rest");
+    expect(describe_(thing).label).toContain("Review PR running");
     expect(describe_(thing).label).toContain("in storefront-web-platform-xy");
   });
 });

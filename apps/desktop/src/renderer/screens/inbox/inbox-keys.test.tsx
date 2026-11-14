@@ -60,7 +60,7 @@ describe("decideInboxKeyAction", () => {
     expect(decide("n", "list")).toBe("startThread");
     expect(decide("t", "list")).toBe("takeOn");
     expect(decide("h", "list")).toBe("handOff");
-    expect(decide("g", "list")).toBe("goToTask");
+    expect(decide("g", "list")).toBe("viewTask");
     expect(decide("o", "list")).toBe("openAtSource");
     expect(decide("f", "list")).toBe("narrow");
     expect(decide(".", "list")).toBe("showArrivals");

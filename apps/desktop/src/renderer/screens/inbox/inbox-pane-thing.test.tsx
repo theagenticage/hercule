@@ -6,7 +6,7 @@ import { InboxPaneThing } from "./inbox-pane-thing";
 import { TEST_PLUGINS } from "./inbox-row.testing";
 
 const renderThing = (props: Partial<Parameters<typeof InboxPaneThing>[0]> = {}) => {
-  const onGoToTask = vi.fn();
+  const onViewTask = vi.fn();
   const onGoTo = vi.fn();
   render(
     <InboxPaneThing
@@ -18,12 +18,12 @@ const renderThing = (props: Partial<Parameters<typeof InboxPaneThing>[0]> = {}) 
       links={[]}
       history={[]}
       plugins={TEST_PLUGINS}
-      onGoToTask={onGoToTask}
+      onViewTask={onViewTask}
       onGoTo={onGoTo}
       {...props}
     />,
   );
-  return { onGoToTask, onGoTo };
+  return { onViewTask, onGoTo };
 };
 
 describe("InboxPaneThing", () => {
@@ -52,22 +52,22 @@ describe("InboxPaneThing", () => {
   });
 
   it("shows the Task the thing is on, with what runs on it, and views it", async () => {
-    const { onGoToTask } = renderThing({
+    const { onViewTask } = renderThing({
       task: {
         title: "Review the checkout fix",
         activity: "Review PR running",
-        faceSeeds: ["review-pr"],
+        faceSeed: "review-pr",
       },
     });
     expect(screen.getByText("Review the checkout fix")).toBeTruthy();
     expect(screen.getByText("Review PR running")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: /View task/ }));
-    expect(onGoToTask).toHaveBeenCalledOnce();
+    expect(onViewTask).toHaveBeenCalledOnce();
   });
 
   it("shows a Task nothing runs on", () => {
     renderThing({
-      task: { title: "Install with Bun", activity: "Nothing running", faceSeeds: [] },
+      task: { title: "Install with Bun", activity: "Nothing running" },
     });
     expect(screen.getByText("Nothing running")).toBeTruthy();
     expect(screen.getByRole("button", { name: /View task/ })).toBeTruthy();

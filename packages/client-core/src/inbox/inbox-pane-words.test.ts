@@ -131,7 +131,7 @@ describe("describePaneTask", () => {
     expect(describePaneTask({ task, liveWorkflows: [] })).toEqual({
       title: "Install with Bun",
       activity: "Nothing running",
-      faceSeeds: [],
+      faceSeed: undefined,
     });
   });
 
@@ -141,7 +141,7 @@ describe("describePaneTask", () => {
     ).toEqual({
       title: "Install with Bun",
       activity: "Review PR running · 1 thread working",
-      faceSeeds: ["w1"],
+      faceSeed: "w1",
     });
   });
 

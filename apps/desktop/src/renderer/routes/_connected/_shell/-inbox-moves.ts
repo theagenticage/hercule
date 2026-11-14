@@ -148,7 +148,7 @@ export interface InboxMoves {
     connectionId: string | undefined,
   ) => void;
   /** Goes to the Task of the one thing the move is for, or says it has none. */
-  readonly goToTask: (hoveredKey?: string) => void;
+  readonly viewTask: (hoveredKey?: string) => void;
   /**
    * Starts a link of what the move is for. A selection of two or more things
    * is linked at once (a star from the first) and `null` comes back. One
@@ -177,8 +177,8 @@ export interface InboxMoves {
    * start-thread dialog on them.
    *
    * When `isResumable` says the things already have a send that was attempted,
-   * they are returned without any refusal: a thing that shows as held by a
-   * Task may be held by that very send, and the dialog must open to retry it.
+   * they are returned without any refusal: a thing that shows as on a
+   * Task may be on the Task that very send made, and the dialog must open to retry it.
    */
   readonly readThreadStart: (
     hoveredKey?: string,
@@ -566,8 +566,8 @@ export const useInboxMoves = ({
     return move.kind === "several" ? thing : null;
   };
 
-  const goToTask = (hoveredKey?: string): void => {
-    const plan = planMove("goToTask", hoveredKey);
+  const viewTask = (hoveredKey?: string): void => {
+    const plan = planMove("viewTask", hoveredKey);
     if (plan !== null) latest.current.openTask(plan.taskId);
   };
 
@@ -691,7 +691,7 @@ export const useInboxMoves = ({
     takeOn,
     startHandOff,
     handOff,
-    goToTask,
+    viewTask,
     startLink,
     linkTo,
     unlink,

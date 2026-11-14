@@ -68,7 +68,7 @@ const ROW_ACTION_NAMES = [
   "onStartThread",
   "onTakeOn",
   "onHandOff",
-  "onGoToTask",
+  "onViewTask",
   "onDismiss",
   "onPickGroup",
   "onToggleGroupSelect",

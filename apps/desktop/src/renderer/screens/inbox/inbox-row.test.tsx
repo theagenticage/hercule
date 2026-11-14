@@ -80,12 +80,12 @@ describe("InboxRow", () => {
         who: "Tomás",
         rest: "mentioned you",
         more: 1,
-        aside: "Review PR has the rest",
+        aside: "Review PR running",
         quiet: false,
       },
     });
     expect(within(row).getByText("+1")).toBeTruthy();
-    expect(row.textContent).toContain("· Review PR has the rest");
+    expect(row.textContent).toContain("· Review PR running");
   });
 
   it("keeps the place out when the row leaves it to the pane, and the identifier stays", () => {

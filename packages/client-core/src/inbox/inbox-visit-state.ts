@@ -50,6 +50,8 @@ export interface InboxVisitRow {
    * row that only slid into the first page.
    */
   readonly arrival: number;
+  /** The Task the row is on, when it is on one: `tasksChanged` reads a row again when its Task changed. */
+  readonly task?: { readonly id: string } | undefined;
 }
 
 /** The most held rows one refresh or row read asks for. */

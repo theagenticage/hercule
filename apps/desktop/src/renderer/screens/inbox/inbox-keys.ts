@@ -26,7 +26,7 @@ export type InboxKeyAction =
   | { readonly kind: "startThread" }
   | { readonly kind: "takeOn" }
   | { readonly kind: "handOff" }
-  | { readonly kind: "goToTask" }
+  | { readonly kind: "viewTask" }
   | { readonly kind: "link" }
   /** → opens the current group; ← closes it, or from a member goes to its group. */
   | { readonly kind: "fold"; readonly fold: "open" | "close" }
@@ -130,7 +130,7 @@ export const decideInboxKeyAction = (
     case "h":
       return { kind: "handOff" };
     case "g":
-      return { kind: "goToTask" };
+      return { kind: "viewTask" };
     case "l":
       return { kind: "link" };
     case "o":
@@ -179,7 +179,7 @@ export const buildInboxKeyRows = (platform: DesktopPlatform): readonly InboxKeyR
   ],
   ["T", "Take on: a Task on Work. A group or a selection becomes one Task"],
   ["H", "Hand off to an agent"],
-  ["G", "Go to its Task"],
+  ["G", "View task"],
   ["L", "Link the selected things, or pick a thing to link to"],
   ["O", "Open at its source"],
   ["/", "Search"],
