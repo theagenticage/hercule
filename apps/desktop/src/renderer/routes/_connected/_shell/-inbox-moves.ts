@@ -1,5 +1,5 @@
 /**
- * The moves of the Inbox's things (Dismiss, Take on, hand-off, Go to its Task,
+ * The moves of the Inbox's things (Dismiss, Take on, hand-off, View task,
  * Open at its source) and the undo line at the foot of the list. Start a
  * thread is made by `-inbox-thread.tsx`, which asks this file which things it
  * may start from and says its line here. It follows
@@ -215,7 +215,7 @@ const joinGestureWords = ({ text, title }: InboxLineWords): string =>
 
 /**
  * Makes the moves of the Inbox for `client`, for the user of `scope`, over
- * the list `visit` holds. `isOffline` makes every move but Go to its Task
+ * the list `visit` holds. `isOffline` makes every move but View task
  * refuse. `openTask` opens a Task on Work. `onMoved` is called with the
  * snapshot a move or an undo left, so the screen can move the focus to the
  * row that is current now, or to the empty state when none is.
@@ -408,7 +408,7 @@ export const useInboxMoves = ({
         say(
           line.text,
           (await wasChanged) ? gesture : undefined,
-          { label: "Go to the Task", act: () => latest.current.openTask(result.taskId) },
+          { label: "View task", act: () => latest.current.openTask(result.taskId) },
           line.title ?? undefined,
         );
       },

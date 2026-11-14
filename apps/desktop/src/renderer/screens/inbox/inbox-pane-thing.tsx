@@ -1,23 +1,17 @@
 import type { JSX, ReactNode, Ref } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
 import type {
-  InboxRowHolder,
   PaneHistoryLine,
   PaneLink,
   PaneMetaItem,
+  PaneTaskStrip,
 } from "@hercule/client-core/inbox";
-import { buildLook, Face, UserAvatar } from "../../faces";
+import { buildLook, Face } from "../../faces";
+import { TasksIcon } from "../../icons/tasks";
 import { PluginMark } from "../../marks";
 import { EntityStatusIcon } from "../desk/status-shape";
 import { CardFactText } from "./card-parts";
 import "./inbox-pane-thing.css";
-
-/** Who holds the thing: `holder` draws the face or monogram, `heading` is "Your Task" or "Mei has it", `taskName` is the Task's name. */
-export interface InboxPaneHolding {
-  readonly holder: InboxRowHolder;
-  readonly heading: string;
-  readonly taskName: string;
-}
 
 /**
  * What the pane shows of the plugin's blocks:
@@ -30,30 +24,34 @@ export type InboxPaneBlocks =
   | { readonly state: "failed"; readonly words: string }
   | { readonly state: "ready"; readonly content: ReactNode };
 
-/** Renders the strip that says who holds the thing and goes to its Task. */
-function InboxPaneHeld({
-  holding,
+/**
+ * Renders the strip of the Task the thing is on: the face of the first
+ * workflow running on it, or the Task mark when none runs, the Task's title,
+ * what runs on it, and View task.
+ */
+function InboxPaneTask({
+  task,
   onGoToTask,
 }: {
-  readonly holding: InboxPaneHolding;
+  readonly task: PaneTaskStrip;
   readonly onGoToTask: () => void;
 }): JSX.Element {
-  const { holder } = holding;
+  const [faceSeed] = task.faceSeeds;
   return (
-    <div className="ib-pane-held">
-      <span className="ib-pane-held-who">
-        {holder.kind === "you" ? (
-          <UserAvatar name={holder.name} size={20} />
+    <div className="ib-pane-task">
+      <span className="ib-pane-task-mark">
+        {faceSeed === undefined ? (
+          <TasksIcon size={16} />
         ) : (
-          <Face look={buildLook(holder.faceSeed)} pose="working" size={22} />
+          <Face look={buildLook(faceSeed)} pose="working" size={22} />
         )}
       </span>
-      <span className="ib-pane-held-words">
-        <b>{holding.heading}</b>
-        {holding.taskName}
+      <span className="ib-pane-task-words">
+        <b>{task.title}</b>
+        {task.activity}
       </span>
       <button type="button" className="btn btn--sm" aria-keyshortcuts="G" onClick={onGoToTask}>
-        Go to the Task
+        View task
         <kbd aria-hidden="true">G</kbd>
       </button>
     </div>
@@ -88,8 +86,8 @@ function InboxPaneBlockSlot({ blocks }: { readonly blocks: InboxPaneBlocks }): J
  * - `meta` is the meta line, item by item in the order shown. The separators
  *   between items are drawn by CSS, so no item starts with a dot and a wrapped
  *   line never starts or ends with one.
- * - `holding` is who holds the thing, or `undefined` when no Task does.
- *   `onGoToTask` is called by its "Go to the Task" button.
+ * - `task` is the strip of the Task the thing is on, or `undefined` when it
+ *   is on none. `onGoToTask` is called by its View task button.
  * - `asks` holds the signal sections and is drawn first, then `blocks`.
  * - `links` is the Linked section, left out when empty.
  * - `history` is What happened, newest first, left out when empty.
@@ -102,7 +100,7 @@ export function InboxPaneThing({
   title,
   identifier,
   meta,
-  holding,
+  task,
   asks,
   blocks,
   links,
@@ -115,7 +113,7 @@ export function InboxPaneThing({
   readonly title: string;
   readonly identifier?: string | undefined;
   readonly meta: ReadonlyArray<PaneMetaItem>;
-  readonly holding?: InboxPaneHolding | undefined;
+  readonly task?: PaneTaskStrip | undefined;
   readonly asks: ReactNode;
   readonly blocks: InboxPaneBlocks;
   readonly links: ReadonlyArray<PaneLink>;
@@ -155,7 +153,7 @@ export function InboxPaneThing({
           ))}
         </p>
       )}
-      {holding === undefined ? null : <InboxPaneHeld holding={holding} onGoToTask={onGoToTask} />}
+      {task === undefined ? null : <InboxPaneTask task={task} onGoToTask={onGoToTask} />}
       {hasAsks && <div className="ib-pane-asks">{asks}</div>}
       <InboxPaneBlockSlot blocks={blocks} />
       {links.length > 0 && (

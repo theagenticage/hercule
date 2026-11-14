@@ -1,4 +1,4 @@
-/** Tests the pane's content for one thing: its meta line, who holds it, the blocks' states, links and history. */
+/** Tests the pane's content for one thing: its meta line, the Task it is on, the blocks' states, links and history. */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -51,18 +51,31 @@ describe("InboxPaneThing", () => {
     expect(document.querySelector(".ib-pane-meta")?.textContent ?? "").not.toContain("·");
   });
 
-  it("shows who holds the thing and goes to its Task", async () => {
+  it("shows the Task the thing is on, with what runs on it, and views it", async () => {
     const { onGoToTask } = renderThing({
-      holding: {
-        holder: { kind: "colleague", faceSeed: "review-pr", words: "Review PR has it" },
-        heading: "Review PR has it",
-        taskName: "Review the checkout fix",
+      task: {
+        title: "Review the checkout fix",
+        activity: "Review PR running",
+        faceSeeds: ["review-pr"],
       },
     });
-    expect(screen.getByText("Review PR has it")).toBeTruthy();
     expect(screen.getByText("Review the checkout fix")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: /Go to the Task/ }));
+    expect(screen.getByText("Review PR running")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /View task/ }));
     expect(onGoToTask).toHaveBeenCalledOnce();
+  });
+
+  it("shows a Task nothing runs on", () => {
+    renderThing({
+      task: { title: "Install with Bun", activity: "Nothing running", faceSeeds: [] },
+    });
+    expect(screen.getByText("Nothing running")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /View task/ })).toBeTruthy();
+  });
+
+  it("draws no Task strip for a thing on no Task", () => {
+    renderThing();
+    expect(screen.queryByRole("button", { name: /View task/ })).toBeNull();
   });
 
   it("draws the asks before the blocks", () => {

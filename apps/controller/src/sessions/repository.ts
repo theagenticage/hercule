@@ -1681,6 +1681,28 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Counts the working Threads of each of `taskIds`: the sessions of kind
+     * `thread` whose status is one of `WORKING_SESSION_STATUSES`, the rule the
+     * Work board uses for an agent at work. Returns a map from Task id to the
+     * count, which leaves out a Task with none. One statement on
+     * `sessions_task_id`; the ids reach SQLite as one JSON text.
+     */
+    countWorkingThreadsOfTasks: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, number>, SqlError> =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly task_id: Uint8Array; readonly working: number }>`
+              SELECT task_id, COUNT(*) AS working FROM sessions
+              WHERE task_id IN (SELECT unhex(value)
+                                FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+                AND kind = 'thread' AND status IN ${sql.in(WORKING_SESSION_STATUSES)}
+              GROUP BY task_id`,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.task_id), row.working])),
+          ),
+
+    /**
      * Sets the time the session's own agent last ended a turn to `at`. An
      * exited session is left alone, like `touched`. This is not the last
      * activity time, which every tool event moves.

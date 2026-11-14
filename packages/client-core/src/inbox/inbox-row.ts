@@ -8,21 +8,15 @@ import type { EntityStatus, InboxOrder, InboxThing } from "@hercule/contract";
 import { listAvailableHandOffs, type CardOffers } from "./card-hand-off";
 import { formatCompactNumber, readFieldWords } from "./field-words";
 import { describeWaitSince, measureSpan, type Span, type WaitLevel } from "./card-wait";
-import { findHolder } from "./inbox-holder";
-
-/**
- * Whoever holds a thing's Task. The user is drawn as a monogram of `name`; a
- * colleague is drawn as a face grown from `faceSeed`, which is the id of the
- * workflow so that the face matches the one on the hand-off menu.
- */
-export type InboxRowHolder =
-  | { readonly kind: "you"; readonly name: string; readonly words: string }
-  | { readonly kind: "colleague"; readonly faceSeed: string; readonly words: string };
+import { describeTaskActivity } from "./inbox-task";
 
 /**
  * What the time column shows:
  * - `wait`: `text` ("5d") in `tone`, with `words` ("Waiting 5 days, overdue") as its tooltip;
- * - `holder`: the holder's face or monogram in place of a time;
+ * - `task`: in place of a time, for a thing on a Task that asks nothing: the
+ *   face of the workflow running on it, grown from `faceSeed` (the workflow's
+ *   id, so it matches the face on the hand-off menu), or the Task mark when
+ *   no workflow runs. `words` is its tooltip;
  * - `none`: nothing, for a thing that asks nothing in a list ordered by waiting.
  */
 export type InboxRowTime =
@@ -32,7 +26,7 @@ export type InboxRowTime =
       readonly tone: WaitLevel;
       readonly words: string;
     }
-  | { readonly kind: "holder"; readonly holder: InboxRowHolder }
+  | { readonly kind: "task"; readonly faceSeed?: string | undefined; readonly words: string }
   | { readonly kind: "none" };
 
 /** The words of the second line, already decided. */
@@ -52,7 +46,7 @@ export interface InboxRowReason {
 /**
  * The hand-off button of a row: one workflow shows its face and its name, and
  * several show the first faces and "Hand to…". A face never stands alone.
- * `faceSeed` is the workflow's id, as in `InboxRowHolder`.
+ * `faceSeed` is the workflow's id, as in `InboxRowTime`.
  */
 export type InboxRowHandOff =
   | { readonly kind: "one"; readonly name: string; readonly faceSeed: string }
@@ -76,8 +70,8 @@ export interface InboxRowView {
   readonly label: string;
   /** The hand-off button, or `null` when no workflow offers one. */
   readonly handOff: InboxRowHandOff | null;
-  /** True when a Task holds the thing: its buttons are G and E instead of T, H and E. */
-  readonly held: boolean;
+  /** True when the thing is on a Task: its buttons are G and E instead of N, T, H and E. */
+  readonly isOnTask: boolean;
 }
 
 /** What `describeInboxRow` needs besides the thing. */
@@ -85,8 +79,6 @@ export interface InboxRowContext {
   /** The order of the list the row is in. It decides what the time column shows. */
   readonly order: InboxOrder;
   readonly now: Date;
-  /** The user's name, for the monogram that shows when the user holds the thing. */
-  readonly userName: string;
   /** The workflows the thing can be handed to, from `listCardOffers`. */
   readonly offers: CardOffers;
 }
@@ -100,15 +92,6 @@ const HAND_OFF_FACES = 3;
 /** Returns an age as it follows "ago": "1d ago", or "just now" for less than a minute. */
 const formatAgo = (span: Span): string => (span.text === "now" ? "just now" : `${span.text} ago`);
 
-/** Returns the holder mark of a row: see `findHolder` for who has the thing. */
-export const findRowHolder = (thing: InboxThing, userName: string): InboxRowHolder | undefined => {
-  const holder = findHolder(thing);
-  if (holder === undefined) return undefined;
-  return holder.kind === "colleague"
-    ? { kind: "colleague", faceSeed: holder.workflowId, words: `${holder.name} has it` }
-    : { kind: "you", name: userName, words: "You took it on" };
-};
-
 /** Returns the wait of the oldest open ask, or `undefined` when the thing asks nothing. */
 const readWait = (thing: InboxThing, now: Date) => {
   if (thing.askCount === 0 || thing.waitingSince === undefined) return undefined;
@@ -119,20 +102,24 @@ const readWait = (thing: InboxThing, now: Date) => {
 /**
  * Decides the time column:
  *
- * - A thing someone holds shows the holder, but only when no ask is left for
- *   the user. With asks left, the wait shows like any ask's.
+ * - A thing on a Task shows the Task (`task`), but only when no ask is left
+ *   for the user. With asks left, the wait shows like any ask's. A thing
+ *   just handed to a workflow counts as on a Task, before its Task is known.
  * - In a "waiting" list the wait of the oldest ask shows, and a thing that asks
  *   nothing shows nothing.
  * - In a "newest" list the moment the thing last changed shows, faint, and
  *   only an overdue wait shows in its place.
  */
-export const decideTime = (
-  thing: InboxThing,
-  context: InboxRowContext,
-  holder: InboxRowHolder | undefined,
-): InboxRowTime => {
+export const decideTime = (thing: InboxThing, context: InboxRowContext): InboxRowTime => {
   const wait = readWait(thing, context.now);
-  if (holder !== undefined && wait === undefined) return { kind: "holder", holder };
+  const [workflow] = thing.liveWorkflows;
+  if (wait === undefined && (thing.task !== undefined || workflow !== undefined)) {
+    return {
+      kind: "task",
+      faceSeed: workflow?.workflowId,
+      words: describeTaskActivity(thing) ?? `On the Task “${thing.task!.title}”`,
+    };
+  }
   if (context.order === "waiting") {
     return wait === undefined ? { kind: "none" } : { kind: "wait", ...wait };
   }
@@ -152,18 +139,19 @@ export const decideTime = (
  * - With asks, it is the newest ask's sentence with the asker set apart, "+n"
  *   for the other asks, and an aside: who has the rest, or that the thing came
  *   back after a dismissal.
- * - A thing someone holds that asks nothing says who has it.
+ * - A thing that asks nothing, with something running on its Task, says what
+ *   runs (`describeTaskActivity`).
  * - Any other thing that asks nothing says what it is, quietly: its status,
  *   its face's context and fact, or its noun when the face has none of these.
  */
 export const decideReason = (
   thing: InboxThing,
   context: Pick<InboxRowContext, "now">,
-  holder: InboxRowHolder | undefined,
 ): InboxRowReason => {
   const [newest] = thing.asks;
   if (newest === undefined) {
-    if (holder !== undefined) return { rest: holder.words, more: 0, quiet: true };
+    const activity = describeTaskActivity(thing);
+    if (activity !== undefined) return { rest: activity, more: 0, quiet: true };
     const words = [
       thing.status?.label,
       readFieldWords(thing.face?.context, formatCompactNumber, context.now),
@@ -211,13 +199,12 @@ export const decideHandOff = (thing: InboxThing, offers: CardOffers): InboxRowHa
 
 /**
  * Returns what a screen reader says for the whole row, in reading order:
- * title, sentence (with "and 2 more asks"), the wait or who has it, status,
- * kind with its place, and the identifier.
+ * title, sentence (with "and 2 more asks"), the Task it is on, the wait,
+ * status, kind with its place, and the identifier.
  */
 const describeRowAloud = (
   thing: InboxThing,
   reason: InboxRowReason,
-  holder: InboxRowHolder | undefined,
   place: string | undefined,
   now: Date,
 ): string => {
@@ -230,7 +217,7 @@ const describeRowAloud = (
       : sentence,
   ];
   if (reason.aside !== undefined) parts.push(reason.aside);
-  if (holder?.kind === "you") parts.push("on your Task");
+  if (thing.task !== undefined) parts.push(`on the Task ${thing.task.title}`);
   if (wait !== undefined) parts.push(wait.words.replace(/^Waiting/, "waiting"));
   if (thing.status !== undefined) parts.push(thing.status.label);
   parts.push(place === undefined ? thing.noun : `${thing.noun} in ${place}`);
@@ -253,8 +240,7 @@ export const readThingPlace = (thing: InboxThing, now: Date): string | undefined
  * already has an aside to say. The pane still has it.
  */
 export const describeInboxRow = (thing: InboxThing, context: InboxRowContext): InboxRowView => {
-  const holder = findRowHolder(thing, context.userName);
-  const reason = decideReason(thing, context, holder);
+  const reason = decideReason(thing, context);
   const place = readThingPlace(thing, context.now);
   const dropPlace =
     place !== undefined &&
@@ -265,12 +251,12 @@ export const describeInboxRow = (thing: InboxThing, context: InboxRowContext): I
     title: thing.title,
     pluginId: thing.source,
     status: thing.status,
-    time: decideTime(thing, context, holder),
+    time: decideTime(thing, context),
     reason,
     place: dropPlace ? undefined : place,
     identifier: thing.identifier,
-    label: describeRowAloud(thing, reason, holder, place, context.now),
+    label: describeRowAloud(thing, reason, place, context.now),
     handOff: decideHandOff(thing, context.offers),
-    held: thing.taskId !== undefined,
+    isOnTask: thing.task !== undefined,
   };
 };

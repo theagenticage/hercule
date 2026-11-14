@@ -22,7 +22,7 @@ import {
   type InboxScope,
 } from "@hercule/client-core/inbox";
 import { CORE_SAVED_QUERY_IDS, type InboxClause, type InboxOrder } from "@hercule/contract";
-import { inboxOutlineQuery, inboxQuery, pluginsQuery, userQuery } from "../../../app/queries";
+import { inboxOutlineQuery, inboxQuery, pluginsQuery } from "../../../app/queries";
 import {
   InboxList,
   type InboxListActions,
@@ -62,33 +62,23 @@ const SELECTION_BAR_RESERVE = 30;
 
 const NO_ROWS: ReadonlyArray<InboxListRow> = [];
 
-/** The view last described for a row, kept while the row, the order, the minute and the user's name stay the same. */
+/** The view last described for a row, kept while the row, the order and the minute stay the same. */
 const viewsByRow = new WeakMap<
   InboxListRow,
-  { order: InboxOrder; nowTime: number; userName: string; view: InboxRowView }
+  { order: InboxOrder; nowTime: number; view: InboxRowView }
 >();
 
 /**
  * Returns the view of `row`, the same object as last time when nothing it
  * draws changed, so a row that did not change is not drawn again.
  */
-function describeStableRow(
-  row: InboxListRow,
-  order: InboxOrder,
-  now: Date,
-  userName: string,
-): InboxRowView {
+function describeStableRow(row: InboxListRow, order: InboxOrder, now: Date): InboxRowView {
   const kept = viewsByRow.get(row);
-  if (
-    kept !== undefined &&
-    kept.order === order &&
-    kept.nowTime === now.getTime() &&
-    kept.userName === userName
-  ) {
+  if (kept !== undefined && kept.order === order && kept.nowTime === now.getTime()) {
     return kept.view;
   }
-  const view = describeInboxRow(row, { order, now, userName, offers: row.offers });
-  viewsByRow.set(row, { order, nowTime: now.getTime(), userName, view });
+  const view = describeInboxRow(row, { order, now, offers: row.offers });
+  viewsByRow.set(row, { order, nowTime: now.getTime(), view });
   return view;
 }
 
@@ -96,10 +86,10 @@ const NO_REFS: ReadonlyArray<string> = [];
 
 const NO_ENTRIES: ReadonlyArray<InboxListEntry> = [];
 
-/** The line last described for an entry, kept while the entry, the order, the minute and the user's name stay the same. */
+/** The line last described for an entry, kept while the entry, the order and the minute stay the same. */
 const linesByEntry = new WeakMap<
   InboxEntry<InboxListRow>,
-  { order: InboxOrder; nowTime: number; userName: string; line: InboxListEntry }
+  { order: InboxOrder; nowTime: number; line: InboxListEntry }
 >();
 
 /**
@@ -112,19 +102,13 @@ function describeStableEntry(
   entry: InboxEntry<InboxListRow>,
   order: InboxOrder,
   now: Date,
-  userName: string,
 ): InboxListEntry {
   const kept = linesByEntry.get(entry);
-  if (
-    kept !== undefined &&
-    kept.order === order &&
-    kept.nowTime === now.getTime() &&
-    kept.userName === userName
-  ) {
+  if (kept !== undefined && kept.order === order && kept.nowTime === now.getTime()) {
     return kept.line;
   }
-  const line = describeEntry(entry, order, now, userName);
-  linesByEntry.set(entry, { order, nowTime: now.getTime(), userName, line });
+  const line = describeEntry(entry, order, now);
+  linesByEntry.set(entry, { order, nowTime: now.getTime(), line });
   return line;
 }
 
@@ -132,20 +116,19 @@ function describeEntry(
   entry: InboxEntry<InboxListRow>,
   order: InboxOrder,
   now: Date,
-  userName: string,
 ): InboxListEntry {
   switch (entry.kind) {
     case "thing":
       return {
         kind: "thing",
         key: entry.key,
-        view: describeStableRow(entry.row, order, now, userName),
+        view: describeStableRow(entry.row, order, now),
       };
     case "member":
       return {
         kind: "member",
         key: entry.key,
-        view: describeStableRow(entry.row, order, now, userName),
+        view: describeStableRow(entry.row, order, now),
         member: {
           isQuiet: !entry.matches,
           isLast: entry.isLast,
@@ -161,7 +144,6 @@ function describeEntry(
         view: describeInboxGroupRow(group, {
           order,
           now,
-          userName,
           offers: group.placedBy.offers,
         }),
         isOpen: group.isOpen,
@@ -290,7 +272,6 @@ export function InboxListPart({
   const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const formatClock = useInboxClock(client);
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const { username } = useSuspenseQuery(userQuery(client)).data;
   const [narrowButton, setNarrowButton] = useState<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const handledHeadingRequest = useRef(headingFocusRequest);
@@ -343,8 +324,8 @@ export function InboxListPart({
     () =>
       order === undefined
         ? NO_ENTRIES
-        : entries.map((entry) => describeStableEntry(entry, order, now, username)),
-    [entries, order, now, username],
+        : entries.map((entry) => describeStableEntry(entry, order, now)),
+    [entries, order, now],
   );
 
   const empty: InboxEmptyState | null = (() => {

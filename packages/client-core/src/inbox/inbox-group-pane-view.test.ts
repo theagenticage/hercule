@@ -1,7 +1,7 @@
 /** Tests the words and values the pane of a group draws. */
 import { describe, expect, it } from "vitest";
 import type { EntityLink, EntityPeer, InboxGroupDetail } from "@hercule/contract";
-import { buildInboxAsk, buildInboxThing } from "./cards.testing";
+import { buildActiveTask, buildInboxAsk, buildInboxThing } from "./cards.testing";
 import { describeInboxGroupHead, describeInboxGroupPane } from "./inbox-group-pane-view";
 
 const NOW = new Date("2026-11-07T12:00:00.000Z");
@@ -58,7 +58,6 @@ const askingRow = (ref: string, waitingSince: string) =>
 const context = (rows = new Map<string, ReturnType<typeof buildInboxThing>>()) => ({
   plugins: PLUGINS,
   rows,
-  userName: "Rogier",
   now: NOW,
 });
 
@@ -112,7 +111,10 @@ describe("describeInboxGroupPane members", () => {
   });
 
   it("counts a member whose Task a hand-off made when it still has an ask left", () => {
-    const handed = { ...askingRow(pull.ref, "2026-11-07T10:00:00.000Z"), taskId: "task-1" };
+    const handed = {
+      ...askingRow(pull.ref, "2026-11-07T10:00:00.000Z"),
+      task: buildActiveTask("task-1"),
+    };
     const rows = new Map([
       [pull.ref, handed],
       [issue.ref, buildInboxThing("1", { ref: issue.ref })],

@@ -11,11 +11,10 @@ import {
   decideHandOff,
   describeBlocksUnreadable,
   describeDismissalReturn,
-  describeHolderStrip,
   describePaneMeta,
+  describePaneTask,
   describeUnreadable,
   findAccountLabel,
-  findRowHolder,
   listPaneAsks,
   listPaneHistory,
   listPaneLinks,
@@ -29,7 +28,6 @@ import {
   inboxOutlineQuery,
   pluginsQuery,
   settingsQuery,
-  userQuery,
 } from "../../../app/queries";
 import { InboxBlocks } from "../../../screens/inbox/inbox-blocks";
 import { InboxPaneFooter } from "../../../screens/inbox/inbox-pane-footer";
@@ -109,7 +107,6 @@ export function InboxPaneThingPart({
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "/_connected/_shell" });
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
-  const { username } = useSuspenseQuery(userQuery(client)).data;
   const outline = useSuspenseQuery(inboxOutlineQuery(client)).data;
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const now = useInboxNow([thing]);
@@ -139,8 +136,6 @@ export function InboxPaneThingPart({
   }
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const sourceName = namePlugin(thing.source, plugins);
-  const holder = findRowHolder(thing, username);
-  const holdingHeading = describeHolderStrip(thing);
   const paneAsks = listPaneAsks(record);
   const hasAsks = paneAsks.sections.length > 0 || paneAsks.hiddenOpenCount > 0;
   // While the thing before's record is drawn, its title must not carry this thing's blocks.
@@ -170,11 +165,7 @@ export function InboxPaneThingPart({
           ),
           dismissalReturn: describeDismissalReturn(thing, now),
         })}
-        holding={
-          holder === undefined || holdingHeading === undefined || thing.taskTitle === undefined
-            ? undefined
-            : { holder, heading: holdingHeading, taskName: thing.taskTitle }
-        }
+        task={describePaneTask(thing)}
         asks={
           hasAsks ? (
             <InboxPaneAsks
@@ -205,8 +196,7 @@ export function InboxPaneThingPart({
         onGoTo={moves.onGoTo}
       />
       <InboxPaneFooter
-        isOnTask={thing.taskId !== undefined}
-        isTakenOn={thing.takenOn}
+        isOnTask={thing.task !== undefined}
         handOff={decideHandOff(thing, thing.offers)}
         isHandMenuOpen={isHandMenuOpen}
         handAnchorRef={handAnchorRef}

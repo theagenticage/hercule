@@ -2,7 +2,7 @@
 import type { InboxThing } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { NO_OFFERS } from "./card-hand-off";
-import { buildInboxAsk, buildInboxThing } from "./cards.testing";
+import { buildActiveTask, buildInboxAsk, buildInboxThing } from "./cards.testing";
 import { describeInboxGroupRow } from "./inbox-group-row";
 import type { InboxGroupView } from "./inbox-groups";
 import type { InboxRowContext } from "./inbox-row";
@@ -13,7 +13,6 @@ const hoursAgo = (hours: number): string =>
 const CONTEXT: InboxRowContext = {
   order: "waiting",
   now: NOW,
-  userName: "Rogier",
   offers: NO_OFFERS,
 };
 
@@ -88,13 +87,17 @@ describe("describeInboxGroupRow", () => {
 
   it("counts members, not asks, and a member with a Task still asks when an ask is left", () => {
     const twoAsks = asking("1", "Mei", 4, { askCount: 3 });
-    const handed = asking("2", "Omar", 40, { taskId: "task-1" });
+    const handed = asking("2", "Omar", 40, { task: buildActiveTask("task-1") });
     const view = describeInboxGroupRow(groupOf([twoAsks, handed]), CONTEXT);
     expect(view.reason).toMatchObject({ who: "Omar", more: 1 });
   });
 
   it("does not count a member with a Task and no ask left", () => {
-    const quiet = asking("2", "Omar", 40, { taskId: "task-1", askCount: 0, asks: [] });
+    const quiet = asking("2", "Omar", 40, {
+      task: buildActiveTask("task-1"),
+      askCount: 0,
+      asks: [],
+    });
     const view = describeInboxGroupRow(groupOf([asking("1", "Mei", 4), quiet]), CONTEXT);
     expect(view.reason).toMatchObject({ who: "Mei", more: 0 });
   });

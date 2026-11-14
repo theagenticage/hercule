@@ -121,6 +121,11 @@ const SHARED_READ_WINDOW_MS = 50;
 /** Who listens for the Inbox's pushes, by the query client the pushes reach. */
 const inboxPushListeners = new WeakMap<QueryClient, Set<() => void>>();
 
+const taskActivityListeners = new WeakMap<
+  QueryClient,
+  Set<(taskIds: ReadonlyArray<string>) => void>
+>();
+
 /** What the pushes of one window have named, by the query client they reached. */
 interface GatheredPushes {
   readonly keys: Map<string, LiveQueryKey>;
@@ -176,6 +181,26 @@ export const listenForInboxPushes = (
 };
 
 /**
+ * Calls `listener` with the Task ids of each `task` push that does not read the
+ * Inbox's keys by itself: a derived push, which the controller sends when a
+ * session or a run of a Task changes status. Such a push changes what runs on
+ * the Task, which an Inbox row shows, but it is sent for every turn of every
+ * Thread, so the Inbox reads again only when the listener holds a row on one
+ * of those Tasks. Returns a function that stops.
+ */
+export const listenForTaskActivity = (
+  queryClient: QueryClient,
+  listener: (taskIds: ReadonlyArray<string>) => void,
+): (() => void) => {
+  const listeners = taskActivityListeners.get(queryClient) ?? new Set();
+  taskActivityListeners.set(queryClient, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+/**
  * Reads again every query a push on `topic` makes stale: the queries under
  * `keys`, and for a `run` push, Tracking and the Tracking details of the Tasks
  * the push can change (see `findTrackingTasksAffectedByRunPush`). A `run` push
@@ -215,6 +240,12 @@ export const invalidateForPush = (
   }
   if (topic === "task") {
     invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
+    const readsInbox = sharedKeys.some((queryKey) => queryKey[0] === queryKeys.inbox()[0]);
+    if (!readsInbox && push.ids.length > 0) {
+      for (const listener of [...(taskActivityListeners.get(queryClient) ?? [])]) {
+        listener(push.ids);
+      }
+    }
   }
   if (topic !== "run") return;
   invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByRunPush(legs, push));

@@ -57,8 +57,8 @@
   color: var(--faint);
 }
 
-/* Who has the thing: a face or a monogram, the Task, and the way to it. */
-.ib-pane-held {
+/* The Task the thing is on: the face of a running workflow or the Task mark, the Task, what runs on it, and View task. */
+.ib-pane-task {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
@@ -70,17 +70,18 @@
   box-shadow: inset 0 0 0 1px var(--line-soft);
   font-size: var(--t-12);
 }
-.ib-pane-held-who {
+.ib-pane-task-mark {
   display: grid;
   place-items: center;
+  color: var(--muted);
 }
-.ib-pane-held-words {
+.ib-pane-task-words {
   display: flex;
   flex-direction: column;
   min-width: 0;
   color: var(--muted);
 }
-.ib-pane-held-words b {
+.ib-pane-task-words b {
   color: var(--ink);
   font-size: var(--t-13);
   font-weight: var(--w-medium);

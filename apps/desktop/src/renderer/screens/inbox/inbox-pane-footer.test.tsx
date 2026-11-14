@@ -15,7 +15,6 @@ const renderFooter = (props: Partial<Parameters<typeof InboxPaneFooter>[0]> = {}
   render(
     <InboxPaneFooter
       isOnTask={false}
-      isTakenOn={false}
       handOff={{ kind: "one", name: "Review PR", faceSeed: "review-pr" }}
       isHandMenuOpen={false}
       {...calls}
@@ -41,14 +40,9 @@ describe("InboxPaneFooter", () => {
     expect(screen.getAllByRole("button")).toHaveLength(5);
   });
 
-  it("leaves Thread out for a thing a Task holds, which a thread would not make a new Task for", () => {
+  it("leaves Thread and Take on out for a thing on a Task, since each would make a new Task", () => {
     renderFooter({ isOnTask: true });
     expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Take on" })).toBeTruthy();
-  });
-
-  it("leaves Take on out once the user has taken the thing on", () => {
-    renderFooter({ isTakenOn: true });
     expect(screen.queryByRole("button", { name: "Take on" })).toBeNull();
     expect(screen.getByRole("button", { name: "Hand to Review PR" })).toBeTruthy();
   });

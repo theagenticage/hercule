@@ -21,7 +21,7 @@ export const buildInboxRowView = (
   identifier: "#6244",
   label: `Title of ${ref}. Mei asked for your review`,
   handOff: null,
-  held: false,
+  isOnTask: false,
   ...overrides,
 });
 

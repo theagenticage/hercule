@@ -1403,8 +1403,8 @@ describe("the Inbox: membership and counts", () => {
       }),
     );
     const byRef = new Map(steps.inbox.things.map((thing) => [thing.ref, thing]));
-    expect(byRef.get(ticketRef("t1"))).toMatchObject({ taskId: steps.task.id });
-    expect(byRef.get(ticketRef("t2"))!.taskId).toBeUndefined();
+    expect(byRef.get(ticketRef("t1"))).toMatchObject({ task: { id: steps.task.id } });
+    expect(byRef.get(ticketRef("t2"))!.task).toBeUndefined();
     expect(thingRefs(steps.held)).toEqual([ticketRef("t1")]);
     expect(steps.counts.savedQueries.map((query) => [query.id, query.count])).toEqual([
       ["waits", 0],
@@ -1424,7 +1424,7 @@ describe("the Inbox: membership and counts", () => {
         return { task, inbox: yield* readInbox(4) };
       }),
     );
-    expect(steps.inbox.things.map((thing) => [thing.ref, thing.taskId, thing.accounts])).toEqual([
+    expect(steps.inbox.things.map((thing) => [thing.ref, thing.task?.id, thing.accounts])).toEqual([
       [ticketRef("t1"), steps.task.id, [ACCOUNT_A]],
     ]);
   });
@@ -2084,7 +2084,7 @@ describe("what changed outside", () => {
     );
     expect(outcome.after).toEqual(outcome.before);
     expect(outcome.cardAfter).toMatchObject({
-      taskId: outcome.task.id,
+      task: { id: outcome.task.id },
       accounts: outcome.cardBefore.accounts,
     });
   });

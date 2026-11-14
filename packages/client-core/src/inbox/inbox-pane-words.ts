@@ -1,7 +1,7 @@
 /**
  * The words the Inbox pane says about the things it holds: the line for an
  * answer from the moment it is held to the moment it is sent, why a dismissed
- * thing is back, and who has a thing. Each function returns text only, so the
+ * thing is back, and the Task a thing is on. Each function returns text only, so the
  * pane draws it and never words it.
  *
  * Where a sentence names the source of a thing, it takes the source's name
@@ -9,7 +9,7 @@
  */
 import type { InboxAsk, InboxThing } from "@hercule/contract";
 import { describeAge } from "../threads/age";
-import { findHolder } from "./inbox-holder";
+import { describeTaskActivity } from "./inbox-task";
 import {
   APP_CLOSED_BEFORE_SENT,
   APP_CLOSED_WHILE_SENDING,
@@ -153,15 +153,27 @@ export const describeDismissalReturn = (
   return back.length === 0 ? dismissed : `${dismissed}, back for ${joinNames(back)}`;
 };
 
+/** The strip of the pane that shows the Task a thing is on. */
+export interface PaneTaskStrip {
+  readonly title: string;
+  /** What runs on the Task, or "Nothing running". */
+  readonly activity: string;
+  /** The ids of the workflows running on the Task, newest first: each is drawn as its face. */
+  readonly faceSeeds: ReadonlyArray<string>;
+}
+
 /**
- * Returns the strong line of the strip that says who has a thing: "Your Task",
- * or "Review PR has it" for a live workflow. Returns `undefined` when no one
- * does. It reads the same rule as the list's row (`findHolder`).
+ * Returns the strip of the Task `thing` is on, or `undefined` when it is on
+ * none. It shows whatever made the Task (Take on, a Thread, a hand-off or a
+ * signal), and its activity uses the row's words (`describeTaskActivity`).
  */
-export const describeHolderStrip = (
-  thing: Pick<InboxThing, "liveWorkflows" | "takenOn">,
-): string | undefined => {
-  const holder = findHolder(thing);
-  if (holder === undefined) return undefined;
-  return holder.kind === "you" ? "Your Task" : `${holder.name} has it`;
-};
+export const describePaneTask = (
+  thing: Pick<InboxThing, "task" | "liveWorkflows">,
+): PaneTaskStrip | undefined =>
+  thing.task === undefined
+    ? undefined
+    : {
+        title: thing.task.title,
+        activity: describeTaskActivity(thing) ?? "Nothing running",
+        faceSeeds: thing.liveWorkflows.map((workflow) => workflow.workflowId),
+      };

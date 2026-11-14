@@ -2,13 +2,12 @@ import type { PluginIdentity } from "@hercule/client-core";
 import {
   describeHandOff,
   describeHandOffLabel,
-  type InboxRowHolder,
   type InboxRowReason,
   type InboxRowTime,
   type InboxRowView,
 } from "@hercule/client-core/inbox";
 import { memo, type JSX, type MouseEvent } from "react";
-import { buildLook, Face, UserAvatar } from "../../faces";
+import { buildLook, Face } from "../../faces";
 import { ArchiveIcon } from "../../icons/archive";
 import { ArrowIcon } from "../../icons/arrow";
 import { CheckIcon } from "../../icons/check";
@@ -54,22 +53,29 @@ export interface InboxRowActions {
 /** The size of a mark and of a status shape in the row's left column. */
 const LEAD_SIZE = 16;
 
-/** Renders whoever holds the thing, 18px, in the place of the wait. */
-function HolderFigure({ holder }: { readonly holder: InboxRowHolder }): JSX.Element {
+/**
+ * Renders the Task of a thing in the place of the wait: the face of the
+ * workflow running on it, 18px, or the Task mark when none runs.
+ */
+function TaskFigure({
+  time,
+}: {
+  readonly time: Extract<InboxRowTime, { kind: "task" }>;
+}): JSX.Element {
   return (
-    <span className="ib-row-time ib-row-time--held" title={holder.words}>
-      {holder.kind === "you" ? (
-        <UserAvatar name={holder.name} size={18} />
+    <span className="ib-row-time ib-row-time--task" title={time.words}>
+      {time.faceSeed === undefined ? (
+        <TasksIcon size={14} />
       ) : (
-        <Face look={buildLook(holder.faceSeed)} pose="idle" size={18} />
+        <Face look={buildLook(time.faceSeed)} pose="idle" size={18} />
       )}
     </span>
   );
 }
 
-/** Renders the first line's right end: the wait, the holder, or an empty slot that keeps the title's width. */
+/** Renders the first line's right end: the wait, the Task, or an empty slot that keeps the title's width. */
 export function TimeFigure({ time }: { readonly time: InboxRowTime }): JSX.Element {
-  if (time.kind === "holder") return <HolderFigure holder={time.holder} />;
+  if (time.kind === "task") return <TaskFigure time={time} />;
   if (time.kind === "none") return <span className="ib-row-time" aria-hidden="true" />;
   return (
     <span className={`ib-row-time ib-wait--${time.tone}`} title={time.words}>
@@ -106,13 +112,13 @@ function RowMoves({
   const { ref, handOff } = view;
   return (
     <span className="ib-row-acts">
-      {view.held ? (
+      {view.isOnTask ? (
         <button
           type="button"
           className="ib-row-act"
           tabIndex={-1}
-          title="Go to its Task (G)"
-          aria-label="Go to its Task"
+          title="View task (G)"
+          aria-label="View task"
           aria-keyshortcuts="G"
           onClick={() => {
             actions.onGoToTask(ref);

@@ -184,6 +184,32 @@ const answerWithReturn = async (pressReturn = true) => {
   return opened;
 };
 
+describe("the Task of a thing", () => {
+  const onTask = (workingThreadCount: number) => (inbox: FakeInbox) => {
+    const task = { id: buildThingId(900), title: "Speed up slot lookups", workingThreadCount };
+    inbox.lists.waits = [{ ...SLOTS, task }, LOYALTY, BASKET];
+  };
+
+  it("shows a Task nothing runs on, with View task, and offers no Thread or Take on", async () => {
+    await open(onTask(0));
+    const pane = within(document.getElementById("inbox-pane")!);
+
+    expect(pane.getByText("Speed up slot lookups")).toBeTruthy();
+    expect(pane.getByText("Nothing running")).toBeTruthy();
+    expect(pane.getByRole("button", { name: /View task/ })).toBeTruthy();
+    expect(pane.queryByRole("button", { name: "Take on" })).toBeNull();
+    expect(pane.queryByRole("button", { name: "Start a thread" })).toBeNull();
+  });
+
+  it("says how many Threads work on the Task", async () => {
+    await open(onTask(2));
+
+    expect(
+      within(document.getElementById("inbox-pane")!).getByText("2 threads working"),
+    ).toBeTruthy();
+  });
+});
+
 describe("the asks of a thing", () => {
   it("unfolds the newest ask and fills only its suggested answer", async () => {
     await open();

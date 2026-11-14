@@ -123,7 +123,7 @@ export const rollHandedRow = (ref: string, change: () => void): { readonly cance
     );
   };
   // The face rolls in only where the row now shows one: with asks left, the wait stays.
-  if (newSlot.classList.contains("ib-row-time--held")) {
+  if (newSlot.classList.contains("ib-row-time--task")) {
     clips.push(layOldCopy(row, slotBox, oldSlot));
     lines.push(newSlot.parentElement);
     rollUp(oldSlot, newSlot, 0);

@@ -57,22 +57,21 @@ describe("InboxRow", () => {
     }
   });
 
-  it("draws a colleague's face or your monogram in the wait's place for a thing a Task holds", () => {
+  it("draws the face of the workflow running on the thing's Task in the wait's place", () => {
     const { row } = renderRow({
-      time: {
-        kind: "holder",
-        holder: { kind: "colleague", faceSeed: "review", words: "Review PR has it" },
-      },
+      time: { kind: "task", faceSeed: "review", words: "Review PR running" },
     });
     expect(within(row).queryByText("5d")).toBeNull();
-    expect(row.querySelector('[title="Review PR has it"] svg')).not.toBeNull();
+    expect(row.querySelector('[title="Review PR running"] svg')).not.toBeNull();
   });
 
-  it("draws your monogram when you took the thing on", () => {
+  it("draws the Task mark when nothing runs on the thing's Task", () => {
     const { row } = renderRow({
-      time: { kind: "holder", holder: { kind: "you", name: "Rogier", words: "You took it on" } },
+      time: { kind: "task", faceSeed: undefined, words: "On the Task “Fix it”" },
     });
-    expect(row.querySelector('[title="You took it on"]')?.textContent).toBe("R");
+    const mark = row.querySelector('[title="On the Task “Fix it”"]');
+    expect(mark?.classList.contains("ib-row-time--task")).toBe(true);
+    expect(mark?.querySelector("svg")).not.toBeNull();
   });
 
   it("draws the +n chip for more asks, the aside after the sentence, and nothing when there are none", () => {
@@ -182,17 +181,17 @@ describe("InboxRow", () => {
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
   });
 
-  it("offers Go to its Task and Dismiss, and no Start a thread, Take on or hand-off, for a thing a Task holds", async () => {
+  it("offers View task and Dismiss, and no Start a thread, Take on or hand-off, for a thing on a Task", async () => {
     const user = userEvent.setup();
     const { actions } = renderRow({
-      held: true,
+      isOnTask: true,
       handOff: { kind: "one", name: "Agent review", faceSeed: "agent-review" },
     });
     expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Take on" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Hand to/ })).toBeNull();
-    expect(screen.getByTitle("Go to its Task (G)")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Go to its Task" }));
+    expect(screen.getByTitle("View task (G)")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "View task" }));
     expect(actions.calls).toEqual([["goto", "a"]]);
   });
 

@@ -12,8 +12,8 @@ import {
   describeDoneEffect,
   describeHeldSignalAnswer,
   describeHiddenAsks,
-  describeHolderStrip,
   describeMarkedDone,
+  describePaneTask,
   describeSelectedThings,
   describeUnreadable,
   describeUnsentSignalAnswer,
@@ -123,17 +123,30 @@ describe("describeDismissalReturn", () => {
   });
 });
 
-describe("describeHolderStrip", () => {
-  it.each([
-    ["the user's own Task", { liveWorkflows: [], takenOn: true }, "Your Task"],
-    [
-      "a live workflow",
-      { liveWorkflows: [{ workflowId: "w", name: "Review PR" }], takenOn: true },
-      "Review PR has it",
-    ],
-    ["nobody", { liveWorkflows: [], takenOn: false }, undefined],
-  ])("reads %s", (_name, thing, expected) => {
-    expect(describeHolderStrip(thing)).toBe(expected);
+describe("describePaneTask", () => {
+  const task = { id: "t1", title: "Install with Bun", workingThreadCount: 0 };
+  const review = { workflowId: "w1", name: "Review PR" };
+
+  it("shows a Task that nothing runs on, whatever made it", () => {
+    expect(describePaneTask({ task, liveWorkflows: [] })).toEqual({
+      title: "Install with Bun",
+      activity: "Nothing running",
+      faceSeeds: [],
+    });
+  });
+
+  it("names what runs on the Task, with a face per workflow", () => {
+    expect(
+      describePaneTask({ task: { ...task, workingThreadCount: 1 }, liveWorkflows: [review] }),
+    ).toEqual({
+      title: "Install with Bun",
+      activity: "Review PR running · 1 thread working",
+      faceSeeds: ["w1"],
+    });
+  });
+
+  it("shows no strip for a thing on no Task", () => {
+    expect(describePaneTask({ liveWorkflows: [review] })).toBeUndefined();
   });
 });
 

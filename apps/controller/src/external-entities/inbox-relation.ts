@@ -233,18 +233,6 @@ export const buildEligibleEntities = (
   ]);
 
 /**
- * Builds the tables `live_links` and `taken` for the refs of one page only, to
- * put after `WITH`. `taken` means what it means in `buildAskTables`, and the
- * answer for these refs is the same as in `buildEligibleEntities`. The signals
- * are not read.
- */
-export const buildTakenOfRefs = (refs: ReadonlyArray<string>): CompiledSql => ({
-  sql: `live_links AS MATERIALIZED (${buildLiveTaskLinksSql("l.ref IN (SELECT value FROM json_each(?))")}),
-  ${TAKEN_SQL}`,
-  params: [JSON.stringify(refs)],
-});
-
-/**
  * Builds the tables `live_links`, `taken`, `live_signals`, `asks` and
  * `ask_summary` for the refs of one page only, to put after `WITH`. They mean
  * what they mean in `buildEligibleEntities`, but read only the links and

@@ -348,7 +348,7 @@ describe("who is on the Inbox", () => {
       }),
     );
     expect(
-      things.things.map((thing) => [thing.ref === things.held, thing.taskTitle]).sort(),
+      things.things.map((thing) => [thing.ref === things.held, thing.task?.title]).sort(),
     ).toEqual([
       [false, undefined],
       [true, "Checkout flaky on Safari"],

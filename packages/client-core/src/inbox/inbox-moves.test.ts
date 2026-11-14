@@ -10,7 +10,12 @@ import {
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { NO_OFFERS, type CardOffers } from "./card-hand-off";
-import { buildInboxAsk, buildInboxThing, buildWorkflowOffer } from "./cards.testing";
+import {
+  buildActiveTask,
+  buildInboxAsk,
+  buildInboxThing,
+  buildWorkflowOffer,
+} from "./cards.testing";
 import { buildEntries, type InboxGroupView } from "./inbox-groups";
 import {
   buildHandedThing,
@@ -37,7 +42,7 @@ type Row = InboxThing & { readonly offers: CardOffers };
 const offered = (thing: InboxThing, offers: CardOffers = NO_OFFERS): Row => ({ ...thing, offers });
 const oneOffer = { available: [buildWorkflowOffer("Review PR", [])], unavailable: [] };
 const thing = offered(buildInboxThing("1", { title: "Cache delivery slot lookups" }));
-const held = offered(buildInboxThing("2", { taskId: "t-1", takenOn: true }));
+const held = offered(buildInboxThing("2", { task: buildActiveTask("t-1") }));
 const online = { isOffline: false } as const;
 
 const reasonOf = (plan: { readonly kind: string; readonly reason?: string }): string =>
@@ -145,15 +150,21 @@ describe("planInboxMove for Start a thread", () => {
     expect(reasonOf(start(one(thing), true))).toContain("You are offline");
   });
 
-  it("refuses a thing someone has, with the words of Take on for one thing", () => {
-    expect(reasonOf(start(one(held)))).toBe("You have this already. G goes to its Task.");
-  });
-
-  it("refuses a thing on a Task nobody holds, and says where to go", () => {
-    const onTask = offered(buildInboxThing("5", { title: "Slow page", taskId: "t-9" }));
-    expect(reasonOf(start(one(onTask)))).toBe(
-      "“Slow page” is on a Task already. G goes to its Task, where you can start a thread.",
+  it("refuses a thing on a Task, whatever runs on it, and says where to go", () => {
+    const onTask = offered(
+      buildInboxThing("5", { title: "Slow page", task: buildActiveTask("t-9") }),
     );
+    const reviewed = offered(
+      buildInboxThing("6", {
+        task: buildActiveTask("t-6"),
+        liveWorkflows: [{ workflowId: "w", name: "Review PR" }],
+      }),
+    );
+    for (const target of [onTask, reviewed, held]) {
+      expect(reasonOf(start(one(target)))).toBe(
+        "This is on a Task already. G views it, and you can start a thread there.",
+      );
+    }
     expect(reasonOf(start(selection(thing, onTask)))).toBe(
       "“Slow page” is in the selection, and it is on a Task already. Take it out of the selection, then press N again.",
     );
@@ -162,16 +173,16 @@ describe("planInboxMove for Start a thread", () => {
     );
   });
 
-  it("names the first held thing of a selection", () => {
-    const colleague = offered(
+  it("names the first thing of a selection that is on a Task", () => {
+    const reviewed = offered(
       buildInboxThing("4", {
         title: "Slow page",
-        taskId: "t-4",
+        task: buildActiveTask("t-4"),
         liveWorkflows: [{ workflowId: "w", name: "Mei" }],
       }),
     );
-    expect(reasonOf(start(selection(thing, colleague, held)))).toBe(
-      "“Slow page” is in the selection, and Mei has it already. Take it out of the selection, then press N again.",
+    expect(reasonOf(start(selection(thing, reviewed, held)))).toBe(
+      "“Slow page” is in the selection, and it is on a Task already. Take it out of the selection, then press N again.",
     );
   });
 
@@ -378,31 +389,18 @@ describe("planInboxMove", () => {
     });
   });
 
-  it("lets Take on join a Task the user did not take on, such as a signal's", () => {
-    const signalsTask = offered(buildInboxThing("4", { taskId: "t-3", takenOn: false }));
-
-    expect(planInboxMove({ move: "takeOn", target: one(signalsTask), ...online }).kind).toBe(
-      "takeOn",
-    );
-  });
-
-  it("refuses Take on for a thing the user took on, naming who has it", () => {
-    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(held), ...online }))).toBe(
-      "You have this already. G goes to its Task.",
-    );
-    expect(reasonOf(planInboxMove({ move: "takeOn", target: selection(held), ...online }))).toBe(
-      "You have this already. G goes to its Task.",
-    );
+  it("refuses Take on for a thing on a Task, whatever made the Task, and points to View task", () => {
     const handed = offered(
       buildInboxThing("3", {
-        taskId: "t-2",
-        takenOn: true,
+        task: buildActiveTask("t-2"),
         liveWorkflows: [{ workflowId: "w", name: "Review PR" }],
       }),
     );
-    expect(reasonOf(planInboxMove({ move: "takeOn", target: one(handed), ...online }))).toBe(
-      "Review PR has this already. G goes to its Task.",
-    );
+    for (const target of [one(held), selection(held), one(handed)]) {
+      expect(reasonOf(planInboxMove({ move: "takeOn", target, ...online }))).toBe(
+        "This is on a Task already. G views it.",
+      );
+    }
   });
 
   it("refuses the hand-off for a group or a selection, and says what to do instead", () => {
@@ -435,14 +433,14 @@ describe("planInboxMove", () => {
 
   it("goes to the Task of a thing that has one, and refuses one with none or a group", () => {
     expect(reasonOf(planInboxMove({ move: "goToTask", target: one(thing), ...online }))).toBe(
-      "This has no Task yet. T takes it on.",
+      "This is on no Task yet. T takes it on.",
     );
     expect(planInboxMove({ move: "goToTask", target: one(held), ...online })).toEqual({
       kind: "goToTask",
       taskId: "t-1",
     });
     expect(reasonOf(planInboxMove({ move: "goToTask", target: groupOf(3), ...online }))).toBe(
-      "Go to its Task takes one thing at a time.",
+      "View task takes one thing at a time.",
     );
   });
 

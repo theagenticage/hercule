@@ -351,7 +351,7 @@ export const WorkflowOffer = Schema.Struct({
 
 export type WorkflowOffer = Schema.Schema.Type<typeof WorkflowOffer>;
 
-/** A workflow with a live run on a card's active Task: its id, and its name for "<name> has it". */
+/** A workflow with a live run on a thing's active Task: its id, and its name for "<name> running". */
 export const LiveWorkflow = Schema.Struct({
   workflowId: Id,
   name: bounded(1, MAX_WORKFLOW_NAME_LENGTH),
@@ -712,6 +712,22 @@ export const InboxAsk = Schema.Struct({
 export type InboxAsk = Schema.Schema.Type<typeof InboxAsk>;
 
 /**
+ * The active Task of a thing on the Inbox: the oldest live Task that links the
+ * thing. A row names it without reading the Task.
+ *
+ * - `workingThreadCount` is how many Threads of the Task are working now:
+ *   running a turn, or about to (`WORKING_SESSION_STATUSES`). The workflows
+ *   running on the Task are the thing's `liveWorkflows`.
+ */
+export const InboxActiveTask = Schema.Struct({
+  id: Id,
+  title: bounded(1, MAX_TASK_TITLE_LENGTH),
+  workingThreadCount: Schema.Int,
+});
+
+export type InboxActiveTask = Schema.Schema.Type<typeof InboxActiveTask>;
+
+/**
  * One row of the Inbox. It is lean: it holds only what a row draws, and the
  * pane reads the rest (such as the lifecycle and every ask) from
  * `externalEntity.read` when a thing is opened. A page holds 200 rows, so each
@@ -722,9 +738,11 @@ export type InboxAsk = Schema.Schema.Type<typeof InboxAsk>;
  * - `asks` are the open asks, newest first, at most `MAX_INBOX_ASKS`;
  *   `askCount` counts all of them, `askKinds` lists their distinct kinds, and
  *   `waitingSince` is when the oldest one began.
- * - `takenOn` is true when the user took the thing on: the link to its active
- *   Task was made or joined by Take on or Add to Work, not by a hand-off, a
- *   session or a signal. Only then does the row say that you have it.
+ * - `task` is the thing's active Task, when it has one (`InboxActiveTask`).
+ * - `liveWorkflows` are the workflows with a live run on the active Task,
+ *   newest first. It is a field of the thing, not of `task`, because a client
+ *   that has just handed the thing to a workflow draws that workflow at once,
+ *   before it knows which Task the hand-off made.
  * - `openKinds` are the distinct kinds of every open signal, snoozed ones
  *   included: what a hand-off ends is read from it.
  * - `dismissedAt` is set only when the thing came back after a dismissal.
@@ -758,11 +776,7 @@ export const InboxThing = Schema.Struct({
   askKinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
   openKinds: atMost(SignalKind, MAX_ENTITY_SIGNALS),
   waitingSince: Schema.optionalKey(Timestamp),
-  /** The active Task, when there is one. */
-  taskId: Schema.optionalKey(Id),
-  /** The active Task's title. Present exactly when `taskId` is, so a row can name the Task without reading it. */
-  taskTitle: Schema.optionalKey(bounded(1, MAX_TASK_TITLE_LENGTH)),
-  takenOn: Schema.Boolean,
+  task: Schema.optionalKey(InboxActiveTask),
   liveWorkflows: atMost(LiveWorkflow, MAX_LIVE_WORKFLOWS),
   dismissedAt: Schema.optionalKey(Timestamp),
   arrival: Schema.Int,

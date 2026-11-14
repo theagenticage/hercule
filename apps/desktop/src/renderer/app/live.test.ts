@@ -20,7 +20,12 @@ import {
   type TrackingRead,
 } from "@hercule/client-core";
 import type { HandoffLeg, TrackingRun } from "@hercule/contract";
-import { invalidateForPush, listenForInboxPushes, useSubagentsLive } from "./live";
+import {
+  invalidateForPush,
+  listenForInboxPushes,
+  listenForTaskActivity,
+  useSubagentsLive,
+} from "./live";
 import {
   handoffLegQuery,
   signalsClearedTodayQuery,
@@ -587,6 +592,36 @@ describe("listenForInboxPushes", () => {
 
     invalidateForPush(queryClient, "externalEntity", [queryKeys.inbox()], push);
     await waitPastPushWindow();
+
+    expect(calls).toBe(0);
+  });
+});
+describe("listenForTaskActivity", () => {
+  const push = { ids: ["t-1", "t-2"], kind: "updated" } as const;
+
+  it("names the Tasks of a derived task push, which does not read the Inbox by itself", () => {
+    const queryClient = new QueryClient();
+    const named: Array<ReadonlyArray<string>> = [];
+    const stop = listenForTaskActivity(queryClient, (taskIds) => {
+      named.push(taskIds);
+    });
+
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", push.ids, undefined, true), push);
+    stop();
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", push.ids, undefined, true), push);
+
+    expect(named).toEqual([["t-1", "t-2"]]);
+  });
+
+  it("stays quiet for a plain task push, which reads the Inbox already", () => {
+    const queryClient = new QueryClient();
+    let calls = 0;
+    const stop = listenForTaskActivity(queryClient, () => {
+      calls += 1;
+    });
+
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", push.ids), push);
+    stop();
 
     expect(calls).toBe(0);
   });

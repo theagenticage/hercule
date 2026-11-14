@@ -359,10 +359,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ib-row-time--held {
+.ib-row-time--task {
   display: inline-grid;
   place-items: center;
   height: 18px;
+  color: var(--muted);
 }
 .ib-row-glyph {
   grid-row: 2;
