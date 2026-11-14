@@ -24,11 +24,14 @@ import {
 } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
+  appendPromptContext,
   createForbiddenError,
   Id,
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  flattenToOneLine,
+  MAX_PROMPT_LENGTH,
   MEMORY_CORE,
   refuseEmptyPrompt,
   SESSION_CONTINUE_FIELDS,
@@ -90,6 +93,7 @@ import {
   dedupKeyRepository,
   type DedupOperation,
   type TaskSource,
+  type TitleParts,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
@@ -356,6 +360,8 @@ interface Placing {
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
   readonly title: string | undefined;
+  /** The words and the first thing's title of a prompt with a context block; undefined when the prompt is all words. */
+  readonly titleParts?: TitleParts | undefined;
   /** The session's role, or undefined for none. */
   readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
@@ -418,13 +424,17 @@ const make = Effect.gen(function* () {
    * title it was given from the message, and the role it was spawned with, if
    * any.
    *
+   * `titleInput` is what the model reads: the user's words when there are
+   * any, and the whole message otherwise, so text that came from outside
+   * Hercule stays away from the title model when the user wrote something.
+   *
    * `madeTaskId` is the Task made for this Thread, if the join made one. It is
    * handed on to `setGeneratedTitleAndRole`, which renames that Task together
    * with the Thread.
    */
   const startThreadTitle = (
     sessionId: string,
-    firstMessage: string,
+    titleInput: string,
     madeTaskId: string | undefined,
   ): Effect.Effect<void> =>
     forkAfterCommit(
@@ -439,7 +449,7 @@ const make = Effect.gen(function* () {
               caller: "core:sessions",
               purpose: "thread.title",
               instructions: THREAD_TITLE_INSTRUCTIONS,
-              input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+              input: titleInput.slice(0, MAX_TITLE_INPUT_LENGTH),
               outputSchema: THREAD_TITLE_AND_ROLE_OUTPUT_SCHEMA,
               // A title is only worth having soon; the Thread keeps its
               // cut-short title instead.
@@ -946,6 +956,7 @@ const make = Effect.gen(function* () {
             prompt: open.prompt,
             attachments: open.attachments,
             title: open.title,
+            titleParts: open.titleParts,
             role: open.role,
             kind: open.kind,
             payload: open.payload,
@@ -1060,7 +1071,12 @@ const make = Effect.gen(function* () {
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
         if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt, madeTaskId);
+          const words = open.titleParts?.words ?? open.prompt;
+          yield* startThreadTitle(
+            session.id,
+            words.trim() === "" ? open.prompt : words,
+            madeTaskId,
+          );
         }
         return session;
       }),
@@ -1375,6 +1391,20 @@ const make = Effect.gen(function* () {
      * makes the Task. A thing that changed since the read, or is already on an
      * active Task, fails the call with `Conflict`. Nothing is written when
      * the call fails.
+     *
+     * With `context`, the controller appends a block that describes those
+     * things after the user's words (`buildPromptContext`), and that text is
+     * the session's first input. `context` needs `task.read` and
+     * `signal.query`, refused before any source is read, and works with or
+     * without `newTask`: the two lists are independent. The block's origin is
+     * read before the transaction, because the group read scans the link graph
+     * and stays off the writer. Its entries are read after the take-on, inside
+     * the transaction. A prompt that grows past
+     * `MAX_PROMPT_LENGTH` fails with `Validation` at `context`. The Thread's
+     * title is made from the user's words (`titleParts` and `buildTitle`), and
+     * so is its generation (`startThreadTitle`). A Thread with context and no
+     * words gets a title from the first thing, and a generated one from the
+     * block.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
@@ -1388,10 +1418,26 @@ const make = Effect.gen(function* () {
         // plugin was disabled, the account lost access), and the repeat must
         // still succeed. The same lookup runs again inside `place`'s
         // transaction, which is the one that decides.
-        if (decoded.newTask !== undefined && decoded.dedupKey !== undefined) {
+        const contextEntityIds = decoded.context?.map((reference) => reference.entityId);
+        if (
+          (decoded.newTask !== undefined || contextEntityIds !== undefined) &&
+          decoded.dedupKey !== undefined
+        ) {
           const savedId = yield* dedupKeys.findResultId("session.spawn", decoded.dedupKey);
           if (savedId !== undefined) return yield* readSessionRecord(savedId);
         }
+        // The origin of the context is read here, outside the transaction,
+        // because deciding it scans the link graph and that must not run on
+        // the single writer. The read also checks the grants the context
+        // needs, so a caller without them is refused before any source is
+        // read for `newTask`.
+        const context =
+          contextEntityIds === undefined
+            ? undefined
+            : {
+                entityIds: contextEntityIds,
+                labelRef: yield* externalEntities.readGroupLabelRef(contextEntityIds),
+              };
         // Reading the things at their source can take seconds, so it happens
         // here, before the transaction that writes the session.
         const prepared =
@@ -1588,6 +1634,27 @@ const make = Effect.gen(function* () {
                   projectId: Option.isSome(project) ? projectId : undefined,
                 });
 
+          // The entries are read after the take-on, so a thing that was read
+          // at its source for the Task carries the fields it was stored with.
+          const promptContext =
+            context === undefined
+              ? undefined
+              : yield* externalEntities.buildPromptContext(context.entityIds, context.labelRef);
+          const prompt =
+            promptContext === undefined
+              ? decoded.prompt
+              : appendPromptContext(decoded.prompt, promptContext);
+          if (prompt.length > MAX_PROMPT_LENGTH) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["context"],
+                  message: `The words and the description of the context together are ${String(prompt.length)} characters, and a prompt holds at most ${String(MAX_PROMPT_LENGTH)}. Send fewer things or shorter words.`,
+                },
+              ]),
+            );
+          }
+
           return {
             permissionProfileId: profileId,
             agentId: agent?.id,
@@ -1598,9 +1665,18 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             parentSessionId: undefined,
             spec,
-            prompt: decoded.prompt,
+            prompt,
             attachments: decoded.attachments ?? [],
             title: undefined,
+            titleParts:
+              promptContext === undefined
+                ? undefined
+                : {
+                    words: decoded.prompt,
+                    firstThingTitle: promptContext.things
+                      .map((thing) => flattenToOneLine(thing.title ?? ""))
+                      .find((title) => title.length > 0),
+                  },
             role: decoded.role,
             kind: "session.spawned",
             projectId,

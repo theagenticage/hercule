@@ -12,7 +12,7 @@
  *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
-import type { SessionRequest, TranscriptRow } from "@hercule/contract";
+import { appendPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
 import { buildTurns, readUserSender } from "./turns";
 
@@ -30,6 +30,7 @@ const buildAgentAskingAbout = (...itemIds: readonly string[]): AgentState => ({
     detail: { command: "ls -la" },
   })),
   model: "claude-sonnet-5",
+  isSubagent: false,
 });
 
 const AGENT_ASKING_NOTHING = buildAgentAskingAbout();
@@ -1675,5 +1676,100 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     });
 
     expect(readItems(rows)[0]).toMatchObject({ verb: "tool", target: "github/create_issue" });
+  });
+});
+
+describe("buildTurns: the context block in a user message", () => {
+  const THING_ID = "01a1317e-d8d3-7402-8971-cfcc37f653ca";
+  const BLOCK = appendPromptContext("", {
+    origin: { kind: "one" },
+    things: [
+      {
+        entityId: THING_ID,
+        ref: "linear:issue:northwind/SHOP-142",
+        title: "Show the delivery cost",
+        fields: [],
+      },
+    ],
+  });
+
+  /**
+   * Returns the message built from the user message sent with `text` (by
+   * `senderSessionId`, when set), which comes after `earlier` other user
+   * messages in the transcript.
+   */
+  const readSentMessage = (text: string, senderSessionId?: string, earlier = 0) => {
+    const row = (itemId: string, itemText: string, detail: object = {}) =>
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+        itemId,
+        kind: "user_message",
+        detail: { text: itemText, ...detail },
+      });
+    const rows = [
+      ...Array.from({ length: earlier }, (_, index) => row(`earlier-${String(index)}`, "Hello")),
+      row("u1", text, senderSessionId === undefined ? {} : { senderSessionId }),
+    ];
+    return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[earlier];
+  };
+
+  it("reads the words and the block apart", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`);
+    expect(message?.text).toBe("Look into this.");
+    expect(message?.context).toMatchObject({
+      text: BLOCK,
+      lineCount: 3,
+      things: [{ entityId: THING_ID, title: "Show the delivery cost" }],
+    });
+  });
+
+  it("reads a text that is only a block as no words", () => {
+    const message = readSentMessage(BLOCK);
+    expect(message?.text).toBe("");
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("reads the block of the first message when another session's agent sent it", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`, "s-spawner");
+    expect(message).toMatchObject({ text: "Look into this.", senderSessionId: "s-spawner" });
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("keeps the whole text of a later message, even when it ends in a block", () => {
+    const text = `Look into this.\n\n${BLOCK}`;
+    for (const sender of [undefined, "s-sender"]) {
+      const message = readSentMessage(text, sender, 1);
+      expect(message).toMatchObject({ text });
+      expect(message).not.toHaveProperty("context");
+    }
+  });
+
+  it("keeps the whole brief of a subagent, even when it ends in a block", () => {
+    const text = `Investigate this.\n\n${BLOCK}`;
+    const row = buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T10:00:00.000Z",
+      turnId: "t1",
+      itemId: "u1",
+      kind: "user_message",
+      detail: { text },
+    });
+    const message = buildTurns([row], { ...AGENT_ASKING_NOTHING, isSubagent: true }).turns[0]
+      ?.userMessages[0];
+    expect(message).toMatchObject({ text });
+    expect(message).not.toHaveProperty("context");
+  });
+
+  it("keeps a text with no block, or a near miss, whole as words", () => {
+    const nearMiss = `Look.\n\n${BLOCK.replace("hercule entity read", "hercule entity show")}`;
+    expect(readSentMessage("Fix the login bug")).not.toHaveProperty("context");
+    expect(readSentMessage(nearMiss)).toMatchObject({ text: nearMiss });
+    expect(readSentMessage(nearMiss)).not.toHaveProperty("context");
   });
 });

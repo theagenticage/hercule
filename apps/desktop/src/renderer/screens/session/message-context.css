@@ -1,0 +1,139 @@
+/* The cards and the fold under a user message that carried context
+   (message-context.tsx). The rules follow the signed-off drawing of the
+   start-thread dialog (states 24 and 25), on the app's tokens. The message is
+   88% of the transcript, on the right, and the bubble stays as wide as its
+   text. */
+.msg--me.msg--context > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 88%;
+  max-width: none;
+}
+.msg--context .bubble-meta {
+  margin-top: 0;
+}
+.msg-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.msg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--stock);
+  box-shadow: var(--h-rest);
+}
+.msg-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.msg-card-top > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-card-top > b {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.msg-card-title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font: var(--type-card);
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.msg-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Says the facts above are the last known ones, for a thing that lost access. */
+.msg-card-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.msg-card-live {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+/* A number that changed rises into place, as the drawing's `tick-up`. */
+@media (prefers-reduced-motion: no-preference) {
+  .msg-card-live.is-ticked {
+    animation: msg-card-tick 260ms var(--ease-out) both;
+  }
+}
+@keyframes msg-card-tick {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+}
+.msg-ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.msg-ctx:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.msg-ctx > span {
+  color: var(--faint);
+}
+.msg-ctx .ic {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.msg-ctx[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.msg-ctx-body {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-11);
+  line-height: 17px;
+  white-space: pre-wrap;
+}
+/* A thing the user cannot open: a lock and the words, all faint, as the locked rows of a pane. */
+.msg-card.is-locked .msg-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}

@@ -88,6 +88,14 @@ const USER_LINE_HEIGHT = 21.7;
  * 210px tile at 4:3, then the 8px gap or margin under it.
  */
 const SENT_IMAGE_ROW_HEIGHT = 166;
+/**
+ * The height one row of context cards adds under a user's bubble, in CSS
+ * pixels: a card (10px padding, the source line, two title lines, the status
+ * line, and the gaps between them), then the 8px gap above it.
+ */
+const CONTEXT_CARD_ROW_HEIGHT = 104;
+/** The height the fold "Context sent with it" adds under the cards, folded, in CSS pixels: its 24px button and the 8px gap above it. */
+const CONTEXT_FOLD_HEIGHT = 32;
 /** The height the sender's chip adds above a bubble another agent sent, in CSS pixels: its 18px row and the 4px under it. */
 const SENDER_ROW_HEIGHT = 22;
 
@@ -105,6 +113,10 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
         40 +
         USER_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / USER_CHARS_PER_LINE)) +
         SENT_IMAGE_ROW_HEIGHT * Math.ceil(block.attachments.length / 2) +
+        (block.context === undefined
+          ? 0
+          : CONTEXT_CARD_ROW_HEIGHT * Math.ceil(block.context.things.length / 2) +
+            CONTEXT_FOLD_HEIGHT) +
         (block.senderSessionId === undefined ? 0 : SENDER_ROW_HEIGHT)
       );
     case "agent":
@@ -255,6 +267,7 @@ export function Transcript({
         return block.senderSessionId === undefined ? (
           <UserMessage
             text={block.text}
+            context={block.context}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}
@@ -268,6 +281,7 @@ export function Transcript({
           <AgentSentMessage
             senderSessionId={block.senderSessionId}
             text={block.text}
+            context={block.context}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}

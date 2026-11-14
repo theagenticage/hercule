@@ -1103,6 +1103,7 @@ export {
   describeTurnEnding,
   showsTurnDivider,
 } from "./threads/turn-divider";
+export { splitSendingTexts, type SentText } from "./threads/first-message";
 export {
   buildTurns,
   mayBeRunningTurn,

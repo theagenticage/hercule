@@ -46,6 +46,7 @@ import {
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
+  type EntityCard,
   type EntitySearchQuery,
   type EventHandling,
   type HandoffLeg,
@@ -1115,6 +1116,29 @@ export const inboxGroupQuery = (client: HerculeClient, ref: string) =>
   queryOptions({
     queryKey: [...queryKeys.inbox(), "group", ref],
     queryFn: ({ signal }) => client.externalEntity.readInboxGroup({ payload: { ref } }, { signal }),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Returns the cards of a reply by the id of their thing. Module level, so Query keeps the result of one reply. */
+const indexCardsById = (reply: {
+  readonly cards: ReadonlyArray<EntityCard>;
+}): ReadonlyMap<string, EntityCard> => new Map(reply.cards.map((card) => [card.id, card]));
+
+/**
+ * Reads the light cards of the things `ids`, in one request
+ * (`externalEntity.readCards`), for the cards under a message that carried
+ * context. The data is the cards by thing id: a thing that names nothing is
+ * not in it. The key holds `ids` in the order asked, under its own prefix
+ * (`queryKeys.entityCards`), which a push on `externalEntity`, `connection` or
+ * `plugin` reads again.
+ */
+export const entityCardsQuery = (client: HerculeClient, ids: ReadonlyArray<string>) =>
+  queryOptions({
+    queryKey: queryKeys.entityCards(ids),
+    queryFn: ({ signal }) =>
+      client.externalEntity.readCards({ payload: { ids: [...ids] } }, { signal }),
+    select: indexCardsById,
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 

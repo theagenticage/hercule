@@ -38,6 +38,15 @@ export interface UiScreen {
    * the exception cannot move to other text or stop applying unnoticed.
    */
   readonly fixedSizeSamples?: number;
+  /**
+   * Whether the page is captured with the system's Reduce motion on, which
+   * the other screens do not need. A screen with a working face needs it:
+   * the face's paws tap by a CSS animation that only the Reduce motion media
+   * query stops, and Chromium rasterises the paws' SVG a few pixels
+   * differently from run to run once it has been animated, even though the
+   * screenshot cancels the animation first.
+   */
+  readonly reducedMotion?: true;
 }
 
 /** One part of a screen whose contrast with its surroundings is measured. See `UiScreen.nonTextParts`. */
@@ -297,6 +306,21 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "inbox.html?state=dialog",
     contentSelector: ".thread-dialog .composer-card",
     nonTextParts: [],
+  },
+  // The started thread: the message's words, the things as live cards, and "Context sent with it" folded, then opened.
+  {
+    name: "inbox-dialog-started",
+    path: "inbox.html?state=dialog-started",
+    contentSelector: ".thread-dialog .msg-card",
+    nonTextParts: [],
+    reducedMotion: true,
+  },
+  {
+    name: "inbox-dialog-context",
+    path: "inbox.html?state=dialog-context",
+    contentSelector: ".thread-dialog .msg-ctx-body",
+    nonTextParts: [],
+    reducedMotion: true,
   },
   {
     name: "settings-appearance",

@@ -17,7 +17,6 @@ import {
 import {
   THREAD_STARTERS,
   buildPicksForProjectChoice,
-  buildThingsPromptText,
   buildThreadStartView,
   writeStarterMessage,
   type ProjectLookup,
@@ -297,17 +296,13 @@ function ThreadStartForm({
       setRefusal("Give the Task a name first.");
       return;
     }
-    const prompt = buildThingsPromptText(current.text, current.things);
-    if (prompt.kind === "too-long") {
-      setRefusal(prompt.reason);
-      return;
-    }
     images.clearRefusal();
-    const { input } = buildSubmission(view.resolved, { text: prompt.text, attachments: shelf });
+    const { input } = buildSubmission(view.resolved, { text: current.text, attachments: shelf });
     const sent: SentThread = {
       draftKey,
       input: {
         ...input,
+        context: current.things.map((thing) => ({ kind: "entity", entityId: thing.id })),
         newTask: { title, entityIds: current.things.map((thing) => thing.id) },
         dedupKey: crypto.randomUUID(),
       },

@@ -90,8 +90,8 @@ const invalidateLegReads = (
 
 /**
  * The first segments of the keys whose reads are large and that several pushes
- * of one change all name: the Inbox's outline, the sidebar's counts, and the
- * entity panes. A signal's change pushes `signal`, then
+ * of one change all name: the Inbox's outline, the sidebar's counts, the
+ * entity panes and the context cards. A signal's change pushes `signal`, then
  * `externalEntity`, and a first push on each of five subscribed topics names
  * them all. `invalidateForPush` reads each of these keys once for the pushes
  * that arrive within `SHARED_READ_WINDOW_MS`, see `queueSharedReads`.
@@ -100,6 +100,7 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
   queryKeys.inbox()[0],
   queryKeys.inboxCount()[0],
   queryKeys.externalEntity()[0],
+  queryKeys.entityCards()[0],
 ] as string[]);
 
 /**

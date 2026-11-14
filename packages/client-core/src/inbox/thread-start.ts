@@ -4,13 +4,12 @@
  * sent as the thread's first prompt, and the key under which unsent words are
  * kept. Pure: nothing here reads or writes anything.
  */
-import {
-  MAX_PROMPT_LENGTH,
-  type EvidenceEntity,
-  type InboxThing,
-  type ProjectMatch,
-  type Resource,
-  type ThreadWorkspace,
+import type {
+  EvidenceEntity,
+  InboxThing,
+  ProjectMatch,
+  Resource,
+  ThreadWorkspace,
 } from "@hercule/contract";
 import { ApiError, readErrorMessage } from "../errors";
 import { formatAccessMode } from "../threads/access-modes";
@@ -262,53 +261,6 @@ const describePickReason = (
     case "profile":
       return `${labels.profileLabel} is the model this thread starts with. It begins as ${projectName}’s profile, unless you pick another.`;
   }
-};
-
-/** What `buildThingsPromptText` makes: the text, or why no text was made. */
-export type ThingsPromptText =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "too-long"; readonly reason: string };
-
-/** Returns `text` on one line: every run of whitespace, newlines included, becomes one space. */
-const collapseWhitespace = (text: string): string => text.replace(/\s+/g, " ").trim();
-
-/**
- * Returns the line that lists one thing in the prompt: identifier, title in
- * quotes, and id. Titles come from outside trackers and may hold newlines, so
- * whitespace is collapsed: a title cannot add a line of its own that reads as
- * the user's instruction. Quotes inside the title become typographic quotes so
- * the title cannot end its own quotation.
- */
-const describeThingForPrompt = (thing: InboxThing): string => {
-  const title = collapseWhitespace(thing.title).replaceAll('"', "”");
-  return `- ${collapseWhitespace(thing.identifier)} "${title}" (${thing.id})`;
-};
-
-/**
- * Builds the prompt that starts the thread: `message`, a blank line, a
- * sentence saying the titles below are copied from their sources, one line per
- * thing (identifier, quoted title, id), and how to read them in full. Returns
- * a refusal, never a cut prompt, when the text would pass the prompt's length
- * limit. This stands in until the controller builds the context itself.
- */
-export const buildThingsPromptText = (
-  message: string,
-  things: readonly InboxThing[],
-): ThingsPromptText => {
-  const text = [
-    message,
-    "",
-    "The things this is about (titles as their sources give them):",
-    ...things.map(describeThingForPrompt),
-    "",
-    "Read any of them in full with `hercule entity read <id>`.",
-  ].join("\n");
-  return text.length <= MAX_PROMPT_LENGTH
-    ? { kind: "text", text }
-    : {
-        kind: "too-long",
-        reason: `The message and the things are ${text.length.toLocaleString("en-US")} letters, and a thread starts with at most ${MAX_PROMPT_LENGTH.toLocaleString("en-US")}. Shorten the message or leave some things out.`,
-      };
 };
 
 /** Returns the key under which unsent words are kept for a set of things: the same for any order. */

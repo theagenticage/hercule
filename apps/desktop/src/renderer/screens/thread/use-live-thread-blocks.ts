@@ -164,6 +164,7 @@ export const useLiveThreadBlocks = (
           blocks: appendSendingMessages(
             threadBlocks,
             splitQueuedInputs(session, queued ?? []).sending,
+            rows,
           ),
         }
       : splitSubagentBrief(threadBlocks);

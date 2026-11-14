@@ -53,6 +53,7 @@ describe("RuntimeNoteLine", () => {
       mayBeRunningTurn: false,
       openRequests: [],
       model: "claude-sonnet-5",
+      isSubagent: false,
     });
 
     const { container } = render(<RuntimeNoteLine note={outsideRuntimeNotes[0]!} />);

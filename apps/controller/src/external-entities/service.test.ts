@@ -15,7 +15,13 @@ import { Deferred, Effect, Fiber, Layer, Schema } from "effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
-import { MAX_ACTING_CONNECTIONS, MAX_LIVE_WORKFLOWS, type ExternalRef } from "@hercule/contract";
+import {
+  appendPromptContext,
+  MAX_ACTING_CONNECTIONS,
+  MAX_LIVE_WORKFLOWS,
+  type ExternalRef,
+  type PromptContextInput,
+} from "@hercule/contract";
 import {
   HOST_API,
   registerConnectionType,
@@ -51,6 +57,7 @@ import { signalRepository } from "../signals/repository";
 import { TaskService, TaskServiceLayer, taskRepository } from "../tasks";
 import { TaskServicePortsLayer } from "../daemon/tasks";
 import { externalEntityRepository, type ObservedEntity } from "./repository";
+import { replaceFieldRows } from "./entity-fields";
 import { SettingsLayer } from "../settings";
 import { narrowInboxReply } from "./inbox.testing";
 import { chooseStageForEntity, ExternalEntityService, ExternalEntityServiceLayer } from "./service";
@@ -71,6 +78,11 @@ const TICKET_KIND: EntityKindDeclaration = {
     doing: { shape: "half", tone: "active", word: "In progress", stage: "building" },
     backlog: { shape: "dashed", tone: "quiet", word: "Backlog" },
   },
+  fields: [
+    { key: "team", label: "Team", type: "text" },
+    { key: "size", label: "Size", type: "number" },
+  ],
+  face: { place: "team", fact: "size" },
   facts: [],
   reasons: {},
 };
@@ -2651,5 +2663,298 @@ describe("what a card shows of the live work on its Task", () => {
         (_, index) => `Workflow ${String(MAX_LIVE_WORKFLOWS + 1 - index)}`,
       ),
     );
+  });
+});
+
+describe("the prompt context of things", () => {
+  const MISSING_ID = "0199f0b7-0000-7000-8000-00000000dead";
+
+  /** Reports the tickets, makes each live Task-free thing show on the Inbox, and returns their ids. */
+  const arrangeTickets = (
+    arranged: Pick<Arranged, "report" | "connectionId" | "entityId">,
+    keys: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      yield* arranged.report(
+        arranged.connectionId,
+        keys.map((key) => buildObservation(key)),
+      );
+      return yield* Effect.forEach(keys, (key) => arranged.entityId(ticketRef(key)));
+    });
+
+  /** Writes the block of the things, as a prompt with no words has it. */
+  const writeBlock = (input: PromptContextInput): string => appendPromptContext("", input);
+
+  it("reads a group label only when the things are exactly one linked group of the Inbox", async () => {
+    const labels = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2", "3", "4"]);
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        yield* service.link({ fromRef: ticketRef("2"), toRefs: [ticketRef("3")] });
+        return {
+          group: yield* service.readGroupLabelRef([ids[2]!, ids[0]!, ids[1]!]),
+          subset: yield* service.readGroupLabelRef([ids[0]!, ids[1]!]),
+          superset: yield* service.readGroupLabelRef(ids),
+          unlinked: yield* service.readGroupLabelRef([ids[0]!, ids[3]!]),
+          one: yield* service.readGroupLabelRef([ids[0]!]),
+        };
+      }),
+    );
+    expect(labels.group).toBe(ticketRef("1"));
+    expect(labels.subset).toBeUndefined();
+    expect(labels.superset).toBeUndefined();
+    expect(labels.unlinked).toBeUndefined();
+    expect(labels.one).toBeUndefined();
+  });
+
+  it("writes each thing with its ref, title, status label, declared fields and id, and what they share", async () => {
+    const block = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2"]);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`UPDATE external_entities SET status = ${JSON.stringify({ shape: "half", tone: "active", label: "In progress" })} WHERE ref = ${ticketRef("1")}`;
+            yield* replaceFieldRows([
+              {
+                ref: ticketRef("1"),
+                fields: [
+                  { key: "team", text_value: "Storefront", number_value: null },
+                  { key: "size", text_value: null, number_value: 3 },
+                ],
+              },
+              {
+                ref: ticketRef("2"),
+                fields: [{ key: "team", text_value: "Storefront", number_value: null }],
+              },
+            ]);
+          }),
+        );
+        return writeBlock(yield* service.buildPromptContext(ids, undefined));
+      }),
+    );
+    const [first, second] = [ticketRef("1"), ticketRef("2")];
+    expect(block.split("\n")).toEqual([
+      "From your selection (2 things)",
+      expect.stringMatching(
+        new RegExp(
+          `^1\\. ${first} · “Ticket 1” · In progress · Team Storefront, Size 3 · [0-9a-f-]{36}$`,
+        ),
+      ),
+      expect.stringMatching(
+        new RegExp(`^2\\. ${second} · “Ticket 2” · Todo · Team Storefront · [0-9a-f-]{36}$`),
+      ),
+      "They share: Team Storefront",
+      "Read any of them in full: hercule entity read <id>",
+    ]);
+  });
+
+  it("gives a place no Connection can read only its ref and id, and a full record that lost access, or a readable partial record, what its rows hold", async () => {
+    const block = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        yield* reportPartial("3");
+        yield* withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'
+              WHERE ref IN (${ticketRef("1")}, ${ticketRef("3")})`,
+        );
+        const ids = yield* Effect.forEach(["1", "2", "3"], (key) => entityId(ticketRef(key)));
+        return writeBlock(yield* service.buildPromptContext(ids, undefined));
+      }),
+    );
+    const [, lostAccess, partial, place] = block.split("\n");
+    expect(lostAccess).toMatch(
+      new RegExp(`^1\\. ${ticketRef("1")} · “Ticket 1” · Todo · [0-9a-f-]{36}$`),
+    );
+    expect(partial).toMatch(new RegExp(`^2\\. ${ticketRef("2")} · “Ticket 2” · [0-9a-f-]{36}$`));
+    expect(place).toMatch(new RegExp(`^3\\. ${ticketRef("3")} · [0-9a-f-]{36}$`));
+  });
+
+  it("writes the label from the label thing's record at the time of the write, so access lost after the groups were read locks it", async () => {
+    const block = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql } = arranged;
+        const ids = yield* arrangeTickets(arranged, ["1", "2"]);
+        yield* service.link({ fromRef: ticketRef("1"), toRefs: [ticketRef("2")] });
+        const labelRef = yield* service.readGroupLabelRef(ids);
+        // The label thing becomes a place nobody can read after the groups were decided.
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`UPDATE external_entities SET pace = 'context' WHERE ref = ${ticketRef("1")}`;
+            yield* sql`UPDATE external_entity_observations SET access = 'inaccessible'
+                       WHERE ref = ${ticketRef("1")}`;
+          }),
+        );
+        return writeBlock(yield* service.buildPromptContext(ids, labelRef));
+      }),
+    );
+    const [firstLine] = block.split("\n");
+    expect(firstLine).toBe("From your linked group “A ticket you cannot open” (2 things)");
+    expect(block).not.toContain("Ticket 1");
+  });
+
+  it("fails with not_found naming each unknown id, and with forbidden naming the missing grant of task.read and signal.read", async () => {
+    const result = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service } = arranged;
+        const [id] = yield* arrangeTickets(arranged, ["1"]);
+        const withoutGrant = {
+          ...A_SESSION,
+          grants: ["task.update"],
+        } as unknown as Actor;
+        const withoutSignalQuery = {
+          ...A_SESSION,
+          grants: ["task.read"],
+        } as unknown as Actor;
+        return {
+          build: yield* Effect.flip(service.buildPromptContext([id!, MISSING_ID], undefined)),
+          labelRef: yield* Effect.flip(service.readGroupLabelRef([MISSING_ID, id!])),
+          refused: yield* Effect.flip(
+            Effect.provideService(
+              service.buildPromptContext([id!], undefined),
+              CurrentActor,
+              withoutGrant,
+            ),
+          ),
+          labelRefWithoutSignalQuery: yield* Effect.flip(
+            Effect.provideService(
+              service.readGroupLabelRef([id!]),
+              CurrentActor,
+              withoutSignalQuery,
+            ),
+          ),
+        };
+      }),
+    );
+    expect(result.build).toMatchObject({ error: { code: "not_found" } });
+    expect(JSON.stringify(result.build)).toContain(MISSING_ID);
+    expect(JSON.stringify(result.labelRef)).toContain(MISSING_ID);
+    expect(result.refused).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+    expect(result.labelRefWithoutSignalQuery).toMatchObject({
+      error: { code: "forbidden", details: { grant: "signal.read" } },
+    });
+  });
+});
+
+describe("readCards", () => {
+  const MISSING_ID = "0199f0b7-0000-7000-8000-00000000dead";
+
+  it("returns a card for each thing in the order asked, leaves out an id that names nothing, and draws the face", async () => {
+    const cards = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1"), buildObservation("2")]);
+        yield* withTransaction(
+          sql,
+          replaceFieldRows([
+            {
+              ref: ticketRef("1"),
+              fields: [
+                { key: "team", text_value: "Storefront", number_value: null },
+                { key: "size", text_value: null, number_value: 3 },
+              ],
+            },
+          ]),
+        );
+        const first = yield* entityId(ticketRef("1"));
+        const second = yield* entityId(ticketRef("2"));
+        return (yield* service.readCards({ ids: [second, MISSING_ID, first] })).cards;
+      }),
+    );
+    expect(cards.map((card) => card.ref)).toEqual([ticketRef("2"), ticketRef("1")]);
+    expect(cards[1]).toMatchObject({
+      kind: KIND,
+      noun: "Ticket",
+      identifier: "1",
+      title: "Ticket 1",
+      restricted: false,
+      face: {
+        place: { key: "team", text: "Storefront" },
+        fact: { key: "size", number: 3 },
+      },
+    });
+    expect(cards[0]!.face).toEqual({});
+  });
+
+  it("gives a place no Connection can read only its id, ref, kind and noun, and a full record that lost access, or a readable partial record, what its rows hold", async () => {
+    const cards = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, sql, report, connectionId, reportPartial, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        yield* reportPartial("2");
+        yield* reportPartial("3");
+        yield* withTransaction(
+          sql,
+          sql`UPDATE external_entity_observations SET access = 'inaccessible'
+              WHERE ref IN (${ticketRef("1")}, ${ticketRef("3")})`,
+        );
+        const ids = yield* Effect.forEach(["1", "2", "3"], (key) => entityId(ticketRef(key)));
+        return (yield* service.readCards({ ids })).cards;
+      }),
+    );
+    expect(cards[0]).toMatchObject({
+      restricted: false,
+      title: "Ticket 1",
+      card: "compact",
+      access: "inaccessible",
+      face: {},
+    });
+    expect(cards[1]).toMatchObject({ restricted: false, title: "Ticket 2", access: "ok" });
+    expect(Object.keys(cards[2]!).sort()).toEqual(
+      ["face", "id", "kind", "noun", "ref", "restricted"].sort(),
+    );
+    expect(cards[2]).toMatchObject({ face: null, restricted: true, noun: "Ticket" });
+  });
+
+  it("needs only task.read, and refuses without it naming the grant", async () => {
+    const result = await run((arranged) =>
+      Effect.gen(function* () {
+        const { service, report, connectionId, entityId } = arranged;
+        yield* report(connectionId, [buildObservation("1")]);
+        const id = yield* entityId(ticketRef("1"));
+        const only = (grants: ReadonlyArray<string>) =>
+          Effect.provideService(service.readCards({ ids: [id] }), CurrentActor, {
+            ...A_SESSION,
+            grants,
+          } as unknown as Actor);
+        return { allowed: yield* only(["task.read"]), refused: yield* Effect.flip(only([])) };
+      }),
+    );
+    expect(result.allowed.cards).toHaveLength(1);
+    expect(result.refused).toMatchObject({
+      error: { code: "forbidden", details: { grant: "task.read" } },
+    });
+  });
+
+  it("sends as many statements for 24 things as for 4", async () => {
+    const count = (things: number) =>
+      run(({ service, report, connectionId, entityId }) =>
+        Effect.gen(function* () {
+          const keys = Array.from({ length: things }, (_, index) => String(index));
+          yield* report(
+            connectionId,
+            keys.map((key) => buildObservation(key)),
+          );
+          const ids = yield* Effect.forEach(keys, (key) => entityId(ticketRef(key)));
+          const statements: Array<string> = [];
+          const record = Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile()[0]);
+              return statement;
+            }),
+          );
+          yield* service.readCards({ ids }).pipe(record);
+          return statements.length;
+        }),
+      );
+    expect(await count(24)).toBe(await count(4));
   });
 });

@@ -208,6 +208,35 @@ export const deriveAccess = (
   return "inaccessible";
 };
 
+/**
+ * Checks that a record is a restricted place (spec 20 section 1.3): not a
+ * full work record, and no Connection can read it now. Such a record shows no
+ * title, identifier or URL anywhere, only its kind and noun. A full work
+ * record that lost access is not restricted: it keeps its last known facts and
+ * shows its `access`.
+ *
+ * Three places use this rule when they draw a thing outside the Inbox's own
+ * queries: the context block of a prompt (`buildPromptContextThing`), the
+ * cards (`buildEntityCard`) and the label of a linked group
+ * (`buildPromptContextOrigin`).
+ */
+export const isRestrictedPlace = (record: {
+  readonly isWorkRecord: boolean;
+  readonly access: EntityAccess;
+}): boolean => !record.isWorkRecord && record.access !== "ok";
+
+/**
+ * Builds the label of a restricted place: it names the kind of record and
+ * never the ref or the title. The wording matches the locked rows the apps
+ * draw, such as "A pull request you cannot open". `noun` is empty or null
+ * for a record that has no noun stored.
+ */
+export const buildLockedLabel = (noun: string | null): string => {
+  const kind =
+    noun === null || noun === "" ? "record" : noun.charAt(0).toLowerCase() + noun.slice(1);
+  return `${/^[aeiou]/i.test(kind) ? "An" : "A"} ${kind} you cannot open`;
+};
+
 /** Checks that any Connection reports the thing as the user's own. */
 export const deriveYours = (
   observations: ReadonlyArray<Pick<ObservationRow, "owned_by_you">>,

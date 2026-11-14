@@ -462,6 +462,8 @@ The web keeps its existing routes and workspace controls compatible; complete wo
 
 **The bubble.** A user's message shows its images above its text, in a grid of at most two columns and at most 210px wide; each tile 4:3, radius 8, a `--line` hairline border. The images load through `attachment.readContent` after a reload and in a second client alike, because the stream carries their references (`detail.attachments`). A queued input shows its images as small tiles in its row. The text the agent received has a path line per image added by the runner; the bubble shows only what the user wrote.
 
+*(Added 2026-11-13, [#1127](https://github.com/theagenticage/hercule/issues/1127).)* **The first message of a thread, when it has context,** shows its words in the bubble and the context block folded below it as "Context sent with it", in a plain `details` element, with no live cards (those are the desktop app's). The block is found with `splitPromptContext` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), in a session's first message only, because only `session.spawn` adds one. A block typed into a later message shows as text.
+
 **The lightbox.** Clicking a tile, on the shelf or in a bubble, opens a `role="dialog"` over a scrim, like the app's other dialogs. The image is at most 92vw × 86vh, with the caption "<name> (i/n)". ← and → move between the images of that shelf or message; Esc or a click on the scrim closes it.
 
 **Object URLs are revoked** when a tile is removed, when its message is sent, and when the component unmounts.

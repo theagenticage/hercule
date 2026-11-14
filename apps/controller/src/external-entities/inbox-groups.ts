@@ -106,6 +106,21 @@ export const decideGroups = (
   return groups;
 };
 
+/**
+ * Returns the group whose members are exactly `refs`, or `undefined` when
+ * `refs` are not that: fewer than two refs, a ref in no group, refs of
+ * different groups, or part of a group (or more than one group's worth).
+ * The order of `refs` does not matter.
+ */
+export const findGroupMadeOf = (
+  groups: GroupsByRef,
+  refs: ReadonlyArray<string>,
+): Group | undefined => {
+  const group = refs.length < 2 ? undefined : groups.get(refs[0]!);
+  if (group === undefined || group.memberRefs.length !== refs.length) return undefined;
+  return refs.every((ref) => groups.get(ref)?.labelRef === group.labelRef) ? group : undefined;
+};
+
 const compareRefs = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
 

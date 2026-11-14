@@ -103,6 +103,13 @@ export type FieldRow =
        * only.
        */
       readonly resolves?: OperationId;
+      /**
+       * Marks a flag that can be the whole input of a command whose text
+       * comes from stdin, as `--image` is. With this flag given, the command
+       * does not wait for stdin at a terminal and sends empty text, and an
+       * empty pipe sends empty text. Without it, a terminal is refused.
+       */
+      readonly standsInForStdin?: true;
     }
   | {
       readonly stdin: true;
@@ -126,6 +133,8 @@ export type FieldRow =
       readonly upload: true;
       readonly flag: string;
       readonly help: string;
+      /** Same meaning as on the plain flag row above. */
+      readonly standsInForStdin?: true;
     }
   | {
       /**
@@ -1493,6 +1502,10 @@ export const CLI = {
   // Exists only for the search box of the desktop app: it suggests values of a
   // field while the user types. A terminal types the value it knows.
   "externalEntity.suggestInboxValues": { hidden: true },
+  // Exists only for the cards a desktop transcript draws for a message's context:
+  // one batch read of the small cards. A terminal reads one thing in full with
+  // `entity read`.
+  "externalEntity.readCards": { hidden: true },
   "externalEntity.readInboxGroup": {
     command: "entity group",
     help: "Reads the group a thing is in on your Inbox. A group is the things that a source or you linked to each other, directly or through one another. It gives the group's label thing, every member (the label first, then by ref) and each link between two members, with the firmest claim behind it and whether you made one yourself (`hasPersonClaim`; only that claim can be removed, with `hercule entity unlink`). A thing linked to nothing on the Inbox is a group of one. `complete` is false when the group has more members or links than a reply holds. Needs the grants `task.read` and `signal.query`. Fails with not_found when the thing is not on the Inbox.",
@@ -4778,15 +4791,25 @@ export const CLI = {
         ],
         stdin: "These two things are one problem. Find the cause.",
       },
+      {
+        args: [
+          "--context",
+          '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"}',
+          "--context",
+          '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000012"}',
+        ],
+        stdin: "Look at these two things and tell me how they relate.",
+      },
     ],
     fields: {
       prompt: {
         stdin: true,
         flag: "prompt",
-        help: "The opening prompt. It may be empty when --image is given.",
+        help: "The opening prompt. It may be empty when --image or --context is given.",
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },
@@ -4844,6 +4867,11 @@ export const CLI = {
         help: "The Task to join, by its id or a tail of eight or more characters; find it with `hercule task list`. A Thread joins a Task even without this flag: a Thread a session starts joins the calling session's Task, and one in an ephemeral workspace joins the Task that workspace belongs to. A Task that is done or dropped is refused; reopen it, or leave --task off.",
         resolves: "task.query",
       },
+      context: {
+        flag: "context",
+        standsInForStdin: true,
+        help: 'A thing to tell the agent about, as JSON: {"kind":"entity","entityId":"<id>"}; repeat the flag for more things. The id is an External Entity (found with `hercule entity list`). The controller appends a short description of each after the prompt, so the prompt may be empty when --context is given. Context never takes a thing on as a Task: use --new-task for that. The list holds 1 to 50 things, each once. Nothing is started when a thing is unknown.',
+      },
       newTask: {
         flag: "new-task",
         help: 'The new Task this Thread starts, as JSON: {"title":"<title>","entityIds":["<id>", ...]}. Each id is an External Entity (a pull request or an issue on the Inbox, found with `hercule entity list`), and the user takes each on as the Thread\'s Task, so none of them may be on an active Task already. The Thread joins the Task and the title is the one given, never a generated one. Only the user may use it, and it cannot be combined with --task or --agent. Nothing is started when a thing is refused.',
@@ -4863,7 +4891,7 @@ export const CLI = {
       invalid_state:
         "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off. Or a thing named in --new-task is a place that groups work, or Hercule cannot read it now",
       not_found:
-        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task is unknown: check `hercule entity list`",
+        "the Task named with --task does not exist or was deleted: find one with `hercule task list`, or leave --task off, or a thing named in --new-task or --context is unknown: check `hercule entity list`",
       conflict:
         "a thing named in --new-task is already on an active Task, and the message names both: leave it out, or start the Thread on that Task with --task. Or a thing named in --new-task changed between its read and the write: try again",
     },
@@ -4915,6 +4943,7 @@ export const CLI = {
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the text (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },
@@ -5056,6 +5085,7 @@ export const CLI = {
       },
       attachments: {
         upload: true,
+        standsInForStdin: true,
         flag: "image",
         help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },

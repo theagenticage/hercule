@@ -317,6 +317,29 @@ describe("--image", () => {
   });
 });
 
+// Tests `--context`, which stands in for the prompt the way `--image` does.
+describe("--context", () => {
+  const sessionSpawn = lookUpCommand("session", "spawn");
+  const context = '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"}';
+
+  it("sends empty text without reading stdin when stdin is a terminal", async () => {
+    const args = await parseArguments(sessionSpawn, ["--context", context], refuseStdinRead, true);
+    expect(args.payload["prompt"]).toBe("");
+    expect(args.payload["context"]).toEqual([JSON.parse(context)]);
+  });
+
+  it("still reads a pipe, and an empty pipe sends empty text", async () => {
+    const args = await parseArguments(sessionSpawn, ["--context", context], stubStdin(""));
+    expect(args.payload["prompt"]).toBe("");
+  });
+
+  it("leaves a terminal without --context or --image to the reader, which refuses it", async () => {
+    await expect(parseArguments(sessionSpawn, [], refuseStdinRead, true)).rejects.toThrow(
+      "stdin was read",
+    );
+  });
+});
+
 // Tests the two signal fields that are content, and so come from stdin.
 describe("signal content on stdin", () => {
   const signalRaise = lookUpCommand("signal", "raise");

@@ -187,6 +187,7 @@ describe("the Inbox's and the entities' keys", () => {
       keys: [
         ...inboxKeys,
         queryKeys.externalEntity(),
+        queryKeys.entityCards(),
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
@@ -199,6 +200,7 @@ describe("the Inbox's and the entities' keys", () => {
       keys: [
         ...inboxKeys,
         queryKeys.externalEntity(),
+        queryKeys.entityCards(),
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
@@ -278,6 +280,7 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.signal(),
         ...inboxKeys,
         queryKeys.externalEntity(),
+        queryKeys.entityCards(),
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
@@ -294,6 +297,7 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.signal(),
         ...inboxKeys,
         queryKeys.externalEntity(),
+        queryKeys.entityCards(),
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
@@ -310,6 +314,7 @@ describe("the Inbox's and the entities' keys", () => {
         queryKeys.signal(),
         ...inboxKeys,
         queryKeys.externalEntity(),
+        queryKeys.entityCards(),
         queryKeys.workBoard(),
         queryKeys.task(),
         queryKeys.entitySuggestions(),
@@ -336,6 +341,21 @@ describe("the Inbox's and the entities' keys", () => {
       queryKeys.inboxOutline(),
       queryKeys.inbox({ list: { savedQuery: "waits" } }),
     );
+  });
+
+  it("reads the context cards only on the pushes that change what a card shows", () => {
+    for (const topic of ["externalEntity", "connection", "plugin"] as const) {
+      assert.isTrue(
+        buildQueryKeys(topic, []).some((key) => isPrefixOf(key, queryKeys.entityCards(["e1"]))),
+        topic,
+      );
+    }
+    for (const topic of ["task", "signal"] as const) {
+      assert.isFalse(
+        buildQueryKeys(topic, []).some((key) => isPrefixOf(key, queryKeys.entityCards(["e1"]))),
+        topic,
+      );
+    }
   });
 
   it("leaves the signal lists alone on an externalEntity push, because the controller announces a signal push when a thing's open signals gain their entity", () => {

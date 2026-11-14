@@ -57,6 +57,7 @@ import { runRepository } from "../runs";
 import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
+  buildLockedLabel,
   deriveAccess,
   deriveObservedAt,
   deriveStale,
@@ -72,6 +73,7 @@ import {
   cutPage,
   decideGroups,
   type Group,
+  findGroupMadeOf,
   type GroupsByRef,
 } from "./inbox-groups";
 import {
@@ -307,16 +309,6 @@ interface FacetRow {
   readonly status: string | null;
   readonly distinct_values: number;
 }
-
-/**
- * Builds the label of a context record that no Connection can read: it names
- * the kind of record and never the ref or the title, which are restricted. The
- * wording matches the locked rows the apps draw.
- */
-const buildLockedLabel = (noun: string | null): string => {
-  const kind = noun === null ? "record" : noun.charAt(0).toLowerCase() + noun.slice(1);
-  return `${/^[aeiou]/i.test(kind) ? "An" : "A"} ${kind} you cannot open`;
-};
 
 /**
  * Reads the values of the facet fields among the things of `matched`, most
@@ -1670,5 +1662,36 @@ export const externalEntityInbox = Effect.gen(function* () {
       return { values };
     });
 
-  return { queryInbox, countInbox, readInboxOutline, suggestInboxValues, readInboxGroup };
+  /**
+   * Returns the ref of the label thing of the Inbox group whose members are
+   * exactly `refs` (in any order), or none when `refs` are not that: fewer
+   * than two refs, a ref in no group, refs of different groups, or part of a
+   * group.
+   *
+   * The groups are decided by `readGroups`, as `queryInbox` decides them, in
+   * one read snapshot. That read scans the link graph, so callers keep it off
+   * the transaction that writes. It returns the ref and not the label text,
+   * because access to the label thing can change before the text is used:
+   * the caller reads the label thing again when it writes the text.
+   */
+  const findInboxGroupLabelRef = (
+    environment: InboxEnvironment,
+    refs: ReadonlyArray<string>,
+  ): Effect.Effect<Option.Option<string>, SqlError> =>
+    withReadSnapshot(
+      sql,
+      Effect.gen(function* () {
+        const group = findGroupMadeOf(yield* readGroups(environment), refs);
+        return group === undefined ? Option.none() : Option.some(group.labelRef);
+      }),
+    );
+
+  return {
+    queryInbox,
+    countInbox,
+    readInboxOutline,
+    suggestInboxValues,
+    readInboxGroup,
+    findInboxGroupLabelRef,
+  };
 });

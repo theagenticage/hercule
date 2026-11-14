@@ -843,11 +843,25 @@ export interface InboxScene {
   readonly play?: Play;
 }
 
+/** The things the `dialog` states start from: three pull requests and an error, which the controller matches to webshop. */
+const DIALOG_THINGS = ["#6244", "#6255", "#6271", "STOREFRONT-1Z9"];
+
 const THREAD_START = buildThreadStartRecords(
   ALL_THINGS.filter((thing) => thing.kind === "github/pull-request").map(({ id, identifier }) => ({
     id,
     identifier,
   })),
+  DIALOG_THINGS.map((identifier) => {
+    const thing = ALL_THINGS.find((each) => each.identifier === identifier)!;
+    const place = thing.face?.place;
+    return {
+      id: thing.id,
+      ref: thing.ref,
+      title: thing.title,
+      ...(thing.status === undefined ? {} : { status: thing.status.label }),
+      ...(place?.type === "text" ? { place: place.text } : {}),
+    };
+  }),
 );
 
 const BASE: InboxRecords = {
@@ -1113,8 +1127,23 @@ const openThreadDialog = async (page: Document, needles: ReadonlyArray<string>):
   }
 };
 
-/** The things the `dialog` states start from: three pull requests and an error, which the controller matches to webshop. */
-const DIALOG_THINGS = ["#6244", "#6255", "#6271", "STOREFRONT-1Z9"];
+/**
+ * Starts the thread from the dialog that `openThreadDialog` opened, and
+ * returns once the first message shows each thing as a card read from the
+ * controller.
+ */
+const startDialogThread = async (page: Document): Promise<void> => {
+  await openThreadDialog(page, DIALOG_THINGS);
+  (await waitFor(page, '.thread-dialog [title="Start thread"]')).click();
+  await waitFor(page, ".thread-dialog-foot");
+  const deadline = performance.now() + 5000;
+  while (
+    performance.now() < deadline &&
+    page.querySelectorAll(".msg-card .msg-card-top b").length < DIALOG_THINGS.length
+  ) {
+    await nextFrame();
+  }
+};
 
 /** The states of the page, in the order the capture takes them. */
 export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
@@ -1349,10 +1378,17 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
   {
     name: "dialog-started",
     records: { ...BASE, threadStart: THREAD_START },
+    play: startDialogThread,
+  },
+  {
+    // The started thread with "Context sent with it" opened.
+    name: "dialog-context",
+    records: { ...BASE, threadStart: THREAD_START },
     play: async (page) => {
-      await openThreadDialog(page, DIALOG_THINGS);
-      (await waitFor(page, '.thread-dialog [title="Start thread"]')).click();
-      await waitFor(page, ".thread-dialog-foot");
+      await startDialogThread(page);
+      (await waitFor(page, ".msg-ctx")).click();
+      await waitFor(page, ".msg-ctx-body");
+      await nextFrame();
     },
   },
 ];

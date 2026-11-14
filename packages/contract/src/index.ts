@@ -163,6 +163,14 @@ export {
   removeTerminalControls,
 } from "./agent-text";
 
+export { appendPromptContext, splitPromptContext } from "./prompt-context";
+export type {
+  PromptContextBlock,
+  PromptContextInput,
+  PromptContextOrigin,
+  PromptContextThing,
+} from "./prompt-context";
+
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface that the form schemas above implement. */
@@ -378,6 +386,7 @@ export {
   EMPTY_PROMPT_MESSAGE,
   MAX_INPUT_ANSWER_WAIT,
   MAX_THREAD_THINGS,
+  ContextReference,
   refuseEmptyPrompt,
 } from "./groups/session";
 export {
@@ -797,6 +806,9 @@ export {
   ProjectMatch,
   type CoreSavedQueryId,
   EntityBlocks,
+  EntityCard,
+  EntityCards,
+  EntityCardsQuery,
   ExternalEntityDetail,
   MAX_ENTITY_BLOCKS,
   MAX_SAVED_QUERY_SIGNAL_KINDS,

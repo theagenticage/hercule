@@ -272,6 +272,18 @@ export type TaskSource =
     };
 
 /**
+ * The parts of a prompt that has a context block after the user's words, as
+ * the caller knows them, so the title never has to be read back out of the
+ * prompt text.
+ */
+export interface TitleParts {
+  /** The user's own words in the prompt, without the context block. May be empty. */
+  readonly words: string;
+  /** The title of the first thing in the context block that has one. */
+  readonly firstThingTitle: string | undefined;
+}
+
+/**
  * Everything needed to store one new session, whether it starts a
  * conversation or continues another session. Every value is already decided:
  * the controller daemon chose the runner and opened the workspace before this
@@ -314,6 +326,11 @@ export interface CreateRequest {
    * from the prompt (`buildTitle`).
    */
   readonly title: string | undefined;
+  /**
+   * The words and the first thing's title of a prompt that holds a context
+   * block, or `undefined` when the whole prompt is the user's words.
+   */
+  readonly titleParts?: TitleParts | undefined;
   /** The role the caller chose; `undefined` for a session that starts without one. */
   readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
@@ -783,20 +800,29 @@ const cleanGeneratedText = (text: string): string =>
 const isAcceptableRole = Schema.is(SessionRole);
 
 /**
- * Builds a session's short title, trimmed and cut by `cutTitle`:
- * `chosen` when the caller chose a title, otherwise the first non-blank line
- * of the session's first prompt, otherwise the name of the prompt's first
- * image. That way a sidebar row has something to show without reading the
+ * Builds a session's short title, trimmed and cut by `cutTitle`. The title is
+ * the first of these that exists:
+ *
+ * 1. `chosen`, when the caller chose a title;
+ * 2. the first non-blank line of the user's words, which are `titleParts.words`
+ *    when the prompt holds a context block and the whole `prompt` otherwise;
+ * 3. the title of the first thing in the context block that has one;
+ * 4. the name of the prompt's first image.
+ *
+ * The context block never supplies a line of the title when the prompt has
+ * words. That way a sidebar row has something to show without reading the
  * transcript.
  */
 const buildTitle = (
   chosen: string | undefined,
   prompt: string,
+  titleParts: TitleParts | undefined,
   firstAttachmentName: string | undefined,
 ): string => {
   const title =
     chosen ??
-    prompt.split("\n").find((line) => line.trim().length > 0) ??
+    (titleParts?.words ?? prompt).split("\n").find((line) => line.trim().length > 0) ??
+    titleParts?.firstThingTitle ??
     firstAttachmentName ??
     "";
   return cutTitle(title);
@@ -2440,7 +2466,7 @@ const make = Effect.gen(function* () {
             attachments: references,
           }),
         );
-        const title = buildTitle(open.title, open.prompt, references[0]?.name);
+        const title = buildTitle(open.title, open.prompt, open.titleParts, references[0]?.name);
         const joined =
           open.taskSource._tag === "fixed"
             ? undefined

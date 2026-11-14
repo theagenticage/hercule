@@ -90,7 +90,7 @@ export interface CaptureVariantsOptions {
  * one context share. The context fixes what the page could read from the
  * machine: the 1440 × 900 window, the scale, UTC and en-US (the fixtures'
  * times read the same everywhere), the colour scheme a Mac would report for
- * the theme, and no Reduce motion.
+ * the theme, and no Reduce motion unless the screen asks for it.
  *
  * A page is ready when `<html>` has `data-ready` and the screen's content
  * selector matches a visible element. Any uncaught exception or console error
@@ -167,7 +167,7 @@ async function loadVariant<Result>(
       // appearance puts in use, so the context reports the appearance that
       // matches the theme (see scripts/sheet-window.ts).
       colorScheme: isDarkTheme(variant.theme) ? "dark" : "light",
-      reducedMotion: "no-preference",
+      reducedMotion: variant.screen.reducedMotion === true ? "reduce" : "no-preference",
     });
     const page = await context.newPage();
     page.setDefaultTimeout(READY_TIMEOUT_MS);

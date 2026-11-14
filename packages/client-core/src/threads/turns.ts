@@ -21,6 +21,7 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
+  type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
   type TodoStep,
@@ -28,6 +29,7 @@ import {
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { findFirstMessageItemId, splitSentText } from "./first-message";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -136,7 +138,10 @@ const isSteeredUserMessage = (detail: unknown): boolean => readJsonObject(detail
 /** One message sent into a turn: by the session's owner, or by another session's agent. */
 export interface ThreadUserMessage {
   readonly itemId: string;
+  /** The user's words: the text as sent, without the context block that follows them. */
   readonly text: string;
+  /** The block that tells the agent about things, when the text ended in one. Absent otherwise. */
+  readonly context?: PromptContextBlock;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
   /**
@@ -159,12 +164,15 @@ export interface ThreadUserMessage {
  * and its blocks both build their messages here, so the two never read a
  * message differently.
  */
-export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+export const buildUserMessage = (
+  event: ItemStarted,
+  isFirstMessage: boolean,
+): ThreadUserMessage => {
   const text = readJsonObject(event.detail)?.text;
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    text: typeof text === "string" ? text : "",
+    ...splitSentText(typeof text === "string" ? text : "", isFirstMessage),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
@@ -671,6 +679,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
     const event: HarnessEvent = row.event;
@@ -709,7 +718,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event));
+          turn.userMessages.push(buildUserMessage(event, event.itemId === firstMessageItemId));
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);
