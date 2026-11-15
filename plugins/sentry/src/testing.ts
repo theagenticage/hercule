@@ -595,7 +595,10 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
           Object.entries(renderFakeIssue(world, issue)).filter(([key]) => !dropped.includes(key)),
         ),
       ),
-      Number(request.params.get("limit") ?? "25"),
+      // Like Sentry, a direct short id hit ignores `limit` and returns every match.
+      shortIdHits.length > 0 && groups.length === 0
+        ? Number.POSITIVE_INFINITY
+        : Number(request.params.get("limit") ?? "25"),
     );
   }
   const shortIdMatch = new RegExp(`^${base}/shortids/([^/]+)/$`).exec(request.path);

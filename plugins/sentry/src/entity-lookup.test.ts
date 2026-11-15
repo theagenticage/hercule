@@ -197,6 +197,23 @@ describe("searching Sentry", () => {
     expect(fake.requests.find((r) => r.path.endsWith("/issues/"))?.params.get("limit")).toBe("2");
   });
 
+  it("returns no more than the limit when a short id matches more issues", async () => {
+    const fake = buildFakeSentry(
+      buildFakeWorld([
+        buildFakeIssue("1", { shortId: "WEBSHOP-1" }),
+        buildFakeIssue("2", { shortId: "WEBSHOP-1" }),
+        buildFakeIssue("3", { shortId: "WEBSHOP-1" }),
+      ]),
+    );
+
+    const result = await runAgainstStub(
+      searchIssues(access, TEST_ACCOUNT_ID, { text: "WEBSHOP-1", limit: 2 }),
+      fake,
+    );
+
+    expect(Result.isSuccess(result) && result.success).toHaveLength(2);
+  });
+
   it("sends no projects request when the search finds nothing", async () => {
     const fake = buildFakeSentry(buildFakeWorld(issues()));
 

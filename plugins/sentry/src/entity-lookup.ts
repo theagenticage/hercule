@@ -59,6 +59,13 @@ const MAX_ISSUE_ID_DIGITS = 32;
  * - A slug may hold dashes, so a dash cannot tell where the suffix starts. The
  *   last dash splits them, because the greedy slug backtracks to it.
  *
+ * The grammar is deliberately stricter than Sentry's own slug rule
+ * (`^(?![0-9]+$)[a-z0-9_\-]+$`): the slug must start with a letter or digit
+ * and hold at least one letter (see `isShortId`), so a date such as
+ * `2024-01-15` is never read as a short id. Rare slugs such as `123_` or
+ * `_app` are therefore not recognized and cannot be resolved by short id; they
+ * can still be found by address or by search.
+ *
  * Every repetition is bounded, so a long run of dashes cannot make a match slow.
  */
 const buildShortIdSource = (letters: "capitals" | "any-case"): string => {
@@ -204,7 +211,10 @@ export const searchIssues = (
     );
     if (issues.length === 0) return [];
     const context = yield* readIssueObservationContext(access, readUserId(accountId));
-    return issues.flatMap((issue) => buildIssueObservation(issue, context, []) ?? []);
+    // A direct short id hit ignores `limit` in Sentry and returns every match.
+    return issues
+      .flatMap((issue) => buildIssueObservation(issue, context, []) ?? [])
+      .slice(0, query.limit);
   });
 
 /**
