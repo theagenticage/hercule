@@ -9,7 +9,7 @@
  *   strong the colour is, so it reads well in every theme.
  * - `color`: an exact CSS colour, either one for every theme or a pair for
  *   light and dark themes.
- * - neither: the mark takes the text colour, and a status icon is grey.
+ * - neither: the mark takes the text colour, and a status icon is drawn in its status's tone.
  */
 import { Schema } from "effect";
 

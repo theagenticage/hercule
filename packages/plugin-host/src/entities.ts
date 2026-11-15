@@ -122,7 +122,7 @@ export const EntityTemplate = buildBoundedString(1, MAX_DECLARED_NAME_LENGTH).ch
  *   them when the status has no `icon`.
  * - `icon` is the plugin's own drawing of the status, such as GitHub's merged
  *   icon, and `hue` or `color` colours it (see `withPluginColor`). An icon
- *   with no colour is drawn grey.
+ *   with no colour is drawn in its status's `tone`.
  * - `norm` marks the usual state of a request.
  * - `stage` is the Task stage a Task takes when its entity gets this status.
  */
