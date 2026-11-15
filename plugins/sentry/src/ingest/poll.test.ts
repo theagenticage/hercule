@@ -65,7 +65,7 @@ const buildTape = (issues: Array<FakeIssue> = [], config: SentryConnectionConfig
     /** Polls once and returns the result, whether it succeeded or failed. */
     pollResult: (context = harness.context) =>
       runAgainstStub(
-        pollWithConnection(tape.config, { accountId: TEST_ACCOUNT_ID }, context),
+        pollWithConnection("issues", tape.config, { accountId: TEST_ACCOUNT_ID }, context),
         fake,
       ),
     /** The time of the latest poll, as the plugin writes it into keys. */

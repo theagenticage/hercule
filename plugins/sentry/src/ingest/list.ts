@@ -11,7 +11,7 @@ import { ApiIssue } from "../sentry-objects";
 import type { ResolvedFilter } from "./filter";
 
 /** How many issues one page of the list holds: the most Sentry allows. */
-const PAGE_SIZE = 100;
+export const PAGE_SIZE = 100;
 
 /** The most issues the feed watches: `MAX_LIST_PAGES` pages. A poll that finds more fails. */
 export const MAX_WATCHED_ISSUES = PAGE_SIZE * MAX_LIST_PAGES;
@@ -22,12 +22,13 @@ export const MAX_WATCHED_ISSUES = PAGE_SIZE * MAX_LIST_PAGES;
  * out too, but Sentry then also drops `firstSeen`, `lastSeen`, `count` and
  * `userCount`, which every issue needs, so it is never sent.
  */
-const LIST_PARAMETERS: ReadonlyArray<readonly [string, string]> = [
+export const LIST_PARAMETERS: ReadonlyArray<readonly [string, string]> = [
   ["limit", String(PAGE_SIZE)],
   ["groupStatsPeriod", ""],
 ];
 
-const issuesPath = (access: OrganizationAccess): string =>
+/** Returns the path of the organization's issue list. */
+export const issuesPath = (access: OrganizationAccess): string =>
   `/api/0/organizations/${access.organization.slug}/issues/`;
 
 /**

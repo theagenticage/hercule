@@ -1,6 +1,6 @@
 /**
  * The ingest handle of one Sentry Connection: what the host calls to poll its
- * one feed, `issues`.
+ * two feeds, `issues` and `entities`.
  *
  * Every poll reads the token and the organization afresh, so a refreshed token
  * is used from the next poll on, and a renamed organization keeps working.
@@ -16,8 +16,10 @@ import {
   type PollResult,
 } from "@hercule/plugin-host";
 import { readToken } from "../api";
-import { SentryConnectionConfig } from "../connection-type";
+import { DEFAULT_LAST_SEEN_DAYS, SentryConnectionConfig } from "../connection-type";
+import { readUserId } from "../identity";
 import { findOrganization } from "../organization";
+import { pollSentryEntities } from "./entities";
 import { pollSentryIssues } from "./poll";
 
 /**
@@ -27,6 +29,7 @@ import { pollSentryIssues } from "./poll";
  * with a `PluginError` for any other failure.
  */
 export const pollWithConnection = (
+  feed: string,
   config: SentryConnectionConfig,
   identity: { readonly accountId: string },
   context: IngestContext,
@@ -42,7 +45,29 @@ export const pollWithConnection = (
       });
     }
     const organization = yield* findOrganization(token, credentials);
-    return yield* pollSentryIssues({ token, organization }, config, identity, context);
+    const access = { token, organization };
+    switch (feed) {
+      case "issues":
+        return yield* pollSentryIssues(access, config, identity, context);
+      case "entities":
+        return context.entities === undefined
+          ? yield* new PluginError({
+              message:
+                "The host gave the Sentry plugin no way to report entities, so the entities feed cannot run.",
+            })
+          : yield* pollSentryEntities(
+              access,
+              {
+                userId: readUserId(identity.accountId),
+                lastSeenDays: config.lastSeenDays ?? DEFAULT_LAST_SEEN_DAYS,
+              },
+              context.entities,
+            );
+      default:
+        return yield* new PluginError({
+          message: `The Sentry event source has no feed "${feed}".`,
+        });
+    }
   }).pipe(
     // Looking up the organization can be rate limited too; the host waits as for a rate limited poll.
     Effect.catchTag("SentryRateLimited", (limit) =>
@@ -69,9 +94,8 @@ export const openSentryIngest: EventSourceContribution["open"] = (connection, co
       ),
     ),
     (config) => ({
-      // The host polls only the feeds the event source declares, and there is one.
-      poll: () =>
-        pollWithConnection(config, { accountId: connection.accountId }, context).pipe(
+      poll: (feed) =>
+        pollWithConnection(feed, config, { accountId: connection.accountId }, context).pipe(
           Effect.provide(FetchHttpClient.layer),
         ),
       close: Effect.void,

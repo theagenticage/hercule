@@ -1,7 +1,8 @@
 /**
  * The Sentry plugin: the Sentry connection type, the event source that polls
- * Sentry for issues entering, leaving and changing, and the workflow actions
- * that resolve, archive and assign an issue.
+ * Sentry for issues entering, leaving and changing, the External Entities
+ * (issues, shown as Errors in the Inbox) with their lookup and saved query,
+ * and the workflow actions that resolve, archive and assign an issue.
  */
 import { Effect, Schema } from "effect";
 import {
@@ -14,9 +15,12 @@ import {
 } from "@hercule/plugin-host";
 import { SENTRY_WORKFLOW_ACTIONS } from "./actions";
 import { connectionType, SENTRY_CONNECTION_TYPE } from "./connection-type";
+import { SENTRY_ENTITY_KINDS, SENTRY_SAVED_QUERIES } from "./entity-kinds";
+import { sentryEntityLookup } from "./entity-lookup";
 import { openSentryIngest } from "./ingest";
 import { SENTRY_EVENT_KINDS } from "./kinds";
 import { SENTRY_SIGNAL_KINDS } from "./signal-kinds";
+import { SENTRY_HUE } from "./status-icons";
 
 /**
  * The Sentry mark, path data only, on the 16x16 grid a plugin's mark uses. It
@@ -30,7 +34,8 @@ const SENTRY_MARK_PATH =
 /**
  * The unqualified id, which the host prefixes to make `sentry/sentry`. The
  * `issues` feed polls a minute apart by default and may not go below 30
- * seconds, which keeps a Connection well inside Sentry's rate limits.
+ * seconds, which keeps a Connection well inside Sentry's rate limits. The
+ * `entities` feed polls every two minutes and may not go below a minute.
  */
 const eventSource: EventSourceContribution = {
   id: "sentry",
@@ -38,7 +43,11 @@ const eventSource: EventSourceContribution = {
   kinds: SENTRY_EVENT_KINDS,
   feeds: {
     issues: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+    entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
   },
+  entityKinds: SENTRY_ENTITY_KINDS,
+  savedQueries: SENTRY_SAVED_QUERIES,
+  entityLookup: sentryEntityLookup,
   signalKinds: SENTRY_SIGNAL_KINDS,
   open: openSentryIngest,
 };
@@ -48,9 +57,9 @@ export const sentry: Plugin = {
     id: "sentry",
     displayName: "Sentry",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "workflow-actions"],
+    capabilities: ["connections", "event-sources", "events", "workflow-actions", "entities"],
     configSchema: Schema.Struct({}),
-    mark: { paths: [SENTRY_MARK_PATH] },
+    mark: { paths: [SENTRY_MARK_PATH], hue: SENTRY_HUE },
   },
   register: (host) =>
     Effect.gen(function* () {

@@ -190,13 +190,63 @@ const ApiActivity = Schema.Struct({
   type: Schema.String,
   dateCreated: SentryTime,
   data: Schema.optionalKey(
-    Schema.NullOr(Schema.Struct({ version: Schema.optionalKey(Schema.NullOr(Schema.String)) })),
+    Schema.NullOr(
+      Schema.Struct({
+        version: Schema.optionalKey(Schema.NullOr(Schema.String)),
+        /** On a regression: the release the issue was resolved in before it came back. */
+        resolved_in_version: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      }),
+    ),
   ),
 });
 
-/** An issue's detail, cut to its activity. */
+/** An issue's detail, cut to its activity, newest first. */
 export const ApiIssueDetail = Schema.Struct({
   activity: Schema.optionalKey(Schema.Array(ApiActivity)),
+});
+
+/** A release an issue was first or last seen in. Sentry sends only `version` for a deleted release. */
+const ApiRelease = Schema.Struct({ version: Schema.String });
+
+/**
+ * An issue's detail, cut to what the Inbox pane reads: its counts, times and
+ * releases, its activity, and `stats["30d"]`, the events of each UTC day as
+ * `[epoch seconds, count]` pairs with the last pair being today.
+ */
+export const ApiIssueBlocksDetail = Schema.Struct({
+  ...ApiIssueDetail.fields,
+  level: Schema.String,
+  substatus: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  userCount: Schema.Number,
+  firstSeen: SentryTime,
+  lastSeen: SentryTime,
+  firstRelease: Schema.optionalKey(Schema.NullOr(ApiRelease)),
+  lastRelease: Schema.optionalKey(Schema.NullOr(ApiRelease)),
+  stats: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        "30d": Schema.optionalKey(
+          Schema.NullOr(Schema.Array(Schema.Tuple([Schema.Number, Schema.Number]))),
+        ),
+      }),
+    ),
+  ),
+});
+
+/** The answer for one tag key of an issue, cut to the most frequent values. */
+export const ApiTagValues = Schema.Struct({
+  totalValues: Schema.Number,
+  topValues: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          value: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          count: Schema.Number,
+        }),
+      ),
+    ),
+  ),
 });
 
 /** One time an issue came back after it was resolved. */
@@ -231,10 +281,13 @@ export const listRegressions = (
     .sort((first, second) => compareNumericIds(first.activityId, second.activityId));
 
 /** One stack frame of an event's exception, as Sentry returns it. */
-const ApiStackFrame = Schema.Struct({
+export const ApiStackFrame = Schema.Struct({
   filename: Schema.optionalKey(Schema.NullOr(Schema.String)),
   function: Schema.optionalKey(Schema.NullOr(Schema.String)),
   lineNo: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  colNo: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  absPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  module: Schema.optionalKey(Schema.NullOr(Schema.String)),
   inApp: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 
@@ -284,6 +337,16 @@ const cutOptionalName = (text: string | undefined): string | undefined =>
 
 const decodeException = Schema.decodeUnknownOption(ApiException);
 
+/**
+ * Returns the last exception of an event, as Sentry sent it: the one that was
+ * raised last, with every frame, oldest call first. Returns undefined when
+ * the event has no exception.
+ */
+export const readLastException = (event: Schema.Schema.Type<typeof ApiLatestEvent>) => {
+  const exceptionEntry = event.entries?.find((entry) => entry.type === "exception");
+  return Option.getOrUndefined(decodeException(exceptionEntry?.data))?.values?.at(-1);
+};
+
 /** Converts one stack frame, keeping what Sentry knows of it. */
 const buildStackFrame = (frame: Schema.Schema.Type<typeof ApiStackFrame>): StackFrame => ({
   filename: frame.filename == null ? null : cutName(frame.filename),
@@ -310,8 +373,7 @@ export const buildLatestEvent = (
     event.tags?.find((tag) => tag.key === key)?.value ?? undefined;
   const environment = cutOptionalName(readTag("environment"));
   const release = cutOptionalName(event.release?.version ?? readTag("release"));
-  const exceptionEntry = event.entries?.find((entry) => entry.type === "exception");
-  const exception = Option.getOrUndefined(decodeException(exceptionEntry?.data))?.values?.at(-1);
+  const exception = readLastException(event);
   return {
     id,
     dateCreated: event.dateCreated ?? fallbackDate,

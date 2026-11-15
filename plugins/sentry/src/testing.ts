@@ -164,6 +164,13 @@ export interface FakeIssue {
   actorId: string | null;
   activity: Array<FakeActivity>;
   latestEvent: FakeEvent | null;
+  /** The release it was first or last seen in; null renders as Sentry's null. */
+  firstRelease: string | null;
+  lastRelease: string | null;
+  /** The detail's `stats["30d"]`: `[epoch seconds, count]` per day. Null leaves `stats` out. */
+  dailyStats: ReadonlyArray<[number, number]> | null;
+  /** The answer for the `browser` tag. Null answers 404, as Sentry does for an issue without one. */
+  browserTag: { totalValues: number; topValues: Array<{ name: string; count: number }> } | null;
 }
 
 /** One entry of an issue's activity. */
@@ -171,7 +178,7 @@ export interface FakeActivity {
   id: string;
   type: string;
   dateCreated: string;
-  data: { version?: string };
+  data: { version?: string; resolved_in_version?: string };
 }
 
 /** The newest event of an issue. */
@@ -184,6 +191,7 @@ export interface FakeEvent {
     filename: string;
     function: string;
     lineNo: number;
+    colNo?: number;
     inApp: boolean;
   }>;
   type: string;
@@ -266,6 +274,10 @@ export const buildFakeIssue = (id: string, overrides: Partial<FakeIssue> = {}): 
   actorId: null,
   activity: [],
   latestEvent: null,
+  firstRelease: null,
+  lastRelease: null,
+  dailyStats: null,
+  browserTag: null,
   ...overrides,
 });
 
@@ -368,6 +380,13 @@ const renderLatestEvent = (event: FakeEvent): Record<string, unknown> => ({
  * value that matches nothing matches nothing, without an error, as recorded.
  */
 const matchesQuery = (world: FakeWorld, issue: FakeIssue, query: string): boolean => {
+  // Words that are not `key:value` filters must all appear in the title or the short id.
+  const words = query
+    .replace(/\S+:\[[^\]]*\]/g, "")
+    .split(/\s+/)
+    .filter((word) => word !== "" && !word.includes(":"));
+  const haystack = `${issue.title} ${issue.shortId}`.toLowerCase();
+  if (words.some((word) => !haystack.includes(word.toLowerCase()))) return false;
   if (/\bis:unresolved\b/.test(query) && issue.status !== "unresolved") return false;
   const days = /\blastSeen:-(\d+)d\b/.exec(query)?.[1];
   if (days !== undefined && Date.parse(issue.lastSeen) < Date.now() - Number(days) * 86_400_000) {
@@ -540,15 +559,24 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
     }
     const environments = request.params.getAll("environment");
     const query = request.params.get("query") ?? "";
+    const shortIdHits =
+      request.params.get("shortIdLookup") === "1"
+        ? world.issues.filter((issue) =>
+            query.split(/\s+/).some((word) => word.toUpperCase() === issue.shortId.toUpperCase()),
+          )
+        : [];
     const matching = (
       groups.length > 0
         ? world.issues.filter((issue) => groups.includes(issue.id))
-        : world.issues.filter(
-            (issue) =>
-              matchesQuery(world, issue, query) &&
-              (projectIds.length === 0 || projectIds.includes(issue.projectId)) &&
-              (environments.length === 0 || environments.includes(issue.environment)),
-          )
+        : // With `shortIdLookup=1`, a short id in the query is a direct hit that comes back alone.
+          shortIdHits.length > 0
+          ? shortIdHits
+          : world.issues.filter(
+              (issue) =>
+                matchesQuery(world, issue, query) &&
+                (projectIds.length === 0 || projectIds.includes(issue.projectId)) &&
+                (environments.length === 0 || environments.includes(issue.environment)),
+            )
     )
       // `sort=new` lists the newest first seen first; the id breaks ties.
       .sort(
@@ -568,11 +596,42 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
       Number(request.params.get("limit") ?? "25"),
     );
   }
-  const issueMatch = new RegExp(`^${base}/issues/(\\d+)/(events/latest/)?$`).exec(request.path);
+  const shortIdMatch = new RegExp(`^${base}/shortids/([^/]+)/$`).exec(request.path);
+  if (request.method === "GET" && shortIdMatch !== null) {
+    const wanted = decodeURIComponent(shortIdMatch[1]!).toUpperCase();
+    const issue = world.issues.find((candidate) => candidate.shortId.toUpperCase() === wanted);
+    return issue === undefined
+      ? { status: 404, body: { detail: "The requested resource does not exist" } }
+      : {
+          status: 200,
+          body: {
+            organizationSlug: slug,
+            projectSlug: world.projects.find((project) => project.id === issue.projectId)?.slug,
+            groupId: issue.id,
+            shortId: issue.shortId,
+            group: renderFakeIssue(world, issue),
+          },
+        };
+  }
+  const issueMatch = new RegExp(`^${base}/issues/(\\d+)/(events/latest/|tags/browser/)?$`).exec(
+    request.path,
+  );
   if (issueMatch !== null) {
     const issue = world.issues.find((candidate) => candidate.id === issueMatch[1]);
     if (issue === undefined)
       return { status: 404, body: { detail: "The requested resource does not exist" } };
+    if (issueMatch[2] === "tags/browser/") {
+      return issue.browserTag === null
+        ? { status: 404, body: { detail: "Tag not found" } }
+        : {
+            status: 200,
+            body: {
+              key: "browser",
+              totalValues: issue.browserTag.totalValues,
+              topValues: issue.browserTag.topValues.map((top) => ({ ...top, value: top.name })),
+            },
+          };
+    }
     if (issueMatch[2] !== undefined) {
       return issue.latestEvent === null
         ? { status: 404, body: { detail: "Event not found" } }
@@ -582,7 +641,16 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
       applyIssueUpdate(world, issue, request.body);
       return { status: 200, body: renderFakeIssue(world, issue) };
     }
-    return { status: 200, body: { ...renderFakeIssue(world, issue), activity: issue.activity } };
+    return {
+      status: 200,
+      body: {
+        ...renderFakeIssue(world, issue),
+        activity: issue.activity,
+        firstRelease: issue.firstRelease === null ? null : { version: issue.firstRelease },
+        lastRelease: issue.lastRelease === null ? null : { version: issue.lastRelease },
+        ...(issue.dailyStats === null ? {} : { stats: { "30d": issue.dailyStats } }),
+      },
+    };
   }
   return {
     status: 404,
