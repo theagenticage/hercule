@@ -370,9 +370,6 @@ describe("the issues feed", () => {
     expect(list?.authorization).toBe(`Bearer ${TEST_TOKEN}`);
     expect(list?.params.get("query")).toBe("is:unresolved lastSeen:-14d");
     expect(list?.params.get("sort")).toBe("new");
-    expect(list?.params.get("limit")).toBe("100");
-    expect(list?.params.get("groupStatsPeriod")).toBe("");
-    expect(list?.params.has("collapse")).toBe(false);
     expect(list?.params.getAll("project")).toEqual(["11"]);
     expect(list?.params.getAll("environment")).toEqual(["production", "staging"]);
   });

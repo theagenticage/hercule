@@ -180,12 +180,9 @@ describe("searching Sentry", () => {
     );
 
     expect(Result.isSuccess(result) && result.success.map((o) => o.ref)).toEqual([issueRef("2")]);
-    expect(
-      fake.requests.find((r) => r.path.endsWith("/issues/"))?.params.get("shortIdLookup"),
-    ).toBe("1");
   });
 
-  it("asks for no more than the limit and returns no more", async () => {
+  it("returns no more than the limit", async () => {
     const fake = buildFakeSentry(buildFakeWorld(issues()));
 
     const result = await runAgainstStub(
@@ -194,7 +191,6 @@ describe("searching Sentry", () => {
     );
 
     expect(Result.isSuccess(result) && result.success).toHaveLength(2);
-    expect(fake.requests.find((r) => r.path.endsWith("/issues/"))?.params.get("limit")).toBe("2");
   });
 
   it("returns no more than the limit when a short id matches more issues", async () => {

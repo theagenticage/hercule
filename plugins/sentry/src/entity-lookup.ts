@@ -8,7 +8,7 @@
  * Recognition therefore gives scoped recognitions, and `resolve` reads them on
  * a Connection to find the ref.
  */
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
@@ -20,7 +20,7 @@ import {
   type EntityRecognition,
   type EntityResolution,
 } from "@hercule/plugin-host";
-import { callSentry, decodeSentryBody, type SentryFailure } from "./api";
+import type { SentryFailure } from "./api";
 import { readIssueBlocks } from "./entity-blocks";
 import { ISSUE_KIND } from "./entity-kinds";
 import {
@@ -29,14 +29,14 @@ import {
   readIssueObservationContext,
 } from "./entity-reads";
 import { readUserId } from "./identity";
-import { issuesPath, LIST_PARAMETERS, lookUpIssues, PAGE_SIZE } from "./ingest/list";
+import { findIssues, lookUpIssues } from "./issue-list";
 import {
   openOrganizationAccess,
   readOrganizationResource,
   type OrganizationAccess,
 } from "./organization";
 import { parseIssueRef } from "./refs";
-import { ApiIssue, ApiShortIdAnswer } from "./sentry-objects";
+import { type ApiIssue, ApiShortIdAnswer } from "./sentry-objects";
 
 /** The most things `recognize` returns for one text. */
 const MAX_RECOGNITIONS = 20;
@@ -171,8 +171,7 @@ const withOrganizationAccess = <A>(
 
 /**
  * Searches the organization's issues by words or a short id, at most `limit`,
- * whatever their status. Sends one issues-list request with `shortIdLookup=1`,
- * so a short id in the text comes back alone. Reads the organization's teams
+ * whatever their status (see `findIssues`). Reads the organization's teams
  * only when the search found something, after the issues: with the
  * organization lookup a search costs three requests, and two when it finds
  * nothing.
@@ -192,29 +191,10 @@ export const searchIssues = (
         message: `Sentry cannot search inside ${query.scopeRef}: it can search only the whole organization.`,
       });
     }
-    const response = yield* callSentry({
-      method: "GET",
-      baseUrl: access.organization.regionUrl,
-      path: issuesPath(access),
-      token: access.token,
-      query: [
-        ["query", query.text],
-        ["shortIdLookup", "1"],
-        ["limit", String(Math.min(query.limit, PAGE_SIZE))],
-        ...LIST_PARAMETERS.filter(([name]) => name !== "limit"),
-      ],
-    });
-    const issues = yield* decodeSentryBody(
-      Schema.Array(ApiIssue),
-      response.body,
-      issuesPath(access),
-    );
+    const issues = yield* findIssues(access, query.text, query.limit);
     if (issues.length === 0) return [];
     const context = yield* readIssueObservationContext(access, readUserId(accountId));
-    // A direct short id hit ignores `limit` in Sentry and returns every match.
-    return issues
-      .flatMap((issue) => buildIssueObservation(issue, context, []) ?? [])
-      .slice(0, query.limit);
+    return issues.flatMap((issue) => buildIssueObservation(issue, context, []) ?? []);
   });
 
 /**

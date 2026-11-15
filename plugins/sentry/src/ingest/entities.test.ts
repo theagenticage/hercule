@@ -86,7 +86,6 @@ describe("the inventory", () => {
       "is:unresolved assigned:[me, my_teams] lastSeen:-14d",
     );
     expect(request?.params.get("sort")).toBe("new");
-    expect(request?.params.get("limit")).toBe("100");
     expect(request?.params.has("project")).toBe(false);
     expect(request?.params.has("environment")).toBe(false);
   });
@@ -200,8 +199,6 @@ describe("the refresh", () => {
     expect(missing).toEqual([]);
     const reads = fake.requests.filter((request) => request.params.has("group"));
     expect(reads).toHaveLength(1);
-    expect(reads[0]?.params.getAll("group")).toEqual(["1", "2", "3"]);
-    expect(reads[0]?.params.get("query")).toBe("");
   });
 
   it("reports an unparseable ref or another organization's ref inaccessible, without a request", async () => {

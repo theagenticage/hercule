@@ -23,7 +23,7 @@ import {
   type IngestEntities,
   type PollResult,
 } from "@hercule/plugin-host";
-import { readPages, type SentryFailure } from "../api";
+import type { SentryFailure } from "../api";
 import { ISSUE_KIND } from "../entity-kinds";
 import {
   buildIssueObservation,
@@ -31,10 +31,9 @@ import {
   readIssueObservationContext,
   type IssueObservationContext,
 } from "../entity-reads";
+import { listIssues, lookUpIssues } from "../issue-list";
 import type { OrganizationAccess } from "../organization";
 import { parseIssueRef } from "../refs";
-import { ApiIssue } from "../sentry-objects";
-import { issuesPath, LIST_PARAMETERS, lookUpIssues, PAGE_SIZE } from "./list";
 
 /** How many wanted refs the poll asks the host for, and reads, each time. */
 const WANTED_REFS = 100;
@@ -52,7 +51,7 @@ export interface EntitiesPollInput {
  * more issues than the host takes, the poll reports the ones first seen most
  * recently, a stable subset, with `complete: false`. An issue listed twice
  * (a merge between two pages can do that) is reported once. Fails as
- * `readPages` does, before anything is reported.
+ * `listIssues` does, before anything is reported.
  */
 const reconcileInventory = (
   access: OrganizationAccess,
@@ -61,24 +60,17 @@ const reconcileInventory = (
   entities: IngestEntities,
 ): Effect.Effect<void, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const listed = yield* readPages(
+    const listed = yield* listIssues(
+      access,
       {
-        method: "GET",
-        baseUrl: access.organization.regionUrl,
-        path: issuesPath(access),
-        token: access.token,
-        query: [
-          ["query", `is:unresolved assigned:[me, my_teams] lastSeen:-${String(lastSeenDays)}d`],
-          ["sort", "new"],
-          ...LIST_PARAMETERS,
-        ],
+        query: `is:unresolved assigned:[me, my_teams] lastSeen:-${String(lastSeenDays)}d`,
+        sort: "new",
       },
-      ApiIssue,
-      MAX_ENTITY_OBSERVATIONS / PAGE_SIZE,
+      MAX_ENTITY_OBSERVATIONS,
     );
     // The core refuses a reconcile that lists a ref twice. An issue Sentry is
     // deleting just stays out of the inventory.
-    const uniqueIssues = [...new Map(listed.items.map((issue) => [issue.id, issue])).values()];
+    const uniqueIssues = [...new Map(listed.issues.map((issue) => [issue.id, issue])).values()];
     const observations = uniqueIssues
       .flatMap((issue) => {
         const observation = buildIssueObservation(issue, context, ["assigned"]);
