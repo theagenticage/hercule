@@ -69,9 +69,10 @@ describe("what the sentry plugin registers", () => {
     expect(sentry.manifest).toMatchObject({
       id: "sentry",
       displayName: "Sentry",
-      capabilities: ["connections", "event-sources", "events", "workflow-actions"],
+      capabilities: ["connections", "event-sources", "events", "entities", "workflow-actions"],
     });
     expect(sentry.manifest.mark?.paths).toHaveLength(1);
+    expect(sentry.manifest.mark?.hue).toBe(288);
   });
 
   it("contributes one type with a device flow and a pasted token", async () => {
@@ -108,7 +109,7 @@ describe("what the sentry plugin registers", () => {
     expect(type?.oauth).toBeUndefined();
   });
 
-  it("contributes one event source with the issues feed and every kind", async () => {
+  it("contributes one event source with the issues and entities feeds and every kind", async () => {
     const [source, ...others] = (await collectContributions(sentry)).sources;
 
     expect(others).toEqual([]);
@@ -116,8 +117,29 @@ describe("what the sentry plugin registers", () => {
     expect(source?.connectionType).toBe("sentry/sentry");
     expect(source?.feeds).toEqual({
       issues: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+      entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     });
     expect(Object.keys(source?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
+  });
+
+  it("declares the Error kind, its saved query and a lookup", async () => {
+    const source = (await collectContributions(sentry)).sources[0]!;
+
+    expect(
+      (source.entityKinds ?? []).map((kind) => [kind.word, kind.refPrefix, kind.noun, kind.pace]),
+    ).toEqual([["issue", "sentry:issue:", "Error", "fast"]]);
+    expect(source.savedQueries).toEqual([
+      {
+        word: "errors-on-me",
+        name: "Errors on me",
+        order: "waiting",
+        clauses: [
+          { key: "kind", op: "is", value: "issue" },
+          { key: "mine", op: "is", value: true },
+        ],
+      },
+    ]);
+    expect(source.entityLookup).toBeDefined();
   });
 
   it("offers entered, regressed and escalating to triage, and not the kinds that only end a signal", async () => {
@@ -322,6 +344,7 @@ describe("the choices of the config form", () => {
       world.teams = Array.from({ length: 500 }, (_, index) => ({
         id: String(1000 + index),
         slug: `team-${String(index)}`,
+        name: `Team ${String(index)}`,
       }));
       world.members = Array.from({ length: 600 }, (_, index) => ({
         id: String(2000 + index),

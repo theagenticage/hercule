@@ -197,8 +197,8 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     // linked repo Resources it watches, the reader of the issues and pull
     // requests that concern the user (entities), and the GitHub workflow
     // actions.
-    // sentry is the same without Resources and entities, and linear is sentry
-    // without workflow actions, plus entities.
+    // sentry is github without Resources, and linear is sentry without
+    // workflow actions.
     const findCapabilities = (id: string) =>
       plugins.find((plugin) => plugin.id === id)?.capabilities;
     expect(findCapabilities("github")).toEqual([
@@ -213,6 +213,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "connections",
       "event-sources",
       "events",
+      "entities",
       "workflow-actions",
     ]);
     expect(findCapabilities("linear")).toEqual([

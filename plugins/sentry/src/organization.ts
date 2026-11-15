@@ -6,8 +6,15 @@
  */
 import { Effect, type Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
-import { PluginError } from "@hercule/plugin-host";
-import { callSentry, decodeSentryBody, readPages, SENTRY_API_URL, type SentryFailure } from "./api";
+import { AuthError, PluginError } from "@hercule/plugin-host";
+import {
+  callSentry,
+  decodeSentryBody,
+  readPages,
+  readToken,
+  SENTRY_API_URL,
+  type SentryFailure,
+} from "./api";
 import { ApiMember, ApiOrganization, buildMemberLabel } from "./sentry-objects";
 
 /** The organization a Connection watches. */
@@ -107,6 +114,50 @@ export const findOrganization = (
       });
     }
     return { id: only.id, slug: only.slug, name: only.name, regionUrl: only.links.regionUrl };
+  });
+
+/**
+ * Opens the organization the Connection's credentials reach: reads the token,
+ * then finds the organization. Fails with an `AuthError` telling the user to
+ * reconnect when the credentials hold no token. Otherwise fails as
+ * `findOrganization` does.
+ */
+export const openOrganizationAccess = (
+  credentials: Readonly<Record<string, string>>,
+): Effect.Effect<OrganizationAccess, AuthError | SentryFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const token = readToken(credentials);
+    if (token === undefined) {
+      return yield* new AuthError({
+        message: "The Connection has no Sentry token. Reconnect it to sign in to Sentry again.",
+      });
+    }
+    return { token, organization: yield* findOrganization(token, credentials) };
+  });
+
+/** Returns the path of one issue of the organization, such as `/api/0/organizations/acme/issues/1001/`. */
+export const buildIssuePath = (access: OrganizationAccess, issueId: string): string =>
+  `/api/0/organizations/${access.organization.slug}/issues/${issueId}/`;
+
+/**
+ * Reads one resource of the organization from the organization's region host
+ * and decodes it with `schema`. `path` is the full path, such as the result of
+ * `buildIssuePath`. Returns undefined when Sentry answers 404, so a resource
+ * deleted since it was listed does not fail the caller. Otherwise fails as
+ * `callSentry` and `decodeSentryBody` do.
+ */
+export const readOrganizationResource = <S extends Schema.Decoder<unknown>>(
+  access: OrganizationAccess,
+  path: string,
+  schema: S,
+): Effect.Effect<S["Type"] | undefined, SentryFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* callSentry(
+      { method: "GET", baseUrl: access.organization.regionUrl, path, token: access.token },
+      [404],
+    );
+    if (response.status === 404) return undefined;
+    return yield* decodeSentryBody(schema, response.body, path);
   });
 
 /**
