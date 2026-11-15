@@ -6,13 +6,18 @@
  */
 import { Effect } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
-import { isHttpUrl, type EntityObservation } from "@hercule/plugin-host";
+import {
+  isHttpUrl,
+  MAX_ENTITY_FIELD_TEXT_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
+  type EntityObservation,
+} from "@hercule/plugin-host";
 import { readPages, type SentryFailure } from "./api";
 import { ISSUE_KIND, SEVERITY_VALUES } from "./entity-kinds";
 import { MAX_LIST_PAGES, type OrganizationAccess } from "./organization";
 import { buildIssueRef } from "./refs";
-import { ApiProject, buildIssueBlock, isAssignedToUser, type ApiIssue } from "./sentry-objects";
-import { cutName, cutText } from "./text";
+import { ApiProject, type ApiIssue } from "./sentry-objects";
+import { cutText } from "./text";
 
 /**
  * The longest `shortId` an observation reports. The core refuses an
@@ -27,6 +32,9 @@ const MAX_IDENTIFIER_LENGTH = 64;
  * inventory it is in.
  */
 const MAX_PERSON_NAME_LENGTH = 120;
+
+/** Cuts a team or project name to the longest text an observation's field holds. */
+const cutFieldText = (text: string): string => cutText(text, MAX_ENTITY_FIELD_TEXT_LENGTH);
 
 /**
  * The teams of an organization, as its projects list them.
@@ -163,12 +171,12 @@ const decideLifecycleAndStatus = (
  */
 const decideTeamName = (issue: ApiIssue, teams: OrganizationTeams): string | null => {
   if (issue.assignedTo?.type === "team") {
-    return cutName(teams.names.get(issue.assignedTo.id) ?? issue.assignedTo.name);
+    return cutFieldText(teams.names.get(issue.assignedTo.id) ?? issue.assignedTo.name);
   }
   const projectTeamIds = teams.teamIdsByProject.get(issue.project.id) ?? [];
   const onlyTeamName =
     projectTeamIds.length === 1 ? teams.names.get(projectTeamIds[0]!) : undefined;
-  return onlyTeamName === undefined ? null : cutName(onlyTeamName);
+  return onlyTeamName === undefined ? null : cutFieldText(onlyTeamName);
 };
 
 /** Returns `value` when it is a finite number that is not negative, and null otherwise. */
@@ -198,8 +206,9 @@ const parseEventCount = (count: string): number | null =>
  *   time from the same source, so such a change is still written.
  * - `severity` is null for a level that is not one of `SEVERITY_VALUES`,
  *   `users` and `events` are null when not a finite non-negative number, and
- *   `shortId` and `assignee` are cut to the core's bounds, because the core
- *   refuses a whole inventory that holds an unknown or oversized value.
+ *   the title, the short id, the names and the assignee are cut to the core's
+ *   bounds, because the core refuses a whole inventory that holds an unknown
+ *   or oversized value.
  */
 export const buildIssueObservation = (
   issue: ApiIssue,
@@ -207,11 +216,11 @@ export const buildIssueObservation = (
   concerns: ReadonlyArray<"assigned">,
 ): EntityObservation | undefined => {
   if (isDeletedInSentry(issue) || issue.status === "reprocessing") return undefined;
-  const block = buildIssueBlock(issue);
-  const assignedToUser = isAssignedToUser(block, context.userId);
+  const assignedToUser =
+    issue.assignedTo?.type === "user" && issue.assignedTo.id === context.userId;
   const reason = assignedToUser
     ? "assigned"
-    : block.assignedTo?.type === "team"
+    : issue.assignedTo?.type === "team"
       ? "team-assigned"
       : undefined;
   const firstSeen = new Date(issue.firstSeen).toISOString();
@@ -219,23 +228,24 @@ export const buildIssueObservation = (
   return {
     kind: ISSUE_KIND,
     ref: buildIssueRef(context.organizationId, issue.id),
-    title: block.title,
-    url: isHttpUrl(block.permalink)
-      ? block.permalink
+    // An issue with no title is named by its short id, as the event payload does.
+    title: cutText(issue.title.trim() === "" ? issue.shortId : issue.title, MAX_EVENT_TITLE_LENGTH),
+    url: isHttpUrl(issue.permalink)
+      ? issue.permalink
       : `https://${context.organizationSlug}.sentry.io/issues/${issue.id}/`,
     ...decideLifecycleAndStatus(issue),
     fields: {
-      shortId: cutText(block.shortId, MAX_IDENTIFIER_LENGTH),
+      shortId: cutText(issue.shortId, MAX_IDENTIFIER_LENGTH),
       team: decideTeamName(issue, context.teams),
-      project: block.project.slug,
+      project: cutFieldText(issue.project.slug),
       severity: SEVERITY_WORDS.has(issue.level) ? issue.level : null,
       events: parseEventCount(issue.count),
       users: readCount(issue.userCount),
       firstSeen,
       lastSeen,
       assignee:
-        block.assignedTo?.type === "user"
-          ? cutText(block.assignedTo.name, MAX_PERSON_NAME_LENGTH)
+        issue.assignedTo?.type === "user"
+          ? cutText(issue.assignedTo.name, MAX_PERSON_NAME_LENGTH)
           : null,
     },
     concerns,
