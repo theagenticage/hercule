@@ -503,7 +503,9 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
         id: project.id,
         slug: project.slug,
         name: project.name,
-        teams: world.teams.filter((team) => project.teamIds.includes(team.id)),
+        teams: world.teams
+          .filter((team) => project.teamIds.includes(team.id))
+          .map((team) => ({ id: team.id, slug: team.slug, name: team.slug })),
       })),
       world.pageSize,
     );

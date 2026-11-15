@@ -61,7 +61,7 @@ All recorded.
 - `project`: a project id; repeat it for more than one. Leaving it out returns every project the user can see, the same as `project=-1`. Recorded. **An unknown project id is an error**, unlike the other filters: it answered 403 with a `detail` message. Recorded.
 - `group`: an issue id; repeat it to read up to 100 named issues in one request. This is how a poller learns why an issue left its list.
 - `sort`: `date` (last seen, the default), `new` (first seen).
-- `statsPeriod`: the window for the `stats` field.
+- `groupStatsPeriod`: the window for the `stats` field: `24h`, `14d` or `auto`, else 400. (`statsPeriod` is a different parameter: the date window the search covers. From Sentry's source, `src/sentry/issues/endpoints/organization_group_index.py`.)
 - `collapse`: leaves fields out. `collapse=stats` drops the hourly counts and shrinks the response by about a third. **`collapse=lifetime` drops `firstSeen`, `lastSeen`, `count` and `userCount` too**, so a poller must not collapse it.
 
 **An unknown value in the query is not an error.** `assigned:#no-such-team` answered 200 with an empty list. A team, project or environment that was renamed or deleted makes the filter match nothing, silently. Recorded.
@@ -109,3 +109,55 @@ All need the `event:write` scope, which the plugin's device flow must request ([
 - The same with `{"assignedTo": "<user id or email>"}` assigns; `"team:<id>"` assigns a team.
 
 The build ticket's fake Sentry server implements these. They are not tried against a real organization until the plugin's own end-to-end check.
+
+## For the Inbox (#1163)
+
+None of this was recorded: there was no token. Each fact is marked "From the documentation" or "From Sentry's source" with the file path at getsentry/sentry (read on 2026-11-15). Check each against a real response when the plugin first runs.
+
+### Reading one issue
+
+- **Short id lookup.** `GET /api/0/organizations/{org}/shortids/{short_id}/` answers `{organizationSlug, projectSlug, groupId (string), shortId, group}`. `group` is the same serializer as the issue detail without `activity`, `tags`, `stats` and releases, so it has `id`, `shortId`, `title`, `permalink`, `level`, `status`, `substatus`, `assignedTo`, `project`, `firstSeen`, `lastSeen`, `count`, `userCount` and the rest of the list fields. From the documentation, and `src/sentry/issues/endpoints/organization_shortid.py`.
+- The short id is matched case-insensitively (the project slug is lower-cased, the base32 part upper-cased). A leading `issue:` is allowed. An unknown or malformed short id, or one in another organization, answers 404. From `src/sentry/models/group.py` (`parse_short_id`, `get_group_with_redirect`) and `src/sentry/utils/numbers.py`.
+- Every issue endpoint under `/issues/{id}/` takes a short id in place of the numeric id, by the same code. So the detail request can be made with the short id and no lookup request is needed.
+- **Gone issues answer 404.** `pending_deletion`, `deletion_in_progress` and `pending_merge` issues answer 404 on the lookup and on every `/issues/{id}/...` endpoint (`EXCLUDED_STATUSES` in `src/sentry/issues/endpoints/bases/group.py`). A `reprocessing` issue still answers 200.
+
+### Statuses
+
+`status` strings are `unresolved`, `resolved`, `ignored`, `pending_deletion`, `pending_merge` and `reprocessing`. `deletion_in_progress` is reported as `pending_deletion`. Only `unresolved` and `ignored` carry a `substatus`. From `src/sentry/api/serializers/models/group.py` (`_get_status_label`) and `src/sentry/models/group.py`.
+
+The issues list with `group=<id>` ignores `query` and does not filter by status, so it returns `pending_deletion`, `pending_merge` and `reprocessing` issues with that status string. An issue that no longer exists is simply missing from the answer. Search by `query` leaves out the three gone statuses (`_initialize_group_queryset` in `src/sentry/search/snuba/backend.py`). Source only.
+
+### Searching
+
+- **The default `is:unresolved` applies only when the `query` parameter is absent.** `query=` (empty) returns every status, and so does a query with words and no `is:` token. The documentation says the same for the empty value. From `src/sentry/api/helpers/group_index/index.py` (`if query is None: query = DEFAULT_QUERY`). The existing "applies the default" wording above holds only for a missing parameter.
+- Free text matches the issue's title and message, as a contains match ([search docs](https://docs.sentry.io/concepts/search/)). A status filter is optional: `is:resolved` or `is:unresolved` narrow, nothing widens.
+- **A short id in `query` is found only with `shortIdLookup=1`.** Every whitespace-separated token that looks like a short id is looked up; hits come back alone, with header `X-Sentry-Direct-Hit: 1` when there is one. Without `shortIdLookup=1` it is searched as plain text. From `get_by_short_ids` in `src/sentry/api/helpers/group_index/index.py`.
+
+### Daily counts for 14 days
+
+- **Issues list with `groupStatsPeriod=14d`** returns `stats: {"14d": [[epochSeconds, count], ...]}` on each issue: 14 buckets of 24 hours. The series is built from now backwards in steps of 86,400 seconds, and each timestamp is rounded down to a multiple of 86,400, so buckets start at UTC midnight and the last one is today so far (partial). From `GroupStatsMixin.get_stats` in `src/sentry/api/serializers/models/group_stream.py` (`STATS_PERIOD_CHOICES`) and `get_optimal_rollup_series` in `src/sentry/tsdb/base.py`. Do not send `collapse=stats`. One request serves up to 100 issues (`group=` repeated).
+- **Issue detail** (`GET .../issues/{id}/`) carries `stats: {"24h": [...], "30d": [...]}`, same pair format, daily buckets with the same boundaries. The loop runs from `now - 30 days`, so `30d` should hold 31 buckets; the last 14 are the trend. `collapse=stats` removes it. From `src/sentry/issues/endpoints/group_details.py` (`__group_hourly_daily_stats`). Count the buckets in the first real response.
+- **`GET .../issues/{id}/stats/`** is `PRIVATE` and deprecated (`src/sentry/issues/endpoints/group_stats.py`). Do not use it.
+- **Recommendation: take `30d` from the issue detail and keep its last 14 entries.** The detail is needed anyway for activity, releases and tags, so the trend costs no request.
+
+### Tags
+
+- `GET /api/0/organizations/{org}/issues/{id}/tags/browser/` answers `{key, name, uniqueValues, totalValues, topValues: [{key, name, value, count, lastSeen, firstSeen}]}`. `topValues` is ordered by `count`, most frequent first, limited to a few values (the limit is `TOP_VALUES_DEFAULT_LIMIT` in the tagstore; its number was not read). In a value, `value` is the raw tag value and `name` its display label; for `browser` both are like `Safari 19.1`. From the documentation, `src/sentry/issues/endpoints/group_tagkey_details.py` and `src/sentry/tagstore/types.py`.
+- **No `browser` tag on the issue answers 404** (`GroupTagKeyNotFound`; a key whose only values are empty counts as missing).
+- The tag URL is rate limited to 10 requests a second per user.
+- **The issue detail's `tags` array does not carry `topValues`**: its items are `{key, name, totalValues}` only, because the detail builds them without top values (`get_group_tag_keys` in `src/sentry/tagstore/snuba/backend.py`). Reading the browser needs its own request. Use it as the signal whether an issue has a `browser` key at all, to skip a 404.
+
+### Releases and activity
+
+- `firstRelease` and `lastRelease` are `null` when the issue has none, else a release: `{id, version, shortVersion, status, ref, url, dateReleased, dateCreated, ...}`. A release that no longer exists comes back as `{version}` alone. `shortVersion` equals `version` in this code. From `src/sentry/api/serializers/models/release.py` and `group.py` (`GroupReleaseVersionResponse`).
+- `activity` is newest first, at most 100 items; each is `{type, dateCreated, data, user, ...}`.
+- **Resolved:** the newest `set_resolved` / `set_resolved_in_release` / `set_resolved_by_age` item. Its `dateCreated` is when. For `set_resolved_in_release`, `data.version` is the release, and is `""` for "in the next release" (`inNextRelease: true`). `set_resolved_by_age` has `data.age` (hours) and no version. From `src/sentry/api/helpers/group_index/update.py` and `activity_response_schemas.py`.
+- **Came back:** the newest `set_regression` item. `dateCreated` is when, `data.version` the release it came back in (`""` when the event had none), and `data.resolved_in_version` the release it was resolved in before. From `src/sentry/event_manager.py`.
+
+### Latest event frames
+
+`GET .../issues/{id}/events/latest/` has `entries: [{type: "exception", data: {values: [{type, value, module, stacktrace: {frames, framesOmitted, hasSystemFrames}}]}}]`. A frame has `filename`, `absPath`, `module`, `function`, `lineNo`, `colNo`, `inApp` (bool or null), `context`, `vars` and more, all nullable. `colNo` is confirmed. Frames are in the order the SDK sent them: **oldest call first, the throwing frame last**; the web app reverses them for display only. From `src/sentry/interfaces/stacktrace.py` (`Frame.get_api_context`, "ordered by the oldest call first").
+
+### Projects with teams
+
+`GET /api/0/organizations/{org}/projects/` returns each project with `id`, `name`, `slug`, `teams: [{id, slug, name}]` (`id` a string) and a legacy `team`. It pages by `Link` header at up to 100 per page (`per_page`, default 100); `all_projects=1` returns every project unpaged. From `src/sentry/core/endpoints/organization_projects.py` and `src/sentry/api/serializers/models/project.py`.

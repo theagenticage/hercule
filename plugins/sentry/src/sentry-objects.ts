@@ -67,7 +67,9 @@ export const ApiProject = Schema.Struct({
   id: Schema.String,
   slug: Schema.String,
   name: Schema.String,
-  teams: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
+  teams: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  ),
 });
 
 /** An environment. */

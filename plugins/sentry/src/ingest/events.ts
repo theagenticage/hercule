@@ -6,6 +6,7 @@
 import { MAX_EVENT_TITLE_LENGTH, type EmittedEvent } from "@hercule/plugin-host";
 import type { IssueBlock } from "../kinds";
 import type { SentryOrganization } from "../organization";
+import { buildIssueRef, buildProjectRef } from "../refs";
 import { cutText } from "../text";
 
 /** The `system` of every event this plugin emits. */
@@ -45,8 +46,8 @@ export const buildIssueEvent = (input: IssueEventInput): EmittedEvent => {
     dedupKey: input.dedupKey,
     occurredAt: normalizeTimestamp(input.occurredAt, input.fallbackTime),
     refs: [
-      `sentry:issue:${organization.id}/${issue.id}`,
-      `sentry:project:${organization.id}/${issue.project.id}`,
+      buildIssueRef(organization.id, issue.id),
+      buildProjectRef(organization.id, issue.project.id),
     ],
     ...(issue.permalink === "" ? {} : { url: issue.permalink }),
     system: SENTRY_SYSTEM,
