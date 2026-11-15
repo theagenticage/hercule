@@ -266,11 +266,11 @@ export const PANE_BLOCKS: ReadonlyMap<number, EntityBlocks> = new Map<number, En
     6,
     {
       blocks: [
-        trendPoints([2, 2, 3, 2, 4, 3, 5, 9, 14, 22, 31, 48, 70, 96, 128]),
+        trendPoints([2, 3, 2, 4, 3, 5, 9, 14, 22, 31, 48, 70, 96, 128]),
         {
           type: "fields",
           rows: [
-            { label: "Level", value: "error" },
+            { label: "Severity", value: "error" },
             { label: "First seen", value: "6 days ago, in 2026.11.06-1" },
             { label: "Last seen", value: "4 minutes ago" },
             { label: "Users", value: "312" },
@@ -328,7 +328,7 @@ const SENTRY_ISSUE_PEER: EntityPeer = {
   id: buildId(6),
   ref: SENTRY_ISSUE_REF,
   kind: "sentry/issue",
-  noun: "Issue",
+  noun: "Error",
   identifier: "STOREFRONT-1Z9",
   title: "TypeError: Cannot read properties of undefined (reading 'deliveryCost')",
   yours: false,
