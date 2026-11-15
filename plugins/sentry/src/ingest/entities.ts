@@ -12,7 +12,7 @@
  * 2. The refresh: issues the host wants read although the inventory did not
  *    list them, such as a resolved one, read by id.
  *
- * Nothing is reported for the inventory unless all its pages were read, so a
+ * Nothing is reported for the inventory unless every page it asks for was read, so a
  * failed page or a rate limit takes nothing away.
  */
 import { Effect } from "effect";
@@ -27,7 +27,8 @@ import { readPages, type SentryFailure } from "../api";
 import { ISSUE_KIND } from "../entity-kinds";
 import {
   buildIssueObservation,
-  readOrganizationTeams,
+  isDeletedInSentry,
+  readIssueObservationContext,
   type IssueObservationContext,
 } from "../entity-reads";
 import type { OrganizationAccess } from "../organization";
@@ -49,12 +50,13 @@ export interface EntitiesPollInput {
 /**
  * Reads the inventory and reports it in one `reconcile` call. When Sentry has
  * more issues than the host takes, the poll reports the ones first seen most
- * recently, a stable subset, with `complete: false`. Fails as `readPages`
- * does, before anything is reported.
+ * recently, a stable subset, with `complete: false`. An issue listed twice
+ * (a merge between two pages can do that) is reported once. Fails as
+ * `readPages` does, before anything is reported.
  */
 const reconcileInventory = (
   access: OrganizationAccess,
-  input: EntitiesPollInput,
+  lastSeenDays: number,
   context: IssueObservationContext,
   entities: IngestEntities,
 ): Effect.Effect<void, SentryFailure, HttpClient.HttpClient> =>
@@ -66,10 +68,7 @@ const reconcileInventory = (
         path: issuesPath(access),
         token: access.token,
         query: [
-          [
-            "query",
-            `is:unresolved assigned:[me, my_teams] lastSeen:-${String(input.lastSeenDays)}d`,
-          ],
+          ["query", `is:unresolved assigned:[me, my_teams] lastSeen:-${String(lastSeenDays)}d`],
           ["sort", "new"],
           ...LIST_PARAMETERS,
         ],
@@ -77,11 +76,15 @@ const reconcileInventory = (
       ApiIssue,
       MAX_ENTITY_OBSERVATIONS / PAGE_SIZE,
     );
-    // An issue Sentry is deleting just stays out of the inventory.
-    const observations = listed.items.flatMap((issue) => {
-      const observation = buildIssueObservation(issue, context, ["assigned"]);
-      return observation === undefined ? [] : [observation];
-    });
+    // The core refuses a reconcile that lists a ref twice. An issue Sentry is
+    // deleting just stays out of the inventory.
+    const uniqueIssues = [...new Map(listed.items.map((issue) => [issue.id, issue])).values()];
+    const observations = uniqueIssues
+      .flatMap((issue) => {
+        const observation = buildIssueObservation(issue, context, ["assigned"]);
+        return observation === undefined ? [] : [observation];
+      })
+      .slice(0, MAX_ENTITY_OBSERVATIONS);
     // A complete call is the whole kind: a second complete call for the same
     // kind would unlist what the first one listed.
     yield* entities.reconcile({
@@ -94,8 +97,11 @@ const reconcileInventory = (
 /**
  * Reads the issues the host wants and hands over what was found. A ref this
  * organization cannot read (not an issue ref, or another organization's) is
- * reported `inaccessible` without a request. An issue Sentry does not return,
- * or is deleting, merging or reprocessing, is reported `deleted`.
+ * reported `inaccessible` without a request. So is an issue Sentry does not
+ * return: the list leaves out issues the token cannot see, so absence is not
+ * proof of deletion. An issue Sentry says it is deleting or merging
+ * (`isDeletedInSentry`) is reported `deleted`. An issue being reprocessed is
+ * reported as nothing: that is temporary, and the host wants it again.
  */
 const refreshWantedIssues = (
   access: OrganizationAccess,
@@ -118,17 +124,17 @@ const refreshWantedIssues = (
     const refreshed: Array<EntityObservation> = [];
     for (const [id, ref] of readable) {
       const issue = found.get(id);
-      const observation =
-        issue === undefined ? undefined : buildIssueObservation(issue, context, []);
-      if (observation === undefined) {
+      if (issue === undefined) {
+        yield* entities.reportMissing(ref, "inaccessible");
+      } else if (isDeletedInSentry(issue)) {
         yield* entities.reportMissing(ref, "deleted");
       } else {
-        refreshed.push(observation);
+        const observation = buildIssueObservation(issue, context, []);
+        if (observation !== undefined) refreshed.push(observation);
       }
     }
-    for (let start = 0; start < refreshed.length; start += MAX_ENTITY_OBSERVATIONS) {
-      yield* entities.refresh(refreshed.slice(start, start + MAX_ENTITY_OBSERVATIONS));
-    }
+    // At most WANTED_REFS observations, well under what the host takes at once.
+    if (refreshed.length > 0) yield* entities.refresh(refreshed);
   });
 
 /**
@@ -149,12 +155,8 @@ export const pollSentryEntities = (
   entities: IngestEntities,
 ): Effect.Effect<PollResult, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const context: IssueObservationContext = {
-      organizationId: access.organization.id,
-      userId: input.userId,
-      teams: yield* readOrganizationTeams(access),
-    };
-    yield* reconcileInventory(access, input, context, entities);
+    const context = yield* readIssueObservationContext(access, input.userId);
+    yield* reconcileInventory(access, input.lastSeenDays, context, entities);
     yield* refreshWantedIssues(access, context, entities);
     return {};
   });

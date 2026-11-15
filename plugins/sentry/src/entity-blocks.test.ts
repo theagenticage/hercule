@@ -1,7 +1,7 @@
 import { Effect, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
-import { describeTimeSince, readIssueBlocks } from "./entity-blocks";
+import { readIssueBlocks } from "./entity-blocks";
 import {
   buildFakeIssue,
   buildFakeSentry,
@@ -60,7 +60,7 @@ const readOk = async (issue: FakeIssue) => {
   return result.success as ReadonlyArray<ReadBlock>;
 };
 
-const fieldsOf = (blocks: ReadonlyArray<ReadBlock>) =>
+const findFieldRows = (blocks: ReadonlyArray<ReadBlock>) =>
   Object.fromEntries(
     (blocks.find((block) => block.type === "fields")?.rows ?? []).map((row) => [
       row.label,
@@ -112,6 +112,24 @@ describe("readIssueBlocks", () => {
       expect(points[10]).toEqual({ at: "2026-11-12T00:00:00.000Z", value: 0 });
     });
 
+    it("ignores buckets with an impossible time or count, keeping the valid ones", async () => {
+      const stats: Array<[number, number]> = [
+        [1e20, 5],
+        [TODAY_START / 1000, -4],
+        [(TODAY_START - DAY) / 1000, 7],
+      ];
+      const [trend] = await readOk(buildFakeIssue("7", { dailyStats: stats }));
+      const points = trend!.points!;
+      expect(points).toHaveLength(14);
+      expect(points[12]).toEqual({ at: "2026-11-14T00:00:00.000Z", value: 7 });
+      expect(points[13]).toEqual({ at: "2026-11-15T00:00:00.000Z", value: 0 });
+    });
+
+    it("is left out when no bucket is valid", async () => {
+      const blocks = await readOk(buildFakeIssue("7", { dailyStats: [[1e20, 5]] }));
+      expect(blocks.map((block) => block.type)).toEqual(["fields"]);
+    });
+
     it("is left out when Sentry sent no daily counts", async () => {
       const blocks = await readOk(buildFakeIssue("7"));
       expect(blocks.map((block) => block.type)).toEqual(["fields"]);
@@ -136,7 +154,7 @@ describe("readIssueBlocks", () => {
         "Last seen",
         "Users",
       ]);
-      expect(fieldsOf(blocks)).toEqual({
+      expect(findFieldRows(blocks)).toEqual({
         Severity: "error",
         "First seen": "6 days ago, in 2026.11.06-1",
         "Last seen": "4 minutes ago",
@@ -146,7 +164,7 @@ describe("readIssueBlocks", () => {
 
     it("leaves out the release of first seen when Sentry knows none", async () => {
       const blocks = await readOk(buildFakeIssue("7", { firstSeen: ago(2 * DAY) }));
-      expect(fieldsOf(blocks)["First seen"]).toBe("2 days ago");
+      expect(findFieldRows(blocks)["First seen"]).toBe("2 days ago");
     });
 
     it("shows Resolved and Came back for a regressed issue", async () => {
@@ -169,7 +187,7 @@ describe("readIssueBlocks", () => {
           ],
         }),
       );
-      expect(fieldsOf(blocks)).toEqual({
+      expect(findFieldRows(blocks)).toEqual({
         Severity: "error",
         Resolved: "8 days ago, in 2026.11.04-2",
         "Came back": "35 minutes ago, in 2026.11.12-1",
@@ -196,18 +214,18 @@ describe("readIssueBlocks", () => {
             },
           ],
         });
-      expect(fieldsOf(await readOk(regressed("from-the-regression", "")))).toMatchObject({
+      expect(findFieldRows(await readOk(regressed("from-the-regression", "")))).toMatchObject({
         Resolved: "3 days ago, in from-the-regression",
         "Came back": "1 hour ago",
       });
-      expect(fieldsOf(await readOk(regressed("", "")))).toMatchObject({
+      expect(findFieldRows(await readOk(regressed("", "")))).toMatchObject({
         Resolved: "3 days ago, in from-the-resolve",
       });
     });
 
     it("falls back to first and last seen when a regressed issue has no regression", async () => {
       const blocks = await readOk(buildFakeIssue("7", { substatus: "regressed" }));
-      expect(Object.keys(fieldsOf(blocks))).toEqual([
+      expect(Object.keys(findFieldRows(blocks))).toEqual([
         "Severity",
         "First seen",
         "Last seen",
@@ -227,16 +245,50 @@ describe("readIssueBlocks", () => {
           },
         }),
       );
-      expect(fieldsOf(blocks)["Browser"]).toBe("Safari 19 · 61%");
+      expect(findFieldRows(blocks)["Browser"]).toBe("Safari 19 · 61%");
+    });
+
+    it.each([
+      ["a total of zero", 0, 0],
+      ["a count above the total", 10, 11],
+    ])("has no Browser row for %s", async (_name, totalValues, count) => {
+      const blocks = await readOk(
+        buildFakeIssue("7", {
+          browserTag: { totalValues, topValues: [{ name: "Safari", count }] },
+        }),
+      );
+      expect(findFieldRows(blocks)).not.toHaveProperty("Browser");
+    });
+
+    it("leaves out the Severity row when Sentry sends an empty level", async () => {
+      const blocks = await readOk(buildFakeIssue("7", { level: "" }));
+      expect(Object.keys(findFieldRows(blocks))).toEqual(["First seen", "Last seen", "Users"]);
     });
 
     it("has no Browser row when the issue has no browser tag", async () => {
-      expect(fieldsOf(await readOk(buildFakeIssue("7")))).not.toHaveProperty("Browser");
+      expect(findFieldRows(await readOk(buildFakeIssue("7")))).not.toHaveProperty("Browser");
     });
 
     it("fails the read when the browser tag cannot be read, instead of hiding it", async () => {
       const { result } = await read(buildFakeIssue("7"), ref("7"), () => 500);
       expect(Result.isFailure(result)).toBe(true);
+    });
+  });
+
+  describe("time since", () => {
+    it.each([
+      [4 * MINUTE, "4 minutes ago"],
+      [HOUR, "1 hour ago"],
+      [24 * HOUR, "yesterday"],
+      [6 * DAY, "6 days ago"],
+      [14 * DAY, "2 weeks ago"],
+      [60 * DAY, "2 months ago"],
+      [364 * DAY, "11 months ago"],
+      [365 * DAY, "1 year ago"],
+      [800 * DAY, "2 years ago"],
+    ])("describes %i milliseconds ago as %s", async (elapsed, expected) => {
+      const blocks = await readOk(buildFakeIssue("7", { lastSeen: ago(elapsed) }));
+      expect(findFieldRows(blocks)["Last seen"]).toBe(expected);
     });
   });
 
@@ -258,6 +310,26 @@ describe("readIssueBlocks", () => {
       expect(lines[0]).toBe("at fn24 (app/f24.ts:25:5)");
       expect(lines[19]).toBe("at fn5 (app/f5.ts:6:5)");
       expect(code.truncated).toBe(true);
+    });
+
+    it("puts a name with a line or paragraph separator on one line", async () => {
+      const blocks = await readOk(
+        buildFakeIssue("7", {
+          latestEvent: {
+            ...event(1),
+            frames: [
+              {
+                filename: "a\u2028b\u2029c.ts",
+                function: "f\ng",
+                lineNo: 1,
+                colNo: 2,
+                inApp: true,
+              },
+            ],
+          },
+        }),
+      );
+      expect(blocks.at(-1)!.text).toBe("at f g (a b c.ts:1:2)");
     });
 
     it("is left out when the event has no frame", async () => {
@@ -293,27 +365,5 @@ describe("readIssueBlocks", () => {
       const { fake } = await read(buildFakeIssue("7"));
       expect(fake.requests).toHaveLength(3);
     });
-  });
-});
-
-describe("describeTimeSince", () => {
-  it.each([
-    [0, "just now"],
-    [-5 * MINUTE, "just now"],
-    [59_000, "just now"],
-    [MINUTE, "1 minute ago"],
-    [4 * MINUTE, "4 minutes ago"],
-    [HOUR, "1 hour ago"],
-    [23 * HOUR, "23 hours ago"],
-    [24 * HOUR, "yesterday"],
-    [47 * HOUR, "yesterday"],
-    [6 * DAY, "6 days ago"],
-    [13 * DAY, "13 days ago"],
-    [14 * DAY, "2 weeks ago"],
-    [21 * DAY, "3 weeks ago"],
-    [60 * DAY, "2 months ago"],
-    [400 * DAY, "1 year ago"],
-  ])("describes %i milliseconds as %s", (elapsed, expected) => {
-    expect(describeTimeSince(NOW - elapsed, NOW)).toBe(expected);
   });
 });

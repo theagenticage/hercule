@@ -9,24 +9,25 @@ import { Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
-  AuthError,
+  type AuthError,
   PluginError,
   type EventSourceContribution,
   type IngestContext,
   type PollResult,
 } from "@hercule/plugin-host";
-import { readToken } from "../api";
 import { DEFAULT_LAST_SEEN_DAYS, SentryConnectionConfig } from "../connection-type";
 import { readUserId } from "../identity";
-import { findOrganization } from "../organization";
+import { openOrganizationAccess } from "../organization";
 import { pollSentryEntities } from "./entities";
 import { pollSentryIssues } from "./poll";
 
 /**
- * Polls the `issues` feed once with the Connection's current credentials.
- * Returns when the host may poll next, as `pollSentryIssues` does. Fails with
- * an `AuthError` when the credentials hold no token or Sentry refuses it, and
- * with a `PluginError` for any other failure.
+ * Polls one feed once with the Connection's current credentials: `issues`
+ * (`pollSentryIssues`) or `entities` (`pollSentryEntities`). Returns when the
+ * host may poll next. Fails with an `AuthError` when the credentials hold no
+ * token or Sentry refuses it, and with a `PluginError` for an unknown feed,
+ * for the `entities` feed when `context.entities` is missing, and for any
+ * other failure.
  */
 export const pollWithConnection = (
   feed: string,
@@ -38,14 +39,7 @@ export const pollWithConnection = (
     const credentials = yield* context
       .credentials()
       .pipe(Effect.mapError((error) => new PluginError({ message: error.message })));
-    const token = readToken(credentials);
-    if (token === undefined) {
-      return yield* new AuthError({
-        message: "The Connection has no Sentry token. Reconnect it to sign in to Sentry again.",
-      });
-    }
-    const organization = yield* findOrganization(token, credentials);
-    const access = { token, organization };
+    const access = yield* openOrganizationAccess(credentials);
     switch (feed) {
       case "issues":
         return yield* pollSentryIssues(access, config, identity, context);

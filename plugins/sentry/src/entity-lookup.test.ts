@@ -92,6 +92,37 @@ describe("recognizing Sentry text", () => {
       text: "https://acme.sentry.io/projects/webshop/ https://acme.sentry.io/issues/",
       expected: [],
     },
+    {
+      name: "the edge short ids: one letter, an underscore, a leading digit, a 13 character suffix",
+      text: "A-1 MY_APP-1 3D-APP-1F WEB-0123456789ABC",
+      expected: [
+        scoped("A-1"),
+        scoped("MY_APP-1"),
+        scoped("3D-APP-1F"),
+        scoped("WEB-0123456789ABC"),
+      ],
+    },
+    {
+      name: "a suffix with I, L, O or U, or longer than 13, as nothing",
+      text: "WEB-1I WEB-1L WEB-1O WEB-1U WEB-0123456789ABCD",
+      expected: [],
+    },
+    { name: "a date as nothing", text: "on 2024-01-15 we", expected: [] },
+    {
+      name: "an address whose issue segment runs on into a word as nothing",
+      text: "https://acme.sentry.io/issues/123oops/ https://acme.sentry.io/issues/12-x/",
+      expected: [],
+    },
+    {
+      name: "an address with a 19 digit id",
+      text: "https://acme.sentry.io/issues/1234567890123456789/)",
+      expected: [scoped("1234567890123456789", "acme")],
+    },
+    {
+      name: "an address that holds a short id in place of the id",
+      text: "https://acme.sentry.io/issues/STOREFRONT-21C/ and https://sentry.io/organizations/acme/issues/STOREFRONT-21D/?x=1",
+      expected: [scoped("STOREFRONT-21C", "acme"), scoped("STOREFRONT-21D", "acme")],
+    },
     { name: "lower case words as nothing", text: "utf-8 and storefront-21c", expected: [] },
     {
       name: "a short id inside a longer word or path as nothing",
@@ -164,6 +195,18 @@ describe("searching Sentry", () => {
 
     expect(Result.isSuccess(result) && result.success).toHaveLength(2);
     expect(fake.requests.find((r) => r.path.endsWith("/issues/"))?.params.get("limit")).toBe("2");
+  });
+
+  it("sends no projects request when the search finds nothing", async () => {
+    const fake = buildFakeSentry(buildFakeWorld(issues()));
+
+    const result = await runAgainstStub(
+      searchIssues(access, TEST_ACCOUNT_ID, { text: "nothing matches this", limit: 10 }),
+      fake,
+    );
+
+    expect(result).toEqual(Result.succeed([]));
+    expect(fake.requests.filter((request) => request.path.endsWith("/projects/"))).toEqual([]);
   });
 
   it("refuses a scope, saying Sentry cannot search inside it, and sends nothing", async () => {
@@ -257,7 +300,18 @@ describe("resolving a recognition", () => {
     expect(result).toMatchObject(Result.succeed({ found: { ref: issueRef("12") } }));
   });
 
-  it("says not-found for a short id Sentry answers 404 to, and for an id it does not return", async () => {
+  it("reads the issue an address with a short id names", async () => {
+    const fake = buildFakeSentry(world());
+
+    const result = await runAgainstStub(
+      resolveIssue(access, TEST_ACCOUNT_ID, scoped("WEBSHOP-1A", "acme")),
+      fake,
+    );
+
+    expect(result).toMatchObject(Result.succeed({ found: { ref: issueRef("12") } }));
+  });
+
+  it("says unknown for a short id Sentry answers 404 to, and for an id it does not return", async () => {
     const fake = buildFakeSentry(world());
 
     const shortId = await runAgainstStub(
@@ -269,8 +323,8 @@ describe("resolving a recognition", () => {
       fake,
     );
 
-    expect(shortId).toEqual(Result.succeed({ missing: "not-found" }));
-    expect(id).toEqual(Result.succeed({ missing: "not-found" }));
+    expect(shortId).toEqual(Result.succeed({ missing: "unknown" }));
+    expect(id).toEqual(Result.succeed({ missing: "unknown" }));
   });
 
   it("says not-found for an issue Sentry is deleting", async () => {

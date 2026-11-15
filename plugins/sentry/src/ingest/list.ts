@@ -72,8 +72,9 @@ export const listWatchedIssues = (
  * Looks up issues by id, whatever their status, and returns the ones Sentry
  * still has by id. An id missing from the result was deleted or merged.
  *
- * The search query is sent empty on purpose: with a query, Sentry applies its
- * default `is:unresolved` and would not return a resolved issue.
+ * The search query is sent empty on purpose: Sentry applies its default
+ * `is:unresolved` only when `query` is absent, so an empty `query` returns
+ * every status, a resolved issue included.
  */
 export const lookUpIssues = (
   access: OrganizationAccess,

@@ -202,6 +202,8 @@ export interface FakeEvent {
 export interface FakeTeam {
   id: string;
   slug: string;
+  /** The display name, which differs from the slug as in Sentry. */
+  name: string;
 }
 
 /** A project of the fake organization, and the teams that own it. */
@@ -287,8 +289,8 @@ export const buildFakeWorld = (issues: Array<FakeIssue> = []): FakeWorld => ({
   organization: TEST_ORGANIZATION,
   userTeamIds: ["31"],
   teams: [
-    { id: "31", slug: "platform" },
-    { id: "32", slug: "payments" },
+    { id: "31", slug: "platform", name: "Platform" },
+    { id: "32", slug: "payments", name: "Payments" },
   ],
   projects: [
     { id: "11", slug: "webshop", name: "Webshop", teamIds: ["31"] },
@@ -511,7 +513,7 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
   if (request.method === "GET" && request.path === `${base}/teams/`) {
     return buildPage(
       request,
-      world.teams.map((team) => ({ id: team.id, slug: team.slug, name: team.slug })),
+      world.teams.map((team) => ({ id: team.id, slug: team.slug, name: team.name })),
       world.pageSize,
     );
   }
@@ -524,7 +526,7 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
         name: project.name,
         teams: world.teams
           .filter((team) => project.teamIds.includes(team.id))
-          .map((team) => ({ id: team.id, slug: team.slug, name: team.slug })),
+          .map((team) => ({ id: team.id, slug: team.slug, name: team.name })),
       })),
       world.pageSize,
     );

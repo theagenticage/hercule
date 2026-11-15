@@ -121,6 +121,15 @@ describe("the inventory", () => {
     ]);
   });
 
+  it("reports an issue that two pages both list once", async () => {
+    const { inventories } = await pollOnce([
+      buildFakeIssue("1", { assignedTo: ME }),
+      buildFakeIssue("1", { assignedTo: ME }),
+    ]);
+
+    expect(inventories[0]?.observations.map((o) => o.ref)).toEqual(["sentry:issue:4501/1"]);
+  });
+
   it("leaves an issue that Sentry is deleting out of the inventory", async () => {
     const { inventories } = await pollOnce([
       buildFakeIssue("1", { assignedTo: ME, status: "pending_deletion", substatus: null }),
@@ -209,7 +218,8 @@ describe("the refresh", () => {
     expect(fake.requests.some((request) => request.params.has("group"))).toBe(false);
   });
 
-  it("reports an issue Sentry did not return, or is deleting, as deleted", async () => {
+  it("reports an issue Sentry did not return as inaccessible, and one it is deleting as deleted", async () => {
+    // The list also leaves out issues the token cannot see, so absence proves no deletion.
     const { missing, refreshes } = await pollOnce(
       [buildFakeIssue("1"), buildFakeIssue("2", { status: "pending_merge", substatus: null })],
       { wanted: ["1", "2", "3"].map((id) => buildIssueRef("4501", id)) },
@@ -218,8 +228,27 @@ describe("the refresh", () => {
     expect(refreshes.flat().map((o) => o.ref)).toEqual(["sentry:issue:4501/1"]);
     expect(missing).toEqual([
       ["sentry:issue:4501/2", "deleted"],
-      ["sentry:issue:4501/3", "deleted"],
+      ["sentry:issue:4501/3", "inaccessible"],
     ]);
+  });
+
+  it("reports an issue being reprocessed as nothing, since it comes back", async () => {
+    const { missing, refreshes } = await pollOnce(
+      [buildFakeIssue("1", { status: "reprocessing", substatus: null })],
+      { wanted: [buildIssueRef("4501", "1")] },
+    );
+
+    expect(missing).toEqual([]);
+    expect(refreshes).toEqual([]);
+  });
+
+  it("keeps the team reason of an issue it refreshes with no concerns", async () => {
+    const { refreshes } = await pollOnce([buildFakeIssue("1", { assignedTo: MY_TEAM })], {
+      wanted: [buildIssueRef("4501", "1")],
+    });
+
+    expect(refreshes).toHaveLength(1);
+    expect(refreshes[0]).toMatchObject([{ concerns: [], reason: "team-assigned" }]);
   });
 });
 

@@ -12,7 +12,7 @@ import { Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
-  AuthError,
+  type AuthError,
   PluginError,
   type EntityLookup,
   type EntityLookupContext,
@@ -20,85 +20,118 @@ import {
   type EntityRecognition,
   type EntityResolution,
 } from "@hercule/plugin-host";
-import { callSentry, decodeSentryBody, readToken, type SentryFailure } from "./api";
+import { callSentry, decodeSentryBody, type SentryFailure } from "./api";
 import { readIssueBlocks } from "./entity-blocks";
 import { ISSUE_KIND } from "./entity-kinds";
 import {
   buildIssueObservation,
-  readOrganizationTeams,
-  type IssueObservationContext,
+  isDeletedInSentry,
+  readIssueObservationContext,
 } from "./entity-reads";
-import { lookUpIssues } from "./ingest/list";
 import { readUserId } from "./identity";
-import { findOrganization, type OrganizationAccess } from "./organization";
+import { issuesPath, LIST_PARAMETERS, lookUpIssues, PAGE_SIZE } from "./ingest/list";
+import {
+  openOrganizationAccess,
+  readOrganizationResource,
+  type OrganizationAccess,
+} from "./organization";
 import { parseIssueRef } from "./refs";
-import { ApiIssue } from "./sentry-objects";
+import { ApiIssue, ApiShortIdAnswer } from "./sentry-objects";
 
 /** The most things `recognize` returns for one text. */
 const MAX_RECOGNITIONS = 20;
 
-/** The most issues one issues-list request returns: the most Sentry allows. */
-const MAX_SEARCH_LIMIT = 100;
-
 /** An organization's slug, as it appears in an address. */
 const ORGANIZATION_SLUG_SOURCE = "[A-Za-z0-9][A-Za-z0-9-]{0,49}";
 
+/** The most digits of an issue id: the bound the plugin puts on every id. */
+const MAX_ISSUE_ID_DIGITS = 32;
+
 /**
- * A short id such as `STOREFRONT-21C`: the project's slug in capitals (it may
- * hold digits and dashes), a dash, and a base-36 suffix in capitals. Only
- * capitals count, because words such as `utf-8` are not issues. The lengths
- * are bounded so a long run of dashes cannot make the match slow.
+ * Builds the pattern source of a short id such as `STOREFRONT-21C`: a project
+ * slug, a dash, and a suffix. `letters` is the letters allowed, so the caller
+ * chooses capitals only or both cases.
+ *
+ * - The slug is Sentry's project slug (letters, digits, `_` and `-`, starting
+ *   with a letter or digit, at most 100 characters) written in capitals.
+ * - The suffix is Sentry's base32 alphabet, `0123456789ABCDEFGHJKMNPQRSTVWXYZ`
+ *   (no I, L, O or U), at most 13 characters: the most a 64-bit counter needs.
+ * - A slug may hold dashes, so a dash cannot tell where the suffix starts. The
+ *   last dash splits them, because the greedy slug backtracks to it.
+ *
+ * Every repetition is bounded, so a long run of dashes cannot make a match slow.
  */
-const SHORT_ID_SOURCE = "[A-Z][A-Z0-9]{1,30}(?:-[A-Z0-9]{1,30}){0,5}-[A-Z0-9]{1,8}";
+const buildShortIdSource = (letters: "capitals" | "any-case"): string => {
+  const lower = letters === "capitals" ? "" : "a-z";
+  const lowerSuffix = letters === "capitals" ? "" : "a-hjkmnp-tv-z";
+  return `[A-Z0-9${lower}][A-Z0-9${lower}_-]{0,99}-[0-9A-HJKMNP-TV-Z${lowerSuffix}]{1,13}`;
+};
+
+/**
+ * Returns true when `text` is a short id in any case. A slug of only digits
+ * and dashes is not a short id: Sentry slugs are not made of digits alone, and
+ * it keeps a date such as `2024-01-15` out.
+ */
+const isShortId = (text: string): boolean =>
+  new RegExp(`^${buildShortIdSource("any-case")}$`).test(text) &&
+  /[A-Za-z]/.test(text.slice(0, text.lastIndexOf("-")));
+
+/** What follows an address's issue segment: a real boundary, never more of a word. */
+const ADDRESS_END = "(?=[/?#\\s)\\]}>,.;:!\"'*]|$)";
+
+/** The issue segment of an address: the numeric id, or a short id in place of it. */
+const ISSUE_SEGMENT = `(\\d{1,${String(MAX_ISSUE_ID_DIGITS)}}|${buildShortIdSource("any-case")})`;
 
 /**
  * Matches, in order, the three ways a text names one issue: the address
- * `https://<org>.sentry.io/issues/<id>/`, the address
- * `https://sentry.io/organizations/<org>/issues/<id>/`, and a short id. The
- * short id may not start inside a longer word or path, so nothing inside an
- * address is read twice. The address must end its host at `sentry.io`, so
- * `sentry.io.evil.com` and `evil.com/sentry.io/...` match nothing.
+ * `https://<org>.sentry.io/issues/<id or short id>/`, the address
+ * `https://sentry.io/organizations/<org>/issues/<id or short id>/`, and a
+ * short id in capitals. The short id may not start inside a longer word or
+ * path, so nothing inside an address is read twice. The address must end its
+ * host at `sentry.io`, so `sentry.io.evil.com` and `evil.com/sentry.io/...`
+ * match nothing, and its issue segment must end at a boundary, so
+ * `/issues/123oops/` matches nothing.
+ *
+ * Words such as `UTF-8` or `SHA-256` are short ids by shape, so they match
+ * too. That only costs a failed read when the user adds one, which the spec
+ * accepts (spec 20 section 5.4).
  */
 const MENTION = new RegExp(
-  `https://(${ORGANIZATION_SLUG_SOURCE})\\.sentry\\.io/issues/(\\d{1,18})(?!\\d)` +
-    `|https://sentry\\.io/organizations/(${ORGANIZATION_SLUG_SOURCE})/issues/(\\d{1,18})(?!\\d)` +
-    `|(?<![\\w/.-])(${SHORT_ID_SOURCE})(?![\\w-])`,
+  `https://(${ORGANIZATION_SLUG_SOURCE})\\.sentry\\.io/issues/${ISSUE_SEGMENT}${ADDRESS_END}` +
+    `|https://sentry\\.io/organizations/(${ORGANIZATION_SLUG_SOURCE})/issues/${ISSUE_SEGMENT}${ADDRESS_END}` +
+    `|(?<![\\w/.-])(${buildShortIdSource("capitals")})(?![\\w-])`,
   "g",
 );
 
-/** Matches a whole short id. Case does not matter here: the user may type it. */
-const SHORT_ID = new RegExp(`^${SHORT_ID_SOURCE}$`, "i");
-
 /**
  * Returns the issues `text` names, in order, each once, at most 20. An address
- * gives a scoped recognition whose `identifier` is the issue's id and whose
- * `scopeHint` is the organization's slug. A short id gives a scoped
- * recognition with no hint. A Linear key such as `SHOP-123` reads as a short
- * id too: each plugin recognizes its own shapes, and the core shows only the
- * ones that resolve. Reads no page and needs no credentials.
+ * gives a scoped recognition whose `identifier` is the issue's id (or its
+ * short id, when the address holds one) and whose `scopeHint` is the
+ * organization's slug. A short id in the text gives a scoped recognition with
+ * no hint. A Linear key such as `SHOP-123` reads as a short id too: each
+ * plugin recognizes its own shapes, and the core shows only the ones that
+ * resolve. Reads no page and needs no credentials.
  */
 export const recognizeSentryIssues = (text: string): ReadonlyArray<EntityRecognition> => {
   const recognitions: Array<EntityRecognition> = [];
   const seen = new Set<string>();
   for (const match of text.matchAll(MENTION)) {
     if (recognitions.length === MAX_RECOGNITIONS) break;
-    const [, subdomainSlug, subdomainId, pathSlug, pathId, shortId] = match;
+    const [, subdomainSlug, subdomainIssue, pathSlug, pathIssue, textShortId] = match;
     const organizationSlug = subdomainSlug ?? pathSlug;
-    const issueId = subdomainId ?? pathId;
-    const key =
-      organizationSlug === undefined
-        ? `short/${shortId ?? ""}`
-        : `url/${organizationSlug.toLowerCase()}/${issueId ?? ""}`;
+    const identifier = subdomainIssue ?? pathIssue ?? textShortId ?? "";
+    if (!/^\d+$/.test(identifier) && !isShortId(identifier)) continue;
+    const key = `${organizationSlug?.toLowerCase() ?? ""}/${identifier.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     recognitions.push(
       organizationSlug === undefined
-        ? { recognized: "scoped", form: "identifier", kind: ISSUE_KIND, identifier: shortId ?? "" }
+        ? { recognized: "scoped", form: "identifier", kind: ISSUE_KIND, identifier }
         : {
             recognized: "scoped",
             form: "url",
             kind: ISSUE_KIND,
-            identifier: issueId ?? "",
+            identifier,
             scopeHint: organizationSlug,
           },
     );
@@ -118,19 +151,7 @@ const withOrganizationAccess = <A>(
 ): Effect.Effect<A, AuthError | PluginError> =>
   context.credentials().pipe(
     Effect.mapError((error) => new PluginError({ message: error.message })),
-    Effect.flatMap((credentials) => {
-      const token = readToken(credentials);
-      return token === undefined
-        ? Effect.fail(
-            new AuthError({
-              message:
-                "The Connection has no Sentry token. Reconnect it to sign in to Sentry again.",
-            }),
-          )
-        : findOrganization(token, credentials).pipe(
-            Effect.flatMap((organization) => use({ token, organization })),
-          );
-    }),
+    Effect.flatMap((credentials) => openOrganizationAccess(credentials).pipe(Effect.flatMap(use))),
     Effect.catchTag("SentryRateLimited", (limit) =>
       Effect.fail(
         new PluginError({
@@ -142,24 +163,12 @@ const withOrganizationAccess = <A>(
   );
 
 /**
- * Reads the organization's teams (one request) and returns what an issue's
- * observation needs besides the issue.
- */
-const readObservationContext = (
-  access: OrganizationAccess,
-  accountId: string,
-): Effect.Effect<IssueObservationContext, SentryFailure, HttpClient.HttpClient> =>
-  Effect.map(readOrganizationTeams(access), (teams) => ({
-    organizationId: access.organization.id,
-    userId: readUserId(accountId),
-    teams,
-  }));
-
-/**
  * Searches the organization's issues by words or a short id, at most `limit`,
  * whatever their status. Sends one issues-list request with `shortIdLookup=1`,
- * so a short id in the text comes back alone. With the teams read and the
- * organization lookup, a search costs three requests.
+ * so a short id in the text comes back alone. Reads the organization's teams
+ * only when the search found something, after the issues: with the
+ * organization lookup a search costs three requests, and two when it finds
+ * nothing.
  *
  * Fails with a `PluginError` for a `scopeRef`, because Sentry has no context
  * a search can be narrowed to, and widening the search would give results
@@ -176,80 +185,75 @@ export const searchIssues = (
         message: `Sentry cannot search inside ${query.scopeRef}: it can search only the whole organization.`,
       });
     }
-    const path = `/api/0/organizations/${access.organization.slug}/issues/`;
     const response = yield* callSentry({
       method: "GET",
       baseUrl: access.organization.regionUrl,
-      path,
+      path: issuesPath(access),
       token: access.token,
       query: [
         ["query", query.text],
         ["shortIdLookup", "1"],
-        ["limit", String(Math.min(query.limit, MAX_SEARCH_LIMIT))],
-        ["groupStatsPeriod", ""],
+        ["limit", String(Math.min(query.limit, PAGE_SIZE))],
+        ...LIST_PARAMETERS.filter(([name]) => name !== "limit"),
       ],
     });
-    const issues = yield* decodeSentryBody(Schema.Array(ApiIssue), response.body, path);
-    const context = yield* readObservationContext(access, accountId);
-    return issues
-      .slice(0, query.limit)
-      .flatMap((issue) => buildIssueObservation(issue, context, []) ?? []);
+    const issues = yield* decodeSentryBody(
+      Schema.Array(ApiIssue),
+      response.body,
+      issuesPath(access),
+    );
+    if (issues.length === 0) return [];
+    const context = yield* readIssueObservationContext(access, readUserId(accountId));
+    return issues.flatMap((issue) => buildIssueObservation(issue, context, []) ?? []);
   });
-
-/** What the short id endpoint answers: the issue, under `group`. */
-const ShortIdAnswer = Schema.Struct({ group: ApiIssue });
 
 /**
  * Reads the issue a short id names in this organization. Returns undefined
- * when Sentry answers 404, which it does for an unknown short id and for an
- * issue being deleted. Costs one request.
+ * when Sentry answers 404, which it does for an unknown short id, for an issue
+ * being deleted, and for an issue of a project the token cannot see. Costs
+ * one request.
  */
 const readIssueByShortId = (
   access: OrganizationAccess,
   shortId: string,
 ): Effect.Effect<ApiIssue | undefined, SentryFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const path = `/api/0/organizations/${access.organization.slug}/shortids/${encodeURIComponent(shortId)}/`;
-    const response = yield* callSentry(
-      { method: "GET", baseUrl: access.organization.regionUrl, path, token: access.token },
-      [404],
-    );
-    if (response.status === 404) return undefined;
-    return (yield* decodeSentryBody(ShortIdAnswer, response.body, path)).group;
-  });
+  Effect.map(
+    readOrganizationResource(
+      access,
+      `/api/0/organizations/${access.organization.slug}/shortids/${encodeURIComponent(shortId)}/`,
+      ApiShortIdAnswer,
+    ),
+    (answer) => answer?.group,
+  );
 
 /**
- * Reads the issue with the id `issueId` and returns what the core stores for
- * it, or `missing: "not-found"` when Sentry returns no such issue or the issue
- * is being deleted, merged or reprocessed. Sentry answers the same for an
- * issue that never existed and one that was deleted, and the token reaches the
- * whole organization, so the answer is `not-found` and never `inaccessible`.
- * Costs two requests: the issue and the teams.
+ * Reads the issue with `readIssue` and the organization's teams at the same
+ * time, and returns what the core stores for the issue. Returns:
+ *
+ * - `missing: "unknown"` when Sentry returns no issue, or one that is being
+ *   merged away or reprocessed. Sentry hides the issues of projects the token
+ *   cannot see, so it cannot tell a missing issue from a forbidden one;
+ * - `missing: "not-found"` when the issue's status says it is being deleted
+ *   or merged, the one explicit evidence that it is gone;
+ * - `found` otherwise.
+ *
+ * Reading both at once keeps a lookup inside the core's time limit. The teams
+ * are read even when the issue turns out to be missing.
  */
-const resolveIssueById = (
+const resolveWith = (
   access: OrganizationAccess,
   accountId: string,
-  issueId: string,
+  readIssue: Effect.Effect<ApiIssue | undefined, SentryFailure, HttpClient.HttpClient>,
 ): Effect.Effect<EntityResolution, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const issue = (yield* lookUpIssues(access, [issueId])).get(issueId);
-    return yield* buildResolution(access, accountId, issue);
-  });
-
-/** Turns an issue Sentry returned, or none, into the resolution of a lookup. */
-const buildResolution = (
-  access: OrganizationAccess,
-  accountId: string,
-  issue: ApiIssue | undefined,
-): Effect.Effect<EntityResolution, SentryFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    if (issue === undefined) return { missing: "not-found" as const };
-    const found = buildIssueObservation(
-      issue,
-      yield* readObservationContext(access, accountId),
-      [],
+    const [issue, context] = yield* Effect.all(
+      [readIssue, readIssueObservationContext(access, readUserId(accountId))],
+      { concurrency: 2 },
     );
-    return found === undefined ? { missing: "not-found" as const } : { found };
+    if (issue === undefined) return { missing: "unknown" as const };
+    if (isDeletedInSentry(issue)) return { missing: "not-found" as const };
+    const found = buildIssueObservation(issue, context, []);
+    return found === undefined ? { missing: "unknown" as const } : { found };
   });
 
 /**
@@ -258,12 +262,13 @@ const buildResolution = (
  * - `outOfScope` when the recognition's `scopeHint` is not this organization's
  *   slug (compared without case), before any issue is read;
  * - `missing: "inaccessible"` for a ref of another organization;
- * - `missing: "not-found"` when Sentry returns no issue, or one that is being
- *   deleted, merged or reprocessed.
+ * - `missing: "unknown"` when Sentry returns no issue, or one that is being
+ *   reprocessed;
+ * - `missing: "not-found"` when the issue is being deleted or merged away.
  *
- * Costs two requests for an id or a ref (the issue, the teams) and the same
- * for a short id, beside the organization lookup. Fails with a `PluginError`
- * for a ref that is not an issue's and an identifier that is not a short id.
+ * Costs two requests, made at the same time (the issue and the teams), beside
+ * the organization lookup. Fails with a `PluginError` for a ref that is not an
+ * issue's and an identifier that is neither an issue id nor a short id.
  */
 export const resolveIssue = (
   access: OrganizationAccess,
@@ -281,27 +286,34 @@ export const resolveIssue = (
       if (parsed.organizationId !== access.organization.id) {
         return { missing: "inaccessible" as const };
       }
-      return yield* resolveIssueById(access, accountId, parsed.issueId);
+      return yield* resolveWith(
+        access,
+        accountId,
+        Effect.map(lookUpIssues(access, [parsed.issueId]), (found) => found.get(parsed.issueId)),
+      );
     }
-    if (target.form === "url") {
-      if (
-        target.scopeHint !== undefined &&
-        target.scopeHint.toLowerCase() !== access.organization.slug.toLowerCase()
-      ) {
-        return { outOfScope: true as const };
-      }
-      return yield* resolveIssueById(access, accountId, target.identifier);
+    if (
+      target.form === "url" &&
+      target.scopeHint !== undefined &&
+      target.scopeHint.toLowerCase() !== access.organization.slug.toLowerCase()
+    ) {
+      return { outOfScope: true as const };
     }
-    if (!SHORT_ID.test(target.identifier)) {
+    if (target.form === "url" && /^\d+$/.test(target.identifier)) {
+      return yield* resolveWith(
+        access,
+        accountId,
+        Effect.map(lookUpIssues(access, [target.identifier]), (found) =>
+          found.get(target.identifier),
+        ),
+      );
+    }
+    if (!isShortId(target.identifier)) {
       return yield* new PluginError({
-        message: `Sentry reads an issue written like STOREFRONT-21C, and ${target.identifier} is not.`,
+        message: `Sentry reads an issue written as an id or like STOREFRONT-21C, and ${target.identifier} is neither.`,
       });
     }
-    return yield* buildResolution(
-      access,
-      accountId,
-      yield* readIssueByShortId(access, target.identifier),
-    );
+    return yield* resolveWith(access, accountId, readIssueByShortId(access, target.identifier));
   });
 
 export const sentryEntityLookup: EntityLookup = {

@@ -7,11 +7,11 @@
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError, type EntityBlockDraft } from "@hercule/plugin-host";
-import { callSentry, decodeSentryBody, type SentryFailure } from "./api";
-import type { OrganizationAccess } from "./organization";
+import type { SentryFailure } from "./api";
+import { buildIssuePath, readOrganizationResource, type OrganizationAccess } from "./organization";
 import { parseIssueRef } from "./refs";
 import {
-  ApiIssueBlocksDetail,
+  ApiIssueDetail,
   ApiLatestEvent,
   ApiStackFrame,
   ApiTagValues,
@@ -19,7 +19,7 @@ import {
 } from "./sentry-objects";
 import { cutText } from "./text";
 
-type IssueDetail = Schema.Schema.Type<typeof ApiIssueBlocksDetail>;
+type IssueDetail = Schema.Schema.Type<typeof ApiIssueDetail>;
 type TagValues = Schema.Schema.Type<typeof ApiTagValues>;
 
 const TREND_DAYS = 14;
@@ -28,7 +28,9 @@ const MAX_FIELD_VALUE_LENGTH = 200;
 // 20 lines of at most about 300 characters stay far below the code block's 8 KiB.
 const MAX_FUNCTION_LENGTH = 120;
 const MAX_FILE_LENGTH = 160;
-const DAY_MILLIS = 86_400_000;
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+/** The latest time a JavaScript Date can hold, in milliseconds from the epoch. */
+const MAX_DATE_MILLIS = 8.64e15;
 
 const RESOLVE_ACTIVITY_TYPES = ["set_resolved", "set_resolved_in_release", "set_resolved_by_age"];
 
@@ -38,7 +40,7 @@ const RESOLVE_ACTIVITY_TYPES = ["set_resolved", "set_resolved_in_release", "set_
  * "3 weeks ago", "2 months ago", "1 year ago". Both arguments are epoch
  * milliseconds. A time in the future reads as "just now".
  */
-export const describeTimeSince = (at: number, now: number): string => {
+const describeTimeSince = (at: number, now: number): string => {
   const plural = (count: number, unit: string): string =>
     `${String(count)} ${unit}${count === 1 ? "" : "s"} ago`;
   const minutes = Math.floor((now - at) / 60_000);
@@ -51,27 +53,39 @@ export const describeTimeSince = (at: number, now: number): string => {
   // The drawing reads "8 days ago", so days run up to two weeks.
   if (days < 14) return plural(days, "day");
   if (days < 30) return plural(Math.floor(days / 7), "week");
-  if (days < 365) return plural(Math.floor(days / 30), "month");
+  // 360 to 364 days stay at 11 months: 12 months would read as a year too early.
+  if (days < 365) return plural(Math.min(11, Math.floor(days / 30)), "month");
   return plural(Math.floor(days / 365), "year");
 };
 
-/** Returns the events of each of the last 14 UTC days, today last. Returns undefined when Sentry sent no daily counts. */
+/**
+ * Returns the events of each of the last 14 UTC days, today last. Ignores a
+ * bucket whose time is not a date or whose count is not a finite number of
+ * zero or more, so one odd value does not fail the pane. Returns undefined
+ * when no valid bucket is left.
+ */
 const buildTrendBlock = (detail: IssueDetail, now: number): EntityBlockDraft | undefined => {
-  const stats = detail.stats?.["30d"];
-  if (stats == null || stats.length === 0) return undefined;
-  const countByDay = new Map(
-    stats.map(([seconds, count]) => [new Date(seconds * 1000).toISOString().slice(0, 10), count]),
+  const buckets = (detail.stats?.["30d"] ?? []).filter(
+    ([seconds, count]) =>
+      Number.isFinite(seconds) &&
+      Math.abs(seconds * 1000) <= MAX_DATE_MILLIS &&
+      Number.isFinite(count) &&
+      count >= 0,
   );
-  const today = Math.floor(now / DAY_MILLIS) * DAY_MILLIS;
+  if (buckets.length === 0) return undefined;
+  const countByDay = new Map(
+    buckets.map(([seconds, count]) => [new Date(seconds * 1000).toISOString().slice(0, 10), count]),
+  );
+  const today = Math.floor(now / MILLIS_PER_DAY) * MILLIS_PER_DAY;
   const points = Array.from({ length: TREND_DAYS }, (_, index) => {
-    const start = new Date(today - (TREND_DAYS - 1 - index) * DAY_MILLIS).toISOString();
+    const start = new Date(today - (TREND_DAYS - 1 - index) * MILLIS_PER_DAY).toISOString();
     return { at: start, value: countByDay.get(start.slice(0, 10)) ?? 0 };
   });
   return { type: "trend", caption: "Events, last 14 days", points };
 };
 
 /** Appends ", in <release>" to a time, when the release is known. */
-const withRelease = (when: string, release: string | null | undefined): string =>
+const appendRelease = (when: string, release: string | null | undefined): string =>
   release == null || release === "" ? when : `${when}, in ${release}`;
 
 /** Builds the rows about when the issue appeared, went away and came back. */
@@ -95,19 +109,19 @@ const buildTimeRows = (
         : [
             {
               label: "Resolved",
-              value: withRelease(since(resolution.dateCreated), resolvedRelease),
+              value: appendRelease(since(resolution.dateCreated), resolvedRelease),
             },
           ]),
       {
         label: "Came back",
-        value: withRelease(since(regression.dateCreated), regression.data?.version),
+        value: appendRelease(since(regression.dateCreated), regression.data?.version),
       },
     ];
   }
   return [
     {
       label: "First seen",
-      value: withRelease(since(detail.firstSeen), detail.firstRelease?.version),
+      value: appendRelease(since(detail.firstSeen), detail.firstRelease?.version),
     },
     { label: "Last seen", value: since(detail.lastSeen) },
   ];
@@ -118,7 +132,10 @@ const buildBrowserRow = (
 ): ReadonlyArray<{ label: string; value: string }> => {
   const top = tag?.topValues?.[0];
   const name = top?.name || top?.value;
-  if (tag === undefined || top === undefined || !name || tag.totalValues <= 0) return [];
+  if (tag === undefined || top === undefined || !name) return [];
+  // A count above the total, or a total of zero or less, is not a share.
+  if (!(tag.totalValues > 0) || !Number.isFinite(top.count) || top.count > tag.totalValues)
+    return [];
   const percent = Math.round((top.count / tag.totalValues) * 100);
   return [
     {
@@ -128,6 +145,7 @@ const buildBrowserRow = (
   ];
 };
 
+/** Builds the facts about the issue. A row with an empty value is left out, since the pane refuses an empty value. */
 const buildFieldsBlock = (
   detail: IssueDetail,
   tag: TagValues | undefined,
@@ -142,19 +160,22 @@ const buildFieldsBlock = (
     })),
     { label: "Users", value: String(detail.userCount) },
     ...buildBrowserRow(tag),
-  ],
+  ].filter((row) => row.value.trim() !== ""),
 });
 
-/** Joins the parts of a name or path on one line, since a newline would break the stack's lines. */
-const flatten = (text: string, maximum: number): string =>
-  cutText(text.replace(/[\r\n]+/g, " "), maximum);
+/**
+ * Puts a name or path on one line and cuts it to `maximum` characters. A line
+ * break (including U+2028 and U+2029) would break the stack's lines.
+ */
+const flattenLine = (text: string, maximum: number): string =>
+  cutText(text.replace(/[\r\n\u2028\u2029]+/g, " "), maximum);
 
 /** Writes one frame as `at fn (file:line:col)`. */
 const describeFrame = (frame: Schema.Schema.Type<typeof ApiStackFrame>): string => {
   const place = frame.filename || frame.absPath || frame.module || "unknown";
   const line = frame.lineNo == null ? "" : `:${String(frame.lineNo)}`;
   const column = frame.lineNo == null || frame.colNo == null ? "" : `:${String(frame.colNo)}`;
-  return `at ${flatten(frame.function || "<anonymous>", MAX_FUNCTION_LENGTH)} (${flatten(place, MAX_FILE_LENGTH)}${line}${column})`;
+  return `at ${flattenLine(frame.function || "<anonymous>", MAX_FUNCTION_LENGTH)} (${flattenLine(place, MAX_FILE_LENGTH)}${line}${column})`;
 };
 
 /** Builds the stack trace of the newest event, innermost frame first. Returns undefined when it has no frame. */
@@ -171,22 +192,6 @@ const buildStackBlock = (
     ...(innermostFirst.length > MAX_STACK_LINES ? { truncated: true } : {}),
   };
 };
-
-/** Sends a GET to `path` and decodes the answer, or returns undefined on a 404. */
-const readOptional = <S extends Schema.Decoder<unknown>>(
-  access: OrganizationAccess,
-  path: string,
-  schema: S,
-): Effect.Effect<S["Type"] | undefined, SentryFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const response = yield* callSentry(
-      { method: "GET", baseUrl: access.organization.regionUrl, path, token: access.token },
-      [404],
-    );
-    return response.status === 404
-      ? undefined
-      : yield* decodeSentryBody(schema, response.body, path);
-  });
 
 /**
  * Reads the blocks of one issue: `trend`, `fields` and `code`, in that order.
@@ -207,12 +212,12 @@ export const readIssueBlocks = (
         message: `Sentry reads blocks for the issues of ${access.organization.slug}, and ${ref} is not one of their refs.`,
       });
     }
-    const base = `/api/0/organizations/${access.organization.slug}/issues/${parsed.issueId}/`;
+    const base = buildIssuePath(access, parsed.issueId);
     const [detail, tag, event] = yield* Effect.all(
       [
-        readOptional(access, base, ApiIssueBlocksDetail),
-        readOptional(access, `${base}tags/browser/`, ApiTagValues),
-        readOptional(access, `${base}events/latest/`, ApiLatestEvent),
+        readOrganizationResource(access, base, ApiIssueDetail),
+        readOrganizationResource(access, `${base}tags/browser/`, ApiTagValues),
+        readOrganizationResource(access, `${base}events/latest/`, ApiLatestEvent),
       ],
       { concurrency: "unbounded" },
     );

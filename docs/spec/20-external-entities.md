@@ -95,7 +95,7 @@ The work-only columns (`card`, `pace`, `patience`, `identifier`, `url`, `lifecyc
 
 A link can point at something the user's Connections cannot read. This is one of two cases, and they are kept apart:
 
-- **A place no Connection can read** has no title, identifier or URL to show. Its `EntityPlace` carries the kind's `noun` and `restricted: true`, and the row says "A Sentry issue you cannot open". A title learned through someone else's read, such as an attachment's label, is never stored as the entity's title. `restricted` is on `EntityPlace`, and on `EntityCard` (section 8.3) for the same case. The same rule decides a prompt's context block ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+- **A place no Connection can read** has no title, identifier or URL to show. Its `EntityPlace` carries the kind's `noun` and `restricted: true`, and the row says "A Sentry error you cannot open". A title learned through someone else's read, such as an attachment's label, is never stored as the entity's title. `restricted` is on `EntityPlace`, and on `EntityCard` (section 8.3) for the same case. The same rule decides a prompt's context block ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 - **A card that lost access** keeps its last known facts, with `access: inaccessible` or `deleted`. It is not restricted.
 
 An unknown ref is neither. It is a ref with no record, and a reply leaves it as a ref: no record is invented for it.
@@ -139,7 +139,7 @@ The shared fields are everything on the entity row that is not one Connection's 
 | No concern, no open signal, no live Task | Off the Inbox. Pruned after 30 days, unless it is context something still reaches ([section 4.3](#43-pruning)) |
 | It has a live Task, or an open signal | Stays observed by `listWanted`, whatever its concern |
 | A Task link exists, Task finished | Kept, last known state, not refreshed |
-| A source says for certain that it is gone | That Connection's `access` is `deleted`, and the card says so. No plugin can say this yet |
+| A source says for certain that it is gone | That Connection's `access` is `deleted`, and the card says so. ~~No plugin can say this yet~~ *(Amended 2026-11-15, [#1163](https://github.com/theagenticage/hercule/issues/1163).)* Sentry can: an issue it reports as being deleted or merged |
 | 403, 404, or any missing answer | `access: inaccessible`, last known state kept. Never read as deleted or closed |
 | Token lost, Connection disabled, plugin disabled | Nothing changes. The card shows its age and why. A stale scan is not an empty inventory, and a missing relationship read removes no claim |
 | Back in a later scan | Concerns return, and the card comes back unless dismissed |

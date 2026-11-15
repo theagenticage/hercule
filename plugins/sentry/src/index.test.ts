@@ -344,6 +344,7 @@ describe("the choices of the config form", () => {
       world.teams = Array.from({ length: 500 }, (_, index) => ({
         id: String(1000 + index),
         slug: `team-${String(index)}`,
+        name: `Team ${String(index)}`,
       }));
       world.members = Array.from({ length: 600 }, (_, index) => ({
         id: String(2000 + index),

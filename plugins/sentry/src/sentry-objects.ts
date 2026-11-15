@@ -200,21 +200,16 @@ const ApiActivity = Schema.Struct({
   ),
 });
 
-/** An issue's detail, cut to its activity, newest first. */
-export const ApiIssueDetail = Schema.Struct({
-  activity: Schema.optionalKey(Schema.Array(ApiActivity)),
-});
-
 /** A release an issue was first or last seen in. Sentry sends only `version` for a deleted release. */
 const ApiRelease = Schema.Struct({ version: Schema.String });
 
 /**
- * An issue's detail, cut to what the Inbox pane reads: its counts, times and
- * releases, its activity, and `stats["30d"]`, the events of each UTC day as
- * `[epoch seconds, count]` pairs with the last pair being today.
+ * An issue's detail, cut to what this plugin reads: its counts, times and
+ * releases, its activity (newest first), and `stats["30d"]`, the events of
+ * each UTC day as `[epoch seconds, count]` pairs with the last pair being
+ * today.
  */
-export const ApiIssueBlocksDetail = Schema.Struct({
-  ...ApiIssueDetail.fields,
+export const ApiIssueDetail = Schema.Struct({
   level: Schema.String,
   substatus: Schema.optionalKey(Schema.NullOr(Schema.String)),
   userCount: Schema.Number,
@@ -231,7 +226,11 @@ export const ApiIssueBlocksDetail = Schema.Struct({
       }),
     ),
   ),
+  activity: Schema.optionalKey(Schema.Array(ApiActivity)),
 });
+
+/** What the short id endpoint answers: the issue, under `group`. */
+export const ApiShortIdAnswer = Schema.Struct({ group: ApiIssue });
 
 /** The answer for one tag key of an issue, cut to the most frequent values. */
 export const ApiTagValues = Schema.Struct({
