@@ -57,7 +57,7 @@ export const sentry: Plugin = {
     id: "sentry",
     displayName: "Sentry",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "workflow-actions", "entities"],
+    capabilities: ["connections", "event-sources", "events", "entities", "workflow-actions"],
     configSchema: Schema.Struct({}),
     mark: { paths: [SENTRY_MARK_PATH], hue: SENTRY_HUE },
   },

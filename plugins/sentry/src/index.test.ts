@@ -69,7 +69,7 @@ describe("what the sentry plugin registers", () => {
     expect(sentry.manifest).toMatchObject({
       id: "sentry",
       displayName: "Sentry",
-      capabilities: ["connections", "event-sources", "events", "workflow-actions", "entities"],
+      capabilities: ["connections", "event-sources", "events", "entities", "workflow-actions"],
     });
     expect(sentry.manifest.mark?.paths).toHaveLength(1);
     expect(sentry.manifest.mark?.hue).toBe(288);
