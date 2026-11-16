@@ -16,7 +16,7 @@ Everything.
 
 ## Set aside
 
-Only what Hercule's instructions already allow: an ask that no longer holds at its source, and a thing I already answered the same way when nothing is new.
+Only what Hercule's instructions already allow: a leftover ask on a thing that is finished at its source, and a thing a Thread looked at and found nothing to do about.
 
 ## Never
 
