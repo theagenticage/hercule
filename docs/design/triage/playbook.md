@@ -35,3 +35,4 @@ These are examples, written for the invented Northwind Market world. They are no
 - Set aside: browser-extension errors with no affected users.
 - Set aside: errors that only happen on staging, unless they started after a merge of mine.
 - Never start work on a draft pull request somebody else opened.
+- For tickets, start a Thread. Do not hand them to "Ticket to PR": its runs fail too often.
