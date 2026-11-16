@@ -16,7 +16,8 @@
  *
  * The rest runs on one Effect runtime, made here. Each Electron callback is
  * one line that runs an effect on it. The runtime is disposed when the app
- * quits.
+ * quits. Everything it logs also goes to `logs/main.log` in the app's data
+ * folder (see `./main-log.ts`).
  *
  * The top level stays synchronous and does little: Electron waits for this
  * module to finish before it emits `ready`.
@@ -39,6 +40,7 @@ import { fetchWithoutRedirects } from "./fetch-without-redirects";
 import { makeThisMacLayer } from "./this-mac";
 import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
+import { locateMainLog, makeMainLogLayer } from "./main-log";
 import { makeMainMenuLayer } from "./menu";
 import { PickedSkillFoldersLayer } from "./picked-skill-folders";
 import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
@@ -128,6 +130,9 @@ const startApp = (): void => {
       Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
       Layer.provide(NodeFileSystem.layer),
+      // Last, so that every layer above logs to the file too, the effects they
+      // start in the background included.
+      Layer.provideMerge(makeMainLogLayer(locateMainLog(app.getPath("userData")))),
     ),
   );
 

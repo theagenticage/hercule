@@ -89,6 +89,20 @@ The desktop app has three layers. Each has one job.
 
 Pinned versions: Electron 44.4.5 (Chromium 152, Node 24), Vite 8.2.2, electron-builder 26.15.3. *(Amended 2026-10-19, [#767](https://github.com/theagenticage/hercule/issues/767).)* The renderer's Tiptap packages are pinned to 3.32.0: `@tiptap/core`, `@tiptap/pm`, `@tiptap/extensions` and the document, paragraph and text extensions.
 
+### Main's log
+
+*(Added 2026-11-16, [#1180](https://github.com/theagenticage/hercule/issues/1180).)* A frozen window left no trace: main logged only to stderr, which an app opened from the Dock or the Finder throws away, and macOS writes no hang report for a renderer. So main keeps a log file, and logs when the page stops responding.
+
+- **Where.** Everything main logs also goes to `logs/main.log` in the app's data folder: `~/Library/Application Support/Hercule/logs/main.log` on macOS, `~/.config/Hercule/logs/main.log` on Linux. It is not in macOS's own logs folder, because that folder ignores `--user-data-dir`, and every end-to-end test needs a log of its own. stderr stays as it is: the end-to-end tests and the perf script read it.
+- **What.** One logfmt line per entry. Main logs only what went wrong, warnings and errors, and the page's recovery from a hang. A launch where nothing goes wrong writes no file.
+- **Its size.** It is rotated at 2 MiB, keeping one old file, `main.log.1`.
+- **Who can read it.** The folder is mode 0700 and the file 0600: a line can hold a page's address and a call stack.
+- **A page that stops responding.** Chromium reports the page unresponsive about 15 seconds after an input event, such as a click, went unanswered. Main then logs a warning with the screen the page was on (its path, such as `/inbox?list=waits`) at once, so a user who quits the frozen app still leaves it in the log. A second warning follows with the JavaScript call stack the page is running, which main reads with `webContents.mainFrame.collectJavaScriptCallStack()`. When no stack comes within 5 seconds, no JavaScript held the page, and the warning says that something else did, such as layout. When the page responds again, main logs how long it was stuck, and drops a stack that comes after that, because it would show what the page ran after it recovered. When the renderer process ends, main logs Chromium's reason and the exit code, and the hang under way is over, so the reloaded page is watched again.
+  - **The page opts in.** Chromium gives the stack only to a page served with `Document-Policy: include-js-call-stacks-in-crash-reports`, so the `app` scheme sends that header beside the [Content-Security-Policy](#content-security-policy). Measured on Electron 44.4.5: the header is needed, and the feature switch `DocumentPolicyIncludeJSCallStacksInCrashReports` is not.
+  - **A hang nobody touches is not reported.** Chromium starts counting only at an input event, so a page that freezes while the user does nothing is logged once they click. Main sets no timer and sends the page no heartbeat, so the log costs nothing while the app is idle.
+  - **The stack is the bundle's.** The renderer's bundle is minified without source maps, so the stack names minified functions at positions in hashed chunks, such as `a (app://hercule/assets/inbox-3f2c.js:1:48211)`. A build of the same commit with source maps turns them back into source lines.
+  - **The end-to-end test emits the event itself.** Chromium's hang monitor does not run while a debugger is attached to the page, and Playwright attaches one. `e2e/desktop/hang-log.test.ts` therefore emits `unresponsive` on a page it keeps spinning, and checks the stack and the recovery in the file.
+
 ## Reaching the controller
 
 **The renderer calls the controller directly.** It creates its clients the way the web app does, with the controller's URL as the base:
@@ -6553,6 +6567,13 @@ Why each count rose:
 The pane is most of the Inbox chunk's growth. The two block renderers load only when a thing shows blocks (`inbox-blocks-parts`), so they are not in the first screen. `use-undo-line` grew with the held-answer line (the undo line that says what will be sent, and that it sends when let go). The counts check's own bundle rows read 4,812,724 bytes and 1,755,511 gzipped for the renderer and 523,362 for the first screen, a little above this table, because the tree changed between the two runs.
 
 **Not measured:** memory, frame times, wakeups and launch time, on Linux or on a Mac. The counts above are the whole evidence for the Inbox's step costs.
+
+**Main's log** ([#1180](https://github.com/theagenticage/hercule/issues/1180)), measured 2026-11-16 on a Mac with `perf:counts`, `main` against the branch, back to back:
+
+- **Processes, timers and work while idle:** unchanged. Main adds three listeners on the window's web contents and sets a timer only while it reads the stack of a page that already stopped responding. The log file is opened at the first line logged, so a launch where nothing goes wrong opens no file.
+- **Bundle:** main grows by 2,433 bytes, 266,120 -> 268,553, all of it in main's startup files, 174,548 -> 176,981. The preload and the renderer are unchanged.
+- **Screens:** no request, element or idle count moved. Renders and restyled moved by run-to-run noise only (Inbox `open` 562 -> 552 renders, `J x50` +6 renders), as the renderer's code did not change.
+- **Work per streamed token:** none; main logs nothing while the page answers.
 
 ## Slices
 
