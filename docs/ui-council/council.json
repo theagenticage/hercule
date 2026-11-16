@@ -1,0 +1,153 @@
+{
+  "app": "Hercule (desktop app)",
+  "about": "A desktop app (Electron, macOS and Linux) for orchestrating AI coding agents: an inbox of work that needs the user, agent threads and assistant conversations, discussions between agents, and the fleet of machines the agents run on.",
+  "scenario": "The shots are the app's own reference screenshots (goldens), rendered at 1x and 1440x900 on one fixed sample workspace (a webshop team with repositories such as storefront-web and platform-core, four agents waiting or working, five machines). Each moment is shown in two themes: light is the Whitehaven theme and dark is the Orient Express theme, the app's default day and night themes. Sidebar glass is at 40%.",
+  "target": "hercule-desktop",
+  "rivals": [],
+  "shots": "shots/ui-council",
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "moments": [
+    {
+      "id": "inbox",
+      "shows": "The Inbox: a rail of views and sources on the left, the list of items where someone waits on the user in the middle, and one GitHub pull request open in the right pane, with a mention to answer, a Reply button and the failing checks"
+    },
+    {
+      "id": "conversation",
+      "shows": "A conversation with the assistant Ada: a failed-turn notice, the morning summary, two user messages, and Ada answering live; the sidebar shows threads grouped by project with their states"
+    },
+    {
+      "id": "draft",
+      "shows": "A new agent thread before it starts: the prompt box with access mode, effort and model, where it will run, and three Tasks from Intake to start from"
+    },
+    {
+      "id": "fleet",
+      "shows": "Fleet: the machines that host agent sessions, as cards with sessions, disk and memory, and the problems that need the user (full disk, offline, sessions waiting for a slot)"
+    },
+    {
+      "id": "discussions",
+      "shows": "Discussions: the list of conversations between agents (overlapping edits, questions), grouped by project and repository, with session and post counts and the time of the last post"
+    }
+  ],
+  "goal": 9,
+  "categories": [
+    {
+      "id": "typography",
+      "nine": "Few sizes and weights, each with one job; mono only for code and counts"
+    },
+    {
+      "id": "hierarchy",
+      "nine": "The eye lands on the one thing that matters on each screen first"
+    },
+    {
+      "id": "spacing",
+      "nine": "One rhythm; dense where you scan and roomy where you read"
+    },
+    {
+      "id": "color",
+      "nine": "Colour carries meaning and is rare enough to keep it; text and controls pass WCAG AA in every theme. Removing colour doesn't raise this score"
+    },
+    {
+      "id": "iconography",
+      "nine": "One stroke weight and one family; every icon earns its place"
+    },
+    {
+      "id": "consistency",
+      "nine": "The same thing looks and is named the same on every surface; radius, borders and focus states agree"
+    },
+    {
+      "id": "clarity",
+      "nine": "A new user can say what each control does and what happens next"
+    },
+    {
+      "id": "branding",
+      "nine": "The theme is unmistakably this app's own in every theme. Its palette, type, marks and voice run through every surface, empty states and settings included, and nothing looks like a stock component kit"
+    },
+    {
+      "id": "direction",
+      "nine": "Every screen follows one confident design idea, so the app reads as made by one hand. What to stress and what to leave out are deliberate choices, and no surface falls back to generic defaults"
+    }
+  ],
+  "lenses": {
+    "craft": "Craft. Audit the pixels. Count the distinct type sizes and weights per screen, and check spacing rhythm, alignment, corner radii, border weights, icon stroke weights and focus states for consistency across every shot. Measure contrast ratios of body text, secondary text and controls against their backgrounds from the PNGs, in every theme, against WCAG AA. You may run read-only tools such as python with PIL on the files. Cite measured numbers in your reasons where you can. The users are software engineers and engineering leads who run many AI coding agents at once across their own machines and repositories: they triage incoming work, answer agents that wait on them, start new agent threads and keep an eye on machine capacity, often for hours a day.",
+    "clarity": "Clarity and hierarchy. Walk the moments first as a new user, then as an expert who does this work all day. At each moment, say where your eye lands first, whether that is the thing that matters, what each control does and what happens next, and what you would click. Flag labels, icons or states you can only decode by reading sentences or guessing, and anything that competes with the one thing that matters. The users are software engineers and engineering leads who run many AI coding agents at once across their own machines and repositories: they triage incoming work, answer agents that wait on them, start new agent threads and keep an eye on machine capacity, often for hours a day.",
+    "identity": "Identity and direction. Work out from the shots what each shape, colour, icon, typeface and motion cue means, then check that it means the same thing everywhere it appears. Flag decoration that carries no meaning, anything that carries two meanings, and any surface that falls back to stock components. Ask: with the logo cropped out, would you still know the app, and does every screen follow the same design idea? The users are software engineers and engineering leads who run many AI coding agents at once across their own machines and repositories: they triage incoming work, answer agents that wait on them, start new agent threads and keep an eye on machine capacity, often for hours a day.",
+    "advocate": "Advocate. In every category, build the strongest case against your first impression: what the best-looking surface or app gets wrong, and what the weakest gets right. Score only after you have argued both sides, and name in your findings what each one does better, with the shot that proves it. The users are software engineers and engineering leads who run many AI coding agents at once across their own machines and repositories: they triage incoming work, answer agents that wait on them, start new agent threads and keep an eye on machine capacity, often for hours a day."
+  },
+  "judges": [
+    {
+      "name": "opus-craft",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7126-b9e7-ae3ac15ae616",
+      "harness": "claude-code/claude-code",
+      "model": "opus",
+      "effort": "high",
+      "lens": "craft"
+    },
+    {
+      "name": "gpt-craft",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7127-a0ed-08d383fb775f",
+      "harness": "codex/codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "lens": "craft"
+    },
+    {
+      "name": "opus-clarity",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7126-b9e7-ae3ac15ae616",
+      "harness": "claude-code/claude-code",
+      "model": "opus",
+      "effort": "high",
+      "lens": "clarity"
+    },
+    {
+      "name": "gpt-clarity",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7127-a0ed-08d383fb775f",
+      "harness": "codex/codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "lens": "clarity"
+    },
+    {
+      "name": "opus-identity",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7126-b9e7-ae3ac15ae616",
+      "harness": "claude-code/claude-code",
+      "model": "opus",
+      "effort": "high",
+      "lens": "identity"
+    },
+    {
+      "name": "gpt-identity",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7127-a0ed-08d383fb775f",
+      "harness": "codex/codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "lens": "identity"
+    },
+    {
+      "name": "opus-advocate",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7126-b9e7-ae3ac15ae616",
+      "harness": "claude-code/claude-code",
+      "model": "opus",
+      "effort": "high",
+      "lens": "advocate"
+    },
+    {
+      "name": "gpt-advocate",
+      "runner": "hercule",
+      "account": "01a11891-08b4-7127-a0ed-08d383fb775f",
+      "harness": "codex/codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "lens": "advocate"
+    }
+  ]
+}
