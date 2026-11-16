@@ -58,18 +58,27 @@ const describeScreen = (url: string): string => {
   }
 };
 
+/** The hang under way: when it started. One object per hang, so a stack read for an earlier hang can tell it is late. */
+interface Hang {
+  readonly startedAt: number;
+}
+
 /**
  * Logs the hangs of `page` to `lines` for as long as the page lives:
  *
- * - When Chromium reports the page unresponsive, a warning names the screen
- *   and gives the JavaScript call stack the page was running. Chromium reports
- *   it only after an input event, such as a click, has gone unanswered for
- *   some seconds, so the stack is taken while the user waits.
- * - When no stack comes within `CALL_STACK_TIMEOUT_MS`, the warning says so:
- *   then no JavaScript held the page, and something else did, such as layout.
- * - When the page responds again, a line says after how long.
+ * - When Chromium reports the page unresponsive, a warning names the screen at
+ *   once, so a user who quits the frozen app still leaves it in the log.
+ *   Chromium reports it only after an input event, such as a click, has gone
+ *   unanswered for some seconds.
+ * - A second warning follows with the JavaScript call stack the page is
+ *   running. When no stack comes within `CALL_STACK_TIMEOUT_MS`, it says that
+ *   no JavaScript held the page, and something else did, such as layout.
+ * - When the page responds again, a line says after how long. A stack that
+ *   comes after that is dropped: it shows whatever the page ran after it
+ *   recovered, not what held it.
  * - When the page's renderer process ends, an error gives Chromium's reason
- *   and the exit code.
+ *   and the exit code, and the hang under way, if any, is over: a reloaded
+ *   page starts with no hang.
  *
  * The stack holds the renderer bundle's minified names and positions. A build
  * of the same commit with source maps turns them back into source lines.
@@ -82,13 +91,15 @@ export const logPageHangs = (
   lines: HangLogLines,
   now: () => number = Date.now,
 ): void => {
-  // When the current hang started, or null while the page responds.
-  let hungSince: number | null = null;
+  let hang: Hang | null = null;
 
   page.on("unresponsive", () => {
-    if (hungSince !== null) return;
-    hungSince = now();
-    const screen = describeScreen(page.getURL());
+    if (hang !== null) return;
+    const thisHang: Hang = { startedAt: now() };
+    hang = thisHang;
+    lines.logWarning(
+      `The window's page stopped responding on ${describeScreen(page.getURL())}. Reading the JavaScript it is running.`,
+    );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<null>((resolve) => {
       timer = setTimeout(() => resolve(null), CALL_STACK_TIMEOUT_MS);
@@ -97,24 +108,27 @@ export const logPageHangs = (
       .catch((error: unknown) => `the stack could not be read: ${String(error)}`)
       .then((stack) => {
         clearTimeout(timer);
-        const detail =
+        // The page recovered, or its renderer ended, before the stack came.
+        if (hang !== thisHang) return;
+        lines.logWarning(
           stack === null
-            ? `No JavaScript was running ${String(CALL_STACK_TIMEOUT_MS / 1000)} seconds later, so something else held it, such as layout.`
+            ? `No JavaScript ran in the window's page in the ${String(CALL_STACK_TIMEOUT_MS / 1000)} seconds after it stopped responding, so something else held it, such as layout.`
             : typeof stack === "string" && stack.trim() !== ""
-              ? `Its JavaScript was running:\n${stack.trim()}`
-              : "Chromium gave no JavaScript call stack.";
-        lines.logWarning(`The window's page stopped responding on ${screen}. ${detail}`);
+              ? `The window's page was running this JavaScript when it stopped responding:\n${stack.trim()}`
+              : "Chromium gave no JavaScript call stack for the window's page.",
+        );
       });
   });
 
   page.on("responsive", () => {
-    if (hungSince === null) return;
-    const seconds = ((now() - hungSince) / 1000).toFixed(1);
-    hungSince = null;
+    if (hang === null) return;
+    const seconds = ((now() - hang.startedAt) / 1000).toFixed(1);
+    hang = null;
     lines.logInfo(`The window's page responds again, ${seconds} seconds after it stopped.`);
   });
 
   page.on("render-process-gone", (_event, { reason, exitCode }) => {
+    hang = null;
     lines.logError(
       `The window's renderer process ended: ${reason}, exit code ${String(exitCode)}.`,
     );

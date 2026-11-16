@@ -8,7 +8,7 @@
  * folder, so a launch with its own `--user-data-dir`, as every end-to-end test
  * makes, writes its own log.
  */
-import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -25,8 +25,9 @@ export const locateMainLog = (userDataDir: string): string =>
 
 /**
  * Returns a function that appends one line to the log file at `file`, after
- * creating its folder (mode 0700) and the file (mode 0600). The lines can
- * hold page addresses and call stacks, so only this user may read them.
+ * creating its folder, and giving the folder mode 0700 and the file mode 0600,
+ * whether they were there or not. The lines can hold page addresses and call
+ * stacks, so only this user may read them.
  *
  * When a line would push a non-empty file past `maxBytes`, the file is first
  * renamed to `<file>.1`, which replaces the one renamed before, and the line
@@ -36,12 +37,18 @@ export const locateMainLog = (userDataDir: string): string =>
  * fails.
  */
 export const openMainLog = (file: string, maxBytes: number): ((line: string) => void) => {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const folder = path.dirname(file);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  // A folder or a file that was already there keeps its mode when it is
+  // opened, so the mode is set again: a copy restored from a backup, or one
+  // made by hand, could be readable by others.
+  chmodSync(folder, 0o700);
   let size = 0;
   try {
     size = statSync(file).size;
+    chmodSync(file, 0o600);
   } catch {
-    // No file yet: the first line creates it.
+    // No file yet: the first line creates it with mode 0600.
   }
   return (line) => {
     const text = `${line}\n`;

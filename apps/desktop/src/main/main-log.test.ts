@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as Effect from "effect/Effect";
@@ -20,6 +20,15 @@ describe("openMainLog", () => {
     const file = locateMainLog(userDataDir);
     openMainLog(file, 1000)("first line");
     expect(readFileSync(file, "utf8")).toBe("first line\n");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+  });
+
+  it("makes a folder and a file that were already there private", () => {
+    const file = locateMainLog(userDataDir);
+    mkdirSync(path.dirname(file), { mode: 0o755 });
+    writeFileSync(file, "", { mode: 0o644 });
+    openMainLog(file, 1000)("a line");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
   });

@@ -51,7 +51,9 @@ describe("main's log", () => {
     });
     await expect
       .poll(() => readMainLog(userDataDir), { timeout: SPIN_MS + 5000 })
-      .toMatch(/level=WARN .*stopped responding on \/.*at spinForTheHangLog/s);
+      .toMatch(
+        /level=WARN .*stopped responding on \/\..*level=WARN .*was running this JavaScript.*at spinForTheHangLog/s,
+      );
 
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]!.webContents.emit("responsive");
