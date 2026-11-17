@@ -19,6 +19,7 @@ import {
   type ProviderAccountReadinessState,
   type ResolvedModelProfileAccount,
   type ResolvedModelProfileEntry,
+  joinNames,
 } from "@hercule/contract";
 import {
   decideProviderAccountHarness,
@@ -63,12 +64,6 @@ const MOST_ACTIONABLE_FIRST = [
   "harness-too-old",
   "harness-missing",
 ] as const satisfies ReadonlyArray<Exclude<ProviderAccountReadinessState, "ready">>;
-
-/** Joins machine names for a message: `Laptop`, `Laptop and Server`, `Laptop, Server and Desk`. */
-const joinNames = (names: ReadonlyArray<string>): string =>
-  names.length <= 1
-    ? (names[0] ?? "")
-    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /**
  * Describes why an account cannot run in the harness on the connected runners

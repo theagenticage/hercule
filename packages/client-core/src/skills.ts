@@ -25,16 +25,19 @@ import { ApiError, isConflict, readErrorMessage, readValidationIssues } from "./
 import { formatBytes } from "./format-bytes";
 import { formatNameList } from "./name-list";
 import { formatShortMoment } from "./time-context";
+import type { SenderReading } from "./threads/sender";
 
 /**
  * When the approval effects a warning line describes apply:
  *
  * - `current`: the revision is the skill's current revision, or the line
  *   already sits under the update it describes, as in Update all.
- * - `afterUpdate`: the revision waits to be applied, and the line stands on
- *   its own, as on a skill's page under "What it changes".
+ * - `afterUpdate`: the revision is an update that waits to be applied, and
+ *   the line stands on its own, as on a skill's page under "What it changes".
+ * - `afterApply`: the same for a revision a session proposed, which the user
+ *   applies rather than updates to.
  */
-export type SkillApprovalEffectWording = "current" | "afterUpdate";
+export type SkillApprovalEffectWording = "current" | "afterUpdate" | "afterApply";
 
 /** The texts of the warning lines, by wording: the start of the `allowed-tools` line, and the `hooks` line. */
 const APPROVAL_EFFECT_WARNINGS: Readonly<
@@ -47,6 +50,10 @@ const APPROVAL_EFFECT_WARNINGS: Readonly<
   afterUpdate: {
     allowedTools: "After the update, lets tools run without asking:",
     hooks: "After the update, has hooks, which run without asking",
+  },
+  afterApply: {
+    allowedTools: "After you apply it, lets tools run without asking:",
+    hooks: "After you apply it, has hooks, which run without asking",
   },
 };
 
@@ -192,26 +199,108 @@ export const describeSkillRevisionOrigin = (origin: SkillRevisionOrigin): string
   ORIGIN_LABELS[origin];
 
 /**
+ * Returns how a line names the actor `actor`: "you", "Ada, session 7c82ebeb",
+ * or the plain label `describeActor` gives for any other actor.
+ *
+ * For a session, `sender` is how the app reads its agent (`describeSender`):
+ * its assistant's name, or its Thread's title. The line then names it and
+ * keeps the session's id tail after it, so two sessions of one assistant stay
+ * apart. With no `sender`, or a sender that has no name but the session's own
+ * label (a Thread with an empty title), the line is the label alone, so the
+ * session is never named twice.
+ */
+const describeSkillActor = (actor: string, sender: SenderReading | undefined): string => {
+  const { label } = describeActor(actor);
+  const name = readDistinctSenderName(actor, sender);
+  return name === undefined ? label : `${name}, ${label}`;
+};
+
+/**
+ * Returns the name of `sender`, how the app reads the agent of session
+ * `actor`, or `undefined` when there is no sender or its name is only the
+ * session's own label. A line names the agent only when the name tells more
+ * than the label does.
+ */
+const readDistinctSenderName = (
+  actor: string,
+  sender: SenderReading | undefined,
+): string | undefined =>
+  sender !== undefined && sender.name !== describeActor(actor).label ? sender.name : undefined;
+
+/**
  * Returns who applied a Skill Revision and when, as the line under its
- * History row reads: "applied by you, 14:02". The time is relative to `now`
- * in `timezone`, as `formatShortMoment` writes it ("Mon 09:00", "4 Nov
- * 09:00"). A part that is not known is left out: "applied by you" when the
- * time cannot be placed.
+ * History row reads: "applied by you, 14:02", or "applied by Ada, session
+ * 7c82ebeb, 14:02" for a session. The time is relative to `now` in
+ * `timezone`, as `formatShortMoment` writes it ("Mon 09:00", "4 Nov 09:00").
+ * A part that is not known is left out: "applied by you" when the time cannot
+ * be placed.
+ *
+ * `sender` is how the app reads the applying session's agent; it is ignored
+ * when the revision was not applied by a session (see `describeSkillActor`).
  */
 export const describeSkillRevisionApplied = (
   revision: { readonly appliedAt: string | null; readonly appliedBy: NullableActor },
+  sender: SenderReading | undefined,
   now: Date,
   timezone: string,
 ): string => {
   const by =
     revision.appliedBy === null
       ? "applied"
-      : `applied by ${describeActor(revision.appliedBy).label}`;
+      : `applied by ${describeSkillActor(revision.appliedBy, sender)}`;
   const at =
     revision.appliedAt === null
       ? undefined
       : formatShortMoment(new Date(revision.appliedAt), now, timezone);
   return at === undefined ? by : `${by}, ${at}`;
+};
+
+/**
+ * Returns the badge a skill's row shows for the revisions sessions proposed
+ * and nobody has applied or rejected: "Proposed", or "Proposed 2" for two or
+ * more. Returns null when none waits.
+ */
+export const describeSkillProposedBadge = (skill: Pick<Skill, "proposedCount">): string | null => {
+  if (skill.proposedCount === 0) return null;
+  return skill.proposedCount === 1 ? "Proposed" : `Proposed ${String(skill.proposedCount)}`;
+};
+
+/**
+ * Returns who proposed a revision: "Proposed by Ada, session 7c82ebeb". The
+ * list shows it under a skill that exists only as a proposal. `proposer` is
+ * the revision's `createdBy`, and `sender` how the app reads that session's
+ * agent (see `describeSkillActor`).
+ */
+export const describeSkillProposer = (
+  proposer: string,
+  sender: SenderReading | undefined,
+): string => `Proposed by ${describeSkillActor(proposer, sender)}`;
+
+/**
+ * Returns the line of a proposal's banner: "Proposed by Ada, session
+ * 7c82ebeb, 14:02", from the revision's `createdBy` and `createdAt`. The time
+ * is placed as `describeSkillRevisionApplied` places it.
+ */
+export const describeSkillProposal = (
+  revision: Pick<SkillRevision, "createdAt" | "createdBy">,
+  sender: SenderReading | undefined,
+  now: Date,
+  timezone: string,
+): string =>
+  `${describeSkillProposer(revision.createdBy, sender)}, ${formatShortMoment(new Date(revision.createdAt), now, timezone)}`;
+
+/**
+ * Returns the tooltip of the chip "Includes third-party content": the
+ * proposing session had read third-party messages, so the revision may carry
+ * their words. It names the session's agent when `sender` gives a name other
+ * than the session's own label, and says "The session" otherwise.
+ */
+export const describeSkillThirdPartyContent = (
+  proposer: string,
+  sender: SenderReading | undefined,
+): string => {
+  const name = readDistinctSenderName(proposer, sender);
+  return `${name === undefined ? "The session" : `${name}'s session`} had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`;
 };
 
 /**

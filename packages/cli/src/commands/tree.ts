@@ -106,6 +106,11 @@ export interface Field {
    */
   readonly readsSkillFolder: boolean;
   /**
+   * Whether the skill folder must be one skill, so a folder of skills is
+   * refused before anything is sent. Set by the row's `oneSkillOnly` marker.
+   */
+  readonly readsOneSkillOnly: boolean;
+  /**
    * The list operation that resolves an id tail given here; absent when only a
    * full id is accepted.
    */
@@ -152,6 +157,12 @@ export interface Command {
   readonly payload: ReadonlyArray<Field>;
   /** The query fields other than the three paging fields, given as `--<flag>`. */
   readonly query: ReadonlyArray<Field>;
+  /**
+   * The name of every query field the operation has, the paging fields and
+   * the fields the CLI table hides included. A command reads this to know
+   * what the operation takes without a row marking it.
+   */
+  readonly queryFieldNames: ReadonlyArray<string>;
   /**
    * Whether the operation is paged, so `--limit`, `--cursor` and `--all`
    * apply, and `--sort` when it has sort fields.
@@ -361,6 +372,7 @@ const buildField = (
   return {
     name,
     spelling,
+    readsOneSkillOnly: "oneSkillOnly" in row,
     positional: "positional" in row || readsSkillFolder,
     carriedIn,
     kind: takesNamedValues ? "namedValues" : readScalarKind(value),
@@ -648,6 +660,7 @@ const buildCommands = (): ReadonlyArray<Command> => {
         positionals,
         payload: payload.filter((field) => !field.positional),
         query: query.filter((field) => !field.positional),
+        queryFieldNames: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast),
         // `limit` and `cursor` always come together, and `sort` comes with
         // them unless the list has one fixed order, so `limit` alone shows
         // that the operation is paged.

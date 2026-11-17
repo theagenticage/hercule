@@ -109,9 +109,9 @@
   background: color-mix(in oklab, var(--fail-ink) 8%, transparent);
 }
 
-/* ---------- An update ---------- */
+/* ---------- An update or a proposal ---------- */
 
-/* The update waiting on a skill: one band, with Update at its end. The same
+/* The revision waiting on a skill: one band, with its actions at its end. The same
    room on every side, so the button sits as far from the band's right edge
    as from its top and bottom. The band and an error under it are one item
    of the record, so the error sits close under the band. */
@@ -132,16 +132,40 @@
   font-weight: var(--w-medium);
   line-height: var(--line-18);
 }
-.skill-band > span {
+/* The band's text: one line for an update, two for a proposal, who proposed
+   it and when, with the third-party chip, over what applying it does. Each
+   line is exactly one line of text high, so the chip never makes the first
+   line taller than the second. */
+.skill-band-text {
   flex: 1;
   min-width: 0;
+  display: grid;
+  row-gap: 2px;
 }
-/* Not in the prototype: an Update the controller refused, under the band. */
+.skill-band-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+}
+.skill-band-line > .chip {
+  height: 18px;
+  padding: 0 7px;
+}
+.skill-band-note {
+  font-weight: var(--w-regular);
+}
+/* Not in the prototype: an Update, Apply or Reject the controller refused, under the band. */
 .skill-update > .set-err {
   margin: 0;
   color: var(--fail-ink);
   font-size: var(--t-12);
   line-height: 1.45;
+}
+
+/* The button that opens an older proposal's changes. */
+.skill-proposal-more {
+  display: flex;
 }
 
 /* The changed files: the book's `.card.files` from a Thread's changed files,

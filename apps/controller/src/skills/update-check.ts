@@ -164,6 +164,7 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
             sizeBytes: content.sizeBytes,
             description: content.description,
             approvalEffects: content.approvalEffects,
+            includesThirdPartyContent: false,
             ...change,
           });
         }

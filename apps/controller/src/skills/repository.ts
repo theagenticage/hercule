@@ -69,6 +69,8 @@ export interface NewSkillRevision {
   readonly sizeBytes: number;
   readonly description: string;
   readonly approvalEffects: SkillApprovalEffects;
+  /** True when a session that had read third-party messages proposed it. */
+  readonly includesThirdPartyContent: boolean;
   /** When the revision was stored and by whom. */
   readonly at: string;
   readonly actor: string;
@@ -93,6 +95,7 @@ interface SkillRow {
   readonly available_allowed_tools: string | null;
   readonly available_hooks: string | null;
   readonly proposed_count: number;
+  readonly proposed_by: string | null;
   readonly last_checked_at: string | null;
   readonly check_error: string | null;
   readonly upstream_commit: string | null;
@@ -123,6 +126,13 @@ interface RevisionWithEffectsRow extends RevisionRow {
 const SourceJson = Schema.fromJsonString(SkillSource);
 const decodeSource = Schema.decodeUnknownSync(SourceJson);
 const encodeSource = Schema.encodeSync(SourceJson);
+
+/**
+ * The condition for a proposed Skill Revision: written by a session and not
+ * yet applied. "Proposed" is a query, not a column. Every statement that
+ * uses it must alias `skill_revisions` as `r`.
+ */
+const PROPOSED_REVISION = "r.origin = 'session' AND r.applied_at IS NULL";
 
 const REVISION_COLUMNS =
   "hash, origin, file_count, size_bytes, description, created_at, created_by, applied_at, applied_by, includes_third_party_content";
@@ -159,6 +169,7 @@ const toStoredSkill = (row: SkillRow): StoredSkill => ({
       row.available_hooks,
     ),
     proposedCount: row.proposed_count,
+    proposedBy: row.proposed_by,
     lastCheckedAt: row.last_checked_at,
     checkError: row.check_error,
     createdAt: row.created_at,
@@ -194,9 +205,13 @@ export const skillRepository = Effect.gen(function* () {
            c.size_bytes AS current_size_bytes,
            s.available_revision_hash, a.allowed_tools AS available_allowed_tools,
            a.hooks AS available_hooks,
-           (SELECT count(*) FROM skill_revisions p
-            WHERE p.skill_id = s.id AND p.origin = 'session' AND p.applied_at IS NULL)
+           (SELECT count(*) FROM skill_revisions r
+            WHERE r.skill_id = s.id AND ${sql.literal(PROPOSED_REVISION)})
              AS proposed_count,
+           (SELECT r.created_by FROM skill_revisions r
+            WHERE r.skill_id = s.id AND ${sql.literal(PROPOSED_REVISION)}
+            ORDER BY r.created_at DESC, r.hash DESC LIMIT 1)
+             AS proposed_by,
            s.last_checked_at, s.check_error, s.upstream_commit,
            s.created_at, s.created_by, s.updated_at, s.updated_by
     FROM skills s
@@ -287,12 +302,12 @@ export const skillRepository = Effect.gen(function* () {
       Effect.asVoid(sql`
         INSERT INTO skill_revisions
           (skill_id, hash, origin, file_count, size_bytes, description, allowed_tools, hooks,
-           created_at, created_by)
+           includes_third_party_content, created_at, created_by)
         VALUES
           (${skillId}, ${revision.hash}, ${revision.origin}, ${revision.fileCount},
            ${revision.sizeBytes}, ${revision.description},
            ${revision.approvalEffects.allowedTools}, ${revision.approvalEffects.hooks},
-           ${revision.at}, ${revision.actor})
+           ${revision.includesThirdPartyContent ? 1 : 0}, ${revision.at}, ${revision.actor})
       `),
 
     /**
@@ -359,6 +374,37 @@ export const skillRepository = Effect.gen(function* () {
             updated_at = ${change.at}, updated_by = ${change.actor}
         WHERE id = ${skillId}
       `),
+
+    /** Records that the Skill's record changed: sets `updated_at` and `updated_by`. */
+    touch: (skillId: Uint8Array, change: SkillChange): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE skills SET updated_at = ${change.at}, updated_by = ${change.actor}
+        WHERE id = ${skillId}
+      `),
+
+    /**
+     * Returns each Skill that has proposed revisions with how many, sorted by
+     * name, in one statement. A Skill with none is left out.
+     */
+    listProposedCounts: (): Effect.Effect<
+      ReadonlyArray<{ readonly name: string; readonly count: number }>,
+      SqlError
+    > =>
+      sql<{ readonly name: string; readonly count: number }>`
+        SELECT s.name, count(*) AS count
+        FROM skill_revisions r JOIN skills s ON s.id = r.skill_id
+        WHERE ${sql.literal(PROPOSED_REVISION)}
+        GROUP BY s.id ORDER BY s.name
+      `,
+
+    /**
+     * Deletes the Skill's revision with this hash. The caller first clears
+     * `available_revision_hash` when it names the hash.
+     */
+    deleteRevision: (skillId: Uint8Array, hash: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`DELETE FROM skill_revisions WHERE skill_id = ${skillId} AND hash = ${hash}`,
+      ),
 
     /**
      * Records how an update check ended. It changes neither `updated_at` nor

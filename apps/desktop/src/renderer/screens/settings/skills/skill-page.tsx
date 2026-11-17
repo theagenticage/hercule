@@ -15,6 +15,7 @@ import {
   formatSkillSize,
   isExecutableSkillFile,
   listSkillApprovalEffectLines,
+  readActorSessionId,
   stripFrontmatter,
   type SkillApprovalEffectWording,
 } from "@hercule/client-core";
@@ -28,6 +29,7 @@ import { GlobeIcon } from "../../../icons/globe";
 import { ActorMark } from "../../actor/actor-mark";
 import { InlineCode } from "../../inline-code";
 import { Markdown } from "../../session/markdown";
+import { useActorSenderReading } from "../../thread/use-sender-reading";
 import "../../session/messages.css";
 import "../permission-profiles/permission-profiles.css";
 import "./skills.css";
@@ -39,10 +41,11 @@ const APPLIER_MARK_SIZE = 18;
 const SHORT_HASH_LENGTH = 7;
 
 /**
- * Renders the head of the page: `description`, the current revision's, as
- * the lead, then two chips, the skill's source in full and its size, then a
- * warning line for each approval effect of the current revision. Each
- * effect lets tools run without the approval card on Claude Code, so the
+ * Renders the head of the page: the description of `revision` as the lead,
+ * then two chips, the skill's source in full and `revision`'s size, then a
+ * warning line for each field of `approvalEffects`, those of `revision`: the
+ * current revision, or for a skill with no current revision the proposed one
+ * the page shows. Each effect lets tools run without the approval card on Claude Code, so the
  * user sees what the skill does after an import has applied it.
  *
  * While the skill's last update check failed, a last line in `--fail` says
@@ -50,26 +53,24 @@ const SHORT_HASH_LENGTH = 7;
  */
 export function SkillLead({
   skill,
-  description,
+  revision,
+  approvalEffects,
 }: {
   readonly skill: Skill;
-  readonly description: string;
+  readonly revision: Pick<SkillRevision, "description" | "fileCount" | "sizeBytes">;
+  readonly approvalEffects: SkillApprovalEffects | null;
 }): JSX.Element {
   return (
     <div className="skill-lead">
-      <p className="profile-lead">{description}</p>
+      <p className="profile-lead">{revision.description}</p>
       <div className="skill-chips">
         <span className="chip">
           {skill.source.kind === "github" && <GlobeIcon size={13} />}
           {describeSkillSourceInFull(skill.source)}
         </span>
-        {skill.currentFileCount !== null && skill.currentSizeBytes !== null && (
-          <span className="chip">
-            {formatSkillSize(skill.currentFileCount, skill.currentSizeBytes)}
-          </span>
-        )}
+        <span className="chip">{formatSkillSize(revision.fileCount, revision.sizeBytes)}</span>
       </div>
-      <SkillApprovalWarnings effects={skill.currentApprovalEffects} wording="current" />
+      <SkillApprovalWarnings effects={approvalEffects} wording="current" />
       {skill.checkError !== null && (
         <p className="profile-note skill-warning skill-warning--fail">
           Last check failed: <InlineCode text={skill.checkError} />
@@ -172,6 +173,50 @@ export function SkillFilesSection({
 }
 
 /**
+ * Renders the line under a History row, "applied by Ada, session 7c82ebeb,
+ * 14:02" (spec 17 §Settings, Skills, History). A revision applied by a
+ * session names the session's agent once it is read. Any other row
+ * ("applied by you, 14:02") needs no read, so it subscribes to nothing.
+ */
+function RevisionAppliedLine({
+  revision,
+  now,
+  timezone,
+}: {
+  readonly revision: SkillRevision;
+  readonly now: Date;
+  readonly timezone: string;
+}): JSX.Element {
+  if (revision.appliedBy !== null && readActorSessionId(revision.appliedBy) !== undefined) {
+    return (
+      <SessionAppliedLine
+        revision={revision}
+        applier={revision.appliedBy}
+        now={now}
+        timezone={timezone}
+      />
+    );
+  }
+  return <span>{describeSkillRevisionApplied(revision, undefined, now, timezone)}</span>;
+}
+
+/** Renders the line of a History row whose revision a session `applier` applied, with its agent read. */
+function SessionAppliedLine({
+  revision,
+  applier,
+  now,
+  timezone,
+}: {
+  readonly revision: SkillRevision;
+  readonly applier: string;
+  readonly now: Date;
+  readonly timezone: string;
+}): JSX.Element {
+  const sender = useActorSenderReading(applier);
+  return <span>{describeSkillRevisionApplied(revision, sender, now, timezone)}</span>;
+}
+
+/**
  * Renders the History: one row per revision of `history` that has been
  * current, in the order given, newest first. Each row has who applied it,
  * how it arrived, and when, as `now` in `timezone` puts it, and the first
@@ -204,7 +249,7 @@ export function SkillHistorySection({
             )}
             <span className="skill-rev-text">
               <b>{describeSkillRevisionOrigin(revision.origin)}</b>
-              <span>{describeSkillRevisionApplied(revision, now, timezone)}</span>
+              <RevisionAppliedLine revision={revision} now={now} timezone={timezone} />
             </span>
             {revision.revisionHash === currentRevisionHash && <span className="chip">Current</span>}
             <code className="skill-rev-hash">

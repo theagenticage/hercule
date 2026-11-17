@@ -83,6 +83,9 @@ import type {
   Session,
   Signal,
   SignedInUser,
+  Skill,
+  SkillDetail,
+  SkillRevisionDiff,
   SkillsPreviewFilter,
   Task,
   TrackingDetail,
@@ -152,6 +155,9 @@ import {
   sessionQuery,
   sessionSkillsQuery,
   settingsQuery,
+  skillDiffQuery,
+  skillQuery,
+  skillsQuery,
   signalQuery,
   signalsClearedTodayQuery,
   signalsDoneQuery,
@@ -208,6 +214,8 @@ import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/se
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
+import { Route as SkillsSettingsRoute } from "../routes/_connected/_shell/settings/skills/index";
+import { Route as SkillSettingsRoute } from "../routes/_connected/_shell/settings/skills/$name";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as InboxRoute } from "../routes/_connected/_shell/inbox";
 import { Route as WorkRoute } from "../routes/_connected/_shell/work";
@@ -385,6 +393,18 @@ export interface PermissionProfilesSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/** What Settings > Skills reads besides the sidebar's lists. */
+export interface SkillsSettingsRecords {
+  /** The Skill Library's list, sorted by name. */
+  readonly skills: ReadonlyArray<Skill>;
+  /** Each skill's page, by its name. */
+  readonly details: ReadonlyMap<string, SkillDetail>;
+  /** What each waiting revision changes, by `<skill name>/<revision hash>`. */
+  readonly diffs: ReadonlyMap<string, SkillRevisionDiff>;
+  /** The Connections the Settings list reads for its Connections row's dot. */
+  readonly connections: ReadonlyArray<Connection>;
+}
+
 /**
  * The records Settings > Appearance reads. The section itself reads none:
  * it reads the Appearance from the bridge.
@@ -473,6 +493,7 @@ interface OpenScreens {
   readonly draft?: DraftScreenRecords;
   readonly assistantsSettings?: AssistantsSettingsRecords;
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
+  readonly skillsSettings?: SkillsSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly connectionsSettings?: ConnectionsSettingsRecords;
   readonly providersSettings?: ProvidersSettingsRecords;
@@ -646,6 +667,7 @@ const seedQueryCache = (
     draft,
     assistantsSettings,
     permissionProfilesSettings,
+    skillsSettings,
     appearanceSettings,
     connectionsSettings,
     providersSettings,
@@ -768,6 +790,31 @@ const seedQueryCache = (
       connectionsQuery(client).queryKey,
       permissionProfilesSettings.connections,
     );
+  }
+  if (skillsSettings !== undefined) {
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
+    queryClient.setQueryData(connectionsQuery(client).queryKey, skillsSettings.connections);
+    // A line names the session that proposed or applied a revision, which the
+    // sidebar's lists do not hold for an assistant's conversation.
+    for (const { currentSession } of records.assistants) {
+      if (currentSession !== null) {
+        queryClient.setQueryData(
+          senderSessionQuery(client, currentSession.id).queryKey,
+          currentSession,
+        );
+      }
+    }
+    queryClient.setQueryData(skillsQuery(client).queryKey, skillsSettings.skills);
+    for (const [name, detail] of skillsSettings.details) {
+      queryClient.setQueryData(skillQuery(client, name).queryKey, detail);
+    }
+    for (const [key, diff] of skillsSettings.diffs) {
+      const [name, revisionHash] = key.split("/") as [string, string];
+      queryClient.setQueryData(skillDiffQuery(client, name, revisionHash).queryKey, diff);
+    }
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
@@ -1179,6 +1226,18 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  const skillsSettingsRoute = SkillsSettingsRoute.update({
+    id: "/skills/",
+    path: "/skills/",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
+  const skillSettingsRoute = SkillSettingsRoute.update({
+    id: "/skills/$name",
+    path: "/skills/$name",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const appearanceSettingsRoute = AppearanceSettingsRoute.update({
     id: "/appearance",
     path: "/appearance",
@@ -1321,6 +1380,8 @@ const buildRouter = (
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
+          skillsSettingsRoute,
+          skillSettingsRoute,
         ]),
       ]),
     ]),
@@ -1447,6 +1508,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   ) {
     throw new Error(
       "Settings > Permission profiles drew no list and no profile. Check the page's console for the error.",
+    );
+  }
+  if (
+    screens.skillsSettings !== undefined &&
+    document.querySelector(".skill-list, .skill-record") === null
+  ) {
+    throw new Error(
+      "Settings > Skills drew no list and no skill. Check the page's console for the error.",
     );
   }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
@@ -1807,6 +1876,24 @@ export async function mountPermissionProfilesSettingsSpecimen(
   settings: PermissionProfilesSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, path, { permissionProfilesSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Skills open at `path`: `/settings/skills` for the list, or
+ * `/settings/skills/<name>` for one skill's page. The main pane shows the
+ * app's real Settings frame and section, which read the skills, their
+ * pages and their diffs from `settings`. Returns once the list or the skill
+ * is in the document. Fails when the page has no `#root`, draws no sidebar
+ * row, no list and no skill, or tries to read a record the cache does not
+ * hold.
+ */
+export async function mountSkillsSettingsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  settings: SkillsSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { skillsSettings: settings });
 }
 
 /**

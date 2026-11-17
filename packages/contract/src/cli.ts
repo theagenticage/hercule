@@ -20,7 +20,7 @@ import { OWN_SESSION_ALIAS } from "./ids";
 import type { ErrorCode } from "./errors";
 import { GRANTS_ONLY_THE_USER_GIVES_TEXT } from "./grants";
 import { INITIATIVE_HUES } from "./groups/initiative";
-import { ONLY_THE_USER_IMPORTS_SKILLS } from "./groups/skill";
+import { ONLY_A_SESSION_PROPOSES_SKILLS, ONLY_THE_USER_IMPORTS_SKILLS } from "./groups/skill";
 import {
   MEMORY_CORE_CAP,
   MEMORY_TOPIC_CAP,
@@ -139,13 +139,20 @@ export type FieldRow =
   | {
       /**
        * Makes the command take one positional `<folder>` in place of this
-       * field: a skill folder, or for an import a folder of skills. The CLI
-       * reads the folder, and sends one request per skill it holds, with this
-       * field set to that skill's folder name and the skill's tar archive as
-       * the request body. A skill's files cannot be typed on a command line,
-       * so this is how a command takes a skill.
+       * field: a skill folder, or a folder of skills. The CLI reads the
+       * folder, and sends one request per skill it holds, with this field
+       * set to that skill's folder name and the skill's tar archive as the
+       * request body. A skill's files cannot be typed on a command line, so
+       * this is how a command takes a skill.
        */
       readonly skillFolder: true;
+      /**
+       * Makes the command take one skill folder only, and refuses a folder of
+       * skills before anything is sent. It says nothing about what else the
+       * query carries: the CLI sends a skill's GitHub source from its lock
+       * file only when the operation's query has the source fields.
+       */
+      readonly oneSkillOnly?: true;
       readonly help: string;
     }
   | {
@@ -204,6 +211,15 @@ export interface NounRow {
  */
 const USER_ONLY_FORBIDDEN =
   "only the user may make this call: a session token is refused whatever grants its profile holds, so a Permission Request cannot help; ask the user to run the command instead";
+
+/**
+ * The `forbidden` meaning of a command that changes the Skill Library after
+ * review. A session that has read third-party messages is refused it even
+ * when its profile holds `skill.apply`, because those messages may have
+ * steered what it would change.
+ */
+const SKILL_REVIEW_FORBIDDEN =
+  "the session lacks skill.apply, which only the user gives, or it has read third-party messages, which no grant overrides; ask the user to do it on the Skills screen";
 
 /**
  * The queries that read both the open and the closed initiatives. A command
@@ -4450,6 +4466,23 @@ export const CLI = {
         "the Skill Library is full; delete a skill you no longer use with `hercule skill delete`, then import again",
     },
   },
+  "skill.propose": {
+    command: "skill propose",
+    help: "Proposes a skill, or a new version of one, from a session. The user applies it on the Skills screen. Takes one skill folder, one that holds a `SKILL.md`, named by the folder. Run with the user's own credential, it is refused: the user imports instead. Prints one line: proposed, unchanged, or why it was refused.",
+    examples: [{ args: ["./release-checklist"] }],
+    fields: {
+      name: {
+        skillFolder: true,
+        oneSkillOnly: true,
+        help: "The skill's own folder, which holds its `SKILL.md`. The skill is named by the folder's name.",
+      },
+    },
+    errors: {
+      forbidden: `${ONLY_A_SESSION_PROPOSES_SKILLS} Or the session lacks skill.write, which only the user gives: ask with \`hercule permission request skill.write\`, and the user decides it`,
+      cap_exceeded:
+        "20 proposed revisions already wait, or the skill is new and the Skill Library is full; ask the user to apply or reject some on the Skills screen, then propose again",
+    },
+  },
   "skill.delete": {
     command: "skill delete",
     help: "Deletes a skill and all its revisions from the Skill Library. A running session keeps the copy it was given.",
@@ -4457,6 +4490,7 @@ export const CLI = {
     fields: {
       name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
     },
+    errors: { forbidden: SKILL_REVIEW_FORBIDDEN },
   },
   "skill.check": {
     command: "skill check",
@@ -4503,8 +4537,28 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden: SKILL_REVIEW_FORBIDDEN,
       invalid_state:
         "the revision is not waiting to be applied: it is the current revision or an earlier one. To go back to an earlier revision, import its files again with --replace true",
+    },
+  },
+  "skill.reject": {
+    command: "skill reject",
+    help: "Deletes a proposed revision. Any other revision is refused. Rejecting the last proposed revision of a skill that has no current revision deletes the skill too.",
+    examples: [
+      { args: ["grilling", "4f9c2b7e1d0a3c5b6e8f9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f"] },
+    ],
+    fields: {
+      name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
+      revisionHash: {
+        positional: true,
+        placeholder: "revision-hash",
+        help: "The proposed revision's full hash, as `hercule skill read` prints it.",
+      },
+    },
+    errors: {
+      forbidden: SKILL_REVIEW_FORBIDDEN,
+      invalid_state: "the revision is not a proposed one: only a proposed revision can be rejected",
     },
   },
   "skill.applyUpdates": {
@@ -4517,6 +4571,7 @@ export const CLI = {
       updates: { hidden: true },
     },
     errors: {
+      forbidden: SKILL_REVIEW_FORBIDDEN,
       conflict:
         "a check found a newer update since the list was read, and nothing was applied; run the command again",
     },
@@ -5518,7 +5573,7 @@ export const NOUNS = {
   },
   skill: {
     summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
-    flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill delete <name> removes one.",
+    flow: "hercule skill import <folder> adds or updates skills (a session runs hercule skill propose <folder> instead), hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill reject deletes a proposed revision, hercule skill delete <name> removes one.",
   },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",

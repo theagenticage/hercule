@@ -12,9 +12,10 @@
  * - **`--image <path>`** names an image file. The API takes an image's id,
  *   which nobody has before the upload, so the CLI uploads each file with
  *   `attachment.create` and sends the returned ids.
- * - **`<folder>`** names a skill folder, or a folder of skills. A skill's
- *   files travel as one tar archive per request, so the CLI reads the folder
- *   and sends one request per skill.
+ * - **`<folder>`** names a skill folder, or a folder of skills (only one
+ *   skill folder when the row says `oneSkillOnly`). A skill's files travel as
+ *   one tar archive per request, so the CLI reads the folder and sends one
+ *   request per skill.
  * - **`skill apply-updates`** takes no arguments. The CLI reads the Skill
  *   Library and sends every Skill's available revision, so the updates sent
  *   are exactly the ones it prints.
@@ -37,6 +38,7 @@ import {
   MAX_ATTACHMENTS_PER_INPUT,
   OWN_AGENT_ALIAS,
   type SkillImportResult,
+  type SkillProposeResult,
 } from "@hercule/contract";
 import { Effect, Result } from "effect";
 import { UsageError } from "../exit";
@@ -387,7 +389,7 @@ const uploadImages = async (
  * sentence when the CLI refused the skill before sending it.
  */
 export type SentSkill =
-  | { readonly name: string; readonly answer: SkillImportResult }
+  | { readonly name: string; readonly answer: SkillImportResult | SkillProposeResult }
   | { readonly name: string; readonly refusal: ApiError | string };
 
 /**
@@ -413,9 +415,14 @@ export type Outcome =
 /**
  * Reads the skill folder the command line names and sends one request per
  * skill in it, one at a time, in name order. Each request carries the
- * query `buildSkillImportQuery` builds (the skill's folder name, and its
- * GitHub source from the lock file when there is one), the command's other
- * query fields, and the skill's tar archive as the body.
+ * skill's folder name, the command's other query fields, and the skill's tar
+ * archive as the body. When the operation's query has the source fields
+ * (`sourceRepo`), it also carries the skill's GitHub source from the lock
+ * file, as `buildSkillImportQuery` builds it, and a lock file that cannot be
+ * read is reported. An operation without them never reads a source, so a lock
+ * file problem is of no concern to it.
+ *
+ * When the row says `oneSkillOnly`, the folder must be one skill.
  *
  * Each archive is built just before its request and dropped after it, so a
  * folder of many skills never sits in memory at once. A skill whose folder
@@ -445,10 +452,18 @@ const sendSkillFolder = async (
   if (Result.isFailure(found)) {
     throw new UsageError(`${formatFieldName(field)}: ${found.failure.reason}`, command.spelling);
   }
-  const { displayPath, lockFileProblem, skills } = found.success;
+  const { displayPath, isSkill, skills } = found.success;
+  const takesSource = command.queryFieldNames.includes("sourceRepo");
+  const lockFileProblem = takesSource ? found.success.lockFileProblem : null;
   if (skills.length === 0) {
     throw new UsageError(
       `${formatFieldName(field)}: \`${displayPath}\` holds no skill: neither it nor any folder in it holds a SKILL.md`,
+      command.spelling,
+    );
+  }
+  if (field.readsOneSkillOnly && !isSkill) {
+    throw new UsageError(
+      `${formatFieldName(field)}: \`${displayPath}\` is a folder of skills, and ${command.spelling} takes one skill folder only. Pass the skill's own folder, the one that holds its SKILL.md.`,
       command.spelling,
     );
   }
@@ -469,9 +484,11 @@ const sendSkillFolder = async (
     }
     try {
       const answer = (await call({
-        query: { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) },
+        query: takesSource
+          ? { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) }
+          : { ...query, name: skill.name },
         payload: archive.success,
-      })) as SkillImportResult;
+      })) as SkillImportResult | SkillProposeResult;
       sent.push({ name: skill.name, answer });
     } catch (error) {
       if (!isSkillImportRefusal(error)) {
