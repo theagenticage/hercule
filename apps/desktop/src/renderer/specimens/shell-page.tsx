@@ -295,7 +295,7 @@ export interface SidebarRecords {
   readonly agentSessions?: ReadonlyArray<Session>;
   /**
    * What `task.queryTracking` returns: the Tasks Tracking follows, which the
-   * Hercule segment's count and Intake's Tracking read. None when left out.
+   * Work segment's count and Intake's Tracking read. None when left out.
    */
   readonly tracking?: ReadonlyArray<TrackingTask>;
   /**
