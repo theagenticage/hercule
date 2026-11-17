@@ -4,8 +4,10 @@ import "./fleet-page.css";
 
 declare module "react" {
   interface CSSProperties {
-    /** The width of one cell of the sessions drawing, such as `5px`. */
+    /** The width of one cell of the sessions drawing on a card or a list row, such as `5px`. */
     "--fleet-cell"?: string;
+    /** How many slots the sessions drawing's cells stand for, from which the machine page sizes them. */
+    "--fleet-slots"?: number;
   }
 }
 
@@ -28,7 +30,9 @@ const splitIntoSegments = (slots: number, slotsPerSegment: number): number[] =>
  *
  * - While `drawing.cellWidth` is a number, every slot is one cell of that
  *   width, with a 2px gap between every two, so the bar ends wherever its
- *   cells end. A running session's cell is filled and marked `is-run`.
+ *   cells end. A running session's cell is filled and marked `is-run`. The
+ *   machine page sizes the cells by the same rule against its tile's width
+ *   instead of 120px, from `--fleet-slots` (machine-page.css).
  * - While it is `null`, the bar is one continuous fill, 120px wide, cut every
  *   10 sessions. A segment fills from the left with the sessions running in
  *   it and is free for the rest, and a segment whose every slot runs a
@@ -67,7 +71,11 @@ export function SessionsFigure({
   return (
     <span
       className={className}
-      style={isCells ? { "--fleet-cell": `${String(cellWidth)}px` } : undefined}
+      style={
+        isCells
+          ? { "--fleet-cell": `${String(cellWidth)}px`, "--fleet-slots": cap + overCap }
+          : undefined
+      }
       aria-hidden="true"
     >
       {splitIntoSegments(cap, slotsPerSegment).map((slots, index) => {

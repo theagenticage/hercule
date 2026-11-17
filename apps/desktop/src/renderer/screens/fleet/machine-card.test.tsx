@@ -65,11 +65,11 @@ describe("MachineCard", () => {
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("runner-busy");
   });
 
-  it("draws no status label for an online machine, and names the state on its dot instead", () => {
+  it("draws an online machine's status in words under its name, as every other status", () => {
     const card = renderCard(BUSY_MACHINE);
 
-    expect(within(card).queryByText("Online")).toBeNull();
-    expect(within(card).getByRole("img", { name: "Online" })).toBeTruthy();
+    expect(within(card).getByText("Online").className).toBe("fleet-card-state");
+    expect(card.querySelector(".fleet-card-title")?.firstElementChild?.textContent).toBe("atlas");
   });
 
   it("names a machine told to take no new work once, in its status, and not again as its room", () => {

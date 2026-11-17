@@ -113,6 +113,8 @@ describe("SessionsFigure", () => {
     const figure = draw(4, 6, 0);
 
     expect(readCellWidth(figure)).toBe("18px");
+    // The machine page sizes the cells by the slots drawn, which include the sessions past the cap.
+    expect(figure.style.getPropertyValue("--fleet-slots")).toBe("6");
     expect(readSegments(figure)).toEqual(Array<string>(6).fill("cell run 100%"));
     expect(figure.children[4]?.className).toBe("fleet-sessions-rule");
   });

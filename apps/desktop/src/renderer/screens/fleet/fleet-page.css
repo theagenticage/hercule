@@ -274,7 +274,6 @@
   color: var(--muted);
 }
 .fleet-card-head .fleet-open {
-  flex: 1;
   font-size: var(--t-14);
 }
 .fleet-card-state {
@@ -290,9 +289,10 @@
   width: 7px;
   height: 7px;
 }
-/* A machine with a status label: its name over the label, so a long label never cuts the name
-   short. Each line is as tall as its font's own box, so the two never touch, and the pair reaches
-   1px past the icon's 30px box at each end, so the head keeps its height. */
+/* Every card's head: the name over the status's dot and words, so the names of one row line up and
+   a long status never cuts the name short. Each line is as tall as its font's own box, so the two
+   never touch, and the pair reaches 1px past the icon's 30px box at each end, so the head keeps
+   its height. */
 .fleet-card-title {
   display: grid;
   flex: 1;

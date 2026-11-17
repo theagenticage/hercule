@@ -49,10 +49,9 @@ function Gauge({
  * against the cap, its disk and memory gauges, how much room it has, and the
  * one thing that needs the user with the button that fixes it. It draws what `machine` holds and works out nothing.
  *
- * The status label is drawn only while the machine is not plainly online; the
- * dot alone says "online", at the head's right. A label, such as "Takes no
- * new sessions", is drawn under the name with its dot, so a long label never
- * cuts the name short and the head keeps its height.
+ * Every head is the same two lines, the name over the status's dot and words
+ * ("Online", "Offline", "Takes no new sessions"), so the names of one row of
+ * cards line up and a long status never cuts the name short.
  *
  * The machine's name is the card's one way to open the machine: its button
  * covers the whole card and calls `onOpen` with the runner id. `allow` is the
@@ -83,7 +82,6 @@ export function MachineCard({
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
   const { runnerId, status, isAway, drawing, disk, memory } = machine;
-  const isLabelled = status.tone !== "online";
 
   return (
     <div
@@ -94,22 +92,13 @@ export function MachineCard({
         <span className="fleet-card-icon">
           <MachineIcon kind={machine.kind} size={16} />
         </span>
-        {isLabelled ? (
-          <span className="fleet-card-title">
-            <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
-            <span className="fleet-card-state">
-              <StatusDot status={status} />
-              {status.label}
-            </span>
+        <span className="fleet-card-title">
+          <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
+          <span className="fleet-card-state">
+            <StatusDot status={status} />
+            {status.label}
           </span>
-        ) : (
-          <>
-            <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
-            <span className="fleet-card-state">
-              <StatusDot status={status} namesState />
-            </span>
-          </>
-        )}
+        </span>
       </div>
       <div className="fleet-gauges">
         <Gauge label="Sessions" isWide>

@@ -187,9 +187,8 @@
 .machine-page-instrument--fail > b {
   color: var(--fail-ink);
 }
-/* The drawings are the cards', made as tall as the prototype's instruments:
-   a 6px meter across the tile, and the sessions' bar 14px tall, as wide as on
-   a card, so one cell is one session in the same width. Both take
+/* The drawings are the cards', made as big as the prototype's instruments:
+   a 6px meter, and the sessions' bar 14px tall across the tile. Both take
    22px with their margins and centre on the same line, so the notes under
    the three tiles line up (the prototype's meter takes 16px and its ladder
    22px). */
@@ -200,6 +199,15 @@
 .machine-page-instrument .fleet-sessions {
   height: 14px;
   margin: 4px 0;
+}
+/* The cells follow the card's rule with the tile's width as the budget in place of 120px: the
+   widest whole width that, with the 2px gaps, keeps the slots within the tile. The waiting cells
+   are as wide, and those past the tile's edge are cut off, as on a card. */
+.machine-page-instrument .fleet-sessions.is-cells {
+  width: 100%;
+}
+.machine-page-instrument .fleet-sessions.is-cells > i {
+  width: calc(round(down, (100% + 2px) / var(--fleet-slots), 1px) - 2px);
 }
 .machine-page-instrument-note {
   color: var(--faint);
