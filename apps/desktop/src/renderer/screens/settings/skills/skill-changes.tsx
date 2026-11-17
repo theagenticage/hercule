@@ -1,7 +1,7 @@
 /**
- * The parts of an update on a skill's page in Settings > Skills (spec 17
- * §Settings, Skills, Updates): the band that offers the update, and the card
- * of the files it changes.
+ * The parts of a waiting revision on a skill's page in Settings > Skills
+ * (spec 17 §Settings, Skills, Updates and Proposed revisions): the band that
+ * offers an update or a proposal, and the card of the files it changes.
  *
  * Every changed file gets its row, but a patch's lines are drawn in steps.
  * `skill.diff` keeps the patches of one revision under 1 MiB in total, yet
@@ -27,22 +27,43 @@ import { DiffIcon } from "../../../icons/diff";
 import "./skills.css";
 
 /**
- * Renders the band over an update from the GitHub repository `repo`:
- * "Update available from mattpocock/skills. Nothing changes until you
- * update.", with `action`, the Update button, at its end.
+ * Renders the band over a revision that waits on a skill's page: an update
+ * from GitHub or a session's proposal. `mark` is drawn at its start when
+ * given, the proposer's face. `children` is its text, one line, or the
+ * lines of `SkillBandLine`. `actions` are the buttons at its end.
  */
-export function SkillUpdateBand({
-  repo,
-  action,
+export function SkillBand({
+  mark,
+  children,
+  actions,
 }: {
-  readonly repo: string;
-  readonly action: ReactNode;
+  readonly mark?: ReactNode;
+  readonly children: ReactNode;
+  readonly actions: ReactNode;
 }): JSX.Element {
   return (
     <div className="skill-band">
-      <span>{`Update available from ${repo}. Nothing changes until you update.`}</span>
-      {action}
+      {mark}
+      <span className="skill-band-text">{children}</span>
+      {actions}
     </div>
+  );
+}
+
+/**
+ * Renders one line of a band's text, exactly one line high, so a chip in it
+ * never makes it taller than the line under it. `note` draws the line
+ * lighter, as the second line of a proposal is.
+ */
+export function SkillBandLine({
+  note = false,
+  children,
+}: {
+  readonly note?: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <span className={note ? "skill-band-line skill-band-note" : "skill-band-line"}>{children}</span>
   );
 }
 

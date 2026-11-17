@@ -7,6 +7,7 @@ import {
   isNotFound,
   resolveDisplayTimezone,
 } from "@hercule/client-core";
+import type { SkillRevision } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import { settingsQuery, skillDiffQuery, skillQuery } from "../../../../../app/queries";
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
@@ -18,22 +19,28 @@ import {
 } from "../../../../../screens/settings/skills/skill-page";
 import { CheckNow } from "./-check-now";
 import { DeleteSection } from "./-delete-section";
+import { Proposal } from "./-skill-proposal";
 import { SkillUpdateSection } from "./-skill-update";
 import { UploadVersion } from "./-upload-version";
 
 /**
  * Settings > Skills, the page of one skill: its description and source, the
- * warning lines for its approval effects, the update waiting on it with what
- * it changes, its `SKILL.md`, its files, its History and Delete (spec 17
- * §Settings, Skills). The header reads "Settings / Skills / <name>", with
- * the list linked. For a skill from GitHub it has "Checked 2 hours ago" and
- * Check now, then Upload new version for every skill.
+ * warning lines for its approval effects, the update waiting on it and the
+ * revisions sessions proposed, each with what it changes, its `SKILL.md`, its
+ * files, its History and Delete (spec 17 §Settings, Skills). The header
+ * reads "Settings / Skills / <name>", with the list linked. For a skill from
+ * GitHub it has "Checked 2 hours ago" and Check now, then Upload new version.
+ *
+ * A skill with no current revision exists only as proposals. Its page shows
+ * the newest proposal's band, the lead from that proposal's description,
+ * "What it adds", then any older proposals, and no `SKILL.md`, Files,
+ * History, Upload new version or Delete.
  *
  * The section's layout holds the `skill` topic, which keeps the skill
  * current, so the loader reads it only when it is not cached yet; the
  * controller's first push on the topic reads it again. The loader also reads
- * what a waiting update changes, and the topic reads that again with the
- * skill. A name that names no skill goes back to the list, and so does a
+ * what a waiting update and each proposal change, and the topic reads those
+ * again with the skill. A name that names no skill goes back to the list, and so does a
  * page whose skill is deleted while it is open. The section remembers its
  * list, never one skill's page.
  */
@@ -42,15 +49,19 @@ export const Route = createFileRoute("/_connected/_shell/settings/skills/$name")
   loader: async ({ context: { controller, queryClient }, params: { name } }) => {
     const { client } = controller;
     try {
-      const [{ skill }] = await Promise.all([
+      const [{ skill, proposedRevisions }] = await Promise.all([
         queryClient.ensureQueryData(skillQuery(client, name)),
         queryClient.ensureQueryData(settingsQuery(client)),
       ]);
+      const revisionHashes = proposedRevisions.map(({ revisionHash }) => revisionHash);
       if (skill.availableRevisionHash !== null && skill.currentRevisionHash !== null) {
-        await queryClient.ensureQueryData(
-          skillDiffQuery(client, name, skill.availableRevisionHash),
-        );
+        revisionHashes.push(skill.availableRevisionHash);
       }
+      await Promise.all(
+        revisionHashes.map((revisionHash) =>
+          queryClient.ensureQueryData(skillDiffQuery(client, name, revisionHash)),
+        ),
+      );
     } catch (error) {
       if (!isNotFound(error)) throw error;
       // oxlint-disable-next-line typescript/only-throw-error -- the router's way to redirect
@@ -85,8 +96,22 @@ function SkillPage(): JSX.Element {
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
-  const { skill, files, skillMd, history } = detail;
+  const { skill, files, skillMd, history, proposedRevisions } = detail;
   const current = findCurrentSkillRevision(detail);
+  const isNewSkill = skill.currentRevisionHash === null;
+  const now = new Date(query.dataUpdatedAt);
+  const [newest, ...older] = proposedRevisions;
+  const proposal = (revision: SkillRevision, lead?: JSX.Element): JSX.Element => (
+    <Proposal
+      key={revision.revisionHash}
+      name={name}
+      revision={revision}
+      isNewSkill={isNewSkill}
+      now={now}
+      timezone={timezone}
+      lead={lead}
+    />
+  );
   return (
     <>
       {/* The header's actions and their lines sit above the record, under
@@ -95,30 +120,39 @@ function SkillPage(): JSX.Element {
       {skill.source.kind === "github" && (
         <CheckNow name={name} lastCheckedAt={skill.lastCheckedAt} />
       )}
-      <UploadVersion skill={skill} />
+      {!isNewSkill && <UploadVersion skill={skill} />}
       <div className="set-record skill-record">
         <SettingsHeaderTitle parent={{ title: "Skills", to: "/settings/skills" }} title={name} />
-        {/* A skill with no current revision exists only as a proposed
-            revision. This page does not draw proposed revisions yet (spec 17
-            §Settings, Skills, Proposed revisions, #736), so such a skill
-            shows only its History and Delete. */}
-        {current !== undefined && <SkillLead skill={skill} description={current.description} />}
-        <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
-        {skillMd !== null && <SkillMdSection text={skillMd} sizeBytes={findSkillMdSize(files)} />}
-        {skill.currentFileCount !== null && skill.currentSizeBytes !== null && (
-          <SkillFilesSection
-            files={files}
-            fileCount={skill.currentFileCount}
-            sizeBytes={skill.currentSizeBytes}
-          />
+        {isNewSkill ? (
+          <>
+            {newest !== undefined &&
+              proposal(newest, <SkillLead skill={skill} revision={newest} />)}
+            {older.map((revision) => proposal(revision))}
+          </>
+        ) : (
+          <>
+            {current !== undefined && <SkillLead skill={skill} revision={current} />}
+            <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
+            {proposedRevisions.map((revision) => proposal(revision))}
+            {skillMd !== null && (
+              <SkillMdSection text={skillMd} sizeBytes={findSkillMdSize(files)} />
+            )}
+            {skill.currentFileCount !== null && skill.currentSizeBytes !== null && (
+              <SkillFilesSection
+                files={files}
+                fileCount={skill.currentFileCount}
+                sizeBytes={skill.currentSizeBytes}
+              />
+            )}
+            <SkillHistorySection
+              history={history}
+              currentRevisionHash={skill.currentRevisionHash}
+              now={now}
+              timezone={timezone}
+            />
+            <DeleteSection name={name} />
+          </>
         )}
-        <SkillHistorySection
-          history={history}
-          currentRevisionHash={skill.currentRevisionHash}
-          now={new Date(query.dataUpdatedAt)}
-          timezone={timezone}
-        />
-        <DeleteSection name={name} />
       </div>
     </>
   );

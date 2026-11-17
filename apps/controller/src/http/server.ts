@@ -210,12 +210,13 @@ export const listenerOptions = {
  * The routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
  * `<method> <path>`: a user's image upload (`attachment.create`), a runner's
  * upload of a tool result's attachment, and a skill's archive
- * (`skill.import`).
+ * (`skill.import` and `skill.propose`).
  */
 const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
   `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
   `POST ${RUNNER_ATTACHMENTS_PATH}`,
   `${OPERATIONS["skill.import"].method} ${OPERATIONS["skill.import"].path}`,
+  `${OPERATIONS["skill.propose"].method} ${OPERATIONS["skill.propose"].path}`,
 ]);
 
 /**

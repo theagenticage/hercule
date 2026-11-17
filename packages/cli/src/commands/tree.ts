@@ -106,6 +106,11 @@ export interface Field {
    */
   readonly readsSkillFolder: boolean;
   /**
+   * Whether the skill folder must be one skill, and the request carries only
+   * the skill's name. Set by the row's `oneSkillOnly` marker.
+   */
+  readonly readsOneSkillOnly: boolean;
+  /**
    * The list operation that resolves an id tail given here; absent when only a
    * full id is accepted.
    */
@@ -361,6 +366,7 @@ const buildField = (
   return {
     name,
     spelling,
+    readsOneSkillOnly: "oneSkillOnly" in row,
     positional: "positional" in row || readsSkillFolder,
     carriedIn,
     kind: takesNamedValues ? "namedValues" : readScalarKind(value),

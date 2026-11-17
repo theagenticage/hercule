@@ -7,7 +7,9 @@ import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   BUILT_IN_SKILL_NAME,
+  MAX_PROPOSED_SKILL_REVISIONS,
   MAX_SKILLS,
+  ONLY_A_SESSION_PROPOSES_SKILLS,
   ONLY_THE_USER_IMPORTS_SKILLS,
   type Grant,
 } from "@hercule/contract";
@@ -16,8 +18,9 @@ import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { AfterCommit, nowIso, withTransaction, type Change } from "../db";
+import { AfterCommit, nowIso, uuidFromString, withTransaction, type Change } from "../db";
 import { readEventsOfKind } from "../events/testing";
+import { sessionTaint } from "../taint";
 import { buildSkillArchivePath, buildSkillsFolder } from "./files";
 import { GithubSkillSources } from "./github";
 import { SkillService, SkillServiceLayer } from "./service";
@@ -1250,5 +1253,371 @@ describe("skill.applyUpdates", () => {
     expect(outcome.applied.items.map((skill) => skill.currentRevisionHash)).toEqual(
       outcome.fresh.map((update) => update.revisionHash),
     );
+  });
+});
+
+/** Proposes `files` as the skill `name`, as whoever the effect runs as. */
+const proposeSkill = (name: string, files: ReadonlyArray<SkillFile>) =>
+  Effect.gen(function* () {
+    const service = yield* SkillService;
+    const archive = yield* buildSkillArchive(files);
+    return yield* service.propose({ name }, archive);
+  });
+
+/** Runs `effect` as `SESSION`, from inside a body that otherwise runs as the user. */
+const asSession = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.provideService(effect, CurrentActor, SESSION);
+
+/** Inserts the row of `SESSION`, tainted when `tainted` is true, so the taint check can read it. */
+const insertSessionRow = (tainted: boolean) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const taint = yield* sessionTaint;
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const none = uuidFromString("0199f0b7-0000-7000-8000-0000000000ee");
+        yield* sql`
+          INSERT INTO sessions (id, permission_profile_id, provider_account_id, harness_id,
+                                runner_id, requested_access_mode, access_mode, spec, title,
+                                status, created_at, last_activity_at)
+          VALUES (${uuidFromString(SESSION.sessionId)}, ${none}, ${none}, 'test.harness',
+                  ${none}, 'auto', 'auto', '{}', 'a session', 'idle', ${AT}, ${AT})
+        `;
+        if (tainted) yield* taint.markTainted(SESSION.sessionId);
+      }),
+    );
+  });
+
+/** Proposes `count` revisions of `name` as the session, each with other content. */
+const proposeMany = (name: string, count: number) =>
+  Effect.forEach(
+    Array.from({ length: count }, (_, index) => index),
+    (index) => proposeSkill(name, buildFiles(name, `Body ${String(index)}\n`)),
+    { discard: true },
+  );
+
+describe("skill.propose", () => {
+  it("files a new Skill with no current revision, stamped with the session, and audits it", async () => {
+    const outcome = await runAs(
+      SESSION,
+      Effect.gen(function* () {
+        const proposed = yield* proposeSkill("teach", buildFiles("teach"));
+        const hash = yield* computeSkillRevisionHash(buildFiles("teach"));
+        return {
+          proposed,
+          hash,
+          archiveExists: existsSync(yield* readArchivePath(hash)),
+          entries: yield* readEventsOfKind("skill.proposed"),
+        };
+      }),
+    );
+    expect(outcome.proposed.result).toBe("proposed");
+    expect(outcome.proposed.skill).toMatchObject({
+      name: "teach",
+      source: { kind: "upload" },
+      currentRevisionHash: null,
+      availableRevisionHash: null,
+      proposedCount: 1,
+      createdBy: `session:${SESSION.sessionId}`,
+    });
+    expect(outcome.archiveExists).toBe(true);
+    expect(outcome.entries.map((entry) => entry.payload)).toEqual([
+      { name: "teach", revisionHash: outcome.hash, includesThirdPartyContent: false },
+    ]);
+  });
+
+  it("files a revision of an existing Skill without changing its source or current revision", async () => {
+    const { imported, proposed, detail } = await run(
+      Effect.gen(function* () {
+        const imported = yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        const proposed = yield* asSession(proposeSkill("teach", buildFiles("teach", "Better\n")));
+        const detail = yield* (yield* SkillService).read("teach");
+        return { imported, proposed, detail };
+      }),
+    );
+    expect(proposed.result).toBe("proposed");
+    expect(proposed.skill).toMatchObject({
+      source: imported.skill.source,
+      currentRevisionHash: imported.skill.currentRevisionHash,
+      proposedCount: 1,
+      updatedBy: `session:${SESSION.sessionId}`,
+    });
+    expect(detail.proposedRevisions).toMatchObject([
+      { origin: "session", appliedAt: null, includesThirdPartyContent: false },
+    ]);
+  });
+
+  it("answers unchanged and writes nothing for content the Skill already holds, even when the proposal cap is full", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"));
+        yield* asSession(proposeMany("grill", MAX_PROPOSED_SKILL_REVISIONS));
+        const entriesBefore = (yield* readEventsOfKind("skill.proposed")).length;
+        const current = yield* asSession(proposeSkill("teach", buildFiles("teach")));
+        const earlier = yield* asSession(proposeSkill("grill", buildFiles("grill", "Body 0\n")));
+        return {
+          current,
+          earlier,
+          entriesBefore,
+          entriesAfter: (yield* readEventsOfKind("skill.proposed")).length,
+          revisions: yield* countRevisions,
+        };
+      }),
+    );
+    expect(outcome.current.result).toBe("unchanged");
+    expect(outcome.earlier.result).toBe("unchanged");
+    expect(outcome.entriesAfter).toBe(outcome.entriesBefore);
+    expect(outcome.revisions).toBe(MAX_PROPOSED_SKILL_REVISIONS + 1);
+  });
+
+  it("marks a revision a tainted session proposed as including third-party content", async () => {
+    const { detail, entries } = await runAs(
+      SESSION,
+      Effect.gen(function* () {
+        yield* insertSessionRow(true);
+        yield* proposeSkill("teach", buildFiles("teach"));
+        return {
+          detail: yield* (yield* SkillService).read("teach"),
+          entries: yield* readEventsOfKind("skill.proposed"),
+        };
+      }),
+    );
+    expect(detail.proposedRevisions.map((revision) => revision.includesThirdPartyContent)).toEqual([
+      true,
+    ]);
+    expect(entries.map((entry) => entry.payload)).toMatchObject([
+      { includesThirdPartyContent: true },
+    ]);
+  });
+
+  it("refuses the user and a run, naming skill.write", async () => {
+    const run_: Actor = {
+      _tag: "run",
+      runId: "0199f0b7-0000-7000-8000-0000000000aa",
+      stepId: "s",
+      workflowId: null,
+    };
+    const errors = await Effect.runPromise(
+      Effect.forEach([USER, run_], (actor) =>
+        Effect.provideService(
+          Effect.flip(proposeSkill("teach", buildFiles("teach"))),
+          CurrentActor,
+          actor,
+        ),
+      ).pipe(Effect.provide(buildStack(makeFakeGithub())), Effect.provide(TestClock.layer())),
+    );
+    for (const error of errors) {
+      expect(readApiError(error)).toEqual({
+        code: "forbidden",
+        message: ONLY_A_SESSION_PROPOSES_SKILLS,
+        details: { grant: "skill.write" },
+      });
+    }
+  });
+
+  it("refuses the 21st proposed revision, naming every Skill that has one in name order", async () => {
+    const { error, revisions } = await runAs(
+      SESSION,
+      Effect.gen(function* () {
+        yield* proposeMany("teach", 8);
+        yield* proposeMany("grilling", 7);
+        yield* proposeMany("write-docs", 5);
+        const error = yield* Effect.flip(proposeSkill("other", buildFiles("other")));
+        return { error, revisions: yield* countRevisions };
+      }),
+    );
+    expect(readApiError(error)).toEqual({
+      code: "cap_exceeded",
+      message:
+        "20 proposed revisions already wait for review, in `grilling`, `teach` and `write-docs`. Ask the user to apply or reject them on the Skills screen before you propose another.",
+      details: { count: 21, cap: 20 },
+    });
+    expect(revisions).toBe(20);
+  });
+
+  it("refuses a new name once the library holds MAX_SKILLS skills, and still proposes to an existing one", async () => {
+    const { error, proposed } = await runAs(
+      SESSION,
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          Array.from({ length: MAX_SKILLS }, (_, index) => `skill-${String(index)}`),
+          insertSkillWithoutCurrent,
+          { discard: true },
+        );
+        const error = yield* Effect.flip(proposeSkill("teach", buildFiles("teach")));
+        const proposed = yield* proposeSkill("skill-0", buildFiles("skill-0"));
+        return { error, proposed };
+      }),
+    );
+    expect(readApiError(error)).toMatchObject({
+      code: "cap_exceeded",
+      details: { count: MAX_SKILLS + 1, cap: MAX_SKILLS },
+    });
+    expect(proposed.result).toBe("proposed");
+  });
+});
+
+describe("skill.reject", () => {
+  it("deletes a proposed revision and its archive, and keeps the Skill that has a current revision", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"));
+        yield* asSession(proposeSkill("teach", buildFiles("teach", "Better\n")));
+        const hash = yield* computeSkillRevisionHash(buildFiles("teach", "Better\n"));
+        const answer = yield* service.reject({ name: "teach", revisionHash: hash });
+        return {
+          answer,
+          skill: (yield* service.read("teach")).skill,
+          archiveExists: existsSync(yield* readArchivePath(hash)),
+          entries: yield* readEventsOfKind("skill.rejected"),
+          hash,
+        };
+      }),
+    );
+    expect(outcome.answer).toEqual({});
+    expect(outcome.skill.proposedCount).toBe(0);
+    expect(outcome.archiveExists).toBe(false);
+    expect(outcome.entries.map((entry) => entry.payload)).toEqual([
+      { name: "teach", revisionHash: outcome.hash, skillDeleted: false },
+    ]);
+  });
+
+  it("deletes the Skill with its last proposed revision when it has no current revision", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* asSession(proposeSkill("teach", buildFiles("teach")));
+        yield* asSession(proposeSkill("teach", buildFiles("teach", "Other\n")));
+        const first = yield* computeSkillRevisionHash(buildFiles("teach"));
+        const second = yield* computeSkillRevisionHash(buildFiles("teach", "Other\n"));
+        yield* service.reject({ name: "teach", revisionHash: first });
+        const afterFirst = (yield* service.query()).items.map((skill) => skill.name);
+        yield* service.reject({ name: "teach", revisionHash: second });
+        return {
+          afterFirst,
+          afterSecond: (yield* service.query()).items,
+          revisions: yield* countRevisions,
+          archiveExists: existsSync(yield* readArchivePath(second)),
+          entries: yield* readEventsOfKind("skill.rejected"),
+        };
+      }),
+    );
+    expect(outcome.afterFirst).toEqual(["teach"]);
+    expect(outcome.afterSecond).toEqual([]);
+    expect(outcome.revisions).toBe(0);
+    expect(outcome.archiveExists).toBe(false);
+    expect(
+      outcome.entries.map((entry) => (entry.payload as { skillDeleted: boolean }).skillDeleted),
+    ).toEqual([false, true]);
+  });
+
+  it("clears the available revision when the rejected revision is also the available one", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        yield* asSession(proposeSkill("teach", buildFiles("teach", "Upstream\n")));
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Upstream\n") });
+        yield* checkAll;
+        const before = (yield* readTeach).skill;
+        yield* service.reject({ name: "teach", revisionHash: before.availableRevisionHash ?? "" });
+        return { before, after: (yield* readTeach).skill };
+      }),
+      github,
+    );
+    expect(outcome.before.availableRevisionHash).not.toBeNull();
+    expect(outcome.after).toMatchObject({ availableRevisionHash: null, proposedCount: 0 });
+  });
+
+  it("refuses a revision that is not proposed, and an unknown Skill or revision", async () => {
+    const errors = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        const imported = yield* importSkill("teach", buildFiles("teach"));
+        const hash = imported.skill.currentRevisionHash ?? "";
+        return [
+          yield* Effect.flip(service.reject({ name: "teach", revisionHash: hash })),
+          yield* Effect.flip(service.reject({ name: "teach", revisionHash: "d".repeat(64) })),
+          yield* Effect.flip(service.reject({ name: "nope", revisionHash: hash })),
+        ];
+      }),
+    );
+    expect(errors.map((error) => readApiError(error).code)).toEqual([
+      "invalid_state",
+      "not_found",
+      "not_found",
+    ]);
+    expect(readApiError(errors[0]).message).toContain("only a proposed revision can be rejected");
+  });
+});
+
+describe("a tainted session", () => {
+  const TAINTED_APPLIES_PROPOSAL =
+    "This session has read third-party messages, so it cannot apply skills. The revision stays proposed: apply it on the Skills screen, or from a session that has not read third-party messages.";
+  const TAINTED_CHANGES_LIBRARY =
+    "A session that has read third-party messages cannot change the Skill Library. Ask the user to do it on the Skills screen.";
+
+  it("is refused skill.apply of a proposed revision with the proposal wording, and the revision stays proposed", async () => {
+    const outcome = await runAs(
+      SESSION,
+      Effect.gen(function* () {
+        yield* insertSessionRow(true);
+        yield* proposeSkill("teach", buildFiles("teach"));
+        const hash = yield* computeSkillRevisionHash(buildFiles("teach"));
+        const service = yield* SkillService;
+        return {
+          error: yield* Effect.flip(service.apply({ name: "teach", revisionHash: hash })),
+          unknownSkill: yield* Effect.flip(service.apply({ name: "nope", revisionHash: hash })),
+          skill: (yield* service.read("teach")).skill,
+        };
+      }),
+    );
+    expect(readApiError(outcome.error)).toEqual({
+      code: "forbidden",
+      message: TAINTED_APPLIES_PROPOSAL,
+      details: { grant: "skill.apply" },
+    });
+    expect(readApiError(outcome.unknownSkill).code).toBe("not_found");
+    expect(outcome.skill).toMatchObject({ currentRevisionHash: null, proposedCount: 1 });
+  });
+
+  it("is refused skill.apply of an available revision, applyUpdates, reject and delete with the general wording", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* insertSessionRow(true);
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        yield* asSession(proposeSkill("teach", buildFiles("teach", "Better\n")));
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Upstream\n") });
+        yield* checkAll;
+        const skill = (yield* readTeach).skill;
+        const proposedHash = yield* computeSkillRevisionHash(buildFiles("teach", "Better\n"));
+        const service = yield* SkillService;
+        const available = skill.availableRevisionHash ?? "";
+        const errors = yield* asSession(
+          Effect.all([
+            Effect.flip(service.apply({ name: "teach", revisionHash: available })),
+            Effect.flip(
+              service.applyUpdates({ updates: [{ name: "teach", revisionHash: available }] }),
+            ),
+            Effect.flip(service.reject({ name: "teach", revisionHash: proposedHash })),
+            Effect.flip(service.delete("teach")),
+          ]),
+        );
+        return { errors, after: (yield* readTeach).skill, skill };
+      }),
+      github,
+    );
+    for (const error of outcome.errors) {
+      expect(readApiError(error)).toEqual({
+        code: "forbidden",
+        message: TAINTED_CHANGES_LIBRARY,
+        details: { grant: "skill.apply" },
+      });
+    }
+    expect(outcome.after).toEqual(outcome.skill);
   });
 });

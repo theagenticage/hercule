@@ -1,6 +1,8 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import {
+  describeSkillProposedBadge,
+  describeSkillProposer,
   describeSkillSource,
   describeSkillUpdateBadge,
   formatSkillSize,
@@ -8,6 +10,7 @@ import {
 import { BUILT_IN_SKILL_NAME, type Skill } from "@hercule/contract";
 import { ChevronRightIcon } from "../../../icons/chevron-right";
 import { SkillIcon } from "../../../icons/skill";
+import { useActorSenderReading } from "../../thread/use-sender-reading";
 import "../permission-profiles/permission-profiles.css";
 import "./skills.css";
 
@@ -19,8 +22,11 @@ import "./skills.css";
  * has no page, so it is not a link.
  *
  * The badges are "Update available", or "Update may change approvals"
- * (`describeSkillUpdateBadge`), and "Check failed" with the check's error as
- * its tooltip. A row whose check failed is tinted in `--fail`.
+ * (`describeSkillUpdateBadge`), "Proposed" with the count from two
+ * (`describeSkillProposedBadge`), and "Check failed" with the check's error
+ * as its tooltip. A row whose check failed is tinted in `--fail`. A skill
+ * with no current revision exists only as a proposal: its line names the
+ * proposer where the source would be, and it has no size.
  *
  * With no skill in `skills`, the empty block follows the built-in row, with
  * a button that calls `onImport`.
@@ -60,6 +66,7 @@ export function SkillList({
         </div>
         {skills.map((skill) => {
           const updateBadge = describeSkillUpdateBadge(skill);
+          const proposedBadge = describeSkillProposedBadge(skill);
           return (
             <Link
               key={skill.name}
@@ -76,11 +83,15 @@ export function SkillList({
               </span>
               <span className="profile-name">
                 <b>{skill.name}</b>
-                <span>{describeSkillSource(skill.source)}</span>
+                {skill.currentRevisionHash === null ? (
+                  <ProposerLine proposer={skill.createdBy} />
+                ) : (
+                  <span>{describeSkillSource(skill.source)}</span>
+                )}
               </span>
-              {/* The Proposed badge waits on proposed revisions (#736). */}
               <span className="skill-badges">
                 {updateBadge !== null && <span className="chip chip--you">{updateBadge}</span>}
+                {proposedBadge !== null && <span className="chip chip--you">{proposedBadge}</span>}
                 {skill.checkError !== null && (
                   <span className="chip chip--fail" title={skill.checkError}>
                     Check failed
@@ -110,4 +121,14 @@ export function SkillList({
       )}
     </div>
   );
+}
+
+/**
+ * Renders the line under the name of a skill that exists only as a proposal:
+ * "Proposed by Ada, session 7c82ebeb", naming the agent once its session is
+ * read. `proposer` is the actor stamp of whoever proposed it.
+ */
+function ProposerLine({ proposer }: { readonly proposer: string }): JSX.Element {
+  const sender = useActorSenderReading(proposer);
+  return <span>{describeSkillProposer(proposer, sender)}</span>;
 }

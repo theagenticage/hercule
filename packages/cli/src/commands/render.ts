@@ -1367,13 +1367,13 @@ const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
  * skill that stopped the command, if one did, then the lock file line when a
  * `.skill-lock.json` could not be read:
  *
- * - a skill the controller took: `grilling: created`, `revised` or
- *   `unchanged`, with one indented warning line under it per approval effect
+ * - a skill the controller took: `grilling: created`, `revised`,
+ *   `proposed` or `unchanged`, with one indented warning line under it per approval effect
  *   its current revision now has;
  * - a refused skill: `teach: refused: ` and why, with each issue of a
  *   validation error indented under it;
- * - the skill that stopped the command: `teach: refused, so the import
- *   stopped: ` and the controller's message, or `teach: failed, so the import
+ * - the skill that stopped the command: `teach: refused, so the command
+ *   stopped: ` and the controller's message, or `teach: failed, so the command
  *   stopped: ` and the error, such as a controller that cannot be reached.
  */
 const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): ReadonlyArray<string> => {
@@ -1396,10 +1396,10 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
       ? []
       : stopped.error instanceof ApiError
         ? [
-            `${stopped.name}: refused, so the import stopped: ${stopped.error.message}`,
+            `${stopped.name}: refused, so the command stopped: ${stopped.error.message}`,
             ...indentIssues(stopped.error),
           ]
-        : [`${stopped.name}: failed, so the import stopped: ${readErrorMessage(stopped.error)}`]),
+        : [`${stopped.name}: failed, so the command stopped: ${readErrorMessage(stopped.error)}`]),
     ...(outcome.lockFileProblem === null ? [] : [outcome.lockFileProblem]),
   ];
 };
