@@ -38,12 +38,16 @@
   -webkit-app-region: no-drag;
 }
 
-/* The face switch, Threads | Hercule: its two segments share the sidebar's
+/* The face switch, Threads | Work: its two segments share the sidebar's
    width. Two classes, as in the book, so the grid wins over `.seg`'s
-   `inline-flex` whichever style sheet loads first. */
+   `inline-flex` whichever style sheet loads first. Its track keeps the quiet
+   chrome divider rather than `--control-edge`: the switch is on screen all
+   the time, and a 3:1 edge made it the loudest thing in the sidebar. The
+   selected segment's fill already tells the two apart. */
 .seg.seg--side {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  box-shadow: inset 0 0 0 1px var(--divider);
 }
 
 /* The face switch and the failed-run dot that sits over its right end. */
@@ -53,7 +57,7 @@
   margin-bottom: 8px;
 }
 
-/* A failed run, on the Hercule segment while the Threads face shows: a 26px
+/* A failed run, on the Work segment while the Threads face shows: a 26px
    button of its own, with the 7px dot drawn in the middle of it, 2px in from
    the segment's top and right edges. The word stays centred in the tab, as
    drawn. Only when the To do count shows too does the tab give the dot room

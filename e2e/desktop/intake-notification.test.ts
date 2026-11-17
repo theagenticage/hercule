@@ -34,11 +34,11 @@ describe("Intake, the notification", () => {
     const arranged = await arrangeFleet();
     await raiseSignal(arranged, "fyi", "Earlier news");
     const { app, page } = await openSignedIn(arranged.url);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 1 to do" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work, 1 to do" });
     await hideWindow(app);
 
     const urgent = await raiseSignal(arranged, "fyi", "Checkout is down", ["--priority", "high"]);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work, 2 to do" });
     expect(await readWaitingNotifications(app)).toEqual([]);
     // The app reads To do again once it reconnects, and the list then holds
     // an urgent signal it has not seen.

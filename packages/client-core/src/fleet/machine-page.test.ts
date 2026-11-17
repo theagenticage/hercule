@@ -193,6 +193,21 @@ describe("describeMachinePage top", () => {
     );
   });
 
+  it("counts the sessions waiting for a slot as taking room", () => {
+    expect(readText(line({ maxConcurrentSessions: 16 }, { running: 10, waiting: 2 }))).toBe(
+      "Room for 4 more, under its cap of 16",
+    );
+  });
+
+  it("says the sessions running and waiting take the cap when they leave no room", () => {
+    expect(readText(line({ maxConcurrentSessions: 16 }, { running: 12, waiting: 5 }))).toBe(
+      "No room: 12 running and 5 waiting sessions take its cap of 16",
+    );
+    expect(readText(line({ maxConcurrentSessions: 1 }, { running: 0, waiting: 1 }))).toBe(
+      "No room: 0 running and 1 waiting session take its cap of 1",
+    );
+  });
+
   it("names the disk for a disk below its limit", () => {
     const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
@@ -531,7 +546,7 @@ describe("describeMachinePage instruments", () => {
       const drawing = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 })
         .sessions.drawing;
 
-      expect(drawing).toMatchObject({ sessionsPerCut: 10, cap: 17, running: 12, waiting: 3 });
+      expect(drawing).toMatchObject({ slotsPerSegment: 2, cap: 17, running: 12, waiting: 3 });
     });
   });
 

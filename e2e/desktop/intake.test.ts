@@ -7,7 +7,7 @@
  * - Intake opens from the Hercule face's row and from Go › Intake, ⌘⇧I, and
  *   shows the Hercule face; View's two items change the face without
  *   leaving Intake;
- * - the Hercule segment's count, and the Intake row's, follow a raised
+ * - the Work segment's count, and the Intake row's, follow a raised
  *   signal and one answered elsewhere;
  * - the keys answer a signal: `J` moves the selection, `↩` opens the pane on
  *   the suggested answer, and a second `↩` presses it; Esc steps back;
@@ -146,7 +146,7 @@ function makeSignalFailedChecks(home: string, signalId: string): void {
 /** Returns which face the sidebar shows, by its selected segment and the label of the list under it. */
 async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: string | null }> {
   const tab = page.getByRole("tablist", { name: "Sidebar" }).locator('[aria-selected="true"]');
-  const list = page.locator('nav[aria-label="Threads"], nav[aria-label="Hercule"]');
+  const list = page.locator('nav[aria-label="Threads"], nav[aria-label="Work"]');
   // The segment's first text is its label; a To do count may follow it.
   return {
     tab: await tab.evaluate((element) => element.firstChild?.textContent ?? null),
@@ -155,7 +155,7 @@ async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: 
 }
 
 const THREADS_FACE = { tab: "Threads", list: "Threads" };
-const ORCHESTRATION_FACE = { tab: "Hercule", list: "Hercule" };
+const ORCHESTRATION_FACE = { tab: "Work", list: "Work" };
 
 describe("Intake", () => {
   it("opens from the Hercule face's row and from Go › Intake, shows the Hercule face, and keeps Intake open while View changes the face", async () => {
@@ -170,7 +170,7 @@ describe("Intake", () => {
     });
 
     await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab").nth(1).click();
-    await page.locator('nav[aria-label="Hercule"] a.nav-row', { hasText: "Intake" }).click();
+    await page.locator('nav[aria-label="Work"] a.nav-row', { hasText: "Intake" }).click();
     await expect.poll(() => readScreenTitle(page)).toBe("Intake");
     expect(await readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
     expect(
@@ -180,7 +180,7 @@ describe("Intake", () => {
     await chooseMenuItem(app, "View", "Threads");
     await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
     expect(await readScreenTitle(page)).toBe("Intake");
-    await chooseMenuItem(app, "View", "Hercule");
+    await chooseMenuItem(app, "View", "Work");
     await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
     expect(await readScreenTitle(page)).toBe("Intake");
 
@@ -199,26 +199,20 @@ describe("Intake", () => {
     await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
   });
 
-  it("counts a raised signal on the Hercule segment and the Intake row, and drops it once it is answered elsewhere", async () => {
+  it("counts a raised signal on the Work segment and the Intake row, and drops it once it is answered elsewhere", async () => {
     const arranged = await arrangeFleet();
     const { page } = await openSignedIn(arranged.url);
     // The Intake row is on the Hercule face; the segment shows on both faces.
     await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab").nth(1).click();
-    expect(await readToDoCounts(page)).toEqual({ segment: "Hercule", row: "" });
+    expect(await readToDoCounts(page)).toEqual({ segment: "Work", row: "" });
 
     const first = await raiseProposal(arranged, "Fix the flaky login test");
-    await expect
-      .poll(() => readToDoCounts(page))
-      .toEqual({ segment: "Hercule, 1 to do", row: "1" });
+    await expect.poll(() => readToDoCounts(page)).toEqual({ segment: "Work, 1 to do", row: "1" });
     await raiseSignal(arranged, "fyi", "Release 4.2 shipped");
-    await expect
-      .poll(() => readToDoCounts(page))
-      .toEqual({ segment: "Hercule, 2 to do", row: "2" });
+    await expect.poll(() => readToDoCounts(page)).toEqual({ segment: "Work, 2 to do", row: "2" });
 
     await arranged.client.signal.act({ params: { id: first }, payload: { actionId: "dismiss" } });
-    await expect
-      .poll(() => readToDoCounts(page))
-      .toEqual({ segment: "Hercule, 1 to do", row: "1" });
+    await expect.poll(() => readToDoCounts(page)).toEqual({ segment: "Work, 1 to do", row: "1" });
   });
 
   it("answers a signal from the keys: J moves, ↩ puts the focus on the suggested answer, a second ↩ presses it, and Esc steps back", async () => {
@@ -285,7 +279,7 @@ describe("Intake", () => {
       )
       .toEqual(["Bump the checkout timeout"]);
     await expect.poll(() => readRowTitles(page)).toEqual(["Fix the flaky login test"]);
-    expect(await readToDoCounts(page)).toEqual({ segment: "Hercule, 1 to do", row: "1" });
+    expect(await readToDoCounts(page)).toEqual({ segment: "Work, 1 to do", row: "1" });
   });
 
   it("draws a GitHub failed-checks signal's Checks block with the log lines of each failed check", async () => {

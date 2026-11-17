@@ -122,7 +122,7 @@ export async function readSelectedTitle(page: Page): Promise<string | null> {
   return (await selected.count()) === 0 ? null : selected.locator(".ask-title").textContent();
 }
 
-/** Returns the accessible names of the Hercule segment and the Intake row's count, "" when hidden. */
+/** Returns the accessible names of the Work segment and the Intake row's count, "" when hidden. */
 export async function readToDoCounts(page: Page): Promise<{ segment: string; row: string }> {
   const segment = page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab").nth(1);
   const rowCount = page.locator("a.nav-row", { hasText: "Intake" }).locator(".count");

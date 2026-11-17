@@ -97,14 +97,14 @@ const PANE_TOGGLE = ".asks-pane-btn";
 
 /**
  * Returns an expression that evaluates, in the page, to whether Intake shows
- * its list and the sidebar's Hercule segment counts `count` signals on To do.
+ * its list and the sidebar's Work segment counts `count` signals on To do.
  * The list is virtualized, so its rows cannot be counted; the segment counts
  * the whole of To do.
  */
 export const buildIntakeShown = (count: number) => `(() => {
   const segments = [...document.querySelectorAll('[role="tablist"][aria-label="Sidebar"] [role="tab"]')];
   return document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}) !== null &&
-    segments.some((segment) => segment.getAttribute("aria-label") === "Hercule, ${String(count)} to do");
+    segments.some((segment) => segment.getAttribute("aria-label") === "Work, ${String(count)} to do");
 })()`;
 
 /** How many signals `raiseSignals` raises at once. */
@@ -302,7 +302,7 @@ export interface IntakeWork {
  *   after the last. Each also holds whatever the process did while idle in
  *   that time, so the numbers err high;
  * - 30 signals raised at once: a Chromium trace from the first raise until
- *   the Hercule segment counts them all, plus 2 s;
+ *   the Work segment counts them all, plus 2 s;
  * - the split opened and then closed with the header's button: for each, a
  *   trace and the page's animation frames from the click until one frame
  *   after the transition's `--dur-3` is over (see `measureSplitToggle`);
@@ -384,7 +384,7 @@ export async function measureIntakeWork(
       await waitInPage(
         buildIntakeShown(onToDo),
         10_000,
-        `the Hercule segment did not count the ${String(PUSH_COUNT)} signals raised one at a time`,
+        `the Work segment did not count the ${String(PUSH_COUNT)} signals raised one at a time`,
       );
 
       const burstFrom = await readPageNow();
@@ -398,7 +398,7 @@ export async function measureIntakeWork(
         await waitInPage(
           buildIntakeShown(onToDo),
           10_000,
-          `the Hercule segment did not count the burst of ${String(BURST_SIZE)} signals`,
+          `the Work segment did not count the burst of ${String(BURST_SIZE)} signals`,
         );
         await sleep(PUSH_SETTLE_MS);
       });

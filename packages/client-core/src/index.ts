@@ -23,6 +23,7 @@ export {
   buildConversationBlocks,
   collectRunningTurnRows,
   describeOpenReply,
+  hasMessageAfter,
   trimToRunningTurn,
   type ConversationBlock,
   type OpenReplyBlock,

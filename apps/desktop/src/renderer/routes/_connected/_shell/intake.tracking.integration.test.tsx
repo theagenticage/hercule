@@ -1273,7 +1273,7 @@ describe("a row that needs you", () => {
       ),
     ).not.toBeNull();
     // The signal itself and the row it makes Needs you.
-    expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 2 to do" })).toBeTruthy();
 
     signals.length = 0;
     act(() => live.pushInvalidation("signal"));
@@ -1282,7 +1282,7 @@ describe("a row that needs you", () => {
     });
     expect(getRowButton(CHECKED_TASK).textContent).toContain("finished");
     // The row still waits on the user as a Finished one, so only the signal drops out of the count.
-    expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 1 to do" })).toBeTruthy();
   });
 
   it("marks the row done on E when no run of its Task is live", async () => {
@@ -1309,7 +1309,7 @@ describe("a row that needs you", () => {
       expect(getRowButton(WORKING_TASK).textContent).toContain(
         "Run git push -u origin chore/stripe-sdk-14?",
       );
-      expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "Work, 1 to do" })).toBeTruthy();
       await userEvent.click(getRowButton(WORKING_TASK));
       expect(
         [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map(
@@ -1349,7 +1349,7 @@ describe("a row that needs you", () => {
         expect(getRowButton(WORKING_TASK).textContent).not.toContain("Run git push");
       });
       expect(getRowButton(WORKING_TASK).textContent).toContain("working");
-      expect(screen.queryByRole("tab", { name: /^Hercule, \d+ to do$/ })).toBeNull();
+      expect(screen.queryByRole("tab", { name: /^Work, \d+ to do$/ })).toBeNull();
     });
   });
 
@@ -1520,7 +1520,7 @@ describe("marking a row done", () => {
     // The selection goes to the next row, and the keys still work.
     expect(readSelected()).toEqual([WORKING_TASK.id]);
     expect(getTray().contains(document.activeElement)).toBe(true);
-    expect(screen.getByRole("tab", { name: "Hercule, 3 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 3 to do" })).toBeTruthy();
   });
 
   it("marks a Failed row and a Stopped row done, and does nothing on a Working row", async () => {
@@ -2532,9 +2532,9 @@ describe("the pane's trip", () => {
 });
 
 describe("the To do count", () => {
-  it("counts the Finished and Failed rows with the signals, on the Hercule segment, Intake's row, All and the view switcher", async () => {
+  it("counts the Finished and Failed rows with the signals, on the Work segment, Intake's row, All and the view switcher", async () => {
     await openIntake();
-    expect(screen.getByRole("tab", { name: "Hercule, 4 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 4 to do" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Intake, 4 to do" })).toBeTruthy();
     expect(readTabs()).toEqual(["All4", "GitHub2"]);
     expect(readViewSwitcher()[0]).toBe("To do4");
@@ -2547,7 +2547,7 @@ describe("the To do count", () => {
         [STOPPED_TASK, "cancelled"],
       ]),
     });
-    expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 2 to do" })).toBeTruthy();
     expect(readTabs()).toEqual(["All2", "GitHub2"]);
   });
 
@@ -2555,7 +2555,7 @@ describe("the To do count", () => {
     const { router } = await openIntake();
     await router.navigate({ to: "/office" });
     await screen.findByText("The Office");
-    expect(screen.getByRole("tab", { name: "Hercule, 4 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 4 to do" })).toBeTruthy();
   });
 
   it("is read again when a Task joins Tracking or a run changes state", async () => {
@@ -2566,12 +2566,12 @@ describe("the To do count", () => {
       }),
     });
     await live.waitForFirstPushes();
-    expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 2 to do" })).toBeTruthy();
 
     status = "completed";
     act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
 
-    await screen.findByRole("tab", { name: "Hercule, 3 to do" });
+    await screen.findByRole("tab", { name: "Work, 3 to do" });
     expect(readTabs()[0]).toBe("All3");
   });
 });

@@ -127,6 +127,18 @@
 .notice .time {
   margin-left: 6px;
 }
+/* A notice a message follows is in the past: a quiet row as tall as a day stamp, with no fill, so
+   the eye lands on the newest message first. */
+.notice.is-past {
+  gap: 8px;
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: inherit;
+}
 
 /* The caret after the paragraph the assistant is writing, alone while the
    reply has no text yet. It is drawn after the paragraph rather than inside

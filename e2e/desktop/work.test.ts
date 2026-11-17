@@ -223,12 +223,9 @@ async function runTerminal(
 
 /** Opens Work from the Hercule face of the sidebar, by its Overview row, and waits for the board's cards. */
 async function openWork(page: Page): Promise<void> {
+  await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab", { name: "Work" }).click();
   await page
-    .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: "Hercule" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Hercule", exact: true })
+    .getByRole("navigation", { name: "Work", exact: true })
     .getByRole("link", { name: "Overview", exact: true })
     .click();
   await page.locator(".work-desk .board-lane").first().waitFor();

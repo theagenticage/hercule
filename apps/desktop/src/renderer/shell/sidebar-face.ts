@@ -1,7 +1,7 @@
 /**
  * Which of its two faces the sidebar shows: `threads`, the user's threads
  * and assistants, or `orchestration`, the places of Hercule itself, which
- * the switch labels "Hercule" (spec 17 §The Hercule face).
+ * the switch labels "Work" (spec 17 §The Hercule face).
  */
 export type SidebarFace = "threads" | "orchestration";
 

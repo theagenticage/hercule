@@ -72,7 +72,7 @@ export function useTrackingRows(): ReadonlyArray<TrackingRow> {
 
 /**
  * Returns the To do count: the open signals on To do, and the rows of
- * Tracking that wait on the user. The Hercule segment, Intake's row, the All
+ * Tracking that wait on the user. The Work segment, Intake's row, the All
  * tab and the view switcher all show it. The count of signals is selected, so
  * a change to a signal that leaves the count as it was draws nothing again.
  */

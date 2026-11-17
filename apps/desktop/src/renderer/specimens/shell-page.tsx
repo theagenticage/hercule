@@ -277,7 +277,7 @@ export interface SidebarRecords {
    * Hercule face. None when left out. A screen that reads them too sets its own.
    */
   readonly connections?: ReadonlyArray<Connection>;
-  /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
+  /** The signals on To do, which Intake's row and the Work segment count. None when left out. */
   readonly signals?: ReadonlyArray<Signal>;
   /** The signals on Later, soonest snooze first. None when left out. */
   readonly later?: ReadonlyArray<Signal>;
@@ -295,7 +295,7 @@ export interface SidebarRecords {
   readonly agentSessions?: ReadonlyArray<Session>;
   /**
    * What `task.queryTracking` returns: the Tasks Tracking follows, which the
-   * Hercule segment's count and Intake's Tracking read. None when left out.
+   * Work segment's count and Intake's Tracking read. None when left out.
    */
   readonly tracking?: ReadonlyArray<TrackingTask>;
   /**

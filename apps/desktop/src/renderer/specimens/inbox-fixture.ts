@@ -1300,7 +1300,7 @@ export const INBOX_SCENES: ReadonlyArray<InboxScene> = [
       const head = findByText(page, ".sig-head", "Mei");
       if (head === undefined) throw new Error("The pane has no ask from Mei.");
       head.click();
-      await waitFor(page, ".sig.is-open.is-current-ask [data-answer=approve]");
+      await waitFor(page, '.sig.is-open[aria-current="true"] [data-answer=approve]');
     },
   },
   {

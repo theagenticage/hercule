@@ -3,7 +3,7 @@
  * records in sidebar-fixture.ts, with the Fix thread open, as the book shows
  * it. `capture:ui` captures it and `ui:metrics` measures it.
  *
- * A run has failed on a Task, so the Hercule segment of the face switch shows
+ * A run has failed on a Task, so the Work segment of the face switch shows
  * the failed-run dot.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.

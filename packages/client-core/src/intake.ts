@@ -216,17 +216,17 @@ export const isBackFromSnooze = (signal: Signal): boolean => signal.snooze !== u
 
 /**
  * Returns the To do count: the number of signals on To do. The sidebar's
- * Hercule segment, Intake's row and the All tab all show it.
+ * Work segment, Intake's row and the All tab all show it.
  */
 export const countToDo = (signals: ReadonlyArray<Signal>): number => signals.length;
 
 /**
- * Returns the accessible name of the sidebar's Hercule segment while
- * something is on To do: "Hercule, 8 to do". The segment draws no count at
+ * Returns the accessible name of the sidebar's Work segment while
+ * something is on To do: "Work, 8 to do". The segment draws no count at
  * 0, so it is not called then.
  */
 export const describeOrchestrationSegment = (toDoCount: number): string =>
-  `Hercule, ${String(toDoCount)} to do`;
+  `Work, ${String(toDoCount)} to do`;
 
 /** One tab of Intake's bar: All, or one plugin's signals. */
 export interface IntakeTab {

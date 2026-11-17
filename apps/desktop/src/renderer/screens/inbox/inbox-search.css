@@ -15,7 +15,7 @@
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   box-shadow:
-    inset 0 0 0 1px var(--glass-rim),
+    inset 0 0 0 1px var(--control-edge),
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
   color: var(--faint);
@@ -25,7 +25,7 @@
   outline: 2px solid var(--focus);
   outline-offset: 1px;
   box-shadow:
-    inset 0 0 0 1px var(--composer-line),
+    inset 0 0 0 1px var(--control-edge),
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
   color: var(--muted);

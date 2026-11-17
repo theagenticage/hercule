@@ -97,21 +97,26 @@ const canTakeNewSessions = (runner: Runner): boolean =>
   runner.connectivity === "online" && runner.lifecycle === "active" && !isDiskBelowLimit(runner);
 
 /**
- * Counts the sessions the machine can still start: the free slots under its
- * session cap. It is 0 when the machine cannot take new sessions.
+ * Counts the sessions the machine can still start: its session cap less the
+ * sessions running and the sessions already waiting for a slot, never below 0.
+ * The waiting sessions count because they take the next free slots before any
+ * new session does. It is 0 when the machine cannot take new sessions.
  */
 export const countRoom = (machine: FleetMachine): number =>
   canTakeNewSessions(machine.runner)
-    ? Math.max(0, machine.runner.maxConcurrentSessions - machine.running)
+    ? Math.max(0, machine.runner.maxConcurrentSessions - machine.running - machine.waiting)
     : 0;
 
 /**
- * Describes how much room an online machine has. `short` is the text of a card
- * or a list row ("Room for 4" or "Full"). `line` is the machine page's
- * sentence about it, in parts so the number can be drawn in bold. Returns
- * `null` while the machine is offline or unreachable, because the screen shows
- * that state instead.
+ * Describes how much room an online machine has, as `countRoom` counts it.
+ * `short` is the text of a card or a list row ("Room for 4" or "Full").
+ * `line` is the machine page's sentence about it, in parts so the number can
+ * be drawn in bold. Returns `null` while the machine is offline or
+ * unreachable, because the screen shows that state instead.
  *
+ * - A full machine with sessions waiting says what takes its cap: "No room:
+ *   12 running and 5 waiting sessions take its cap of 16". With none waiting
+ *   it reads "No room: it runs its cap of 16 sessions".
  * - `short` is `null` while the machine is told to take no new work, because
  *   its status label already says so, and while its disk is below its limit,
  *   because the line of what needs the user already says so.
@@ -137,11 +142,14 @@ export const describeRoom = (
     return { short: null, line: [buildPlainPart("No room: it takes no new work")] };
   }
   if (room === 0) {
+    const { running, waiting } = machine;
     return {
       short: "Full",
       line: [
         buildPlainPart(
-          `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`,
+          waiting === 0
+            ? `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`
+            : `No room: ${String(running)} running and ${String(waiting)} waiting ${plural(running + waiting, "session", "sessions")} take its cap of ${String(cap)}`,
         ),
       ],
     };
@@ -209,38 +217,36 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
   return isDesktopOs && facts.totalMemoryBytes >= DESKTOP_MEMORY_BYTES ? "desktop" : "laptop";
 };
 
-/** The most slots, and the most waiting sessions, the bar cuts one by one. */
-const MAX_SLOTS_CUT_ONE_BY_ONE = 16;
-
-/** How many sessions one cut of the bar stands for once it has more than 16 slots. */
-const SESSIONS_PER_WIDE_CUT = 10;
+/** The most segments the cap's part of the bar has, and the most the waiting part has. */
+const MAX_SEGMENTS = 16;
 
 /**
  * How to draw a machine's sessions against its cap, and the words drawn beside
- * it. Every machine draws the same bar. `running` slots are filled, `free`
- * slots are empty, and `waiting` is the number of sessions waiting for a slot,
- * drawn as a marigold part after the cap. The drawn total is
- * `max(cap, running) + waitingDrawn`: after the user lowers the cap below the
- * sessions running, `free` is 0 and `running` runs past the cap. The renderer
- * needs `cap` to mark where the cap ends in that case, and where the waiting
- * part starts.
+ * it. Every machine draws the same bar of segments. `running` slots are
+ * filled, `free` slots are empty, and `waiting` is the number of sessions
+ * waiting for a slot, drawn as a marigold part after the cap. The drawn total
+ * is `max(cap, running) + waitingDrawn`: after the user lowers the cap below
+ * the sessions running, `free` is 0 and `running` runs past the cap. The
+ * renderer needs `cap` to mark where the cap ends in that case, and where the
+ * waiting part starts.
  *
- * `sessionsPerCut` is how many sessions each cut of the bar stands for: 1
+ * `slotsPerSegment` is how many slots one segment of the bar stands for: 1
  * while both the cap and the sessions running are at most 16, so the bar
- * still reads as slots, and 10 above that, so a cap of 100 stays countable.
+ * reads as slots, and above that the fewest whole slots that keep the cap's
+ * part at 16 segments or fewer (24 slots are 12 segments of 2, 100 are 15 of
+ * 7, the last one shorter). The waiting part uses segments of the same size.
  *
  * `waitingDrawn` is how many of the `waiting` sessions the bar draws: at most
- * 16 while it is cut per slot, so a long queue cannot squeeze the cap's part
- * to nothing, and all of them when it is cut every 10. The words beside the
- * bar carry the count.
+ * 16 segments' worth, so a long queue cannot squeeze the cap's part to
+ * nothing. The words beside the bar carry the count.
  *
  * A machine that is `isAway` (offline or unreachable) runs nothing that can be
  * counted: `running` is 0 and every slot is `free`, and the renderer draws the
- * cap as an outline. Its `waiting` sessions stay, because the controller still
- * knows what waits for the machine.
+ * segments in the disabled tint. Its `waiting` sessions stay, because the
+ * controller still knows what waits for the machine.
  */
 export interface SessionsDrawing {
-  readonly sessionsPerCut: 1 | 10;
+  readonly slotsPerSegment: number;
   readonly cap: number;
   readonly running: number;
   readonly free: number;
@@ -256,26 +262,26 @@ export interface SessionsDrawing {
 }
 
 /**
- * Returns the counts and words to draw a machine's sessions from: a bar cut
- * per slot while both the cap and the sessions running are at most 16, and
- * every 10 sessions otherwise. A cap lowered from 100 to 4 under 100 running
- * sessions is therefore cut every 10, not into 100 slots. A machine running
- * more sessions than its cap has 0 free slots, never a negative number. An
- * away machine counts as running none (see `SessionsDrawing`).
+ * Returns the counts and words to draw a machine's sessions from (see
+ * `SessionsDrawing`). The segment size follows the larger of the cap and the
+ * sessions running, so a cap lowered from 100 to 4 under 100 running sessions
+ * still draws at most 16 segments. A machine running more sessions than its
+ * cap has 0 free slots, never a negative number. An away machine counts as
+ * running none.
  */
 export const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
   const { runner, waiting } = machine;
   const isAway = runner.connectivity !== "online";
   const cap = runner.maxConcurrentSessions;
   const running = isAway ? 0 : machine.running;
-  const isCutPerSlot = cap <= MAX_SLOTS_CUT_ONE_BY_ONE && running <= MAX_SLOTS_CUT_ONE_BY_ONE;
+  const slotsPerSegment = Math.max(1, Math.ceil(Math.max(cap, running) / MAX_SEGMENTS));
   return {
-    sessionsPerCut: isCutPerSlot ? 1 : SESSIONS_PER_WIDE_CUT,
+    slotsPerSegment,
     cap,
     running,
     free: Math.max(0, cap - running),
     waiting,
-    waitingDrawn: isCutPerSlot ? Math.min(waiting, MAX_SLOTS_CUT_ONE_BY_ONE) : waiting,
+    waitingDrawn: Math.min(waiting, MAX_SEGMENTS * slotsPerSegment),
     isAway,
     runningText: isAway ? "–" : String(running),
     capText: ` of ${String(cap)}`,

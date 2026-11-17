@@ -1006,7 +1006,7 @@ describe("the sidebar's Done moves", () => {
 
 describe("the sidebar's faces", () => {
   /** Returns the face switch's segment named `name`. */
-  const getSegment = (name: "Threads" | "Hercule"): HTMLElement =>
+  const getSegment = (name: "Threads" | "Work"): HTMLElement =>
     within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", { name });
 
   /** Returns the names of the segments that are selected. */
@@ -1025,19 +1025,19 @@ describe("the sidebar's faces", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((segment) => segment.textContent),
-    ).toEqual(["Threads", "Hercule"]);
+    ).toEqual(["Threads", "Work"]);
     expect(readSelectedSegments()).toEqual(["Threads"]);
   });
 
   it("shows Waiting on you, Work and the System section on the Hercule face, without leaving the screen", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
     expect(screen.queryByRole("navigation", { name: "Threads" })).toBeNull();
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     expect(
       within(nav)
         .getAllByRole("heading")
@@ -1054,8 +1054,8 @@ describe("the sidebar's faces", () => {
 
   it("lists Overview, The office, Inbox, Intake, Workflows, Discussions and Wiki, all but Inbox and Intake with no count, in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const work = within(nav).getByRole("heading", { name: "Work" }).closest("section")!;
 
     expect(
@@ -1107,8 +1107,8 @@ describe("the sidebar's faces", () => {
           },
         },
       });
-      await userEvent.click(getSegment("Hercule"));
-      const nav = screen.getByRole("navigation", { name: "Hercule" });
+      await userEvent.click(getSegment("Work"));
+      const nav = screen.getByRole("navigation", { name: "Work" });
       return { ...app, link: within(nav).getByRole("link", { name: /^Inbox/ }) };
     };
 
@@ -1147,8 +1147,8 @@ describe("the sidebar's faces", () => {
 
   it("marks Overview on Work only, and The office on the Office as before", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const overview = within(nav).getByRole("link", { name: "Overview" });
     const office = within(nav).getByRole("link", { name: "The office" });
     expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([null, null]);
@@ -1174,8 +1174,8 @@ describe("the sidebar's faces", () => {
   it("opens the Office from Overview when the Office was the view used last", async () => {
     localStorage.setItem(`overview-view:${CONTROLLER_URL}`, "office");
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
 
     await userEvent.click(within(nav).getByRole("link", { name: "Overview" }));
 
@@ -1196,8 +1196,8 @@ describe("the sidebar's faces", () => {
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
       handlers: buildDiscussionsWikiHandlers(),
     });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const row = within(nav).getByRole("link", { name });
     expect(row.getAttribute("aria-current")).toBeNull();
 
@@ -1216,8 +1216,8 @@ describe("the sidebar's faces", () => {
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
     });
     await live.waitForFirstPushes();
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
 
     const row = within(nav).getByRole("link", { name: "Fleet" });
     expect(row.getAttribute("href")).toBe("/fleet");
@@ -1245,8 +1245,8 @@ describe("the sidebar's faces", () => {
         },
       },
     });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
 
     const row = within(nav).getByRole("link", { name: /Connections/ });
     expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
@@ -1271,57 +1271,57 @@ describe("the sidebar's faces", () => {
     // Nothing on the Threads face draws the Connections. Query removes a read
     // no component draws after five minutes, unless its options keep it.
     await act(() => vi.advanceTimersByTimeAsync(6 * 60_000));
-    fireEvent.click(getSegment("Hercule"));
+    fireEvent.click(getSegment("Work"));
 
     // A suspended screen is hidden, and a hidden element has no role.
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     expect(within(nav).getByRole("link", { name: /Connections/ })).toBeTruthy();
   });
 
   it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {
     await startSidebar();
     const threads = getSegment("Threads");
-    const orchestration = getSegment("Hercule");
+    const orchestration = getSegment("Work");
     expect([threads.tabIndex, orchestration.tabIndex]).toEqual([0, -1]);
 
     threads.focus();
     await userEvent.keyboard("{ArrowRight}");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
-    expect(document.activeElement).toBe(getSegment("Hercule"));
-    expect([getSegment("Threads").tabIndex, getSegment("Hercule").tabIndex]).toEqual([-1, 0]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
+    expect(document.activeElement).toBe(getSegment("Work"));
+    expect([getSegment("Threads").tabIndex, getSegment("Work").tabIndex]).toEqual([-1, 0]);
 
     await userEvent.keyboard("{ArrowRight}");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
     await userEvent.keyboard("{ArrowLeft}");
     expect(readSelectedSegments()).toEqual(["Threads"]);
     expect(document.activeElement).toBe(getSegment("Threads"));
   });
 
-  it("switches the face from View › Threads and View › Hercule", async () => {
+  it("switches the face from View › Threads and View › Work", async () => {
     const { fake } = await startSidebar();
 
     fake.sendMenuCommand("showOrchestrationFace");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
     fake.sendMenuCommand("showThreadsFace");
     expect(readSelectedSegments()).toEqual(["Threads"]);
   });
 
   it("keeps the face when the Office or Settings opens, and shows Threads when a thread opens", async () => {
     const { router } = await startSidebar();
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     await userEvent.click(screen.getByRole("link", { name: "Office ⌘⇧O" }));
     await screen.findByText("The Office");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
     await act(() => router.navigate({ to: "/settings" }));
     await waitFor(() => {
       expect(router.state.location.pathname).toMatch(/^\/settings\//);
     });
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     await userEvent.click(
       within(nav).getByRole("link", { name: "Write the retry runbook, waiting on you" }),
     );
@@ -1338,7 +1338,7 @@ describe("the sidebar's faces", () => {
 
   it("opens a new Draft Thread on the Threads face, also from the new-thread screen", async () => {
     const { router } = await startSidebar();
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     // A new Draft Thread opens at "/" again, with other search parameters.
     await act(() =>
@@ -1350,9 +1350,9 @@ describe("the sidebar's faces", () => {
 
   it("keeps the focus on a Waiting on you row opened from the Hercule face", async () => {
     await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
     const name = "Write the retry runbook, waiting on you";
-    within(screen.getByRole("navigation", { name: "Hercule" }))
+    within(screen.getByRole("navigation", { name: "Work" }))
       .getByRole("link", { name })
       .focus();
 
@@ -1373,7 +1373,7 @@ describe("the sidebar's faces", () => {
     const nav = screen.getByRole("navigation", { name: "Threads" });
 
     expect(nav.id).not.toBe("");
-    for (const name of ["Threads", "Hercule"] as const) {
+    for (const name of ["Threads", "Work"] as const) {
       expect(getSegment(name).getAttribute("aria-controls")).toBe(nav.id);
     }
   });
@@ -1386,7 +1386,7 @@ describe("the sidebar's faces", () => {
     });
     const sent = fake.goMenus.length;
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
     expect(fake.goMenus).toHaveLength(sent);
 
     // A thread that does not wait, so the Hercule face does not show it.
