@@ -1703,7 +1703,7 @@ This text replaces the Inbox of [#1032](https://github.com/theagenticage/hercule
 Three columns under one bar: the **rail**, the **list** and the **pane**.
 
 ```
- sidebar 272 | rail 240        | list (at least 400)         | pane 480 (360 to 640)
+ sidebar 272 | rail 240        | list (at least 400)         | pane 461 (360 to 640)
              | [Inbox|Intake]  | [ Search, or type a field ] |                    [?]
              |-----------------+-----------------------------+---------------------
              | saved queries   | list head                   | the open thing
@@ -1713,7 +1713,7 @@ Three columns under one bar: the **rail**, the **list** and the **pane**.
 
 - **The bar** is a subgrid of the three columns. The pill sits over the rail and reads `Inbox | Intake`, because Intake stays a tab until #1048; its Intake tab opens `/intake`. The search sits over the list. The offline pill and the keys button (`?`) sit over the pane.
 - **The rail** is 240px wide on the page's ground, with a divider, and does not resize. The list is on the same ground. **The pane** is on `--surface`, because it is for reading.
-- **The pane** is 360 to 640px wide, ~~420~~ 480 by default. The user drags its edge, or focuses the edge and uses the arrows (Home and End go to the widest and the narrowest), or double-clicks it to spring back to ~~420~~ 480. The pane's ⋯ menu offers **Narrow, Default and Wide** (360, ~~420~~ 480 and 560), for anyone who cannot drag. *(Amended 2026-11-17, [#1197](https://github.com/theagenticage/hercule/issues/1197).)* 480 is the narrowest default at which the footer shows Thread and Take on as words (it turns them into icons under 460px), and at a 1440px window it leaves the list 448px. The pane never takes so much that the list keeps less than 400px: its widest is the room less the rail and 400. The width the user chose is kept in `localStorage` under `hercule.inbox.pane-width`, as the other panes keep theirs, and the frame shows the nearest width the window allows.
+- **The pane** is 360 to 640px wide, ~~420~~ 461 by default. The user drags its edge, or focuses the edge and uses the arrows (Home and End go to the widest and the narrowest), or double-clicks it to spring back to ~~420~~ 461. The pane's ⋯ menu offers **Narrow, Default and Wide** (360, ~~420~~ 461 and 560), for anyone who cannot drag. *(Amended 2026-11-17, [#1197](https://github.com/theagenticage/hercule/issues/1197).)* 461 fits two container queries at a 1440px window. The footer's box is the pane less its 1px left border, and it shows Thread and Take on as words from 460px, so the pane needs at least 461. The list keeps 467px, so its rows (the list less 12px on each side) are 443px, above the 440px under which they hide where a thing lives, and its head still shows the order. A default of 464 or more would hide where a thing lives again. The pane never takes so much that the list keeps less than 400px: its widest is the room less the rail and 400. The width the user chose is kept in `localStorage` under `hercule.inbox.pane-width`, as the other panes keep theirs, and the frame shows the nearest width the window allows.
 - **Breakpoints.** The drawing states them as window widths with the sidebar's 272px open. The frame measures its own width, which is the window less the sidebar, so a collapsed sidebar or a zoomed window changes the layout by the room the Inbox really has. In window widths, and in the frame's own in brackets:
 
   | Window (frame) | What changes |

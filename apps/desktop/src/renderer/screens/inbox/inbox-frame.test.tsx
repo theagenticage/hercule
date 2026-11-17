@@ -189,7 +189,7 @@ describe("InboxFrame pane width", () => {
     fireEvent.keyDown(edge, { key: "Home" });
     fireEvent.keyDown(edge, { key: "End" });
 
-    expect(onPaneWidthChange.mock.calls).toEqual([[480], [640], [360]]);
+    expect(onPaneWidthChange.mock.calls).toEqual([[461], [640], [360]]);
   });
 
   it("gives the pane a default width at which the footer shows its moves' words, not icons", () => {
@@ -220,7 +220,7 @@ describe("InboxFrame pane width", () => {
 describe("InboxFrame pane menu", () => {
   it("sets Narrow, Default and Wide, and shows the one the pane has as checked", async () => {
     const onPaneWidthChange = vi.fn();
-    renderFrame({ paneWidth: 480, onPaneWidthChange });
+    renderFrame({ paneWidth: 461, onPaneWidthChange });
     reportWidth(1600);
 
     expect(

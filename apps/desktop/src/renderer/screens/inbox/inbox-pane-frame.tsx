@@ -21,10 +21,16 @@ export const INBOX_PANE_MAX_WIDTH = 640;
 
 /**
  * The width a double click and the "Default" menu item give the pane, in
- * pixels. It is wide enough for the footer to show Thread and Take on as words:
- * the footer turns them into icons under 460px (`inbox-pane-footer.css`).
+ * pixels. It fits two container queries at a 1440px window:
+ *
+ * - the footer shows Thread and Take on as words while its box, the pane less
+ *   its 1px left border, is 460px or more (`inbox-pane-footer.css`), so the
+ *   pane needs at least 461;
+ * - the list keeps 467px, so its rows (the list less 12px on each side) are
+ *   443px, above the 440px under which they hide where a thing lives
+ *   (`inbox-list.css`), and its head still shows the order.
  */
-export const INBOX_PANE_DEFAULT_WIDTH = 480;
+export const INBOX_PANE_DEFAULT_WIDTH = 461;
 
 /** How far one arrow key press moves the pane's edge, in pixels. */
 const ARROW_STEP = 40;
