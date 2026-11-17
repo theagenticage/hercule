@@ -78,7 +78,7 @@ describe("InboxPaneFooter", () => {
     expect(screen.getByRole("button", { name: "Dismiss" }).title).toBe("Dismiss (E)");
   });
 
-  it("draws Link and Dismiss as bordered moves with their key hint after the icon, like the moves beside them", () => {
+  it("draws Link and Dismiss as bordered squares like the moves beside them, with their keys only in their tooltips", () => {
     renderFooter();
     for (const [name, key] of [
       ["Link to another thing", "L"],
@@ -87,8 +87,9 @@ describe("InboxPaneFooter", () => {
       const button = screen.getByRole("button", { name });
       expect(button.classList).toContain("btn");
       expect(button.classList).toContain("ib-pane-move");
-      expect(button.lastElementChild?.tagName).toBe("KBD");
-      expect(button.lastElementChild?.textContent).toBe(key);
+      expect(button.querySelector("kbd")).toBeNull();
+      expect(button.title).toBe(`${name} (${key})`);
+      expect(button.getAttribute("aria-keyshortcuts")).toBe(key);
     }
   });
 });

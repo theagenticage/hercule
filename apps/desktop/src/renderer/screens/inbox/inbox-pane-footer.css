@@ -34,10 +34,17 @@
   background: var(--pane-fill);
 }
 .ib-pane-move {
+  --btn-h: 28px;
   min-width: 0;
-  height: 28px;
+  height: var(--btn-h);
   gap: 6px;
-  padding: 0 7px 0 10px;
+  padding: 0 10px;
+}
+/* A move that ends with its key keeps as much room to the key's right as above and below it, as
+   every button does (controls.css). That rule sits in the controls' cascade layer, which the
+   padding above outranks, so the moves repeat it here. */
+.ib-pane-move:has(> kbd:last-child) {
+  padding-right: calc((var(--btn-h) - 18px) / 2);
 }
 .ib-pane-move-label {
   display: inline-flex;
@@ -82,21 +89,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Link and Dismiss are moves with an icon in place of words, so they start closer to their edge:
-   the icon's stroke sits inside its box, where a word's first letter does not. The footer's Link is
-   named apart from the Linked list's rows (`.ib-pane-link`), whose rules it must not take. */
+/* Link and Dismiss are moves with an icon in place of words and no key: a bordered square as tall as
+   the moves beside it. Their keys, L and E, are in their tooltips. The footer's Link is named apart
+   from the Linked list's rows (`.ib-pane-link`), whose rules it must not take. */
 .ib-pane-dismiss,
 .ib-pane-foot-link {
   flex: none;
-  padding-left: 8px;
+  width: var(--btn-h);
+  padding: 0;
 }
 
 @container pane-foot (max-width: 459px) {
   .ib-pane-move--hand {
     order: -1;
   }
-  .ib-pane-move.has-icon {
-    width: 30px;
+  /* Thread and Take on become squares like Link and Dismiss. Their key is hidden, so the room a
+     key would keep to the right (controls.css) goes too. */
+  .ib-pane-move.has-icon,
+  .ib-pane-move.has-icon:has(> kbd:last-child) {
+    width: var(--btn-h);
     padding: 0;
   }
   .ib-pane-move.has-icon .ib-pane-move-icon {
@@ -112,12 +123,8 @@
   .ib-pane-move kbd {
     display: none;
   }
-  .ib-pane-dismiss,
-  .ib-pane-foot-link {
-    width: 30px;
-    padding: 0;
-  }
-  .ib-pane-move--hand {
+  /* With its key hidden, a move keeps its own padding on the right, not the key's room. */
+  .ib-pane-move:not(.has-icon):has(> kbd:last-child) {
     padding-right: 10px;
   }
 }

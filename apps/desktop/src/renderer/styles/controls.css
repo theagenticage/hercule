@@ -13,11 +13,12 @@
    - .btn--quiet   declines and dismissals: text until hovered.
    - .btn--danger  an answer that destroys or deletes: red ink on the neutral tablet. */
 .btn {
+  --btn-h: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  height: 30px;
+  height: var(--btn-h);
   padding: 0 12px;
   border-radius: var(--r-btn);
   font-weight: var(--w-medium);
@@ -89,7 +90,8 @@
 /* A smaller button, for answers inside a row or a card, such as a queued
    message's Steer and Cancel. */
 .btn--sm {
-  height: 26px;
+  --btn-h: 26px;
+  height: var(--btn-h);
   padding: 0 10px;
   font-size: var(--t-12);
   gap: 5px;
@@ -99,16 +101,27 @@
 .btn .cr {
   margin-left: -6px;
 }
-/* A key at the end of a button, such as the Reply button's ⌘↩, sits closer
-   to the edge. The key's tint has padding of its own, so without this the gap
-   between the tint and the button's edge is much wider than the gap above and
-   below it. */
+/* A key in a button, such as the Reply button's ⌘↩, is an 18px tint: a whole
+   pixel tall, so its edges stay sharp, and at least as wide as it is tall, so
+   one-letter keys are all the same square. A button that ends with its key
+   keeps as much room to the key's right as above and below it, half of what
+   the button's height leaves around the key. A button whose height differs
+   from `.btn`'s sets `--btn-h` with it. */
 .btn kbd {
-  margin-right: -4px;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  height: 18px;
+  min-width: 18px;
+  line-height: 1;
+}
+.btn:has(> kbd:last-child) {
+  padding-right: calc((var(--btn-h) - 18px) / 2);
 }
 /* The large button that ends a step of the first run, such as Add project. */
 .btn--lg {
-  height: 38px;
+  --btn-h: 38px;
+  height: var(--btn-h);
   padding: 0 16px;
   font-size: var(--t-14);
 }

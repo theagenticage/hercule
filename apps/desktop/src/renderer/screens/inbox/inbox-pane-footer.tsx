@@ -15,9 +15,9 @@ import "./inbox-pane-footer.css";
 const HAND_OFF_FACES = 3;
 
 /**
- * Renders Dismiss (E) as a move with no words: the bordered button of the moves beside it, with
- * the archive icon and then its key. `words` is its name and `onDismiss` is called when it is
- * pressed.
+ * Renders Dismiss (E) as a move with no words: a bordered square as tall as the moves beside it,
+ * with the archive icon. Its key is in its tooltip, not on the button. `words` is its name and
+ * `onDismiss` is called when it is pressed.
  */
 export function InboxPaneDismissButton({
   words,
@@ -36,15 +36,14 @@ export function InboxPaneDismissButton({
       onClick={onDismiss}
     >
       <ArchiveIcon size={14} />
-      <kbd aria-hidden="true">E</kbd>
     </button>
   );
 }
 
 /**
- * Renders Link (L) as a move with no words: the bordered button of the moves beside it, with the
- * link icon and then its key. `words` is its name, such as "Link another thing", and `onLink` is
- * called when it is pressed.
+ * Renders Link (L) as a move with no words: a bordered square as tall as the moves beside it, with
+ * the link icon. Its key is in its tooltip, not on the button. `words` is its name, such as "Link
+ * another thing", and `onLink` is called when it is pressed.
  */
 export function InboxPaneLinkButton({
   words,
@@ -63,7 +62,6 @@ export function InboxPaneLinkButton({
       onClick={onLink}
     >
       <LinkIcon size={14} />
-      <kbd aria-hidden="true">L</kbd>
     </button>
   );
 }
