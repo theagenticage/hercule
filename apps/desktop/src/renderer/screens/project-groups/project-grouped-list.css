@@ -4,12 +4,12 @@
    places every item by it. Each one's height is a custom property that the
    list places it by too (styles/row-heights.css). */
 
-/* A project's heading: its tile, then its name, in the heading's muted ink at
-   the rows' body size and semibold, and in sentence case, unlike a workflow
-   group's uppercase label. So it cannot be taken for a repository's
-   sub-heading, which is smaller, fainter and lighter. */
+/* A project's heading: its tile, then its name, in the rows' ink at the rows'
+   body size and semibold, and in sentence case, unlike a workflow group's
+   uppercase label. So it cannot be taken for a repository's sub-heading,
+   which is smaller, muted and regular. */
 .group-h.group-h--proj {
-  color: var(--muted);
+  color: var(--ink);
   font-size: var(--t-13);
   font-weight: var(--w-bold);
   letter-spacing: 0;
@@ -17,17 +17,24 @@
 }
 .group-h--proj .proj {
   min-width: 0;
-  color: var(--muted);
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* End House's ink is brighter than the ceiling the dark themes keep body text under (APCA Lc 95),
+   so there a project's heading takes the strongest text token under it. */
+[data-theme="end-house"] .group-h.group-h--proj,
+[data-theme="end-house"] .group-h--proj .proj {
+  color: var(--muted-firm);
 }
 
-/* A repository's sub-heading: its name in the heading's quiet ink, indented
-   to the project's name. */
+/* A repository's sub-heading: its name in muted ink at the small size and
+   regular weight, indented to the project's name. */
 .group-h.group-h--repo {
   height: var(--list-height-repository-heading);
   padding-left: 25px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
-  font-weight: var(--w-medium);
+  font-weight: var(--w-regular);
   letter-spacing: 0;
   text-transform: none;
 }

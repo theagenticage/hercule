@@ -6,6 +6,7 @@
  * stay off the first screen.
  */
 import { useCallback } from "react";
+import { isSameDay } from "@hercule/client-core";
 import {
   findNextListTimeChange,
   formatListTime,
@@ -37,6 +38,22 @@ export const useListTime = (
     onScreen,
     findNextChange,
     (now) => formatListTime(new Date(at), timezone, now, direction) ?? "",
+  );
+};
+
+/**
+ * Checks whether the moment `at`, an ISO instant, falls on today's date in
+ * `timezone`: the moments the list's time column shows as a clock time, such
+ * as "10:31". Keeps the answer current while `onScreen` is true, so it turns
+ * false at midnight. Returns false for a moment that cannot be placed.
+ */
+export const useIsToday = (at: string, timezone: string, onScreen: boolean): boolean => {
+  const findNextChange = useCallback(
+    (moment: string, now: Date) => findNextListTimeChange(new Date(moment), timezone, now, "past"),
+    [timezone],
+  );
+  return useClockValue(at, onScreen, findNextChange, (now) =>
+    isSameDay(new Date(at), now, timezone),
   );
 };
 

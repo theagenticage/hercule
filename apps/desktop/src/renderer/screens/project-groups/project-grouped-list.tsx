@@ -96,8 +96,9 @@ interface PlacedEntry<Item extends RepositoryRecord> {
  * - a repository's sub-heading sits 2px under its project's heading, and
  *   8px under the row before it, 6px in the column;
  * - a row in the table touches the row above it, which its hairline divides
- *   it from, and a row in the column sits 1px under it, as the sidebar's
- *   rows do.
+ *   it from, except under a repository's sub-heading, where it sits 4px
+ *   lower so the label does not rest on the hairline; a row in the column
+ *   sits 1px under the entry above it, as the sidebar's rows do.
  */
 const computeLeading = <Item extends RepositoryRecord>(
   width: ProjectGroupedListWidth,
@@ -113,7 +114,8 @@ const computeLeading = <Item extends RepositoryRecord>(
       if (entries[index - 1]?.kind === "project") return 2;
       return isTable ? 8 : 6;
     case "item":
-      return isTable ? 0 : COLUMN_ROW_LEADING;
+      if (!isTable) return COLUMN_ROW_LEADING;
+      return entries[index - 1]?.kind === "repository" ? 4 : 0;
   }
 };
 

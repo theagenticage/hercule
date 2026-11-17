@@ -291,6 +291,19 @@ describe("the Discussion list", () => {
     expect(code.querySelector("code")?.textContent).toBe("src/cart/totals.ts");
   });
 
+  it("sets a last Post written today in the rows' ink, and an older one in the numbers' faint ink", async () => {
+    await openDiscussions();
+
+    const readLastPost = (name: string) =>
+      within(getList()).getByRole("link", { name }).lastElementChild!;
+    const today = readLastPost("Edits overlap in src/cart/totals.ts");
+    const older = readLastPost("Who owns the price formatting helpers?");
+    expect(today.textContent).toBe("09:41");
+    expect(today.className).toBe("table-num is-today");
+    expect(older.textContent).toBe("Sat");
+    expect(older.className).toBe("table-num");
+  });
+
   it("opens a Discussion from its row, and marks the row selected", async () => {
     const { router } = await openDiscussions();
     const row = within(getList()).getByRole("link", {
