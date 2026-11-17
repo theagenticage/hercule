@@ -5,10 +5,7 @@
   "target": "hercule-desktop",
   "rivals": [],
   "shots": "shots/ui-council",
-  "themes": [
-    "light",
-    "dark"
-  ],
+  "themes": ["light", "dark"],
   "moments": [
     {
       "id": "inbox",
