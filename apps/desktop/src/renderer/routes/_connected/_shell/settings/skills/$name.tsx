@@ -7,7 +7,6 @@ import {
   isNotFound,
   resolveDisplayTimezone,
 } from "@hercule/client-core";
-import type { SkillRevision } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import { settingsQuery, skillDiffQuery, skillQuery } from "../../../../../app/queries";
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
@@ -19,7 +18,7 @@ import {
 } from "../../../../../screens/settings/skills/skill-page";
 import { CheckNow } from "./-check-now";
 import { DeleteSection } from "./-delete-section";
-import { NewSkillLead, Proposal } from "./-skill-proposal";
+import { Proposal } from "./-skill-proposal";
 import { SkillUpdateSection } from "./-skill-update";
 import { UploadVersion } from "./-upload-version";
 
@@ -103,19 +102,7 @@ function SkillPage(): JSX.Element {
   const current = findCurrentSkillRevision(detail);
   const isNewSkill = skill.currentRevisionHash === null;
   const now = new Date(query.dataUpdatedAt);
-  const [newest, ...older] = proposedRevisions;
-  const proposal = (revision: SkillRevision, lead?: JSX.Element): JSX.Element => (
-    <Proposal
-      key={revision.revisionHash}
-      name={name}
-      revision={revision}
-      isNewSkill={isNewSkill}
-      isNewest={revision === newest}
-      now={now}
-      timezone={timezone}
-      lead={lead}
-    />
-  );
+  const newest = proposedRevisions[0];
   return (
     <>
       {/* The header's actions and their lines sit above the record, under
@@ -129,9 +116,16 @@ function SkillPage(): JSX.Element {
         <SettingsHeaderTitle parent={{ title: "Skills", to: "/settings/skills" }} title={name} />
         {isNewSkill ? (
           <>
-            {newest !== undefined &&
-              proposal(newest, <NewSkillLead skill={skill} revision={newest} />)}
-            {older.map((revision) => proposal(revision))}
+            {proposedRevisions.map((revision) => (
+              <Proposal
+                key={revision.revisionHash}
+                skill={skill}
+                revision={revision}
+                isNewest={revision === newest}
+                now={now}
+                timezone={timezone}
+              />
+            ))}
           </>
         ) : (
           <>
@@ -143,7 +137,16 @@ function SkillPage(): JSX.Element {
               />
             )}
             <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
-            {proposedRevisions.map((revision) => proposal(revision))}
+            {proposedRevisions.map((revision) => (
+              <Proposal
+                key={revision.revisionHash}
+                skill={skill}
+                revision={revision}
+                isNewest={revision === newest}
+                now={now}
+                timezone={timezone}
+              />
+            ))}
             {skillMd !== null && (
               <SkillMdSection text={skillMd} sizeBytes={findSkillMdSize(files)} />
             )}

@@ -173,7 +173,7 @@ const describeRevisionNotWaiting = (
 ): string | undefined => {
   const hash = revision.revisionHash;
   if (hash === skill.availableRevisionHash) return undefined;
-  if (revision.origin === "session" && revision.appliedAt === null) return undefined;
+  if (isProposed(revision)) return undefined;
   if (hash === skill.currentRevisionHash) {
     return `\`${hash}\` is already the current revision of \`${skill.name}\`, so there is nothing to apply.`;
   }
@@ -577,12 +577,7 @@ const make = Effect.gen(function* () {
                   revisions.find(
                     (revision) => revision.revisionHash === skill.availableRevisionHash,
                   ) ?? null,
-                proposedRevisions: sortNewestFirst(
-                  revisions.filter(
-                    (revision) => revision.origin === "session" && revision.appliedAt === null,
-                  ),
-                  "createdAt",
-                ),
+                proposedRevisions: sortNewestFirst(revisions.filter(isProposed), "createdAt"),
               };
             }),
           )

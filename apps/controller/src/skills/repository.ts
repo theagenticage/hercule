@@ -127,6 +127,13 @@ const SourceJson = Schema.fromJsonString(SkillSource);
 const decodeSource = Schema.decodeUnknownSync(SourceJson);
 const encodeSource = Schema.encodeSync(SourceJson);
 
+/**
+ * The condition for a proposed Skill Revision: written by a session and not
+ * yet applied. "Proposed" is a query, not a column. Every statement that
+ * uses it must alias `skill_revisions` as `r`.
+ */
+const PROPOSED_REVISION = "r.origin = 'session' AND r.applied_at IS NULL";
+
 const REVISION_COLUMNS =
   "hash, origin, file_count, size_bytes, description, created_at, created_by, applied_at, applied_by, includes_third_party_content";
 
@@ -198,12 +205,12 @@ export const skillRepository = Effect.gen(function* () {
            c.size_bytes AS current_size_bytes,
            s.available_revision_hash, a.allowed_tools AS available_allowed_tools,
            a.hooks AS available_hooks,
-           (SELECT count(*) FROM skill_revisions p
-            WHERE p.skill_id = s.id AND p.origin = 'session' AND p.applied_at IS NULL)
+           (SELECT count(*) FROM skill_revisions r
+            WHERE r.skill_id = s.id AND ${sql.literal(PROPOSED_REVISION)})
              AS proposed_count,
-           (SELECT p.created_by FROM skill_revisions p
-            WHERE p.skill_id = s.id AND p.origin = 'session' AND p.applied_at IS NULL
-            ORDER BY p.created_at DESC, p.hash DESC LIMIT 1)
+           (SELECT r.created_by FROM skill_revisions r
+            WHERE r.skill_id = s.id AND ${sql.literal(PROPOSED_REVISION)}
+            ORDER BY r.created_at DESC, r.hash DESC LIMIT 1)
              AS proposed_by,
            s.last_checked_at, s.check_error, s.upstream_commit,
            s.created_at, s.created_by, s.updated_at, s.updated_by
@@ -386,7 +393,7 @@ export const skillRepository = Effect.gen(function* () {
       sql<{ readonly name: string; readonly count: number }>`
         SELECT s.name, count(*) AS count
         FROM skill_revisions r JOIN skills s ON s.id = r.skill_id
-        WHERE r.origin = 'session' AND r.applied_at IS NULL
+        WHERE ${sql.literal(PROPOSED_REVISION)}
         GROUP BY s.id ORDER BY s.name
       `,
 
