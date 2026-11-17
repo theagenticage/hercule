@@ -50,7 +50,9 @@ function Gauge({
  * one thing that needs the user with the button that fixes it. It draws what `machine` holds and works out nothing.
  *
  * The status label is drawn only while the machine is not plainly online; the
- * dot alone says "online".
+ * dot alone says "online", at the head's right. A label, such as "Takes no
+ * new sessions", is drawn under the name with its dot, so a long label never
+ * cuts the name short and the head keeps its height.
  *
  * The machine's name is the card's one way to open the machine: its button
  * covers the whole card and calls `onOpen` with the runner id. `allow` is the
@@ -92,11 +94,22 @@ export function MachineCard({
         <span className="fleet-card-icon">
           <MachineIcon kind={machine.kind} size={16} />
         </span>
-        <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
-        <span className="fleet-card-state">
-          <StatusDot status={status} namesState={!isLabelled} />
-          {isLabelled && status.label}
-        </span>
+        {isLabelled ? (
+          <span className="fleet-card-title">
+            <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
+            <span className="fleet-card-state">
+              <StatusDot status={status} />
+              {status.label}
+            </span>
+          </span>
+        ) : (
+          <>
+            <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
+            <span className="fleet-card-state">
+              <StatusDot status={status} namesState />
+            </span>
+          </>
+        )}
       </div>
       <div className="fleet-gauges">
         <Gauge label="Sessions" isWide>

@@ -14,7 +14,11 @@ import "./inbox-pane-footer.css";
 /** How many faces the hand-off button shows when several workflows fit. */
 const HAND_OFF_FACES = 3;
 
-/** Renders the icon button of Dismiss alone: `words` is its name and `onDismiss` is called when it is pressed. */
+/**
+ * Renders Dismiss (E) as a move with no words: the bordered button of the moves beside it, with
+ * the archive icon and then its key. `words` is its name and `onDismiss` is called when it is
+ * pressed.
+ */
 export function InboxPaneDismissButton({
   words,
   onDismiss,
@@ -25,20 +29,22 @@ export function InboxPaneDismissButton({
   return (
     <button
       type="button"
-      className="icon-btn ib-pane-dismiss"
+      className="btn btn--sm ib-pane-move ib-pane-dismiss"
       title={`${words} (E)`}
       aria-label={words}
       aria-keyshortcuts="E"
       onClick={onDismiss}
     >
-      <ArchiveIcon size={16} />
+      <ArchiveIcon size={14} />
+      <kbd aria-hidden="true">E</kbd>
     </button>
   );
 }
 
 /**
- * Renders the icon button of Link (L): `words` is its name, such as "Link another thing", and
- * `onLink` is called when it is pressed.
+ * Renders Link (L) as a move with no words: the bordered button of the moves beside it, with the
+ * link icon and then its key. `words` is its name, such as "Link another thing", and `onLink` is
+ * called when it is pressed.
  */
 export function InboxPaneLinkButton({
   words,
@@ -50,13 +56,14 @@ export function InboxPaneLinkButton({
   return (
     <button
       type="button"
-      className="icon-btn ib-pane-foot-link"
+      className="btn btn--sm ib-pane-move ib-pane-foot-link"
       title={`${words} (L)`}
       aria-label={words}
       aria-keyshortcuts="L"
       onClick={onLink}
     >
-      <LinkIcon size={16} />
+      <LinkIcon size={14} />
+      <kbd aria-hidden="true">L</kbd>
     </button>
   );
 }
@@ -150,8 +157,9 @@ export function InboxPaneTakeOnButton({
 
 /**
  * Renders the footer of the pane of one thing: the moves that work, Thread
- * (N), Take on (T), the hand-off (H), and Link (L) and Dismiss (E) as icons at
- * the end. No move is filled.
+ * (N), Take on (T), the hand-off (H), and Link (L) and Dismiss (E) as icons
+ * with their keys at the end. Every move is the same bordered button, and no
+ * move is filled.
  *
  * - Thread and Take on are left out when `isOnTask` is true: each makes a new
  *   Task, and the thing is on one already. View task, in the pane's Task

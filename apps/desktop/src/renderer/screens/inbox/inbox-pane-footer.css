@@ -1,6 +1,6 @@
 /* The footer: the moves that work, each with its key. The pane is its size container, so the footer
    follows the pane's width and not the window's.
-   - from 460px every move has its words and its key;
+   - from 460px every move has its words and its key, and Link and Dismiss their icon and key;
    - under 460px the hand-off comes first and Thread and Take on are icons, their words in the tooltip;
    - under 400px the moves drop their key hints, which stay in the tooltips;
    - a name too long even then keeps its line, and the icons wrap under it. */
@@ -21,8 +21,11 @@
   background: linear-gradient(to top, var(--pane-fill), transparent);
   pointer-events: none;
 }
+/* At a large text size the moves can outgrow the footer, so they wrap onto a second line rather
+   than squeeze their words into their keys. */
 .ib-pane-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 56px;
@@ -53,9 +56,8 @@
 .ib-pane-foot-end {
   display: flex;
   flex: none;
-  gap: 2px;
+  gap: 8px;
   margin-left: auto;
-  margin-right: -6px;
 }
 .ib-pane-faces {
   display: inline-flex;
@@ -80,19 +82,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The footer's Link is named apart from the Linked list's rows (`.ib-pane-link`), whose rules it must not take. */
+/* Link and Dismiss are moves with an icon in place of words, so they start closer to their edge:
+   the icon's stroke sits inside its box, where a word's first letter does not. The footer's Link is
+   named apart from the Linked list's rows (`.ib-pane-link`), whose rules it must not take. */
 .ib-pane-dismiss,
 .ib-pane-foot-link {
-  width: 28px;
-  height: 28px;
-  color: var(--muted);
+  flex: none;
+  padding-left: 8px;
 }
 
 @container pane-foot (max-width: 459px) {
-  .ib-pane-foot {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
   .ib-pane-move--hand {
     order: -1;
   }
@@ -112,6 +111,11 @@
 @container pane-foot (max-width: 399px) {
   .ib-pane-move kbd {
     display: none;
+  }
+  .ib-pane-dismiss,
+  .ib-pane-foot-link {
+    width: 30px;
+    padding: 0;
   }
   .ib-pane-move--hand {
     padding-right: 10px;

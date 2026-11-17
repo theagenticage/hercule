@@ -9,14 +9,17 @@
 import { memo, type JSX } from "react";
 import { describeOpenReply, type OpenReplyBlock } from "@hercule/client-core";
 import { buildHueStyle, Face, type Look } from "../../faces";
+import { AlertIcon } from "../../icons/alert";
 import { Markdown } from "../session/markdown";
 import { AgentFace, OpenMessageText } from "../session/messages";
 import type { AttachOpenParagraph } from "../session/use-session-live";
 
 /** The size of the newest notice's face, in CSS pixels: the book's `data-size="28"`. */
 const NOTICE_FACE_SIZE = 28;
-/** The size of a past notice's face, in CSS pixels: the height of its one line, as a day stamp's. */
+/** The size of a past notice's face, in CSS pixels: about the height of its one line. */
 const PAST_NOTICE_FACE_SIZE = 16;
+/** The size of the alert icon that leads a past notice, in CSS pixels. */
+const PAST_NOTICE_ALERT_SIZE = 14;
 
 /** Renders the day stamp above the first message of a day, such as "Today" or "4 Sep". */
 export function DayStamp({ label }: { readonly label: string }): JSX.Element {
@@ -73,9 +76,11 @@ export const StoredReply = memo(function StoredReply({
  * such as a turn that failed, beside the assistant's face in the failed
  * pose, still, with the notice's `time` after the text.
  *
- * A notice that `isPast`, because a message follows it, is a quiet row as
- * tall as a day stamp: a small face and muted text on no fill. The newest
- * notice is filled, because it may still need the user.
+ * A notice that `isPast`, because a message follows it, is a quiet row on no
+ * fill: a small alert icon in the failure colour, so it still reads as a
+ * failure, then a small face, the muted text at the size of a reply's time,
+ * and the time apart in faint ink. The newest notice is filled, because it
+ * may still need the user.
  */
 export const Notice = memo(function Notice({
   look,
@@ -90,6 +95,7 @@ export const Notice = memo(function Notice({
 }): JSX.Element {
   return (
     <div className={isPast ? "notice is-past" : "notice"}>
+      {isPast && <AlertIcon size={PAST_NOTICE_ALERT_SIZE} />}
       <Face look={look} pose="failed" size={isPast ? PAST_NOTICE_FACE_SIZE : NOTICE_FACE_SIZE} />
       <span>
         {text}

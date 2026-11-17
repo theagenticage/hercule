@@ -187,8 +187,9 @@
 .machine-page-instrument--fail > b {
   color: var(--fail-ink);
 }
-/* The drawings are the cards', made as big as the prototype's instruments:
-   a 6px meter, and the sessions' bar 14px tall across the tile. Both take
+/* The drawings are the cards', made as tall as the prototype's instruments:
+   a 6px meter across the tile, and the sessions' bar 14px tall, as wide as on
+   a card, so one cell is one session in the same width. Both take
    22px with their margins and centre on the same line, so the notes under
    the three tiles line up (the prototype's meter takes 16px and its ladder
    22px). */
@@ -197,7 +198,6 @@
   margin: 8px 0;
 }
 .machine-page-instrument .fleet-sessions {
-  width: 100%;
   height: 14px;
   margin: 4px 0;
 }

@@ -381,14 +381,14 @@ describe("decideMachineNeed", () => {
     });
   });
 
-  it("reports a disk below its limit by how full it is, in the words of a nearly full disk", () => {
+  it("reports a disk below its limit by how full it is alone, because the status says it takes no new sessions", () => {
     // 8 GB free of 1,000 GB is under the 10 GiB limit.
     const machine = buildMachine(withDisk(8e9));
 
     expect(findNeed(machine)).toEqual({
       kind: "disk-below-limit",
       hue: "fail",
-      line: "Disk 99% full. It takes no new sessions.",
+      line: "Disk 99% full",
     });
   });
 
@@ -400,7 +400,7 @@ describe("decideMachineNeed", () => {
     expect(findNeed(machine)).toEqual({
       kind: "disk-below-limit",
       hue: "fail",
-      line: "Disk below its limit. It takes no new sessions.",
+      line: "Disk below its limit",
     });
   });
 
@@ -784,9 +784,9 @@ describe("MachineSummary drawing", () => {
   const drawing = (cap: number, running: number, waiting = 0) =>
     summarize({ maxConcurrentSessions: cap }, { running, waiting }).drawing;
 
-  it("draws one segment per slot at a cap of 16", () => {
+  it("draws one cell per slot at a cap of 16", () => {
     expect(drawing(16, 12, 3)).toMatchObject({
-      slotsPerSegment: 1,
+      cellWidth: 5,
       cap: 16,
       running: 12,
       free: 4,
@@ -796,34 +796,48 @@ describe("MachineSummary drawing", () => {
   });
 
   it.each([
-    [17, 2],
-    [24, 2],
-    [32, 2],
-    [33, 3],
-    [100, 7],
+    [1, 120],
+    [4, 28],
+    [8, 13],
+    [16, 5],
+    [24, 3],
+    [30, 2],
   ])(
-    "draws a cap of %i in segments of %i slots, the fewest that keep it at 16 segments or fewer",
-    (cap, slotsPerSegment) => {
-      expect(drawing(cap, 9, 3)).toMatchObject({ slotsPerSegment, cap, running: 9, waiting: 3 });
-      expect(Math.ceil(cap / slotsPerSegment)).toBeLessThanOrEqual(16);
+    "draws a cap of %i in cells of %ipx, the widest whole width that keeps the slots within 120px",
+    (cap, cellWidth) => {
+      const width = drawing(cap, 1).cellWidth;
+      expect(width).toBe(cellWidth);
+      expect(Number.isInteger(width)).toBe(true);
+      // The cells and the 2px gaps between them fit in 120px, and one more pixel per cell would not.
+      expect(cap * cellWidth + (cap - 1) * 2).toBeLessThanOrEqual(120);
+      expect(cap * (cellWidth + 1) + (cap - 1) * 2).toBeGreaterThan(120);
     },
   );
 
-  it("sizes the segments by the sessions running when they run past a lower cap", () => {
-    expect(drawing(4, 16)).toMatchObject({ slotsPerSegment: 1, running: 16, free: 0 });
-    expect(drawing(4, 17)).toMatchObject({ slotsPerSegment: 2, running: 17, free: 0 });
-    expect(drawing(4, 100)).toMatchObject({ slotsPerSegment: 7, cap: 4, running: 100, free: 0 });
+  it("draws a cap above 30 as one continuous fill, with no cells", () => {
+    expect(drawing(31, 9, 3)).toMatchObject({ cellWidth: null, cap: 31, running: 9 });
+    expect(drawing(100, 9, 3)).toMatchObject({ cellWidth: null, cap: 100, running: 9 });
+  });
+
+  it("sizes the cells by the sessions running when they run past a lower cap", () => {
+    expect(drawing(4, 16)).toMatchObject({ cellWidth: 5, running: 16, free: 0 });
+    expect(drawing(4, 30)).toMatchObject({ cellWidth: 2, running: 30, free: 0 });
+    expect(drawing(4, 31)).toMatchObject({ cellWidth: null, running: 31, free: 0 });
   });
 
   it("has no free slot when more sessions run than the cap allows", () => {
     expect(drawing(4, 6)).toMatchObject({ cap: 4, running: 6, free: 0 });
   });
 
-  it("draws at most 16 segments of waiting sessions, and keeps the full count", () => {
+  it("draws at most 16 waiting cells, and keeps the full count", () => {
     expect(drawing(16, 16, 16)).toMatchObject({ waiting: 16, waitingDrawn: 16 });
     expect(drawing(16, 16, 40)).toMatchObject({ waiting: 40, waitingDrawn: 16 });
-    expect(drawing(24, 24, 40)).toMatchObject({ waiting: 40, waitingDrawn: 32 });
+    expect(drawing(24, 24, 40)).toMatchObject({ waiting: 40, waitingDrawn: 16 });
+  });
+
+  it("draws at most as many waiting sessions as the slots in a continuous fill", () => {
     expect(drawing(100, 100, 40)).toMatchObject({ waiting: 40, waitingDrawn: 40 });
+    expect(drawing(40, 40, 100)).toMatchObject({ waiting: 100, waitingDrawn: 40 });
   });
 
   it("words the sessions running against the cap, and the sessions waiting", () => {
@@ -868,8 +882,8 @@ describe("MachineSummary drawing", () => {
       });
     });
 
-    it("draws one segment per slot for a cap of 4, however many sessions it last ran", () => {
-      expect(awayDrawing(4, 100, 0)).toMatchObject({ slotsPerSegment: 1, running: 0, free: 4 });
+    it("draws one cell per slot for a cap of 4, however many sessions it last ran", () => {
+      expect(awayDrawing(4, 100, 0)).toMatchObject({ cellWidth: 28, running: 0, free: 4 });
     });
   });
 });
@@ -1082,11 +1096,26 @@ describe("MachineSummary status", () => {
     );
   });
 
-  it("says an online machine takes no new work while draining", () => {
+  it("says an online machine takes no new sessions while draining", () => {
     expect(summarize({ lifecycle: "draining" }).status).toEqual({
-      tone: "draining",
-      label: "Takes no new work",
+      tone: "no-new-sessions",
+      label: "Takes no new sessions",
     });
+  });
+
+  it("says an online machine takes no new sessions while its disk is below its limit", () => {
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+
+    expect(summarize({ metrics }).status).toEqual({
+      tone: "no-new-sessions",
+      label: "Takes no new sessions",
+    });
+  });
+
+  it("says Offline for an offline machine whose disk is below its limit", () => {
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+
+    expect(summarize({ connectivity: "offline", metrics }).status.label).toBe("Offline");
   });
 });
 

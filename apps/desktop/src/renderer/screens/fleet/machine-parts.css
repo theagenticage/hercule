@@ -13,7 +13,7 @@
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--fail);
 }
-.fleet-dot--draining {
+.fleet-dot--no-new-sessions {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--muted);
 }

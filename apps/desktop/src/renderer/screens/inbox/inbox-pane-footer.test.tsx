@@ -77,4 +77,18 @@ describe("InboxPaneFooter", () => {
     );
     expect(screen.getByRole("button", { name: "Dismiss" }).title).toBe("Dismiss (E)");
   });
+
+  it("draws Link and Dismiss as bordered moves with their key hint after the icon, like the moves beside them", () => {
+    renderFooter();
+    for (const [name, key] of [
+      ["Link to another thing", "L"],
+      ["Dismiss", "E"],
+    ] as const) {
+      const button = screen.getByRole("button", { name });
+      expect(button.classList).toContain("btn");
+      expect(button.classList).toContain("ib-pane-move");
+      expect(button.lastElementChild?.tagName).toBe("KBD");
+      expect(button.lastElementChild?.textContent).toBe(key);
+    }
+  });
 });

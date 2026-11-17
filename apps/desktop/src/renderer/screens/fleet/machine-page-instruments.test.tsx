@@ -16,7 +16,7 @@ const INSTRUMENTS: MachineInstruments = {
     level: "you",
     note: "5 waiting",
     drawing: {
-      slotsPerSegment: 1,
+      cellWidth: 5,
       cap: 16,
       running: 12,
       free: 4,

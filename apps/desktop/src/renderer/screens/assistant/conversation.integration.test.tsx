@@ -299,8 +299,10 @@ describe("an assistant's Conversation", () => {
 
     const notices = [...findConversation().querySelectorAll(".notice")];
     expect(notices.map((notice) => notice.classList.contains("is-past"))).toEqual([true, false]);
-    // The quiet row keeps the failed face.
+    // The quiet row keeps the failed face, led by the alert icon; the newest notice has no icon.
     expect(notices[0]!.querySelector(".cr")?.classList).toContain("cr--failed");
+    expect(notices[0]!.firstElementChild?.classList).toContain("ic");
+    expect(notices[1]!.querySelector(".ic")).toBeNull();
   });
 
   it("ends with one notice when the controller sent a row the app cannot read, and keeps the messages drawn", async () => {

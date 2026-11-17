@@ -1,10 +1,9 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the
    meters, the text field, the switches and choices, the quiet text and
-   dots, the priority bars, the bar over the main pane, the tabs and the
-   section headings. The rules and
-   class names are the Bureau book's, as its system.css spells them. Each
-   departure from the book says why. */
+   dots, the bar over the main pane, the tabs and the section headings. The
+   rules and class names are the Bureau book's, as its system.css spells
+   them. Each departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -868,44 +867,6 @@ input.field[type="password"]:not(:placeholder-shown) {
   to {
     transform: rotate(1turn);
   }
-}
-
-/* ---------- Priority bars ---------- */
-/* Four bars rising left to right, filled up to the priority: one for low,
-   four for urgent. Urgent fills all four in the failure colour. */
-.bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 12px;
-}
-.bars i {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--line);
-}
-.bars i:nth-child(1) {
-  height: 5px;
-}
-.bars i:nth-child(2) {
-  height: 7.5px;
-}
-.bars i:nth-child(3) {
-  height: 10px;
-}
-.bars i:nth-child(4) {
-  height: 12px;
-}
-.bars[data-p="1"] i:nth-child(-n + 1),
-.bars[data-p="2"] i:nth-child(-n + 2),
-.bars[data-p="3"] i:nth-child(-n + 3) {
-  background: var(--ink);
-}
-/* The book also lists urgent among the ink bars above, and overrides it
-   here with `!important`. Here urgent is left out above, so this rule has
-   nothing to override. */
-.bars[data-p="4"] i {
-  background: var(--fail);
 }
 
 /* ---------- The bar ---------- */

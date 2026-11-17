@@ -25,15 +25,6 @@ const buildTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe("buildStartCards", () => {
-  it("fills one bar for low up to four for urgent", () => {
-    const cards = buildStartCards(
-      (["low", "normal", "high", "urgent"] as const).map((priority) =>
-        buildTask({ id: priority, priority }),
-      ),
-    );
-    expect(cards.map((card) => card.bars)).toEqual([1, 2, 3, 4]);
-  });
-
   it.each([
     ["urgent", "Urgent"],
     ["high", "High"],

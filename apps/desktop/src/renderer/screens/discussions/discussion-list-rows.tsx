@@ -15,7 +15,7 @@ import { memo, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { describePostsAndSessions, stripCodeMarks } from "@hercule/client-core/discussion-text";
 import type { DiscussionKind } from "@hercule/contract";
-import { useListTime } from "../workflows/list-time";
+import { useIsToday, useListTime } from "../workflows/list-time";
 import { SELECTED_LINK_PROPS } from "../selected-link-props";
 import { InlineCode } from "../inline-code";
 import { DiscussionKindMark } from "./discussion-kind-mark";
@@ -62,7 +62,8 @@ interface DiscussionRowProps {
  * Renders a Discussion's row in the table: a link to the Discussion. Its
  * cells are the mark of its kind (`DiscussionKindMark`), the subject, how
  * many sessions took part, how many Posts it holds, and when the last one was
- * written.
+ * written. A last Post written today is in the rows' ink, so today's
+ * Discussions stand out from older ones.
  */
 export const DiscussionTableRow = memo(function DiscussionTableRow({
   itemKey,
@@ -77,6 +78,7 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
   onScreen,
 }: DiscussionRowProps): JSX.Element {
   const lastPost = useListTime(lastPostAt, timezone, "past", onScreen);
+  const isLastPostToday = useIsToday(lastPostAt, timezone, onScreen);
   return (
     <Link
       to="/discussions/$discussionId"
@@ -93,7 +95,7 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
       </span>
       <span className="table-num">{participantCount}</span>
       <span className="table-num">{postCount}</span>
-      <span className="table-num">{lastPost}</span>
+      <span className={isLastPostToday ? "table-num is-today" : "table-num"}>{lastPost}</span>
     </Link>
   );
 });

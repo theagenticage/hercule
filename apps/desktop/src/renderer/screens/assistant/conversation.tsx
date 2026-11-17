@@ -73,8 +73,8 @@ const OWNER_FRAME_HEIGHT = 40;
 const REPLY_NAME_HEIGHT = 21.5;
 /** The height of the newest notice: the 28px failed face inside 8px of padding above and below. */
 const NOTICE_HEIGHT = 44;
-/** The height of a notice a message follows: one line beside the 16px failed face, as a day stamp. */
-const PAST_NOTICE_HEIGHT = 16;
+/** The height of a notice a message follows: one line of 12px text at the transcript's 1.45 line height, above the 16px failed face. */
+const PAST_NOTICE_HEIGHT = 17.4;
 /** The height of the reply being written before any text: its name line and the caret's line. */
 const OPEN_REPLY_HEIGHT = 43.9;
 

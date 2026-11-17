@@ -59,9 +59,12 @@
 }
 
 /* ---------- Sessions against the cap ---------- */
-/* One bar of a fixed width on every machine, whatever its cap, made of square segments with the
-   same 2px gap between every two: a segment can be under 4px wide, too narrow for a radius token. Each segment's flex-grow is the slots it holds, so every slot is as wide
-   as every other. The card's bar is 10px tall and the list's 8px. */
+/* Square segments with the same 2px gap between every two: a segment can be 2px wide, too narrow
+   for a radius token. Up to 30 slots (`is-cells`) every slot is one cell of a whole width,
+   `--fleet-cell`, so the bar ends where its cells end, and a bar too long for its place is cut off
+   at its edge: the numbers carry the counts. Above 30 slots the bar is 120px wide, and each
+   segment's flex-grow is the sessions it holds, so every session is as wide as every other. The
+   card's bar is 10px tall and the list's 8px. */
 .fleet-sessions {
   display: inline-flex;
   flex: none;
@@ -73,6 +76,11 @@
 .fleet-sessions--list {
   height: 8px;
 }
+.fleet-sessions.is-cells {
+  width: auto;
+  max-width: 100%;
+  overflow-x: clip;
+}
 /* A segment of the cap fills from the left with the sessions running in it (--fleet-running) and
    is free for the rest. The free ink reaches 1.5:1 against the card in every theme. */
 .fleet-sessions > i {
@@ -83,6 +91,10 @@
     color-mix(in oklab, var(--ink) 55%, transparent) var(--fleet-running, 0%),
     color-mix(in oklab, var(--ink) 22%, transparent) var(--fleet-running, 0%)
   );
+}
+.fleet-sessions.is-cells > i {
+  flex: none;
+  width: var(--fleet-cell);
 }
 /* The rule marks where the cap ends. It reaches 3px past the bar's edges, between two segments. */
 .fleet-sessions-rule {
@@ -277,6 +289,21 @@
 .fleet-card-state .fleet-dot {
   width: 7px;
   height: 7px;
+}
+/* A machine with a status label: its name over the label, so a long label never cuts the name
+   short. Each line is as tall as its font's own box, so the two never touch, and the pair reaches
+   1px past the icon's 30px box at each end, so the head keeps its height. */
+.fleet-card-title {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  margin-block: -1px;
+}
+.fleet-card-title .fleet-open {
+  line-height: calc(17px + var(--text-size-step));
+}
+.fleet-card-title .fleet-card-state {
+  line-height: calc(15px + var(--text-size-step));
 }
 
 .fleet-gauges {

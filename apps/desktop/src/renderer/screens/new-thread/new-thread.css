@@ -132,7 +132,7 @@ button.lip-pick:hover,
   color: var(--faint);
   font-size: var(--t-12);
 }
-/* The priority word of an urgent task, in the failure hue its bars take. */
+/* The priority word of an urgent task, in the failure hue. */
 .start-priority.is-urgent {
   color: var(--fail-ink);
 }

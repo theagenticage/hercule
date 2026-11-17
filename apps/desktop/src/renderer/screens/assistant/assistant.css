@@ -127,8 +127,10 @@
 .notice .time {
   margin-left: 6px;
 }
-/* A notice a message follows is in the past: a quiet row as tall as a day stamp, with no fill, so
-   the eye lands on the newest message first. */
+/* A notice a message follows is in the past: a quiet row with no fill, so the eye lands on the
+   newest message first. An alert icon in the failure colour leads it, so it still reads as a
+   failure and not as a day stamp. Its text is the size of a reply's time, and its time stands
+   apart in faint ink, as the time beside a reply's name does. */
 .notice.is-past {
   gap: 8px;
   max-width: 100%;
@@ -136,8 +138,16 @@
   border-radius: 0;
   background: none;
   color: var(--muted);
-  font-size: var(--t-11);
+  font-size: var(--t-12);
   line-height: inherit;
+}
+.notice.is-past > .ic {
+  flex: none;
+  color: var(--fail);
+}
+.notice.is-past .time {
+  margin-left: 8px;
+  color: var(--faint);
 }
 
 /* The caret after the paragraph the assistant is writing, alone while the

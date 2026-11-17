@@ -216,8 +216,8 @@ describe("describeMachinePage top", () => {
     );
   });
 
-  it("says a machine told to take no new work takes none", () => {
-    expect(readText(line({ lifecycle: "draining" }))).toBe("No room: it takes no new work");
+  it("says a machine told to take no new work takes no new sessions", () => {
+    expect(readText(line({ lifecycle: "draining" }))).toBe("No room: it takes no new sessions");
   });
 
   it("still names the disk when the machine is also told to take no new work", () => {
@@ -546,7 +546,7 @@ describe("describeMachinePage instruments", () => {
       const drawing = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 })
         .sessions.drawing;
 
-      expect(drawing).toMatchObject({ slotsPerSegment: 2, cap: 17, running: 12, waiting: 3 });
+      expect(drawing).toMatchObject({ cellWidth: 5, cap: 17, running: 12, waiting: 3 });
     });
   });
 

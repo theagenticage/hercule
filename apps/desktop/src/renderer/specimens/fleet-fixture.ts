@@ -7,14 +7,15 @@
  * their ids and the order of the cards:
  *
  * - atlas: a Mac with 64 GB, so a desktop. Online, a cap of 16 with 12
- *   running, so its sessions draw as 16 blocks, and 5 Threads waiting for a
- *   slot, so its card offers Allow 17. It runs a runner one release behind the
+ *   running, so its sessions draw as 16 cells, and 5 Threads waiting for a
+ *   slot, so its card offers Raise cap to 17. It runs a runner one release behind the
  *   controller, and Codex 0.9.0, which is below the floor. Anthropic is signed
  *   in on it and OpenAI is not.
  * - beelink: a Linux server, and the controller's own machine. Online, a cap
- *   of 24 with 9 running, so its sessions draw as a bar. Healthy, but 85 % of
+ *   of 24 with 9 running, so its sessions draw as 24 narrower cells. Healthy, but 85 % of
  *   its memory is in use, which turns the memory marigold.
- * - bosgame: a Linux server, online, whose free disk is below its limit.
+ * - bosgame: a Linux server, online, whose free disk is below its limit, so
+ *   it takes no new sessions.
  * - mini: a Mac laptop with 16 GB, offline since 09:12 today. Two of its
  *   Threads are open.
  * - studio: a Mac with 96 GB, online and set to take no new work. Its
