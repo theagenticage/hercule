@@ -188,29 +188,18 @@
   color: var(--fail-ink);
 }
 /* The drawings are the cards', made as big as the prototype's instruments:
-   a 6px meter and 7 by 14px blocks. Both take 22px with their margins and
-   centre on the same line, so the notes under the three tiles line up (the
-   prototype's meter takes 16px and its ladder 22px). */
+   a 6px meter, and the sessions' bar 14px tall across the tile. Both take
+   22px with their margins and centre on the same line, so the notes under
+   the three tiles line up (the prototype's meter takes 16px and its ladder
+   22px). */
 .machine-page-instrument .fleet-meter {
   height: 6px;
   margin: 8px 0;
 }
 .machine-page-instrument .fleet-sessions {
-  /* Square blocks: a 1.5px corner would add a radius to the page. */
-  --r-block: 0;
-  margin: 4px 0;
-}
-.machine-page-instrument .fleet-sessions--blocks i {
-  width: 7px;
-  height: 14px;
-}
-.machine-page-instrument .fleet-sessions--bar {
-  flex: none;
   width: 100%;
   height: 14px;
-}
-.machine-page-instrument .fleet-sessions-mark {
-  height: 20px;
+  margin: 4px 0;
 }
 .machine-page-instrument-note {
   color: var(--faint);

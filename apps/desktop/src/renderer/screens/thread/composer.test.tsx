@@ -539,7 +539,7 @@ describe("the composer", () => {
     expect(readFieldText(field)).toBe("");
 
     // The model options trigger shows the options in use: a medium effort.
-    for (const name of ["Medium", "Claude Sonnet 5"]) {
+    for (const name of ["Effort: Medium", "Claude Sonnet 5"]) {
       const trigger = screen.getByRole("button", { name });
       expect(trigger.getAttribute("aria-disabled")).toBe("true");
       expect(trigger.hasAttribute("popovertarget")).toBe(false);
@@ -701,7 +701,7 @@ describe("the composer", () => {
     expect(accessMode.tagName).toBe("SPAN");
     expect(accessMode.textContent).toBe("Approval required");
     for (const [name, menu] of [
-      ["Medium", "Model options"],
+      ["Effort: Medium", "Model options"],
       ["Claude Sonnet 5", "Model"],
     ] as const) {
       const trigger = screen.getByRole("button", { name });
@@ -738,7 +738,7 @@ describe("the composer", () => {
       });
     });
     expect(screen.getByRole("button", { name: "Claude Opus 5" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "High" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Effort: High" })).toBeTruthy();
     expect(document.querySelector(".composer-note")?.textContent).toBe(
       "model change applies on send",
     );

@@ -141,6 +141,11 @@ button.pick:not([aria-disabled="true"]):hover,
 .pick .br {
   opacity: 0.85;
 }
+/* The name of the option a pick shows, "Effort:" before "High". It keeps the
+   muted ink while the open pick turns its value to the ink. */
+.pick-option-name {
+  color: var(--muted);
+}
 .send {
   display: inline-grid;
   place-items: center;

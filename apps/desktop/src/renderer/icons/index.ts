@@ -11,7 +11,8 @@
 // Every coordinate is copied from the Bureau book's crew.js as the same
 // string, so the markup matches the book's attribute for attribute. The book
 // fills small dots (radius .4 to .6) at runtime; here the fill is written on
-// the dot itself.
+// the dot itself. The two exceptions are `IntakeIcon` and `OverviewIcon`,
+// which the book does not draw: their outlines are in app-icon-outlines.ts.
 export { IconFrame, type IconProps } from "./icon-frame";
 export { AgentIcon } from "./agent";
 export { AlarmIcon } from "./alarm";
@@ -39,6 +40,7 @@ export { FleetIcon } from "./fleet";
 export { GlobeIcon } from "./globe";
 export { HeartIcon } from "./heart";
 export { IdIcon } from "./id";
+export { InboxIcon } from "./inbox";
 export { IntakeIcon } from "./intake";
 export { KeyIcon } from "./key";
 export { LaptopIcon } from "./laptop";
@@ -51,6 +53,7 @@ export { MoonIcon } from "./moon";
 export { MoreIcon } from "./more";
 export { OfficeIcon } from "./office";
 export { OverlapIcon } from "./overlap";
+export { OverviewIcon } from "./overview";
 export { PaletteIcon } from "./palette";
 export { PauseIcon } from "./pause";
 export { PlusIcon } from "./plus";

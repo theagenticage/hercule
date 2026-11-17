@@ -18,10 +18,10 @@ import type { DiscussionKind } from "@hercule/contract";
 import { useListTime } from "../workflows/list-time";
 import { SELECTED_LINK_PROPS } from "../selected-link-props";
 import { InlineCode } from "../inline-code";
-import { OverlapMark } from "./overlap-mark";
+import { DiscussionKindMark } from "./discussion-kind-mark";
 import "./discussions.css";
 
-/** The size of the overlap mark in a row, in CSS pixels. */
+/** The size of the kind mark in a row, in CSS pixels. */
 const MARK_SIZE = 14;
 
 /**
@@ -60,9 +60,9 @@ interface DiscussionRowProps {
 
 /**
  * Renders a Discussion's row in the table: a link to the Discussion. Its
- * cells are the overlap mark, or an empty place for a general Discussion,
- * the subject, how many sessions took part, how many Posts it holds, and
- * when the last one was written.
+ * cells are the mark of its kind (`DiscussionKindMark`), the subject, how
+ * many sessions took part, how many Posts it holds, and when the last one was
+ * written.
  */
 export const DiscussionTableRow = memo(function DiscussionTableRow({
   itemKey,
@@ -87,7 +87,7 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
       style={{ marginTop }}
       aria-label={stripCodeMarks(subject)}
     >
-      {kind === "overlap" ? <OverlapMark size={MARK_SIZE} /> : <span></span>}
+      <DiscussionKindMark kind={kind} size={MARK_SIZE} />
       <span className="table-name">
         <InlineCode text={subject} />
       </span>
@@ -101,7 +101,7 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
 /**
  * Renders a Discussion's row in the column beside the open Discussion: a link
  * to the Discussion, selected while it is open, drawn as the sidebar's
- * two-line row. Its parts are the overlap mark, the subject over how many
+ * two-line row. Its parts are the mark of its kind, the subject over how many
  * Posts and sessions the Discussion holds, and when its last Post was
  * written.
  */
@@ -129,7 +129,7 @@ export const DiscussionColumnRow = memo(function DiscussionColumnRow({
       aria-label={stripCodeMarks(subject)}
     >
       <span className="column-mark">
-        {kind === "overlap" ? <OverlapMark size={MARK_SIZE} /> : null}
+        <DiscussionKindMark kind={kind} size={MARK_SIZE} />
       </span>
       <span className="column-text">
         {/* The column is narrow, so a long subject ends in an ellipsis; the

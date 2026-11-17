@@ -59,67 +59,18 @@
 }
 
 /* ---------- Sessions against the cap ---------- */
+/* One bar of a fixed width on every machine, whatever its cap: the cap's
+   part, then the waiting part after a 4px gap. The card's bar is 10px tall
+   and the list's 8px. */
 .fleet-sessions {
-  --r-block: 1.5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* One block per slot, always in one line. A drawing wider than its place is
-   cut off at the edge: the numbers beside it carry the counts. Sixteen
-   blocks are 110px wide, which fits the list's 156px column with room for a
-   few waiting ones. */
-.fleet-sessions--blocks {
-  flex-wrap: nowrap;
-  max-width: 100%;
-  overflow: hidden;
-}
-.fleet-sessions--blocks i {
-  flex: none;
-  width: 5px;
-  height: 10px;
-  /* The prototype's 1.5px. No radius token fits a block this small: the
-     smallest, --r-xs, would make it a capsule. `.fleet-sessions` names it. */
-  border-radius: var(--r-block);
-  background: color-mix(in oklab, var(--ink) 8%, transparent);
-}
-.fleet-sessions--blocks i.is-run {
-  background: color-mix(in oklab, var(--ink) 52%, transparent);
-}
-.fleet-sessions--blocks i.is-wait {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--you-ink);
-}
-.fleet-sessions--list.fleet-sessions--blocks i {
-  height: 8px;
-}
-.fleet-sessions-gap {
-  width: 2px;
-}
-/* Where the cap ends when more sessions run than it allows: the bar's rule,
-   in the flow between two blocks. It is taller than the blocks, so it reaches
-   past them as the bar's does. */
-.fleet-sessions-mark {
-  flex: none;
-  width: 1.5px;
-  height: 16px;
-  background: color-mix(in oklab, var(--ink) 50%, transparent);
-}
-.fleet-sessions--list .fleet-sessions-mark {
-  height: 14px;
-}
-
-/* One bar, for a cap above 16. */
-.fleet-sessions--bar {
   position: relative;
-  flex: 1 1 80px;
+  display: inline-flex;
+  flex: none;
   align-items: stretch;
-  gap: 0;
-  min-width: 60px;
+  width: 120px;
   height: 10px;
 }
-.fleet-sessions--bar.fleet-sessions--list {
+.fleet-sessions--list {
   height: 8px;
 }
 .fleet-sessions-cap {
@@ -129,11 +80,13 @@
   border-radius: var(--r-xs);
   background: color-mix(in oklab, var(--ink) 9%, transparent);
 }
-/* A thin cut every 10 sessions, through whatever is drawn, in the cap's part
-   and in the waiting part. Each sets --fleet-cut to 10 sessions of its own
-   width. */
+/* A thin cut every --fleet-cut, through whatever is drawn, in the cap's part
+   and in the waiting part. Each sets --fleet-cut to one slot, or to 10
+   sessions, of its own width. The mask is 1.5px wider than the part, so the
+   cut after the last slot falls outside it and both ends keep their round
+   corners. */
 .fleet-sessions-cap,
-.fleet-sessions--bar > i.is-wait {
+.fleet-sessions > i.is-wait {
   mask-image: repeating-linear-gradient(
     90deg,
     #000 0,
@@ -141,6 +94,8 @@
     transparent calc(var(--fleet-cut) - 1.5px),
     transparent var(--fleet-cut)
   );
+  mask-size: calc(100% + 1.5px) 100%;
+  mask-repeat: no-repeat;
 }
 .fleet-sessions-cap i {
   flex: none;
@@ -157,18 +112,15 @@
   margin-left: 1.25px;
   background: color-mix(in oklab, var(--ink) 50%, transparent);
 }
-.fleet-sessions--bar > i.is-wait {
+.fleet-sessions > i.is-wait {
   flex: 1;
   margin-left: 4px;
   border-radius: var(--r-xs);
-  box-shadow: inset 0 0 0 1.5px var(--you-ink);
+  /* The marigold the card's meters fill with at the you level. */
+  background: var(--you-ink);
 }
 
 /* A machine that is away: the cap's part is an outline with nothing in it. */
-.fleet-sessions.is-away i:not(.is-wait) {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
-}
 .fleet-sessions.is-away .fleet-sessions-cap {
   background: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
@@ -177,9 +129,10 @@
 
 /* ---------- What needs the user ---------- */
 /* The line wraps to at most three lines and ends in an ellipsis after that. Its
-   line is 18px tall, a little above the surrounding text's, so the first line
-   centres on the 26px button beside it with a whole-pixel margin; the button
-   and the first line stay level however many lines follow. */
+   line is 18px tall, a little above the surrounding text's, so in a list row
+   the first line centres on the 26px button beside it with a whole-pixel
+   margin; the button and the first line stay level however many lines
+   follow. A card puts the button under the line instead. */
 .fleet-attn {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -435,14 +388,20 @@
   font-size: var(--t-12);
   white-space: nowrap;
 }
+/* The card's need line takes the card's full width, and its button sits on a
+   row of its own under it, at the left. So the line wraps only when its words
+   fill the card. The list's row keeps the line and its button side by side. */
 .fleet-card-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   min-height: 26px;
   margin-top: 12px;
+}
+.fleet-card-foot > .fleet-attn {
+  flex-basis: 100%;
 }
 
 /* ---------- The card that adds a machine ---------- */

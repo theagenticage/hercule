@@ -245,14 +245,14 @@ describe("the Fleet page", () => {
     const user = userEvent.setup();
     const { calls } = await openFleet();
 
-    await user.click(within(getCard("atlas")).getByRole("button", { name: "Allow 17" }));
+    await user.click(within(getCard("atlas")).getByRole("button", { name: "Raise cap to 17" }));
 
     await waitFor(() => expect(getValue(getCard("atlas"), "12 of 17")).toBeTruthy());
     const update = calls.find((call) => call.method === "PATCH");
     expect(update?.path).toBe(`/api/v1/runners/${ATLAS.id}`);
     expect(update?.body).toEqual({ maxConcurrentSessions: 17 });
     // The machine no longer has threads waiting for a slot.
-    expect(within(getCard("atlas")).queryByRole("button", { name: /Allow/ })).toBeNull();
+    expect(within(getCard("atlas")).queryByRole("button", { name: /^Raise cap/ })).toBeNull();
   });
 
   it("shows the controller's message when Allow fails, and leaves the cap as it was", async () => {
@@ -266,7 +266,7 @@ describe("the Fleet page", () => {
       },
     });
 
-    await user.click(within(getCard("atlas")).getByRole("button", { name: "Allow 17" }));
+    await user.click(within(getCard("atlas")).getByRole("button", { name: "Raise cap to 17" }));
 
     const alert = await within(getCard("atlas")).findByRole("alert");
     expect(alert.textContent).toBe("Could not allow 17 sessions: The runner is being retired.");
@@ -283,7 +283,7 @@ describe("the Fleet page", () => {
         },
       },
     });
-    await user.click(within(getCard("atlas")).getByRole("button", { name: "Allow 17" }));
+    await user.click(within(getCard("atlas")).getByRole("button", { name: "Raise cap to 17" }));
     await within(getCard("atlas")).findByRole("alert");
 
     await user.click(screen.getByRole("button", { name: "List" }));

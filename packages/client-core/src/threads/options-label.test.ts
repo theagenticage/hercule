@@ -1,10 +1,11 @@
 /**
  * Tests `buildOptionsLabel(descriptors, selected)`, the short label the model
- * options selector shows for the picked options.
+ * options selector shows for the picked options, and `describeOptionsLabel`,
+ * which names the option that label belongs to.
  */
 import { describe, expect, it } from "vitest";
 import type { ModelOption } from "@hercule/contract";
-import { buildOptionsLabel } from "./options-label";
+import { buildOptionsLabel, describeOptionsLabel } from "./options-label";
 
 const EFFORT: ModelOption = {
   id: "effort",
@@ -99,5 +100,32 @@ describe("buildOptionsLabel", () => {
     expect(buildOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: false })).toBe(
       "High",
     );
+  });
+});
+
+describe("describeOptionsLabel", () => {
+  it("names the effort option, so the selector reads Effort: High", () => {
+    expect(describeOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: true })).toEqual({
+      name: "Effort",
+      value: "High ⚡",
+    });
+  });
+
+  it("names a thinking option that lists levels", () => {
+    expect(describeOptionsLabel([THINKING_LEVELS], { thinking: "max" })).toEqual({
+      name: "Thinking",
+      value: "Max",
+    });
+  });
+
+  it("gives no name to Thinking on, which names its option already", () => {
+    expect(describeOptionsLabel([THINKING], { thinking: true })).toEqual({
+      name: null,
+      value: "Thinking on",
+    });
+  });
+
+  it("returns null when there is no reasoning option to show", () => {
+    expect(describeOptionsLabel([FAST_MODE], { fastMode: true })).toBeNull();
   });
 });
