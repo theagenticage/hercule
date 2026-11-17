@@ -6,13 +6,18 @@ declare module "react" {
   interface CSSProperties {
     /** The width of one cell of the sessions drawing on a card or a list row, such as `5px`. */
     "--fleet-cell"?: string;
-    /** How many slots the sessions drawing's cells stand for, from which the machine page sizes them. */
-    "--fleet-slots"?: number;
+    /** How many cells the sessions drawing draws, from which the machine page sizes them. */
+    "--fleet-cells"?: number;
+    /** The room the cap's rule takes in the sessions drawing, with its gap: `3.5px`, or `0px` without a rule. */
+    "--fleet-rule"?: string;
   }
 }
 
 /** How many sessions a segment of the continuous fill holds: it is cut every 10 sessions. */
 const SESSIONS_PER_CUT = 10;
+
+/** The room the cap's rule takes in a row of cells: its 1.5px and one more 2px gap (fleet-page.css). */
+const RULE_SPACE = 3.5;
 
 /**
  * Returns how many slots each segment of a stretch of `slots` slots holds, in
@@ -31,8 +36,10 @@ const splitIntoSegments = (slots: number, slotsPerSegment: number): number[] =>
  * - While `drawing.cellWidth` is a number, every slot is one cell of that
  *   width, with a 2px gap between every two, so the bar ends wherever its
  *   cells end. A running session's cell is filled and marked `is-run`. The
- *   machine page sizes the cells by the same rule against its tile's width
- *   instead of 120px, from `--fleet-slots` (machine-page.css).
+ *   machine page sizes the cells against its tile's width instead, so that
+ *   every cell it draws fits: the slots, the sessions past the cap and the
+ *   waiting ones, with the cap's rule (`--fleet-cells` and `--fleet-rule`,
+ *   machine-page.css). Its waiting cells are never cut off.
  * - While it is `null`, the bar is one continuous fill, 120px wide, cut every
  *   10 sessions. A segment fills from the left with the sessions running in
  *   it and is free for the rest, and a segment whose every slot runs a
@@ -73,7 +80,11 @@ export function SessionsFigure({
       className={className}
       style={
         isCells
-          ? { "--fleet-cell": `${String(cellWidth)}px`, "--fleet-slots": cap + overCap }
+          ? {
+              "--fleet-cell": `${String(cellWidth)}px`,
+              "--fleet-cells": cap + overCap + waitingDrawn,
+              "--fleet-rule": marksCap ? `${String(RULE_SPACE)}px` : "0px",
+            }
           : undefined
       }
       aria-hidden="true"
