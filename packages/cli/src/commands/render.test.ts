@@ -2096,6 +2096,7 @@ describe("hercule skill", () => {
     availableRevisionHash: NEWER,
     availableApprovalEffects: null,
     proposedCount: 2,
+    proposedBy: null,
     lastCheckedAt: null,
     checkError: null,
     createdAt: "2026-10-18T09:00:00.000Z",
@@ -2127,12 +2128,14 @@ describe("hercule skill", () => {
       currentSizeBytes: null,
       availableRevisionHash: null,
       proposedCount: 1,
+      proposedBy: null,
     };
     const failing = {
       ...skill,
       name: "triage",
       availableRevisionHash: null,
       proposedCount: 0,
+      proposedBy: null,
       checkError: "`mattpocock/skills` has no folder `skills/triage`.",
     };
 
@@ -2215,6 +2218,23 @@ describe("hercule skill", () => {
       "  `grilling` lets tools run without asking: `Bash(git:*)`",
       "teach: refused: the archive is over 10 MiB",
     ]);
+  });
+
+  it("prints no approval warning and no lock file line under a proposal", () => {
+    const lines = renderHuman(
+      {
+        kind: "skills",
+        skills: [{ name: "grilling", answer: { result: "proposed", skill } }],
+        stopped: null,
+        lockFileProblem: null,
+      },
+      lookUpCommand("skill", "propose"),
+      CONTROLLER_URL,
+    );
+
+    // The skill's current revision has `allowed-tools`, but the proposal is
+    // another revision, so the current one's warning would mislead.
+    expect(lines).toEqual(["grilling: proposed"]);
   });
 
   it("prints each changed file of a diff under its heading, with the revision's warnings first", () => {

@@ -892,6 +892,8 @@ const TABLE = {
   // The service refuses every caller but the user, whatever grants a
   // session's profile holds: a session proposes a skill instead.
   "skill.import": { requires: "skill.apply", method: "POST", path: "/api/v1/skills/import" },
+  // Only a session may call it: the service refuses every other caller.
+  "skill.propose": { requires: "skill.write", method: "POST", path: "/api/v1/skills/propose" },
   "skill.delete": { requires: "skill.apply", method: "DELETE", path: "/api/v1/skills/:name" },
   "skill.check": { requires: "skill.write", method: "POST", path: "/api/v1/skills/check" },
   "skill.diff": {
@@ -903,6 +905,11 @@ const TABLE = {
     requires: "skill.apply",
     method: "POST",
     path: "/api/v1/skills/:name/revisions/:revisionHash/apply",
+  },
+  "skill.reject": {
+    requires: "skill.apply",
+    method: "POST",
+    path: "/api/v1/skills/:name/revisions/:revisionHash/reject",
   },
   "skill.applyUpdates": {
     requires: "skill.apply",

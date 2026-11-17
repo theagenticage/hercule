@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { notifyManager } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
+import { toIdTail } from "@hercule/contract";
 import type { Skill, SkillApplyUpdatesInput, SkillDetail, SkillRevision } from "@hercule/contract";
 import type {
   SkillArchiveBuildOutcome,
@@ -21,6 +22,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_THREAD_IDS,
   holdAnswer,
   refuseConnection,
   renderApp,
@@ -53,6 +55,7 @@ const buildSkill = (over: Partial<Skill> & Pick<Skill, "name">): Skill => ({
   availableRevisionHash: null,
   availableApprovalEffects: null,
   proposedCount: 0,
+  proposedBy: null,
   lastCheckedAt: null,
   checkError: null,
   createdAt: "2026-09-28T10:15:00.000Z",
@@ -1236,5 +1239,342 @@ describe("Settings > Skills, updates", () => {
       { updates: [{ name: "code-review", revisionHash: UPDATE }] },
       { updates: [{ name: "code-review", revisionHash: NEWER }] },
     ]);
+  });
+});
+
+describe("Settings > Skills, proposed revisions", () => {
+  // The proposing session is the fixture's thread "Write the retry runbook",
+  // which the shell holds, so it is named by its title. A session the shell
+  // does not hold, and cannot be read, is "Another agent".
+  const PROPOSER = `session:${FIXTURE_THREAD_IDS.runbook}`;
+  const PROPOSER_NAME = `Write the retry runbook, session ${toIdTail(FIXTURE_THREAD_IDS.runbook)}`;
+  const UNLISTED = "session:01a06d02-7400-7000-8000-0000000000ff";
+  const FIRST = "1".repeat(64);
+  const SECOND = "2".repeat(64);
+  const SHIP = buildSkill({
+    name: "ship",
+    currentRevisionHash: "c".repeat(64),
+    proposedCount: 2,
+  });
+  const NEW_SKILL = buildSkill({
+    name: "release-checklist",
+    currentRevisionHash: null,
+    currentFileCount: null,
+    currentSizeBytes: null,
+    proposedCount: 1,
+    proposedBy: PROPOSER,
+    createdBy: PROPOSER,
+  });
+  const proposal = (revisionHash: string, over: Partial<SkillRevision> = {}) =>
+    buildRevision({
+      revisionHash,
+      origin: "session",
+      createdBy: PROPOSER,
+      createdAt: "2026-09-29T14:02:00.000Z",
+      appliedAt: null,
+      appliedBy: null,
+      description: "Takes a branch to a merged pull request.",
+      ...over,
+    });
+  const SHIP_DETAIL: SkillDetail = {
+    ...GRILLING_DETAIL,
+    skill: SHIP,
+    proposedRevisions: [
+      proposal(SECOND, { includesThirdPartyContent: true }),
+      proposal(FIRST, { createdBy: UNLISTED }),
+    ],
+  };
+  const NEW_DETAIL: SkillDetail = {
+    skill: NEW_SKILL,
+    files: [],
+    skillMd: null,
+    history: [],
+    availableRevision: null,
+    proposedRevisions: [
+      proposal(FIRST, { description: "Walks through a release.", fileCount: 2, sizeBytes: 2316 }),
+    ],
+  };
+  const diffPath = (name: string, revisionHash: string) =>
+    `/api/v1/skills/${name}/revisions/${revisionHash}/diff`;
+  const SHIP_DIFF = {
+    approvalEffects: { allowedTools: "Bash(git tag:*)", hooks: null },
+    files: [
+      {
+        path: "SKILL.md",
+        change: "modified",
+        mode: "644",
+        patch: "@@ -1,1 +1,2 @@\n ## Steps\n+Publish with npm.\n",
+        patchOmitted: null,
+      },
+    ],
+  };
+  const NEW_DIFF = {
+    approvalEffects: { allowedTools: null, hooks: "{}" },
+    files: [
+      {
+        path: "SKILL.md",
+        change: "added",
+        mode: "644",
+        patch: "@@ -0,0 +1,1 @@\n+Cut it.\n",
+        patchOmitted: null,
+      },
+    ],
+  };
+  const SHIP_HANDLERS: Readonly<Record<string, Handler>> = {
+    "GET /api/v1/skills/ship": { body: SHIP_DETAIL },
+    [`GET ${diffPath("ship", FIRST)}`]: { body: SHIP_DIFF },
+    [`GET ${diffPath("ship", SECOND)}`]: { body: SHIP_DIFF },
+    "GET /api/v1/sessions/01a06d02-7400-7000-8000-0000000000ff": {
+      status: 404,
+      body: buildErrorBody("not_found", "No session."),
+    },
+  };
+  const NEW_HANDLERS: Readonly<Record<string, Handler>> = {
+    "GET /api/v1/skills/release-checklist": { body: NEW_DETAIL },
+    [`GET ${diffPath("release-checklist", FIRST)}`]: { body: NEW_DIFF },
+  };
+
+  const openShip = async (handlers: Readonly<Record<string, Handler>> = {}) => {
+    const app = await openAt(`${LIST_PATH}/ship`, {
+      skills: [SHIP],
+      handlers: { ...SHIP_HANDLERS, ...handlers },
+    });
+    await screen.findByRole("heading", { level: 1, name: "ship" });
+    return app;
+  };
+  const openNewSkill = async (handlers: Readonly<Record<string, Handler>> = {}) => {
+    const app = await openAt(`${LIST_PATH}/release-checklist`, {
+      skills: [NEW_SKILL],
+      handlers: { ...NEW_HANDLERS, ...handlers },
+    });
+    await screen.findByRole("heading", { level: 1, name: "release-checklist" });
+    return app;
+  };
+  const countReads = (calls: readonly Call[], path: string): number =>
+    calls.filter((call) => call.method === "GET" && call.path === path).length;
+  /** Returns the band of the proposal whose line starts with `text`. */
+  const findBand = async (text: RegExp): Promise<HTMLElement> =>
+    (await screen.findByText(text)).closest<HTMLElement>(".skill-band")!;
+
+  it("badges a skill with its proposals, and names the proposer under a skill that exists only as one", async () => {
+    await openList({
+      skills: [
+        buildSkill({ name: "alpha", proposedCount: 1 }),
+        buildSkill({ name: "beta", proposedCount: 2, availableRevisionHash: "e".repeat(64) }),
+        NEW_SKILL,
+        TEACH,
+      ],
+    });
+
+    const rows = [...document.querySelectorAll<HTMLElement>("a.skill-row")];
+    const badges = rows.map((row) =>
+      [...row.querySelectorAll(".skill-badges > *")].map((badge) => badge.textContent),
+    );
+    expect(badges).toEqual([["Proposed"], ["Update available", "Proposed 2"], ["Proposed"], []]);
+    const proposalRow = rows[2]!;
+    await waitFor(() => {
+      expect(proposalRow.querySelector(".profile-name span")!.textContent).toBe(
+        `Proposed by ${PROPOSER_NAME}`,
+      );
+    });
+    expect(proposalRow.querySelector(".skill-size")!.textContent).toBe("");
+  });
+
+  it("draws each proposal as a band and its changes, and names a proposer it cannot read", async () => {
+    const { calls } = await openShip();
+
+    const second = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}, 29 Sep 14:02`));
+    expect(within(second).getByText("Nothing changes until you apply it.")).toBeTruthy();
+    const chip = within(second).getByText("Includes third-party content");
+    expect(chip.className).toContain("chip--fail");
+    expect(chip.title).toBe(
+      `${PROPOSER_NAME.split(",")[0]}'s session had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`,
+    );
+    const first = await findBand(/^Proposed by Another agent, session 000000ff, 29 Sep 14:02/);
+    expect(within(first).queryByText("Includes third-party content")).toBeNull();
+    // The newest proposal's changes are open. The older one has a button.
+    const section = screen.getByRole("heading", { name: "What it changes" }).parentElement!;
+    expect(section.querySelector(".skill-warning")!.textContent).toBe(
+      "After you apply it, lets tools run without asking: Bash(git tag:*)",
+    );
+    expect(section.querySelector(".skill-changes-head")!.textContent).toBe("1 changed file+1-0");
+    expect(screen.getAllByRole("button", { name: "Show what it changes" })).toHaveLength(1);
+    // The loader reads the newest diff with the page, and the topic's first push reads it again.
+    // The older proposal's diff is not read until it is opened.
+    expect(countReads(calls, diffPath("ship", SECOND))).toBe(2);
+    expect(countReads(calls, diffPath("ship", FIRST))).toBe(0);
+  });
+
+  it("reads an older proposal's changes when its button is pressed", async () => {
+    const { calls } = await openShip();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show what it changes" }));
+
+    expect(await screen.findAllByRole("heading", { name: "What it changes" })).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByText("1 changed file")).toHaveLength(2);
+    });
+    expect(screen.queryByRole("button", { name: "Show what it changes" })).toBeNull();
+    expect(countReads(calls, diffPath("ship", FIRST))).toBe(1);
+  });
+
+  it("applies a proposal on Apply, then reads the page and its diffs again", async () => {
+    const applyPath = `/api/v1/skills/ship/revisions/${SECOND}/apply`;
+    const { calls } = await openShip({ [`POST ${applyPath}`]: { body: SHIP } });
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}`));
+    const pageReads = countReads(calls, "/api/v1/skills/ship");
+    const diffReads = countReads(calls, diffPath("ship", SECOND));
+
+    await userEvent.click(within(band).getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      expect(countReads(calls, "/api/v1/skills/ship")).toBe(pageReads + 1);
+    });
+    expect(calls.filter((call) => call.path === applyPath)).toHaveLength(1);
+    expect(countReads(calls, diffPath("ship", SECOND))).toBe(diffReads + 1);
+  });
+
+  it("rejects a proposal on Reject", async () => {
+    const rejectPath = `/api/v1/skills/ship/revisions/${SECOND}/reject`;
+    const { calls } = await openShip({ [`POST ${rejectPath}`]: { body: {} } });
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}`));
+    const pageReads = countReads(calls, "/api/v1/skills/ship");
+
+    await userEvent.click(within(band).getByRole("button", { name: "Reject" }));
+
+    await waitFor(() => {
+      expect(countReads(calls, "/api/v1/skills/ship")).toBe(pageReads + 1);
+    });
+    expect(calls.filter((call) => call.path === rejectPath)).toHaveLength(1);
+    expect(calls.some((call) => call.path.endsWith("/apply"))).toBe(false);
+  });
+
+  it("disables only the band whose write runs, and names it", async () => {
+    const held = holdAnswer();
+    const applyPath = `/api/v1/skills/ship/revisions/${SECOND}/apply`;
+    await openShip({ [`POST ${applyPath}`]: held.handler });
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}`));
+    const other = await findBand(/^Proposed by Another agent/);
+
+    await userEvent.click(within(band).getByRole("button", { name: "Apply" }));
+
+    const applying = await within(band).findByRole("button", { name: "Applying…" });
+    expect(applying.getAttribute("aria-disabled")).toBe("true");
+    expect(within(band).getByRole("button", { name: "Reject" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    expect(within(other).getByRole("button", { name: "Apply" }).getAttribute("aria-disabled")).toBe(
+      "false",
+    );
+    held.answer({ body: SHIP });
+  });
+
+  it("shows a refused Apply and a refused Reject under their band", async () => {
+    await openShip({
+      [`POST /api/v1/skills/ship/revisions/${SECOND}/apply`]: {
+        status: 403,
+        body: {
+          error: {
+            code: "forbidden",
+            message: "The session is tainted.",
+            details: { grant: "skill.apply" },
+          },
+        },
+      },
+      [`POST /api/v1/skills/ship/revisions/${SECOND}/reject`]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "Already applied."),
+      },
+    });
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}`));
+
+    await userEvent.click(within(band).getByRole("button", { name: "Apply" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not apply: The session is tainted.",
+    );
+    await userEvent.click(within(band).getByRole("button", { name: "Reject" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Could not reject: Already applied.");
+    });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("draws a new skill as the band, the lead and what it adds, with no other section", async () => {
+    await openNewSkill();
+
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}, 29 Sep 14:02`));
+    expect(
+      within(band).getByText("A new skill: no Thread gets it until you apply it."),
+    ).toBeTruthy();
+    expect(screen.getByText("Walks through a release.")).toBeTruthy();
+    expect(
+      [...document.querySelectorAll(".skill-chips .chip")].map((chip) => chip.textContent),
+    ).toEqual(["Uploaded", "2 files · 2.3 KiB"]);
+    const section = screen.getByRole("heading", { name: "What it adds" }).parentElement!;
+    // The warning sits under the lead's chips, worded as a current revision's.
+    const warning = screen.getByText("Has hooks, which run without asking");
+    expect(warning.closest(".skill-lead")).not.toBeNull();
+    expect(within(section).queryByText(/run without asking/)).toBeNull();
+    expect(section.querySelector(".skill-changes-row")!.textContent).toBe("SKILL.mdAdded+1-0");
+    // The band comes before the lead, and the lead before the section.
+    const order = [band, screen.getByText("Walks through a release."), section];
+    expect(
+      order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      order[1]!.compareDocumentPosition(order[2]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    for (const heading of ["SKILL.md", "Files", "History", "Delete release-checklist"]) {
+      expect(screen.queryByRole("heading", { name: heading })).toBeNull();
+    }
+    expect(screen.queryByRole("button", { name: "Upload new version" })).toBeNull();
+  });
+
+  it("goes to the list when the last proposal of a new skill is rejected", async () => {
+    let rejected = false;
+    const { router } = await openNewSkill({
+      "GET /api/v1/skills": () => ({ body: { items: rejected ? [] : [NEW_SKILL] } }),
+      "GET /api/v1/skills/release-checklist": () =>
+        rejected
+          ? {
+              status: 404,
+              body: buildErrorBody("not_found", "No skill is named release-checklist."),
+            }
+          : { body: NEW_DETAIL },
+      [`POST /api/v1/skills/release-checklist/revisions/${FIRST}/reject`]: () => {
+        rejected = true;
+        return { body: {} };
+      },
+    });
+    const band = await findBand(new RegExp(`^Proposed by ${PROPOSER_NAME}`));
+
+    await userEvent.click(within(band).getByRole("button", { name: "Reject" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(LIST_PATH);
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Skills" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /release-checklist/ })).toBeNull();
+  });
+
+  it("names the applying session in the History", async () => {
+    const detail: SkillDetail = {
+      ...GRILLING_DETAIL,
+      history: [
+        buildRevision({
+          revisionHash: "c".repeat(64),
+          origin: "session",
+          appliedAt: "2026-09-29T14:02:00.000Z",
+          appliedBy: PROPOSER,
+        }),
+      ],
+    };
+    await openGrilling({ handlers: { "GET /api/v1/skills/grilling": { body: detail } } });
+
+    await waitFor(() => {
+      expect(document.querySelector(".skill-rev")!.textContent).toMatch(
+        new RegExp(`^Proposed by a sessionapplied by ${PROPOSER_NAME}, 29 Sep 14:02Current`),
+      );
+    });
   });
 });

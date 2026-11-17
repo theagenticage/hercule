@@ -88,6 +88,7 @@ import {
   type StoredSession,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
+import { sessionTaint } from "../../taint";
 import type { WorkspaceService } from "../../workspaces";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
@@ -219,6 +220,7 @@ const make = Effect.gen(function* () {
   const readSession = readSessionOrFail(yield* sessionRepository);
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
+  const taint = yield* sessionTaint;
   const dedupKeys = yield* dedupKeyRepository;
   const providerAccounts = yield* providerAccountRepository;
   const host = yield* PluginHost;
@@ -1517,6 +1519,10 @@ const make = Effect.gen(function* () {
                     payload: { sessionId: id, runnerId: session.runnerId, requestId },
                     at: yield* nowIso,
                   });
+                  // An answer from a tainted session taints its reader. The
+                  // flag commits here, before the answer frame is sent, so the
+                  // recipient is never clean while it holds the text.
+                  yield* taint.passOn(id);
                 }),
               );
               const sent = yield* connections.sendRequest(

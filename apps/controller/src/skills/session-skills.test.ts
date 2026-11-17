@@ -26,6 +26,7 @@ const insertSkill = (name: string, hash: string, apply: boolean) =>
           sizeBytes: 10,
           description: "Teaches.",
           approvalEffects: { allowedTools: null, hooks: null },
+          includesThirdPartyContent: false,
           ...CHANGE,
         });
         if (apply) yield* skills.applyRevision(id, hash, CHANGE);

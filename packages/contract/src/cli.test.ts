@@ -14,6 +14,7 @@ interface FieldRow {
   readonly hidden?: true;
   readonly stdin?: true;
   readonly skillFolder?: true;
+  readonly oneSkillOnly?: true;
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
@@ -293,10 +294,12 @@ const COMMANDS: Record<string, string> = {
   "skill.query": "skill list",
   "skill.read": "skill read",
   "skill.import": "skill import",
+  "skill.propose": "skill propose",
   "skill.delete": "skill delete",
   "skill.check": "skill check",
   "skill.diff": "skill diff",
   "skill.apply": "skill apply",
+  "skill.reject": "skill reject",
   "skill.applyUpdates": "skill apply-updates",
 
   "conversation.query": "conversation list",
@@ -867,7 +870,23 @@ describe("the skill import row", () => {
 
   it("tells a session to ask the user, because only the user imports", () => {
     expect(row?.errors?.["forbidden"]).toBe(
-      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.",
+      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Propose the skill instead with `hercule skill propose <folder>`; the user applies it on the Skills screen.",
+    );
+  });
+});
+
+/** `hercule skill propose <folder>` takes one skill folder, and a session is the only caller. */
+describe("the skill propose row", () => {
+  const row = table["skill.propose"];
+
+  it("takes one skill folder in place of the name", () => {
+    expect(row?.fields?.["name"]?.skillFolder).toBe(true);
+    expect(row?.fields?.["name"]?.oneSkillOnly).toBe(true);
+  });
+
+  it("tells the user to import instead, because only a session proposes", () => {
+    expect(row?.errors?.["forbidden"]).toContain(
+      "Only a session proposes a skill revision. Import your own skills instead",
     );
   });
 });
