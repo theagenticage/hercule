@@ -1,7 +1,7 @@
 /**
- * The parts of an update on a skill's page in Settings > Skills (spec 17
- * §Settings, Skills, Updates): the band that offers the update, and the card
- * of the files it changes.
+ * The parts of a waiting revision on a skill's page in Settings > Skills
+ * (spec 17 §Settings, Skills, Updates and Proposed revisions): the band that
+ * offers an update or a proposal, and the card of the files it changes.
  *
  * Every changed file gets its row, but a patch's lines are drawn in steps.
  * `skill.diff` keeps the patches of one revision under 1 MiB in total, yet
@@ -14,7 +14,7 @@
  * card counts its lines without splitting it, and splits only the lines it
  * draws.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { memo, useState, type JSX, type ReactNode } from "react";
 import {
   describeOmittedPatch,
   describeSkillFileChange,
@@ -27,22 +27,43 @@ import { DiffIcon } from "../../../icons/diff";
 import "./skills.css";
 
 /**
- * Renders the band over an update from the GitHub repository `repo`:
- * "Update available from mattpocock/skills. Nothing changes until you
- * update.", with `action`, the Update button, at its end.
+ * Renders the band over a revision that waits on a skill's page: an update
+ * from GitHub or a session's proposal. `mark` is drawn at its start when
+ * given, the proposer's face. `children` is its text, one line, or the
+ * lines of `SkillBandLine`. `actions` are the buttons at its end.
  */
-export function SkillUpdateBand({
-  repo,
-  action,
+export function SkillBand({
+  mark,
+  children,
+  actions,
 }: {
-  readonly repo: string;
-  readonly action: ReactNode;
+  readonly mark?: ReactNode;
+  readonly children: ReactNode;
+  readonly actions: ReactNode;
 }): JSX.Element {
   return (
     <div className="skill-band">
-      <span>{`Update available from ${repo}. Nothing changes until you update.`}</span>
-      {action}
+      {mark}
+      <span className="skill-band-text">{children}</span>
+      {actions}
     </div>
+  );
+}
+
+/**
+ * Renders one line of a band's text, exactly one line high, so a chip in it
+ * never makes it taller than the line under it. `note` draws the line
+ * lighter, as the second line of a proposal is.
+ */
+export function SkillBandLine({
+  note = false,
+  children,
+}: {
+  readonly note?: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <span className={note ? "skill-band-line skill-band-note" : "skill-band-line"}>{children}</span>
   );
 }
 
@@ -78,8 +99,12 @@ const countPatchLinesAtFirst = (
  * A file's row has its path, "Executable" for an executable file, the kind of
  * change, and its own counts. A file whose patch was left out shows why in
  * place of the counts, and a file whose mode alone changed shows no counts.
+ *
+ * The card is memoized: counting a patch's lines walks the whole string, and
+ * the page draws again on every read, push and check of the skill. Query keeps
+ * an unchanged diff's `files` the same object, so such a draw skips the work.
  */
-export function SkillFileChanges({
+export const SkillFileChanges = memo(function SkillFileChanges({
   files,
 }: {
   readonly files: ReadonlyArray<SkillFileChange>;
@@ -133,7 +158,7 @@ export function SkillFileChanges({
       ))}
     </div>
   );
-}
+});
 
 /**
  * Renders the first `linesAtFirst` lines of `patch`, a patch of `lineCount`

@@ -268,6 +268,10 @@ _Avoid_: reset, compaction (reserved for harness-native context handling)
 An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session; what the assistant knows about the user, as opposed to the persona the user wrote for it) and named **topic** notes (each with a one-line gist, listed by name and gist, opened on demand). A note written while the assistant could see third-party messages carries a provenance mark the user can review.
 _Avoid_: knowledge base, brain, journal
 
+**Taint**:
+*(Added 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* The flag on a session that says it has read third-party text. The core sets it, never the agent. It passes on to a session that a tainted session starts, forks, or puts text into, and ends when the conversation rotates. A tainted session cannot change the Skill Library, and its memory writes carry provenance. The flag is stored on the session and is not on the public Session record.
+_Avoid_: dirty, untrusted session, infected, poisoned
+
 **Heartbeat**:
 An assistant's standing recurring scheduled wake with a user-editable prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity. A heartbeat that finds nothing to say stays silent.
 _Avoid_: poll

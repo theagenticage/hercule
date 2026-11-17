@@ -335,6 +335,33 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
     fixedSizeSamples: 4,
   },
+  // Settings > Skills: the list, a new skill's proposal, a proposal that
+  // includes third-party content on an existing skill, and a skill after its
+  // proposal was applied.
+  {
+    name: "settings-skills",
+    path: "settings-skills.html",
+    contentSelector: ".skill-list .skill-row",
+    nonTextParts: [{ selector: ".skill-row .profile-mark svg", kind: "mark" }],
+  },
+  {
+    name: "settings-skills-proposed",
+    path: "settings-skills.html?state=proposed",
+    contentSelector: ".skill-record .skill-band",
+    nonTextParts: [{ selector: ".skill-changes-head svg", kind: "mark" }],
+  },
+  {
+    name: "settings-skills-tainted",
+    path: "settings-skills.html?state=tainted",
+    contentSelector: ".skill-record .skill-band",
+    nonTextParts: [{ selector: ".skill-changes-head svg", kind: "mark" }],
+  },
+  {
+    name: "settings-skills-applied",
+    path: "settings-skills.html?state=applied",
+    contentSelector: ".skill-record .skill-rev",
+    nonTextParts: [],
+  },
 ];
 
 /**

@@ -416,6 +416,8 @@ describe("the placeholders a usage line shows", () => {
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "skill propose": "<folder>",
+    "skill reject": "<name> <revision-hash>",
     "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",

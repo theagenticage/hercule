@@ -173,6 +173,7 @@ import {
   type Tracked,
 } from "./stream";
 import { subagentRepository } from "./subagent-repository";
+import { sessionTaint } from "../taint";
 import {
   collectSubagentTree,
   computeSubagentsAfter,
@@ -887,6 +888,7 @@ const keepsStepPromptOnExit = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const taint = yield* sessionTaint;
   const permissionRequests = yield* permissionRequestRepository;
   const requestSubscriptions = yield* permissionRequestSubscriptions;
   const subscriptions = yield* subscriptionRepository;
@@ -2518,6 +2520,9 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        // A session a tainted session starts, or a fork of a tainted one,
+        // starts tainted (spec 13 section 10).
+        yield* taint.passOn(open.id, open.parentSessionId);
         if (open.spec.workspaceId !== null)
           yield* workspaces.retainForThread(open.id, open.spec.workspaceId);
         // The prompt is stored as an ordinary input, waiting with the
@@ -3266,6 +3271,8 @@ const make = Effect.gen(function* () {
           ...(claimed ? { sentAt: taking.at } : {}),
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
+        // Text from a tainted session taints its reader (spec 13 section 10).
+        yield* taint.passOn(taking.sessionId);
         yield* provideSql(claimAttachments(created.id, references));
         // New work for a Thread the user marked Done means it is not done
         // any more, so the input takes it off the Done shelf.
@@ -4097,6 +4104,7 @@ const make = Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
             const actor = yield* currentStamp;
             yield* inputs.rewrite(inputId, text, actor);
+            yield* taint.passOn(id);
             if (attachments === undefined) {
               // The payload cannot see the stored images, so an empty text
               // that leaves the input with nothing is refused here.

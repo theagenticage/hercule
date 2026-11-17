@@ -523,10 +523,12 @@ const skillRoutes = HttpApiBuilder.group(api, "skill", (handlers) =>
       .handle("query", () => withApiErrors(skills.query()))
       .handle("read", ({ params }) => withApiErrors(skills.read(params.name)))
       .handle("import", ({ query, payload }) => withApiErrors(skills.import(query, payload)))
+      .handle("propose", ({ query, payload }) => withApiErrors(skills.propose(query, payload)))
       .handle("delete", ({ params }) => withApiErrors(skills.delete(params.name)))
       .handle("check", ({ payload }) => withApiErrors(skills.check(payload)))
       .handle("diff", ({ params }) => withApiErrors(skills.diff(params)))
       .handle("apply", ({ params }) => withApiErrors(skills.apply(params)))
+      .handle("reject", ({ params }) => withApiErrors(skills.reject(params)))
       .handle("applyUpdates", ({ payload }) => withApiErrors(skills.applyUpdates(payload)));
   }),
 );

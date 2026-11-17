@@ -108,7 +108,9 @@ export const AUDIT_KINDS = [
   "memory.deleted",
   "wikiPage.written",
   "skill.imported",
+  "skill.proposed",
   "skill.applied",
+  "skill.rejected",
   "skill.deleted",
   "workflow.created",
   "workflow.updated",
@@ -257,7 +259,11 @@ const RECORD_KINDS = {
   // A Skill is named by its name. An import that creates a Skill is recorded
   // as updated too: either way a client reads the Skill again.
   "skill.imported": "updated",
+  "skill.proposed": "updated",
   "skill.applied": "updated",
+  // Rejecting the last proposal of a proposal-only Skill deletes the Skill;
+  // a client reading it again finds it gone, as after a delete.
+  "skill.rejected": "updated",
   "skill.deleted": "deleted",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 

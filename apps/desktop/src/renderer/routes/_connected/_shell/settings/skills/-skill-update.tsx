@@ -4,10 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import type { Skill } from "@hercule/contract";
 import { readSkillsAgain, skillDiffQuery } from "../../../../../app/queries";
-import {
-  SkillFileChanges,
-  SkillUpdateBand,
-} from "../../../../../screens/settings/skills/skill-changes";
+import { SkillBand, SkillFileChanges } from "../../../../../screens/settings/skills/skill-changes";
 import { SkillApprovalWarnings } from "../../../../../screens/settings/skills/skill-page";
 
 /**
@@ -55,9 +52,8 @@ function WaitingUpdate({
   return (
     <>
       <div className="skill-update">
-        <SkillUpdateBand
-          repo={repo}
-          action={
+        <SkillBand
+          actions={
             <button
               type="button"
               className="btn btn--accent btn--sm"
@@ -69,7 +65,9 @@ function WaitingUpdate({
               {apply.isPending ? "Updating…" : "Update"}
             </button>
           }
-        />
+        >
+          {`Update available from ${repo}. Nothing changes until you update.`}
+        </SkillBand>
         {apply.error !== null && (
           <p className="set-err" role="alert">
             {`Could not update: ${readErrorMessage(apply.error)}`}
