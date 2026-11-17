@@ -14,7 +14,7 @@
  * card counts its lines without splitting it, and splits only the lines it
  * draws.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { memo, useState, type JSX, type ReactNode } from "react";
 import {
   describeOmittedPatch,
   describeSkillFileChange,
@@ -99,8 +99,12 @@ const countPatchLinesAtFirst = (
  * A file's row has its path, "Executable" for an executable file, the kind of
  * change, and its own counts. A file whose patch was left out shows why in
  * place of the counts, and a file whose mode alone changed shows no counts.
+ *
+ * The card is memoized: counting a patch's lines walks the whole string, and
+ * the page draws again on every read, push and check of the skill. Query keeps
+ * an unchanged diff's `files` the same object, so such a draw skips the work.
  */
-export function SkillFileChanges({
+export const SkillFileChanges = memo(function SkillFileChanges({
   files,
 }: {
   readonly files: ReadonlyArray<SkillFileChange>;
@@ -154,7 +158,7 @@ export function SkillFileChanges({
       ))}
     </div>
   );
-}
+});
 
 /**
  * Renders the first `linesAtFirst` lines of `patch`, a patch of `lineCount`

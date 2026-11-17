@@ -62,9 +62,17 @@ import {
   type SkillSource,
   type Unauthenticated,
   type Validation,
+  OPERATIONS,
+  joinAllNames,
 } from "@hercule/contract";
 import { readSkillArchive } from "@hercule/protocol";
-import { CurrentActor, currentStamp, requireGrant, requireUserActor, type Actor } from "../actor";
+import {
+  CurrentActor,
+  currentStamp,
+  findRequiredGrant,
+  requireGrant,
+  requireUserActor,
+} from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { sessionTaint } from "../taint";
@@ -109,12 +117,6 @@ const TAINTED_SESSION_CHANGES_LIBRARY =
 /** Returns whether the revision was proposed by a session and never applied. */
 const isProposed = (revision: SkillRevision): boolean =>
   revision.origin === "session" && revision.appliedAt === null;
-
-/** Joins names for a message: `a`, `a and b`, `a, b and c`. */
-const joinNames = (names: ReadonlyArray<string>): string =>
-  names.length <= 1
-    ? (names[0] ?? "")
-    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /** Returns the refusal for a name no Skill has. */
 const describeUnknownSkill = (name: string): string =>
@@ -289,17 +291,20 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Requires the caller to hold `skill.write` and to be a session, and
-   * returns the session. The user and a run hold every grant but are refused,
-   * because a proposal the user files for themselves would only be a detour
+   * Requires the caller to hold the grant `skill.propose` needs and to be a
+   * session. Fails with `Forbidden` for the user and for a run: they hold every
+   * grant, but a proposal the user files for themselves would only be a detour
    * around an import.
    */
   const requireSessionProposer = Effect.flatMap(
     requireGrant("skill.propose"),
-    (actor): Effect.Effect<Actor, Forbidden> =>
-      actor._tag === "session"
-        ? Effect.succeed(actor)
-        : Effect.fail(createForbiddenError("skill.write", ONLY_A_SESSION_PROPOSES_SKILLS)),
+    (actor): Effect.Effect<void, Forbidden> => {
+      if (actor._tag === "session") return Effect.void;
+      const grant = findRequiredGrant(OPERATIONS["skill.propose"].requires);
+      return grant === undefined
+        ? Effect.die("skill.propose must require a grant")
+        : Effect.fail(createForbiddenError(grant, ONLY_A_SESSION_PROPOSES_SKILLS));
+    },
   );
 
   /**
@@ -345,7 +350,7 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(
           createCapExceededError(
             { count: proposedTotal + 1, cap: MAX_PROPOSED_SKILL_REVISIONS },
-            `${String(proposedTotal)} proposed revisions already wait for review, in ${joinNames(proposed.map((entry) => `\`${entry.name}\``))}. Ask the user to apply or reject them on the Skills screen before you propose another.`,
+            `${String(proposedTotal)} proposed revisions already wait for review, in ${joinAllNames(proposed.map((entry) => `\`${entry.name}\``))}. Ask the user to apply or reject them on the Skills screen before you propose another.`,
           ),
         );
       }

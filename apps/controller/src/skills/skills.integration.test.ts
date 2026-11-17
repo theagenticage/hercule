@@ -21,7 +21,7 @@ import {
   type SkillDetail,
   type SkillProposeResult,
 } from "@hercule/contract";
-import { computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
+import { buildSkillArchive, computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   collectPushes,
@@ -284,6 +284,48 @@ describe("a session proposing a Skill", () => {
         thread.token,
       );
       expect(asked.status, await asked.clone().text()).toBe(200);
+    });
+  });
+
+  it("lists a bad name beside the other broken rules, as an import does", async () => {
+    await withPipeline(async (arranged) => {
+      const archive = await Effect.runPromise(
+        buildSkillArchive([
+          {
+            path: "SKILL.md",
+            mode: "644",
+            content: new TextEncoder().encode("---\nname: Release_Checklist\n---\nBody\n"),
+          },
+        ]),
+      );
+      const ada = await spawnThreadWithGrants(arranged, "ada", ["skill.write"]);
+      const uploadArchive = (url: string, token: string) =>
+        fetch(`${arranged.harness.base}${url}?name=Release_Checklist`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+          body: archive,
+        });
+      const readIssues = async (response: Response) => {
+        expect(response.status).toBe(400);
+        const { error } = (await response.json()) as {
+          readonly error: {
+            readonly code: string;
+            readonly details: { readonly issues: ReadonlyArray<{ readonly message: string }> };
+          };
+        };
+        expect(error.code).toBe("validation");
+        return error.details.issues.map((issue) => issue.message);
+      };
+
+      const imported = await readIssues(
+        await uploadArchive("/api/v1/skills/import", arranged.token),
+      );
+      const proposed = await readIssues(await uploadArchive("/api/v1/skills/propose", ada.token));
+
+      expect(imported).toHaveLength(2);
+      expect(imported.some((message) => message.includes("is not a valid skill name"))).toBe(true);
+      expect(imported.some((message) => message.includes("has no `description`"))).toBe(true);
+      expect(proposed).toEqual(imported);
     });
   });
 

@@ -95,6 +95,7 @@ interface SkillRow {
   readonly available_allowed_tools: string | null;
   readonly available_hooks: string | null;
   readonly proposed_count: number;
+  readonly proposed_by: string | null;
   readonly last_checked_at: string | null;
   readonly check_error: string | null;
   readonly upstream_commit: string | null;
@@ -161,6 +162,7 @@ const toStoredSkill = (row: SkillRow): StoredSkill => ({
       row.available_hooks,
     ),
     proposedCount: row.proposed_count,
+    proposedBy: row.proposed_by,
     lastCheckedAt: row.last_checked_at,
     checkError: row.check_error,
     createdAt: row.created_at,
@@ -199,6 +201,10 @@ export const skillRepository = Effect.gen(function* () {
            (SELECT count(*) FROM skill_revisions p
             WHERE p.skill_id = s.id AND p.origin = 'session' AND p.applied_at IS NULL)
              AS proposed_count,
+           (SELECT p.created_by FROM skill_revisions p
+            WHERE p.skill_id = s.id AND p.origin = 'session' AND p.applied_at IS NULL
+            ORDER BY p.created_at DESC, p.hash DESC LIMIT 1)
+             AS proposed_by,
            s.last_checked_at, s.check_error, s.upstream_commit,
            s.created_at, s.created_by, s.updated_at, s.updated_by
     FROM skills s

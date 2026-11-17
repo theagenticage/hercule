@@ -150,6 +150,13 @@ export const Skill = Schema.Struct({
   availableApprovalEffects: Schema.NullOr(SkillApprovalEffects),
   /** How many proposed revisions wait for review. */
   proposedCount: Schema.Int,
+  /**
+   * Who proposed the newest revision that waits for review (by when it was
+   * proposed), or null when none waits. A Skill with no current revision shows
+   * this, not `createdBy`, because `createdBy` names the first proposer even
+   * after that proposal is rejected and another session's remains.
+   */
+  proposedBy: Schema.NullOr(Actor),
   /** When the last update check ended. Always null for an `upload` source. */
   lastCheckedAt: Schema.NullOr(Timestamp),
   /** The last update check's error message, or null when it succeeded. */
@@ -307,10 +314,12 @@ export type SkillImportInput = Schema.Schema.Type<typeof SkillImportInput>;
 
 /**
  * The input of `skill.propose` other than the archive, carried in the query
- * string. The name must be a valid skill name, so a new Skill gets a usable
- * one. A proposal never sets a source: a new Skill is an `upload` Skill.
+ * string. A proposal never sets a source: a new Skill is an `upload` Skill.
+ *
+ * `name` is any text here: the controller checks it with the content rules,
+ * so a bad name is listed beside every other issue the content has.
  */
-export const SkillProposeInput = Schema.Struct({ name: SkillName });
+export const SkillProposeInput = Schema.Struct({ name: Schema.String });
 
 export type SkillProposeInput = Schema.Schema.Type<typeof SkillProposeInput>;
 

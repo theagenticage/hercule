@@ -235,7 +235,6 @@ export {
   describeLockedSkillSource,
   describeSkillImportSummary,
   describeSkillProposal,
-  describeSkillProposalEffect,
   describeSkillProposedBadge,
   describeSkillProposer,
   describeSkillRevisionApplied,

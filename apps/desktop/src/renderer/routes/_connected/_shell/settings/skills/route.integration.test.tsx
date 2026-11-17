@@ -55,6 +55,7 @@ const buildSkill = (over: Partial<Skill> & Pick<Skill, "name">): Skill => ({
   availableRevisionHash: null,
   availableApprovalEffects: null,
   proposedCount: 0,
+  proposedBy: null,
   lastCheckedAt: null,
   checkError: null,
   createdAt: "2026-09-28T10:15:00.000Z",
@@ -1261,6 +1262,7 @@ describe("Settings > Skills, proposed revisions", () => {
     currentFileCount: null,
     currentSizeBytes: null,
     proposedCount: 1,
+    proposedBy: PROPOSER,
     createdBy: PROPOSER,
   });
   const proposal = (revisionHash: string, over: Partial<SkillRevision> = {}) =>
@@ -1390,21 +1392,30 @@ describe("Settings > Skills, proposed revisions", () => {
     );
     const first = await findBand(/^Proposed by Another agent, session 000000ff, 29 Sep 14:02/);
     expect(within(first).queryByText("Includes third-party content")).toBeNull();
-    expect(
-      screen.getAllByRole("heading", { name: "What it changes" }).map((heading) => {
-        const section = heading.parentElement!;
-        return [
-          section.querySelector(".skill-warning")!.textContent,
-          section.querySelector(".skill-changes-head")!.textContent,
-        ];
-      }),
-    ).toEqual([
-      ["After you apply it, lets tools run without asking: Bash(git tag:*)", "1 changed file+1-0"],
-      ["After you apply it, lets tools run without asking: Bash(git tag:*)", "1 changed file+1-0"],
-    ]);
-    // The loader reads each diff with the page, and the topic's first push reads it again.
-    expect(countReads(calls, diffPath("ship", FIRST))).toBe(2);
+    // The newest proposal's changes are open. The older one has a button.
+    const section = screen.getByRole("heading", { name: "What it changes" }).parentElement!;
+    expect(section.querySelector(".skill-warning")!.textContent).toBe(
+      "After you apply it, lets tools run without asking: Bash(git tag:*)",
+    );
+    expect(section.querySelector(".skill-changes-head")!.textContent).toBe("1 changed file+1-0");
+    expect(screen.getAllByRole("button", { name: "Show what it changes" })).toHaveLength(1);
+    // The loader reads the newest diff with the page, and the topic's first push reads it again.
+    // The older proposal's diff is not read until it is opened.
     expect(countReads(calls, diffPath("ship", SECOND))).toBe(2);
+    expect(countReads(calls, diffPath("ship", FIRST))).toBe(0);
+  });
+
+  it("reads an older proposal's changes when its button is pressed", async () => {
+    const { calls } = await openShip();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show what it changes" }));
+
+    expect(await screen.findAllByRole("heading", { name: "What it changes" })).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByText("1 changed file")).toHaveLength(2);
+    });
+    expect(screen.queryByRole("button", { name: "Show what it changes" })).toBeNull();
+    expect(countReads(calls, diffPath("ship", FIRST))).toBe(1);
   });
 
   it("applies a proposal on Apply, then reads the page and its diffs again", async () => {
@@ -1500,9 +1511,10 @@ describe("Settings > Skills, proposed revisions", () => {
       [...document.querySelectorAll(".skill-chips .chip")].map((chip) => chip.textContent),
     ).toEqual(["Uploaded", "2 files · 2.3 KiB"]);
     const section = screen.getByRole("heading", { name: "What it adds" }).parentElement!;
-    expect(
-      within(section).getByText("After you apply it, has hooks, which run without asking"),
-    ).toBeTruthy();
+    // The warning sits under the lead's chips, worded as a current revision's.
+    const warning = screen.getByText("Has hooks, which run without asking");
+    expect(warning.closest(".skill-lead")).not.toBeNull();
+    expect(within(section).queryByText(/run without asking/)).toBeNull();
     expect(section.querySelector(".skill-changes-row")!.textContent).toBe("SKILL.mdAdded+1-0");
     // The band comes before the lead, and the lead before the section.
     const order = [band, screen.getByText("Walks through a release."), section];

@@ -13,6 +13,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor } from "../actor";
 import { uuidFromString } from "../db";
 
+/**
+ * The taint service: reads and writes the taint flag of sessions. Building it
+ * needs the ambient `SqlClient`, and every function it holds runs on that
+ * client, so inside the caller's transaction when there is one.
+ */
 export const sessionTaint = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 

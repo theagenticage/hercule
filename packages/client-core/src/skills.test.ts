@@ -9,7 +9,6 @@ import {
   describeFolderWithoutSkills,
   describeLockedSkillSource,
   describeSkillProposal,
-  describeSkillProposalEffect,
   describeSkillProposedBadge,
   describeSkillProposer,
   describeSkillRevisionApplied,
@@ -287,15 +286,6 @@ describe("describeSkillProposer and describeSkillProposal", () => {
   });
 });
 
-describe("describeSkillProposalEffect", () => {
-  it("says what applying does to a skill that exists and to a new one", () => {
-    expect(describeSkillProposalEffect(false)).toBe("Nothing changes until you apply it.");
-    expect(describeSkillProposalEffect(true)).toBe(
-      "A new skill: no Thread gets it until you apply it.",
-    );
-  });
-});
-
 describe("describeSkillThirdPartyContent", () => {
   it("names the agent when it has a name, and says the session otherwise", () => {
     expect(describeSkillThirdPartyContent(SESSION, senderNamed("Milo"))).toBe(
@@ -369,6 +359,7 @@ const SKILL: Skill = {
   availableRevisionHash: null,
   availableApprovalEffects: null,
   proposedCount: 0,
+  proposedBy: null,
   lastCheckedAt: null,
   checkError: null,
   createdAt: "2026-10-18T10:00:00Z",

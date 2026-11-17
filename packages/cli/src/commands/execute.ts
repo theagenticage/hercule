@@ -415,13 +415,14 @@ export type Outcome =
 /**
  * Reads the skill folder the command line names and sends one request per
  * skill in it, one at a time, in name order. Each request carries the
- * query `buildSkillImportQuery` builds (the skill's folder name, and its
- * GitHub source from the lock file when there is one), the command's other
- * query fields, and the skill's tar archive as the body.
+ * skill's folder name, the command's other query fields, and the skill's tar
+ * archive as the body. When the operation's query has the source fields
+ * (`sourceRepo`), it also carries the skill's GitHub source from the lock
+ * file, as `buildSkillImportQuery` builds it, and a lock file that cannot be
+ * read is reported. An operation without them never reads a source, so a lock
+ * file problem is of no concern to it.
  *
- * When the row says `oneSkillOnly`, the folder must be one skill, and the
- * query is the skill's name alone: the operation takes no source and no other
- * field.
+ * When the row says `oneSkillOnly`, the folder must be one skill.
  *
  * Each archive is built just before its request and dropped after it, so a
  * folder of many skills never sits in memory at once. A skill whose folder
@@ -451,7 +452,9 @@ const sendSkillFolder = async (
   if (Result.isFailure(found)) {
     throw new UsageError(`${formatFieldName(field)}: ${found.failure.reason}`, command.spelling);
   }
-  const { displayPath, lockFileProblem, isSkill, skills } = found.success;
+  const { displayPath, isSkill, skills } = found.success;
+  const takesSource = command.queryFieldNames.includes("sourceRepo");
+  const lockFileProblem = takesSource ? found.success.lockFileProblem : null;
   if (skills.length === 0) {
     throw new UsageError(
       `${formatFieldName(field)}: \`${displayPath}\` holds no skill: neither it nor any folder in it holds a SKILL.md`,
@@ -481,9 +484,9 @@ const sendSkillFolder = async (
     }
     try {
       const answer = (await call({
-        query: field.readsOneSkillOnly
-          ? { ...query, name: skill.name }
-          : { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) },
+        query: takesSource
+          ? { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) }
+          : { ...query, name: skill.name },
         payload: archive.success,
       })) as SkillImportResult | SkillProposeResult;
       sent.push({ name: skill.name, answer });

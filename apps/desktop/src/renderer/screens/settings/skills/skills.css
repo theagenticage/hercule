@@ -163,6 +163,11 @@
   line-height: 1.45;
 }
 
+/* The button that opens an older proposal's changes. */
+.skill-proposal-more {
+  display: flex;
+}
+
 /* The changed files: the book's `.card.files` from a Thread's changed files,
    with the book's `.plus` and `.minus`. */
 .skill-changes {

@@ -22,7 +22,7 @@ import type { SkillsSettingsRecords } from "./shell-page";
 /** The states the specimen draws. */
 export type SkillsState = "list" | "proposed" | "tainted" | "applied";
 
-const sessionOf = (assistantName: string): string => {
+const findAssistantSessionStamp = (assistantName: string): string => {
   const entry = PERMISSION_PROFILES_SIDEBAR_RECORDS.assistants.find(
     ({ assistant }) => assistant.name === assistantName,
   );
@@ -30,8 +30,8 @@ const sessionOf = (assistantName: string): string => {
   return `session:${entry.currentSession.id}`;
 };
 
-const ADA_SESSION = sessionOf("Ada");
-const MILO_SESSION = sessionOf("Milo");
+const ADA_SESSION = findAssistantSessionStamp("Ada");
+const MILO_SESSION = findAssistantSessionStamp("Milo");
 
 /** Returns the time `hour:minute` today, in the specimen's clock, as the API spells a time. */
 const todayAt = (hour: number, minute: number): string => {
@@ -89,6 +89,7 @@ const buildSkill = (over: Partial<Skill> & Pick<Skill, "name">): Skill => ({
   availableRevisionHash: null,
   availableApprovalEffects: null,
   proposedCount: 0,
+  proposedBy: null,
   lastCheckedAt: null,
   checkError: null,
   createdAt: LONG_AGO,
@@ -201,6 +202,7 @@ export const buildSkillsRecords = (state: SkillsState): SkillsSettingsRecords =>
     : buildSkill({
         name: "release-checklist",
         proposedCount: 1,
+        proposedBy: ADA_SESSION,
         createdBy: ADA_SESSION,
         updatedBy: ADA_SESSION,
       });

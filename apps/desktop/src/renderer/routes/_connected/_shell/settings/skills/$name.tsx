@@ -19,7 +19,7 @@ import {
 } from "../../../../../screens/settings/skills/skill-page";
 import { CheckNow } from "./-check-now";
 import { DeleteSection } from "./-delete-section";
-import { Proposal } from "./-skill-proposal";
+import { NewSkillLead, Proposal } from "./-skill-proposal";
 import { SkillUpdateSection } from "./-skill-update";
 import { UploadVersion } from "./-upload-version";
 
@@ -39,8 +39,9 @@ import { UploadVersion } from "./-upload-version";
  * The section's layout holds the `skill` topic, which keeps the skill
  * current, so the loader reads it only when it is not cached yet; the
  * controller's first push on the topic reads it again. The loader also reads
- * what a waiting update and each proposal change, and the topic reads those
- * again with the skill. A name that names no skill goes back to the list, and so does a
+ * what a waiting update and the newest proposal change, and the topic reads
+ * those again with the skill. An older proposal reads its changes when the
+ * user opens them. A name that names no skill goes back to the list, and so does a
  * page whose skill is deleted while it is open. The section remembers its
  * list, never one skill's page.
  */
@@ -53,7 +54,9 @@ export const Route = createFileRoute("/_connected/_shell/settings/skills/$name")
         queryClient.ensureQueryData(skillQuery(client, name)),
         queryClient.ensureQueryData(settingsQuery(client)),
       ]);
-      const revisionHashes = proposedRevisions.map(({ revisionHash }) => revisionHash);
+      // Only the newest proposal's diff is read up front: an older proposal
+      // reads its own when the user opens it.
+      const revisionHashes = proposedRevisions.slice(0, 1).map(({ revisionHash }) => revisionHash);
       if (skill.availableRevisionHash !== null && skill.currentRevisionHash !== null) {
         revisionHashes.push(skill.availableRevisionHash);
       }
@@ -107,6 +110,7 @@ function SkillPage(): JSX.Element {
       name={name}
       revision={revision}
       isNewSkill={isNewSkill}
+      isNewest={revision === newest}
       now={now}
       timezone={timezone}
       lead={lead}
@@ -126,12 +130,18 @@ function SkillPage(): JSX.Element {
         {isNewSkill ? (
           <>
             {newest !== undefined &&
-              proposal(newest, <SkillLead skill={skill} revision={newest} />)}
+              proposal(newest, <NewSkillLead skill={skill} revision={newest} />)}
             {older.map((revision) => proposal(revision))}
           </>
         ) : (
           <>
-            {current !== undefined && <SkillLead skill={skill} revision={current} />}
+            {current !== undefined && (
+              <SkillLead
+                skill={skill}
+                revision={current}
+                approvalEffects={skill.currentApprovalEffects}
+              />
+            )}
             <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
             {proposedRevisions.map((revision) => proposal(revision))}
             {skillMd !== null && (

@@ -1369,7 +1369,8 @@ const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
  *
  * - a skill the controller took: `grilling: created`, `revised`,
  *   `proposed` or `unchanged`, with one indented warning line under it per approval effect
- *   its current revision now has;
+ *   its current revision now has (none under `proposed`: a proposal changes
+ *   no current revision);
  * - a refused skill: `teach: refused: ` and why, with each issue of a
  *   validation error indented under it;
  * - the skill that stopped the command: `teach: refused, so the command
@@ -1383,9 +1384,13 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
       if ("answer" in skill) {
         return [
           `${skill.name}: ${skill.answer.result}`,
-          ...listSkillApprovalWarnings(skill.name, skill.answer.skill.currentApprovalEffects).map(
-            (warning) => `  ${warning}`,
-          ),
+          // A proposal changes no current revision, so the current revision's
+          // approval effects are not what was proposed.
+          ...(skill.answer.result === "proposed"
+            ? []
+            : listSkillApprovalWarnings(skill.name, skill.answer.skill.currentApprovalEffects).map(
+                (warning) => `  ${warning}`,
+              )),
         ];
       }
       const { refusal } = skill;

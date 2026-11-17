@@ -83,8 +83,8 @@ export function SkillList({
               </span>
               <span className="profile-name">
                 <b>{skill.name}</b>
-                {skill.currentRevisionHash === null ? (
-                  <ProposerLine proposer={skill.createdBy} />
+                {skill.currentRevisionHash === null && skill.proposedBy !== null ? (
+                  <ProposerLine proposer={skill.proposedBy} />
                 ) : (
                   <span>{describeSkillSource(skill.source)}</span>
                 )}

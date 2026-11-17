@@ -211,8 +211,21 @@ export const describeSkillRevisionOrigin = (origin: SkillRevisionOrigin): string
  */
 const describeSkillActor = (actor: string, sender: SenderReading | undefined): string => {
   const { label } = describeActor(actor);
-  return sender === undefined || sender.name === label ? label : `${sender.name}, ${label}`;
+  const name = readDistinctSenderName(actor, sender);
+  return name === undefined ? label : `${name}, ${label}`;
 };
+
+/**
+ * Returns the name of `sender`, how the app reads the agent of session
+ * `actor`, or `undefined` when there is no sender or its name is only the
+ * session's own label. A line names the agent only when the name tells more
+ * than the label does.
+ */
+const readDistinctSenderName = (
+  actor: string,
+  sender: SenderReading | undefined,
+): string | undefined =>
+  sender !== undefined && sender.name !== describeActor(actor).label ? sender.name : undefined;
 
 /**
  * Returns who applied a Skill Revision and when, as the line under its
@@ -277,16 +290,6 @@ export const describeSkillProposal = (
   `${describeSkillProposer(revision.createdBy, sender)}, ${formatShortMoment(new Date(revision.createdAt), now, timezone)}`;
 
 /**
- * Returns the second line of a proposal's banner: what applying does. A
- * proposal for a skill that has no current revision creates the skill, and no
- * Thread gets it until it is applied.
- */
-export const describeSkillProposalEffect = (isNewSkill: boolean): string =>
-  isNewSkill
-    ? "A new skill: no Thread gets it until you apply it."
-    : "Nothing changes until you apply it.";
-
-/**
  * Returns the tooltip of the chip "Includes third-party content": the
  * proposing session had read third-party messages, so the revision may carry
  * their words. It names the session's agent when `sender` gives a name other
@@ -296,8 +299,8 @@ export const describeSkillThirdPartyContent = (
   proposer: string,
   sender: SenderReading | undefined,
 ): string => {
-  const named = sender !== undefined && sender.name !== describeActor(proposer).label;
-  return `${named ? `${sender.name}'s session` : "The session"} had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`;
+  const name = readDistinctSenderName(proposer, sender);
+  return `${name === undefined ? "The session" : `${name}'s session`} had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`;
 };
 
 /**

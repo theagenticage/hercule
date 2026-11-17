@@ -1,8 +1,8 @@
 /**
  * The Settings > Skills specimen: the app's real shell with Settings open on
  * the Skills section, drawn from the records in settings-skills-fixture.ts.
- * No capture script draws it yet; open it in the dev server for a check by
- * eye, or list its states in scripts/ui-screens.ts to record goldens.
+ * `capture:ui` draws its four states (scripts/ui-screens.ts); open it in the
+ * dev server for a check by eye.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`,
  * and opens the state its `?state=` names:

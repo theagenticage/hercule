@@ -269,7 +269,7 @@ An assistant's durable notes: assistant-scoped, maintained by the assistant itse
 _Avoid_: knowledge base, brain, journal
 
 **Taint**:
-*(Added 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* The flag on a session that says it has read third-party text. The core sets it, never the agent. It passes on to a session that a tainted session starts, forks, or puts text into, and ends when the conversation rotates. A tainted session cannot change the Skill Library, and its memory writes carry provenance. The flag is stored on the session and is not on the public Session record. In code: `tainted`, `markTainted`, `isCallerTainted`, `passOn`.
+*(Added 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* The flag on a session that says it has read third-party text. The core sets it, never the agent. It passes on to a session that a tainted session starts, forks, or puts text into, and ends when the conversation rotates. A tainted session cannot change the Skill Library, and its memory writes carry provenance. The flag is stored on the session and is not on the public Session record.
 _Avoid_: dirty, untrusted session, infected, poisoned
 
 **Heartbeat**:

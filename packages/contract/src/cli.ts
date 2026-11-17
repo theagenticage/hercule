@@ -148,9 +148,9 @@ export type FieldRow =
       readonly skillFolder: true;
       /**
        * Makes the command take one skill folder only, and refuses a folder of
-       * skills before anything is sent. It also marks an operation whose
-       * query holds only this field, so the CLI sends the skill's name and
-       * nothing else: no source read from a lock file, and no other flag.
+       * skills before anything is sent. It says nothing about what else the
+       * query carries: the CLI sends a skill's GitHub source from its lock
+       * file only when the operation's query has the source fields.
        */
       readonly oneSkillOnly?: true;
       readonly help: string;
@@ -4544,7 +4544,7 @@ export const CLI = {
   },
   "skill.reject": {
     command: "skill reject",
-    help: "Deletes a proposed revision. Any other revision is refused. Rejecting the last proposed revision of a skill that has no current revision deletes the skill too. Running Threads are not affected.",
+    help: "Deletes a proposed revision. Any other revision is refused. Rejecting the last proposed revision of a skill that has no current revision deletes the skill too.",
     examples: [
       { args: ["grilling", "4f9c2b7e1d0a3c5b6e8f9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f"] },
     ],

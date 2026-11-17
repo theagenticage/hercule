@@ -205,6 +205,7 @@ describe("skill.import", () => {
       currentFileCount: 1,
       availableRevisionHash: null,
       proposedCount: 0,
+      proposedBy: null,
       createdBy: "user",
     });
     expect(skill.currentRevisionHash).toMatch(/^[0-9a-f]{64}$/);
@@ -1319,12 +1320,47 @@ describe("skill.propose", () => {
       currentRevisionHash: null,
       availableRevisionHash: null,
       proposedCount: 1,
+      proposedBy: `session:${SESSION.sessionId}`,
       createdBy: `session:${SESSION.sessionId}`,
     });
     expect(outcome.archiveExists).toBe(true);
     expect(outcome.entries.map((entry) => entry.payload)).toEqual([
       { name: "teach", revisionHash: outcome.hash, includesThirdPartyContent: false },
     ]);
+  });
+
+  it("names the proposer of the newest proposed revision, and no one when none waits", async () => {
+    const other: Actor = { ...SESSION, sessionId: "0199f0b7-0000-7000-8000-00000000005f" };
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* importSkill("plain", buildFiles("plain"));
+        yield* asSession(proposeSkill("teach", buildFiles("teach")));
+        yield* Effect.provideService(
+          proposeSkill("teach", buildFiles("teach", "Other\n")),
+          CurrentActor,
+          other,
+        );
+        // The test clock gives both proposals one time, so make the second one newer.
+        yield* withTransaction(
+          sql,
+          sql`UPDATE skill_revisions SET created_at = '2026-01-01T00:00:00.000Z'
+              WHERE created_by = ${`session:${other.sessionId}`}`,
+        );
+        const first = yield* computeSkillRevisionHash(buildFiles("teach"));
+        const second = yield* computeSkillRevisionHash(buildFiles("teach", "Other\n"));
+        const items = (yield* service.query()).items;
+        yield* service.reject({ name: "teach", revisionHash: second });
+        return {
+          proposedBy: Object.fromEntries(items.map((skill) => [skill.name, skill.proposedBy])),
+          afterReject: (yield* service.read("teach")).skill.proposedBy,
+          first,
+        };
+      }),
+    );
+    expect(outcome.proposedBy).toEqual({ plain: null, teach: `session:${other.sessionId}` });
+    expect(outcome.afterReject).toBe(`session:${SESSION.sessionId}`);
   });
 
   it("files a revision of an existing Skill without changing its source or current revision", async () => {
@@ -1341,6 +1377,7 @@ describe("skill.propose", () => {
       source: imported.skill.source,
       currentRevisionHash: imported.skill.currentRevisionHash,
       proposedCount: 1,
+      proposedBy: `session:${SESSION.sessionId}`,
       updatedBy: `session:${SESSION.sessionId}`,
     });
     expect(detail.proposedRevisions).toMatchObject([
