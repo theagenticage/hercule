@@ -235,7 +235,7 @@ describe("countToDo and describeOrchestrationSegment", () => {
   });
 
   it("names the count in the segment's accessible name", () => {
-    expect(describeOrchestrationSegment(8)).toBe("Hercule, 8 to do");
+    expect(describeOrchestrationSegment(8)).toBe("Work, 8 to do");
   });
 });
 

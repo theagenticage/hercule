@@ -113,6 +113,17 @@ describe("the shared Work and Inbox tokens", () => {
   });
 });
 
+describe("the edge of a control", () => {
+  // Each theme sets its own value, in its own hue, at 3:1 against the surfaces a control sits on
+  // (WCAG 1.4.11), so the token must sit in the theme's block: a value shared by every theme could
+  // not reach 3:1 on both the light and the dark grounds.
+  it.each(THEMES)("declares --control-edge in the block of the %s theme", (theme) => {
+    expect(
+      blocks.some((block) => block.declared.has("--control-edge") && appliesToTheme(block, theme)),
+    ).toBe(true);
+  });
+});
+
 describe("the motion tokens", () => {
   it("keeps the ease of Web Animations equal to --m-ease", () => {
     expect(readFileSync(join(import.meta.dirname, "tokens.css"), "utf8")).toContain(

@@ -52,7 +52,7 @@ describe("Intake, the moves", () => {
     await expect
       .poll(async () => (await readRowTitles(page)).toSorted())
       .toEqual(titles.toSorted());
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work, 3 to do" });
 
     // H opens the snooze menu on the selected row, and a choice's number
     // snoozes it. Tomorrow is always open to choose.
@@ -66,7 +66,7 @@ describe("Intake, the moves", () => {
     await expect
       .poll(async () => (await readRowTitles(page)).toSorted())
       .toEqual(["Docs moved to the wiki", "Staging was rebuilt"]);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work, 2 to do" });
     // A move ignores the keys until the one before it ends, and the toast
     // shows when it has.
     await expect
@@ -89,7 +89,7 @@ describe("Intake, the moves", () => {
     await expect
       .poll(async () => (await readRowTitles(page)).toSorted())
       .toEqual(titles.toSorted());
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work, 3 to do" });
 
     // E marks the selected row done, and the toast says so.
     await selectRow(page, "Docs moved to the wiki");
@@ -112,7 +112,7 @@ describe("Intake, the moves", () => {
     await bar.getByRole("button", { name: /^Done/ }).click();
     await expect.poll(() => readRowTitles(page)).toEqual([]);
     await expect.poll(() => bar.count()).toBe(0);
-    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule" });
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Work" });
 
     await showView(page, "Done");
     await expect

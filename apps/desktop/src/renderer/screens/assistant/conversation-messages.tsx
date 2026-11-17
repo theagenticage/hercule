@@ -13,8 +13,10 @@ import { Markdown } from "../session/markdown";
 import { AgentFace, OpenMessageText } from "../session/messages";
 import type { AttachOpenParagraph } from "../session/use-session-live";
 
-/** The size of a notice's face, in CSS pixels: the book's `data-size="28"`. */
+/** The size of the newest notice's face, in CSS pixels: the book's `data-size="28"`. */
 const NOTICE_FACE_SIZE = 28;
+/** The size of a past notice's face, in CSS pixels: the height of its one line, as a day stamp's. */
+const PAST_NOTICE_FACE_SIZE = 16;
 
 /** Renders the day stamp above the first message of a day, such as "Today" or "4 Sep". */
 export function DayStamp({ label }: { readonly label: string }): JSX.Element {
@@ -70,19 +72,25 @@ export const StoredReply = memo(function StoredReply({
  * Renders a notice: a line the controller stored about the Conversation,
  * such as a turn that failed, beside the assistant's face in the failed
  * pose, still, with the notice's `time` after the text.
+ *
+ * A notice that `isPast`, because a message follows it, is a quiet row as
+ * tall as a day stamp: a small face and muted text on no fill. The newest
+ * notice is filled, because it may still need the user.
  */
 export const Notice = memo(function Notice({
   look,
   text,
   time,
+  isPast,
 }: {
   readonly look: Look;
   readonly text: string;
   readonly time: string | undefined;
+  readonly isPast: boolean;
 }): JSX.Element {
   return (
-    <div className="notice">
-      <Face look={look} pose="failed" size={NOTICE_FACE_SIZE} />
+    <div className={isPast ? "notice is-past" : "notice"}>
+      <Face look={look} pose="failed" size={isPast ? PAST_NOTICE_FACE_SIZE : NOTICE_FACE_SIZE} />
       <span>
         {text}
         {time === undefined ? null : <span className="time">{time}</span>}

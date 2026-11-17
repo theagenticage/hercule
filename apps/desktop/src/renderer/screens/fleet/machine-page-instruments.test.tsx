@@ -16,7 +16,7 @@ const INSTRUMENTS: MachineInstruments = {
     level: "you",
     note: "5 waiting",
     drawing: {
-      sessionsPerCut: 1,
+      slotsPerSegment: 1,
       cap: 16,
       running: 12,
       free: 4,

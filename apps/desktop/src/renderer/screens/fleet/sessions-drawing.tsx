@@ -3,24 +3,34 @@ import type { SessionsDrawing } from "@hercule/client-core/fleet";
 import "./fleet-page.css";
 
 /**
+ * Returns how many slots each segment of a stretch of `slots` slots holds, in
+ * order: `slotsPerSegment` each, and the rest in a shorter last segment. An
+ * empty stretch has no segment.
+ */
+const splitIntoSegments = (slots: number, slotsPerSegment: number): number[] =>
+  Array.from({ length: Math.ceil(slots / slotsPerSegment) }, (_, index) =>
+    Math.min(slotsPerSegment, slots - index * slotsPerSegment),
+  );
+
+/**
  * Renders a machine's sessions against its cap, as `drawing` says, as one bar
- * of a fixed width, whatever the cap:
+ * of a fixed width, whatever the cap, made of segments of `slotsPerSegment`
+ * slots with the same gap between every two:
  *
- * - The bar's first part holds the cap: running sessions are its filled
- *   stretch, free slots its empty rest. A filled marigold part after it holds
- *   the `drawing.waitingDrawn` sessions waiting for a slot.
- * - Both parts are cut every `drawing.sessionsPerCut` sessions: once per slot
- *   up to a cap of 16, so the bar still reads as slots, and every 10 above.
- * - When the cap was lowered below the sessions running, the running stretch
- *   fills the first part, which then holds the sessions running, and a rule
- *   marks where the cap ends. The rule also stands between the cap and the
- *   waiting part.
- * - A drawing that `isAway` draws the cap's part as an outline with nothing
- *   running in it, for a machine whose sessions cannot be known. The waiting
- *   part stays marigold.
+ * - The cap's segments come first. A segment fills from the left with the
+ *   sessions running in its slots and is free for the rest. A segment whose
+ *   every slot runs a session is marked `is-run`.
+ * - When the cap was lowered below the sessions running, the sessions past
+ *   the cap follow as filled segments.
+ * - The sessions waiting for a slot follow as marigold segments.
+ * - A 1.5px rule marks where the cap ends, when sessions run past it or wait.
+ * - A drawing that `isAway` draws every segment in the disabled tint, for a
+ *   machine whose sessions cannot be known. The waiting segments stay
+ *   marigold.
  *
- * The numbers are drawn beside it, so the drawing is hidden from assistive
- * technology. `size` is the card's or the list row's.
+ * A segment's width is its share of the slots drawn, so every slot is as wide
+ * as every other. The numbers are drawn beside the bar, so the drawing is
+ * hidden from assistive technology. `size` is the card's or the list row's.
  */
 export function SessionsFigure({
   drawing,
@@ -29,28 +39,35 @@ export function SessionsFigure({
   readonly drawing: SessionsDrawing;
   readonly size: "card" | "list";
 }): JSX.Element {
-  const { running, isAway, sessionsPerCut, waitingDrawn } = drawing;
+  const { cap, running, isAway, slotsPerSegment, waitingDrawn } = drawing;
   const className = `fleet-sessions fleet-sessions--${size}${isAway ? " is-away" : ""}`;
-  const isOverCap = running > drawing.cap;
-  // The first part holds the cap, or the sessions running when they are more.
-  const inCap = Math.max(drawing.cap, running);
-  const total = inCap + waitingDrawn;
-  const share = (count: number, of: number): string => `${(count / of) * 100}%`;
-  const cutStyle = (sessions: number): CSSProperties =>
-    ({ "--fleet-cut": share(sessionsPerCut, sessions) }) as CSSProperties;
-  const marksCap = waitingDrawn > 0 || isOverCap;
+  const overCap = Math.max(0, running - cap);
+  const marksCap = waitingDrawn > 0 || overCap > 0;
+  const segmentStyle = (slots: number, runningShare?: number): CSSProperties => ({
+    flexGrow: slots,
+    ...(runningShare === undefined ? {} : { "--fleet-running": `${runningShare * 100}%` }),
+  });
+
   return (
     <span className={className} aria-hidden="true">
-      <span
-        className="fleet-sessions-cap"
-        style={{ width: share(inCap, total), ...cutStyle(inCap) }}
-      >
-        <i className="is-run" style={{ width: share(running, inCap) }} />
-      </span>
-      {marksCap && (
-        <b className="fleet-sessions-rule" style={{ left: share(drawing.cap, total) }} />
-      )}
-      {waitingDrawn > 0 && <i className="is-wait" style={cutStyle(waitingDrawn)} />}
+      {splitIntoSegments(cap, slotsPerSegment).map((slots, index) => {
+        // Every segment before the last holds `slotsPerSegment` slots, so this one starts there.
+        const runningHere = Math.min(slots, Math.max(0, running - index * slotsPerSegment));
+        return (
+          <i
+            key={`cap-${String(index)}`}
+            className={runningHere === slots ? "is-run" : undefined}
+            style={segmentStyle(slots, runningHere / slots)}
+          />
+        );
+      })}
+      {marksCap && <b className="fleet-sessions-rule" />}
+      {splitIntoSegments(overCap, slotsPerSegment).map((slots, index) => (
+        <i key={`over-${String(index)}`} className="is-run" style={segmentStyle(slots, 1)} />
+      ))}
+      {splitIntoSegments(waitingDrawn, slotsPerSegment).map((slots, index) => (
+        <i key={`wait-${String(index)}`} className="is-wait" style={segmentStyle(slots)} />
+      ))}
     </span>
   );
 }

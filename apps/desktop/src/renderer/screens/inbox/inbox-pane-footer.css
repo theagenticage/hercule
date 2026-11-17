@@ -5,8 +5,21 @@
    - under 400px the moves drop their key hints, which stay in the tooltips;
    - a name too long even then keeps its line, and the icons wrap under it. */
 .ib-pane-foot-box {
+  position: relative;
   flex: none;
   container: pane-foot / inline-size;
+}
+/* The pane's scrolling body fades out over its last 24px above the footer, so a line the footer
+   cuts reads as more below and not as broken text. The fade takes no pointer. */
+.ib-pane-foot-box::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 24px;
+  background: linear-gradient(to top, var(--pane-fill), transparent);
+  pointer-events: none;
 }
 .ib-pane-foot {
   display: flex;

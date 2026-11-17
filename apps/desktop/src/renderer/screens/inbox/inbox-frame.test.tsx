@@ -6,7 +6,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InboxFrame } from "./inbox-frame";
+import { INBOX_PANE_DEFAULT_WIDTH, InboxFrame } from "./inbox-frame";
+import paneFooterCss from "./inbox-pane-footer.css?raw";
 
 /** The callbacks of the observer the frame made, so a test can say how wide the frame is. */
 let reportWidth: (width: number) => void = () => undefined;
@@ -188,7 +189,18 @@ describe("InboxFrame pane width", () => {
     fireEvent.keyDown(edge, { key: "Home" });
     fireEvent.keyDown(edge, { key: "End" });
 
-    expect(onPaneWidthChange.mock.calls).toEqual([[420], [640], [360]]);
+    expect(onPaneWidthChange.mock.calls).toEqual([[480], [640], [360]]);
+  });
+
+  it("gives the pane a default width at which the footer shows its moves' words, not icons", () => {
+    // jsdom evaluates no container query, so the test reads the width under which the footer turns
+    // Thread and Take on into icons from its stylesheet. The pane's 1px left border is not room.
+    const iconsBelow =
+      /@container pane-foot \(max-width: (\d+)px\)[^{]*\{[^@]*\.has-icon \.ib-pane-move-icon/.exec(
+        paneFooterCss,
+      );
+    expect(iconsBelow).not.toBeNull();
+    expect(INBOX_PANE_DEFAULT_WIDTH - 1).toBeGreaterThan(Number(iconsBelow![1]));
   });
 
   it("limits the widest width to the room the list leaves", () => {
@@ -208,7 +220,7 @@ describe("InboxFrame pane width", () => {
 describe("InboxFrame pane menu", () => {
   it("sets Narrow, Default and Wide, and shows the one the pane has as checked", async () => {
     const onPaneWidthChange = vi.fn();
-    renderFrame({ paneWidth: 420, onPaneWidthChange });
+    renderFrame({ paneWidth: 480, onPaneWidthChange });
     reportWidth(1600);
 
     expect(

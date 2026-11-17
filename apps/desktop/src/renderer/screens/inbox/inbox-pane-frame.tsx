@@ -19,8 +19,12 @@ export const INBOX_PANE_MIN_WIDTH = 360;
 /** The widest the pane may be, in pixels, whatever room the window has. */
 export const INBOX_PANE_MAX_WIDTH = 640;
 
-/** The width a double click and the "Default" menu item give the pane, in pixels. */
-export const INBOX_PANE_DEFAULT_WIDTH = 420;
+/**
+ * The width a double click and the "Default" menu item give the pane, in
+ * pixels. It is wide enough for the footer to show Thread and Take on as words:
+ * the footer turns them into icons under 460px (`inbox-pane-footer.css`).
+ */
+export const INBOX_PANE_DEFAULT_WIDTH = 480;
 
 /** How far one arrow key press moves the pane's edge, in pixels. */
 const ARROW_STEP = 40;

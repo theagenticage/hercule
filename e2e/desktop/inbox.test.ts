@@ -76,12 +76,9 @@ async function arrangeInbox(): Promise<OpenInbox> {
     seedInbox(arranged.home);
   });
   const { page } = await openSignedIn(arranged.url);
-  await page
-    .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: "Hercule" })
-    .click();
+  await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab", { name: "Work" }).click();
   const sidebarRow = page
-    .getByRole("navigation", { name: "Hercule", exact: true })
+    .getByRole("navigation", { name: "Work", exact: true })
     .getByRole("link", { name: /^Inbox/ });
   return {
     arranged,

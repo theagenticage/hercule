@@ -209,7 +209,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [
       { selector: ".fleet-sec-h .seg", kind: "boundary" },
       { selector: ".fleet-dot", kind: "mark" },
-      // The sessions bar's running and waiting fills. Its free part is an empty track.
+      // The sessions bar's full running segments and its waiting ones. A free segment is a track,
+      // drawn at 1.5:1 on purpose, so it is not a mark.
       { selector: ".fleet-sessions i.is-run", kind: "mark" },
       { selector: ".fleet-sessions i.is-wait", kind: "mark" },
       { selector: ".fleet-meter i", kind: "mark" },

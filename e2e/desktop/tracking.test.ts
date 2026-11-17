@@ -6,7 +6,7 @@
  *
  * - a signal handed off from the pane lands in folded Tracking as a Working
  *   row, and becomes Finished when its run ends. The Finished row counts in
- *   the To do count of the Hercule segment, `T` opens Tracking, and `E` ticks
+ *   the To do count of the Work segment, `T` opens Tracking, and `E` ticks
  *   the row off: the Task is `done` and the row leaves;
  * - a run that fails shows a Failed row that counts in To do and says why the
  *   run failed, and the row's Mark done control ticks it off;
@@ -37,8 +37,8 @@ const openSignalPane = (page: Page) => page.getByRole("region", { name: "The ope
 const readSignalTitles = (page: Page): Promise<string[]> =>
   page.locator('section[aria-label="Signals"] .ask-title').allTextContents();
 
-/** Returns the label of the Hercule segment: "Hercule, 2 to do", or "Hercule" with no count. */
-async function readHerculeSegment(page: Page): Promise<string> {
+/** Returns the label of the Work segment: "Work, 2 to do", or "Work" with no count. */
+async function readWorkSegment(page: Page): Promise<string> {
   const segment = page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab").nth(1);
   return (await segment.getAttribute("aria-label")) ?? ((await segment.textContent()) ?? "").trim();
 }
@@ -54,7 +54,7 @@ describe("Tracking", () => {
     await raiseSignal(arranged, "Docs moved to the wiki");
     const { app, page } = await openSignedIn(arranged.url);
     await chooseMenuItem(app, "Go", "Intake");
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 2 to do");
 
     await page.locator(".ask-row", { hasText: "Review the pricing page" }).click();
     await openSignalPane(page).getByRole("button", { name: "Hand to Review PR" }).click();
@@ -68,7 +68,7 @@ describe("Tracking", () => {
     expect(await tracking(page).evaluate((element) => element.classList.contains("is-open"))).toBe(
       false,
     );
-    expect(await readHerculeSegment(page)).toBe("Hercule, 1 to do");
+    expect(await readWorkSegment(page)).toBe("Work, 1 to do");
     const [task] = await listHandedOffTasks(arranged);
     expect(task).toMatchObject({ title: "Review the pricing page", status: "in-progress" });
     expect(task!.provenance).toMatchObject([{ signalId: handedOff, actor: "user" }]);
@@ -82,7 +82,7 @@ describe("Tracking", () => {
       .poll(() => readTrackingRows(page), { timeout: 30_000 })
       .toEqual([{ state: "finished", title: "Review the pricing page" }]);
     expect(await tracking(page).locator(".tr-run-sub").textContent()).toBe("Review PR finished");
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 2 to do");
     expect(
       (await arranged.client.run.read({ params: { id: task!.provenance[0]!.runId! } })).status,
     ).toBe("completed");
@@ -111,7 +111,7 @@ describe("Tracking", () => {
     await expect
       .poll(async () => (await arranged.client.task.read({ params: { id: task!.id } })).status)
       .toBe("done");
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 1 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 1 to do");
 
     // Esc closes Tracking, and the signals are back.
     await page.keyboard.press("Escape");
@@ -131,7 +131,7 @@ describe("Tracking", () => {
     await raiseSignal(arranged, "Docs moved to the wiki");
     const { app, page } = await openSignedIn(arranged.url);
     await chooseMenuItem(app, "Go", "Intake");
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 2 to do");
 
     await arranged.client.signal.handOff({
       params: { id: signalId },
@@ -145,7 +145,7 @@ describe("Tracking", () => {
     expect(await tracking(page).locator(".tr-run-sub").textContent()).toMatch(
       /^Investigate failed/,
     );
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 2 to do");
 
     // The Mark done control takes the pointer only while the pointer is on the
     // row. The page works out which element the pointer is on only when the
@@ -177,7 +177,7 @@ describe("Tracking", () => {
     await expect.poll(() => readTrackingRows(page)).toEqual([]);
     const [task] = (await arranged.client.task.query({ query: { limit: 10 } })).items;
     expect(task).toMatchObject({ title: "Webhook deliveries fail", status: "done" });
-    await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 1 to do");
+    await expect.poll(() => readWorkSegment(page)).toBe("Work, 1 to do");
   }, 120_000);
 
   it("refuses a session's token on hercule signal hand-off, and leaves the signal open with no Task", async () => {

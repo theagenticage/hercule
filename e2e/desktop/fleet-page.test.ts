@@ -40,9 +40,9 @@ describe("the Fleet page", () => {
 
     await openFleet(page);
     const fleetRow = page
-      .getByRole("navigation", { name: "Hercule", exact: true })
+      .getByRole("navigation", { name: "Work", exact: true })
       .getByRole("link", { name: "Fleet" });
-    expect(await readSidebarList(page)).toBe("Hercule");
+    expect(await readSidebarList(page)).toBe("Work");
     await expect.poll(() => fleetRow.getAttribute("aria-current")).toBe("page");
     await locateCard(page, "studio").waitFor();
 
@@ -52,7 +52,7 @@ describe("the Fleet page", () => {
       .getByRole("navigation", { name: "Fleet", exact: true })
       .getByText("studio")
       .waitFor();
-    expect(await readSidebarList(page)).toBe("Hercule");
+    expect(await readSidebarList(page)).toBe("Work");
     await expect.poll(() => fleetRow.getAttribute("aria-current")).toBe("page");
 
     // Opening a thread leaves Fleet, and the sidebar shows the Threads face.
