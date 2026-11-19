@@ -113,6 +113,11 @@ describe("the new-thread screen", () => {
       screen.getByText("It gets its own worktree of webshop, on a new branch from remote default."),
     ).toBeTruthy();
     expect(readLip()).toBe("New workspace" + "From remote default" + "moss");
+    // Each pick in the lip is its icon and its words, with no chevron.
+    for (const pick of document.querySelectorAll(".lip button")) {
+      expect(pick.querySelectorAll("svg")).toHaveLength(1);
+      expect(pick.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    }
     expect(document.activeElement).toBe(field);
   });
 
@@ -491,6 +496,8 @@ describe("the new-thread screen", () => {
     await userEvent.type(field, "Look at checkout");
 
     const cards = screen.getByRole("region", { name: "Start from Intake" });
+    // The heading's note says a click adds to the message and starts nothing.
+    expect(within(cards).getByText("Puts the Task in your message")).toBeTruthy();
     const card = await within(cards).findByRole("button", { name: /Cart total rounding/ });
     expect(card.textContent).toBe("High" + "Cart total rounding on discounts");
     expect(within(cards).getAllByRole("button")).toHaveLength(1);

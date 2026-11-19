@@ -14,7 +14,7 @@ export interface Composer {
   /** The button that opens the model options menu. Its text is the effort, such as "Effort: Medium". */
   readonly optionsTrigger: Locator;
   /** The model pill, the button that opens the model menu. */
-  readonly modelPill: Locator;
+  readonly modelPick: Locator;
   readonly optionsMenu: Locator;
   readonly modelMenu: Locator;
   /** The note that a picked model applies on send. It is empty while no model is picked. */
@@ -32,8 +32,8 @@ export function locateComposer(page: Page): Composer {
     field: page.getByRole("textbox", { name: "Message" }),
     send: page.getByRole("button", { name: "Send", exact: true }),
     stop: page.getByRole("button", { name: "Stop", exact: true }),
-    optionsTrigger: page.locator(".composer-row button.pick:not(.pick--pill)"),
-    modelPill: page.locator(".composer-row button.pick--pill"),
+    optionsTrigger: page.locator(".composer-row button.pick:not(.pick--model)"),
+    modelPick: page.locator(".composer-row button.pick--model"),
     optionsMenu: page.getByRole("dialog", { name: "Model options", exact: true }),
     modelMenu: page.getByRole("dialog", { name: "Model", exact: true }),
     note: page.locator(".composer-note"),

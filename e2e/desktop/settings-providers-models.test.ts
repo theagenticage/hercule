@@ -86,7 +86,7 @@ describe("Settings > Providers > Models", () => {
 
     // The composer offers both before the trim.
     await openDraft(app, page, "notes");
-    const pill = page.locator(".composer-row button.pick--pill");
+    const pill = page.locator(".composer-row button.pick--model");
     const menu = page.getByRole("dialog", { name: "Model", exact: true });
     await pill.click();
     await menu.waitFor();

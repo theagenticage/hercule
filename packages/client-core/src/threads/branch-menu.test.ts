@@ -89,6 +89,16 @@ describe("buildBranchField", () => {
     expect(field?.rows).toEqual([]);
   });
 
+  it("names the branch main files keep, or says it was not observed", () => {
+    const field = buildBranchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
+    expect(field?.label).toBe(PRIMARY.checkouts[0]!.branch);
+    const unobserved = buildBranchField(
+      { kind: "primary", resourceId: WEBSHOP.id },
+      { ...around, workspaces: [] },
+    );
+    expect(unobserved?.label).toBe("Not observed");
+  });
+
   it("returns no revision picker for joined files or a Thread without a checkout", () => {
     expect(buildBranchField({ kind: "existing", workspaceId: THREAD_3F1.id }, around)).toBeNull();
     expect(buildBranchField({ kind: "none" }, around)).toBeNull();

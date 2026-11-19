@@ -143,6 +143,18 @@ button.lip-pick:hover,
 .starts-h {
   margin: 0 0 10px 2px;
 }
+/* Not in the book. A click on a card adds one line to the message and
+   starts nothing, which a note after the heading says before the user
+   clicks. */
+.starts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.starts-note {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
 .intake-note {
   display: flex;
   align-items: center;
