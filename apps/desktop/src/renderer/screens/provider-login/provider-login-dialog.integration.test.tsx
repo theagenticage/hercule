@@ -147,7 +147,7 @@ describe("the provider sign-in dialog", () => {
     });
     expect(screen.getByRole("alert").textContent).toBe("Anthropic is not signed in on moss");
     const lip = document.querySelector<HTMLElement>(".lip-machine")!;
-    expect(lip.textContent).toBe("on moss·Sign in");
+    expect(lip.textContent).toBe("moss·Sign in");
     expect(lip.querySelector(".lip-alert")).not.toBeNull();
     const signIn = within(lip).getByRole("button", { name: "Sign in to Anthropic on moss" });
 
@@ -166,10 +166,10 @@ describe("the provider sign-in dialog", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(screen.queryByRole("alert")).toBeNull();
-    // A machine with no problem is a pick alone again.
+    // A machine with no problem is the book's lip again: its laptop and its name.
     expect(document.querySelector(".lip-machine")).toBeNull();
     expect(document.querySelector(".lip-alert")).toBeNull();
-    expect(screen.getByRole("button", { name: "on moss" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "moss" })).toBeTruthy();
   });
 
   it("offers the sign-in beside a machine that the workspace it joins decides", async () => {
@@ -182,7 +182,7 @@ describe("the provider sign-in dialog", () => {
 
     const lip = document.querySelector<HTMLElement>(".lip-machine")!;
     expect(within(lip).getByTitle("The workspace it joins decides the machine").textContent).toBe(
-      "on moss",
+      "moss",
     );
     await userEvent.click(
       within(lip).getByRole("button", { name: "Sign in to Anthropic on moss" }),

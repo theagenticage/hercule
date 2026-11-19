@@ -99,7 +99,7 @@ const openDraft = async (path: string, handlers: Readonly<Record<string, Handler
 const readSpawns = (calls: readonly Call[]): readonly Call[] =>
   calls.filter((call) => call.method === "POST" && call.path === "/api/v1/sessions");
 
-/** Returns the text of the lip: the workspace, the branch and the machine, with a dot between each two. */
+/** Returns the text of the lip: the workspace, the branch and the machine. */
 const readLip = (): string | null => document.querySelector(".lip")?.textContent ?? null;
 
 describe("the new-thread screen", () => {
@@ -112,18 +112,11 @@ describe("the new-thread screen", () => {
     expect(
       screen.getByText("It gets its own worktree of webshop, on a new branch from remote default."),
     ).toBeTruthy();
-    expect(readLip()).toBe("New workspace" + "·" + "from remote default" + "·" + "on moss");
-    // The lip is one line of picks with no icons: each is a button whose only
-    // mark is the chevron at its end. The dots between them are in no pick.
-    const picks = [...document.querySelectorAll<HTMLElement>(".lip button")];
-    expect(picks.map((pick) => pick.textContent)).toEqual([
-      "New workspace",
-      "from remote default",
-      "on moss",
-    ]);
-    for (const pick of picks) {
+    expect(readLip()).toBe("New workspace" + "From remote default" + "moss");
+    // Each pick in the lip is its icon and its words, with no chevron.
+    for (const pick of document.querySelectorAll(".lip button")) {
       expect(pick.querySelectorAll("svg")).toHaveLength(1);
-      expect(pick.lastElementChild?.className).toBe("pick-chevron");
+      expect(pick.firstElementChild?.tagName.toLowerCase()).toBe("svg");
     }
     expect(document.activeElement).toBe(field);
   });
@@ -133,7 +126,7 @@ describe("the new-thread screen", () => {
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should the agent do?");
     expect(screen.getByText("It works without a checkout.")).toBeTruthy();
-    expect(readLip()).toBe("No workspace" + "·" + "on moss");
+    expect(readLip()).toBe("No workspace" + "moss");
     // A draft with no project has no tasks to start from, nor starters.
     expect(screen.queryByRole("heading", { name: "Start from Intake" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Or start from one of these" })).toBeNull();
@@ -143,11 +136,10 @@ describe("the new-thread screen", () => {
     const [primary] = SIDEBAR_FIXTURE.workspaces;
     await openDraft(`/?project=${WEBSHOP.id}&workspace=${primary!.id}`);
 
-    expect(readLip()).toBe("Main workspace" + "·" + "on moss");
-    // A machine the user cannot change is text, with no chevron.
-    const machine = screen.getByTitle("The workspace it joins decides the machine");
-    expect(machine.textContent).toBe("on moss");
-    expect(machine.querySelector(".pick-chevron")).toBeNull();
+    expect(readLip()).toBe("Main workspace" + "moss");
+    expect(screen.getByTitle("The workspace it joins decides the machine").textContent).toBe(
+      "moss",
+    );
   });
 
   it("draws the header of a workspace it joins as its threads do: the work's name, the row's tabs, and its own New thread tab selected", async () => {
@@ -225,7 +217,7 @@ describe("the new-thread screen", () => {
     );
 
     await screen.findByRole("textbox", { name: "Message" });
-    expect(readLip()).toBe("No workspace" + "·" + "on studio");
+    expect(readLip()).toBe("No workspace" + "studio");
   });
 
   it("opens the add-account sheet from Add an account when the user has no account", async () => {

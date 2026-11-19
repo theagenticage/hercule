@@ -109,7 +109,6 @@
   pointer-events: none;
 }
 .composer-row {
-  container: composer-row / inline-size;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -135,20 +134,9 @@ button.pick:not([aria-disabled="true"]):hover,
   background: var(--hover);
   color: var(--ink);
 }
-/* Not in the book, whose model pick is a filled chip and whose other picks
-   are bare words. Every pick that opens a menu is text that ends in a small
-   chevron, the model's too, so each reads as a pick and all read alike. The
-   chevron sits 4px after the text, closer than the 6px after the icon. */
-.pick-chevron {
-  margin-left: -2px;
-}
-/* A narrow composer, such as an 800px window's, has no room for three chevrons: with them the
-   model's name would be cut. Below 540px the chevrons go and the picks keep their words. */
-@container composer-row (max-width: 539px) {
-  .pick-chevron {
-    display: none;
-  }
-}
+/* Not in the book, whose model pick is a filled chip. Every pick is plain
+   muted text after its icon, the model's too, so the eye stays on the
+   message field and no pick stands out from the others. */
 .pick .br {
   opacity: 0.85;
 }

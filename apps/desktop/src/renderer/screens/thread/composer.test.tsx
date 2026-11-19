@@ -692,24 +692,23 @@ describe("the composer", () => {
     expect(calls).toHaveLength(sent);
   });
 
-  it("draws the fixed access mode as text, and the model and its options as menus that end in a chevron", async () => {
+  it("draws the fixed access mode as text, and the model and its options as menus of plain text", async () => {
     await renderComposer(IDLE);
 
     // The thread has started, so its access mode is fixed, and the tooltip
-    // says how to get another one. Text that opens nothing has no chevron.
+    // says how to get another one.
     const accessMode = screen.getByTitle("Create a new thread to change the access mode");
     expect(accessMode.tagName).toBe("SPAN");
     expect(accessMode.textContent).toBe("Approval required");
-    expect(accessMode.querySelector(".pick-chevron")).toBeNull();
     for (const [name, menu] of [
       ["Effort: Medium", "Model options"],
       ["Claude Sonnet 5", "Model"],
     ] as const) {
       const trigger = screen.getByRole("button", { name });
-      // Every pick is drawn alike, as text and a chevron: the model's has no
-      // chip of its own.
+      // Every pick is drawn alike, as its icon and its words: no chevron
+      // follows them, and the model's has no chip of its own.
       expect(trigger.className).not.toContain("pill");
-      expect(trigger.lastElementChild?.className).toBe("pick-chevron");
+      expect(trigger.querySelectorAll("svg")).toHaveLength(1);
       expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
       // A closed menu is hidden, and a hidden element has no accessible
