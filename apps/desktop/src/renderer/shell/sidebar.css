@@ -412,17 +412,20 @@
 }
 
 /* The state word that starts a row's second line, in the colours of the
-   status words: Working, and the draft's "Draft", in the accent's ink;
-   Approval and Question in the colour of a question to the user, bold;
-   Queued and Offline in the line's faint ink. */
+   status words: Working in the accent's ink; Approval and Question in the
+   colour of a question to the user, bold; Queued and Offline in the line's
+   faint ink. The draft's "Draft" is in the muted ink: a thread that has not
+   started must not take the colour of one at work. */
 .side-state,
 .side-sep,
 .side-age {
   flex: none;
 }
-.side-state--working,
-.side-state--draft {
+.side-state--working {
   color: var(--accent-ink);
+}
+.side-state--draft {
+  color: var(--muted);
 }
 .side-state--approval,
 .side-state--question {
