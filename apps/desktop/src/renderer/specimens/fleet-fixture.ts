@@ -30,10 +30,12 @@
  * succeeded ("checked 09:00").
  *
  * The sidebar's seven threads run on atlas, and are 7 of its 12 running
- * sessions, so the sidebar and the Fleet page agree. Atlas's work is nine
- * groups in Running here: the seven rows of the sidebar (the Payout row also
- * holds two Agent sessions), one workflow run with two steps working and
- * five waiting for a slot, and Ada, an assistant.
+ * sessions, so the sidebar and the Fleet page agree. They are the threads of
+ * every other shell specimen, with no session added, so the sidebar's foot
+ * reads "3 working · 2 waiting · 2 idle" here as it does on every other
+ * screen. Atlas's work is ten groups in Running here: the seven rows of the
+ * sidebar, a workflow run with two steps working and five waiting for a
+ * slot, a second run with two steps working, and Ada, an assistant.
  */
 import {
   DISK_USAGE_CAPABILITY,
@@ -536,16 +538,19 @@ const buildBusySessions = (runnerId: string, prefix: string, count: number): Ses
     );
   });
 
-/** The id of the one workflow run the fixture's step sessions belong to, which is running. */
+/** The id of the workflow run most of the fixture's step sessions belong to, which is running. */
 const NIGHTLY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a1";
 
 /** The name of the workflow the running run belongs to, which is what a machine's Running here names the run by. */
 const NIGHTLY_WORKFLOW_NAME = "Nightly build";
 
-/** The workspace of the Payout row, which holds the Thread and its two Agent sessions. */
+/** The id of a second running run, of the Dependency check workflow, whose two steps work on atlas. */
+const DEPENDENCY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a2";
+
+/** The workspace of the Payout row, which holds its Thread. */
 const PAYOUT_WORKSPACE_ID = "ws-payout";
 
-/** The repository the Payout row works in, and its worktree on atlas, where the Thread and its Agent sessions work. */
+/** The repository the Payout row works in, and its worktree on atlas, where the Thread works. */
 const PAYMENTS_REPO = buildRepo(
   "res-payments-api",
   "git@github.com:acme/payments-api.git",
@@ -557,14 +562,14 @@ const PAYOUT_WORKSPACE = buildWorkspace({
   runnerId: ATLAS_ID,
   kind: "ephemeral",
   checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, "rogier/payout-report"), form: "worktree" }],
-  sessionIds: ["s-payout", "atlas-payout-review", "atlas-payout-tests"],
+  sessionIds: ["s-payout"],
   diskUsage: { sizeBytes: 17 * GB, freesBytes: 16.2 * GB, measuredAt: minutesAgo(12) },
 });
 
 /**
- * The sidebar's seven threads, which run on atlas. The Payout thread shares
- * its workspace with two Agent sessions, so the three are one row. A thread
- * started when it was created, which is the minutes ago its record says.
+ * The sidebar's seven threads, which run on atlas. The Payout thread works in
+ * its own worktree on atlas. A thread started when it was created, which is
+ * the minutes ago its record says.
  */
 const ATLAS_THREADS: ReadonlyArray<Session> = SPECIMEN_RECORDS.threads.map((thread) => ({
   ...thread,
@@ -573,24 +578,13 @@ const ATLAS_THREADS: ReadonlyArray<Session> = SPECIMEN_RECORDS.threads.map((thre
   ...(thread.id === "s-payout" ? { workspaceId: PAYOUT_WORKSPACE_ID } : {}),
 }));
 
-/** Atlas's sessions that are not Threads of the sidebar: the Payout row's two Agent sessions, Ada's, and the run's seven steps. */
+/**
+ * Atlas's sessions that are not Threads of the sidebar: Ada's, the Nightly
+ * build's seven steps and the Dependency check's two. None is an Agent
+ * session: the sidebar would list it and count it in its foot, which must
+ * read as it does on every other shell specimen.
+ */
 const ATLAS_OTHER_SESSIONS: ReadonlyArray<Session> = [
-  buildFleetSession(
-    "atlas-payout-review",
-    ATLAS_ID,
-    "busy",
-    "agent",
-    "Review the payout totals",
-    4,
-    {
-      workspaceId: PAYOUT_WORKSPACE_ID,
-      agentId: "agent-reviewer",
-    },
-  ),
-  buildFleetSession("atlas-payout-tests", ATLAS_ID, "busy", "agent", "Write the payout tests", 3, {
-    workspaceId: PAYOUT_WORKSPACE_ID,
-    agentId: "agent-tester",
-  }),
   buildAssistantSession(ADA, {
     minutesAgo: 9,
     status: "busy",
@@ -611,6 +605,19 @@ const ATLAS_OTHER_SESSIONS: ReadonlyArray<Session> = [
       stepId: "typecheck",
     },
   ),
+  buildFleetSession("atlas-check-audit", ATLAS_ID, "busy", "run", "Dependency check · audit", 4, {
+    runId: DEPENDENCY_RUN_ID,
+    stepId: "audit",
+  }),
+  buildFleetSession(
+    "atlas-check-outdated",
+    ATLAS_ID,
+    "busy",
+    "run",
+    "Dependency check · outdated",
+    4,
+    { runId: DEPENDENCY_RUN_ID, stepId: "outdated" },
+  ),
   ...Array.from({ length: 5 }, (_, index) =>
     buildFleetSession(
       `atlas-run-test-${String(index + 1)}`,
@@ -625,10 +632,10 @@ const ATLAS_OTHER_SESSIONS: ReadonlyArray<Session> = [
 ];
 
 /**
- * Every session that has not exited: atlas runs 12 (the seven threads, the
- * Payout row's two Agent sessions, Ada's session and two steps of the run)
- * and has 5 steps waiting for a slot; beelink runs 9, bosgame 3 and studio 2;
- * mini holds 2 open Threads from before it went offline.
+ * Every session that has not exited: atlas runs 12 (the seven threads,
+ * Ada's session, two steps of the Nightly build and two of the Dependency
+ * check) and has 5 steps waiting for a slot; beelink runs 9, bosgame 3 and
+ * studio 2; mini holds 2 open Threads from before it went offline.
  */
 const FLEET_SESSIONS: ReadonlyArray<Session> = [
   ...ATLAS_THREADS,
@@ -1032,7 +1039,10 @@ export interface FleetRecords {
 export const FLEET_RECORDS: FleetRecords = {
   harnesses: FLEET_HARNESSES,
   sessions: FLEET_SESSIONS,
-  workflowNames: { [NIGHTLY_RUN_ID]: NIGHTLY_WORKFLOW_NAME },
+  workflowNames: {
+    [NIGHTLY_RUN_ID]: NIGHTLY_WORKFLOW_NAME,
+    [DEPENDENCY_RUN_ID]: "Dependency check",
+  },
   controller: FLEET_CONTROLLER,
   metrics: FLEET_METRICS,
   activity: FLEET_ACTIVITY,
@@ -1050,7 +1060,7 @@ export const FLEET_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
   workspaces: [PAYOUT_WORKSPACE, ...IDLE_WORKSPACE_RECORDS.map(({ workspace }) => workspace)],
   resources: [PAYMENTS_REPO],
-  threads: [...ATLAS_THREADS, ...ATLAS_OTHER_SESSIONS.filter(({ kind }) => kind === "agent")],
+  threads: ATLAS_THREADS,
   assistants: [
     {
       assistant: ADA,
