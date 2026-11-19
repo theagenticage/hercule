@@ -39,6 +39,7 @@ describe("buildBranchField", () => {
 
   it("labels the revision a new branch starts from, so the lip reads as its base", () => {
     expect(buildBranchField(pick, around)?.label).toBe("From remote default");
+    expect(buildBranchField(pick, around)?.phrase).toBe("from remote default");
     const local = buildBranchField(
       {
         kind: "ephemeral",
@@ -49,6 +50,7 @@ describe("buildBranchField", () => {
       around,
     );
     expect(local?.label).toBe("From local branch release/2.4");
+    expect(local?.phrase).toBe("from local branch release/2.4");
   });
 
   it("keeps remote creation available without inventing local refs from another runner", () => {
@@ -85,8 +87,21 @@ describe("buildBranchField", () => {
       { workspaces: [PRIMARY, infra], runnerId: MOSS.id },
     );
     expect(field?.label).toBe("From local branch release/2.4 · remote default");
+    expect(field?.phrase).toBe("from local branch release/2.4, remote default");
     expect(field?.locked).not.toBeNull();
     expect(field?.rows).toEqual([]);
+  });
+
+  it("names the branch main files keep, in the lip's phrase as in its label", () => {
+    const field = buildBranchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
+    expect(field?.label).toBe(PRIMARY.checkouts[0]!.branch);
+    expect(field?.phrase).toBe(PRIMARY.checkouts[0]!.branch);
+    const unobserved = buildBranchField(
+      { kind: "primary", resourceId: WEBSHOP.id },
+      { ...around, workspaces: [] },
+    );
+    expect(unobserved?.label).toBe("Not observed");
+    expect(unobserved?.phrase).toBe("branch not observed");
   });
 
   it("returns no revision picker for joined files or a Thread without a checkout", () => {

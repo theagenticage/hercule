@@ -84,7 +84,6 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [
       { selector: "aside.side .seg--side", kind: "boundary" },
       { selector: "aside.side .icon-btn svg", kind: "mark" },
-      { selector: "aside.side .side-detail--ask .side-glyph", kind: "mark" },
     ],
   },
   {

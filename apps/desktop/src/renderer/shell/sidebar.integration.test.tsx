@@ -257,6 +257,36 @@ describe("the sidebar", () => {
     ).toBeTruthy();
   });
 
+  it("says each row's state on its second line, before where it works, and the age only when it has none", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
+    const { nav } = await startSidebar();
+    /** Returns the drawn text of the first and the second line of the row in a project named `name`. */
+    const readLines = (name: RegExp): readonly [string, string] => {
+      const row = within(nav).getAllByRole("link", { name }).at(-1)!;
+      const line = row.querySelector(".side-line")!;
+      // The age's words, such as "22 minutes ago", are in a hidden element.
+      const detail = [...row.querySelector(".side-detail")!.childNodes]
+        .filter((node) => !(node instanceof HTMLElement && node.hidden))
+        .map((node) => node.textContent)
+        .join("");
+      return [line.textContent ?? "", detail];
+    };
+
+    // The title is the whole first line: no status slot follows it.
+    expect(readLines(/^Fix flaky webhook tests/)).toEqual([
+      "Fix flaky webhook tests",
+      "Working · moss",
+    ]);
+    expect(readLines(/^Write the retry runbook/)).toEqual([
+      "Write the retry runbook",
+      "Approval · Run git push?",
+    ]);
+    expect(readLines(/^Bump the Bun pin/)).toEqual(["Bump the Bun pin", "main · 22m"]);
+    expect(nav.querySelector(".side-line .side-end")).toBeNull();
+    // The harness's mark left the second line; it stays in the hover card.
+    expect(nav.querySelector(".side-detail svg")).toBeNull();
+  });
+
   it("hides every face, mark and avatar from assistive technology", async () => {
     const { nav } = await startSidebar();
     const sidebar = nav.closest("aside")!;
@@ -408,7 +438,7 @@ describe("the sidebar", () => {
     });
     expect(draft.getAttribute("aria-current")).toBe("page");
     // The worktree's branch was generated, so the row names only its machine.
-    expect(draft.textContent).toBe("New thread" + "draft" + "moss");
+    expect(draft.textContent).toBe("New thread" + "Draft · moss");
     // The draft's project comes first, and the draft is its first row.
     expect(readDraftProject()).toEqual([
       `header:project:${webshop!.id}`,
@@ -427,7 +457,7 @@ describe("the sidebar", () => {
     });
     // The repo's main workspace is on a branch the user chose, so the row names it.
     expect(nav.querySelector('[data-key="draft"]')?.textContent).toBe(
-      "New thread" + "draft" + "main",
+      "New thread" + "Draft · main",
     );
     expect(readDraftProject()[1]).toBe("draft");
   });
@@ -443,12 +473,12 @@ describe("the sidebar", () => {
     const heading = within(nav).getByRole("heading", { name: "No project" });
     const items = [...nav.querySelectorAll(".side-item")];
     expect(items.slice(items.indexOf(heading) + 1).map((item) => item.textContent)).toEqual([
-      "New thread" + "draft" + "moss",
+      "New thread" + "Draft · moss",
       expect.stringContaining("Sketch the pricing page"),
     ]);
   });
 
-  it("tints the draft's row, and a thread's row while its composer holds unsent text, with a pencil before the title", async () => {
+  it("tints the draft's row, and a thread's row while its composer holds unsent text, with a pencil before the thread's title", async () => {
     const { nav, router } = await startSidebar();
     const { pendingSubmissions } = router.options.context.controller!;
     /** Returns whether `row` is tinted and has a pencil before its title. */
@@ -461,7 +491,11 @@ describe("the sidebar", () => {
     });
     const bunPin = () => within(nav).getByRole("link", { name: /^Bump the Bun pin/ });
 
-    expect(isMarkedUnsent(draft)).toBe(true);
+    // The draft's row says "Draft" on its second line in place of a pencil,
+    // so its title starts where every other title does.
+    expect(draft.classList.contains("is-unsent")).toBe(true);
+    expect(draft.querySelector(".side-name svg")).toBeNull();
+    expect(draft.querySelector(".side-state")?.textContent).toBe("Draft");
     expect(isMarkedUnsent(bunPin())).toBe(false);
 
     act(() => {
@@ -697,7 +731,7 @@ describe("the sidebar", () => {
     const { nav } = await startSidebar({ records: NO_SIDEBAR_RECORDS });
 
     const items = [...nav.querySelectorAll(".side-item")].map((item) => item.textContent);
-    expect(items).toEqual(["No project", "New thread" + "draft" + "No workspace"]);
+    expect(items).toEqual(["No project", "New thread" + "Draft · No workspace"]);
     expect(within(nav).queryByText("No threads yet")).toBeNull();
     expect(readCounts()).toBe("0 working · 0 waiting · 0 idle");
   });

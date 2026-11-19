@@ -16,6 +16,7 @@ import type { ModelOption } from "@hercule/contract";
 import { useModelProfileUpdate } from "../../app/model-profile-cache";
 import { pluginsQuery, settingsQuery } from "../../app/queries";
 import { readLastOpenProfileId, rememberOpenProfile } from "../../app/recent-models";
+import { ChevronDownIcon } from "../../icons/chevron-down";
 import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
 import { ModelMenu } from "./model-menu";
@@ -23,15 +24,28 @@ import { OptionsMenu } from "./options-menu";
 import { HarnessLogo } from "./harness-logo";
 
 /**
+ * Renders the small chevron that ends a pick which opens a menu, so the
+ * pick reads as one. A pick that cannot open a menu draws none.
+ */
+export function PickChevron(): JSX.Element {
+  return (
+    <span className="pick-chevron">
+      <ChevronDownIcon size={12} />
+    </span>
+  );
+}
+
+/**
  * Renders the model options pick in a composer's row: the options' values in
  * one word after the option's name, such as "Effort: High", or "Model
- * options", as a trigger that opens the options menu, see `OptionsMenu`. The
- * name stays in the muted ink while the pick is open.
+ * options", then a chevron (`PickChevron`), as a trigger that opens the
+ * options menu, see `OptionsMenu`. The name stays in the muted ink while the
+ * pick is open.
  *
  * `descriptors` are the options the model declares, `selected` the values in
  * use, and `modelName` the model's name for the menu's header. `onChoose`
  * receives the choice of each option the user sets. `disabled` leaves the
- * trigger drawn but unable to open the menu.
+ * trigger drawn, with no chevron, but unable to open the menu.
  */
 export function OptionsPick({
   descriptors,
@@ -68,6 +82,7 @@ export function OptionsPick({
               {label.value}
             </span>
           )}
+          {disabled ? null : <PickChevron />}
         </>
       }
     >
@@ -86,10 +101,10 @@ export function OptionsPick({
 }
 
 /**
- * Renders the model pick in a composer's row: the pill with the harness's
- * logo, the account, the model and "in pi" when the harness is not the
- * account's default, as a trigger that opens the model menu,
- * see `ModelMenu`.
+ * Renders the model pick in a composer's row: the harness's logo, the
+ * account, the model and "in pi" when the harness is not the account's
+ * default, then a chevron (`PickChevron`), as a trigger that opens the model
+ * menu, see `ModelMenu`. It is drawn as the other picks are, as text.
  *
  * `pill` is what the trigger shows, and `catalogs`, `config`, `kind` and
  * `runnerId` are what the menu is built from; `runnerId` is the machine a
@@ -97,8 +112,8 @@ export function OptionsPick({
  * returns the Recent list, which the menu reads when it opens. `onChoose`
  * receives the choice a row makes, and the menu then closes. `onSignIn`, when
  * given, puts a Sign in link on a row that signing in would fix, and the menu
- * closes before it is called. `disabled` leaves the trigger drawn but unable
- * to open the menu.
+ * closes before it is called. `disabled` leaves the trigger drawn, with no
+ * chevron, but unable to open the menu.
  *
  * The menu reads nothing from the controller when it opens: the profiles, the
  * accounts and the plugins are the shell's reads, already in the cache. So are
@@ -147,13 +162,14 @@ export function ModelPick({
       align="end"
       width="wide"
       disabled={disabled}
-      triggerClassName="pick pick--pill"
+      triggerClassName="pick pick--model"
       trigger={
         <>
           {pill.harnessId === null ? null : <HarnessLogo harnessId={pill.harnessId} size={13} />}
           {pill.account === null ? null : <span className="faint">{pill.account}</span>}
           <span className="pick-name">{pill.name ?? "No model"}</span>
           {pill.inHarness === null ? null : <span className="faint">in {pill.inHarness}</span>}
+          {disabled ? null : <PickChevron />}
         </>
       }
     >

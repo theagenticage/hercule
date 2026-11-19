@@ -134,9 +134,12 @@ button.pick:not([aria-disabled="true"]):hover,
   background: var(--hover);
   color: var(--ink);
 }
-.pick--pill {
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  color: var(--ink);
+/* Not in the book, whose model pick is a filled chip and whose other picks
+   are bare words. Every pick that opens a menu is text that ends in a small
+   chevron, the model's too, so each reads as a pick and all read alike. The
+   chevron sits 4px after the text, closer than the 6px after the icon. */
+.pick-chevron {
+  margin-left: -2px;
 }
 .pick .br {
   opacity: 0.85;
@@ -146,8 +149,11 @@ button.pick:not([aria-disabled="true"]):hover,
 .pick-option-name {
   color: var(--muted);
 }
+/* Send, and Stop below, never shrink: when the row runs out of room, the
+   model's name gives way instead (`.pick--model`). */
 .send {
   display: inline-grid;
+  flex: none;
   place-items: center;
   width: 32px;
   height: 32px;
@@ -165,6 +171,7 @@ button.pick:not([aria-disabled="true"]):hover,
    starts or ends. */
 .stop {
   display: inline-grid;
+  flex: none;
   place-items: center;
   width: 32px;
   height: 32px;
@@ -280,6 +287,11 @@ button.pick:not([aria-disabled="true"]):hover,
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* With no note, the spacer takes no room of its own, so a narrow composer
+   leaves it to the picks. */
+.composer-note:empty {
+  padding: 0;
+}
 /* Not in the book, which draws no failed send. The error sits under the
    row, on the field's left edge, in the app's error type. It keeps to one
    line, so the card does not grow with a long message: what does not fit
@@ -305,10 +317,10 @@ button.pick:not([aria-disabled="true"]):hover,
 /* Not in the book, whose model names are short. When the row runs out of
    room, the model's name ellipsizes and the other controls keep their
    size. */
-.pick--pill {
+.pick--model {
   min-width: 0;
 }
-.pick--pill > :not(.pick-name) {
+.pick--model > :not(.pick-name) {
   flex: none;
 }
 .pick-name {

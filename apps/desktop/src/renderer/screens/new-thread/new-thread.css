@@ -77,11 +77,30 @@
 .hello .lip {
   margin-bottom: 30px;
 }
+/* Not in the book, whose lip is a row of icons and words with the machine at
+   the right. A draft's lip is one line of picks with no icons, which reads
+   as a sentence: "New workspace · from remote default · on studio-mac". Its
+   words start where the field's text and the + start, 16px inside the card,
+   where the thread's lip leaves 4px more for its icons. */
+.lip--draft {
+  padding-left: 0;
+}
+/* The picks of the line, and a machine with its problem, sit in a row with
+   5px between them. The lip's own rule for its spans (composer.css) leaves
+   out spans in a popover, and the Inbox's start-thread dialog, which draws
+   this composer, is one, so these say it themselves. */
+.lip-picks,
+.lip-machine {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
 /* Not in the book, whose lip is plain text. A draft's workspace, branch and
-   machine can still change, so each is a button that opens its menu. It
-   looks like the text it replaces, and lights up as a pick does, while
-   hovered or while its menu is open. One that cannot change stays text, and
-   does not light up. */
+   machine can still change, so each is a button that opens its menu and
+   ends in a chevron. It lights up while hovered or while its menu is open.
+   One that cannot change stays text, with no chevron, and does not light
+   up. */
 .lip-pick {
   display: inline-flex;
   align-items: center;
@@ -94,8 +113,8 @@ button.lip-pick:hover,
   color: var(--ink);
 }
 /* Not in the book. When the thread's account cannot run on the machine, the
-   laptop gives way to an alert mark in marigold, the book's colour for "your
-   move", and the machine is followed by Sign in or by the reason. */
+   machine is followed by an alert mark in marigold, the book's colour for
+   "your move", and Sign in or the reason. */
 .lip-alert {
   color: var(--you-ink);
 }
@@ -142,6 +161,18 @@ button.lip-pick:hover,
 }
 .starts-h {
   margin: 0 0 10px 2px;
+}
+/* Not in the book. A click on a card adds one line to the message and
+   starts nothing, which a note after the heading says before the user
+   clicks. */
+.starts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.starts-note {
+  color: var(--muted);
+  font-size: var(--t-12);
 }
 .intake-note {
   display: flex;

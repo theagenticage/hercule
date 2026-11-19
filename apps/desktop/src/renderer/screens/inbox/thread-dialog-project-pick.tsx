@@ -1,9 +1,9 @@
 import { useId, useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
 import { ChatIcon } from "../../icons/chat";
 import { CheckIcon } from "../../icons/check";
-import { ChevronDownIcon } from "../../icons/chevron-down";
 import { FolderIcon } from "../../icons/folder";
 import { ProjectTile, type ProjectTint } from "../project-tile";
+import { PickChevron } from "../thread/composer-picks";
 import { usePopoverMenu } from "../use-popover-menu";
 import "../new-thread/new-thread.css";
 import "../thread/menus.css";
@@ -99,7 +99,7 @@ export function ProjectPick({
           : pick.kind === "unpicked"
             ? "Choose a project"
             : (chosen?.name ?? "")}
-        <ChevronDownIcon size={10} />
+        <PickChevron />
       </button>
       {pick.kind === "none" ? <span className="thread-dialog-lip-note">No checkout</span> : null}
       <div

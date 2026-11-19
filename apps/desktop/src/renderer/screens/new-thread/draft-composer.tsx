@@ -9,15 +9,12 @@ import {
   type ThreadChoice,
 } from "@hercule/client-core";
 import { AlertIcon } from "../../icons/alert";
-import { BranchIcon } from "../../icons/branch";
-import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
 import { SlidersIcon } from "../../icons/sliders";
-import { WorkspaceIcon } from "../../icons/workspace";
 import { ComposerCard, type ComposerAttachments } from "../session/composer-frame";
 import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
-import { ModelPick, OptionsPick } from "../thread/composer-picks";
+import { ModelPick, OptionsPick, PickChevron } from "../thread/composer-picks";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -28,11 +25,12 @@ import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./l
 export const DRAFT_MESSAGE_ID = "draft-message";
 
 /**
- * Renders one pick of the draft: its glyph and its label, as a trigger that
- * opens `children` as a menu above it, `width` wide (see `ComposerMenu`).
- * `className` is `pick` for a pick in the composer's row and `lip-pick` for
- * one in the lip. A pick that cannot change on this draft, `locked`, is plain
- * text with the reason as its tooltip.
+ * Renders one pick of the draft: its glyph, when it has one, its label and a
+ * chevron (`PickChevron`), as a trigger that opens `children` as a menu above
+ * it, `width` wide (see `ComposerMenu`). `className` is `pick` for a pick in
+ * the composer's row and `lip-pick` for one in the lip. A pick that cannot
+ * change on this draft, `locked`, is plain text with no chevron, and the
+ * reason as its tooltip.
  */
 function DraftPick({
   className,
@@ -47,7 +45,7 @@ function DraftPick({
 }: {
   readonly className: "pick" | "lip-pick";
   readonly label: string;
-  readonly glyph: ReactNode;
+  readonly glyph?: ReactNode;
   readonly locked: string | null;
   readonly menuLabel: string;
   readonly align: "start" | "end";
@@ -74,6 +72,7 @@ function DraftPick({
         <>
           {glyph}
           {label}
+          <PickChevron />
         </>
       }
       onOpen={onOpen}
@@ -94,13 +93,14 @@ export interface DraftPickReasons {
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
  * page draws it: the card, see `ComposerCard`, with the shelf of attached
  * images, the message field and a row with Attach, the access mode, the model options when the model has
- * any, the model, Dictate and Send; then the lip under it, with the
- * workspace, the branch when there is one to pick, and the machine.
+ * any, the model, Dictate and Send; then the lip under it, one line of
+ * picks with no icons and a faint " · " between them: the workspace, the
+ * branch when there is one to pick, and the machine, as "New workspace ·
+ * from remote default · on studio-mac".
  *
- * When the account cannot run on the machine, the machine's laptop glyph
- * turns into an alert mark, and the machine is followed by Sign in when a
- * sign-in fixes the problem, which calls `onSignIn`, or else by the reason,
- * such as "offline".
+ * When the account cannot run on the machine, the machine is followed by an
+ * alert mark and Sign in when a sign-in fixes the problem, which calls
+ * `onSignIn`, or else the reason, such as "offline".
  *
  * Every selector makes one choice, which is passed to `onChoose`, and the
  * caller records it in the draft's picks. Joining an existing workspace sets
@@ -198,19 +198,10 @@ export function DraftComposer({
   const machinePick = (
     <DraftPick
       className="lip-pick"
-      label={fields.machine.name}
-      glyph={
-        problem === null ? (
-          <LaptopIcon size={13} />
-        ) : (
-          <span className="lip-alert">
-            <AlertIcon size={13} />
-          </span>
-        )
-      }
+      label={`on ${fields.machine.name}`}
       locked={offReason ?? fields.machine.locked}
       menuLabel="Machine"
-      align="end"
+      align="start"
       width="widest"
     >
       {(close) => (
@@ -224,6 +215,9 @@ export function DraftComposer({
       )}
     </DraftPick>
   );
+  // The lip reads as one sentence: its picks are parted by a faint dot, which
+  // is not part of any pick.
+  const separator = <span aria-hidden="true">·</span>;
   const { config } = resolved;
   const { pill } = fields.model;
   const descriptors = fields.options;
@@ -300,7 +294,7 @@ export function DraftComposer({
               onSignIn={onSignIn}
             />
           ) : (
-            <OffPick reason={offReason} label="Profile" isPill />
+            <OffPick reason={offReason} label="Profile" />
           )
         }
         fieldRef={fieldRef}
@@ -310,86 +304,91 @@ export function DraftComposer({
         autoFocus
         sendTitle="Start thread"
       />
-      <div className="lip">
+      <div className="lip lip--draft">
         {lipStart}
-        {offReason !== null ? null : (
-          <>
-            <DraftPick
-              className="lip-pick"
-              label={workspaceLabel}
-              glyph={<WorkspaceIcon size={13} />}
-              locked={fields.workspace.locked}
-              menuLabel="Workspace"
-              align="start"
-              // The workspace's and the machine's rows carry a second line; the
-              // branch menu's rows are short.
-              width="widest"
-              onOpen={onOpenWorkspaceMenu}
-            >
-              {(close) => (
-                <WorkspaceMenuContent
-                  menu={workspaceMenu}
-                  reason={pickReasons?.workspace ?? null}
-                  onPick={(picked) => {
-                    onChoose({ kind: "workspace", workspace: picked });
-                    close();
-                  }}
-                />
-              )}
-            </DraftPick>
-            {branch === null ? null : (
+        <span className="lip-picks">
+          {offReason !== null ? null : (
+            <>
               <DraftPick
                 className="lip-pick"
-                label={branch.label}
-                glyph={<BranchIcon size={13} />}
-                locked={branch.locked}
-                menuLabel="Branch"
+                label={workspaceLabel}
+                locked={fields.workspace.locked}
+                menuLabel="Workspace"
                 align="start"
-                width="narrow"
+                // The workspace's and the machine's rows carry a second line; the
+                // branch menu's rows are short.
+                width="widest"
                 onOpen={onOpenWorkspaceMenu}
               >
                 {(close) => (
-                  <BranchMenuContent
-                    field={branch}
+                  <WorkspaceMenuContent
+                    menu={workspaceMenu}
+                    reason={pickReasons?.workspace ?? null}
                     onPick={(picked) => {
-                      onChoose({
-                        kind: "workspace",
-                        workspace: setWorkspaceStartingRevision(workspace, picked),
-                      });
+                      onChoose({ kind: "workspace", workspace: picked });
                       close();
                     }}
                   />
                 )}
               </DraftPick>
-            )}
-          </>
-        )}
-        <span className="spacer" />
-        {problem === null ? (
-          machinePick
-        ) : (
-          // The machine and its problem read as one item, so they share a
-          // span and the lip's wider gap stays between items. A machine with
-          // no problem has no span, so the lip is the book's.
-          <span className="lip-machine">
-            {machinePick}
-            <span aria-hidden="true">·</span>
-            {signIn === null ? (
-              problem.reason
-            ) : (
-              <button
-                type="button"
-                className="link"
-                aria-label={`Sign in to ${signIn.subject}`}
-                onClick={() => {
-                  onSignIn(signIn);
-                }}
-              >
-                Sign in
-              </button>
-            )}
-          </span>
-        )}
+              {separator}
+              {branch === null ? null : (
+                <>
+                  <DraftPick
+                    className="lip-pick"
+                    label={branch.phrase}
+                    locked={branch.locked}
+                    menuLabel="Branch"
+                    align="start"
+                    width="narrow"
+                    onOpen={onOpenWorkspaceMenu}
+                  >
+                    {(close) => (
+                      <BranchMenuContent
+                        field={branch}
+                        onPick={(picked) => {
+                          onChoose({
+                            kind: "workspace",
+                            workspace: setWorkspaceStartingRevision(workspace, picked),
+                          });
+                          close();
+                        }}
+                      />
+                    )}
+                  </DraftPick>
+                  {separator}
+                </>
+              )}
+            </>
+          )}
+          {problem === null ? (
+            machinePick
+          ) : (
+            // The machine and its problem read as one item, so they share a
+            // span. A machine with no problem has no span.
+            <span className="lip-machine">
+              {machinePick}
+              {separator}
+              <span className="lip-alert">
+                <AlertIcon size={13} />
+              </span>
+              {signIn === null ? (
+                problem.reason
+              ) : (
+                <button
+                  type="button"
+                  className="link"
+                  aria-label={`Sign in to ${signIn.subject}`}
+                  onClick={() => {
+                    onSignIn(signIn);
+                  }}
+                >
+                  Sign in
+                </button>
+              )}
+            </span>
+          )}
+        </span>
       </div>
     </div>
   );
@@ -397,30 +396,22 @@ export function DraftComposer({
 
 /**
  * Renders a pick that waits for a choice made elsewhere, as faint words with
- * `reason` as its tooltip: the Inbox's start-thread dialog shows "Access",
- * "Effort" and "Profile" this way until a project is picked. `isPill` gives it
- * the pill the model pick has.
+ * `reason` as its tooltip and no chevron: the Inbox's start-thread dialog
+ * shows "Access", "Effort" and "Profile" this way until a project is picked.
  */
 function OffPick({
   reason,
   label,
   glyph,
-  isPill,
 }: {
   readonly reason: string;
   readonly label: string;
   readonly glyph?: ReactNode;
-  readonly isPill?: boolean | undefined;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      className={isPill === true ? "pick pick--pill is-off" : "pick is-off"}
-      aria-disabled="true"
-      title={reason}
-    >
+    <button type="button" className="pick is-off" aria-disabled="true" title={reason}>
       {glyph}
-      {isPill === true ? <span className="pick-name">{label}</span> : label}
+      {label}
     </button>
   );
 }

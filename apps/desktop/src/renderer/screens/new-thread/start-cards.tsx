@@ -4,7 +4,6 @@ import { useRouteContext } from "@tanstack/react-router";
 import { buildStartCards } from "@hercule/client-core";
 import { startTasksQuery } from "../../app/queries";
 import { IntakeIcon } from "../../icons/intake";
-import { TasksIcon } from "../../icons/tasks";
 import { GitHubMark } from "../../logos";
 
 // The starters show only while a project has no planned task, so they load the
@@ -16,9 +15,10 @@ const StarterThreads = lazy(() =>
 
 /**
  * Renders the start cards under a Draft Thread's composer, as the Bureau
- * book's `session-empty` page draws them: "Start from Intake", then up to
- * three planned tasks of the project, most urgent first. Each card shows where
- * the task came from, its priority in words alone ("Urgent" in the failure
+ * book's `session-empty` page draws them: "Start from Intake" and a note that
+ * says what a click does, then up to three planned tasks of the project, most
+ * urgent first. Each card shows where the task came from (the GitHub mark, or
+ * else Intake's icon), its priority in words alone ("Urgent" in the failure
  * hue), and its title.
  *
  * While the project has no planned task, three starter threads take the cards'
@@ -57,10 +57,13 @@ export function StartCards({
   }
   return (
     <section aria-labelledby={headingId}>
-      <h2 className="starts-h section-h" id={headingId}>
-        <IntakeIcon size={14} />
-        Start from Intake
-      </h2>
+      <div className="starts-h starts-head">
+        <h2 className="section-h" id={headingId}>
+          <IntakeIcon size={14} />
+          Start from Intake
+        </h2>
+        <span className="starts-note">Puts the Task in your message</span>
+      </div>
       <div className="starts">
         {cards.map((card) => (
           <button
@@ -72,7 +75,7 @@ export function StartCards({
             }}
           >
             <span className="start-top">
-              {card.source === "github" ? <GitHubMark size={14} /> : <TasksIcon size={14} />}
+              {card.source === "github" ? <GitHubMark size={14} /> : <IntakeIcon size={14} />}
               <span className={card.priority === "urgent" ? "start-priority is-urgent" : undefined}>
                 {card.priorityText}
               </span>

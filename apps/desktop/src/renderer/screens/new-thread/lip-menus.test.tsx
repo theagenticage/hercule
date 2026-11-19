@@ -76,6 +76,7 @@ describe("the branch menu", () => {
     header: "Starting revision",
     note: "the new workspace starts from it",
     label: "Remote: main",
+    phrase: "from remote branch main",
     value: "remote:main",
     glyph: true,
     locked: null,
