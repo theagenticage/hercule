@@ -44,7 +44,7 @@ import {
   REGRESSED,
   REVIEW,
 } from "./inbox-pane-fixture";
-import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import { SPECIMEN_INBOX_WAITING, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import {
   buildPlugin,
   GITHUB_PLUGIN,
@@ -348,7 +348,7 @@ const SAVED_QUERIES: InboxOutline["savedQueries"] = [
     name: "Someone waits on me",
     order: "waiting",
     signalKinds: [],
-    count: 6,
+    count: SPECIMEN_INBOX_WAITING,
   },
   { id: CORE_SAVED_QUERY_IDS.mine, name: "Mine", order: "newest", signalKinds: [], count: 2 },
   { id: CORE_SAVED_QUERY_IDS.updates, name: "Updates", order: "newest", signalKinds: [], count: 3 },

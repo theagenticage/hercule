@@ -25,11 +25,12 @@
    - --rim draws the rim of the chrome's floating panels: the header's pills, menus and
      popovers, the queued inputs (through --glass-rim). The light themes set it equal to --line;
      the dark themes set it apart, quiet.
-   - --control-edge draws the edge of every control: a button, a toolbar control, a segmented
-     control's track, a text or search field and the composer. It reaches 3:1 (WCAG 1.4.11)
-     against every surface a control sits on (--bg, --surface, --raised, --sunken and
-     --composer-fill), in the theme's own hue. It is never faded by the glass, which would take it
-     under 3:1. The composer's fill is --composer-fill: --raised in the light themes, one step
+   - --control-edge draws the edge of every control: a button, a toolbar control, a text or
+     search field and the composer. A segmented control's track is the exception: it takes the
+     quiet --divider, and its raised puck tells the segments apart. --control-edge reaches 3:1
+     (WCAG 1.4.11) against every surface a control sits on (--bg, --surface, --raised, --sunken
+     and --composer-fill), in the theme's own hue. It is never faded by the glass, which would
+     take it under 3:1. The composer's fill is --composer-fill: --raised in the light themes, one step
      lighter than --raised in the dark ones. Each theme sets both, so a theme nested in another
      never inherits the outer theme's values.
 

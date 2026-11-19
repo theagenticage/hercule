@@ -360,6 +360,13 @@ export const SPECIMEN_MODEL_PROFILE: ModelProfile = {
   updatedAt: new Date(SPECIMEN_NOW).toISOString(),
 };
 
+/**
+ * How many things someone waits on the user for in the Inbox: the six items
+ * of the Inbox specimen's "Someone waits on me". The sidebar's Inbox row
+ * shows this count on every screen, so every specimen shows one workspace.
+ */
+export const SPECIMEN_INBOX_WAITING = 6;
+
 /** Every list the sidebar reads, as its query returns it. */
 export const SPECIMEN_RECORDS: SidebarRecords = {
   threads: SPECIMEN_THREADS.map(
@@ -375,4 +382,5 @@ export const SPECIMEN_RECORDS: SidebarRecords = {
   accounts: SPECIMEN_ACCOUNTS,
   modelProfiles: [SPECIMEN_MODEL_PROFILE],
   user: { username: "Rogier" },
+  inboxWaiting: SPECIMEN_INBOX_WAITING,
 };
