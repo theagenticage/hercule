@@ -109,6 +109,7 @@
   pointer-events: none;
 }
 .composer-row {
+  container: composer-row / inline-size;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -140,6 +141,13 @@ button.pick:not([aria-disabled="true"]):hover,
    chevron sits 4px after the text, closer than the 6px after the icon. */
 .pick-chevron {
   margin-left: -2px;
+}
+/* A narrow composer, such as an 800px window's, has no room for three chevrons: with them the
+   model's name would be cut. Below 540px the chevrons go and the picks keep their words. */
+@container composer-row (max-width: 539px) {
+  .pick-chevron {
+    display: none;
+  }
 }
 .pick .br {
   opacity: 0.85;
