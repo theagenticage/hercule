@@ -31,7 +31,12 @@ import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
-import { McpServerChecksLayer, McpServerService, McpServerServiceLayer } from "../mcp-servers";
+import {
+  McpServerCallsLayer,
+  McpServerChecksLayer,
+  McpServerService,
+  McpServerServiceLayer,
+} from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -1139,6 +1144,8 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(McpServerChecksLayer),
     Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
   ),
+  // The gateway's calls to outside MCP servers.
+  McpServerCallsLayer,
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),

@@ -8,19 +8,24 @@
  * - whether a request is authorized, by its `Authorization` header, which is
  *   how a test scripts a 401;
  * - whether it redirects instead of answering;
- * - whether it holds every answer until the test lets go.
+ * - whether it holds every answer until the test lets go;
+ * - what a call of each tool answers: its arguments echoed back, a tool's own
+ *   error, a JSON-RPC error, or an answer over the size cap;
+ * - what to answer to a request instead of the protocol, for a scripted 401, a
+ *   404 for an expired MCP session or a 403.
  *
  * It decides what to answer when a request arrives, and holds the answer
  * after that, so a test can change what the fake does while an answer is on
- * its way. It records every request's JSON-RPC method, address,
- * `Authorization` header and `Mcp-Protocol-Version` header, so a test can
- * check what the controller sent.
+ * its way. It records every request's JSON-RPC method, tool, address,
+ * `Authorization`, `Mcp-Session-Id` and `Mcp-Protocol-Version` headers, so a
+ * test can check what the controller sent.
  *
  * The helpers below the fake are the ones every test of an MCP Server's
  * checks and operations shares: reading the stored row, creating a server and
  * waiting for a result.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -30,15 +35,52 @@ import { McpProtocol, McpSchema, McpServer } from "effect/ai";
 import { expect } from "vitest";
 import type { McpServer as McpServerRecord } from "@hercule/contract";
 import { connectionRepository, OAUTH_TOKENS } from "../connections";
+import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso, withTransaction } from "../db";
 import { get, post, send, type ServerHarness } from "../http/testing";
-import type { SetUpController } from "../workflows/testing";
+import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
+import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 
-/** One tool the fake lists. Calling it answers with no content. */
+/**
+ * One tool the fake lists. A call answers as `answer` says:
+ *
+ * - `echo` (the default): a text block holding the call's arguments as JSON;
+ * - `tool-error`: a result with `isError: true`;
+ * - `rpc-error`: a JSON-RPC error, the way a server refuses bad arguments;
+ * - `too-large`: a text block over 4 MiB.
+ */
 export interface FakeTool {
   readonly name: string;
   readonly description: string;
+  readonly answer?: "echo" | "tool-error" | "rpc-error" | "too-large";
 }
+
+/** What the fake answers a call with, by `FakeTool.answer`. */
+const answerCall = (fake: FakeTool, payload: unknown) => {
+  switch (fake.answer ?? "echo") {
+    case "echo":
+      return Effect.succeed(
+        new McpSchema.CallToolResult({
+          content: [{ type: "text", text: JSON.stringify(payload) }],
+        }),
+      );
+    case "tool-error":
+      return Effect.succeed(
+        new McpSchema.CallToolResult({
+          content: [{ type: "text", text: "the tool failed on its own" }],
+          isError: true,
+        }),
+      );
+    case "rpc-error":
+      return Effect.fail(new McpSchema.InvalidParams({ message: "the arguments do not fit" }));
+    case "too-large":
+      return Effect.succeed(
+        new McpSchema.CallToolResult({
+          content: [{ type: "text", text: "x".repeat(5 * 1024 * 1024) }],
+        }),
+      );
+  }
+};
 
 /** What the fake can be asked to speak and list. */
 export interface FakeUpstreamSettings {
@@ -57,11 +99,24 @@ export interface FakeUpstreamSettings {
 export interface RecordedRequest {
   /** The JSON-RPC method, or `?` for a request that carries none, such as a DELETE. */
   readonly method: string;
+  /** The tool a `tools/call` names, and `undefined` for every other request. */
+  readonly tool: string | undefined;
+  /** The `Mcp-Session-Id` header, which names the upstream MCP session of a legacy revision. */
+  readonly sessionId: string | null;
   /** The path and query of the address the request went to. */
   readonly url: string;
   readonly authorization: string | null;
   readonly protocolVersion: string | null;
   status: number | undefined;
+}
+
+/** A request the fake lets in, as `FakeUpstream.intercept` sees it. */
+export interface InterceptedRequest {
+  readonly method: string;
+  /** The JSON-RPC request's `params`. */
+  readonly params: Record<string, unknown> | undefined;
+  readonly authorization: string | null;
+  readonly sessionId: string | null;
 }
 
 export interface FakeUpstream {
@@ -80,6 +135,12 @@ export interface FakeUpstream {
   redirectTo: string | undefined;
   /** When set, every request gets this HTTP status and an empty body instead of an answer. */
   refuseWithStatus: number | undefined;
+  /**
+   * Looks at every request the fake lets in, before the protocol answers it,
+   * and may answer it instead by returning a response. The default answers
+   * nothing.
+   */
+  intercept: (request: InterceptedRequest) => Response | undefined;
   /** Replaces the revisions it speaks and the tools it lists, for the requests that follow. */
   configure: (settings: Partial<FakeUpstreamSettings>) => Promise<void>;
   /**
@@ -156,7 +217,7 @@ const buildHandler = (settings: FakeUpstreamSettings) => {
             inputSchema: { type: "object", properties: { text: { type: "string" } } },
           }),
           annotations: Context.empty(),
-          handle: () => Effect.succeed(new McpSchema.CallToolResult({ content: [] })),
+          handle: (payload) => answerCall(fake, payload),
         });
       }
     }),
@@ -199,15 +260,22 @@ export const startFakeUpstream = (
     hostname: "127.0.0.1",
     async fetch(request) {
       let method = "?";
+      let params: Record<string, unknown> | undefined;
       try {
-        const body = (await request.clone().json()) as { readonly method?: unknown };
+        const body = (await request.clone().json()) as {
+          readonly method?: unknown;
+          readonly params?: Record<string, unknown>;
+        };
         if (typeof body.method === "string") method = body.method;
+        params = body.params;
       } catch {
         // A request with no JSON body, such as a DELETE, has no method.
       }
       const address = new URL(request.url);
       const recorded: RecordedRequest = {
         method,
+        tool: method === "tools/call" && typeof params?.name === "string" ? params.name : undefined,
+        sessionId: request.headers.get("mcp-session-id"),
         url: `${address.pathname}${address.search}`,
         authorization: request.headers.get("authorization"),
         protocolVersion: request.headers.get("mcp-protocol-version"),
@@ -225,9 +293,16 @@ export const startFakeUpstream = (
                   status: 401,
                   headers: { "www-authenticate": "Bearer" },
                 })
-              : ((settings.answersLikeOfficialSdk
+              : (fake.intercept({
+                  method,
+                  params,
+                  authorization: recorded.authorization,
+                  sessionId: recorded.sessionId,
+                }) ??
+                (settings.answersLikeOfficialSdk
                   ? buildSdkRefusal(request, method, settings)
-                  : undefined) ?? (await built.handler(request, Context.empty())));
+                  : undefined) ??
+                (await built.handler(request, Context.empty())));
       requests.push(recorded);
       for (const waiting of arrivals.filter((one) => requests.length >= one.count)) {
         waiting.resolve();
@@ -247,6 +322,7 @@ export const startFakeUpstream = (
     authorize: () => true,
     redirectTo: undefined,
     refuseWithStatus: undefined,
+    intercept: () => undefined,
     configure: async (changes) => {
       settings = { ...settings, ...changes };
       const previous = built;
@@ -502,3 +578,74 @@ export const readServer = async (
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as McpServerRecord;
 };
+
+export interface RigOptions {
+  readonly fake?: Partial<FakeUpstreamSettings>;
+  readonly oauth?: boolean;
+  readonly buildUpstreamRequest?: (credentials: Record<string, string>) => {
+    readonly url: string;
+    readonly headers: Record<string, string>;
+  };
+  /** How often, in milliseconds, the scheduler looks for checks that are due. Without it, it looks once a minute. */
+  readonly checkInterval?: number;
+}
+
+/** What `withRig` hands the test. */
+export interface Rig {
+  readonly controller: SetUpController;
+  readonly fake: FakeUpstream;
+  readonly provider: ReturnType<typeof createDeviceProvider>;
+  /** Makes a Connection of the plugin's type: pasted `t0ken`, or OAuth tokens `stored-token`. */
+  readonly connect: () => Promise<string>;
+}
+
+/**
+ * Starts the fake outside server, and a controller with a plugin that offers
+ * it. With `oauth`, the Connection holds OAuth tokens and the refresh goes to
+ * a fake provider.
+ */
+export const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOptions = {}) => {
+  const fake = await startFakeUpstream(options.fake);
+  const provider = createDeviceProvider();
+  const { buildUpstreamRequest } = options;
+  try {
+    await withSetUpController(
+      async (controller) => {
+        const connect = () =>
+          options.oauth === true
+            ? insertOauthConnection(controller.harness, {
+                accessToken: "stored-token",
+                refreshToken: "refresh-1",
+              })
+            : createConnection(controller.base, controller.token, "acme/desk", { token: "t0ken" });
+        await body({ controller, fake, provider, connect });
+      },
+      [
+        buildMcpServerPlugin("acme", {
+          server:
+            buildUpstreamRequest === undefined
+              ? buildDeskMcpServer("acme", fake)
+              : {
+                  ...buildDeskMcpServer("acme", fake),
+                  buildUpstreamRequest: ({ credentials }) => buildUpstreamRequest(credentials),
+                },
+          ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
+        }),
+      ],
+      options.checkInterval === undefined
+        ? {}
+        : { mcpServerCheckInterval: Duration.millis(options.checkInterval) },
+    );
+  } finally {
+    await fake.stop();
+    await provider.stop();
+  }
+};
+
+export const refreshedToken = () =>
+  buildJsonResponse({
+    access_token: "refreshed-token",
+    refresh_token: "refresh-2",
+    token_type: "bearer",
+    expires_in: 8 * 60 * 60,
+  });
