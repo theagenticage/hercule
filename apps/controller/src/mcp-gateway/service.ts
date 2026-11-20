@@ -890,17 +890,18 @@ const make = Effect.gen(function* () {
     session: McpSession | undefined,
     message: Exclude<IncomingMessage, { readonly _tag: "batch" | "invalid" | "response" }>,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
+    const idOrNull = message._tag === "request" ? message.id : null;
+    const headers: HeaderMap = request.headers;
+    // An `initialize` that names an owned MCP session is checked against that
+    // session's revision like any other message, before it opens a new one.
+    if (session !== undefined) {
+      const refusal = checkSessionVersionHeader(headers["mcp-protocol-version"], session.revision);
+      if (refusal !== undefined) return Effect.succeed(respondRefusal(refusal, idOrNull));
+    }
     if (message._tag === "request" && message.method === "initialize") {
       return initialize(caller, state, message.id, message.params);
     }
-    const idOrNull = message._tag === "request" ? message.id : null;
-    const headers: HeaderMap = request.headers;
-    if (session !== undefined) {
-      const refusal = checkSessionVersionHeader(headers["mcp-protocol-version"], session.revision);
-      return refusal === undefined
-        ? dispatch("stateful", caller, state, session, message)
-        : Effect.succeed(respondRefusal(refusal, idOrNull));
-    }
+    if (session !== undefined) return dispatch("stateful", caller, state, session, message);
     // A `server/discover` that names no revision at all is how a client asks
     // which revisions the gateway speaks, so it is answered, not checked.
     const asksWhichRevisions =

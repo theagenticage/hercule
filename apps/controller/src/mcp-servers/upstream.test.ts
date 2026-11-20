@@ -190,8 +190,14 @@ describe("openUpstream", () => {
         config: {},
         identity: `identity-${token}`,
       });
-      const first = createUpstreamCallState(Effect.succeed(credentialsOf("token-one-1234")));
-      const second = createUpstreamCallState(Effect.succeed(credentialsOf("token-two-5678")));
+      const stateOf = (token: string) =>
+        createUpstreamCallState(
+          Effect.succeed(credentialsOf(token)),
+          Effect.succeed(credentialsOf(token)),
+          new Set(),
+        );
+      const first = stateOf("token-one-1234");
+      const second = stateOf("token-two-5678");
 
       await Effect.runPromise(
         Effect.scoped(

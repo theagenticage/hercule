@@ -133,6 +133,8 @@ export interface ConnectionCredentialsForUse {
  * - `not-serving`: the controller is frozen or sealed, and the caller asked
  *   for a strict refresh (`StrictServingForRefresh`), so nothing was sent to
  *   the provider. `message` is then the promotion gate's own text.
+ * - `refused`: the caller's own guard (`RefreshGuard`) refused the refresh,
+ *   so nothing was sent to the provider. The caller knows why.
  *
  * `message` is one line a person can read.
  */
@@ -148,6 +150,7 @@ export class ConnectionCredentialsUnavailable extends Schema.TaggedError<Connect
       "credentials-replaced",
       "no-credentials",
       "not-serving",
+      "refused",
     ]),
     message: Schema.String,
   },
@@ -170,6 +173,22 @@ export const StrictServingForRefresh = Context.Reference<boolean>(
   "hercule/controller/connections/StrictServingForRefresh",
   { defaultValue: () => false },
 );
+
+/**
+ * A check of the caller's own that a refresh of OAuth tokens runs under the
+ * Connection's refresh permit, immediately before the strict serving check
+ * (`StrictServingForRefresh`) and the provider request. It fails with
+ * `ConnectionCredentialsUnavailable` of reason `refused` when the caller may
+ * no longer have the refresh, and then nothing is sent to the provider.
+ *
+ * A caller that can lose the right to its call while it waits for the permit,
+ * such as a call of the MCP Gateway, provides it: the check it made before it
+ * asked for the credentials may be out of date by the time the permit is its.
+ * The default does nothing.
+ */
+export const RefreshGuard = Context.Reference<
+  Effect.Effect<void, ConnectionCredentialsUnavailable>
+>("hercule/controller/connections/RefreshGuard", { defaultValue: () => Effect.void });
 
 /**
  * A Connection that holds pasted credentials and no OAuth tokens has nothing
@@ -469,6 +488,8 @@ const make = Effect.gen(function* () {
    *   `ProviderUnreachable` and leaves the status unchanged. The error is not
    *   converted here, so a caller can tell this apart from a connection that
    *   needs reconnecting.
+   * - With `RefreshGuard` provided, it runs the guard after the permit was
+   *   taken and fails as the guard does, before the provider is called.
    * - With `StrictServingForRefresh` provided, it fails with `not-serving`
    *   when the controller is not serving at the moment the request would
    *   start, which is after the permit was taken.
@@ -513,6 +534,9 @@ const make = Effect.gen(function* () {
       if (refreshToken === undefined || Option.isNone(endpoint)) {
         return yield* cannotRefresh(row, held);
       }
+      // Under the permit and right before the serving check, so nothing the
+      // guard cannot see stands between its check and the provider request.
+      yield* yield* RefreshGuard;
       if (yield* StrictServingForRefresh) {
         yield* promotion.refuseUnlessServing.pipe(
           Effect.mapError(

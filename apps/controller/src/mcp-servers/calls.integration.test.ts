@@ -633,6 +633,112 @@ describe("a refresh that waited for the Connection's permit while the controller
   });
 });
 
+describe("a refresh that waited for the Connection's permit while the caller lost its right to the call", () => {
+  const leftTheList = () => new McpCallRefused({ reason: "not-in-list", message: "left the list" });
+
+  /** Makes the provider hold its answer to a refresh, as a failed one, until the returned function is called. */
+  const holdRefreshAnswer = (provider: Rig["provider"]) => {
+    let letAnswer: () => void = () => undefined;
+    const answers = new Promise<void>((resolve) => {
+      letAnswer = resolve;
+    });
+    provider.answers.token = async () => {
+      await answers;
+      return buildJsonResponse({}, 500);
+    };
+    return letAnswer;
+  };
+
+  it("does not call the provider to refresh a stale token, and refuses the call with the caller's refusal", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, provider, call }) => {
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        const letRefreshAnswer = holdRefreshAnswer(provider);
+        // The first call takes the permit. Its refresh fails, so the token is
+        // still stale when the permit goes to the second call.
+        const holder = call({ upstreamScope: SCOPE_B });
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        // The caller may make the call at its first check, and not after it.
+        let checks = 0;
+        const waiter = call({
+          upstreamScope: SCOPE_A,
+          authorize: Effect.suspend(() => {
+            checks += 1;
+            return checks === 1 ? Effect.void : Effect.fail(leftTheList());
+          }),
+        });
+        await eventually(
+          () => Promise.resolve(checks),
+          (count) => count >= 1,
+        );
+        letRefreshAnswer();
+
+        const results = await Promise.all([holder, waiter]);
+
+        expect(results[0]).toMatchObject({ _tag: "Failure", failure: { reason: "unreachable" } });
+        expect(results[1]).toMatchObject({
+          _tag: "Failure",
+          failure: { reason: "not-in-list", message: "left the list" },
+        });
+        expect(provider.tokenRequests).toHaveLength(1);
+      },
+      { oauth: true },
+    );
+  });
+
+  it("does not call the provider to refresh a token the server rejected, and refuses the call with the caller's refusal", async () => {
+    await withReadyServer(
+      async ({ fake, provider, call }) => {
+        fake.authorize = (authorization, method) =>
+          method !== "tools/call" || authorization !== "Bearer stored-token";
+        const letRefreshAnswer = holdRefreshAnswer(provider);
+        // The first call is rejected, and its refresh takes the permit.
+        const holder = call({ upstreamScope: SCOPE_B });
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        const rejections = () =>
+          requestsOf(fake, "tools/call").filter((request) => request.status === 401).length;
+        // Once the second call is rejected too, the caller may make the call
+        // for the check before the refresh, and not for the check under the permit.
+        let checksAfterRejection = 0;
+        const waiter = call({
+          upstreamScope: SCOPE_A,
+          authorize: Effect.suspend(() => {
+            if (rejections() < 2) return Effect.void;
+            checksAfterRejection += 1;
+            return checksAfterRejection === 1 ? Effect.void : Effect.fail(leftTheList());
+          }),
+        });
+        await eventually(
+          () => Promise.resolve(checksAfterRejection),
+          (count) => count >= 1,
+        );
+        letRefreshAnswer();
+
+        const results = await Promise.all([holder, waiter]);
+
+        expect(results[0]).toMatchObject({ _tag: "Failure", failure: { reason: "unreachable" } });
+        expect(results[1]).toMatchObject({
+          _tag: "Failure",
+          failure: { reason: "not-in-list", message: "left the list" },
+        });
+        expect(provider.tokenRequests).toHaveLength(1);
+      },
+      { oauth: true },
+    );
+  });
+});
+
 describe("upstream MCP sessions", () => {
   it("opens one per Session Token and server, reuses it, and keeps two tokens apart", async () => {
     await withReadyServer(
@@ -718,6 +824,28 @@ describe("upstream MCP sessions", () => {
         expect(requestsOf(fake, "tools/call")[3]?.sessionId).toBe(sessionB);
       },
       { legacy: true },
+    );
+  });
+
+  it("ends a session with the credentials stored when the DELETE is sent", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        await call();
+        await storeOauthTokens(controller, connectionId, {
+          accessToken: "rotated-token",
+          refreshToken: "refresh-2",
+        });
+        const endedBefore = requestsOf(fake, "?").length;
+
+        await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
+
+        expect(
+          requestsOf(fake, "?")
+            .slice(endedBefore)
+            .map((request) => request.authorization),
+        ).toEqual(["Bearer rotated-token"]);
+      },
+      { oauth: true, legacy: true },
     );
   });
 
@@ -1035,6 +1163,83 @@ describe("a reply to a request of the server", () => {
       },
     );
 
+  it("carries the credentials stored when it is sent, not those of the tool's request", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        fake.intercept = ({ method }) =>
+          method === "tools/call"
+            ? askServerRequest()
+            : method === "?"
+              ? new Response(null, { status: 202 })
+              : undefined;
+        const repliesBefore = requestsOf(fake, "?").length;
+        const release = fake.hold("tools/call");
+        const pending = call({}, Duration.seconds(5));
+        await eventually(
+          () => Promise.resolve(requestsOf(fake, "tools/call").length),
+          (count) => count === 1,
+        );
+        // A refresh stored a new token while the server was about to ask.
+        await storeOauthTokens(controller, connectionId, {
+          accessToken: "rotated-token",
+          refreshToken: "refresh-2",
+        });
+        release();
+        await pending;
+
+        expect(requestsOf(fake, "tools/call")[0]?.authorization).toBe("Bearer stored-token");
+        expect(
+          requestsOf(fake, "?")
+            .slice(repliesBefore)
+            .map((request) => request.authorization),
+        ).toEqual(["Bearer rotated-token"]);
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
+  it("starts no refresh while the controller is frozen, and ends the call as one that may have run", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, provider, call }) => {
+        const { promotion } = controller.harness;
+        const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
+        provider.answers.token = refreshedToken;
+        fake.intercept = ({ method }) => (method === "tools/call" ? askServerRequest() : undefined);
+        const release = fake.hold("tools/call");
+        const pending = call({}, Duration.seconds(5));
+        await eventually(
+          () => Promise.resolve(requestsOf(fake, "tools/call").length),
+          (count) => count === 1,
+        );
+        // The token went stale while the tool ran, and a freeze waits for the call.
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        const freezing = Effect.runPromise(
+          promotion.freeze(tokenId, new Date(Date.now() + 60_000)),
+        );
+        await eventually(
+          () => Effect.runPromise(promotion.phase),
+          (phase) => phase._tag === "Frozen",
+        );
+        release();
+
+        const result = await pending;
+        await freezing;
+        await Effect.runPromise(promotion.thaw(tokenId));
+
+        expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
+        if (result._tag !== "Failure") return;
+        expect(result.failure.message).toContain("may have run");
+        expect(provider.tokenRequests).toHaveLength(0);
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
   it.each([[401], [404]])(
     "that the server refuses with HTTP %i never sends the tool again, refreshes nothing and changes no status",
     async (status) => {
@@ -1121,6 +1326,35 @@ describe("what each request carries and what comes back", () => {
     );
   });
 
+  it("reads the credentials again when a refresh stored new ones while the checks before the request ran", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        // The second check is the one before the opening's first request, after
+        // its credentials were read. A refresh stores new tokens during it.
+        let checks = 0;
+        const authorize = Effect.suspend(() => {
+          checks += 1;
+          return checks === 2
+            ? Effect.promise(() =>
+                storeOauthTokens(controller, connectionId, {
+                  accessToken: "rotated-token",
+                  refreshToken: "refresh-2",
+                }),
+              )
+            : Effect.void;
+        });
+
+        const result = await call({ upstreamScope: SCOPE_B, authorize });
+
+        expect(result).toMatchObject({ _tag: "Success" });
+        const carried = (method: string) => requestsOf(fake, method).at(-1)?.authorization;
+        expect(carried("initialize")).toBe("Bearer rotated-token");
+        expect(carried("tools/call")).toBe("Bearer rotated-token");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
   it("removes the credentials of the request from a key of the result", async () => {
     await withReadyServer(
       async ({ fake, call }) => {
@@ -1193,6 +1427,83 @@ describe("what each request carries and what comes back", () => {
       );
     },
   );
+});
+
+describe("what is removed from an answer", () => {
+  const answerWith = (text: string, id: unknown) =>
+    new Response(
+      JSON.stringify({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  it("includes a credential the handshake of the upstream session carried and a refresh replaced", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? answerWith("the handshake carried stored-token", id)
+            : undefined;
+        const opened = requestsOf(fake, "initialize").length;
+        const release = fake.hold("initialize");
+        const pending = call({ upstreamScope: SCOPE_B });
+        await eventually(
+          () => Promise.resolve(requestsOf(fake, "initialize").length),
+          (count) => count === opened + 1,
+        );
+        // Another caller refreshed the token while the handshake waited, so
+        // the call itself sends only the new one.
+        await storeOauthTokens(controller, connectionId, {
+          accessToken: "rotated-token",
+          refreshToken: "refresh-2",
+        });
+        release();
+
+        const result = await pending;
+
+        expect(result._tag).toBe("Success");
+        if (result._tag !== "Success") return;
+        expect(textOf(result.success)).toBe("the handshake carried [removed]");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
+  it("includes a credential an earlier attempt of the call sent on another upstream session", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        await call();
+        const expired = requestsOf(fake, "tools/call")[0]?.sessionId;
+        fake.intercept = ({ method, id, sessionId }) =>
+          method !== "tools/call"
+            ? undefined
+            : sessionId === expired
+              ? new Response(null, { status: 404 })
+              : answerWith("the first attempt carried stored-token", id);
+        // The first attempt is refused with a 404, and a refresh stores a new
+        // token before the second attempt opens its own session.
+        let rotated = false;
+        const authorize = Effect.suspend(() =>
+          rotated || !requestsOf(fake, "tools/call").some((request) => request.status === 404)
+            ? Effect.void
+            : Effect.promise(async () => {
+                rotated = true;
+                await storeOauthTokens(controller, connectionId, {
+                  accessToken: "rotated-token",
+                  refreshToken: "refresh-2",
+                });
+              }),
+        );
+
+        const result = await call({ authorize });
+
+        expect(result._tag).toBe("Success");
+        if (result._tag !== "Success") return;
+        expect(requestsOf(fake, "tools/call").at(-1)?.authorization).toBe("Bearer rotated-token");
+        expect(textOf(result.success)).toBe("the first attempt carried [removed]");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
 });
 
 describe("closing upstream MCP sessions", () => {

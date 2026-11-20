@@ -518,7 +518,7 @@ describe("what a check never does", () => {
     }
   });
 
-  it("stores no credential the server echoes in a tool definition, which the gateway would hand to the harness", async () => {
+  it("stores no credential the server echoes in a tool definition, and leaves out a tool whose name holds one", async () => {
     await withRig(
       async ({ controller, connect }) => {
         await createServer(controller, { connectionId: await connect() });
@@ -527,12 +527,19 @@ describe("what a check never does", () => {
 
         expect(row.status).toBe("ready");
         expect(row.tools).not.toContain("t0ken");
+        // A rewritten name would be sent back to the server as the name of
+        // another tool, so that tool is not stored at all.
         expect(JSON.parse(row.tools)).toMatchObject([
-          { name: "[removed]", description: "sent [removed] to this tool" },
+          { name: "plain", description: "sent [removed] to this tool" },
         ]);
       },
       {
-        fake: { tools: [{ name: "Bearer t0ken", description: "sent Bearer t0ken to this tool" }] },
+        fake: {
+          tools: [
+            { name: "Bearer t0ken", description: "named after the credential" },
+            { name: "plain", description: "sent Bearer t0ken to this tool" },
+          ],
+        },
       },
     );
   });

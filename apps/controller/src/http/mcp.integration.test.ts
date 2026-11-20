@@ -981,6 +981,18 @@ describe("which MCP sessions and revisions a message may name", () => {
     const response = await sendMcp(thread.token, { jsonrpc: "2.0", id: 1, result: {} }, headers);
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe(-32020);
+    // An `initialize` that names the owned session is held to the same binding.
+    const reinitialize = await sendMcp(
+      thread.token,
+      request("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      }),
+      headers,
+    );
+    expect(reinitialize.status).toBe(400);
+    expect(reinitialize.body.error.code).toBe(-32020);
     // A client of 2025-03-26 sends no header at all, and a response without one is accepted.
     const bare = { "mcp-session-id": sessionId };
     expect((await sendMcpWithHeaders(thread.token, request("ping"), bare)).status).toBe(200);

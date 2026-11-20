@@ -18,14 +18,17 @@
  * call that arrives while the controller is not serving is refused at once.
  * Admitted or not, a call checks at the moment each request to outside the
  * controller is about to go out (every request of the opening of a session,
- * the tool's request, and every one sent again), and again when a refresh of
- * the Connection's credentials is about to call the provider. The check runs
- * after the current credentials were read, because reading them can wait for
- * a refresh. It finds out that the caller may still make the call
+ * the tool's request, and every one sent again). The check runs after the
+ * current credentials were read, because reading them can wait for a refresh,
+ * and the credentials are read again when a refresh stored new ones meanwhile.
+ * It finds out that the caller may still make the call
  * (`McpToolCall.authorize`), that the server and the tool are still there as
  * the call found them, and, last, that the controller is still serving. A
- * request that only continues an exchange that already went out is not
- * stopped.
+ * refresh of the Connection's credentials that the call causes runs the same
+ * check of the caller and the destination under the Connection's refresh
+ * permit, right before the request to the provider. A request that only
+ * continues an exchange that already went out is not stopped, and carries the
+ * credentials stored then.
  */
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -49,7 +52,8 @@ import {
   StrictServingForRefresh,
   type ConnectionCannotRefresh,
   type ConnectionCredentialsForUse,
-  type ConnectionCredentialsUnavailable,
+  ConnectionCredentialsUnavailable,
+  RefreshGuard,
   type StoredConnection,
 } from "../connections";
 import { nowIso, RecordChanges } from "../db";
@@ -116,11 +120,12 @@ export interface McpToolCall {
    * Runs immediately before every request the call makes to outside the
    * controller, after the credentials it carries were read: each request of
    * the opening of the upstream session, the tool's request, and each request
-   * sent again. It also runs before a refresh of the Connection's
-   * credentials, which a rejection causes. When it fails, nothing more is
-   * sent, and `callTool` fails with that refusal. It sits beside the
-   * catalogue's own check that the server and the tool are still there, at
-   * the same points.
+   * sent again. It also runs under the Connection's refresh permit, right
+   * before a refresh of the Connection's credentials calls the provider,
+   * whether the refresh is for a stale token or after a rejection. When it
+   * fails, nothing more is sent, and `callTool` fails with that refusal. It
+   * sits beside the catalogue's own check that the server and the tool are
+   * still there, at the same points.
    */
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
@@ -130,6 +135,9 @@ export const McpCallDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/mcp-servers/McpCallDeadline",
   { defaultValue: () => Duration.seconds(60) },
 );
+
+/** What the agent reads when a call could not read the database. */
+const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
 
 /** The answer to the agent when the server answers a call with HTTP 403. */
 const FORBIDDEN_ANSWER = "the server refused this call (HTTP 403)";
@@ -247,6 +255,29 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const serviceScope = yield* Effect.scope;
 
+  /**
+   * Reads a Connection's credentials as they are stored now, for a request
+   * that only continues an exchange that already went out, and for the DELETE
+   * that ends an upstream session. It never starts a refresh while the
+   * controller is not serving, and it runs no check of a caller. Fails with an
+   * `UpstreamError` that has reason `not-serving` for that case, and `refused`
+   * when the credentials cannot be read.
+   */
+  const readCurrentCredentials = (connectionId: string): PrepareSend =>
+    connectionTypes.readCredentialsForUse(connectionId).pipe(
+      Effect.provideService(StrictServingForRefresh, true),
+      Effect.mapError(
+        (error) =>
+          new UpstreamError({
+            reason: error.reason === "not-serving" ? "not-serving" : "refused",
+            message:
+              error.reason === "not-serving"
+                ? error.message
+                : "The Connection's credentials could not be read",
+          }),
+      ),
+    );
+
   const readDependenciesOf = (server: StoredMcpServer) =>
     readDependencies(server).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
@@ -314,7 +345,13 @@ const make = Effect.gen(function* () {
     firstRevision: string | null,
     prepareSend: PrepareSend,
   ) =>
-    openUpstream({ contribution, credentials, firstRevision, prepareSend }).pipe(
+    openUpstream({
+      contribution,
+      credentials,
+      firstRevision,
+      prepareSend,
+      readCurrentCredentials: readCurrentCredentials(slot.connectionId),
+    }).pipe(
       Effect.provideService(Scope.Scope, slot.scope),
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(PromotionState, promotion),
@@ -595,14 +632,12 @@ const make = Effect.gen(function* () {
         `${expected.server.name} was changed while the call ran. Try the call again.`;
 
       /**
-       * Runs before every request the call makes to outside the controller:
-       * refuses unless the caller may still make the call, the destination is
-       * still there, and, checked last, the controller is serving. With
-       * `expected`, the destination must also be the one the call began with:
-       * the same `revision`, plugin state, and Connection status and
-       * generation.
+       * Refuses unless the caller may still make the call and the destination
+       * is still there. With `expected`, the destination must also be the one
+       * the call began with: the same `revision`, plugin state, and Connection
+       * status and generation. Returns the destination as it is now.
        */
-      const checkBeforeSend = (
+      const checkDestination = (
         expected: Destination | undefined,
       ): Effect.Effect<Destination, McpCallRefused | SqlError> =>
         Effect.gen(function* () {
@@ -615,6 +650,18 @@ const make = Effect.gen(function* () {
           ) {
             return yield* refuse("error", expected.server.name, buildChangedMessage(expected));
           }
+          return now;
+        });
+
+      /**
+       * Runs before every request the call makes to outside the controller:
+       * `checkDestination`, and, checked last, that the controller is serving.
+       */
+      const checkBeforeSend = (
+        expected: Destination | undefined,
+      ): Effect.Effect<Destination, McpCallRefused | SqlError> =>
+        Effect.gen(function* () {
+          const now = yield* checkDestination(expected);
           // Last, so that nothing slow stands between this check and the send.
           yield* refuseUnlessServing;
           return now;
@@ -625,9 +672,55 @@ const make = Effect.gen(function* () {
       const name = server.name;
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
       const checkAgain = checkBeforeSend(first);
+      const checkDestinationAgain = checkDestination(first);
+
+      // Why a check before a send or a refresh refused it. The client can only
+      // fail with its own error, and a refresh only with the Connection's, so
+      // the reason is kept here for the code that returns the refusal.
+      const refusedSend: { current: McpCallRefused | SqlError | undefined } = {
+        current: undefined,
+      };
+
+      // Every credential value any attempt of this call sent, on any upstream
+      // session, so a value from the handshake or from a rejected attempt is
+      // removed from the answer of a later one. It lives as long as the call.
+      const sentValues = new Set<string>();
+
+      /** Removes the credential values this call and the session `opened` sent from `value`. */
+      const removeSentValues = <A>(value: A, opened: OpenedUpstream): A =>
+        removeCredentialValues(value, new Set([...opened.sentValues, ...sentValues]));
+
+      /**
+       * Runs under the Connection's refresh permit, right before a refresh
+       * calls the provider: refuses unless the caller may still make the call
+       * and the destination is unchanged. The refusal is kept in
+       * `refusedSend`, and `describeUnavailable` returns it.
+       */
+      const guardRefresh: Effect.Effect<void, ConnectionCredentialsUnavailable> =
+        checkDestinationAgain.pipe(
+          Effect.asVoid,
+          Effect.catch((refusal) =>
+            Effect.sync(() => {
+              refusedSend.current = refusal;
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new ConnectionCredentialsUnavailable({
+                    reason: "refused",
+                    message: "The caller's check refused the refresh",
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
 
       const describeUnavailable = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
         switch (error.reason) {
+          case "refused":
+            return refusedSend.current?._tag === "McpCallRefused"
+              ? refusedSend.current
+              : new McpCallRefused({ reason: "error", message: DATABASE_UNREADABLE_ANSWER });
           case "needs-sign-in":
             return new McpCallRefused({
               reason: "needs-sign-in",
@@ -652,8 +745,13 @@ const make = Effect.gen(function* () {
       // The identity of the credentials read last, for a refresh when the
       // client cannot say which credentials a rejection was about.
       let lastReadIdentity = "";
-      /** Reads the Connection's credentials as they are now. Each request reads them anew, and never reuses an older reading. */
+      /**
+       * Reads the Connection's credentials as they are now. Each request reads
+       * them anew, and never reuses an older reading. A refresh this causes
+       * runs `guardRefresh` under the Connection's refresh permit.
+       */
       const readCredentials = connectionTypes.readCredentialsForUse(server.connectionId).pipe(
+        Effect.provideService(RefreshGuard, guardRefresh),
         Effect.mapError(describeUnavailable),
         Effect.tap((read) =>
           Effect.sync(() => {
@@ -696,9 +794,9 @@ const make = Effect.gen(function* () {
         if (reason._tag === "ProtocolError" && reason.code !== undefined) {
           return Effect.succeed(
             buildErrorResult(
-              removeCredentialValues(
+              removeSentValues(
                 reason.description ?? "The server answered the call with an error.",
-                call.sentValues,
+                opened,
               ),
             ),
           );
@@ -706,29 +804,41 @@ const make = Effect.gen(function* () {
         if (reason._tag === "HttpError" && reason.status === 403) {
           return Effect.succeed(buildErrorResult(FORBIDDEN_ANSWER));
         }
+        // The tool went out, and then a request that continues its exchange was
+        // refused before it was sent, so the call may have run.
+        if (call.toolPostSent && call.refusal !== undefined) {
+          return Effect.fail({ _tag: "ExchangeBroken" });
+        }
         const failure = opened.describeFailure(error, call);
         return failure.reason === "unauthorized" && call.toolPostStatus !== 401
           ? Effect.fail({ _tag: "ExchangeBroken" })
           : Effect.fail(failure);
       };
 
-      // Why the checks before a send refused it. The client can only fail
-      // with its own error, so the reason is kept here for the loop below.
-      const refusedSend: { current: McpCallRefused | SqlError | undefined } = {
-        current: undefined,
-      };
-
       /**
        * Prepares a request that starts an exchange: reads the Connection's
        * credentials as they are now, and only then runs the checks before a
        * send, so a wait for credentials never lets an older check stand. The
-       * request carries the credentials it returns. When a check refuses, the
+       * request carries the credentials it returns, which are read again when
+       * a refresh stored new ones meanwhile. When a check refuses, the
        * refusal is kept in `refusedSend` and the request is not sent.
        */
       const prepareSend: PrepareSend = Effect.gen(function* () {
-        const credentials = yield* readCredentials;
-        yield* checkAgain;
-        return credentials;
+        while (true) {
+          // Read before the credentials, so that a refresh that stores new
+          // ones in between shows as a different version, never as the same.
+          const version = yield* connectionTypes.readCredentialsVersion(server.connectionId);
+          const credentials = yield* readCredentials;
+          yield* checkDestinationAgain;
+          // A refresh does not move the Connection's `credentialsGeneration`,
+          // so a refresh that stored new tokens while the checks above ran is
+          // found by the version of the stored credentials. Then they are read
+          // again, because they are no longer the current ones.
+          const stored = yield* connectionTypes.readCredentialsVersion(server.connectionId);
+          if (stored !== version) continue;
+          yield* refuseUnlessServing;
+          return credentials;
+        }
       }).pipe(
         Effect.catch((refusal) =>
           Effect.sync(() => {
@@ -776,7 +886,11 @@ const make = Effect.gen(function* () {
             (slot) =>
               Effect.gen(function* () {
                 const opened = yield* Deferred.await(slot.opening);
-                const call = createUpstreamCallState(prepareSend);
+                const call = createUpstreamCallState(
+                  prepareSend,
+                  readCurrentCredentials(server.connectionId),
+                  sentValues,
+                );
                 return yield* opened.client
                   .callTool({
                     tool: destination.tool,
@@ -784,7 +898,7 @@ const make = Effect.gen(function* () {
                   })
                   .pipe(
                     Effect.provideService(CurrentUpstreamCall, call),
-                    Effect.map((result) => removeCredentialValues(result, call.sentValues)),
+                    Effect.map((result) => removeSentValues(result, opened)),
                     Effect.catch((error) => decideFailure(slot, opened, error, call)),
                   );
               }),
@@ -828,10 +942,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* checkAgain;
           const refreshed = yield* Effect.result(
-            connectionTypes.refreshAfterRejection(
-              server.connectionId,
-              failure.sentIdentity ?? lastReadIdentity,
-            ),
+            connectionTypes
+              .refreshAfterRejection(server.connectionId, failure.sentIdentity ?? lastReadIdentity)
+              .pipe(Effect.provideService(RefreshGuard, guardRefresh)),
           );
           if (refreshed._tag === "Success") return;
           const error: ConnectionCredentialsUnavailable | ConnectionCannotRefresh =
@@ -898,12 +1011,7 @@ const make = Effect.gen(function* () {
       // start its request to the provider once the controller stops serving.
       Effect.provideService(StrictServingForRefresh, true),
       Effect.catchTag("SqlError", () =>
-        Effect.fail(
-          new McpCallRefused({
-            reason: "error",
-            message: "Hercule could not read its own database. Try the call again.",
-          }),
-        ),
+        Effect.fail(new McpCallRefused({ reason: "error", message: DATABASE_UNREADABLE_ANSWER })),
       ),
     );
 

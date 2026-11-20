@@ -22,6 +22,7 @@ export {
   ConnectionCredentialsUnavailable,
   ConnectionTypes,
   ConnectionTypesLayer,
+  RefreshGuard,
   StrictServingForRefresh,
   type ConnectionCredentialsForUse,
   type RegisteredConnectionType,

@@ -200,6 +200,10 @@ const make = Effect.gen(function* () {
         // Only a strict refresh fails this way, and a check never asks for
         // one: it waits for the thaw instead.
         return buildFailedResult("unreachable", "The controller was not serving");
+      case "refused":
+        // Only a caller that provides a `RefreshGuard` gets this, and a check
+        // provides none.
+        return buildFailedResult("error", "The refresh of the sign-in was refused");
       case "missing":
         return buildFailedResult("error", "The Connection of this server is missing");
       case "invalid-config":
@@ -231,10 +235,21 @@ const make = Effect.gen(function* () {
         const tools = yield* opened.client
           .listTools({ timeout: LIST_DEADLINE })
           .pipe(Effect.mapError(opened.describeFailure));
-        // A server that echoes what it received, in a tool's name, description
-        // or schema, must not hand the Connection's token on to the harness.
+        // A server that echoes what it received, in a tool's description or
+        // schema, must not hand the Connection's token on to the harness.
+        // A tool whose name holds a credential value is left out instead: the
+        // name is what a call sends back to the server, so rewriting it would
+        // dispatch to another tool or to none.
+        const kept = tools.filter(
+          (tool) => removeCredentialValues(tool.name, opened.sentValues) === tool.name,
+        );
+        if (kept.length < tools.length) {
+          yield* Effect.logWarning(
+            `${contribution.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
+          );
+        }
         return {
-          tools: removeCredentialValues(tools, opened.sentValues),
+          tools: removeCredentialValues(kept, opened.sentValues),
           revision: opened.revision,
         };
       }),

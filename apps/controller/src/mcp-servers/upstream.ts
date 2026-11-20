@@ -20,7 +20,8 @@
  *   request goes out, so a wait for credentials never lets an old check
  *   stand. A request that only continues an exchange that was already sent,
  *   such as the reply to a request of the server, is let through, so that
- *   exchange settles.
+ *   exchange settles. It reads the credentials stored now, and starts no
+ *   refresh of them while the controller is not serving.
  * - The HTTP client creates no trace spans, so no URL or error text reaches a
  *   trace, and no trace headers go to the outside server.
  * - No failure carries the server's answer, its headers, the request or a
@@ -114,9 +115,15 @@ export interface UpstreamCallState {
    */
   readonly prepareSend: PrepareSend;
   /**
-   * The credentials the call's `tools/call` request carried, and so every
-   * request that continues its exchange, such as the reply to a request of the
-   * server. `undefined` until that request was sent.
+   * Reads the credentials as they are stored now, for a request that only
+   * continues the call's exchange, such as the reply to a request of the
+   * server. It runs no check of the caller, and starts no refresh while the
+   * controller is not serving.
+   */
+  readonly readCurrentCredentials: PrepareSend;
+  /**
+   * The credentials the call's last request carried. `undefined` until a
+   * request was sent.
    */
   sentCredentials: ConnectionCredentialsForUse | undefined;
   /** Why the client refused to send a request of this call, when it did. */
@@ -131,9 +138,11 @@ export interface UpstreamCallState {
    */
   toolPostStatus: number | undefined;
   /**
-   * Every credential value this call sent, longer than `MIN_SECRET_LENGTH`:
-   * the values of the headers the plugin built and of the credentials record.
-   * A caller removes them from the text it returns.
+   * Every credential value any attempt of this call sent, longer than
+   * `MIN_SECRET_LENGTH`: the values of the headers the plugin built and of the
+   * credentials record. The caller of one logical call gives every attempt the
+   * same set, also an attempt on another upstream session, and removes the
+   * values from the text it returns.
    */
   readonly sentValues: Set<string>;
 }
@@ -147,14 +156,23 @@ export interface UpstreamCallState {
  */
 const MIN_SECRET_LENGTH = 8;
 
-/** Creates the state of a call whose `tools/call` request `prepareSend` prepares. */
-export const createUpstreamCallState = (prepareSend: PrepareSend): UpstreamCallState => ({
+/**
+ * Creates the state of one attempt of a call. `prepareSend` prepares its
+ * `tools/call` request and `readCurrentCredentials` the requests that continue
+ * its exchange. `sentValues` collects the credential values it sends.
+ */
+export const createUpstreamCallState = (
+  prepareSend: PrepareSend,
+  readCurrentCredentials: PrepareSend,
+  sentValues: Set<string>,
+): UpstreamCallState => ({
   prepareSend,
+  readCurrentCredentials,
   sentCredentials: undefined,
   refusal: undefined,
   toolPostSent: false,
   toolPostStatus: undefined,
-  sentValues: new Set(),
+  sentValues,
 });
 
 export const CurrentUpstreamCall = Context.Reference<UpstreamCallState | undefined>(
@@ -348,9 +366,10 @@ export interface OpenedUpstream {
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
   /**
-   * Every credential value, longer than `MIN_SECRET_LENGTH`, that a request
-   * belonging to no call sent: the values of the headers the plugin built and
-   * of the credentials record. A caller removes them from what the server
+   * Every credential value, longer than `MIN_SECRET_LENGTH`, that any request
+   * on this session sent, the handshake and the calls' requests included: the
+   * values of the headers the plugin built and of the credentials record. It
+   * lives as long as the session. A caller removes them from what the server
    * answered, which it stores or hands on.
    */
   readonly sentValues: ReadonlySet<string>;
@@ -388,6 +407,12 @@ export interface UpstreamTarget {
    * thaw, as a check does.
    */
   readonly prepareSend?: PrepareSend;
+  /**
+   * Reads the credentials as they are stored now, for the request that ends
+   * the upstream session. Without it, that request carries what the client
+   * sent last. When it fails, the request is not sent.
+   */
+  readonly readCurrentCredentials?: PrepareSend;
 }
 
 /**
@@ -422,8 +447,9 @@ export const openUpstream = (
 
     const outboundRefusal = yield* Ref.make<UpstreamError | undefined>(undefined);
 
-    // What the closing of the session carries, and what a request carries when
-    // nothing prepares it: what the client sent last.
+    // What a request carries when nothing prepares it, and the closing of the
+    // session when nothing reads current credentials for it: what the client
+    // sent last.
     let lastSent = target.credentials;
     const sentValues = new Set<string>();
 
@@ -470,10 +496,8 @@ export const openUpstream = (
 
     /**
      * Builds the request with `used`, checks its URL, and sends it. A request
-     * of a call that starts an exchange (`call` and `startsExchange`) records
-     * its credentials, so the replies that continue the exchange carry the
-     * same ones. `toolPost` is the call when this is the call's own
-     * `tools/call` request.
+     * of a call records its credentials as the call's last. `toolPost` is the
+     * call when this is the call's own `tools/call` request.
      */
     const sendWith = (
       request: HttpClientRequest.HttpClientRequest,
@@ -485,9 +509,12 @@ export const openUpstream = (
       Effect.gen(function* () {
         const built = yield* buildRequest(used);
         lastSent = used;
-        if (call !== undefined && startsExchange) call.sentCredentials = used;
+        if (call !== undefined) call.sentCredentials = used;
         for (const value of [...Object.values(built.headers), ...Object.values(used.credentials)]) {
-          if (value.length > MIN_SECRET_LENGTH) (call?.sentValues ?? sentValues).add(value);
+          if (value.length > MIN_SECRET_LENGTH) {
+            sentValues.add(value);
+            call?.sentValues.add(value);
+          }
         }
         // The URL that is sent is the one just built and checked, so a
         // credential in the URL is the current one.
@@ -521,12 +548,14 @@ export const openUpstream = (
           call !== undefined && !call.toolPostSent && isToolCallRequest(request) ? call : undefined;
         // Once the tool request went out, the other requests of the call only
         // continue its exchange, such as the reply to a request of the server.
-        // They carry the same credentials and are let through while not
-        // serving, so the exchange settles.
-        const continuing = call?.toolPostSent === true ? call.sentCredentials : undefined;
-        if (continuing !== undefined) {
+        // They carry the credentials stored now and are let through while not
+        // serving, so the exchange settles. Reading the credentials starts no
+        // refresh while the controller is not serving.
+        if (call?.toolPostSent === true) {
           return yield* promotion.whenServing(
-            sendWith(request, continuing, call, false, undefined),
+            Effect.flatMap(call.readCurrentCredentials, (used) =>
+              sendWith(request, used, call, false, undefined),
+            ),
           );
         }
         const prepareSend = call?.prepareSend ?? target.prepareSend;
@@ -569,14 +598,20 @@ export const openUpstream = (
      * Sends the DELETE that ends the upstream MCP session. The server ends
      * the session by itself in time, so a DELETE is never worth waiting for a
      * thaw, or sending after one: it is not sent unless the controller is
-     * serving. It carries the credentials the client sent last and runs no
-     * check of a call, because it happens when a call's token has ended.
+     * serving. It carries the credentials stored now, or the ones the client
+     * sent last when the target reads none, and runs no check of a call,
+     * because it happens when a call's token has ended.
      */
     const sendSessionEnd = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.flatMap(promotion.phase, (phase) =>
         phase._tag === "Serving"
           ? promotion
-              .whenServing(sendWith(request, lastSent, undefined, false, undefined))
+              .whenServing(
+                Effect.flatMap(
+                  target.readCurrentCredentials ?? Effect.sync(() => lastSent),
+                  (used) => sendWith(request, used, undefined, false, undefined),
+                ),
+              )
               .pipe(
                 Effect.catchTag("UpstreamError", (refused) =>
                   Effect.fail(buildTransportFailure(request, refused.message)),
