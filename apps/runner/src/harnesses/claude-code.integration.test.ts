@@ -118,6 +118,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
       const context: HarnessRunnerContext = {
         cwd: null,
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: createTemporaryHome(),
@@ -215,6 +216,7 @@ const authed =
             {
               cwd: null,
               attachmentsDir: null,
+              mcpServers: [],
               editMarks: null,
               attachmentUploader: NO_CONTROLLER_UPLOADER,
               home: CONFIG_DIR,
@@ -332,6 +334,7 @@ const buildContext = (
 ): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: CONFIG_DIR,
@@ -812,6 +815,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     const context: HarnessRunnerContext = {
       cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home,
@@ -1008,6 +1012,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
     const context: HarnessRunnerContext = {
       cwd: workspaceRoot,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home,
@@ -1287,6 +1292,7 @@ describe.skipIf(binary === undefined)(
       const context: HarnessRunnerContext = {
         cwd: workspaceRoot,
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home,
@@ -1447,6 +1453,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
     const context: HarnessRunnerContext = {
       cwd: workspace,
       attachmentsDir: null,
+      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: join(root, "harness-home"),
@@ -1788,6 +1795,7 @@ const replayFixture = async (
       {
         cwd: "/workspace",
         attachmentsDir: null,
+        mcpServers: [],
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: "/var/hercule/runner/providers/replay",
@@ -2352,6 +2360,7 @@ describe.skipIf(binary === undefined)(
         const context: HarnessRunnerContext = {
           cwd: checkout,
           attachmentsDir: null,
+          mcpServers: [],
           editMarks: null,
           attachmentUploader: NO_CONTROLLER_UPLOADER,
           home,

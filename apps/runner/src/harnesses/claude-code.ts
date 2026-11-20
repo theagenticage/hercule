@@ -1040,8 +1040,11 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
  *   and loads no setting source at all, so no stray file on this runner can
  *   reach it.
  *
- * MCP servers come only from the options, and auto memory is off, for every
- * session. So is every way of messaging another Claude session: a session
+ * MCP servers come only from the options (the resolved entries of
+ * `ctx.mcpServers`: today the MCP Gateway, named `tools`), and auto memory is
+ * off, for every session. The Access Mode decides what an MCP tool may do:
+ * its calls reach `canUseTool` like any tool, so no allow rule is added for
+ * them. So is every way of messaging another Claude session: a session
  * reaches other sessions through Hercule only. Its own subagents stay
  * reachable (spec 06 section 9.1).
  */
@@ -1126,6 +1129,18 @@ const buildSessionOptions = (
       ],
     },
     strictMcpConfig: true,
+    // The static `Authorization` header keeps Claude Code from starting an
+    // OAuth sign-in of its own.
+    ...(ctx.mcpServers.length === 0
+      ? {}
+      : {
+          mcpServers: Object.fromEntries(
+            ctx.mcpServers.map((server) => [
+              server.name,
+              { type: "http", url: server.url, headers: { ...server.headers } },
+            ]),
+          ),
+        }),
     includePartialMessages: true,
     // Without this, the SDK sends only a subagent's tool calls and results,
     // and none of its text, so a subagent's transcript would have no words in
@@ -1146,6 +1161,11 @@ const buildSessionOptions = (
     env: {
       ...buildEnv(ctx),
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      // Claude Code keeps the tool list of an MCP server on disk and can start
+      // a session from it. The gateway's list depends on the session's token,
+      // so a list cached for an older token would offer tools the new one may
+      // not call, or miss tools it may.
+      MCP_DISCOVERY_CACHE: "0",
       // An assistant's session is rotated by the controller instead of being
       // compacted by the CLI (spec 06 section 9.2). `DISABLE_AUTO_COMPACT`
       // turns off only the automatic compaction. `DISABLE_COMPACT` would also

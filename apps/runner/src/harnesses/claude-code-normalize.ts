@@ -402,6 +402,27 @@ export const classifyTool = (name: string): ItemKind =>
 /** Checks whether a tool is an MCP tool. The name prefix is the only way to tell. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
 
+/** What Claude Code puts in front of the name of every tool of the MCP Gateway's entry, `tools`. */
+const GATEWAY_TOOL_PREFIX = "mcp__tools__";
+
+/**
+ * Splits the name of a gateway tool into the MCP Server it belongs to and the
+ * tool's own name: `mcp__tools__sentry__search_issues` gives the server
+ * `sentry` and the tool `search_issues`. The split is at the first `__` after
+ * the prefix, so a tool name that holds `__` stays whole. Returns `undefined`
+ * for any other tool, and for a name with no server part, which the gateway
+ * never builds.
+ */
+const splitGatewayToolName = (
+  name: string,
+): { readonly server: string; readonly tool: string } | undefined => {
+  if (!name.startsWith(GATEWAY_TOOL_PREFIX)) return undefined;
+  const rest = name.slice(GATEWAY_TOOL_PREFIX.length);
+  const split = rest.indexOf("__");
+  if (split <= 0 || split + 2 >= rest.length) return undefined;
+  return { server: rest.slice(0, split), tool: rest.slice(split + 2) };
+};
+
 /**
  * The tools that start a subagent. Recent CLIs name the tool `Agent` in
  * `tool_use` blocks, and older ones named it `Task`.
@@ -1022,9 +1043,11 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
   const subagentIds = listMessagedSubagents(state, block.name, block.input);
   // Built before the tool is recorded: a read above that throws must not leave
   // an open tool whose item never started.
+  const gateway = splitGatewayToolName(block.name);
   const started = buildItemStarted(state, turn, itemId, kind, {
-    name: block.name,
+    name: gateway === undefined ? block.name : truncateFact(gateway.tool),
     input: block.input,
+    ...(gateway === undefined ? {} : { server: truncateFact(gateway.server) }),
     ...buildFileFields(kind, block.input),
     ...buildWebFields(block.name, block.input),
     ...editedPaths,

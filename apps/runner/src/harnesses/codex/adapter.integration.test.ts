@@ -112,6 +112,7 @@ const createHomeWithLogin = (): string => {
 const buildContext = (home: string): HarnessRunnerContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,

@@ -50,6 +50,7 @@ import {
   type WorkspaceStepKey,
   MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
+  type HarnessMcpServer,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -104,6 +105,7 @@ import {
   decideLeftOutReason,
   mcpServerRepository,
   type LeftOutServer,
+  type StartDelivery,
 } from "../mcp-servers";
 import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
@@ -375,6 +377,21 @@ export interface StartRequest {
   /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
   readonly input: StoredInput;
 }
+
+/** The two facts of a start that decide whether the harness can be given the MCP Gateway's entry. */
+type GatewayDelivery = Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">;
+
+/**
+ * The one entry a start gives the harness: the MCP Gateway, which the runner
+ * resolves against the controller's address and the session's token
+ * (`SessionSpec.mcpServers`, spec 06 section 4).
+ */
+const MCP_GATEWAY_ENTRY: HarnessMcpServer = {
+  name: "tools",
+  type: "http",
+  url: "/mcp",
+  bearer: "session-token",
+};
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
@@ -1043,33 +1060,51 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Records which MCP Servers of the session's list can be called at this
-   * start, and why each other one cannot (`decideLeftOutReason`), and writes
-   * one `runtime.warning` naming the servers left out. Does nothing for a
-   * session whose list is empty. Joins the caller's transaction, and the
-   * caller announces the session. It reads the harness, the profile grants and
-   * the servers' status from the database, never from outside.
+   * Reads the two facts that decide whether a start can give the harness the
+   * MCP Gateway's entry: whether the runner negotiated
+   * `MCP_SERVERS_CAPABILITY`, and whether the harness declares
+   * `mcpPassthrough: "native"`. The entry on the start frame and the servers
+   * a start leaves out (`recordMcpServersLeftOut`) both follow from these
+   * two, so they are read once per start and used for both.
    */
-  const recordMcpServersLeftOut = (
-    sessionId: string,
+  const readMcpGatewayDelivery = (
     harnessId: string,
     runner: StartNeeds["runner"],
-    at: string,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<GatewayDelivery> =>
     Effect.gen(function* () {
-      const listed = yield* sessions.readMcpServers(sessionId);
-      if (listed.length === 0) return;
       const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
-      const delivery = {
+      return {
         runnerReachesMcpServers: (runner.negotiatedCapabilities ?? []).includes(
           MCP_SERVERS_CAPABILITY,
         ),
         // A harness this build no longer carries cannot be given the entry.
         harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
+      };
+    });
+
+  /**
+   * Records which MCP Servers of the session's list can be called at this
+   * start, and why each other one cannot (`decideLeftOutReason`), and writes
+   * one `runtime.warning` naming the servers left out. `gateway` is what
+   * `readMcpGatewayDelivery` returned for this start. Does nothing for a
+   * session whose list is empty. Joins the caller's transaction, and the
+   * caller announces the session. It reads the profile grants and the
+   * servers' status from the database, never from outside.
+   */
+  const recordMcpServersLeftOut = (
+    sessionId: string,
+    gateway: GatewayDelivery,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const listed = yield* sessions.readMcpServers(sessionId);
+      if (listed.length === 0) return;
+      const delivery: StartDelivery = {
+        ...gateway,
         profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
           "mcp.use",
         ),
-      } as const;
+      };
       const available = yield* mcpServers.readAvailability(
         listed.map((entry) => entry.mcpServerId),
       );
@@ -2826,7 +2861,8 @@ const make = Effect.gen(function* () {
             }
             // Decided at every start, like the skills, so a resume records the
             // servers again.
-            yield* recordMcpServersLeftOut(row.id, row.harnessId, needs.runner, at);
+            const gateway = yield* readMcpGatewayDelivery(row.harnessId, needs.runner);
+            yield* recordMcpServersLeftOut(row.id, gateway, at);
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
             if (!modelDeclarationsByPair.has(pair)) {
@@ -2855,7 +2891,18 @@ const make = Effect.gen(function* () {
                 input: buildTurnInput(row, input),
                 harnessId: row.harnessId,
                 harnessAccount,
-                spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
+                // The coordination paragraph and the gateway entry are added
+                // to the frame only, never to the stored spec. The entry goes
+                // to every session whose runner and harness can take it, also
+                // one with an empty list, so a server added later works
+                // without a restart (spec 21 section 4.4).
+                spec: {
+                  ...spec.value,
+                  ...(coordination === undefined ? {} : { coordination }),
+                  ...(gateway.runnerReachesMcpServers && gateway.harnessPassthrough === "native"
+                    ? { mcpServers: [MCP_GATEWAY_ENTRY] }
+                    : {}),
+                },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
                 ...(gitIdentity === undefined ? {} : { gitIdentity }),

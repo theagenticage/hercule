@@ -1315,6 +1315,63 @@ describe("the MCP servers of a session at a start", () => {
 
     expect(warnings).toEqual([]);
   });
+
+  /** The entry a start gives the harness for the MCP Gateway. */
+  const GATEWAY_ENTRY = { name: "tools", type: "http", url: "/mcp", bearer: "session-token" };
+
+  /** Reads the spec the session's row stores, as written. */
+  const readStoredSpec = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly spec: string }>`
+        SELECT spec FROM sessions WHERE id = ${uuidFromString(sessionId)}`;
+      return JSON.parse(rows[0]!.spec) as Record<string, unknown>;
+    });
+
+  it("puts the gateway entry on the frame of a start and of the next one, only for a runner and a harness that can take it, and never stores it", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        yield* bootMcpHarnesses;
+        const profile = yield* aProfileWith([]);
+        const queue = (runnerId: string, harnessId: string) =>
+          insertQueuedSessionWithServers(runnerId, {
+            harnessId,
+            permissionProfileId: profile,
+            servers: [],
+          });
+        const capable = mintId();
+        const oldRunner = mintId();
+        const bareRunner = mintId();
+        // The list is empty in each of them: the entry does not depend on it.
+        const native = yield* queue(capable, NATIVE_MCP_HARNESS_ID);
+        yield* queue(oldRunner, NATIVE_MCP_HARNESS_ID);
+        yield* queue(bareRunner, BARE_MCP_HARNESS_ID);
+
+        const [first] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+        const [tooOld] = yield* claimStarting(oldRunner, 1);
+        const [bare] = yield* claimStarting(bareRunner, 1, undefined, undefined, withMcp);
+        // A start sent again, which is how a resume reaches the claim.
+        yield* withTransaction(sql, sessions.requeue(first!));
+        const [again] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+
+        return {
+          first: first!.frame.spec,
+          tooOld: tooOld!.frame.spec,
+          bare: bare!.frame.spec,
+          again: again!.frame.spec,
+          stored: yield* readStoredSpec(native),
+        };
+      }),
+    );
+
+    expect(result.first.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.again.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.tooOld.mcpServers).toBeUndefined();
+    expect(result.bare.mcpServers).toBeUndefined();
+    expect(result.stored).not.toHaveProperty("mcpServers");
+  });
 });
 
 describe("SessionService.inputFrame", () => {
