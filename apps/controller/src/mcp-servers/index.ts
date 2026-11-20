@@ -30,3 +30,4 @@ export { McpServerListHolders } from "./list-holders";
 export { mcpServerListRule, requireMcpManage } from "./list-rule";
 export { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from "./repository";
 export { McpServerService, McpServerServiceLayer, type UpdateInput } from "./service";
+export { buildErrorResult } from "./upstream";

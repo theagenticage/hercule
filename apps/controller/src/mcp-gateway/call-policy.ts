@@ -8,13 +8,19 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
-import { McpSchema } from "effect/ai";
+import type { McpSchema } from "effect/ai";
 import { ControllerSealed, PromotionInProgress } from "@hercule/contract";
 import { absorbFailures } from "../absorbing";
 import { buildSessionStamp, type SessionActor } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { decideCallRefusal, isServable, McpCallRefused, McpServerCalls } from "../mcp-servers";
+import {
+  buildErrorResult,
+  decideCallRefusal,
+  isServable,
+  McpCallRefused,
+  McpServerCalls,
+} from "../mcp-servers";
 import { PromotionState } from "../promotion";
 import { SessionService } from "../sessions";
 import type { JsonObject } from "./protocol";
@@ -58,10 +64,6 @@ interface WarningState {
 
 const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
   error instanceof ControllerSealed || error instanceof PromotionInProgress;
-
-/** Builds the tool result of a call that was refused: `message` tells the agent what happened. */
-const buildErrorResult = (message: string): McpSchema.CallToolResult =>
-  new McpSchema.CallToolResult({ content: [{ type: "text", text: message }], isError: true });
 
 /** Builds the policy every `tools/call` goes through. */
 export const makeCallPolicy = Effect.gen(function* () {

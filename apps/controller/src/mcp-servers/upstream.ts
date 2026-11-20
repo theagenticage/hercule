@@ -42,7 +42,6 @@ import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -121,31 +120,25 @@ export class UpstreamError extends Schema.TaggedError<UpstreamError>()("Upstream
 export type PrepareSend = Effect.Effect<ConnectionCredentialsForUse, UpstreamError>;
 
 /**
- * What one call keeps for itself while its requests go through the upstream
- * client, which concurrent calls share. `callTool` of `OpenedUpstream` makes
- * one and provides it (see `CurrentUpstreamCall`), and the client reads and
- * writes it for each request the call causes, so one call never sees the
- * credentials, the status or the identity of another.
+ * What the requests of one call keep for themselves while they go through the
+ * upstream client, which concurrent calls share. `callTool` of `OpenedUpstream`
+ * makes one and provides it (see `CurrentUpstreamCall`), and the client reads
+ * and writes it for each request the call causes, so one call never sees the
+ * credentials, the status or the identity of another. The requests that
+ * belong to no call, the opening and the closing of the session, share one
+ * state of their own.
  */
 interface UpstreamCallState {
   /**
-   * Runs before the call's own `tools/call` request, which starts the call's
-   * exchange. The request carries the credentials it returns.
+   * Runs before a request of this state that starts an exchange, such as the
+   * call's own `tools/call` request, and gives the credentials the request
+   * carries. Without it, such a request waits for the thaw and carries the
+   * credentials sent last.
    */
-  readonly prepareSend: PrepareSend;
-  /**
-   * Reads the credentials as they are stored now, for a request that only
-   * continues the call's exchange, such as the reply to a request of the
-   * server. It runs no check of the caller, and starts no refresh while the
-   * controller is not serving.
-   */
-  readonly readCurrentCredentials: PrepareSend;
-  /**
-   * The credentials the call's last request carried. `undefined` until a
-   * request was sent.
-   */
+  readonly prepareSend: PrepareSend | undefined;
+  /** The credentials the last request of this state carried. `undefined` until one was sent. */
   sentCredentials: ConnectionCredentialsForUse | undefined;
-  /** Why the client refused to send a request of this call, when it did. */
+  /** Why the client refused to send a request of this state, when it did. */
   refusal: UpstreamError | undefined;
   /** The call's own `tools/call` request was sent. */
   toolPostSent: boolean;
@@ -385,23 +378,11 @@ export const describeClientFailure = (
 export interface ToolCall {
   readonly tool: McpSchema.Tool;
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
-  /**
-   * Runs before the call's own `tools/call` request, which starts its
-   * exchange, and gives the credentials the request carries (see
-   * `PrepareSend`).
-   */
+  /** Runs before the call's own `tools/call` request, and gives the credentials it carries. */
   readonly prepareSend: PrepareSend;
   /**
-   * Reads the credentials as they are stored now, for a request that only
-   * continues the call's exchange, such as the reply to a request of the
-   * server. It runs no check of the caller, and starts no refresh while the
-   * controller is not serving.
-   */
-  readonly readCurrentCredentials: PrepareSend;
-  /**
-   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that any
-   * attempt of the logical call sent: the values of the headers the plugin
-   * built and of the credentials record. The caller gives every attempt the
+   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that
+   * any attempt of the logical call sent. The caller gives every attempt the
    * same set, also an attempt on another upstream session, so a value from a
    * rejected attempt is removed from the answer of a later one.
    */
@@ -432,11 +413,9 @@ export interface OpenedUpstream {
    *   gone, so the caller may send it again on a new session;
    * - `ExchangeBroken` when the tool's request went out and a later request
    *   of its exchange failed, so the call may have run;
-   * - an `UpstreamError` otherwise. Only a 401 to the tool's own request
-   *   fails with reason `unauthorized`, which is what lets the caller refresh
-   *   the credentials and send the call again. The failure of a request that
-   *   was refused before it was sent is the one `prepareSend` or
-   *   `readCurrentCredentials` failed with.
+   * - an `UpstreamError` otherwise. Only a 401 to the tool's own request has
+   *   reason `unauthorized`, which lets the caller refresh the credentials
+   *   and send the call again.
    */
   readonly callTool: (
     call: ToolCall,
@@ -465,9 +444,12 @@ export interface UpstreamTarget {
    */
   readonly prepareSend?: PrepareSend;
   /**
-   * Reads the credentials as they are stored now, for the request that ends
-   * the upstream session. Without it, that request carries what the client
-   * sent last. When it fails, the request is not sent.
+   * Reads the credentials as they are stored now, for a request that only
+   * continues an exchange that already went out (such as the reply to a
+   * request of the server) and for the request that ends the upstream
+   * session. It runs no check of a caller, and should start no refresh while
+   * the controller is not serving. Without it, those requests carry what the
+   * client sent last. When it fails, the request is not sent.
    */
   readonly readCurrentCredentials?: PrepareSend;
 }
@@ -502,13 +484,16 @@ export const openUpstream = (
     const baseClient = yield* HttpClient.HttpClient;
     const outer = yield* Scope.Scope;
 
-    const outboundRefusal = yield* Ref.make<UpstreamError | undefined>(undefined);
-
-    // What a request carries when nothing prepares it, and the closing of the
-    // session when nothing reads current credentials for it: what the client
-    // sent last.
-    let lastSent = target.credentials;
     const sentValues = new Set<string>();
+    // The state of the requests that belong to no call.
+    const sessionState: UpstreamCallState = {
+      prepareSend: target.prepareSend,
+      sentCredentials: undefined,
+      refusal: undefined,
+      toolPostSent: false,
+      toolPostStatus: undefined,
+      sentValues,
+    };
 
     const buildRequest = (credentials: ConnectionCredentialsForUse) =>
       Effect.try({
@@ -522,7 +507,11 @@ export const openUpstream = (
         catch: () => buildFailure("not-on-origin"),
       });
 
-    const first = yield* buildRequest(lastSent);
+    const readCurrentCredentials: PrepareSend =
+      target.readCurrentCredentials ??
+      Effect.sync(() => sessionState.sentCredentials ?? target.credentials);
+
+    const first = yield* buildRequest(target.credentials);
     const refusedFirst = checkUrlOnOrigin(contribution.origin, first.url);
     if (refusedFirst !== undefined) return yield* Effect.fail(refusedFirst);
 
@@ -552,25 +541,23 @@ export const openUpstream = (
       });
 
     /**
-     * Builds the request with `used`, checks its URL, and sends it. A request
-     * of a call records its credentials as the call's last. `toolPost` is the
-     * call when this is the call's own `tools/call` request.
+     * Builds the request with `used`, checks its URL, and sends it. `state`
+     * records the credentials, the credential values and the answer to the
+     * call's own `tools/call` request.
      */
     const sendWith = (
       request: HttpClientRequest.HttpClientRequest,
       used: ConnectionCredentialsForUse,
-      call: UpstreamCallState | undefined,
+      state: UpstreamCallState,
       startsExchange: boolean,
-      toolPost: UpstreamCallState | undefined,
     ) =>
       Effect.gen(function* () {
         const built = yield* buildRequest(used);
-        lastSent = used;
-        if (call !== undefined) call.sentCredentials = used;
+        state.sentCredentials = used;
         for (const value of [...Object.values(built.headers), ...Object.values(used.credentials)]) {
           if (value.length > MIN_SECRET_LENGTH) {
             sentValues.add(value);
-            call?.sentValues.add(value);
+            state.sentValues.add(value);
           }
         }
         // The URL that is sent is the one just built and checked, so a
@@ -581,43 +568,39 @@ export const openUpstream = (
         // belong to no call, so a later failure is not taken for it. The closing
         // of the session does not, because a failed opening closes its transport
         // before its failure is described.
-        if (call === undefined && startsExchange) yield* Ref.set(outboundRefusal, undefined);
-        if (toolPost !== undefined) toolPost.toolPostSent = true;
+        if (state === sessionState && startsExchange) state.refusal = undefined;
+        // The call's own `tools/call` request is the first request of the call
+        // that carries one.
+        const isToolPost = startsExchange && !state.toolPostSent && isToolCallRequest(request);
+        if (isToolPost) state.toolPostSent = true;
         const response = yield* sendingClient.execute(
           HttpClientRequest.setUrl(HttpClientRequest.setHeaders(request, built.headers), built.url),
         );
-        if (toolPost !== undefined) toolPost.toolPostStatus = response.status;
+        if (isToolPost) state.toolPostStatus = response.status;
         return response;
       });
 
     /**
-     * Sends a request that belongs to a call or to no call and starts an
-     * exchange, or continues one. See the rules at the top of this file.
+     * Sends a request that starts an exchange or continues one. See the rules
+     * at the top of this file.
      */
-    const sendExchange = (
-      request: HttpClientRequest.HttpClientRequest,
-      call: UpstreamCallState | undefined,
-    ) =>
+    const sendExchange = (request: HttpClientRequest.HttpClientRequest, state: UpstreamCallState) =>
       Effect.gen(function* () {
-        // The call's own `tools/call` request, which is the first request of
-        // the call that carries one.
-        const toolPost =
-          call !== undefined && !call.toolPostSent && isToolCallRequest(request) ? call : undefined;
         // Once the tool request went out, the other requests of the call only
         // continue its exchange, such as the reply to a request of the server.
         // They carry the credentials stored now and are let through while not
         // serving, so the exchange settles. Reading the credentials starts no
         // refresh while the controller is not serving.
-        if (call?.toolPostSent === true) {
+        if (state.toolPostSent) {
           return yield* promotion.whenServing(
-            Effect.flatMap(call.readCurrentCredentials, (used) =>
-              sendWith(request, used, call, false, undefined),
-            ),
+            Effect.flatMap(readCurrentCredentials, (used) => sendWith(request, used, state, false)),
           );
         }
-        const prepareSend = call?.prepareSend ?? target.prepareSend;
+        const { prepareSend } = state;
         if (prepareSend === undefined) {
-          return yield* promotion.whenServing(sendWith(request, lastSent, call, true, toolPost));
+          return yield* promotion.whenServing(
+            sendWith(request, state.sentCredentials ?? target.credentials, state, true),
+          );
         }
         // The request is counted from the moment `prepareSend` starts, so a
         // freeze that comes while it reads the credentials waits for this
@@ -625,9 +608,7 @@ export const openUpstream = (
         // serving, and nothing but building the request stands between that
         // check and the send.
         return yield* promotion
-          .admit(
-            Effect.flatMap(prepareSend, (used) => sendWith(request, used, call, true, toolPost)),
-          )
+          .admit(Effect.flatMap(prepareSend, (used) => sendWith(request, used, state, true)))
           .pipe(
             Effect.catch((failure) =>
               failure instanceof UpstreamError || failure instanceof HttpClientError.HttpClientError
@@ -637,15 +618,12 @@ export const openUpstream = (
           );
       }).pipe(
         // The client may fail only with its own error type, so the refusal is
-        // kept aside and `describeFailure` returns it. A call keeps its own,
-        // because calls share this client.
+        // kept aside and `describeFailure` returns it.
         Effect.catchTag("UpstreamError", (refused) =>
           Effect.andThen(
-            call === undefined
-              ? Ref.set(outboundRefusal, refused)
-              : Effect.sync(() => {
-                  call.refusal = refused;
-                }),
+            Effect.sync(() => {
+              state.refusal = refused;
+            }),
             Effect.fail(buildTransportFailure(request, refused.message)),
           ),
         ),
@@ -664,9 +642,8 @@ export const openUpstream = (
         phase._tag === "Serving"
           ? promotion
               .whenServing(
-                Effect.flatMap(
-                  target.readCurrentCredentials ?? Effect.sync(() => lastSent),
-                  (used) => sendWith(request, used, undefined, false, undefined),
+                Effect.flatMap(readCurrentCredentials, (used) =>
+                  sendWith(request, used, sessionState, false),
                 ),
               )
               .pipe(
@@ -682,17 +659,19 @@ export const openUpstream = (
         Effect.flatMap(pending, (request) =>
           request.method === "DELETE"
             ? sendSessionEnd(request)
-            : Effect.flatMap(CurrentUpstreamCall, (call) => sendExchange(request, call)),
+            : Effect.flatMap(CurrentUpstreamCall, (call) =>
+                sendExchange(request, call ?? sessionState),
+              ),
         ),
       Effect.succeed,
     );
 
     const describeFailure = (
       error: McpClientError.McpClientError,
-      call?: UpstreamCallState,
+      state: UpstreamCallState = sessionState,
     ): UpstreamError =>
-      (call === undefined ? Ref.getUnsafe(outboundRefusal) : call.refusal) ??
-      describeClientFailure(error, (call?.sentCredentials ?? lastSent).identity);
+      state.refusal ??
+      describeClientFailure(error, (state.sentCredentials ?? target.credentials).identity);
 
     /** Removes the credential values the session sent, and those of `call` when it is given, from `value`. */
     const removeSentValues = <A>(value: A, call?: UpstreamCallState): A =>
@@ -764,7 +743,6 @@ export const openUpstream = (
       callTool: (call) => {
         const state: UpstreamCallState = {
           prepareSend: call.prepareSend,
-          readCurrentCredentials: call.readCurrentCredentials,
           sentCredentials: undefined,
           refusal: undefined,
           toolPostSent: false,

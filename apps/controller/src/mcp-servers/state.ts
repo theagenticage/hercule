@@ -43,7 +43,7 @@ const BACKOFF_MILLIS = [
  * 1 minute after the first, then 5 minutes, 15 minutes, 1 hour, and every hour
  * after that (spec 21 section 5.3).
  */
-export const computeBackoffMillis = (failedChecks: number): number =>
+const computeBackoffMillis = (failedChecks: number): number =>
   BACKOFF_MILLIS[Math.min(Math.max(failedChecks, 1), BACKOFF_MILLIS.length) - 1] as number;
 
 /**
