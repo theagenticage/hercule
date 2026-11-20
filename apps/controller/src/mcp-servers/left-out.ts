@@ -3,7 +3,7 @@
  * last start (spec 21 section 3.8), and the words the Thread says it in.
  */
 import type { McpServerStatus } from "@hercule/contract";
-import type { McpServerLeftOutReason } from "@hercule/protocol";
+import { MAX_FACT_ITEMS, type McpServerLeftOutReason } from "@hercule/protocol";
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
@@ -15,7 +15,11 @@ export interface StartDelivery {
   readonly profileGrantsMcpUse: boolean;
 }
 
-/** What decides a left-out reason for one server: the user's switch and the status the checks wrote. */
+/**
+ * What decides a left-out reason for one server: the user's switch and its
+ * status. At a start the status is the current one, with the state of the
+ * server's Connection and plugin folded in (`readCurrentAvailability`).
+ */
 export interface ServerAvailability {
   readonly enabled: boolean;
   readonly status: McpServerStatus;
@@ -33,8 +37,8 @@ export interface ServerAvailability {
  * 5. the server's status, when it is not `ready`: `checking` (its first list
  *    has not ended), `needs-sign-in`, `unreachable` or `error`
  *
- * A server whose plugin or Connection is switched off already has the status
- * `error`, so it needs no reason of its own.
+ * A server whose plugin or Connection is switched off has the status `error`,
+ * so it needs no reason of its own.
  */
 export const decideLeftOutReason = (
   delivery: StartDelivery,
@@ -59,10 +63,10 @@ const REASON_WORDS: Readonly<Record<McpServerLeftOutReason, string>> = {
 };
 
 /**
- * The most servers one warning names. A list has no length limit, but the
- * warning's `mcpServers` field and message are bounded
- * (`MAX_FACT_ITEMS`, `MAX_MESSAGE_LENGTH`), and a message that names every
- * server of a very long list would not be read anyway.
+ * The most servers the message of a warning names in words. A list has no
+ * length limit, and a message that names every server of a very long list
+ * would not be read anyway. The structured entries of the warning are bounded
+ * on their own, by the wire limit `MAX_FACT_ITEMS`.
  */
 const MAX_NAMED_LEFT_OUT = 20;
 
@@ -75,11 +79,16 @@ export interface LeftOutServer {
 
 /**
  * Builds the `runtime.warning` a start writes for the servers it left out: a
- * message that names each server and its reason in words, and the `mcpServers`
+ * message that names servers and their reasons in words, and the `mcpServers`
  * field that names them for a client. For example, "MCP servers not available
  * in this session: sentry (its runner is too old to reach MCP servers), linear
- * (needs sign-in)". Names the first 20 servers and ends the message with "and
- * N more" when there are more.
+ * (needs sign-in)".
+ *
+ * - The message names the first 20 servers and ends with "and N more" for the
+ *   rest.
+ * - The field holds the first 64 servers, the most the wire allows, so each
+ *   of them gets its fix button. When more than 64 are left out, the message
+ *   also says how many of them are not in the field.
  */
 export const buildLeftOutWarning = (
   leftOut: ReadonlyArray<LeftOutServer>,
@@ -88,12 +97,18 @@ export const buildLeftOutWarning = (
   readonly mcpServers: ReadonlyArray<Pick<LeftOutServer, "mcpServerId" | "reason">>;
 } => {
   const named = leftOut.slice(0, MAX_NAMED_LEFT_OUT);
+  const forClient = leftOut.slice(0, MAX_FACT_ITEMS);
   const omitted = leftOut.length - named.length;
+  const withoutEntry = leftOut.length - forClient.length;
   const words = named.map(({ name, reason }) => `${name} (${REASON_WORDS[reason]})`);
+  const rest =
+    omitted === 0
+      ? ""
+      : `, and ${String(omitted)} more${
+          withoutEntry > 0 ? ` (${String(withoutEntry)} of them are not given a fix button)` : ""
+        }`;
   return {
-    message: `MCP servers not available in this session: ${words.join(", ")}${
-      omitted > 0 ? `, and ${String(omitted)} more` : ""
-    }`,
-    mcpServers: named.map(({ mcpServerId, reason }) => ({ mcpServerId, reason })),
+    message: `MCP servers not available in this session: ${words.join(", ")}${rest}`,
+    mcpServers: forClient.map(({ mcpServerId, reason }) => ({ mcpServerId, reason })),
   };
 };

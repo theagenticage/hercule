@@ -69,6 +69,12 @@ export interface McpServerDependencyIds {
   readonly contributionId: string;
 }
 
+/** A server's switch and stored status, with the Connection and contribution its status depends on. */
+export interface StoredAvailability extends ServerAvailability {
+  readonly connectionId: string;
+  readonly contributionId: string;
+}
+
 /** What a new server row holds. The status starts as `checking` and the switch as on. */
 export interface NewMcpServer {
   readonly name: string;
@@ -182,14 +188,16 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns the switch and the status of each server that exists, by its id,
-     * in one query and without the tool definitions. A session's start reads
-     * it to decide which servers it can call. An id that no server has is left
-     * out of the map.
+     * Returns the switch and the stored status of each server that exists,
+     * with the Connection and the plugin contribution it depends on, by its
+     * id, in one query and without the tool definitions. An id that no server
+     * has is left out of the map. The stored status can lag the Connection
+     * and the plugin, so a reader that needs the current state judges them
+     * too (`readCurrentAvailability`).
      */
     readAvailability: (
       ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, ServerAvailability>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<string, StoredAvailability>, SqlError> =>
       ids.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
@@ -197,13 +205,20 @@ const make = Effect.gen(function* () {
               readonly id: Uint8Array;
               readonly enabled: number;
               readonly status: McpServerStatus;
-            }>`SELECT id, enabled, status FROM mcp_servers
+              readonly connection_id: Uint8Array;
+              readonly contribution_id: string;
+            }>`SELECT id, enabled, status, connection_id, contribution_id FROM mcp_servers
                WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
             (rows) =>
               new Map(
                 rows.map((row) => [
                   uuidToString(row.id),
-                  { enabled: row.enabled === 1, status: row.status },
+                  {
+                    enabled: row.enabled === 1,
+                    status: row.status,
+                    connectionId: uuidToString(row.connection_id),
+                    contributionId: row.contribution_id,
+                  },
                 ]),
               ),
           ),
