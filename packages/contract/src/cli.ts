@@ -169,11 +169,41 @@ export type FieldRow =
       readonly flag: string;
       readonly help: string;
     }
+  | {
+      /**
+       * Fills an object-valued field from several flags, one per key of the
+       * object, and from fixed values the command line never types:
+       * `--plugin sentry/sentry --connection 1f3a9c2e` sends `{ kind:
+       * "plugin", contributionId: "sentry/sentry", connectionId: <full id> }`.
+       * Each flag is an ordinary flag in help and in errors: a missing
+       * required key is reported by its flag, and an optional key is optional
+       * on the command line. Which keys are required is read from the
+       * field's schema.
+       *
+       * Every key in `fixed` and `flags` must be a key of the object, and a
+       * key holds one value, never a list. The object is sent as soon as one
+       * of its flags is given.
+       */
+      readonly object: {
+        /** Keys sent with this text as their value, whatever the command line says. */
+        readonly fixed: Readonly<Record<string, string>>;
+        /** The flag of each key of the object, by the key's name. */
+        readonly flags: Readonly<Record<string, ObjectKeyRow>>;
+      };
+    }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
    * for a hidden operation.
    */
   | { readonly hidden: true };
+
+/** The flag that fills one key of an object field, as `object` on a `FieldRow` declares it. */
+export interface ObjectKeyRow {
+  readonly flag: string;
+  readonly help: string;
+  /** The list operation that resolves an id tail given for this flag, as on a plain flag. */
+  readonly resolves?: OperationId;
+}
 
 /**
  * An operation with no command at all, or the command with everything the help
@@ -4529,23 +4559,31 @@ export const CLI = {
     command: "mcp-server create",
     help: "Adds an MCP server from a plugin's Connection. It starts in `checking`; run `hercule mcp-server read` to see the result. A server of the same contribution and account that already exists is refused.",
     examples: [
+      { args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e"] },
       {
-        args: [
-          "--source",
-          '{"kind":"plugin","contributionId":"sentry/sentry","connectionId":"0199e0e7-1111-7000-8000-00000000abcd"}',
-        ],
-      },
-      {
-        args: [
-          "--source",
-          '{"kind":"plugin","contributionId":"sentry/sentry","connectionId":"0199e0e7-1111-7000-8000-00000000abcd","name":"work_sentry"}',
-        ],
+        args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e", "--name", "work_sentry"],
       },
     ],
     fields: {
       source: {
-        flag: "source",
-        help: 'Where the server comes from, as JSON: {"kind":"plugin","contributionId":"<plugin>/<contribution>","connectionId":"<id>"}, with an optional "name" that is fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without a name, the server takes its contribution\'s name.',
+        object: {
+          fixed: { kind: "plugin" },
+          flags: {
+            contributionId: {
+              flag: "plugin",
+              help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry.",
+            },
+            connectionId: {
+              flag: "connection",
+              help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
+              resolves: "connection.query",
+            },
+            name: {
+              flag: "name",
+              help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes its contribution's name.",
+            },
+          },
+        },
       },
     },
     errors: {

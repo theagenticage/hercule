@@ -147,6 +147,34 @@ const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
   field.nullable && text === "null" ? null : coerceFieldValue(field, text, help);
 
 /**
+ * Returns the value given for a field in a request part, or `undefined` when
+ * none was. A flag that fills one key of an object field is read from inside
+ * that object.
+ */
+export const readGivenValue = (given: Record<string, unknown>, field: Field): unknown =>
+  field.within === undefined
+    ? given[field.name]
+    : (given[field.within.field] as Record<string, unknown> | undefined)?.[field.name];
+
+/**
+ * Sets the value of a field in the request part `into`. A flag that fills one
+ * key of an object field sets that key in a copy of the object, which starts
+ * as the object's fixed values when no other flag has made it yet.
+ */
+export const setGivenValue = (
+  into: Record<string, unknown>,
+  field: Field,
+  value: unknown,
+): void => {
+  if (field.within === undefined) {
+    into[field.name] = value;
+    return;
+  }
+  const object = (into[field.within.field] ?? field.within.fixed) as Record<string, unknown>;
+  into[field.within.field] = { ...object, [field.name]: value };
+};
+
+/**
  * Adds one value given for a field to the request part `into`. A list field
  * collects its values in order, and a field that takes named values collects
  * them into one object. Throws a `UsageError` when a name is given twice,
@@ -169,7 +197,7 @@ const assignFieldValue = (
     return;
   }
   if (!field.repeated) {
-    into[field.name] = value;
+    setGivenValue(into, field, value);
     return;
   }
   const existing = into[field.name];
@@ -397,7 +425,7 @@ export const parseArguments = async (
   // A flag with a default takes it when the command line left the flag out.
   for (const field of [...command.payload, ...command.query]) {
     const into = field.carriedIn === "payload" ? payload : query;
-    if (field.defaultText !== undefined && !(field.name in into)) {
+    if (field.defaultText !== undefined && readGivenValue(into, field) === undefined) {
       assignFieldValue(into, field, parseWrittenValue(field, field.defaultText, help), help);
     }
   }
@@ -433,7 +461,10 @@ export const parseArguments = async (
   checkPaging(command, { limit, cursor, sort }, help);
 
   const missing = command.payload
-    .filter((field) => !field.optional && !(field.name in payload) && !reading.includes(field))
+    .filter(
+      (field) =>
+        !field.optional && readGivenValue(payload, field) === undefined && !reading.includes(field),
+    )
     .map((field) => `--${field.spelling}${field.stdin ? "-stdin" : ""}`);
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);

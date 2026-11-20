@@ -849,3 +849,77 @@ describe("runner metrics", () => {
     expect(query.get("resolution")).toBe("hour");
   });
 });
+
+/** Returns a Connection, as `connection list` returns it. */
+const buildConnection = (id: string) => ({
+  id,
+  type: "sentry",
+  label: "Work",
+  displayName: "work",
+  status: "connected",
+  labels: [],
+  config: {},
+  feedIntervals: {},
+  credentials: [],
+  createdAt: "2026-09-15T10:00:00.000Z",
+  updatedAt: "2026-09-15T10:00:00.000Z",
+});
+
+// Tests an id tail given to a flag that fills one key of an object field.
+describe("a flag that fills one key of an object", () => {
+  it("resolves a Connection tail and sends the whole source object", async () => {
+    const connectionId = buildId("ccccccc3");
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/connections" && request.method === "GET"
+        ? { items: [buildConnection(connectionId)] }
+        : {
+            id: buildId("aaaaaaa1"),
+            name: "work_sentry",
+            source: { kind: "plugin", contributionId: "sentry/sentry", connectionId },
+            enabled: false,
+            status: "checking",
+            statusDetail: null,
+            tools: [],
+            checkedAt: null,
+            createdAt: "2026-09-15T10:00:00.000Z",
+            updatedAt: "2026-09-15T10:00:00.000Z",
+          },
+    );
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--plugin", "sentry/sentry", "--connection", "0ccccccc3", "--name", "work_sentry"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/connections" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/mcp-servers",
+      body: {
+        source: {
+          kind: "plugin",
+          contributionId: "sentry/sentry",
+          connectionId,
+          name: "work_sentry",
+        },
+      },
+    });
+    expect(fetch.calls.length).toBe(2);
+  });
+
+  it("fails with not_found, and sends nothing, when no Connection ends with the tail", async () => {
+    const { fetch, client } = stubClient(() => ({ items: [] }));
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--plugin", "sentry/sentry", "--connection", "0ccccccc3"],
+      refuseStdinRead,
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow("no connection whose id ends");
+    expect(fetch.calls.map((call) => call.method)).toEqual(["GET"]);
+  });
+});
