@@ -3,9 +3,14 @@
  * server and writes the outcome as the server's status (spec 21 sections 5.1,
  * 5.3 and 5.4).
  *
- * At most one check runs per server. A request that comes while a check runs
- * makes it run once more when it ends, because the request may be about
- * something the running check has already read.
+ * What is due is written in the database, in the server's `next_check_at`.
+ * Whatever wants a check writes that and then wakes the loop. The loop reads
+ * the due servers and starts a check for each one that has none running, so
+ * at most one check runs per server. When a check ends the loop looks again,
+ * because a request that came while it ran may be about something the check
+ * had already read. The loop also looks once in a while by itself, which
+ * finds the work no wake announced: the daily check, and a wake lost to a
+ * restart.
  *
  * A check is background work admitted by the promotion state: it does not
  * start while the controller is frozen or sealed, and a freeze waits for it to
@@ -15,8 +20,11 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import type * as Scope from "effect/Scope";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -30,8 +38,8 @@ import {
   type StoredConnection,
 } from "../connections";
 import { nowIso } from "../db";
-import { Notifier } from "../notifications";
-import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import type { Notifier } from "../notifications";
+import type { PluginHost, RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
@@ -39,35 +47,42 @@ import {
   computeBackoffMillis,
   DAILY_CHECK_MILLIS,
   judgeDependencies,
-  markDueWhenUsable,
-  readServerWhileBasisHolds,
-  readDependencies,
-  writeServerState,
+  mcpServerState,
   type McpServerDependencies,
 } from "./state";
-import { MAX_UPSTREAM_MESSAGE_BYTES, openUpstream, type UpstreamError } from "./upstream";
+import {
+  buildStatusFromFailure,
+  MAX_UPSTREAM_MESSAGE_BYTES,
+  openUpstream,
+  runWithCredentials,
+  type UpstreamError,
+} from "./upstream";
 
 /**
- * Asks for a new list of an MCP Server's tools from the outside server. The
- * MCP Server service calls it after the commit of a create, a switch on, or a
- * "check now", and the Connection follower after a reconnect.
+ * Runs the checks of MCP Servers: a check lists a server's tools from the
+ * outside server. The MCP Server service calls `wake` after the commit of a
+ * create, a switch on, or a "check now", and the Connection follower after a
+ * reconnect.
  */
 export class McpServerChecks extends Context.Service<
   McpServerChecks,
   {
     /**
-     * Requests a new list of this server's tools, soon, and returns at once.
-     * The result is written to the server later and announced on the
-     * `mcpServer` live topic. Never fails: a check that cannot run sets the
-     * server's status instead.
+     * Makes the loop look for due checks now, and returns at once. Call it
+     * after the commit that marked a server due, never inside the
+     * transaction. Wakes that come close together make one look.
      */
-    readonly request: (id: string) => Effect.Effect<void>;
+    readonly wake: Effect.Effect<void>;
     /**
-     * Requests a check of every enabled server whose next check is due or not
-     * planned yet, except those with a check running or waiting. Fails only
-     * when the database cannot be read.
+     * Runs the loop for as long as its fiber lives, and never returns. It
+     * looks for due servers at once, after every `wake`, after every check
+     * that ended without a failure of the database, and after `backstop` has
+     * passed with none of these. A check's result is written to the server
+     * and announced on the `mcpServer` live topic. A check that cannot run
+     * sets the server's status instead. A check that fails because the
+     * database does is logged, and tried again at the next look.
      */
-    readonly requestDue: Effect.Effect<void, SqlError>;
+    readonly run: (backstop: Duration.Duration) => Effect.Effect<never>;
   }
 >()("hercule/controller/mcp-servers/McpServerChecks") {}
 
@@ -98,6 +113,9 @@ type CheckResult =
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
     };
+
+/** What a check fails with when the server changed after the check started, so its outcome is dropped. */
+const CHECK_SUPERSEDED = { _tag: "CheckSuperseded" } as const;
 
 const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
@@ -167,14 +185,11 @@ const buildEdit = (
 };
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
+  const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const plugins = yield* PluginHost;
   const promotion = yield* PromotionState;
-  const notifier = yield* Notifier;
   const httpClient = yield* HttpClient.HttpClient;
-  const scope = yield* Effect.scope;
 
   /**
    * Turns a Connection's failure to give credentials into a failed outcome.
@@ -254,40 +269,22 @@ const make = Effect.gen(function* () {
       Effect.provideService(PromotionState, promotion),
     );
 
-  const describeUpstreamFailure = (
-    failure: UpstreamError,
-    contribution: RegisteredMcpServer,
-  ): CheckResult => {
-    switch (failure.reason) {
-      case "unreachable":
-      case "timeout":
-        return buildFailedResult("unreachable", failure.message);
-      case "unauthorized":
-        return buildFailedResult(
-          "error",
-          `${contribution.displayName}'s MCP server refused the Connection's token`,
-        );
-      default:
-        return buildFailedResult("error", failure.message);
-    }
-  };
-
   /**
    * Works out the outcome of one check from the dependencies read at its
    * start. Never fails except for the database: every other failure is an
    * outcome that becomes the server's status.
    *
-   * When the server answers 401, the Connection's credentials are refreshed
-   * and the listing is tried once more. A refresh changes the Connection, so
-   * it starts only if the server, its revision and its Connection are still
-   * as the check found them. Otherwise the outcome is `discarded`, and the
-   * Connection is left alone.
+   * When the server refuses the credentials, they are refreshed and the
+   * listing is tried once more (`runWithCredentials`). A refresh changes the
+   * Connection, so it starts only if the server, its revision and its
+   * Connection are still as the check found them. Otherwise the outcome is
+   * `discarded`, and the Connection is left alone.
    */
   const evaluate = (
     server: StoredMcpServer,
     dependencies: McpServerDependencies,
     worked: WorkedRevision,
-  ): Effect.Effect<CheckResult, SqlError, SqlClient.SqlClient | PluginHost> =>
+  ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
       const judged = judgeDependencies(dependencies);
       if (judged._tag === "unusable")
@@ -302,46 +299,34 @@ const make = Effect.gen(function* () {
         );
       }
 
-      const read = yield* Effect.result(connectionTypes.readCredentialsForUse(server.connectionId));
-      if (read._tag === "Failure")
-        return describeUnavailable(read.failure, contribution, connection);
-
-      let outcome = yield* Effect.result(
-        listTools(contribution, read.success, worked, server.protocolVersion),
+      return yield* runWithCredentials({
+        connections: connectionTypes,
+        connectionId: server.connectionId,
+        // The retry after a refresh starts with the revision that worked.
+        action: (credentials) =>
+          listTools(contribution, credentials, worked, worked.current ?? server.protocolVersion),
+        checkRefreshAllowed: Effect.flatMap(
+          state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
+          Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
+        ),
+      }).pipe(
+        Effect.map(({ tools, revision }): CheckResult => {
+          const stored = tools.map(toStoredTool);
+          return new TextEncoder().encode(JSON.stringify(stored)).length >
+            MAX_UPSTREAM_MESSAGE_BYTES
+            ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
+            : { _tag: "ready", tools: stored, revision };
+        }),
+        Effect.catchTags({
+          UpstreamError: (failure) => {
+            const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
+            return Effect.succeed(buildFailedResult(status, detail));
+          },
+          ConnectionCredentialsUnavailable: (error) =>
+            Effect.succeed(describeUnavailable(error, contribution, connection)),
+          CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),
+        }),
       );
-      if (outcome._tag === "Failure" && outcome.failure.reason === "unauthorized") {
-        const current = yield* readServerWhileBasisHolds(server.id, {
-          revision: server.revision,
-          dependencies,
-        });
-        if (Option.isNone(current)) return { _tag: "discarded" } satisfies CheckResult;
-        const refresh = yield* Effect.result(
-          connectionTypes.refreshAfterRejection(
-            server.connectionId,
-            outcome.failure.sentIdentity ?? read.success.identity,
-          ),
-        );
-        if (refresh._tag === "Failure") {
-          return refresh.failure._tag === "ConnectionCannotRefresh"
-            ? describeUpstreamFailure(outcome.failure, contribution)
-            : describeUnavailable(refresh.failure, contribution, connection);
-        }
-        outcome = yield* Effect.result(
-          listTools(
-            contribution,
-            refresh.success,
-            worked,
-            worked.current ?? server.protocolVersion,
-          ),
-        );
-      }
-      if (outcome._tag === "Failure") return describeUpstreamFailure(outcome.failure, contribution);
-
-      const tools = outcome.success.tools.map(toStoredTool);
-      if (new TextEncoder().encode(JSON.stringify(tools)).length > MAX_UPSTREAM_MESSAGE_BYTES) {
-        return buildFailedResult("error", "The server's tool list is larger than 4 MiB");
-      }
-      return { _tag: "ready", tools, revision: outcome.success.revision } satisfies CheckResult;
     });
 
   /**
@@ -357,69 +342,70 @@ const make = Effect.gen(function* () {
       const found = yield* servers.readById(id);
       if (Option.isNone(found) || !found.value.enabled) return;
       const server = found.value;
-      const dependencies = yield* readDependencies(server);
+      const dependencies = yield* state.readDependencies(server);
       const worked: WorkedRevision = { current: null };
       const result = yield* evaluate(server, dependencies, worked);
       const at = yield* nowIso;
       const written =
         result._tag !== "discarded" &&
-        (yield* writeServerState(
+        (yield* state.writeCheckResult(
           id,
           { revision: server.revision, dependencies },
           buildEdit(server, result, at, worked),
           at,
         ));
-      if (!written) yield* markDueWhenUsable(id, at);
-    }).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-      Effect.provideService(PluginHost, plugins),
-      Effect.provideService(Notifier, notifier),
+      if (!written) yield* state.markDueWhenUsable(id, at);
+    });
+
+  const wakeup = Latch.makeUnsafe(false);
+  // The servers with a check running. A server stays due until its check
+  // writes the next time, so without this set every look would start it again.
+  const checking = new Set<string>();
+
+  /**
+   * Checks one server, then frees it for the next look. A check that ended
+   * without a failure wakes the loop, because a request that came while it
+   * ran has left the server due. After a failure it does not: the server is
+   * still due, and waking would check it again at once, for as long as the
+   * failure lasts.
+   */
+  const checkAndRelease = (id: string): Effect.Effect<void> =>
+    absorbFailures(
+      `Checking MCP server ${id} failed`,
+      Effect.onExit(promotion.whenServing(checkOnce(id)), (exit) =>
+        Effect.sync(() => {
+          checking.delete(id);
+          if (Exit.isSuccess(exit)) wakeup.openUnsafe();
+        }),
+      ),
     );
 
-  // "running": a check is in progress. "again": a request came during it.
-  const inFlight = new Map<string, "running" | "again">();
-
-  const runUntilNoRequestIsWaiting = (id: string): Effect.Effect<void> =>
+  const startDueChecks = (scope: Scope.Scope): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      let requestedAgain = true;
-      while (requestedAgain) {
-        yield* absorbFailures(
-          `Checking MCP server ${id} failed`,
-          promotion.whenServing(checkOnce(id)),
-        );
-        // Looking for a waiting request and ending the entry are one
-        // synchronous step. With a step between them, a request that came in
-        // between would set "again" on an entry that is then deleted, and
-        // that request would be lost.
-        requestedAgain = yield* Effect.sync(() => {
-          if (inFlight.get(id) === "again") {
-            inFlight.set(id, "running");
-            return true;
-          }
-          inFlight.delete(id);
-          return false;
-        });
+      for (const server of yield* servers.listDueForCheck(yield* nowIso)) {
+        if (checking.has(server.id)) continue;
+        checking.add(server.id);
+        yield* Effect.forkIn(checkAndRelease(server.id), scope);
       }
-    }).pipe(Effect.onInterrupt(() => Effect.sync(() => void inFlight.delete(id))));
-
-  const request = (id: string): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      if (inFlight.has(id)) {
-        inFlight.set(id, "again");
-        return Effect.void;
-      }
-      inFlight.set(id, "running");
-      return Effect.asVoid(Effect.forkIn(runUntilNoRequestIsWaiting(id), scope));
     });
 
   return McpServerChecks.of({
-    request,
-    requestDue: Effect.gen(function* () {
-      const due = yield* servers.listDueForCheck(yield* nowIso);
-      for (const server of due) {
-        if (!inFlight.has(server.id)) yield* request(server.id);
-      }
-    }),
+    wake: Effect.asVoid(wakeup.open),
+    run: (backstop) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scope = yield* Effect.scope;
+          while (true) {
+            yield* absorbFailures(
+              "Looking for the MCP server checks that are due failed",
+              promotion.whenServing(startDueChecks(scope)),
+            );
+            // The latch closes before the next look, so a wake that comes
+            // after the close opens it again and is never lost.
+            yield* wakeup.await.pipe(Effect.timeoutOption(backstop), Effect.andThen(wakeup.close));
+          }
+        }),
+      ),
   });
 });
 

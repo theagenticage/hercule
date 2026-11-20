@@ -20,7 +20,7 @@
  *   itself, so the test renames the table away for a moment.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Redacted } from "effect";
+import { Duration, Effect, Layer, Redacted } from "effect";
 import { PluginError } from "@hercule/plugin-host";
 import * as SqlClient from "effect/sql/SqlClient";
 import { connectionRepository } from "../connections";
@@ -33,7 +33,7 @@ import {
   buildPluginStack,
 } from "../plugins/testing";
 import { Secrets } from "../secrets";
-import { McpServerChecksLayer } from "./checks";
+import { McpServerChecks, McpServerChecksLayer } from "./checks";
 import { runConnectionFollower } from "./follower";
 import { mcpServerRepository, type StoredMcpServer } from "./repository";
 import { startFakeUpstream, type FakeUpstream } from "./testing";
@@ -145,6 +145,8 @@ const followUntil = (
           yield* withTransaction(sql, sql`ALTER TABLE mcp_servers RENAME TO mcp_servers_away`);
         }
         yield* Effect.forkScoped(runConnectionFollower);
+        const checks = yield* McpServerChecks;
+        yield* Effect.forkScoped(checks.run(Duration.minutes(1)));
         if (arrangement.listUnreadableAtStart === true) {
           // The follower reads the list at once, and fails.
           yield* Effect.sleep("100 millis");

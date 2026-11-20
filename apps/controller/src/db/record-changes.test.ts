@@ -1,12 +1,12 @@
 /**
  * Tests the record-changes listener: a subscriber gets only the records of the
  * topics it asked for, without counts-only session changes and other kinds,
- * and sees only what is published after it subscribed. That `announce` reaches
- * it is tested with the one `AfterCommit` that feeds it (`live/topics.test.ts`).
+ * each record once however often it changed, and sees only what is published
+ * after it subscribed. That `announce` reaches it is tested with the one
+ * `AfterCommit` that feeds it (`live/topics.test.ts`).
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import * as Queue from "effect/Queue";
 import type * as Scope from "effect/Scope";
 import { RecordChanges, RecordChangesLayer } from "./record-changes";
 
@@ -18,7 +18,7 @@ describe("RecordChanges", () => {
     const received = await run(
       Effect.gen(function* () {
         const changes = yield* RecordChanges;
-        const queue = yield* changes.subscribe(["mcpServer", "session"]);
+        const subscription = yield* changes.subscribe(["mcpServer", "session"]);
         yield* changes.publish([
           { _tag: "record", topic: "mcpServer", id: "a", kind: "updated" },
           { _tag: "record", topic: "connection", id: "c", kind: "updated" },
@@ -40,7 +40,7 @@ describe("RecordChanges", () => {
           { _tag: "event" },
           { _tag: "transcript", sessionId: "s2" },
         ]);
-        return yield* Queue.takeAll(queue);
+        return yield* subscription.takePending;
       }),
     );
 
@@ -48,5 +48,23 @@ describe("RecordChanges", () => {
       { topic: "mcpServer", id: "a" },
       { topic: "session", id: "s2" },
     ]);
+  });
+
+  it("returns a record that changed many times once, and then waits for the next change", async () => {
+    const { first, second } = await run(
+      Effect.gen(function* () {
+        const changes = yield* RecordChanges;
+        const subscription = yield* changes.subscribe(["mcpServer"]);
+        const change = { _tag: "record", topic: "mcpServer", id: "a", kind: "updated" } as const;
+        yield* changes.publish([change, change]);
+        yield* changes.publish([change]);
+        const first = yield* subscription.takePending;
+        yield* changes.publish([{ ...change, id: "b" }]);
+        return { first, second: yield* subscription.takePending };
+      }),
+    );
+
+    expect([...first]).toEqual([{ topic: "mcpServer", id: "a" }]);
+    expect([...second]).toEqual([{ topic: "mcpServer", id: "b" }]);
   });
 });
