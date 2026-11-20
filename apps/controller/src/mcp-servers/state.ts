@@ -16,6 +16,7 @@ import { connectionRepository, type StoredConnection } from "../connections";
 import { announce, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import type { ServerAvailability } from "./left-out";
 import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
 
 const MINUTE_MILLIS = 60 * 1000;
@@ -182,6 +183,39 @@ export const judgeDependencies = ({
   }
   return { _tag: "usable", contribution: plugin.contribution, connection };
 };
+
+/**
+ * Returns the switch and the status of each server that exists, by its id,
+ * judged from its Connection and plugin as they are now rather than from the
+ * status the follower last wrote. A server whose Connection is switched off
+ * or gone, or whose plugin is stopped, is `error`; one whose Connection needs
+ * sign-in is `needs-sign-in`. A server still `checking` stays `checking`: its
+ * first list has not ended, and that reason comes before the others (spec 21
+ * section 3.8). An id that no server has is left out of the map.
+ *
+ * A session's start reads it, because the follower writes a status some time
+ * after the Connection or the plugin changes, and a start in between must not
+ * call the server usable.
+ */
+export const readCurrentAvailability = (
+  ids: ReadonlyArray<string>,
+): Effect.Effect<
+  ReadonlyMap<string, ServerAvailability>,
+  SqlError,
+  SqlClient.SqlClient | PluginHost
+> =>
+  Effect.gen(function* () {
+    const servers = yield* mcpServerRepository;
+    const stored = yield* servers.readAvailability(ids);
+    const current = new Map<string, ServerAvailability>();
+    for (const [id, server] of stored) {
+      const judged = judgeDependencies(yield* readDependencies(server));
+      const status =
+        server.status !== "checking" && judged._tag === "unusable" ? judged.status : server.status;
+      current.set(id, { enabled: server.enabled, status });
+    }
+    return current;
+  });
 
 /**
  * What a state write was based on: the server's `revision` and the

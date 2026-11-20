@@ -217,6 +217,16 @@ describe("session.spawn with mcpServerIds", () => {
 
         expect(listOf(given)).toEqual([bravo.id, alpha.id]);
         expect(empty.mcpServers).toEqual([]);
+        // The spawn's own audit entry says which servers the session was given.
+        const spawned = await arranged.harness.audit("session.spawned");
+        expect(
+          spawned.find((entry) => entry.payload["sessionId"] === given.id)?.payload,
+        ).toMatchObject({
+          mcpServerIds: [bravo.id, alpha.id],
+        });
+        expect(
+          spawned.find((entry) => entry.payload["sessionId"] === empty.id)?.payload,
+        ).not.toHaveProperty("mcpServerIds");
       });
     },
     TEST_TIMEOUT_MS,
@@ -380,6 +390,23 @@ describe("session.update with mcpServerIds", () => {
 
         const cleared = await updateSession(arranged, thread.session.id, { mcpServerIds: [] });
         expect(((await cleared.json()) as Session).mcpServers).toEqual([]);
+
+        // Each change of the list is audited with who made it and what it added and removed.
+        const entries = await arranged.harness.audit("session.mcpServersChanged");
+        expect(entries.map(({ actor, payload }) => ({ actor, payload }))).toEqual([
+          {
+            actor: "user",
+            payload: {
+              sessionId: thread.session.id,
+              added: [charlie.id, bravo.id],
+              removed: [alpha.id],
+            },
+          },
+          {
+            actor: "user",
+            payload: { sessionId: thread.session.id, added: [], removed: [charlie.id, bravo.id] },
+          },
+        ]);
       });
     },
     TEST_TIMEOUT_MS,
