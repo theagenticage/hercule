@@ -27,7 +27,6 @@ import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
 import { DiscussionService, DiscussionServiceLayer } from "../discussions";
-import { RecordChangesLayer } from "../db";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
@@ -1131,10 +1130,6 @@ const operationServices = Layer.mergeAll(
   // scheduler requests them too, and a check must be one instance to run at
   // most once per server.
   McpServerServiceLayer.pipe(Layer.provideMerge(McpServerChecksLayer)),
-  // The record changes that in-process followers, such as the MCP Server
-  // follower, read. Merged beside the live topics, which keep their own
-  // listener.
-  RecordChangesLayer,
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),

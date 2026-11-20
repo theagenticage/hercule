@@ -1,14 +1,13 @@
 /**
  * Tests the record-changes listener: a subscriber gets only the records of the
  * topics it asked for, without counts-only session changes and other kinds,
- * hears a change published by `announce`, and sees only what is published
- * after it subscribed.
+ * and sees only what is published after it subscribed. That `announce` reaches
+ * it is tested with the one `AfterCommit` that feeds it (`live/topics.test.ts`).
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import type * as Scope from "effect/Scope";
-import { announce } from "./after-commit";
 import { RecordChanges, RecordChangesLayer } from "./record-changes";
 
 const run = <A>(effect: Effect.Effect<A, never, RecordChanges | Scope.Scope>) =>
@@ -49,19 +48,5 @@ describe("RecordChanges", () => {
       { topic: "mcpServer", id: "a" },
       { topic: "session", id: "s2" },
     ]);
-  });
-
-  it("hears a change announced outside a transaction, and only after it subscribed", async () => {
-    const received = await run(
-      Effect.gen(function* () {
-        const changes = yield* RecordChanges;
-        yield* announce({ _tag: "record", topic: "connection", id: "early", kind: "updated" });
-        const queue = yield* changes.subscribe(["connection"]);
-        yield* announce({ _tag: "record", topic: "connection", id: "late", kind: "updated" });
-        return yield* Queue.takeAll(queue);
-      }),
-    );
-
-    expect([...received]).toEqual([{ topic: "connection", id: "late" }]);
   });
 });

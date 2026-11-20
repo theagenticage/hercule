@@ -11,7 +11,9 @@
  *   it on lists the tools again;
  * - a plugin that is missing from the build shows the same words whether the
  *   follower or a check says it;
- * - a status the server earned itself is left alone.
+ * - a status the server earned itself is left alone;
+ * - a Connection that the step of a run marks `needs-reauth`, on the fiber that
+ *   executes the run, reaches the follower like any other change.
  *
  * No operation disables a Connection, and a Connection with pasted
  * credentials has no refresh whose refusal would make it `needs-reauth`. So
@@ -22,12 +24,19 @@
  * tested with the checks.
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Redacted, Schema } from "effect";
+import { HOST_API, registerWorkflowAction, type Plugin } from "@hercule/plugin-host";
+import { OAUTH_TOKENS } from "../connections";
+import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
+import { serializeTokens } from "../connections/oauth";
+import { withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { post, send } from "../http/testing";
+import { expectStatus, findStepRecords, startRun, waitForRunToFinish } from "../runs/testing";
 import {
   createConnection,
+  createWorkflowOrFail,
   disablePlugin,
   withSetUpController,
   type SetUpController,
@@ -36,6 +45,7 @@ import {
   countNotifications,
   createServer,
   eventually,
+  insertOauthConnection,
   readRow,
   requestCheck,
   runSql,
@@ -278,5 +288,106 @@ describe("a server follows its plugin", () => {
       });
       expect(fake.requests).toHaveLength(requestsBefore);
     });
+  });
+});
+
+describe("a server follows a Connection that a run's step marks", () => {
+  it("goes to needs-sign-in when the provider refuses the refresh a workflow's action step asked for", async () => {
+    const fake = await startFakeUpstream();
+    const provider = createDeviceProvider();
+    const mcpPlugin = buildMcpServerPlugin("acme", {
+      server: buildDeskMcpServer("acme", fake),
+      deviceProviderUrl: provider.base,
+    });
+    // The plugin also offers an action that acts through its Connection, so
+    // a run reads the Connection's token on the fiber that executes the run.
+    const plugin: Plugin = {
+      manifest: {
+        id: "acme",
+        displayName: "Acme",
+        hostApi: HOST_API,
+        capabilities: ["connections", "mcp-servers", "workflow-actions"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        Effect.andThen(
+          mcpPlugin.register(host),
+          registerWorkflowAction(host, {
+            id: "desk.touch",
+            displayName: "Touch the desk",
+            description: "Does nothing, through a Desk Connection.",
+            connection: { type: "acme/desk" },
+            input: Schema.Struct({}),
+            output: Schema.Struct({}),
+            execute: () => Effect.succeed({}),
+          }),
+        ),
+      activate: mcpPlugin.activate,
+    };
+    try {
+      await withSetUpController(
+        async (controller) => {
+          const connectionId = await insertOauthConnection(controller.harness, {
+            accessToken: "stored-token",
+            refreshToken: "refresh-1",
+          });
+          await createServer(controller, { connectionId });
+          await eventually(
+            () => readRow(controller),
+            (row) => row.status === "ready",
+          );
+          // The token expires, and the provider will refuse to refresh it.
+          const owner = { kind: "connection", id: connectionId } as const;
+          await Effect.runPromise(
+            withTransaction(
+              controller.harness.sql,
+              controller.harness.secrets.set(
+                owner,
+                OAUTH_TOKENS,
+                Redacted.make(
+                  serializeTokens({
+                    accessToken: "stored-token",
+                    refreshToken: "refresh-1",
+                    expiresAt: new Date(Date.now() - 60_000).toISOString(),
+                  }),
+                ),
+              ),
+            ),
+          );
+          provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+          const workflow = await createWorkflowOrFail(controller.base, controller.token, {
+            definition: {
+              name: "Touch the desk",
+              steps: [
+                {
+                  id: "touch",
+                  kind: "action",
+                  action: "acme/desk.touch",
+                  params: { connection: connectionId },
+                },
+              ],
+            },
+          });
+
+          const run = await waitForRunToFinish(
+            controller.base,
+            controller.token,
+            await startRun(controller.base, controller.token, workflow.id),
+          );
+
+          // The step failed because the refresh was refused, which marks the Connection.
+          expectStatus(findStepRecords(run, "touch")[0], "failed");
+          const stuck = await eventually(
+            () => readRow(controller),
+            (row) => row.status === "needs-sign-in",
+          );
+          expect(stuck.status_cause).toBe("connection");
+        },
+        [plugin],
+      );
+    } finally {
+      await fake.stop();
+      await provider.stop();
+    }
   });
 });
