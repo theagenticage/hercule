@@ -518,8 +518,7 @@ export interface ServerHarness {
   readonly promotion: PromotionState["Service"];
   /**
    * The controller's calls to outside MCP servers, which only the gateway's
-   * route uses. A test replaces a method to stand in for a server, and puts
-   * it back when it is done.
+   * route uses. A test calls its methods directly.
    */
   readonly mcpServerCalls: McpServerCalls["Service"];
   /**

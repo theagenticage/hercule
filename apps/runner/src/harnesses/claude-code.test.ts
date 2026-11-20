@@ -82,6 +82,7 @@ const HERCULE_TOOL = {
 const CONTEXT: HarnessRunnerContext = {
   cwd: null,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
@@ -923,6 +924,36 @@ describe("a Claude Code session", () => {
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
+  });
+
+  it("gives the harness the resolved MCP servers, with a static bearer header and no cached tool list", async () => {
+    const run = createDriving();
+    const gateway = {
+      name: "tools",
+      url: "https://controller.example:4938/mcp",
+      headers: { Authorization: "Bearer a-session-token" },
+    };
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, { ...WORKING, mcpServers: [gateway] }),
+    );
+
+    const [options] = run.options;
+    expect(options?.mcpServers).toEqual({
+      tools: { type: "http", url: gateway.url, headers: gateway.headers },
+    });
+    // The session's list depends on its token, so a list cached for an older
+    // token must never start a session.
+    expect(options?.env?.["MCP_DISCOVERY_CACHE"]).toBe("0");
+    expect(options?.strictMcpConfig).toBe(true);
+    // The Access Mode decides about an MCP tool, so no rule allows one unasked.
+    expect(options?.allowedTools).toBeUndefined();
+  });
+
+  it("gives the harness no MCP server when the runner resolved none", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    expect(run.options[0]?.mcpServers).toBeUndefined();
   });
 
   it("loads the workspace's own CLAUDE.md and .claude/ when the session has a workspace", async () => {

@@ -92,16 +92,29 @@ describe("buildLeftOutWarning", () => {
     });
   });
 
-  it("names the first 20 servers and counts the rest, so the warning stays within its bounds", () => {
-    const leftOut = Array.from({ length: 70 }, (_, index) => ({
+  const buildLeftOut = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
       mcpServerId: `id-${String(index)}`,
       name: `server-${String(index)}`,
       reason: "unreachable" as const,
     }));
 
-    const warning = buildLeftOutWarning(leftOut);
+  it("names 20 servers in the message and counts the rest, but gives a client every server up to its limit", () => {
+    const warning = buildLeftOutWarning(buildLeftOut(64));
 
-    expect(warning.mcpServers).toHaveLength(20);
-    expect(warning.message.endsWith(", and 50 more")).toBe(true);
+    expect(warning.mcpServers).toHaveLength(64);
+    expect(warning.message.endsWith("server-19 (unreachable), and 44 more")).toBe(true);
+    expect(warning.message).not.toContain("server-20");
+  });
+
+  it("gives a client the first 64 servers of a longer list, and says in the message how many have no entry", () => {
+    const warning = buildLeftOutWarning(buildLeftOut(70));
+
+    expect(warning.mcpServers.map(({ mcpServerId }) => mcpServerId)).toEqual(
+      buildLeftOut(64).map(({ mcpServerId }) => mcpServerId),
+    );
+    expect(warning.message.endsWith(", and 50 more (6 of them are not given a fix button)")).toBe(
+      true,
+    );
   });
 });

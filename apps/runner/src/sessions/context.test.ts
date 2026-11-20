@@ -229,6 +229,44 @@ describe("what a workspace-less session runs in", () => {
   });
 });
 
+describe("the MCP servers a session is given", () => {
+  const GATEWAY = { name: "tools", type: "http", url: "/mcp", bearer: "session-token" } as const;
+  const withEntry = (entry: unknown): SessionStart => {
+    const base = buildSessionStart();
+    return { ...base, spec: { ...base.spec, mcpServers: [entry as typeof GATEWAY] } };
+  };
+  const readMcpServers = (frame: SessionStart) => {
+    const outcome = resolveSync(frame, buildMachine());
+    expect(outcome._tag).toBe("Success");
+    return outcome._tag === "Success" ? outcome.success.ctx.mcpServers : [];
+  };
+
+  it("resolves the gateway entry to an absolute URL on the controller and the session's token", () => {
+    expect(readMcpServers(withEntry(GATEWAY))).toEqual([
+      {
+        name: "tools",
+        url: "https://controller.example:4938/mcp",
+        headers: { Authorization: "Bearer a-session-token" },
+      },
+    ]);
+  });
+
+  it("gives none to a start without the entry", () => {
+    expect(readMcpServers(buildSessionStart())).toEqual([]);
+  });
+
+  it.each([
+    "https://elsewhere.example/mcp",
+    "//elsewhere.example/mcp",
+    "http://controller.example:4938/mcp",
+  ])(
+    "drops an entry whose URL %s is not on the controller's origin, so the token goes nowhere else",
+    (url) => {
+      expect(readMcpServers(withEntry({ ...GATEWAY, url }))).toEqual([]);
+    },
+  );
+});
+
 describe("the environment a session runs with", () => {
   const resolveEnv = (
     frame: SessionStart,

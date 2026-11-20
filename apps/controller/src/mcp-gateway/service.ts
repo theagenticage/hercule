@@ -382,16 +382,16 @@ const make = Effect.gen(function* () {
    */
   const refuseWhileNotServing = (
     sessionId: string,
-    decision: CallDecision,
-    gate: ControllerSealed | PromotionInProgress,
+    serverName: string | undefined,
+    tool: string | undefined,
+    gateMessage: string,
   ): Effect.Effect<ToolResult> =>
     Effect.as(
       Effect.logInfo(
         `MCP gateway: refused a tool call while the controller does not serve. session ${sessionId}, ` +
-          `server ${decision._tag === "call" ? decision.serverName : (decision.refusal.server?.name ?? "-")}, ` +
-          `tool ${decision._tag === "call" ? decision.tool : "-"}, reason: ${gate.error.message}`,
+          `server ${serverName ?? "-"}, tool ${tool ?? "-"}, reason: ${gateMessage}`,
       ),
-      buildErrorResult(gate.error.message),
+      buildErrorResult(gateMessage),
     );
 
   /**
@@ -412,7 +412,12 @@ const make = Effect.gen(function* () {
         .admit(executeCall(state, actor, call, decision))
         .pipe(
           Effect.catchIf(isPromotionRefusal, (gate) =>
-            refuseWhileNotServing(actor.sessionId, decision, gate),
+            refuseWhileNotServing(
+              actor.sessionId,
+              decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
+              decision._tag === "call" ? decision.tool : undefined,
+              gate.error.message,
+            ),
           ),
         );
     });
@@ -429,6 +434,9 @@ const make = Effect.gen(function* () {
     // Whatever happens after the call is accepted, one entry is written: a
     // call that is interrupted or dies ends as `failed`.
     let outcome: CallOutcome = { _tag: "failed" };
+    // The catalogue found the controller frozen or sealed after all: that
+    // refusal is logged and answered, never audited (spec 21 section 3.9).
+    let notServing = false;
 
     const refuse = (refusal: Refusal): Effect.Effect<ToolResult> => {
       server = refusal.server;
@@ -456,20 +464,31 @@ const make = Effect.gen(function* () {
                   outcome = { _tag: "answered" };
                   return result as unknown as ToolResult;
                 }),
-                Effect.catchTag("McpCallRefused", (refused) =>
-                  refuse({
+                Effect.catchTag("McpCallRefused", (refused) => {
+                  if (refused.controllerNotServing === true) {
+                    notServing = true;
+                    return refuseWhileNotServing(
+                      actor.sessionId,
+                      decision.serverName,
+                      decision.tool,
+                      refused.message,
+                    );
+                  }
+                  return refuse({
                     reason: refused.reason,
                     server: { id: decision.serverId, name: decision.serverName },
                     tool: decision.tool,
                     message: refused.message,
-                  }),
-                ),
+                  });
+                }),
               );
           });
 
     return run.pipe(
       Effect.onExit(() =>
-        Effect.uninterruptible(auditCall(actor, server, tool, outcome, Date.now() - startedAt)),
+        notServing
+          ? Effect.void
+          : Effect.uninterruptible(auditCall(actor, server, tool, outcome, Date.now() - startedAt)),
       ),
     );
   };

@@ -20,7 +20,7 @@ import {
   switchBranch,
   type Workspaces,
 } from "../workspaces";
-import type { HarnessRunnerContext } from "../harnesses";
+import type { HarnessRunnerContext, ResolvedMcpServer } from "../harnesses";
 import { createHarnessHome } from "../harnesses/account";
 import { endSentence } from "../report";
 import {
@@ -158,6 +158,40 @@ const buildEnv = (
       ? machine.binDir
       : `${machine.binDir}:${machine.baseEnv["PATH"]}`,
 });
+
+/**
+ * Resolves the MCP servers a start frame names into what the harness is
+ * given: each `url` becomes an absolute URL on the controller the session's
+ * `HERCULE_API_URL` points at, and the session's token becomes an
+ * `Authorization: Bearer` header. Returns an empty list for a frame without
+ * `SessionSpec.mcpServers`.
+ *
+ * An entry whose URL leaves the controller's origin is logged and dropped,
+ * never sent: the session's token must reach only the controller that issued
+ * it.
+ */
+const resolveMcpServers = (
+  machine: Machine,
+  frame: SessionStart,
+): Effect.Effect<ReadonlyArray<ResolvedMcpServer>> =>
+  Effect.gen(function* () {
+    const resolved: Array<ResolvedMcpServer> = [];
+    for (const entry of frame.spec.mcpServers ?? []) {
+      const url = URL.parse(entry.url, machine.controllerUrl);
+      if (url === null || url.origin !== URL.parse(machine.controllerUrl)?.origin) {
+        yield* Effect.logWarning(
+          `dropped the MCP server "${entry.name}" of session ${frame.sessionId}: its URL ${entry.url} is not on the controller ${machine.controllerUrl}`,
+        );
+        continue;
+      }
+      resolved.push({
+        name: entry.name,
+        url: url.href,
+        headers: { Authorization: `Bearer ${frame.token}` },
+      });
+    }
+    return resolved;
+  });
 
 /**
  * Runs a filesystem operation. Fails with the error's message, which is the
@@ -350,6 +384,7 @@ export const resolveSessionContext = (
         frame.userMaterial === true
           ? yield* provisionUserMaterial(frame.harnessId, home, machine.baseEnv)
           : undefined;
+      const mcpServers = yield* resolveMcpServers(machine, frame);
       return {
         scratch: placed.scratch,
         attachmentsDir,
@@ -380,6 +415,7 @@ export const resolveSessionContext = (
             : { credential: frame.harnessAccount.credential }),
           herculeTool: machine.herculeTool,
           attachmentsDir,
+          mcpServers,
           attachmentUploader: machine.attachmentUploader,
           ...(userMaterial === undefined ? {} : { userMaterial }),
         },

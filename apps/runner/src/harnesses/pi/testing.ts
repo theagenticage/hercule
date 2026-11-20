@@ -64,6 +64,7 @@ export const buildContext = (
 ): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,

@@ -38,6 +38,7 @@ export const createCodexHome = (): string => createScratchHome("codex");
 export const buildContext = (home: string, cwd: string | null = null): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,

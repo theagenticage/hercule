@@ -51,6 +51,7 @@ import {
   type WorkspaceStepKey,
   MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
+  type HarnessMcpServer,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -103,8 +104,9 @@ import { excludeDigest, claimAttachments, readClaimableAttachments } from "../at
 import {
   buildLeftOutWarning,
   decideLeftOutReason,
-  mcpServerRepository,
+  readCurrentAvailability,
   type LeftOutServer,
+  type StartDelivery,
 } from "../mcp-servers";
 import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
@@ -376,6 +378,21 @@ export interface StartRequest {
   /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
   readonly input: StoredInput;
 }
+
+/** The two facts of a start that decide whether the harness can be given the MCP Gateway's entry. */
+type GatewayDelivery = Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">;
+
+/**
+ * The one entry a start gives the harness: the MCP Gateway, which the runner
+ * resolves against the controller's address and the session's token
+ * (`SessionSpec.mcpServers`, spec 06 section 4).
+ */
+const MCP_GATEWAY_ENTRY: HarnessMcpServer = {
+  name: "tools",
+  type: "http",
+  url: "/mcp",
+  bearer: "session-token",
+};
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
@@ -900,6 +917,20 @@ const keepsStepPromptOnExit = (
   exited.resumable &&
   !exited.crashGuardArmed;
 
+/**
+ * Returns the event a runner reported without the fields only the controller
+ * may write. Today that is `mcpServers` on a `runtime.warning`: the controller
+ * writes it for the servers a start left out, and a client draws a fix button
+ * from it, so a runner must not be able to name servers there. Returns any
+ * other event as it is.
+ */
+const withoutControllerFields = (event: HarnessEvent): HarnessEvent => {
+  if (event._tag !== "runtime.warning" || event.mcpServers === undefined) return event;
+  const copy = { ...event };
+  delete copy.mcpServers;
+  return copy;
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
@@ -910,7 +941,6 @@ const make = Effect.gen(function* () {
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const providerAccounts = yield* providerAccountRepository;
-  const mcpServers = yield* mcpServerRepository;
   const subagents = yield* subagentRepository;
   const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
@@ -1047,36 +1077,56 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Records which MCP Servers of the session's list can be called at this
-   * start, and why each other one cannot (`decideLeftOutReason`), and writes
-   * one `runtime.warning` naming the servers left out. Does nothing for a
-   * session whose list is empty. Joins the caller's transaction, and the
-   * caller announces the session. It reads the harness, the profile grants and
-   * the servers' status from the database, never from outside.
+   * Reads the two facts that decide whether a start can give the harness the
+   * MCP Gateway's entry: whether the runner negotiated
+   * `MCP_SERVERS_CAPABILITY`, and whether the harness declares
+   * `mcpPassthrough: "native"`. The entry on the start frame and the servers
+   * a start leaves out (`recordMcpServersLeftOut`) both follow from these
+   * two, so they are read once per start and used for both.
    */
-  const recordMcpServersLeftOut = (
-    sessionId: string,
+  const readMcpGatewayDelivery = (
     harnessId: string,
     runner: StartNeeds["runner"],
-    at: string,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<GatewayDelivery> =>
     Effect.gen(function* () {
-      const listed = yield* sessions.readMcpServers(sessionId);
-      if (listed.length === 0) return;
       const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
-      const delivery = {
+      return {
         runnerReachesMcpServers: (runner.negotiatedCapabilities ?? []).includes(
           MCP_SERVERS_CAPABILITY,
         ),
         // A harness this build no longer carries cannot be given the entry.
         harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
+      };
+    });
+
+  /**
+   * Records which MCP Servers of the session's list can be called at this
+   * start, and why each other one cannot (`decideLeftOutReason`), and writes
+   * one `runtime.warning` naming the servers left out. `gateway` is what
+   * `readMcpGatewayDelivery` returned for this start. Does nothing for a
+   * session whose list is empty. Joins the caller's transaction, and the
+   * caller announces the session. It reads the profile grants and the
+   * servers' status from the database, never from outside. A server's status
+   * is judged against its Connection and plugin as they are now, so a change
+   * the follower has not yet written is not missed.
+   */
+  const recordMcpServersLeftOut = (
+    sessionId: string,
+    gateway: GatewayDelivery,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const listed = yield* sessions.readMcpServers(sessionId);
+      if (listed.length === 0) return;
+      const delivery: StartDelivery = {
+        ...gateway,
         profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
           "mcp.use",
         ),
-      } as const;
-      const available = yield* mcpServers.readAvailability(
+      };
+      const available = yield* readCurrentAvailability(
         listed.map((entry) => entry.mcpServerId),
-      );
+      ).pipe(provideSql, Effect.provideService(PluginHost, host));
       const reasons = new Map<string, McpServerLeftOutReason>();
       const leftOut: Array<LeftOutServer> = [];
       for (const entry of listed) {
@@ -2619,6 +2669,9 @@ const make = Effect.gen(function* () {
           record: { topic: "session", id: open.id, conversationId: open.conversationId ?? null },
           payload: {
             ...open.payload,
+            ...(open.mcpServers === undefined || open.mcpServers.length === 0
+              ? {}
+              : { mcpServerIds: open.mcpServers.map((entry) => entry.mcpServerId) }),
             sessionId: open.id,
             runnerId: open.runnerId,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
@@ -2830,7 +2883,8 @@ const make = Effect.gen(function* () {
             }
             // Decided at every start, like the skills, so a resume records the
             // servers again.
-            yield* recordMcpServersLeftOut(row.id, row.harnessId, needs.runner, at);
+            const gateway = yield* readMcpGatewayDelivery(row.harnessId, needs.runner);
+            yield* recordMcpServersLeftOut(row.id, gateway, at);
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
             if (!modelDeclarationsByPair.has(pair)) {
@@ -2859,7 +2913,18 @@ const make = Effect.gen(function* () {
                 input: buildTurnInput(row, input),
                 harnessId: row.harnessId,
                 harnessAccount,
-                spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
+                // The coordination paragraph and the gateway entry are added
+                // to the frame only, never to the stored spec. The entry goes
+                // to every session whose runner and harness can take it, also
+                // one with an empty list, so a server added later works
+                // without a restart (spec 21 section 4.4).
+                spec: {
+                  ...spec.value,
+                  ...(coordination === undefined ? {} : { coordination }),
+                  ...(gateway.runnerReachesMcpServers && gateway.harnessPassthrough === "native"
+                    ? { mcpServers: [MCP_GATEWAY_ENTRY] }
+                    : {}),
+                },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
                 ...(gitIdentity === undefined ? {} : { gitIdentity }),
@@ -3221,17 +3286,39 @@ const make = Effect.gen(function* () {
 
     /**
      * Replaces the session's own list of MCP Servers with the entries given,
-     * joining the caller's transaction, and announces the session. An entry
-     * whose server was already in the list keeps what the last start recorded
-     * for it. The caller has checked the list (`mcpServerListRule`).
+     * joining the caller's transaction. An entry whose server was already in
+     * the list keeps what the last start recorded for it. The caller has
+     * checked the list (`mcpServerListRule`).
+     *
+     * When the set of servers changes, it writes a `session.mcpServersChanged`
+     * audit entry stamped with the caller, holding the ids added and the ids
+     * removed. A list the session had, in another order, is not a change of
+     * what the session can reach, so it writes no entry. The session is
+     * announced either way, by the entry's record or directly.
      */
     setMcpServers: (
       sessionId: string,
       entries: ReadonlyArray<McpServerEntry>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        const before = (yield* sessions.readMcpServers(sessionId)).map(
+          (entry) => entry.mcpServerId,
+        );
         yield* sessions.replaceMcpServers(sessionId, entries);
-        yield* announceSessionChangeById(sessionId);
+        const after = entries.map((entry) => entry.mcpServerId);
+        const added = after.filter((id) => !before.includes(id));
+        const removed = before.filter((id) => !after.includes(id));
+        const session = Option.getOrThrow(yield* sessions.one(sessionId));
+        if (added.length === 0 && removed.length === 0) {
+          return yield* announceSessionChange(session);
+        }
+        yield* audit.append({
+          kind: "session.mcpServersChanged",
+          actor: yield* currentStamp,
+          record: { topic: "session", id: sessionId, conversationId: session.conversationId },
+          payload: { sessionId, added, removed },
+          at: yield* nowIso,
+        });
       }),
 
     /**
@@ -3936,6 +4023,9 @@ const make = Effect.gen(function* () {
      * is nothing to write: the session does not exist, is not on this runner,
      * or has already seen the event.
      *
+     * The fields only the controller writes are dropped from the event first
+     * (`withoutControllerFields`), so a runner cannot store them.
+     *
      * A delta's tap is announced here, before the transaction and never inside
      * it. A delta is not stored until it is flushed, but a client watching the
      * session must see it as soon as it is reported. So the tap is sent
@@ -3944,9 +4034,10 @@ const make = Effect.gen(function* () {
     foldReport: (
       runnerId: string,
       seq: number,
-      event: HarnessEvent,
+      reported: HarnessEvent,
     ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
+        const event = withoutControllerFields(reported);
         const id = event.sessionId;
         const found = yield* sessions.one(id);
         // A runner may report only on sessions placed on it. An event for any

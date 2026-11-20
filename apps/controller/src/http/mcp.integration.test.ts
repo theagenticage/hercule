@@ -13,9 +13,11 @@
  *   entry per call;
  * - a controller that is frozen.
  *
- * The outside server is the catalogue's fake upstream, and a call to it is
- * answered by a stand-in for `McpServerCalls.callTool`: how the catalogue
- * reaches a server is tested in the `mcp-servers` domain.
+ * The outside server is the catalogue's fake upstream. Both eras run end to
+ * end through the real `McpServerCalls`. The tests that need a call to hold,
+ * or to be refused for a reason the fake cannot give, replace
+ * `callTool` with a stand-in: how the catalogue reaches a server is tested in
+ * the `mcp-servers` domain.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -478,8 +480,7 @@ describe("who may call", () => {
 });
 
 describe("the stateful era", () => {
-  it("runs initialize, tools/list and tools/call, and writes one audit entry for the call", async () => {
-    standInForServers();
+  it("runs initialize, tools/list and tools/call through the catalogue, and writes one audit entry for the call", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0], servers[1]]);
     const { sessionId, result } = await initialize(thread.token);
 
@@ -501,15 +502,12 @@ describe("the stateful era", () => {
 
     const called = await callEcho(thread.token, "bravo__get_issue_details", sessionId);
     expect(called.body.result.isError).toBeUndefined();
-    expect(textOf(called)).toBe("called get-issue.details");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({
-      serverId: servers[1].id,
-      tool: "get-issue.details",
-      arguments: { text: "hello" },
-    });
-    // The upstream scope is the token's hash, never the token.
-    expect(JSON.stringify(calls[0]?.upstreamScope)).not.toContain(thread.token);
+    // The fake server echoes the arguments it received.
+    expect(textOf(called)).toBe('{"text":"hello"}');
+    const upstreamCalls = upstream.requests.filter((one) => one.method === "tools/call");
+    expect(upstreamCalls.map((one) => one.tool)).toContain("get-issue.details");
+    // The Session Token reaches no server: only the Connection's own credential does.
+    expect(JSON.stringify(upstream.requests)).not.toContain(thread.token);
 
     const [entry, ...rest] = await readCallAudit(thread.session.id);
     expect(rest).toEqual([]);
@@ -546,8 +544,7 @@ describe("the stateful era", () => {
 });
 
 describe("the stateless era", () => {
-  it("runs server/discover, tools/list and tools/call", async () => {
-    standInForServers();
+  it("runs server/discover, tools/list and tools/call through the catalogue", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const discovered = await sendMcp(thread.token, request("server/discover", STATELESS_META));
     expect(discovered.status).toBe(200);
@@ -567,7 +564,7 @@ describe("the stateless era", () => {
     const called = await callEcho(thread.token, "alpha__echo", undefined);
     expect(called.body.result).toMatchObject({
       resultType: "complete",
-      content: [{ type: "text", text: "called echo" }],
+      content: [{ type: "text", text: '{"text":"hello"}' }],
     });
   });
 

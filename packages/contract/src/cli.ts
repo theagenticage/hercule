@@ -5133,7 +5133,10 @@ export const CLI = {
         resolves: "mcpServer.query",
       },
     },
-    errors: { invalid_state: "that session has exited; there is nothing left to configure" },
+    errors: {
+      invalid_state:
+        "the Thread is archived, which refuses every update, or the session has exited, which refuses a change of model or options. A change of --mcp-server alone works on a queued, running or exited Thread, because the list is read again at the next start",
+    },
   },
   "session.input": {
     command: "session input",

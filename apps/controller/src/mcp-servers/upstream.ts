@@ -17,6 +17,7 @@
  * - No failure carries the server's answer, its headers, the request or a
  *   credential: each failure has a fixed message.
  */
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Ref from "effect/Ref";
@@ -73,6 +74,22 @@ export class UpstreamError extends Schema.TaggedError<UpstreamError>()("Upstream
   message: Schema.String,
   sentIdentity: Schema.optionalKey(Schema.String),
 }) {}
+
+/**
+ * Where one call keeps the identity of the credentials that its own request
+ * carried. A call provides one, and the client writes into it when it sends the
+ * call's request. Calls that run at once on one upstream session each have
+ * their own, so a 401 is always matched with the credentials of the request
+ * that got it. Without one, only the client's last-sent identity is kept.
+ */
+export interface UpstreamCallTrace {
+  sentIdentity: string | undefined;
+}
+
+export const CurrentUpstreamCallTrace = Context.Reference<UpstreamCallTrace | undefined>(
+  "hercule/controller/mcp-servers/CurrentUpstreamCallTrace",
+  { defaultValue: () => undefined },
+);
 
 type ClientProtocol = Parameters<typeof McpClient.http>[0]["protocol"];
 
@@ -241,13 +258,27 @@ export interface OpenedUpstream {
   readonly client: McpClient.McpClient;
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
-  /** Converts a failure of `client` into an `UpstreamError`. */
-  readonly describeFailure: (error: McpClientError.McpClientError) => UpstreamError;
+  /**
+   * Converts a failure of `client` into an `UpstreamError`. `sentIdentity` is
+   * the identity of the credentials of the request that failed, when the
+   * caller knows it (see `CurrentUpstreamCallTrace`). Without it, the failure
+   * carries the identity of the credentials the client sent last.
+   */
+  readonly describeFailure: (
+    error: McpClientError.McpClientError,
+    sentIdentity?: string,
+  ) => UpstreamError;
+  /**
+   * Makes every request from now on carry these credentials. The upstream
+   * MCP session stays open: the credentials go with each request.
+   */
+  readonly setCredentials: (credentials: ConnectionCredentialsForUse) => void;
 }
 
 /** What `openUpstream` needs. */
 export interface UpstreamTarget {
   readonly contribution: RegisteredMcpServer;
+  /** The credentials the first requests carry. `OpenedUpstream.setCredentials` replaces them. */
   readonly credentials: ConnectionCredentialsForUse;
   /** The revision that worked last time, tried first, or `null`. */
   readonly firstRevision: string | null;
@@ -283,18 +314,22 @@ export const openUpstream = (
 
     const outboundRefusal = yield* Ref.make<UpstreamError | undefined>(undefined);
 
-    const buildRequest = Effect.try({
-      try: () =>
-        contribution.buildUpstreamRequest({
-          credentials: target.credentials.credentials,
-          config: target.credentials.config,
-        }),
-      // The plugin's function is pure and should not throw. If it does, say
-      // nothing of what it threw, because that may hold the credentials.
-      catch: () => buildFailure("not-on-origin"),
-    });
+    let current = target.credentials;
+    let lastSentIdentity = target.credentials.identity;
 
-    const first = yield* buildRequest;
+    const buildRequest = (credentials: ConnectionCredentialsForUse) =>
+      Effect.try({
+        try: () =>
+          contribution.buildUpstreamRequest({
+            credentials: credentials.credentials,
+            config: credentials.config,
+          }),
+        // The plugin's function is pure and should not throw. If it does, say
+        // nothing of what it threw, because that may hold the credentials.
+        catch: () => buildFailure("not-on-origin"),
+      });
+
+    const first = yield* buildRequest(current);
     const refusedFirst = checkUrlOnOrigin(contribution.origin, first.url);
     if (refusedFirst !== undefined) return yield* Effect.fail(refusedFirst);
 
@@ -315,12 +350,24 @@ export const openUpstream = (
     // `mapRequestEffect`, because the HTTP client runs every request mapping
     // before it runs a `transform`, and the plugin must build the request,
     // with the credentials, only once the controller is known to be serving.
+    const buildTransportFailure = (
+      request: HttpClientRequest.HttpClientRequest,
+      description: string,
+    ) =>
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description }),
+      });
+
     const client = HttpClient.makeWith<never, never, HttpClientError.HttpClientError, never>(
       (pending) =>
-        Effect.flatMap(pending, (request) =>
-          promotion.whenServing(
+        Effect.flatMap(pending, (request) => {
+          const send = promotion.whenServing(
             Effect.gen(function* () {
-              const built = yield* buildRequest;
+              const used = current;
+              const trace = yield* CurrentUpstreamCallTrace;
+              const built = yield* buildRequest(used);
+              if (trace !== undefined) trace.sentIdentity = used.identity;
+              lastSentIdentity = used.identity;
               const refused =
                 checkUrlOnOrigin(contribution.origin, built.url) ??
                 checkUrlOnOrigin(contribution.origin, request.url);
@@ -334,26 +381,30 @@ export const openUpstream = (
               // refusal is kept aside and `describeFailure` returns it.
               Effect.catchTag("UpstreamError", (refused) =>
                 Ref.set(outboundRefusal, refused).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      new HttpClientError.HttpClientError({
-                        reason: new HttpClientError.TransportError({
-                          request,
-                          description: refused.message,
-                        }),
-                      }),
-                    ),
-                  ),
+                  Effect.andThen(Effect.fail(buildTransportFailure(request, refused.message))),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+          if (request.method !== "DELETE") return send;
+          // A DELETE only ends the upstream MCP session, which the server
+          // ends by itself in time. It is never worth waiting for a thaw, or
+          // sending after one, so it is not sent unless the controller serves.
+          return Effect.flatMap(promotion.phase, (phase) =>
+            phase._tag === "Serving"
+              ? send
+              : Effect.fail(buildTransportFailure(request, "The controller is not serving")),
+          );
+        }),
       Effect.succeed,
     );
 
-    const describeFailure = (error: McpClientError.McpClientError): UpstreamError =>
-      Ref.getUnsafe(outboundRefusal) ?? describeClientFailure(error, target.credentials.identity);
+    const describeFailure = (
+      error: McpClientError.McpClientError,
+      sentIdentity?: string,
+    ): UpstreamError =>
+      Ref.getUnsafe(outboundRefusal) ??
+      describeClientFailure(error, sentIdentity ?? lastSentIdentity);
 
     const order = [
       ...REVISIONS.filter((entry) => entry.revision === target.firstRevision),
@@ -379,7 +430,14 @@ export const openUpstream = (
         ),
       );
       if (outcome._tag === "Success") {
-        return { client: outcome.success, revision, describeFailure };
+        return {
+          client: outcome.success,
+          revision,
+          describeFailure,
+          setCredentials: (credentials) => {
+            current = credentials;
+          },
+        };
       }
       yield* Scope.close(attemptScope, Exit.fail(outcome.failure));
       if (!isVersionRefusal(outcome.failure, revision)) {

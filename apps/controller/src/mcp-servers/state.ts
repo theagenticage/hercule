@@ -16,6 +16,7 @@ import { connectionRepository, type StoredConnection } from "../connections";
 import { announce, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import type { ServerAvailability } from "./left-out";
 import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
 
 const MINUTE_MILLIS = 60 * 1000;
@@ -39,6 +40,47 @@ const BACKOFF_MILLIS = [
  */
 export const computeBackoffMillis = (failedChecks: number): number =>
   BACKOFF_MILLIS[Math.min(Math.max(failedChecks, 1), BACKOFF_MILLIS.length) - 1] as number;
+
+/**
+ * Builds the edit that stores a failure of a server: a failed check, or a
+ * failure of a call that is about the whole server (spec 21 section 5.3). A
+ * server that cannot be reached backs off: the failures in a row are counted
+ * and the next check is planned by `computeBackoffMillis`. Any other failure
+ * waits a day. The tools are left as they were. `protocolVersion` is the MCP
+ * revision whose handshake worked, when one did.
+ */
+export const buildFailureEdit = (
+  server: Pick<StoredMcpServer, "failedChecks">,
+  failure: {
+    readonly status: "unreachable" | "error" | "needs-sign-in";
+    readonly detail: string;
+    readonly cause?: "plugin" | "connection" | null;
+  },
+  at: string,
+  protocolVersion?: string,
+): McpServerEdit => {
+  const planAfter = (millis: number): string => new Date(Date.parse(at) + millis).toISOString();
+  const revisionEdit = protocolVersion === undefined ? {} : { protocolVersion };
+  if (failure.status === "unreachable") {
+    const failedChecks = server.failedChecks + 1;
+    return {
+      status: "unreachable",
+      statusDetail: failure.detail,
+      statusCause: null,
+      failedChecks,
+      nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
+      ...revisionEdit,
+    };
+  }
+  return {
+    status: failure.status,
+    statusDetail: failure.detail,
+    statusCause: failure.cause ?? null,
+    failedChecks: 0,
+    nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
+    ...revisionEdit,
+  };
+};
 
 /** Returns the id of the plugin that offers a contribution: `sentry/sentry` is offered by `sentry`. */
 export const parsePluginId = (contributionId: string): string =>
@@ -182,6 +224,39 @@ export const judgeDependencies = ({
   }
   return { _tag: "usable", contribution: plugin.contribution, connection };
 };
+
+/**
+ * Returns the switch and the status of each server that exists, by its id,
+ * judged from its Connection and plugin as they are now rather than from the
+ * status the follower last wrote. A server whose Connection is switched off
+ * or gone, or whose plugin is stopped, is `error`; one whose Connection needs
+ * sign-in is `needs-sign-in`. A server still `checking` stays `checking`: its
+ * first list has not ended, and that reason comes before the others (spec 21
+ * section 3.8). An id that no server has is left out of the map.
+ *
+ * A session's start reads it, because the follower writes a status some time
+ * after the Connection or the plugin changes, and a start in between must not
+ * call the server usable.
+ */
+export const readCurrentAvailability = (
+  ids: ReadonlyArray<string>,
+): Effect.Effect<
+  ReadonlyMap<string, ServerAvailability>,
+  SqlError,
+  SqlClient.SqlClient | PluginHost
+> =>
+  Effect.gen(function* () {
+    const servers = yield* mcpServerRepository;
+    const stored = yield* servers.readAvailability(ids);
+    const current = new Map<string, ServerAvailability>();
+    for (const [id, server] of stored) {
+      const judged = judgeDependencies(yield* readDependencies(server));
+      const status =
+        server.status !== "checking" && judged._tag === "unusable" ? judged.status : server.status;
+      current.set(id, { enabled: server.enabled, status });
+    }
+    return current;
+  });
 
 /**
  * What a state write was based on: the server's `revision` and the
