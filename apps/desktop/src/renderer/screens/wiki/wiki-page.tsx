@@ -1,13 +1,15 @@
 /**
- * The parts of an open wiki page (spec 19 section 8.2): the band over an older
- * revision, the lead with its title, summary and repository, and the History
- * list beside the body. Every component here is presentational: it takes
+ * The parts of an open wiki page (spec 19 section 8.2): the band over an
+ * archived page, the band over an older revision, the lead with its title,
+ * summary and repository, and the History list beside the body. Every component here is presentational: it takes
  * values, and the route reads.
  */
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
+import type { WikiPageArchived } from "@hercule/contract";
 import { describeUnlistedRevisions, type WikiHistory } from "@hercule/client-core/wiki-history";
 import { ActorMark, ActorName } from "../actor/actor-mark";
+import { ArchiveIcon } from "../../icons/archive";
 import { BranchIcon } from "../../icons/branch";
 import { ClockIcon } from "../../icons/clock";
 import { useListTime } from "../workflows/list-time";
@@ -17,7 +19,7 @@ import "../workflows/workflow-detail.css";
 import "../list-pane/open-item.css";
 import "./wiki.css";
 
-/** The size of the clock in the old-revision band, in CSS pixels. */
+/** The size of the icon that starts a band above the page, in CSS pixels. */
 const BAND_ICON_SIZE = 14;
 
 /** The size of the repository icon in the lead's chip, in CSS pixels. */
@@ -62,6 +64,30 @@ export function OldRevisionBand({
       >
         Show the current page
       </Link>
+    </div>
+  );
+}
+
+/**
+ * Renders the band above an archived page: who archived it and when, then
+ * the reason they gave. The page is no longer in the list, so the band is
+ * the only thing that tells a reader why. The reason is text an agent wrote,
+ * so it is isolated from the direction of the text around it.
+ */
+export function ArchivedBand({
+  archived,
+  timezone,
+}: {
+  readonly archived: WikiPageArchived;
+  readonly timezone: string;
+}): JSX.Element {
+  const when = useListTime(archived.at, timezone, "past", true);
+  return (
+    <div className="old-rev archived-band">
+      <ArchiveIcon size={BAND_ICON_SIZE} />
+      <span>
+        Archived {when} by <ActorName actor={archived.by} />. <bdi>{archived.reason}</bdi>
+      </span>
     </div>
   );
 }

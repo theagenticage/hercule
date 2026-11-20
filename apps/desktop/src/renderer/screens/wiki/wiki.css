@@ -129,3 +129,17 @@
 .old-rev > span {
   flex: 1;
 }
+/* The band above an archived page. Its reason can run to several lines, and
+   no button ends it, so it gets the same room on both sides, and room above
+   and below its text that makes a one-line band as tall as the band over an
+   older revision. */
+.archived-band {
+  padding: calc((36px - 1lh) / 2) 12px;
+}
+/* The icon stays beside the first line of a reason that wraps, centred on
+   that line. */
+.archived-band .ic {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-block: calc((1lh - 14px) / 2);
+}

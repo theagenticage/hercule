@@ -22,9 +22,17 @@ const READ_TEXT =
   "For larger work, checking the wiki is part of your research; a quick change does not need it. " +
   "List a repository's pages with `hercule wiki-page list --resource <id>`.";
 
+// The paragraph a session that may write pages gets. It says what the Wiki is
+// for and what it is not for, because a session sees only its own task and
+// the last few titles: told only to "write down what you learn", sessions
+// wrote one page per ticket and copied each other's titles.
 const WRITE_TEXT =
-  "When you learn something a future agent on this repository would need, write it down. " +
-  "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when.";
+  "The wiki holds lasting knowledge about the repository, one page per subject: how something is run or checked, a trap in a tool, a fact about a machine or an outside service. " +
+  "It is not a worklog: never write a page about a ticket, a pull request or a thread, or about what you built or found in one. " +
+  "When you learn something an agent doing different work here would need, list the pages first. Add it to the page on that subject, and create a page only when there is none. " +
+  "A decision or a rule belongs in the repository's own docs, not in the wiki. " +
+  "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when. " +
+  "Correct a page that is wrong, and archive one that no longer helps.";
 
 /** What the Wiki tells one session. */
 export interface WikiDescription {
@@ -37,6 +45,7 @@ export interface WikiDescription {
 /**
  * Describes one repository's Wiki for its line: `Wiki: no pages yet.`, or the
  * number of pages and the quoted titles of the most recently changed ones.
+ * Archived pages are not in the overview, so they are neither counted nor named.
  * The titles were written by other agents, so each is prepared with
  * `prepareForQuoting` before it is quoted.
  */
@@ -52,7 +61,8 @@ const describeOverview = ({ pageCount, recentTitles }: WikiOverview): string => 
  * Builds what the Wiki tells a session holding `grants`, from the overviews of
  * the repositories that get a line of their own. Returns `undefined` for a
  * session without `wiki.read`, which is told nothing about the Wiki. A
- * session that may also write pages is asked to record what it learns.
+ * session that may also write pages is told what belongs in the Wiki and
+ * what does not.
  */
 export const buildWikiDescription = (
   grants: ReadonlySet<Grant>,

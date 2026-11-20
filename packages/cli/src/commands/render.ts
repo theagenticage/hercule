@@ -57,6 +57,7 @@ import {
   type MemoryEntry,
   type MemoryMatch,
   type WikiPage,
+  type WikiPageSummary,
   type WikiPageWithRevisions,
   type Notification,
   type EntityBlocks,
@@ -1190,8 +1191,8 @@ const renderMemorySaved = (
 
 /**
  * Returns a Wiki Page as `wiki-page read` prints it: its title, summary and
- * revision, then its body between two marker lines, then one line per listed
- * revision. The markers show an agent where text another agent wrote starts
+ * revision, and for an archived page who archived it, when and why; then its
+ * body between two marker lines, then one line per listed revision. The markers show an agent where text another agent wrote starts
  * and ends (spec 19 section 3.5).
  */
 const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArray<string> => {
@@ -1207,6 +1208,12 @@ const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArr
         page.revision === current
           ? String(page.revision)
           : `${String(page.revision)}, not the current one (${String(current)})`,
+      // The reason is text another agent wrote, so it is kept on its one line.
+      ...(page.archived === undefined
+        ? {}
+        : {
+            archived: `${page.archived.at} by ${formatActor(page.archived.by)}: ${keepOnOneLine(page.archived.reason)}`,
+          }),
     }),
     "",
     `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
@@ -1230,6 +1237,19 @@ const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArr
  */
 const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
   `wrote wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
+];
+
+/**
+ * Returns the line printed after `wiki-page archive`: the page, its
+ * repository, and how to bring it back.
+ */
+const renderWikiPageArchived = (page: WikiPageSummary): ReadonlyArray<string> => [
+  `archived wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}; bring it back with \`hercule wiki-page restore ${formatCell(page.id)}\``,
+];
+
+/** Returns the line printed after `wiki-page restore`: the page, its repository and its revision. */
+const renderWikiPageRestored = (page: WikiPageSummary): ReadonlyArray<string> => [
+  `restored wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
 ];
 
 /** Returns each matching document's name, with its snippets indented under it. */
@@ -1520,6 +1540,8 @@ const VALUE_RENDERERS: Partial<
   },
   "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
   "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
+  "wikiPage.archive": (value) => renderWikiPageArchived(value as WikiPageSummary),
+  "wikiPage.restore": (value) => renderWikiPageRestored(value as WikiPageSummary),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),

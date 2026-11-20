@@ -512,7 +512,11 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
       .handle("create", ({ payload }) => withApiErrors(wiki.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(wiki.update({ ...params, ...payload })),
-      );
+      )
+      .handle("archive", ({ params, payload }) =>
+        withApiErrors(wiki.archive({ ...params, ...payload })),
+      )
+      .handle("restore", ({ params }) => withApiErrors(wiki.restore(params)));
   }),
 );
 

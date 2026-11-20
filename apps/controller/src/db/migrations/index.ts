@@ -130,6 +130,7 @@ import entityFields from "./0120-entity-fields";
 import linkTakenAt from "./0121-link-taken-at";
 import entityTakeOns from "./0122-entity-take-ons";
 import sessionTaint from "./0123-session-taint";
+import wikiPageArchive from "./0128-wiki-page-archive";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -254,6 +255,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [121, "link-taken-at", Effect.succeed(linkTakenAt)],
   [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
   [123, "session-taint", Effect.succeed(sessionTaint)],
+  // 124 to 127 are taken by migrations on branches that have not merged yet.
+  [128, "wiki-page-archive", Effect.succeed(wikiPageArchive)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

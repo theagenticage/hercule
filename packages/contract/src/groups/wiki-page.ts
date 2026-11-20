@@ -6,7 +6,9 @@
  * and no settings of its own. A page is named in its Wiki by a slug that never
  * changes. Every write stores a new revision holding the whole page, stamped
  * with its actor and time. Nothing is ever deleted: a wrong page is rewritten,
- * and its history shows what it said before.
+ * and its history shows what it said before. A page that no longer helps is
+ * archived: it leaves the listing, and stays readable by its id with its whole
+ * history until someone restores it.
  *
  * Every page carries the Resource's canonical remote as `repository`, copied
  * when the page is created. A caller without `resource.read` can still see
@@ -22,6 +24,7 @@ import {
   Conflict,
   Forbidden,
   Internal,
+  InvalidState,
   NotFound,
   Unauthenticated,
   Validation,
@@ -43,7 +46,10 @@ export const MAX_WIKI_SUMMARY_LENGTH = 200;
 /** The longest page body, in characters. */
 export const MAX_WIKI_PAGE_LENGTH = 64_000;
 
-/** The most pages one Wiki holds. */
+/** The longest reason for archiving a page, in characters. */
+export const MAX_WIKI_ARCHIVE_REASON_LENGTH = 200;
+
+/** The most pages one Wiki holds, not counting archived pages. */
 export const MAX_WIKI_PAGES = 500;
 
 /** How many revisions `wikiPage.read` lists, newest first. */
@@ -63,9 +69,24 @@ export const WikiPageSlug = Schema.String.check(
 const WikiPageTitle = nonBlankLine(MAX_WIKI_TITLE_LENGTH);
 const WikiPageSummaryText = nonBlankLine(MAX_WIKI_SUMMARY_LENGTH);
 const WikiPageBody = nonBlankText(MAX_WIKI_PAGE_LENGTH);
+const WikiArchiveReason = nonBlankLine(MAX_WIKI_ARCHIVE_REASON_LENGTH);
 
 /** A revision number. Revision 1 is the page as it was created. */
 export const WikiRevisionNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+/**
+ * The mark of an archived page: when it was archived, by whom and why. The
+ * reason is one line, and names the page that took over the subject when
+ * there is one. An archived page is not listed, is not counted, and takes no
+ * update. `wikiPage.restore` clears the mark.
+ */
+export const WikiPageArchived = Schema.Struct({
+  at: Timestamp,
+  by: Actor,
+  reason: Schema.String,
+});
+
+export type WikiPageArchived = Schema.Schema.Type<typeof WikiPageArchived>;
 
 /** A row of `wikiPage.query`: a page without its body. */
 export const WikiPageSummary = Schema.Struct({
@@ -83,6 +104,8 @@ export const WikiPageSummary = Schema.Struct({
   /** The current revision's actor. */
   updatedBy: Actor,
   createdAt: Timestamp,
+  /** Set while the page is archived (`wikiPage.archive`); absent otherwise. */
+  archived: Schema.optionalKey(WikiPageArchived),
 });
 
 export type WikiPageSummary = Schema.Schema.Type<typeof WikiPageSummary>;
@@ -113,6 +136,11 @@ export const WIKI_PAGE_SORT_FIELDS = ["updatedAt", "title"] as const;
 export const WikiPageFilter = Schema.Struct({
   /** Only this repository's pages. Without it, every repository's pages are listed. */
   resourceId: Schema.optionalKey(Id),
+  /**
+   * `true` lists only the archived pages. Left out or `false`, only the pages
+   * that are not archived are listed.
+   */
+  archived: Schema.optionalKey(Schema.Boolean),
 });
 
 /**
@@ -145,6 +173,22 @@ export const WIKI_PAGE_UPDATE_FIELDS = {
 export const WikiPageUpdateInput = closedStruct(WIKI_PAGE_UPDATE_FIELDS);
 
 export type WikiPageUpdateInput = Schema.Schema.Type<typeof WikiPageUpdateInput>;
+
+/** The fields of `wikiPage.archive`'s payload. */
+export const WIKI_PAGE_ARCHIVE_FIELDS = {
+  /**
+   * The revision the caller read. The archive is refused when the page has
+   * moved past it, so nobody archives a page for what it no longer says.
+   */
+  expectedRevision: WikiRevisionNumber,
+  /** Why the page is archived, in one line. */
+  reason: WikiArchiveReason,
+} as const;
+
+/** The payload of `wikiPage.archive`. */
+export const WikiPageArchiveInput = closedStruct(WIKI_PAGE_ARCHIVE_FIELDS);
+
+export type WikiPageArchiveInput = Schema.Schema.Type<typeof WikiPageArchiveInput>;
 
 /** What `wikiPage.read` returns: the page, and its newest revisions, newest first. */
 export const WikiPageWithRevisions = Schema.Struct({
@@ -179,7 +223,26 @@ export const wikiPage = HttpApiGroup.make("wikiPage")
       params: { id: Id },
       payload: WikiPageUpdateInput,
       success: WikiPage,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("archive", "/wiki-pages/:id/archive", {
+      params: { id: Id },
+      payload: WikiPageArchiveInput,
+      success: WikiPageSummary,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("restore", "/wiki-pages/:id/restore", {
+      params: { id: Id },
+      success: WikiPageSummary,
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Internal,
+      ],
     }),
   )
   .middleware(Authenticated);
