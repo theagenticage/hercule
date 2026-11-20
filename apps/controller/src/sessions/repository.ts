@@ -28,6 +28,7 @@ import {
   type DisallowedTool,
   type ModelSelection,
   type HarnessEvent,
+  type McpServerWarningReason,
   type SubagentId,
 } from "@hercule/protocol";
 import {
@@ -1172,7 +1173,7 @@ const make = Effect.gen(function* () {
       at: string,
       mcpServers?: ReadonlyArray<{
         readonly mcpServerId: string;
-        readonly reason: McpServerLeftOutReason;
+        readonly reason: McpServerWarningReason;
       }>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {

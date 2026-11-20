@@ -38,6 +38,7 @@ import {
   type ModelDeclaration,
   type HarnessEvent,
   type McpServerLeftOutReason,
+  type McpServerWarningReason,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -1032,10 +1033,13 @@ const make = Effect.gen(function* () {
     sessionId: string,
     message: string,
     at: string,
-    mcpServersLeftOut?: ReadonlyArray<Pick<LeftOutServer, "mcpServerId" | "reason">>,
+    mcpServersWarned?: ReadonlyArray<{
+      readonly mcpServerId: string;
+      readonly reason: McpServerWarningReason;
+    }>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersLeftOut);
+      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });
@@ -3229,6 +3233,36 @@ const make = Effect.gen(function* () {
         yield* sessions.replaceMcpServers(sessionId, entries);
         yield* announceSessionChangeById(sessionId);
       }),
+
+    /**
+     * Returns the id of the session's own open turn: the turn of its newest
+     * `turn.started` row when no `turn.completed` comes after it. Returns
+     * `undefined` between turns. A subagent's turn is never meant.
+     */
+    readOpenTurnId: (sessionId: string): Effect.Effect<string | undefined, SqlError> =>
+      readOpenTurnId(sql, sessionId, undefined),
+
+    /**
+     * Writes a `runtime.warning` to the session's stream at the current time,
+     * in a transaction of its own, and announces the session's transcript.
+     * `mcpServers` is given when the warning is about MCP Servers, so a client
+     * can draw a button for each. For a write made by the controller itself
+     * while a request runs, such as the MCP Gateway's refused call.
+     */
+    writeRuntimeWarning: (
+      sessionId: string,
+      message: string,
+      mcpServersRefused?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerWarningReason;
+      }>,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) =>
+          appendRuntimeWarning(sessionId, message, at, mcpServersRefused),
+        ),
+      ),
 
     /**
      * Stores what the title generation answered for a Thread's first message:

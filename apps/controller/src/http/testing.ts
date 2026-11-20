@@ -146,6 +146,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { McpServerCalls } from "../mcp-servers";
 import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
@@ -516,6 +517,12 @@ export interface ServerHarness {
    */
   readonly promotion: PromotionState["Service"];
   /**
+   * The controller's calls to outside MCP servers, which only the gateway's
+   * route uses. A test replaces a method to stand in for a server, and puts
+   * it back when it is done.
+   */
+  readonly mcpServerCalls: McpServerCalls["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -718,6 +725,7 @@ export const withServer = (
           Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
+        const mcpServerCalls = yield* McpServerCalls;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -742,6 +750,7 @@ export const withServer = (
             runWithShippedWorkflowServices,
             secrets,
             promotion,
+            mcpServerCalls,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );

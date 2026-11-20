@@ -54,6 +54,7 @@ import {
 import { currentStamp, requireGrant, type Actor } from "../actor";
 import {
   afterCommit,
+  announce,
   buildPageInputFields,
   refuseCursor,
   resolveSortDirection,
@@ -304,6 +305,9 @@ const make = Effect.gen(function* () {
                 yield* afterCommit(() => {
                   tokens.forgetProfile(outcome.profile.id);
                 });
+                // The MCP Gateway answers by the profile's `mcp.use`, and
+                // tells a session's harness when its tool list changes.
+                yield* announce({ _tag: "profileGrants", profileId: outcome.profile.id });
                 yield* audit.append({
                   kind: "profile.updated",
                   actor: yield* currentStamp,

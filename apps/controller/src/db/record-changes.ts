@@ -4,7 +4,8 @@
  * the record itself.
  *
  * It receives only `{ topic, id }` for each `record` change, the small part
- * every such listener needs. Nothing calls it directly: the one `AfterCommit`
+ * every such listener needs, and for each change to a permission profile's
+ * grants, which no live topic carries. Nothing calls it directly: the one `AfterCommit`
  * the controller provides (`LiveTopicsLayer`) publishes each committed change
  * to the live topics and to this service.
  */
@@ -16,9 +17,18 @@ import type * as Scope from "effect/Scope";
 import type { MutableLiveTopic } from "@hercule/contract";
 import type { Change } from "./after-commit";
 
+/**
+ * The topic of a change to a permission profile's grants. It is not a live
+ * topic, and the change's `id` is the profile's id.
+ */
+export const PROFILE_GRANTS_TOPIC = "profileGrants";
+
+/** What a subscriber can follow: the records of a live topic, or a profile's grants. */
+export type ChangeTopic = MutableLiveTopic | typeof PROFILE_GRANTS_TOPIC;
+
 /** Names one record that a committed transaction changed. */
 export interface RecordChange {
-  readonly topic: MutableLiveTopic;
+  readonly topic: ChangeTopic;
   readonly id: string;
 }
 
@@ -40,9 +50,9 @@ export class RecordChanges extends Context.Service<
   RecordChanges,
   {
     /**
-     * Offers the `record` changes in the list to every subscriber that asked
-     * for their topic, and ignores the other kinds and the changes that only
-     * moved a session's counts.
+     * Offers the `record` changes and the `profileGrants` changes in the list
+     * to every subscriber that asked for their topic, and ignores the other
+     * kinds and the changes that only moved a session's counts.
      */
     readonly publish: (changes: ReadonlyArray<Change>) => Effect.Effect<void>;
     /**
@@ -53,13 +63,13 @@ export class RecordChanges extends Context.Service<
      * state that changes are applied to.
      */
     readonly subscribe: (
-      topics: ReadonlyArray<MutableLiveTopic>,
+      topics: ReadonlyArray<ChangeTopic>,
     ) => Effect.Effect<Queue.Dequeue<RecordChange>, never, Scope.Scope>;
   }
 >()("hercule/controller/db/RecordChanges") {}
 
 interface Subscriber {
-  readonly topics: ReadonlySet<MutableLiveTopic>;
+  readonly topics: ReadonlySet<ChangeTopic>;
   readonly queue: Queue.Queue<RecordChange>;
 }
 
@@ -69,6 +79,10 @@ const make = Effect.sync(() => {
     publish: (committed) => {
       const records: Array<RecordChange> = [];
       for (const change of committed) {
+        if (change._tag === "profileGrants") {
+          records.push({ topic: PROFILE_GRANTS_TOPIC, id: change.profileId });
+          continue;
+        }
         if (change._tag !== "record") continue;
         if (change.topic === "session" && change.countsOnly === true) continue;
         records.push({ topic: change.topic, id: change.id });

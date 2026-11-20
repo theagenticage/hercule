@@ -68,6 +68,32 @@ const make = Effect.gen(function* () {
     for (const [hash, actor] of held) if (holds(actor)) held.delete(hash);
   };
 
+  const readActor = (tokenHash: string): Effect.Effect<Option.Option<SessionActor>, SqlError> =>
+    Effect.gen(function* () {
+      const rows = yield* sql<Row>`
+        SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id, s.agent_id,
+          ${sql.literal(buildSessionGrantsColumn("s"))} AS session_grants
+        FROM sessions s
+        JOIN permission_profiles p ON p.id = s.permission_profile_id
+        LEFT JOIN conversations c ON c.id = s.conversation_id
+        WHERE s.token_hash = ${tokenHash} AND s.status IN ('starting', 'idle', 'busy')
+      `;
+      const row = rows[0];
+      if (row === undefined) return Option.none();
+      const profileGrants = parseStoredGrants(row.grants);
+      return Option.some<SessionActor>({
+        _tag: "session",
+        sessionId: uuidToString(row.id),
+        profileId: uuidToString(row.permission_profile_id),
+        profileGrants,
+        // A grant can be in both lists, when the profile gained it after
+        // the request was decided, so the union drops duplicates.
+        grants: [...new Set([...profileGrants, ...parseStoredGrants(row.session_grants)])],
+        assistantId: row.assistant_id === null ? null : uuidToString(row.assistant_id),
+        agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
+      });
+    });
+
   return {
     /**
      * Returns the session actor for a token hash, or `None` if no running
@@ -81,31 +107,19 @@ const make = Effect.gen(function* () {
         const cached = held.get(tokenHash);
         if (cached !== undefined) return Option.some(cached);
         const before = dropped;
-        const rows = yield* sql<Row>`
-          SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id, s.agent_id,
-            ${sql.literal(buildSessionGrantsColumn("s"))} AS session_grants
-          FROM sessions s
-          JOIN permission_profiles p ON p.id = s.permission_profile_id
-          LEFT JOIN conversations c ON c.id = s.conversation_id
-          WHERE s.token_hash = ${tokenHash} AND s.status IN ('starting', 'idle', 'busy')
-        `;
-        const row = rows[0];
-        if (row === undefined) return Option.none();
-        const profileGrants = parseStoredGrants(row.grants);
-        const actor: SessionActor = {
-          _tag: "session",
-          sessionId: uuidToString(row.id),
-          profileId: uuidToString(row.permission_profile_id),
-          profileGrants,
-          // A grant can be in both lists, when the profile gained it after
-          // the request was decided, so the union drops duplicates.
-          grants: [...new Set([...profileGrants, ...parseStoredGrants(row.session_grants)])],
-          assistantId: row.assistant_id === null ? null : uuidToString(row.assistant_id),
-          agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
-        };
-        if (dropped === before) held.set(tokenHash, actor);
-        return Option.some(actor);
+        const actor = yield* readActor(tokenHash);
+        if (Option.isSome(actor) && dropped === before) held.set(tokenHash, actor.value);
+        return actor;
       }),
+
+    /**
+     * Like `resolve`, but always reads the database and leaves the cache alone.
+     * For a check that must see a change committed a moment ago, such as the
+     * MCP Gateway's check just before it sends a call upstream: the cache is
+     * cleared only after the commit that made it stale.
+     */
+    resolveUncached: (tokenHash: string): Effect.Effect<Option.Option<SessionActor>, SqlError> =>
+      readActor(tokenHash),
 
     /**
      * Removes the cached actors of these sessions, because they have ended or
