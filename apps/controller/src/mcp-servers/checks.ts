@@ -204,6 +204,18 @@ const make = Effect.gen(function* () {
           "unreachable",
           `${contribution.displayName} could not be reached to refresh the sign-in`,
         );
+      case "credentials-replaced":
+        // The Connection is fine: the user reconnected twice while the
+        // sign-in was refreshed. The backoff checks again soon.
+        return buildFailedResult(
+          "unreachable",
+          `The sign-in of ${connection.label} was replaced while it was being refreshed`,
+        );
+      case "no-credentials":
+        return buildFailedResult(
+          "error",
+          `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
+        );
       case "missing":
         return buildFailedResult("error", "The Connection of this server is missing");
       case "invalid-config":

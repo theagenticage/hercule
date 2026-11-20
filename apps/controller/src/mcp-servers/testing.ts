@@ -331,7 +331,7 @@ const insertConnection = (
  */
 export const insertOauthConnection = (
   harness: ServerHarness,
-  tokens: { readonly accessToken: string; readonly refreshToken: string },
+  tokens: { readonly accessToken: string; readonly refreshToken?: string },
   pluginId = DESK_PLUGIN_ID,
 ): Promise<string> =>
   insertConnection(harness, pluginId, `${pluginId}/desk`, {

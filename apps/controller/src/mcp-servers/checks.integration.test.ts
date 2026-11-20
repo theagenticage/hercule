@@ -405,6 +405,32 @@ describe("the credential of a check", () => {
     });
   });
 
+  it("goes to error, and leaves the Connection alone, for OAuth tokens that have no refresh token and that the server refuses", async () => {
+    await withRig(
+      async ({ controller, fake, provider }) => {
+        fake.authorize = () => false;
+        const connectionId = await insertOauthConnection(controller.harness, {
+          accessToken: "stored-token",
+        });
+        await createServer(controller, { connectionId });
+
+        const row = await waitForResult(controller);
+
+        expect(row).toMatchObject({
+          status: "error",
+          status_detail: "Desk's MCP server refused the Connection's token",
+          status_cause: null,
+        });
+        expect((await readConnection(controller.base, controller.token, connectionId)).status).toBe(
+          "connected",
+        );
+        expect(await countNotifications(controller, "core.connection-error")).toBe(0);
+        expect(provider.tokenRequests).toEqual([]);
+      },
+      { oauth: true },
+    );
+  });
+
   it("keeps the revision that worked when the listing fails, and starts the retry after a refresh with it", async () => {
     await withRig(
       async ({ controller, fake, provider, connect }) => {
