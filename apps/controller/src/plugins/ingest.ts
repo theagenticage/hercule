@@ -18,8 +18,9 @@
  * - sets an `error` Connection back to `connected` once every feed has polled
  *   successfully since the open. A successful open alone does not, because
  *   it proves nothing about the feeds;
- * - sets it to `needs-reauth` and stops at the first `AuthError`, because
- *   retrying with rejected credentials cannot help.
+ * - sets it to `needs-reauth`, which raises its Notification, and stops at
+ *   the first `AuthError`, because retrying with rejected credentials cannot
+ *   help.
  *
  * Closing a Connection interrupts its feed timers, waits for them to finish,
  * then calls the handle's `close` once, giving it 10 seconds. The controller
@@ -280,7 +281,8 @@ const make = Effect.gen(function* () {
       /**
        * Sets the Connection to `needs-reauth` after an `AuthError`, unless its
        * credentials changed since the attempt started, and returns whether
-       * it did. A reconnect while a poll runs replaces the rejected
+       * it did. The core raises the Connection's Notification with the status
+       * change. A reconnect while a poll runs replaces the rejected
        * credentials; marking the Connection then would flag credentials that
        * may well work.
        *
@@ -296,21 +298,14 @@ const make = Effect.gen(function* () {
       ): Effect.Effect<boolean> =>
         connectionTypes.withRefreshPermit(
           connection.id,
-          writeStatus((at) =>
+          writeStatus(() =>
             Effect.gen(function* () {
               const current = yield* connectionTypes.readCredentialsVersion(connection.id);
               if (current !== credentialsVersion) return false;
-              if (
-                yield* connections.changeStatusFrom(
-                  connection.id,
-                  ["connected", "error"],
-                  "needs-reauth",
-                  summarizeCause(cause),
-                  at,
-                )
-              ) {
-                yield* announceConnection;
-              }
+              yield* connectionTypes.setNeedsReauthInTransaction(
+                connection.id,
+                summarizeCause(cause),
+              );
               return true;
             }),
           ),

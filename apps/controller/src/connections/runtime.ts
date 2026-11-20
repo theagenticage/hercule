@@ -213,70 +213,67 @@ const make = Effect.gen(function* () {
     Effect.map(Ref.get(declared), (all) => all.get(row.type));
 
   /**
-   * Sets the connection's status and detail, unless the user disabled it.
+   * Sets the connection's status and detail, unless the user disabled it, and
+   * announces the change. Must run inside a transaction, so the status and
+   * the Notification below commit together.
+   *
+   * This is the one place in the core that sets a status. When the status
+   * moves to `needs-reauth` from another status, the connection's
+   * Notification is raised, whatever the cause: a refused refresh, an ingest
+   * `AuthError`, or a plugin's report. A write that finds the connection
+   * `needs-reauth` already raises none, so an episode of needing to sign in
+   * raises one Notification. The episode ends when the connection is
+   * `connected` again.
+   *
    * Only the user enables a connection again, so a plugin's report or a
    * failed refresh that lands after the user disabled it changes nothing.
-   *
-   * When the status moves to `needs-reauth` from another status and
-   * `raisesNotification` is set, the connection's Notification is raised in
-   * the same transaction. A write that finds the connection `needs-reauth`
-   * already raises none, so one transition raises one Notification.
    */
-  const changeStatus = (
+  const changeStatusInTransaction = (
     connectionId: string,
     status: ConnectionStatus,
     detail: string | null,
-    raisesNotification: boolean,
-  ): Effect.Effect<void> =>
-    promotion.whenServing(
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        yield* Effect.orDie(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const before = Option.getOrUndefined(yield* connections.one(connectionId));
-              const changed = yield* connections.changeStatusFrom(
-                connectionId,
-                ["connected", "error", "needs-reauth"],
-                status,
-                detail,
-                at,
-              );
-              if (!changed || before === undefined) return;
-              yield* announce({
-                _tag: "record",
-                topic: "connection",
-                id: connectionId,
-                kind: "updated",
-              });
-              if (raisesNotification && before.status !== status) {
-                const type = (yield* findRegisteredType(before))?.contribution;
-                yield* notifier.createCoreNotification({
-                  kind: "core.connection-error",
-                  title: `${type?.displayName ?? before.type} connection '${before.label}' needs signing in again`,
-                  body: NEEDS_SIGN_IN_BODY,
-                  subject: [{ kind: "connection", id: connectionId }],
-                });
-              }
-            }),
-          ),
-        );
-      }),
-    );
+  ) =>
+    Effect.gen(function* () {
+      const at = yield* nowIso;
+      const before = Option.getOrUndefined(yield* connections.one(connectionId));
+      const changed = yield* connections.changeStatusFrom(
+        connectionId,
+        ["connected", "error", "needs-reauth"],
+        status,
+        detail,
+        at,
+      );
+      if (!changed || before === undefined) return;
+      yield* announce({
+        _tag: "record",
+        topic: "connection",
+        id: connectionId,
+        kind: "updated",
+      });
+      if (status === "needs-reauth" && before.status !== status) {
+        const type = (yield* findRegisteredType(before))?.contribution;
+        yield* notifier.createCoreNotification({
+          kind: "core.connection-error",
+          title: `${type?.displayName ?? before.type} connection '${before.label}' needs signing in again`,
+          body: NEEDS_SIGN_IN_BODY,
+          subject: [{ kind: "connection", id: connectionId }],
+        });
+      }
+    });
 
+  /** Runs `changeStatusInTransaction` in a transaction of its own, once the controller serves. */
   const setStatus = (
     connectionId: string,
     status: ConnectionStatus,
     detail: string | null,
-  ): Effect.Effect<void> => changeStatus(connectionId, status, detail, false);
+  ): Effect.Effect<void> =>
+    promotion.whenServing(
+      Effect.orDie(withTransaction(sql, changeStatusInTransaction(connectionId, status, detail))),
+    );
 
-  /**
-   * Marks the connection `needs-reauth` and raises its Notification, with
-   * `message` as the status detail.
-   */
+  /** Marks the connection `needs-reauth`, with `message` as the status detail. */
   const setNeedsReauth = (connectionId: string, message: string): Effect.Effect<void> =>
-    changeStatus(connectionId, "needs-reauth", message, true);
+    setStatus(connectionId, "needs-reauth", message);
 
   /**
    * Marks the connection `needs-reauth`, with `message` as the status detail,
@@ -875,6 +872,18 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 
     runtimeFor,
+
+    /**
+     * Marks a connection `needs-reauth` with `detail` as the status detail,
+     * and raises its Notification when the status changed, as
+     * `changeStatusInTransaction` explains. For the ingest loop, which marks
+     * the connection in the transaction that checks its credentials.
+     *
+     * Must run inside a transaction. It does not wait for the promotion gate,
+     * so the caller has to have passed it already.
+     */
+    setNeedsReauthInTransaction: (connectionId: string, detail: string) =>
+      changeStatusInTransaction(connectionId, "needs-reauth", detail),
 
     /**
      * Returns the token set a Connection holds, refreshing it first when its
