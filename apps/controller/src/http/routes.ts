@@ -1135,7 +1135,7 @@ const operationServices = Layer.mergeAll(
   // instance to run at most once per server.
   McpServerServiceLayer.pipe(
     Layer.provideMerge(McpServerChecksLayer),
-    Layer.provide(McpServerListHoldersLayer),
+    Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
   ),
   // The record changes that in-process followers, such as the MCP Server
   // follower, read. Merged beside the live topics, which keep their own

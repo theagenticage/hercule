@@ -93,6 +93,7 @@ const SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const MESSAGE = { text: "ship it", attachments: [] };

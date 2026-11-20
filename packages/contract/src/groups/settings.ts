@@ -29,6 +29,7 @@ import { Id, Timestamp } from "../ids";
 import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
 import { InboxBrowseValue } from "./external-entity";
+import { McpServerIds } from "./mcp-server";
 import { MuteKey } from "./notification";
 import { SpawnBound } from "./workflow-definition";
 
@@ -214,6 +215,12 @@ export const SETTING_VALUES = {
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
+    /**
+     * The MCP Servers a Thread with no project starts with. Unset or empty
+     * means none. Writing it needs `mcp.manage`. It is never rewritten when a
+     * server is deleted: a read drops the ids that no longer exist.
+     */
+    "thread.mcpServerIds": McpServerIds,
     /**
      * What a thread opens in: the repo's main workspace or a worktree of its
      * own. When unset, the project decides: a project with one repo uses the

@@ -1149,6 +1149,7 @@ describe("hercule session spawn --agent", () => {
     exitedAt: null,
     lastActivityAt: "2026-09-19T10:01:00.000Z",
     unenforced: [] as Array<string>,
+    mcpServers: [],
   };
 
   const stubSpawn = () => {

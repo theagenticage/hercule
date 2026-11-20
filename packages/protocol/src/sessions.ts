@@ -887,14 +887,70 @@ const SessionUsageUpdated = Schema.Union([
 ]);
 
 /**
+ * Why an MCP Server in a session's list could not be called at the session's
+ * last start (spec 21 section 3.8). The order is the order of precedence: when
+ * several reasons apply to one server, the first is the one recorded. The
+ * public API's `Session.mcpServers` uses this type for `leftOut`.
+ */
+export const McpServerLeftOutReason = Schema.Literals([
+  "switched-off",
+  "checking",
+  "needs-sign-in",
+  "unreachable",
+  "error",
+  "runner-too-old",
+  "harness-unsupported",
+  "missing-grant",
+]);
+
+export type McpServerLeftOutReason = Schema.Schema.Type<typeof McpServerLeftOutReason>;
+
+/**
+ * Why a `runtime.warning` names an MCP Server: a reason a start leaves a
+ * server out, or one of the two reasons only a refused call has (spec 21
+ * section 3.6):
+ *
+ * - `not-in-list`: the call named a server that is not in the session's list;
+ * - `timed-out`: the call ran past its deadline.
+ *
+ * The other refusals of a call reuse a left-out reason: the profile lacks the
+ * grant (`missing-grant`), the server is switched off (`switched-off`), the
+ * server is not ready or its sign-in failed (`checking`, `needs-sign-in`,
+ * `unreachable` or `error`). It is one union, so a client maps every reason to
+ * its button in one place.
+ */
+export const McpServerWarningReason = Schema.Literals([
+  ...McpServerLeftOutReason.literals,
+  "not-in-list",
+  "timed-out",
+]);
+
+export type McpServerWarningReason = Schema.Schema.Type<typeof McpServerWarningReason>;
+
+/** One MCP Server a `runtime.warning` names, and why. */
+const McpServerWarning = Schema.Struct({
+  mcpServerId: Fact,
+  reason: McpServerWarningReason,
+});
+
+/**
  * Something went wrong, but the session goes on, such as a retry or an event
  * the runner had to shrink. It may fire inside a turn or between turns, so the
  * turn id is optional.
+ *
+ * `mcpServers` is set by the controller, never by a runner, when the warning is
+ * about MCP Servers (spec 21 sections 3.6 and 3.8). Each entry names one
+ * server and why, so a client can offer the button that fixes it. A warning
+ * that is not about MCP Servers has no `mcpServers`. The field is optional, so
+ * a runner that never sets it needs no protocol version change.
  */
 const RuntimeWarning = defineEvent("runtime.warning", {
   ...attribution,
   turnId: Schema.optionalKey(Fact),
   message: Message,
+  mcpServers: Schema.optionalKey(
+    Schema.Array(McpServerWarning).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
 });
 
 /**

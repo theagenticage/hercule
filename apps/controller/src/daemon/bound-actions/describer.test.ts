@@ -285,7 +285,7 @@ describe("task.update", () => {
         const taskId = yield* insertTask("Fix the login page");
         const project = yield* inTransaction(
           Effect.flatMap(projectRepository, (projects) =>
-            projects.insert({ name: "Website", description: undefined, at: AT }),
+            projects.insert({ name: "Website", description: undefined, mcpServerIds: [], at: AT }),
           ),
         );
         return {

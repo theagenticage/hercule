@@ -4340,6 +4340,7 @@ const AT = "2026-09-10T09:00:00.000Z";
 const WEBSHOP: Project = {
   id: "01a06d02-7000-7000-8000-000000000001",
   name: "webshop",
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 };

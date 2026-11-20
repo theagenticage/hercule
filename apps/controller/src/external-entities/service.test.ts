@@ -615,11 +615,19 @@ describe("takeOn", () => {
             sql,
             Effect.gen(function* () {
               for (const name of projectNames) {
-                projectIds.push((yield* projects.insert({ name, description: undefined, at })).id);
+                projectIds.push(
+                  (yield* projects.insert({ name, description: undefined, mcpServerIds: [], at }))
+                    .id,
+                );
               }
               const deletedIds: Array<string> = [];
               for (const name of deletedNames) {
-                const deleted = yield* projects.insert({ name, description: undefined, at });
+                const deleted = yield* projects.insert({
+                  name,
+                  description: undefined,
+                  mcpServerIds: [],
+                  at,
+                });
                 yield* projects.softDelete(deleted.id, at);
                 deletedIds.push(deleted.id);
               }
@@ -1149,7 +1157,12 @@ describe("addToWork", () => {
         const projects = yield* projectRepository;
         const picked = yield* withTransaction(
           sql,
-          projects.insert({ name: "Web", description: undefined, at: new Date().toISOString() }),
+          projects.insert({
+            name: "Web",
+            description: undefined,
+            mcpServerIds: [],
+            at: new Date().toISOString(),
+          }),
         );
         script.resolve = () => ({ found: { connectionId, observation: buildObservation("9") } });
         const result = yield* service.addToWork({ ref: ticketRef("9"), projectId: picked.id });

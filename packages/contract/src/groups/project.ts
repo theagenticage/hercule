@@ -1,8 +1,9 @@
 /**
  * Projects: a way to group information inside Hercule.
  *
- * A project carries no behaviour and one default: the Model Profile a new
- * thread in it starts on (`modelProfileId`). It has no default connection, no
+ * A project carries no behaviour and two defaults for a new thread in it: the
+ * Model Profile it starts on (`modelProfileId`) and the MCP Servers it starts
+ * with (`mcpServerIds`). It has no default connection, no
  * status and nothing derived: a task points at one through `projectId`, and a
  * resource joins any number of them. Delete is soft, as it is for a task, and
  * a task keeps its `projectId` when its project is deleted.
@@ -12,6 +13,7 @@ import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
+import { McpServerIds } from "./mcp-server";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
@@ -35,6 +37,12 @@ export const Project = Schema.Struct({
    * default. Deleting the profile removes it from the project.
    */
   modelProfileId: Schema.optionalKey(Id),
+  /**
+   * The MCP Servers a new Thread in this project starts with, in order. Empty
+   * when the project names none. A default only: changing it touches no
+   * Thread that exists. Deleting a server removes it from the list.
+   */
+  mcpServerIds: McpServerIds,
   createdAt: Timestamp,
   updatedAt: Timestamp,
   /** Set by a delete. A deleted project is never returned, so a caller never sees this field. */
@@ -55,6 +63,12 @@ export const ProjectCreateInput = Schema.Struct({
   description: Schema.optionalKey(ProjectDescription),
   /** A Model Profile that exists; any other id is refused `validation`. */
   modelProfileId: Schema.optionalKey(Id),
+  /**
+   * The MCP Servers a new Thread in the project starts with. Needs
+   * `mcp.manage` as well as `project.write`. Refused `validation` when an id
+   * is unknown or deleted, is given twice, or when two servers share a name.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
 });
 
 export type ProjectCreateInput = Schema.Schema.Type<typeof ProjectCreateInput>;
@@ -66,6 +80,8 @@ export const ProjectUpdateInput = Schema.Struct({
   description: Schema.optionalKey(Schema.NullOr(ProjectDescription)),
   /** `null` removes the project's profile; an id that is no profile is refused `validation`. */
   modelProfileId: Schema.optionalKey(Schema.NullOr(Id)),
+  /** Replaces the list. Needs `mcp.manage`, and is refused `validation` as on create. */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
 });
 
 export type ProjectUpdateInput = Schema.Schema.Type<typeof ProjectUpdateInput>;

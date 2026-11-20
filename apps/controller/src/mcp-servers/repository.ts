@@ -165,6 +165,21 @@ const make = Effect.gen(function* () {
   return {
     readById,
 
+    /**
+     * Returns the name of each server that exists, by its id, in one query. An
+     * id that no server has is left out of the map.
+     */
+    readNames: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly name: string }>`
+              SELECT id, name FROM mcp_servers WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.name])),
+          ),
+
     /** Returns every server, sorted by name and then by id. */
     list: (): Effect.Effect<ReadonlyArray<StoredMcpServer>, SqlError> =>
       Effect.map(

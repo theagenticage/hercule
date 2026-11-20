@@ -48,6 +48,7 @@ const BASE: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 /** An open Request of the session's own agent; `subagentId` makes it a subagent's. */

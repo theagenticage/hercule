@@ -34,8 +34,10 @@ import {
   createNotFoundError,
   LIVE_SESSION_STATUSES,
   type NotFound,
+  type McpServerLeftOutReason,
   type Passage,
   type PermissionRequest,
+  type SessionMcpServer,
   type SessionArchived,
   type SessionKind,
   type SessionRequest,
@@ -53,6 +55,7 @@ import {
   buildKeyset,
   buildPage,
   uuidFromString,
+  uuidHexToString,
   uuidToString,
   type CursorError,
   type CursorScope,
@@ -198,6 +201,14 @@ export interface StoredSession {
    * may enforce what this one ignores.
    */
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
+  /** The session's own list of MCP Servers, in list order. Empty for a session that has none. */
+  readonly mcpServers: ReadonlyArray<SessionMcpServer>;
+}
+
+/** One entry of a session's list as a writer gives it: the server and its name now. */
+export interface McpServerEntry {
+  readonly mcpServerId: string;
+  readonly name: string;
 }
 
 export interface NewSession {
@@ -331,6 +342,8 @@ interface SessionRow {
   readonly reopened_at: string | null;
   readonly input_waiting: number;
   readonly conversation_deleted: number;
+  /** A JSON array of `{ id, name, leftOut }`, in list order; `id` is the hex of the server's id. */
+  readonly mcp_servers: string;
 }
 
 /**
@@ -360,7 +373,11 @@ const buildColumnList = (): string =>
   "FROM session_subagents WHERE session_subagents.session_id = sessions.id " +
   "AND subagent_id IN (SELECT json_extract(value, '$.subagentId') " +
   "FROM json_each(sessions.open_requests))) AS subagent_names, " +
-  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests`;
+  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests, ` +
+  // The list is one subquery on the primary key, so a page of sessions costs one query.
+  "(SELECT json_group_array(json_object('id', hex(mcp_server_id), 'name', name, " +
+  "'leftOut', left_out)) FROM (SELECT mcp_server_id, name, left_out FROM session_mcp_servers " +
+  "WHERE session_id = sessions.id ORDER BY position)) AS mcp_servers";
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -425,6 +442,17 @@ const toSession = (row: SessionRow): StoredSession => ({
     row.disallowed_tools === null
       ? []
       : (JSON.parse(row.disallowed_tools) as ReadonlyArray<DisallowedTool>),
+  mcpServers: (
+    JSON.parse(row.mcp_servers) as ReadonlyArray<{
+      readonly id: string;
+      readonly name: string;
+      readonly leftOut: McpServerLeftOutReason | null;
+    }>
+  ).map((entry) => ({
+    mcpServerId: uuidHexToString(entry.id),
+    name: entry.name,
+    leftOut: entry.leftOut,
+  })),
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -1476,6 +1504,86 @@ const make = Effect.gen(function* () {
         UPDATE sessions SET role = ${role}
         WHERE id = ${uuidFromString(sessionId)} AND role IS NULL
       `),
+
+    /**
+     * Replaces the session's list of MCP Servers with the entries given, in
+     * that order. An entry for a server that was already in the list keeps
+     * the `leftOut` it had, because a start writes that field and an edit does
+     * not. A new entry gets `null`. It announces nothing: the caller announces
+     * the session once it has written everything.
+     */
+    replaceMcpServers: (
+      sessionId: string,
+      entries: ReadonlyArray<McpServerEntry>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const kept = yield* sql<{
+          readonly mcp_server_id: Uint8Array;
+          readonly left_out: McpServerLeftOutReason | null;
+        }>`SELECT mcp_server_id, left_out FROM session_mcp_servers WHERE session_id = ${session}`;
+        const leftOutById = new Map(
+          kept.map((row) => [uuidToString(row.mcp_server_id), row.left_out]),
+        );
+        yield* sql`DELETE FROM session_mcp_servers WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          entries,
+          (entry, position) =>
+            sql`INSERT INTO session_mcp_servers
+                  (session_id, position, mcp_server_id, name, left_out)
+                VALUES (${session}, ${position}, ${uuidFromString(entry.mcpServerId)},
+                        ${entry.name}, ${leftOutById.get(entry.mcpServerId) ?? null})`,
+          { discard: true },
+        );
+      }),
+
+    /**
+     * Records why each listed server could not be called at the session's
+     * last start. `reasonsById` holds the reason of every server that was left
+     * out. A server in the session's list that it does not name is recorded as
+     * `null`: it could be called. An id that is not in the list is ignored.
+     */
+    recordLeftOut: (
+      sessionId: string,
+      reasonsById: ReadonlyMap<string, McpServerLeftOutReason>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const rows = yield* sql<{ readonly mcp_server_id: Uint8Array }>`
+          SELECT mcp_server_id FROM session_mcp_servers WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          rows,
+          (row) =>
+            sql`UPDATE session_mcp_servers
+                SET left_out = ${reasonsById.get(uuidToString(row.mcp_server_id)) ?? null}
+                WHERE session_id = ${session} AND mcp_server_id = ${row.mcp_server_id}`,
+          { discard: true },
+        );
+      }),
+
+    /**
+     * Removes the MCP Server from every session's list. The session's other
+     * entries keep their order. Returns each session that held the server, with
+     * the conversation it answers, so the caller can announce them.
+     */
+    removeMcpServer: (
+      mcpServerId: string,
+    ): Effect.Effect<ReadonlyArray<Pick<StoredSession, "id" | "conversationId">>, SqlError> =>
+      Effect.gen(function* () {
+        const server = uuidFromString(mcpServerId);
+        const held = yield* sql<{
+          readonly id: Uint8Array;
+          readonly conversation_id: Uint8Array | null;
+        }>`
+          SELECT id, conversation_id FROM sessions
+          WHERE id IN (SELECT session_id FROM session_mcp_servers WHERE mcp_server_id = ${server})
+          ORDER BY id`;
+        yield* sql`DELETE FROM session_mcp_servers WHERE mcp_server_id = ${server}`;
+        return held.map((row) => ({
+          id: uuidToString(row.id),
+          conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
+        }));
+      }),
 
     /**
      * Sets the Task the session belongs to, and announces the card of the Task

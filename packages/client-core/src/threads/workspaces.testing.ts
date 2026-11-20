@@ -48,6 +48,7 @@ export const buildRunner = (id: string, name: string): Runner => ({
 export const buildProject = (id: string, name: string): Project => ({
   id,
   name,
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 });
@@ -161,6 +162,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   exitedAt: null,
   lastActivityAt: AT,
   unenforced: [],
+  mcpServers: [],
   ...over,
 });
 
