@@ -38,8 +38,8 @@ import {
   type StoredConnection,
 } from "../connections";
 import { nowIso } from "../db";
-import { Notifier } from "../notifications";
-import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import type { Notifier } from "../notifications";
+import type { PluginHost, RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
@@ -47,10 +47,7 @@ import {
   computeBackoffMillis,
   DAILY_CHECK_MILLIS,
   judgeDependencies,
-  markDueWhenUsable,
-  readServerWhileBasisHolds,
-  readDependencies,
-  writeServerState,
+  mcpServerState,
   type McpServerDependencies,
 } from "./state";
 import { MAX_UPSTREAM_MESSAGE_BYTES, openUpstream, type UpstreamError } from "./upstream";
@@ -179,12 +176,10 @@ const buildEdit = (
 };
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
+  const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const plugins = yield* PluginHost;
   const promotion = yield* PromotionState;
-  const notifier = yield* Notifier;
   const httpClient = yield* HttpClient.HttpClient;
 
   /**
@@ -298,7 +293,7 @@ const make = Effect.gen(function* () {
     server: StoredMcpServer,
     dependencies: McpServerDependencies,
     worked: WorkedRevision,
-  ): Effect.Effect<CheckResult, SqlError, SqlClient.SqlClient | PluginHost> =>
+  ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
       const judged = judgeDependencies(dependencies);
       if (judged._tag === "unusable")
@@ -321,7 +316,7 @@ const make = Effect.gen(function* () {
         listTools(contribution, read.success, worked, server.protocolVersion),
       );
       if (outcome._tag === "Failure" && outcome.failure.reason === "unauthorized") {
-        const current = yield* readServerWhileBasisHolds(server.id, {
+        const current = yield* state.readServerWhileBasisHolds(server.id, {
           revision: server.revision,
           dependencies,
         });
@@ -368,24 +363,20 @@ const make = Effect.gen(function* () {
       const found = yield* servers.readById(id);
       if (Option.isNone(found) || !found.value.enabled) return;
       const server = found.value;
-      const dependencies = yield* readDependencies(server);
+      const dependencies = yield* state.readDependencies(server);
       const worked: WorkedRevision = { current: null };
       const result = yield* evaluate(server, dependencies, worked);
       const at = yield* nowIso;
       const written =
         result._tag !== "discarded" &&
-        (yield* writeServerState(
+        (yield* state.writeCheckResult(
           id,
           { revision: server.revision, dependencies },
           buildEdit(server, result, at, worked),
           at,
         ));
-      if (!written) yield* markDueWhenUsable(id, at);
-    }).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-      Effect.provideService(PluginHost, plugins),
-      Effect.provideService(Notifier, notifier),
-    );
+      if (!written) yield* state.markDueWhenUsable(id, at);
+    });
 
   const wakeup = Latch.makeUnsafe(false);
   // The servers with a check running. A server stays due until its check
