@@ -50,7 +50,13 @@ import {
   mcpServerState,
   type McpServerDependencies,
 } from "./state";
-import { MAX_UPSTREAM_MESSAGE_BYTES, openUpstream, type UpstreamError } from "./upstream";
+import {
+  buildStatusFromFailure,
+  MAX_UPSTREAM_MESSAGE_BYTES,
+  openUpstream,
+  runWithCredentials,
+  type UpstreamError,
+} from "./upstream";
 
 /**
  * Runs the checks of MCP Servers: a check lists a server's tools from the
@@ -107,6 +113,9 @@ type CheckResult =
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
     };
+
+/** What a check fails with when the server changed after the check started, so its outcome is dropped. */
+const CHECK_SUPERSEDED = { _tag: "CheckSuperseded" } as const;
 
 const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
@@ -260,34 +269,16 @@ const make = Effect.gen(function* () {
       Effect.provideService(PromotionState, promotion),
     );
 
-  const describeUpstreamFailure = (
-    failure: UpstreamError,
-    contribution: RegisteredMcpServer,
-  ): CheckResult => {
-    switch (failure.reason) {
-      case "unreachable":
-      case "timeout":
-        return buildFailedResult("unreachable", failure.message);
-      case "unauthorized":
-        return buildFailedResult(
-          "error",
-          `${contribution.displayName}'s MCP server refused the Connection's token`,
-        );
-      default:
-        return buildFailedResult("error", failure.message);
-    }
-  };
-
   /**
    * Works out the outcome of one check from the dependencies read at its
    * start. Never fails except for the database: every other failure is an
    * outcome that becomes the server's status.
    *
-   * When the server answers 401, the Connection's credentials are refreshed
-   * and the listing is tried once more. A refresh changes the Connection, so
-   * it starts only if the server, its revision and its Connection are still
-   * as the check found them. Otherwise the outcome is `discarded`, and the
-   * Connection is left alone.
+   * When the server refuses the credentials, they are refreshed and the
+   * listing is tried once more (`runWithCredentials`). A refresh changes the
+   * Connection, so it starts only if the server, its revision and its
+   * Connection are still as the check found them. Otherwise the outcome is
+   * `discarded`, and the Connection is left alone.
    */
   const evaluate = (
     server: StoredMcpServer,
@@ -308,46 +299,34 @@ const make = Effect.gen(function* () {
         );
       }
 
-      const read = yield* Effect.result(connectionTypes.readCredentialsForUse(server.connectionId));
-      if (read._tag === "Failure")
-        return describeUnavailable(read.failure, contribution, connection);
-
-      let outcome = yield* Effect.result(
-        listTools(contribution, read.success, worked, server.protocolVersion),
+      return yield* runWithCredentials({
+        connections: connectionTypes,
+        connectionId: server.connectionId,
+        // The retry after a refresh starts with the revision that worked.
+        action: (credentials) =>
+          listTools(contribution, credentials, worked, worked.current ?? server.protocolVersion),
+        checkRefreshAllowed: Effect.flatMap(
+          state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
+          Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
+        ),
+      }).pipe(
+        Effect.map(({ tools, revision }): CheckResult => {
+          const stored = tools.map(toStoredTool);
+          return new TextEncoder().encode(JSON.stringify(stored)).length >
+            MAX_UPSTREAM_MESSAGE_BYTES
+            ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
+            : { _tag: "ready", tools: stored, revision };
+        }),
+        Effect.catchTags({
+          UpstreamError: (failure) => {
+            const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
+            return Effect.succeed(buildFailedResult(status, detail));
+          },
+          ConnectionCredentialsUnavailable: (error) =>
+            Effect.succeed(describeUnavailable(error, contribution, connection)),
+          CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),
+        }),
       );
-      if (outcome._tag === "Failure" && outcome.failure.reason === "unauthorized") {
-        const current = yield* state.readServerWhileBasisHolds(server.id, {
-          revision: server.revision,
-          dependencies,
-        });
-        if (Option.isNone(current)) return { _tag: "discarded" } satisfies CheckResult;
-        const refresh = yield* Effect.result(
-          connectionTypes.refreshAfterRejection(
-            server.connectionId,
-            outcome.failure.sentIdentity ?? read.success.identity,
-          ),
-        );
-        if (refresh._tag === "Failure") {
-          return refresh.failure._tag === "ConnectionCannotRefresh"
-            ? describeUpstreamFailure(outcome.failure, contribution)
-            : describeUnavailable(refresh.failure, contribution, connection);
-        }
-        outcome = yield* Effect.result(
-          listTools(
-            contribution,
-            refresh.success,
-            worked,
-            worked.current ?? server.protocolVersion,
-          ),
-        );
-      }
-      if (outcome._tag === "Failure") return describeUpstreamFailure(outcome.failure, contribution);
-
-      const tools = outcome.success.tools.map(toStoredTool);
-      if (new TextEncoder().encode(JSON.stringify(tools)).length > MAX_UPSTREAM_MESSAGE_BYTES) {
-        return buildFailedResult("error", "The server's tool list is larger than 4 MiB");
-      }
-      return { _tag: "ready", tools, revision: outcome.success.revision } satisfies CheckResult;
     });
 
   /**
