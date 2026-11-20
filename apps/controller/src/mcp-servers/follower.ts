@@ -14,7 +14,6 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { absorbFailures } from "../absorbing";
@@ -175,12 +174,12 @@ export const runConnectionFollower = Effect.scoped(
       });
 
     // Subscribe before the first read of the servers, so no change in between is lost.
-    const queue = yield* changes.subscribe(["connection", "plugin"]);
+    const subscription = yield* changes.subscribe(["connection", "plugin"]);
     yield* reconcileSelected(() => true);
     while (true) {
       const connectionIds = new Set<string>();
       const pluginIds = new Set<string>();
-      for (const change of yield* Queue.takeAll(queue)) {
+      for (const change of yield* subscription.takePending) {
         (change.topic === "connection" ? connectionIds : pluginIds).add(change.id);
       }
       yield* reconcileSelected(
