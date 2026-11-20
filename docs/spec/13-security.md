@@ -551,6 +551,7 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
   - the duration.
 
   An entry never holds the arguments or the result, because they can carry the user's private text and the audit log is kept far longer than any of them is useful, as for text generation entries. The kind's name is chosen when the gateway is built ([#1208](https://github.com/theagenticage/hercule/issues/1208)).
+  - *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Not while the controller is frozen or sealed** (decided by Rogier, 2026-11-20). The database refuses writes in that window, so a `tools/call` the gate refuses gets no audit entry and no line on its Thread. The controller's log gets one line instead, with the session, the MCP Server, the tool's original name and the reason ([./21-mcp.md](./21-mcp.md#39-audit)).
 - **Retention.** Security events and actor-stamped mutations are kept at least 90 days; the full retention statement (event log TTL, per-session streams, domain rows) is in [./04-state-store.md](./04-state-store.md).
 
 ## 12. What v1 does not defend against

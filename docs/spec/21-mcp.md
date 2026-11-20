@@ -119,6 +119,7 @@ The route is `POST /mcp`, `GET /mcp` and `DELETE /mcp` on the controller. It is 
   - a call already sent may finish;
   - scheduled checks and refresh writes wait for the phase to end.
 - **Streams end** when the session ends, when the controller freezes or seals, and at shutdown.
+- *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A session running across a promotion keeps the old address until its next start.** The runner binds the gateway's address and the token when a session starts, from the `HERCULE_API_URL` it gives the session ([./06-providers.md](./06-providers.md#4-harnessadapter)). The session's `hercule` CLI reads the same variable, and it does not follow a promotion either: after the seal, A answers its calls with `controller_sealed` and the new address, and the CLI prints that error. So once A seals, a session that started on A reaches only A's gateway: `tools/list` still answers from A's stored lists while A runs, every `tools/call` is refused with A's `controller_sealed` message, and once A stops, the harness cannot reach the gateway at all. The tools work again from the session's next start, a resume included, because the runner, which has followed the forwarding pointer to B, binds B's address then. A proxy on the runner that would let a running session follow the move is a follow-up ticket, not part of v1.
 - **An `Mcp-Session-Id` belongs to one token.** An `Mcp-Session-Id` the gateway issues is bound to the Session Token it was created with. A request that names it with any other token gets 404. `DELETE` ends that MCP session only, never the Thread or its token. A resume mints a new token, so the old token's streams end with it.
 - **The grant.** Every call needs `mcp.use` in the session's profile ([./13-security.md](./13-security.md#61-grant-families)). `mcp.use` alone allows acting through the server's Connection. `connection.use` is not also required, because the user put that server on that Thread.
 - **The list.** A call is allowed only for a server in the session's own list ([section 3.5](#35-a-call)).
@@ -247,6 +248,8 @@ The gateway writes one audit entry per `tools/call`. Its home is [./13-security.
 - the duration.
 
 It never holds the arguments or the result.
+
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **While the controller is frozen or sealed, a refused call is not audited** (decided by Rogier, 2026-11-20). The database refuses writes then, so the gateway can write neither the audit entry nor the `runtime.warning` of section 3.6 on the Thread. It writes one line to the controller's log instead: the session, the MCP Server, the tool's original name and the reason. The agent still gets its tool result with `isError: true` and the gate's message. Outside that window every `tools/call` gets its audit entry.
 
 ### 3.10 Upstream sessions
 
