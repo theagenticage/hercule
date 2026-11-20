@@ -673,12 +673,9 @@ export const openUpstream = (
       state.refusal ??
       describeClientFailure(error, (state.sentCredentials ?? target.credentials).identity);
 
-    /** Removes the credential values the session sent, and those of `call` when it is given, from `value`. */
-    const removeSentValues = <A>(value: A, call?: UpstreamCallState): A =>
-      removeCredentialValues(
-        value,
-        call === undefined ? sentValues : new Set([...sentValues, ...call.sentValues]),
-      );
+    /** Removes the credential values the session sent, and those of `state`, from `value`. */
+    const removeSentValues = <A>(value: A, state: UpstreamCallState = sessionState): A =>
+      removeCredentialValues(value, new Set([...sentValues, ...state.sentValues]));
 
     /** Decides what a failure of a call's request means: see `callTool` of `OpenedUpstream`. */
     const decideCallFailure = (
