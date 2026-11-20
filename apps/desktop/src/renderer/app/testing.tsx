@@ -69,6 +69,7 @@ import {
   NO_SIDEBAR_RECORDS,
 } from "./fake-controller";
 import { buildRouterContext, type RouterContext } from "./context";
+import { SHARED_READ_WINDOW_MS } from "./live";
 import { createAppRouter } from "./router";
 
 /** The address of the stubbed controller. */
@@ -1464,6 +1465,9 @@ export const buildTestContext = async (
       // The stub answers a subscription in a microtask, and the reads the
       // answer starts begin after it is decoded, so let those run first.
       await new Promise((resolve) => setTimeout(resolve, 0));
+      // The pushes gather for `SHARED_READ_WINDOW_MS` before any read starts, so a read they cause
+      // does not exist yet. This timer is set after the window's own, so it ends after it.
+      await new Promise((resolve) => setTimeout(resolve, SHARED_READ_WINDOW_MS));
       await waitFor(() => {
         if (context.queryClient.isFetching() > 0) throw new Error("reads are still running");
       });
