@@ -12,7 +12,8 @@
  * - A redirect is never followed, so a credential never reaches another
  *   origin. A 3xx answer is an error.
  * - Nothing is sent while the controller is frozen or sealed.
- * - No trace headers go to the outside server.
+ * - The HTTP client creates no trace spans, so no URL or error text reaches a
+ *   trace, and no trace headers go to the outside server.
  * - No failure carries the server's answer, its headers, the request or a
  *   credential: each failure has a fixed message.
  */
@@ -258,7 +259,10 @@ export const openUpstream = (
         send.pipe(
           // A redirect would carry the credentials to another origin.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+          // No span at all: a client span records the URL, and a failed one
+          // records the error text, which may hold a credential. Without a
+          // span there is also nothing to propagate to the outside server.
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
         ),
       ),
     );

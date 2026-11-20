@@ -17,8 +17,12 @@
  *   backoff, which Check now ends;
  * - a redirect is not followed, and a URL off the plugin's origin is refused
  *   without any request;
+ * - the revision whose handshake worked is stored even when the listing then
+ *   fails, and the retry after a refresh starts with it;
  * - a result is dropped when the server, its Connection or its plugin changed
- *   while the check ran, whatever the order of the writes;
+ *   while the check ran, whatever the order of the writes, and a dropped check
+ *   of a server that can still be served makes the scheduler check it again;
+ * - a check that was superseded never refreshes the Connection;
  * - one Notification per episode of trouble;
  * - the scheduler checks the servers that are due, and nothing leaves the
  *   controller while it is frozen;
@@ -394,6 +398,39 @@ describe("the credential of a check", () => {
     });
   });
 
+  it("keeps the revision that worked when the listing fails, and starts the retry after a refresh with it", async () => {
+    await withRig(
+      async ({ controller, fake, provider, connect }) => {
+        provider.answers.token = refreshedToken;
+        fake.authorize = (authorization, method) =>
+          method !== "tools/list" || authorization === "Bearer refreshed-token";
+        await createServer(controller, { connectionId: await connect() });
+
+        const row = await waitForResult(controller);
+
+        expect(row).toMatchObject({ status: "ready", protocol_version: "2025-06-18" });
+        const rejected = fake.requests.findIndex((request) => request.status === 401);
+        const retry = fake.requests.slice(rejected + 1).find((one) => one.method === "initialize");
+        expect(retry?.protocolVersion).toBe("2025-06-18");
+      },
+      { oauth: true, fake: { protocols: [McpProtocol.v2025_06_18] } },
+    );
+  });
+
+  it("stores the revision that worked when the listing fails for good", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        fake.authorize = (_authorization, method) => method !== "tools/list";
+        await createServer(controller, { connectionId: await connect() });
+
+        const row = await waitForResult(controller);
+
+        expect(row).toMatchObject({ status: "error", protocol_version: "2025-06-18" });
+      },
+      { fake: { protocols: [McpProtocol.v2025_06_18] } },
+    );
+  });
+
   it("never sends a Connection of another type to the server", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       const server = await createServer(controller, { connectionId: await connect() });
@@ -628,6 +665,97 @@ describe("a result that is out of date", () => {
     },
   );
 
+  it("is dropped when the Connection's credentials generation moved without any announcement", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const release = fake.hold();
+      await createServer(controller, { connectionId: await connect() });
+      await fake.waitForRequests(1);
+      // The scheduler does not look again within this test, so a check that
+      // starts again can only be the one the dropped check asks for.
+      await runSql(
+        controller,
+        controller.harness
+          .sql`UPDATE connections SET credentials_generation = credentials_generation + 1`,
+      );
+      release();
+
+      // A dropped check of a server that can still be served marks it due.
+      const row = await eventually(
+        () => readRow(controller),
+        (found) => found.next_check_at !== null,
+      );
+      expect(row).toMatchObject({ status: "checking", tools: "[]", checked_at: null });
+    });
+  });
+
+  it("makes the scheduler check the server again when its Connection moved from connected to error unannounced", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        const release = fake.hold();
+        await createServer(controller, { connectionId: await connect() });
+        await fake.waitForRequests(1);
+        // Both statuses are usable, so the follower has no cause to ask for a
+        // check, and the server is not due for a day.
+        await runSql(controller, controller.harness.sql`UPDATE connections SET status = 'error'`);
+        await runSql(
+          controller,
+          controller.harness.sql`UPDATE mcp_servers SET next_check_at = '2099-01-01T00:00:00.000Z'`,
+        );
+        release();
+
+        const row = await eventually(
+          () => readRow(controller),
+          (found) => found.status === "ready",
+        );
+        expect(row.checked_at).not.toBeNull();
+      },
+      { checkInterval: 20 },
+    );
+  });
+
+  it("never refreshes the Connection for a check that was superseded while its tools/list answer was a 401", async () => {
+    await withRig(
+      async ({ controller, fake, provider, connect }) => {
+        provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+        fake.authorize = (_authorization, method) => method !== "tools/list";
+        const release = fake.hold("tools/list");
+        const connectionId = await connect();
+        const server = await createServer(controller, { connectionId });
+        await eventually(
+          () => Promise.resolve(fake.requests.some((request) => request.method === "tools/list")),
+          Boolean,
+        );
+
+        await requestUpdate(controller, server.id, { enabled: false });
+        release();
+        await eventually(
+          () =>
+            Promise.resolve(
+              fake.requests.find((request) => request.method === "tools/list")?.status,
+            ),
+          (status) => status === 401,
+        );
+        // Switching the server on requests a check that runs after the held
+        // one has ended, so its result is the proof that the held one is done.
+        fake.authorize = () => true;
+        await requestUpdate(controller, server.id, { enabled: true });
+        await eventually(
+          () => readRow(controller),
+          (found) => found.status === "ready",
+        );
+
+        expect(
+          provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token"),
+        ).toEqual([]);
+        expect((await readConnection(controller.base, controller.token, connectionId)).status).toBe(
+          "connected",
+        );
+        expect(await countNotifications(controller, "core.connection-error")).toBe(0);
+      },
+      { oauth: true },
+    );
+  });
+
   it("is dropped, with no Notification, for a server that is switched off", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       fake.authorize = () => false;
@@ -664,13 +792,13 @@ describe("the Notification of an episode", () => {
       expect(row.status).toBe("error");
       expect(await countNotifications(controller)).toBe(1);
 
-      // Every check plans its next one a moment later than the check before.
+      // Check now marks the next check as due, and the check that ends plans
+      // the next one a day later: that is how the end of a check shows.
       const check = async (): Promise<McpServerRow> => {
-        const previous = (await readRow(controller)).next_check_at;
         await requestCheck(controller, server.id);
         return eventually(
           () => readRow(controller),
-          (next) => next.next_check_at !== previous,
+          (next) => Date.parse(next.next_check_at!) - Date.now() > 12 * 60 * MINUTE,
         );
       };
 

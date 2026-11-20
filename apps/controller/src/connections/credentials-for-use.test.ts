@@ -384,6 +384,53 @@ describe("the credentials the core reads to call an outside server", () => {
     expect(read.credentials).toEqual({ accessToken: "reconnected-token" });
   });
 
+  it("ignores the late refusal of a refresh when the user reconnected meanwhile and stored the same token set", async () => {
+    const { read, status, notifications } = await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        const requested = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        let requests = 0;
+        provider.answers.token = async () => {
+          requests += 1;
+          if (requests > 1) {
+            return buildJsonResponse({
+              access_token: "refreshed-token",
+              refresh_token: "refresh-2",
+              token_type: "bearer",
+              expires_in: 8 * 60 * 60,
+            });
+          }
+          requested.resolve();
+          await release.promise;
+          return buildJsonResponse({ error: "invalid_grant" }, 400);
+        };
+        const reading = yield* Effect.forkChild(readForUse(id));
+        yield* Effect.promise(() => requested.promise);
+        // The reconnect stores the very token set the refresh started from, so
+        // only the Connection's credentials generation shows that it happened.
+        const connections = yield* connectionRepository;
+        yield* storeTokens(id, STALE_TOKENS);
+        yield* inTransaction(
+          connections.update(id, { replacesCredentials: true }, "2026-09-01T00:00:01.000Z"),
+        );
+        release.resolve();
+        const read = yield* Fiber.join(reading);
+        return {
+          read,
+          status: yield* readStatus(id),
+          notifications: yield* countNeedsSignInNotifications(id),
+        };
+      }),
+    );
+
+    // The refusal belonged to the credentials before the reconnect, so the
+    // read starts again with the reconnected ones and succeeds.
+    expect(read.credentials).toEqual({ accessToken: "refreshed-token" });
+    expect(status).toBe("connected");
+    expect(notifications).toBe(0);
+  });
+
   it("fails with unreachable, and leaves the Connection as it was, when the provider cannot be reached", async () => {
     const { failure, status } = await run({ tokens: STALE_TOKENS }, (id) =>
       Effect.gen(function* () {

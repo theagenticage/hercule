@@ -23,24 +23,29 @@ import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import { McpServerChecks } from "./checks";
-import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
+import { mcpServerRepository, type McpServerDependencies, type McpServerEdit } from "./repository";
 import { judgeSurroundings, readPluginId, readSurroundings, writeServerState } from "./state";
 
 /** How many times a reconcile reads the server again after losing a race with another write. */
 const MAX_RACE_ATTEMPTS = 3;
 
-/** How many times in all a server whose reconcile failed is reconciled before the follower gives up until its next change. */
+/**
+ * How many times in all the follower reads the server list, or reconciles a
+ * server whose reconcile failed, before it gives up until the next change.
+ */
 const MAX_FAILURE_ATTEMPTS = 3;
 
-/** How long the follower waits before it reconciles the servers whose reconcile failed. */
+/** How long the follower waits before it reads the server list or reconciles a server again after a failure. */
 const RETRY_DELAY = Duration.seconds(3);
 
 /**
  * Follows the Connections and plugins of the MCP Servers, for the life of the
  * fiber that runs it. It subscribes first, then reconciles every server once,
  * then reconciles the servers of each Connection and plugin that changes.
- * Never returns. A reconcile that fails is logged and tried again after a few
- * seconds, up to three times in all, and never stops the follower.
+ * Never returns. A reconcile or a read of the server list that fails is
+ * logged and tried again after a few seconds, up to three times in all, and
+ * never stops the follower. A batch whose server list could not be read is
+ * left to the daily check of each server.
  */
 export const runConnectionFollower = Effect.scoped(
   Effect.gen(function* () {
@@ -120,21 +125,40 @@ export const runConnectionFollower = Effect.scoped(
       });
 
     /**
+     * Reads the ids of the servers `selected` picks. A failed read is logged
+     * and tried again after `RETRY_DELAY`, up to `MAX_FAILURE_ATTEMPTS` times
+     * in all. Returns `undefined` when every try failed, after logging that
+     * the daily check of each server is what brings it in step then.
+     */
+    const readSelectedIds = (selected: (server: McpServerDependencies) => boolean) =>
+      Effect.gen(function* () {
+        for (let attempt = 1; attempt <= MAX_FAILURE_ATTEMPTS; attempt++) {
+          let ids: ReadonlyArray<string> | undefined;
+          yield* absorbFailures(
+            "Reading the MCP servers to follow their Connections failed",
+            Effect.flatMap(servers.listDependencies(), (all) =>
+              Effect.sync(() => {
+                ids = all.filter(selected).map((server) => server.id);
+              }),
+            ),
+          );
+          if (ids !== undefined) return ids;
+          if (attempt < MAX_FAILURE_ATTEMPTS) yield* Effect.sleep(RETRY_DELAY);
+        }
+        yield* Effect.logError(
+          "The MCP servers could not be read to follow their Connections: their next daily check brings them in step",
+        );
+        return undefined;
+      });
+
+    /**
      * Reconciles the servers `selected` picks. A server whose reconcile fails
      * is logged, and reconciled again after `RETRY_DELAY`, up to
      * `MAX_FAILURE_ATTEMPTS` times in all.
      */
-    const reconcileSelected = (selected: (server: StoredMcpServer) => boolean) =>
+    const reconcileSelected = (selected: (server: McpServerDependencies) => boolean) =>
       Effect.gen(function* () {
-        let pending: ReadonlyArray<string> = [];
-        yield* absorbFailures(
-          "Reading the MCP servers to follow their Connections failed",
-          Effect.flatMap(servers.list(), (all) =>
-            Effect.sync(() => {
-              pending = all.filter(selected).map((server) => server.id);
-            }),
-          ),
-        );
+        let pending = (yield* readSelectedIds(selected)) ?? [];
         for (let attempt = 1; pending.length > 0; attempt++) {
           const failing: Array<string> = [];
           for (const id of pending) {

@@ -60,6 +60,14 @@ export interface StoredMcpServer {
   readonly updatedAt: string;
 }
 
+/** What a server depends on outside its own row, by id. */
+export interface McpServerDependencies {
+  readonly id: string;
+  readonly connectionId: string;
+  /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
+  readonly contributionId: string;
+}
+
 /** What a new server row holds. The status starts as `checking` and the switch as on. */
 export interface NewMcpServer {
   readonly name: string;
@@ -165,6 +173,25 @@ const make = Effect.gen(function* () {
         (rows) => rows.map(toServer),
       ),
 
+    /**
+     * Returns the Connection and the plugin contribution of every server,
+     * without the tool definitions the other reads decode.
+     */
+    listDependencies: (): Effect.Effect<ReadonlyArray<McpServerDependencies>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly connection_id: Uint8Array;
+          readonly contribution_id: string;
+        }>`SELECT id, connection_id, contribution_id FROM mcp_servers`,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            connectionId: uuidToString(row.connection_id),
+            contributionId: row.contribution_id,
+          })),
+      ),
+
     /** Returns the servers reached with this Connection, sorted by name and then by id. */
     listByConnection: (
       connectionId: string,
@@ -262,14 +289,17 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Resets the failed checks of a server whose user asked for a check now,
-     * and raises `revision`, so a check that is running cannot write its older
-     * result over the reset. It changes nothing the record shows.
+     * Prepares a server whose user asked for a check now: resets its failed
+     * checks, marks its next check as due at `at`, so the check happens even
+     * when the request for it is lost, and raises `revision`, so a check that
+     * is running cannot write its older result over the reset. It changes
+     * nothing the record shows.
      */
-    resetFailedChecks: (id: string): Effect.Effect<void, SqlError> =>
+    resetSchedule: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`
-          UPDATE mcp_servers SET failed_checks = 0, revision = revision + 1
+          UPDATE mcp_servers
+          SET failed_checks = 0, next_check_at = ${at}, revision = revision + 1
           WHERE id = ${uuidFromString(id)}
         `,
       ),

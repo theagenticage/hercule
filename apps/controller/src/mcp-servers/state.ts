@@ -85,7 +85,7 @@ export const readSurroundings = (
  * the same plugin state, and the same Connection with the same status and
  * credentials generation.
  */
-const isSameSurroundings = (before: Surroundings, now: Surroundings): boolean =>
+export const isSameSurroundings = (before: Surroundings, now: Surroundings): boolean =>
   before.plugin._tag === now.plugin._tag &&
   before.connection?.status === now.connection?.status &&
   before.connection?.credentialsGeneration === now.connection?.credentialsGeneration;
@@ -170,6 +170,52 @@ export interface StateBasis {
 }
 
 /**
+ * Reads the server and returns it when `basis` still holds: the server exists,
+ * is enabled, still has `basis`'s revision, and its Connection and plugin are
+ * still as `basis`'s surroundings. Returns `None` otherwise. Reads only.
+ */
+export const readServerWhileBasisHolds = (
+  id: string,
+  basis: StateBasis,
+): Effect.Effect<Option.Option<StoredMcpServer>, SqlError, SqlClient.SqlClient | PluginHost> =>
+  Effect.gen(function* () {
+    const servers = yield* mcpServerRepository;
+    const found = yield* servers.readById(id);
+    if (Option.isNone(found)) return found;
+    const current = found.value;
+    if (!current.enabled || current.revision !== basis.revision) return Option.none();
+    if (!isSameSurroundings(basis.surroundings, yield* readSurroundings(current))) {
+      return Option.none();
+    }
+    return found;
+  });
+
+/**
+ * Marks a server due for a check at `at`, so the scheduler checks it again,
+ * when it is enabled and its plugin and Connection can serve it. Does nothing
+ * otherwise. A check whose result was dropped calls it: when the server and
+ * its destination are still usable, nothing else is sure to ask for the
+ * check that the dropped one would have been.
+ */
+export const markDueWhenUsable = (
+  id: string,
+  at: string,
+): Effect.Effect<void, SqlError, SqlClient.SqlClient | PluginHost> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const servers = yield* mcpServerRepository;
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const found = yield* servers.readById(id);
+        if (Option.isNone(found) || !found.value.enabled) return;
+        const judged = judgeSurroundings(yield* readSurroundings(found.value));
+        if (judged._tag === "usable") yield* servers.update(id, { nextCheckAt: at }, undefined);
+      }),
+    );
+  });
+
+/**
  * Writes an edit to a server, unless something newer happened, and returns
  * whether it was written. It is dropped when the server is gone, switched off,
  * no longer has `basis`'s revision, or its Connection or plugin differ from
@@ -202,13 +248,9 @@ export const writeServerState = (
     return yield* withTransaction(
       sql,
       Effect.gen(function* () {
-        const found = yield* servers.readById(id);
+        const found = yield* readServerWhileBasisHolds(id, basis);
         if (Option.isNone(found)) return false;
         const current = found.value;
-        if (!current.enabled || current.revision !== basis.revision) return false;
-        if (!isSameSurroundings(basis.surroundings, yield* readSurroundings(current))) {
-          return false;
-        }
 
         const status = edit.status;
         let notifiedStatus = edit.notifiedStatus;

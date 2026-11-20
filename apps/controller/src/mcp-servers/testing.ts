@@ -65,19 +65,21 @@ export interface FakeUpstream {
   readonly origin: string;
   readonly requests: ReadonlyArray<RecordedRequest>;
   /**
-   * Decides whether a request with this `Authorization` header is let in. A
-   * request that is not gets HTTP 401. The default lets every request in.
+   * Decides whether a request with this `Authorization` header and this
+   * JSON-RPC method is let in. A request that is not gets HTTP 401. The
+   * default lets every request in.
    */
-  authorize: (authorization: string | null) => boolean;
+  authorize: (authorization: string | null, method: string) => boolean;
   /** When set, every request gets a 302 to this address instead of an answer. */
   redirectTo: string | undefined;
   /** Replaces the revisions it speaks and the tools it lists, for the requests that follow. */
   configure: (settings: Partial<FakeUpstreamSettings>) => Promise<void>;
   /**
    * Makes the fake hold the answer to every request, from now on, until the
-   * returned function is called.
+   * returned function is called. With `method`, it holds only the requests
+   * of that JSON-RPC method.
    */
-  hold: () => () => void;
+  hold: (method?: string) => () => void;
   /** Resolves once the fake has received `count` requests in all. */
   waitForRequests: (count: number) => Promise<void>;
   stop: () => Promise<void>;
@@ -131,7 +133,7 @@ export const startFakeUpstream = (
   let built = buildHandler(settings);
   const requests: Array<RecordedRequest> = [];
   const arrivals: Array<{ readonly count: number; readonly resolve: () => void }> = [];
-  let held: Promise<void> | undefined;
+  let held: { readonly released: Promise<void>; readonly method: string | undefined } | undefined;
   let stopped = false;
 
   const server = Bun.serve({
@@ -158,7 +160,7 @@ export const startFakeUpstream = (
       const response =
         fake.redirectTo !== undefined
           ? new Response(null, { status: 302, headers: { location: fake.redirectTo } })
-          : !fake.authorize(recorded.authorization)
+          : !fake.authorize(recorded.authorization, method)
             ? new Response("unauthorized", {
                 status: 401,
                 headers: { "www-authenticate": "Bearer" },
@@ -168,7 +170,9 @@ export const startFakeUpstream = (
       for (const waiting of arrivals.filter((one) => requests.length >= one.count)) {
         waiting.resolve();
       }
-      if (held !== undefined) await held;
+      if (held !== undefined && (held.method === undefined || held.method === method)) {
+        await held.released;
+      }
       recorded.status = response.status;
       return response;
     },
@@ -186,11 +190,14 @@ export const startFakeUpstream = (
       built = buildHandler(settings);
       await previous.dispose();
     },
-    hold: () => {
+    hold: (method) => {
       let release: () => void = () => undefined;
-      held = new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      held = {
+        released: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+        method,
+      };
       return () => {
         release();
         held = undefined;

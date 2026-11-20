@@ -7,7 +7,9 @@
  *   moves the server to the status that cause gives it;
  * - a server whose cause is gone, or whose Connection was reconnected, goes
  *   back to `checking`, ends its backoff, is marked due for a check at once,
- *   and asks for that check.
+ *   and asks for that check;
+ * - a read of the server list that fails at that moment is tried again, so
+ *   the servers are still followed.
  *
  * The checks are replaced by a recorder, because only the follower is tested.
  */
@@ -26,6 +28,8 @@ interface Arrangement {
   /** Boots the `acme` plugin that offers the server. A server with its plugin missing sets this to false. */
   readonly pluginBuilt: boolean;
   readonly connectionStatus: "connected" | "needs-reauth";
+  /** Makes the server list unreadable for the follower's first read, as a database that fails for a moment would. */
+  readonly listUnreadableAtStart?: true;
   /** Written to the Connection, as many reconnects as it takes to differ from the server's. */
   readonly credentialsGeneration: number;
   /** What the server holds before the follower starts. */
@@ -100,7 +104,15 @@ const followUntil = (
           request: (id) => Effect.sync(() => void requested.push(id)),
           requestDue: Effect.void,
         });
+        if (arrangement.listUnreadableAtStart === true) {
+          yield* withTransaction(sql, sql`ALTER TABLE mcp_servers RENAME TO mcp_servers_away`);
+        }
         yield* Effect.forkScoped(runConnectionFollower.pipe(Effect.provide(checks)));
+        if (arrangement.listUnreadableAtStart === true) {
+          // The follower reads the list at once, and fails.
+          yield* Effect.sleep("100 millis");
+          yield* withTransaction(sql, sql`ALTER TABLE mcp_servers_away RENAME TO mcp_servers`);
+        }
 
         for (let attempt = 0; attempt < 500; attempt++) {
           const server = (yield* servers.readById(serverId)).pipe((found) =>
@@ -148,6 +160,21 @@ describe("the Connection follower at startup", () => {
       statusDetail: "The plugin that offered this server is not in this build",
       statusCause: "plugin",
     });
+  });
+
+  it("reads the server list again when the first read fails, and then follows the Connection", async () => {
+    const { server } = await followUntil(
+      {
+        pluginBuilt: true,
+        connectionStatus: "needs-reauth",
+        credentialsGeneration: 0,
+        listUnreadableAtStart: true,
+        server: { statusCause: null, failedChecks: 0 },
+      },
+      (found) => found.status === "needs-sign-in",
+    );
+
+    expect(server.statusCause).toBe("connection");
   });
 
   it.each([

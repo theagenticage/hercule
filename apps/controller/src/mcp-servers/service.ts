@@ -248,8 +248,10 @@ const make = Effect.gen(function* () {
     /**
      * Requests a new list of the server's tools and returns at once. It also
      * resets the server's failed checks, so a server that was backing off is
-     * checked again on the short waits, and raises its revision, so a check
-     * that is running cannot write its older result over the reset. Fails with
+     * checked again on the short waits, marks the next check as due now, so
+     * the check still happens when the request is lost to a restart, and raises
+     * its revision, so a check that is running cannot write its older result
+     * over the reset. Fails with
      * `NotFound` when there is no such server, and with `InvalidState` when the
      * server is switched off.
      */
@@ -269,7 +271,7 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            yield* servers.resetFailedChecks(id);
+            yield* servers.resetSchedule(id, yield* nowIso);
           }),
         );
         yield* checks.request(id);

@@ -39,6 +39,8 @@ import {
   computeBackoffMillis,
   DAILY_CHECK_MILLIS,
   judgeSurroundings,
+  markDueWhenUsable,
+  readServerWhileBasisHolds,
   readSurroundings,
   writeServerState,
   type Surroundings,
@@ -82,8 +84,18 @@ export const McpUpstreamHttpClient = Context.Reference<HttpClient.HttpClient | u
 /** How long listing the tools may take, from the first request to the last page. */
 const LIST_DEADLINE = Duration.seconds(60);
 
+/**
+ * The MCP revision whose handshake worked during a check, or `null` while none
+ * has. A check keeps it even when the listing fails after the handshake, so
+ * the next try starts with a revision known to work.
+ */
+interface WorkedRevision {
+  current: string | null;
+}
+
 /** What a check found out. */
 type CheckResult =
+  | { readonly _tag: "discarded" }
   | {
       readonly _tag: "ready";
       readonly tools: ReadonlyArray<StoredMcpTool>;
@@ -119,10 +131,17 @@ const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
  * and resets the schedule to a day. A server that cannot be reached backs off
- * (spec 21 section 5.3). Any other failure waits a day.
+ * (spec 21 section 5.3). Any other failure waits a day. A failure also stores
+ * the revision whose handshake worked, when one did.
  */
-const buildEdit = (server: StoredMcpServer, result: CheckResult, at: string): McpServerEdit => {
+const buildEdit = (
+  server: StoredMcpServer,
+  result: Exclude<CheckResult, { readonly _tag: "discarded" }>,
+  at: string,
+  worked: WorkedRevision,
+): McpServerEdit => {
   const atMillis = Date.parse(at);
+  const revisionEdit = worked.current === null ? {} : { protocolVersion: worked.current };
   const planAfter = (millis: number): string => new Date(atMillis + millis).toISOString();
   if (result._tag === "ready") {
     return {
@@ -144,6 +163,7 @@ const buildEdit = (server: StoredMcpServer, result: CheckResult, at: string): Mc
       statusCause: null,
       failedChecks,
       nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
+      ...revisionEdit,
     };
   }
   return {
@@ -152,6 +172,7 @@ const buildEdit = (server: StoredMcpServer, result: CheckResult, at: string): Mc
     statusCause: result.cause,
     failedChecks: 0,
     nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
+    ...revisionEdit,
   };
 };
 
@@ -199,10 +220,15 @@ const make = Effect.gen(function* () {
     }
   };
 
-  /** Lists the tools once, on a short-lived client of its own. */
+  /**
+   * Lists the tools once, on a short-lived client of its own. Records the
+   * revision whose handshake worked in `worked`, before it lists, so the
+   * revision is known when the listing fails.
+   */
   const listTools = (
     contribution: RegisteredMcpServer,
     credentials: ConnectionCredentialsForUse,
+    worked: WorkedRevision,
     firstRevision: string | null,
   ): Effect.Effect<
     { readonly tools: ReadonlyArray<McpSchema.Tool>; readonly revision: string },
@@ -211,6 +237,7 @@ const make = Effect.gen(function* () {
     Effect.scoped(
       Effect.gen(function* () {
         const opened = yield* openUpstream({ contribution, credentials, firstRevision });
+        worked.current = opened.revision;
         const tools = yield* opened.client
           .listTools({ timeout: LIST_DEADLINE })
           .pipe(Effect.mapError(opened.describeFailure));
@@ -243,11 +270,18 @@ const make = Effect.gen(function* () {
    * Works out the outcome of one check from the surroundings read at its
    * start. Never fails except for the database: every other failure is an
    * outcome that becomes the server's status.
+   *
+   * When the server answers 401, the Connection's credentials are refreshed
+   * and the listing is tried once more. A refresh changes the Connection, so
+   * it starts only if the server, its revision and its Connection are still
+   * as the check found them. Otherwise the outcome is `discarded`, and the
+   * Connection is left alone.
    */
   const evaluate = (
     server: StoredMcpServer,
     surroundings: Surroundings,
-  ): Effect.Effect<CheckResult, SqlError> =>
+    worked: WorkedRevision,
+  ): Effect.Effect<CheckResult, SqlError, SqlClient.SqlClient | PluginHost> =>
     Effect.gen(function* () {
       const judged = judgeSurroundings(surroundings);
       if (judged._tag === "unusable") return failed(judged.status, judged.detail, judged.cause);
@@ -266,9 +300,14 @@ const make = Effect.gen(function* () {
         return describeUnavailable(read.failure, contribution, connection);
 
       let outcome = yield* Effect.result(
-        listTools(contribution, read.success, server.protocolVersion),
+        listTools(contribution, read.success, worked, server.protocolVersion),
       );
       if (outcome._tag === "Failure" && outcome.failure.reason === "unauthorized") {
+        const current = yield* readServerWhileBasisHolds(server.id, {
+          revision: server.revision,
+          surroundings,
+        });
+        if (Option.isNone(current)) return { _tag: "discarded" } satisfies CheckResult;
         const refresh = yield* Effect.result(
           connectionTypes.refreshAfterRejection(
             server.connectionId,
@@ -281,7 +320,12 @@ const make = Effect.gen(function* () {
             : describeUnavailable(refresh.failure, contribution, connection);
         }
         outcome = yield* Effect.result(
-          listTools(contribution, refresh.success, server.protocolVersion),
+          listTools(
+            contribution,
+            refresh.success,
+            worked,
+            worked.current ?? server.protocolVersion,
+          ),
         );
       }
       if (outcome._tag === "Failure") return describeUpstreamFailure(outcome.failure, contribution);
@@ -295,8 +339,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks one server and writes the outcome, unless the server, its
-   * Connection or its plugin changed meanwhile: then the outcome is dropped,
-   * and whatever changed it requests its own check.
+   * Connection or its plugin changed meanwhile: then the outcome is dropped.
+   * Whatever changed the server requests its own check. When the server is
+   * still enabled and its Connection and plugin are usable, the dropped check
+   * also marks the server due, because a change that nothing announces, such
+   * as a Connection moving from `connected` to `error`, requests no check.
    */
   const checkOnce = (id: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -304,14 +351,18 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found) || !found.value.enabled) return;
       const server = found.value;
       const surroundings = yield* readSurroundings(server);
-      const result = yield* evaluate(server, surroundings);
+      const worked: WorkedRevision = { current: null };
+      const result = yield* evaluate(server, surroundings, worked);
       const at = yield* nowIso;
-      yield* writeServerState(
-        id,
-        { revision: server.revision, surroundings },
-        buildEdit(server, result, at),
-        at,
-      );
+      const written =
+        result._tag !== "discarded" &&
+        (yield* writeServerState(
+          id,
+          { revision: server.revision, surroundings },
+          buildEdit(server, result, at, worked),
+          at,
+        ));
+      if (!written) yield* markDueWhenUsable(id, at);
     }).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
       Effect.provideService(PluginHost, plugins),

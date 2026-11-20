@@ -263,9 +263,11 @@ describe("a server follows its plugin", () => {
       });
 
       await requestCheck(controller, serverId);
+      // Check now marks the next check as due, and the check that ends plans
+      // the next one a day later.
       const checked = await eventually(
         () => readRow(controller),
-        (row) => row.next_check_at !== followed.next_check_at,
+        (row) => Date.parse(row.next_check_at!) - Date.now() > 12 * 60 * 60 * 1000,
       );
       // The check says the same, so what the record shows does not change.
       expect(checked).toMatchObject({
