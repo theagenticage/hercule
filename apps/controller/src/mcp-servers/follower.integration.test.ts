@@ -3,23 +3,28 @@
  * against a real controller and a fake outside MCP server:
  *
  * - a Connection that needs sign-in moves its servers to `needs-sign-in`, and
- *   a Connection that is usable again clears that and lists the tools again;
+ *   reconnecting it clears that and lists the tools again;
  * - a Connection that is switched off moves its servers to `error`;
  * - a reconnect raises the server's revision and lists the tools with the new
  *   credentials;
  * - a plugin that is switched off moves its servers to `error`, and switching
  *   it on lists the tools again;
+ * - a plugin that is missing from the build shows the same words whether the
+ *   follower or a check says it;
  * - a status the server earned itself is left alone.
  *
- * No operation can set a Connection to `needs-reauth` or `disabled` without a
- * browser or a provider, so the test writes the status and then changes the
+ * No operation disables a Connection, and a Connection with pasted
+ * credentials has no refresh whose refusal would make it `needs-reauth`. So
+ * the test writes that status in the database and then changes the
  * Connection's label, which announces the Connection as changed, as every
- * Connection write does.
+ * Connection write does. The way back is a real reconnect. The refusal of a
+ * refresh, which makes a Connection `needs-reauth` through the real path, is
+ * tested with the checks.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { McpServer } from "@hercule/contract";
-import { withTransaction } from "../db";
+import { PluginHost } from "../plugins";
+import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { post, send } from "../http/testing";
 import {
   createConnection,
@@ -27,50 +32,16 @@ import {
   withSetUpController,
   type SetUpController,
 } from "../workflows/testing";
-import { buildUpstreamDeskPlugin, startFakeUpstream, type FakeUpstream } from "./testing";
-
-interface Row {
-  readonly status: string;
-  readonly status_detail: string | null;
-  readonly status_cause: string | null;
-  readonly revision: number;
-  readonly connection_generation: number;
-}
-
-const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
-  Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
-
-const readRow = async (controller: SetUpController): Promise<Row> => {
-  const sql = controller.harness.sql;
-  const rows = await runSql(
-    controller,
-    sql<Row>`SELECT status, status_detail, status_cause, revision, connection_generation
-             FROM mcp_servers`,
-  );
-  return rows[0]!;
-};
-
-const countNotifications = async (controller: SetUpController): Promise<number> => {
-  const sql = controller.harness.sql;
-  const rows = await runSql(
-    controller,
-    sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM notifications
-                                WHERE kind = 'core.mcp-server-failed'`,
-  );
-  return rows[0]!.n;
-};
-
-const eventually = async <A>(read: () => Promise<A>, done: (value: A) => boolean): Promise<A> => {
-  const deadline = Date.now() + 10_000;
-  let value = await read();
-  while (!done(value)) {
-    if (Date.now() > deadline)
-      throw new Error(`gave up waiting, last value: ${JSON.stringify(value)}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    value = await read();
-  }
-  return value;
-};
+import {
+  countNotifications,
+  createServer,
+  eventually,
+  readRow,
+  requestCheck,
+  runSql,
+  startFakeUpstream,
+  type FakeUpstream,
+} from "./testing";
 
 /** Starts a controller with a Connection and a server that is `ready`, and runs `body`. */
 const withReadyServer = async (
@@ -93,43 +64,45 @@ const withReadyServer = async (
             token: "t0ken",
           },
         );
-        const response = await post(
-          controller.base,
-          "/api/v1/mcp-servers",
-          { source: { kind: "plugin", contributionId: "acme/desk", connectionId } },
-          controller.token,
-        );
-        const server = (await response.json()) as McpServer;
+        const server = await createServer(controller, { connectionId });
         await eventually(
           () => readRow(controller),
           (row) => row.status === "ready",
         );
         await body({ controller, fake, connectionId, serverId: server.id });
       },
-      [buildUpstreamDeskPlugin(fake)],
+      [buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", fake) })],
     );
   } finally {
     await fake.stop();
   }
 };
 
-/** Sets the Connection's status in the database, then announces the Connection as changed. */
-const changeConnectionStatus = async (
+/** Renames the Connection, which announces it as changed. */
+const announceConnection = async (
   controller: SetUpController,
   connectionId: string,
-  status: "connected" | "needs-reauth" | "disabled",
+  label: string,
 ): Promise<void> => {
-  const sql = controller.harness.sql;
-  await runSql(controller, sql`UPDATE connections SET status = ${status}`);
   const response = await send("PATCH", controller.base, `/api/v1/connections/${connectionId}`, {
-    body: { label: `work-${status}` },
+    body: { label },
     token: controller.token,
   });
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
+/** Sets the Connection's status in the database, then announces the Connection as changed. */
+const changeConnectionStatus = async (
+  controller: SetUpController,
+  connectionId: string,
+  status: "needs-reauth" | "disabled",
+): Promise<void> => {
+  await runSql(controller, controller.harness.sql`UPDATE connections SET status = ${status}`);
+  await announceConnection(controller, connectionId, `work-${status}`);
+};
+
 describe("a server follows its Connection", () => {
-  it("goes to needs-sign-in when the Connection needs sign-in, and lists again when it is usable", async () => {
+  it("goes to needs-sign-in when the Connection needs sign-in, and lists again after a reconnect", async () => {
     await withReadyServer(async ({ controller, fake, connectionId }) => {
       const before = await readRow(controller);
       const requestsBefore = fake.requests.length;
@@ -149,14 +122,20 @@ describe("a server follows its Connection", () => {
       expect(await countNotifications(controller)).toBe(0);
       expect(fake.requests).toHaveLength(requestsBefore);
 
-      await changeConnectionStatus(controller, connectionId, "connected");
+      const reconnected = await post(
+        controller.base,
+        `/api/v1/connections/${connectionId}/credentials`,
+        { credentials: { token: "new-token" } },
+        controller.token,
+      );
+      expect(reconnected.status, await reconnected.clone().text()).toBe(200);
 
       const recovered = await eventually(
         () => readRow(controller),
         (row) => row.status === "ready",
       );
       expect(recovered.status_cause).toBeNull();
-      expect(fake.requests.length).toBeGreaterThan(requestsBefore);
+      expect(fake.requests.at(-1)?.authorization).toBe("Bearer new-token");
     });
   });
 
@@ -206,21 +185,14 @@ describe("a server follows its Connection", () => {
   it("leaves a status the server earned itself alone, when the Connection is usable", async () => {
     await withReadyServer(async ({ controller, fake, connectionId, serverId }) => {
       fake.authorize = () => false;
-      expect(
-        (await post(controller.base, `/api/v1/mcp-servers/${serverId}/check`, {}, controller.token))
-          .status,
-      ).toBe(200);
+      expect((await requestCheck(controller, serverId)).status).toBe(200);
       const failed = await eventually(
         () => readRow(controller),
         (row) => row.status === "error",
       );
       const requestsBefore = fake.requests.length;
 
-      const renamed = await send("PATCH", controller.base, `/api/v1/connections/${connectionId}`, {
-        body: { label: "renamed" },
-        token: controller.token,
-      });
-      expect(renamed.status).toBe(200);
+      await announceConnection(controller, connectionId, "renamed");
       // The follower handles changes in order, so once it has acted on the
       // plugin's change it has seen the Connection's change before it. The
       // plugin's change is the only write: one revision, and no new request.
@@ -268,6 +240,41 @@ describe("a server follows its plugin", () => {
       );
       expect(on.status_cause).toBeNull();
       expect(fake.requests.length).toBeGreaterThan(requestsBefore);
+    });
+  });
+
+  it("shows a plugin that is missing from the build in the same words as a check does", async () => {
+    await withReadyServer(async ({ controller, fake, connectionId, serverId }) => {
+      const requestsBefore = fake.requests.length;
+      // The next boot of the plugin host has no plugin that offers the server.
+      const rebooted = await controller.harness.runWithLiveSessions(
+        Effect.flatMap(PluginHost, (host) => host.boot([])),
+      );
+      expect(rebooted._tag).toBe("Success");
+
+      await announceConnection(controller, connectionId, "work-after-boot");
+      const followed = await eventually(
+        () => readRow(controller),
+        (row) => row.status === "error",
+      );
+      expect(followed).toMatchObject({
+        status_detail: "The plugin that offered this server is not in this build",
+        status_cause: "plugin",
+      });
+
+      await requestCheck(controller, serverId);
+      const checked = await eventually(
+        () => readRow(controller),
+        (row) => row.next_check_at !== followed.next_check_at,
+      );
+      // The check says the same, so what the record shows does not change.
+      expect(checked).toMatchObject({
+        status: "error",
+        status_detail: followed.status_detail,
+        status_cause: "plugin",
+        updated_at: followed.updated_at,
+      });
+      expect(fake.requests).toHaveLength(requestsBefore);
     });
   });
 });

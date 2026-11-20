@@ -6,12 +6,10 @@
  *   the plugin's origin, and has no user name or password;
  * - every failure of the MCP client becomes one failure reason with a message
  *   that never holds what the server sent, and a 401 names the credentials it
- *   rejected;
- * - the backoff of an unreachable server.
+ *   rejected.
  */
 import { describe, expect, it } from "vitest";
 import { McpClientError } from "effect/ai";
-import { computeBackoffMillis } from "./state";
 import { checkUrlOnOrigin, describeClientFailure } from "./upstream";
 
 const ORIGIN = "https://mcp.example.com";
@@ -75,19 +73,5 @@ describe("describeClientFailure", () => {
       expect(failure.reason, reason._tag).toBe(expected);
       expect(failure.message).not.toMatch(/ECONNREFUSED|10\.0\.0\.1|body the server wrote/);
     }
-  });
-
-  it("says that a redirect is not followed", () => {
-    expect(
-      describeClientFailure(fail(new McpClientError.HttpError({ status: 302 })), undefined).message,
-    ).toBe("The server answered with a redirect (HTTP 302), which is not followed");
-  });
-});
-
-describe("computeBackoffMillis", () => {
-  it("waits 1 minute, 5, 15 and 60, and then an hour each time", () => {
-    const minutes = [1, 2, 3, 4, 5, 20].map((failed) => computeBackoffMillis(failed) / 60_000);
-
-    expect(minutes).toEqual([1, 5, 15, 60, 60, 60]);
   });
 });

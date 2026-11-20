@@ -48,6 +48,7 @@ import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import type { DiscussionService } from "../discussions";
+import { McpUpstreamHttpClient } from "../mcp-servers";
 import {
   endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
@@ -570,6 +571,11 @@ export interface ServerOptions {
   readonly schedulerInterval?: Duration.Duration;
   /** How often the scheduler looks for MCP Server checks that are due. The default is a minute. */
   readonly mcpServerCheckInterval?: Duration.Duration;
+  /**
+   * The HTTP client the MCP Server checks reach outside servers with. Without
+   * it they use `fetch`, so a test sets it to send a vendor's address to a fake.
+   */
+  readonly mcpUpstreamHttpClient?: HttpClient.HttpClient;
   /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
   readonly ingestReconcileInterval?: Duration.Duration;
   /** How long a text generation may wait for a slot and an answer. The default is over a minute. */
@@ -797,6 +803,7 @@ const provideTimings =
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
     provideIfSet(McpServerCheckInterval, options.mcpServerCheckInterval);
+    provideIfSet(McpUpstreamHttpClient, options.mcpUpstreamHttpClient);
     provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
     provideIfSet(ExpressionBudget, options.expressionBudget ?? Duration.infinity);
     return provided;

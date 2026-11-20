@@ -3,121 +3,62 @@
  * fake outside MCP server that speaks the protocol for real:
  *
  * - a created server lists its tools and becomes `ready`, with the full tool
- *   definitions stored;
+ *   definitions stored, and a changed list is announced on the live topic;
  * - the MCP revision: a server that speaks only an older one works and the
  *   revision that worked is tried first the next time; a server that speaks
  *   none of the four is `error`;
  * - the credential: a 401 is answered with one refresh and one more try; a
  *   second 401, or a pasted credential, makes the server `error` and leaves
  *   the Connection alone; a provider that refuses the refresh makes the server
- *   `needs-sign-in`;
- * - no answer makes the server `unreachable` and the next check follows the
- *   backoff;
+ *   `needs-sign-in` and the Connection raises its own Notification; a
+ *   provider that cannot be reached is shown in fixed words;
+ * - a Connection of another type than the contribution's is never used;
+ * - no answer makes the server `unreachable`, and the scheduler follows the
+ *   backoff, which Check now ends;
  * - a redirect is not followed, and a URL off the plugin's origin is refused
  *   without any request;
- * - a result is dropped when the server changed while the check ran;
+ * - a result is dropped when the server, its Connection or its plugin changed
+ *   while the check ran, whatever the order of the writes;
  * - one Notification per episode of trouble;
- * - the scheduler checks the servers that are due.
+ * - the scheduler checks the servers that are due, and nothing leaves the
+ *   controller while it is frozen;
+ * - a request that comes during a check makes it run once more.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
+import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
-import type { McpServer } from "@hercule/contract";
-import { withTransaction } from "../db";
 import { createDeviceProvider, buildJsonResponse, readConnection } from "../connections/testing";
-import { get, post, send } from "../http/testing";
+import {
+  collectPushes,
+  fetchTicket,
+  onSocket,
+  post,
+  waitForLiveToSettle,
+  waitWithin,
+} from "../http/testing";
+import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 import {
-  buildUpstreamDeskPlugin,
+  countNotifications,
+  createServer,
+  eventually,
   insertOauthConnection,
+  readRow,
+  readServer,
+  requestCheck,
+  requestUpdate,
+  runSql,
   startFakeUpstream,
+  waitForResult,
   type FakeUpstream,
   type FakeUpstreamSettings,
+  type McpServerRow,
 } from "./testing";
 
 const MINUTE = 60 * 1000;
 
-/** The stored fields a test looks at. */
-interface Row {
-  readonly status: string;
-  readonly status_detail: string | null;
-  readonly status_cause: string | null;
-  readonly tools: string;
-  readonly checked_at: string | null;
-  readonly protocol_version: string | null;
-  readonly revision: number;
-  readonly failed_checks: number;
-  readonly next_check_at: string | null;
-  readonly updated_at: string;
-  readonly notified_status: string | null;
-}
-
-const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
-  Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
-
-/** Reads the stored row of the only server there is. */
-const readRow = async (controller: SetUpController): Promise<Row> => {
-  const sql = controller.harness.sql;
-  const rows = await runSql(
-    controller,
-    sql<Row>`SELECT status, status_detail, status_cause, tools, checked_at, protocol_version,
-                    revision, failed_checks, next_check_at, updated_at, notified_status
-             FROM mcp_servers`,
-  );
-  return rows[0]!;
-};
-
-const countNotifications = async (controller: SetUpController): Promise<number> => {
-  const sql = controller.harness.sql;
-  const rows = await runSql(
-    controller,
-    sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM notifications
-                                WHERE kind = 'core.mcp-server-failed'`,
-  );
-  return rows[0]!.n;
-};
-
-/** Waits until `read` returns something `done` accepts, polling, and fails the test after ten seconds. */
-const eventually = async <A>(read: () => Promise<A>, done: (value: A) => boolean): Promise<A> => {
-  const deadline = Date.now() + 10_000;
-  let value = await read();
-  while (!done(value)) {
-    if (Date.now() > deadline)
-      throw new Error(`gave up waiting, last value: ${JSON.stringify(value)}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    value = await read();
-  }
-  return value;
-};
-
-const createServer = async (
-  controller: SetUpController,
-  connectionId: string,
-): Promise<McpServer> => {
-  const response = await post(
-    controller.base,
-    "/api/v1/mcp-servers",
-    { source: { kind: "plugin", contributionId: "acme/desk", connectionId } },
-    controller.token,
-  );
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as McpServer;
-};
-
-const requestCheck = (controller: SetUpController, id: string) =>
-  post(controller.base, `/api/v1/mcp-servers/${id}/check`, {}, controller.token);
-
-const readServer = async (controller: SetUpController, id: string): Promise<McpServer> => {
-  const response = await get(controller.base, `/api/v1/mcp-servers/${id}`, controller.token);
-  return (await response.json()) as McpServer;
-};
-
-/** Waits until the stored status is not `checking`, and returns the row. */
-const waitForResult = (controller: SetUpController): Promise<Row> =>
-  eventually(
-    () => readRow(controller),
-    (row) => row.status !== "checking",
-  );
+const LONG_AGO = "2020-01-01T00:00:00.000Z";
 
 interface RigOptions {
   readonly fake?: Partial<FakeUpstreamSettings>;
@@ -126,7 +67,17 @@ interface RigOptions {
     readonly url: string;
     readonly headers: Record<string, string>;
   };
+  /** How often, in milliseconds, the scheduler looks for checks that are due. Without it, it looks once a minute. */
   readonly checkInterval?: number;
+}
+
+/** What `withRig` hands the test. */
+interface Rig {
+  readonly controller: SetUpController;
+  readonly fake: FakeUpstream;
+  readonly provider: ReturnType<typeof createDeviceProvider>;
+  /** Makes a Connection of the plugin's type: pasted `t0ken`, or OAuth tokens `stored-token`. */
+  readonly connect: () => Promise<string>;
 }
 
 /**
@@ -134,18 +85,10 @@ interface RigOptions {
  * it. With `oauth`, the Connection holds OAuth tokens and the refresh goes to
  * a fake provider.
  */
-const withRig = async (
-  body: (rig: {
-    readonly controller: SetUpController;
-    readonly fake: FakeUpstream;
-    readonly provider: ReturnType<typeof createDeviceProvider>;
-    /** Makes a Connection of the plugin's type: pasted `t0ken`, or OAuth tokens `stored-token`. */
-    readonly connect: () => Promise<string>;
-  }) => Promise<void>,
-  options: RigOptions = {},
-): Promise<void> => {
+const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOptions = {}) => {
   const fake = await startFakeUpstream(options.fake);
   const provider = createDeviceProvider();
+  const { buildUpstreamRequest } = options;
   try {
     await withSetUpController(
       async (controller) => {
@@ -159,11 +102,15 @@ const withRig = async (
         await body({ controller, fake, provider, connect });
       },
       [
-        buildUpstreamDeskPlugin(fake, {
+        buildMcpServerPlugin("acme", {
+          server:
+            buildUpstreamRequest === undefined
+              ? buildDeskMcpServer("acme", fake)
+              : {
+                  ...buildDeskMcpServer("acme", fake),
+                  buildUpstreamRequest: ({ credentials }) => buildUpstreamRequest(credentials),
+                },
           ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
-          ...(options.buildUpstreamRequest === undefined
-            ? {}
-            : { buildUpstreamRequest: options.buildUpstreamRequest }),
         }),
       ],
       options.checkInterval === undefined
@@ -184,10 +131,18 @@ const refreshedToken = () =>
     expires_in: 8 * 60 * 60,
   });
 
+/** Returns how many minutes from now the server's next check is planned, rounded. */
+const readMinutesToNextCheck = (row: McpServerRow): number =>
+  Math.round((Date.parse(row.next_check_at!) - Date.now()) / MINUTE);
+
+/** Makes the server's next check due, as the passing of its wait would. */
+const makeCheckDue = (controller: SetUpController) =>
+  runSql(controller, controller.harness.sql`UPDATE mcp_servers SET next_check_at = ${LONG_AGO}`);
+
 describe("checking a server", () => {
   it("lists the tools, stores their full definitions and becomes ready", async () => {
     await withRig(async ({ controller, fake, connect }) => {
-      const server = await createServer(controller, await connect());
+      const server = await createServer(controller, { connectionId: await connect() });
       expect(server.status).toBe("checking");
 
       const row = await waitForResult(controller);
@@ -220,34 +175,53 @@ describe("checking a server", () => {
     });
   });
 
-  it("stores a tool list that differs and announces the server", async () => {
+  it("stores a tool list that differs and announces the server on its live topic", async () => {
     await withRig(async ({ controller, fake, connect }) => {
-      const server = await createServer(controller, await connect());
-      const first = await waitForResult(controller);
+      const connectionId = await connect();
+      const ticket = await fetchTicket(controller.base, controller.token);
 
-      await fake.configure({
-        tools: [
-          { name: "echo", description: "Echoes its text" },
-          { name: "ping", description: "Pings" },
-        ],
-      });
-      expect((await requestCheck(controller, server.id)).status).toBe(200);
-      await eventually(
-        () => readRow(controller),
-        (row) => row.checked_at !== first.checked_at,
+      await onSocket(controller.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const pushes = yield* collectPushes(client, "mcpServer");
+          yield* Effect.promise(async () => {
+            const server = await createServer(controller, { connectionId });
+            const first = await waitForResult(controller);
+            await waitForLiveToSettle();
+            const announced = pushes.received.length;
+
+            await fake.configure({
+              tools: [
+                { name: "echo", description: "Echoes its text" },
+                { name: "ping", description: "Pings" },
+              ],
+            });
+            expect((await requestCheck(controller, server.id)).status).toBe(200);
+            await eventually(
+              () => readRow(controller),
+              (row) => row.checked_at !== first.checked_at,
+            );
+
+            expect(await waitWithin(2000, () => pushes.received.length > announced)).toBe(true);
+            expect(pushes.received.at(-1)).toEqual({
+              _tag: "invalidate",
+              ids: [server.id],
+              kind: "updated",
+            });
+            expect(
+              (await readServer(controller, server.id)).tools.map((tool) => tool.name),
+            ).toEqual(["echo", "ping"]);
+          });
+          yield* Fiber.interrupt(pushes.fiber);
+        }),
       );
-
-      expect((await readServer(controller, server.id)).tools.map((tool) => tool.name)).toEqual([
-        "echo",
-        "ping",
-      ]);
     });
   });
 
   it("works with a server that speaks only an older revision, and tries that revision first next time", async () => {
     await withRig(
       async ({ controller, fake, connect }) => {
-        const server = await createServer(controller, await connect());
+        const server = await createServer(controller, { connectionId: await connect() });
         const first = await waitForResult(controller);
         expect(first).toMatchObject({ status: "ready", protocol_version: "2025-06-18" });
         const before = fake.requests.length;
@@ -268,7 +242,7 @@ describe("checking a server", () => {
   it("goes to error for a server that speaks none of the revisions", async () => {
     await withRig(
       async ({ controller, connect }) => {
-        await createServer(controller, await connect());
+        await createServer(controller, { connectionId: await connect() });
 
         const row = await waitForResult(controller);
 
@@ -287,7 +261,7 @@ describe("checking a server", () => {
   it("goes to error when the tool list is larger than the size cap", async () => {
     await withRig(
       async ({ controller, connect }) => {
-        await createServer(controller, await connect());
+        await createServer(controller, { connectionId: await connect() });
 
         const row = await waitForResult(controller);
 
@@ -305,7 +279,7 @@ describe("the credential of a check", () => {
       async ({ controller, fake, provider, connect }) => {
         provider.answers.token = refreshedToken;
         fake.authorize = (authorization) => authorization === "Bearer refreshed-token";
-        await createServer(controller, await connect());
+        await createServer(controller, { connectionId: await connect() });
 
         const row = await waitForResult(controller);
 
@@ -330,7 +304,7 @@ describe("the credential of a check", () => {
         provider.answers.token = refreshedToken;
         fake.authorize = () => false;
         const connectionId = await connect();
-        await createServer(controller, connectionId);
+        await createServer(controller, { connectionId });
 
         const row = await waitForResult(controller);
 
@@ -350,13 +324,17 @@ describe("the credential of a check", () => {
     );
   });
 
-  it("goes to needs-sign-in when the provider refuses the refresh", async () => {
+  it("goes to needs-sign-in when the provider refuses the refresh, and only the Connection raises a Notification", async () => {
     await withRig(
       async ({ controller, fake, provider, connect }) => {
-        provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+        provider.answers.token = () =>
+          buildJsonResponse(
+            { error: "invalid_grant", error_description: "the provider's words" },
+            400,
+          );
         fake.authorize = () => false;
         const connectionId = await connect();
-        await createServer(controller, connectionId);
+        await createServer(controller, { connectionId });
 
         const row = await waitForResult(controller);
 
@@ -368,8 +346,31 @@ describe("the credential of a check", () => {
         expect((await readConnection(controller.base, controller.token, connectionId)).status).toBe(
           "needs-reauth",
         );
-        // The Connection raises its own Notification.
+        expect(await countNotifications(controller, "core.connection-error")).toBe(1);
         expect(await countNotifications(controller)).toBe(0);
+      },
+      { oauth: true },
+    );
+  });
+
+  it("goes to unreachable, in fixed words, when the provider cannot be reached for the refresh", async () => {
+    await withRig(
+      async ({ controller, fake, provider, connect }) => {
+        await provider.stop();
+        fake.authorize = () => false;
+        const connectionId = await connect();
+        await createServer(controller, { connectionId });
+
+        const row = await waitForResult(controller);
+
+        expect(row).toMatchObject({
+          status: "unreachable",
+          status_detail: "Desk could not be reached to refresh the sign-in",
+          status_cause: null,
+        });
+        expect((await readConnection(controller.base, controller.token, connectionId)).status).toBe(
+          "connected",
+        );
       },
       { oauth: true },
     );
@@ -379,7 +380,7 @@ describe("the credential of a check", () => {
     await withRig(async ({ controller, fake, connect }) => {
       fake.authorize = () => false;
       const connectionId = await connect();
-      await createServer(controller, connectionId);
+      await createServer(controller, { connectionId });
 
       const row = await waitForResult(controller);
 
@@ -392,33 +393,88 @@ describe("the credential of a check", () => {
       );
     });
   });
+
+  it("never sends a Connection of another type to the server", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const server = await createServer(controller, { connectionId: await connect() });
+      await waitForResult(controller);
+      const before = fake.requests.length;
+      // A Connection's type never changes through the API, so the test
+      // writes the row a plugin that changed its types would leave behind.
+      await runSql(controller, controller.harness.sql`UPDATE connections SET type = 'other/desk'`);
+
+      await requestCheck(controller, server.id);
+      const row = await eventually(
+        () => readRow(controller),
+        (found) => found.status === "error",
+      );
+
+      expect(row).toMatchObject({
+        status_detail: "This server needs a acme/desk Connection, and work is another type",
+        status_cause: null,
+      });
+      expect(fake.requests).toHaveLength(before);
+    });
+  });
 });
 
 describe("a server that cannot be reached", () => {
-  it("becomes unreachable and is checked again after 1 minute, 5, 15 and 60, then hourly", async () => {
-    await withRig(async ({ controller, fake, connect }) => {
-      await fake.stop();
-      const server = await createServer(controller, await connect());
+  it("becomes unreachable, and the scheduler checks it again after 1 minute, 5, 15 and 60, then hourly", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        await fake.stop();
+        await createServer(controller, { connectionId: await connect() });
 
-      const waits: Array<number> = [];
-      let row = await waitForResult(controller);
-      for (let attempt = 1; attempt <= 6; attempt++) {
-        expect(row).toMatchObject({ status: "unreachable", failed_checks: attempt });
-        waits.push((Date.parse(row.next_check_at!) - Date.parse(row.updated_at)) / MINUTE);
-        if (attempt === 6) break;
-        const previous = row.updated_at;
+        let row = await waitForResult(controller);
+        const shownAt = row.updated_at;
+        const waits: Array<number> = [];
+        for (let attempt = 1; attempt <= 6; attempt++) {
+          expect(row).toMatchObject({ status: "unreachable", failed_checks: attempt });
+          waits.push(readMinutesToNextCheck(row));
+          if (attempt === 6) break;
+          await makeCheckDue(controller);
+          row = await eventually(
+            () => readRow(controller),
+            (next) => next.failed_checks === attempt + 1,
+          );
+        }
+
+        expect(waits).toEqual([1, 5, 15, 60, 60, 60]);
+        expect(row.checked_at).toBeNull();
+        // A repeat failure changes nothing the record shows.
+        expect(row.updated_at).toBe(shownAt);
+        // One Notification for the whole episode.
+        expect(await countNotifications(controller)).toBe(1);
+      },
+      { checkInterval: 20 },
+    );
+  });
+
+  it("is checked again after 1 minute, not the hour it was waiting, when its user asks for a check now", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        await fake.stop();
+        const server = await createServer(controller, { connectionId: await connect() });
+        await waitForResult(controller);
+        for (let failed = 1; failed < 3; failed++) {
+          await makeCheckDue(controller);
+          await eventually(
+            () => readRow(controller),
+            (next) => next.failed_checks === failed + 1,
+          );
+        }
+        expect(readMinutesToNextCheck(await readRow(controller))).toBe(15);
+
         await requestCheck(controller, server.id);
-        row = await eventually(
-          () => readRow(controller),
-          (next) => next.updated_at !== previous,
-        );
-      }
 
-      expect(waits).toEqual([1, 5, 15, 60, 60, 60]);
-      expect(row.checked_at).toBeNull();
-      // One Notification for the whole episode.
-      expect(await countNotifications(controller)).toBe(1);
-    });
+        const row = await eventually(
+          () => readRow(controller),
+          (next) => next.failed_checks === 1,
+        );
+        expect(readMinutesToNextCheck(row)).toBe(1);
+      },
+      { checkInterval: 20 },
+    );
   });
 });
 
@@ -428,7 +484,7 @@ describe("what a check never does", () => {
     try {
       await withRig(async ({ controller, fake, connect }) => {
         fake.redirectTo = target.url;
-        await createServer(controller, await connect());
+        await createServer(controller, { connectionId: await connect() });
 
         const row = await waitForResult(controller);
 
@@ -449,7 +505,7 @@ describe("what a check never does", () => {
     try {
       await withRig(
         async ({ controller, fake, connect }) => {
-          await createServer(controller, await connect());
+          await createServer(controller, { connectionId: await connect() });
 
           const row = await waitForResult(controller);
 
@@ -473,16 +529,11 @@ describe("a result that is out of date", () => {
       // later one is let in. Written, the first result would raise a Notification.
       fake.authorize = () => false;
       const release = fake.hold();
-      const server = await createServer(controller, await connect());
+      const server = await createServer(controller, { connectionId: await connect() });
       await fake.waitForRequests(1);
 
-      const patch = (enabled: boolean) =>
-        send("PATCH", controller.base, `/api/v1/mcp-servers/${server.id}`, {
-          body: { enabled },
-          token: controller.token,
-        });
-      await patch(false);
-      await patch(true);
+      await requestUpdate(controller, server.id, { enabled: false });
+      await requestUpdate(controller, server.id, { enabled: true });
       fake.authorize = () => true;
       release();
 
@@ -495,17 +546,96 @@ describe("a result that is out of date", () => {
     });
   });
 
+  it("is dropped when the Connection was reconnected while the check ran, so the old tools are never shown", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      // The old token is let in and the new one refused, so the list the
+      // held check ends with is a success the new check cannot repeat: if it
+      // were written, the tools would stay in the record next to the error.
+      fake.authorize = (authorization) => authorization === "Bearer t0ken";
+      const release = fake.hold();
+      const connectionId = await connect();
+      await createServer(controller, { connectionId });
+      await fake.waitForRequests(1);
+
+      const reconnected = await post(
+        controller.base,
+        `/api/v1/connections/${connectionId}/credentials`,
+        { credentials: { token: "new-token" } },
+        controller.token,
+      );
+      expect(reconnected.status, await reconnected.clone().text()).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.connection_generation === 1,
+      );
+      release();
+
+      const row = await eventually(
+        () => readRow(controller),
+        (found) => found.status === "error",
+      );
+      expect(row).toMatchObject({
+        status_detail: "Desk's MCP server refused the Connection's token",
+        tools: "[]",
+        checked_at: null,
+      });
+      expect(await countNotifications(controller)).toBe(1);
+    });
+  });
+
+  it.each([
+    ["is switched off", "disabled", "error", "The Connection work is switched off"],
+    [
+      "needs signing in",
+      "needs-reauth",
+      "needs-sign-in",
+      "Reconnect work in Settings > Connections",
+    ],
+  ])(
+    "is dropped when the Connection %s and nothing has announced it yet, so the old tools are never shown",
+    async (_name, connectionStatus, expectedStatus, expectedDetail) => {
+      await withRig(
+        async ({ controller, fake, connect }) => {
+          const release = fake.hold();
+          await createServer(controller, { connectionId: await connect() });
+          await fake.waitForRequests(1);
+
+          // No operation disables a Connection, and a Connection with pasted
+          // credentials has no refresh to refuse. The status is written
+          // without an announcement, which is the moment between a Connection's
+          // commit and the follower's reaction that the guard exists for.
+          await runSql(
+            controller,
+            controller.harness.sql`UPDATE connections SET status = ${connectionStatus}`,
+          );
+          release();
+          // The scheduler checks again once the held check has ended.
+          await makeCheckDue(controller);
+
+          const row = await eventually(
+            () => readRow(controller),
+            (found) => found.status === expectedStatus,
+          );
+          expect(row).toMatchObject({
+            status_detail: expectedDetail,
+            status_cause: "connection",
+            tools: "[]",
+            checked_at: null,
+          });
+        },
+        { checkInterval: 20 },
+      );
+    },
+  );
+
   it("is dropped, with no Notification, for a server that is switched off", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       fake.authorize = () => false;
       const release = fake.hold();
-      const server = await createServer(controller, await connect());
+      const server = await createServer(controller, { connectionId: await connect() });
       await fake.waitForRequests(1);
 
-      await send("PATCH", controller.base, `/api/v1/mcp-servers/${server.id}`, {
-        body: { enabled: false },
-        token: controller.token,
-      });
+      await requestUpdate(controller, server.id, { enabled: false });
       release();
       await eventually(
         () => Promise.resolve(fake.requests[0]?.status),
@@ -514,10 +644,7 @@ describe("a result that is out of date", () => {
       // Switching the server on requests a check that runs after the held one
       // has ended, so its result is the proof that the held one is done.
       fake.authorize = () => true;
-      await send("PATCH", controller.base, `/api/v1/mcp-servers/${server.id}`, {
-        body: { enabled: true },
-        token: controller.token,
-      });
+      await requestUpdate(controller, server.id, { enabled: true });
       await eventually(
         () => readRow(controller),
         (found) => found.status === "ready",
@@ -532,17 +659,18 @@ describe("the Notification of an episode", () => {
   it("is raised once while the trouble lasts, and again after the server was ready in between", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       fake.authorize = () => false;
-      const server = await createServer(controller, await connect());
+      const server = await createServer(controller, { connectionId: await connect() });
       let row = await waitForResult(controller);
       expect(row.status).toBe("error");
       expect(await countNotifications(controller)).toBe(1);
 
-      const check = async (): Promise<Row> => {
-        const previous = (await readRow(controller)).updated_at;
+      // Every check plans its next one a moment later than the check before.
+      const check = async (): Promise<McpServerRow> => {
+        const previous = (await readRow(controller)).next_check_at;
         await requestCheck(controller, server.id);
         return eventually(
           () => readRow(controller),
-          (next) => next.updated_at !== previous,
+          (next) => next.next_check_at !== previous,
         );
       };
 
@@ -566,14 +694,11 @@ describe("the scheduler", () => {
   it("checks a server whose next check is due", async () => {
     await withRig(
       async ({ controller, fake, connect }) => {
-        await createServer(controller, await connect());
+        await createServer(controller, { connectionId: await connect() });
         const first = await waitForResult(controller);
         const before = fake.requests.length;
 
-        await runSql(
-          controller,
-          controller.harness.sql`UPDATE mcp_servers SET next_check_at = '2020-01-01T00:00:00.000Z'`,
-        );
+        await makeCheckDue(controller);
 
         const row = await eventually(
           () => readRow(controller),
@@ -584,5 +709,101 @@ describe("the scheduler", () => {
       },
       { checkInterval: 20 },
     );
+  });
+
+  it("checks a server that has no next check planned, and leaves a switched-off server alone", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        const server = await createServer(controller, { connectionId: await connect() });
+        const first = await waitForResult(controller);
+
+        await runSql(
+          controller,
+          controller.harness.sql`UPDATE mcp_servers SET next_check_at = NULL`,
+        );
+        await eventually(
+          () => readRow(controller),
+          (next) => next.checked_at !== first.checked_at,
+        );
+
+        await requestUpdate(controller, server.id, { enabled: false });
+        const before = fake.requests.length;
+        await makeCheckDue(controller);
+        // Ten looks of the scheduler.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        expect(fake.requests).toHaveLength(before);
+        expect((await readRow(controller)).next_check_at).toBe(LONG_AGO);
+      },
+      { checkInterval: 20 },
+    );
+  });
+
+  it("sends nothing while the controller is frozen, and checks the server when it thaws", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        const { promotion } = controller.harness;
+        await createServer(controller, { connectionId: await connect() });
+        const first = await waitForResult(controller);
+        const before = fake.requests.length;
+        const token = "0199f0b7-0000-7000-8000-00000000aaaa";
+        await Effect.runPromise(promotion.freeze(token, new Date(Date.now() + 60_000)));
+
+        await makeCheckDue(controller);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(fake.requests).toHaveLength(before);
+
+        await Effect.runPromise(promotion.thaw(token));
+        await eventually(
+          () => readRow(controller),
+          (next) => next.checked_at !== first.checked_at,
+        );
+      },
+      { checkInterval: 20 },
+    );
+  });
+
+  it("makes a freeze wait for the check that is running, which then ends ready and not unreachable", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const { promotion } = controller.harness;
+      const release = fake.hold();
+      await createServer(controller, { connectionId: await connect() });
+      await fake.waitForRequests(1);
+
+      let frozen = false;
+      const freezing = Effect.runPromise(
+        promotion.freeze("0199f0b7-0000-7000-8000-00000000aaaa", new Date(Date.now() + 60_000)),
+      ).then(() => {
+        frozen = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(frozen).toBe(false);
+
+      release();
+      await freezing;
+
+      // The freeze ended only after the check wrote its result.
+      expect((await readRow(controller)).status).toBe("ready");
+    });
+  });
+
+  it("runs a check once more when requests came while it was running, however many", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const release = fake.hold();
+      const server = await createServer(controller, { connectionId: await connect() });
+      await fake.waitForRequests(1);
+
+      await requestCheck(controller, server.id);
+      await requestCheck(controller, server.id);
+      release();
+
+      await eventually(
+        () => Promise.resolve(fake.requests.filter((one) => one.method === "tools/list").length),
+        (lists) => lists >= 2,
+      );
+      await waitForResult(controller);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(2);
+    });
   });
 });

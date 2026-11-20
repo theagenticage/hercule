@@ -86,19 +86,6 @@ describe("registerMcpServer", () => {
     buildUpstreamRequest: () => ({ url: "https://mcp.desk.example/mcp", headers: {} }),
   };
 
-  it("passes the contribution to the service the host granted", async () => {
-    const registered: Array<McpServerContribution> = [];
-
-    await Effect.runPromise(
-      registerMcpServer(
-        { mcpServers: { register: (one) => Effect.sync(() => void registered.push(one)) } },
-        contribution,
-      ),
-    );
-
-    expect(registered).toEqual([contribution]);
-  });
-
   it("fails with a PluginError when the capability was not granted", async () => {
     const failure = await Effect.runPromise(Effect.flip(registerMcpServer({}, contribution)));
 

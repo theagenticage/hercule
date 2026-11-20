@@ -10,28 +10,31 @@
  * - whether it redirects instead of answering;
  * - whether it holds every answer until the test lets go.
  *
- * It records every request's method, `Authorization` header and
- * `Mcp-Session-Id` header, so a test can check what the controller sent.
+ * It decides what to answer when a request arrives, and holds the answer
+ * after that, so a test can change what the fake does while an answer is on
+ * its way. It records every request's JSON-RPC method, address,
+ * `Authorization` header and `Mcp-Protocol-Version` header, so a test can
+ * check what the controller sent.
+ *
+ * The helpers below the fake are the ones every test of an MCP Server's
+ * checks and operations shares: reading the stored row, creating a server and
+ * waiting for a result.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
-import * as Schema from "effect/Schema";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as SqlClient from "effect/sql/SqlClient";
 import { McpProtocol, McpSchema, McpServer } from "effect/ai";
-import {
-  HOST_API,
-  registerConnectionType,
-  registerMcpServer,
-  type Plugin,
-} from "@hercule/plugin-host";
+import { expect } from "vitest";
+import type { McpServer as McpServerRecord } from "@hercule/contract";
 import { connectionRepository, OAUTH_TOKENS } from "../connections";
 import { nowIso, withTransaction } from "../db";
-import type { ServerHarness } from "../http/testing";
+import { get, post, send, type ServerHarness } from "../http/testing";
+import type { SetUpController } from "../workflows/testing";
 
-/** One tool the fake lists. Calling it answers `echo:<text>`. */
+/** One tool the fake lists. Calling it answers with no content. */
 export interface FakeTool {
   readonly name: string;
   readonly description: string;
@@ -48,9 +51,9 @@ export interface FakeUpstreamSettings {
 export interface RecordedRequest {
   /** The JSON-RPC method, or `?` for a request that carries none, such as a DELETE. */
   readonly method: string;
-  readonly httpMethod: string;
+  /** The path and query of the address the request went to. */
+  readonly url: string;
   readonly authorization: string | null;
-  readonly sessionId: string | null;
   readonly protocolVersion: string | null;
   status: number | undefined;
 }
@@ -94,12 +97,7 @@ const buildHandler = (settings: FakeUpstreamSettings) => {
             inputSchema: { type: "object", properties: { text: { type: "string" } } },
           }),
           annotations: Context.empty(),
-          handle: (payload: { readonly text?: string }) =>
-            Effect.succeed(
-              new McpSchema.CallToolResult({
-                content: [{ type: "text", text: `echo:${payload.text ?? ""}` }],
-              }),
-            ),
+          handle: () => Effect.succeed(new McpSchema.CallToolResult({ content: [] })),
         });
       }
     }),
@@ -147,33 +145,30 @@ export const startFakeUpstream = (
       } catch {
         // A request with no JSON body, such as a DELETE, has no method.
       }
+      const address = new URL(request.url);
       const recorded: RecordedRequest = {
         method,
-        httpMethod: request.method,
+        url: `${address.pathname}${address.search}`,
         authorization: request.headers.get("authorization"),
-        sessionId: request.headers.get("mcp-session-id"),
         protocolVersion: request.headers.get("mcp-protocol-version"),
         status: undefined,
       };
-      // Decided on arrival, so a test can change the rule while the answer is held.
-      const authorized = fake.authorize(recorded.authorization);
+      // The answer is decided on arrival and delivered once the hold ends, so
+      // a test can change the rules while it is on its way.
+      const response =
+        fake.redirectTo !== undefined
+          ? new Response(null, { status: 302, headers: { location: fake.redirectTo } })
+          : !fake.authorize(recorded.authorization)
+            ? new Response("unauthorized", {
+                status: 401,
+                headers: { "www-authenticate": "Bearer" },
+              })
+            : await built.handler(request, Context.empty());
       requests.push(recorded);
       for (const waiting of arrivals.filter((one) => requests.length >= one.count)) {
         waiting.resolve();
       }
       if (held !== undefined) await held;
-      if (fake.redirectTo !== undefined) {
-        recorded.status = 302;
-        return new Response(null, { status: 302, headers: { location: fake.redirectTo } });
-      }
-      if (!authorized) {
-        recorded.status = 401;
-        return new Response("unauthorized", {
-          status: 401,
-          headers: { "www-authenticate": "Bearer" },
-        });
-      }
-      const response = await built.handler(request, Context.empty());
       recorded.status = response.status;
       return response;
     },
@@ -215,86 +210,20 @@ export const startFakeUpstream = (
   return Promise.resolve(fake);
 };
 
-/** The id of the plugin `buildUpstreamDeskPlugin` builds when it is given none. */
+/** The id of the plugin the tests of this domain give a Connection to. */
 export const DESK_PLUGIN_ID = "acme";
 
 /**
- * Builds a plugin that offers one MCP server, `<id>/desk`, whose server is
- * `fake`, with the Connection type `<id>/desk` to reach it.
- *
- * The Connection holds a pasted `token`, or, when `deviceProviderUrl` is
- * given, OAuth tokens that refresh at that provider. The server's requests
- * carry the token as `Authorization: Bearer <token>`.
+ * Stores a Connection with one secret and returns its id. No operation makes
+ * one without a browser or a provider that answers, so the test writes the rows
+ * a sign-in would.
  */
-export const buildUpstreamDeskPlugin = (
-  fake: Pick<FakeUpstream, "url" | "origin">,
-  options: {
-    readonly id?: string;
-    /** The provider that refreshes the Connection's OAuth tokens. Without it the Connection holds a pasted token. */
-    readonly deviceProviderUrl?: string;
-    /** Builds the request in place of the plugin's own. */
-    readonly buildUpstreamRequest?: (credentials: Record<string, string>) => {
-      readonly url: string;
-      readonly headers: Record<string, string>;
-    };
-  } = {},
-): Plugin => {
-  const id = options.id ?? DESK_PLUGIN_ID;
-  const providerUrl = options.deviceProviderUrl;
-  return {
-    manifest: {
-      id,
-      displayName: "Acme",
-      hostApi: HOST_API,
-      capabilities: ["connections", "mcp-servers"],
-      configSchema: Schema.Struct({}),
-    },
-    register: (host) =>
-      Effect.andThen(
-        registerConnectionType(host, {
-          type: "desk",
-          displayName: "Desk",
-          ...(providerUrl === undefined
-            ? { setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }] }
-            : {
-                setup: [{ kind: "device" }],
-                device: {
-                  clientId: "desk-client",
-                  deviceCodeUrl: `${providerUrl}/device/code`,
-                  tokenUrl: `${providerUrl}/token`,
-                  scopes: [],
-                },
-              }),
-          validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
-        }),
-        registerMcpServer(host, {
-          id: "desk",
-          displayName: "Desk",
-          description: "Read and update Desk tickets.",
-          connectionType: `${id}/desk`,
-          origin: fake.origin,
-          buildUpstreamRequest: ({ credentials }) =>
-            options.buildUpstreamRequest?.(credentials) ?? {
-              url: fake.url,
-              headers: {
-                Authorization: `Bearer ${credentials["token"] ?? credentials["accessToken"] ?? ""}`,
-              },
-            },
-        }),
-      ),
-    activate: () => Effect.succeed(Effect.void),
-  };
-};
-
-/**
- * Stores a Connection of the OAuth flavor of `buildUpstreamDeskPlugin`, with
- * these tokens, and returns its id. No operation makes one without a browser,
- * so the test writes the rows the sign-in would.
- */
-export const insertOauthConnection = (
+const insertConnection = (
   harness: ServerHarness,
-  tokens: { readonly accessToken: string; readonly refreshToken: string },
-  pluginId = DESK_PLUGIN_ID,
+  pluginId: string,
+  type: string,
+  secret: { readonly name: string; readonly value: string },
+  accountId = "desk-1",
 ): Promise<string> =>
   Effect.runPromise(
     Effect.orDie(
@@ -306,23 +235,18 @@ export const insertOauthConnection = (
           Effect.gen(function* () {
             const row = yield* connections.insert({
               pluginId,
-              type: `${pluginId}/desk`,
+              type,
               label: "work",
               displayName: "Desk",
-              accountId: "desk-1",
+              accountId,
               labels: [],
               config: {},
               at,
             });
             yield* harness.secrets.set(
               { kind: "connection", id: row.id },
-              OAUTH_TOKENS,
-              Redacted.make(
-                JSON.stringify({
-                  ...tokens,
-                  expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-                }),
-              ),
+              secret.name,
+              Redacted.make(secret.value),
             );
             return row.id;
           }),
@@ -330,3 +254,152 @@ export const insertOauthConnection = (
       }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql)),
     ),
   );
+
+/**
+ * Stores a Connection of the OAuth flavor of `buildMcpServerPlugin` (the
+ * plugin gets a `deviceProviderUrl`), with these tokens, and returns its id.
+ */
+export const insertOauthConnection = (
+  harness: ServerHarness,
+  tokens: { readonly accessToken: string; readonly refreshToken: string },
+  pluginId = DESK_PLUGIN_ID,
+): Promise<string> =>
+  insertConnection(harness, pluginId, `${pluginId}/desk`, {
+    name: OAUTH_TOKENS,
+    value: JSON.stringify({
+      ...tokens,
+      expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+    }),
+  });
+
+/**
+ * Stores a Connection of any type with a pasted `token`, for the external
+ * account `accountId`, and returns its id. For a Connection the API cannot
+ * make: one of another account than the test plugin's, or one of a plugin
+ * whose own validation would call the real vendor.
+ */
+export const insertPastedConnection = (
+  harness: ServerHarness,
+  type: string,
+  token: string,
+  accountId = "desk-1",
+): Promise<string> =>
+  insertConnection(
+    harness,
+    type.slice(0, type.indexOf("/")),
+    type,
+    { name: "token", value: token },
+    accountId,
+  );
+
+/** The stored fields of an MCP Server a test looks at. */
+export interface McpServerRow {
+  readonly status: string;
+  readonly status_detail: string | null;
+  readonly status_cause: string | null;
+  readonly tools: string;
+  readonly checked_at: string | null;
+  readonly protocol_version: string | null;
+  readonly revision: number;
+  readonly connection_generation: number;
+  readonly failed_checks: number;
+  readonly next_check_at: string | null;
+  readonly updated_at: string;
+  readonly notified_status: string | null;
+}
+
+/** Runs a statement on the controller's database in its own transaction, for state no operation reaches. */
+export const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
+  Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
+
+/** Reads the stored row of the only server there is. */
+export const readRow = async (controller: SetUpController): Promise<McpServerRow> => {
+  const sql = controller.harness.sql;
+  const rows = await runSql(
+    controller,
+    sql<McpServerRow>`SELECT status, status_detail, status_cause, tools, checked_at,
+                             protocol_version, revision, connection_generation, failed_checks,
+                             next_check_at, updated_at, notified_status
+                      FROM mcp_servers`,
+  );
+  return rows[0]!;
+};
+
+/** Counts the Notifications of one kind: `core.mcp-server-failed` unless another kind is given. */
+export const countNotifications = async (
+  controller: SetUpController,
+  kind = "core.mcp-server-failed",
+): Promise<number> => {
+  const sql = controller.harness.sql;
+  const rows = await runSql(
+    controller,
+    sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM notifications WHERE kind = ${kind}`,
+  );
+  return rows[0]!.n;
+};
+
+/** Waits until `read` returns something `done` accepts, polling, and fails the test after ten seconds. */
+export const eventually = async <A>(
+  read: () => Promise<A>,
+  done: (value: A) => boolean,
+): Promise<A> => {
+  const deadline = Date.now() + 10_000;
+  let value = await read();
+  while (!done(value)) {
+    if (Date.now() > deadline) {
+      throw new Error(`gave up waiting, last value: ${JSON.stringify(value)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    value = await read();
+  }
+  return value;
+};
+
+/** Waits until the stored status is not `checking`, and returns the row. */
+export const waitForResult = (controller: SetUpController): Promise<McpServerRow> =>
+  eventually(
+    () => readRow(controller),
+    (row) => row.status !== "checking",
+  );
+
+/** What `requestCreate` sends: the Connection, and the contribution (`acme/desk` unless given). */
+export interface CreateSource {
+  readonly connectionId: string;
+  readonly contributionId?: string;
+  readonly name?: string;
+}
+
+/** Sends `mcpServer.create` and returns the raw response. */
+export const requestCreate = (
+  controller: SetUpController,
+  source: Record<string, unknown>,
+  token = controller.token,
+) => post(controller.base, "/api/v1/mcp-servers", { source: { kind: "plugin", ...source } }, token);
+
+/** Creates a server and returns it, failing the test when the create is refused. */
+export const createServer = async (
+  controller: SetUpController,
+  source: CreateSource,
+): Promise<McpServerRecord> => {
+  const response = await requestCreate(controller, {
+    contributionId: "acme/desk",
+    ...source,
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as McpServerRecord;
+};
+
+export const requestUpdate = (controller: SetUpController, id: string, body: unknown) =>
+  send("PATCH", controller.base, `/api/v1/mcp-servers/${id}`, { body, token: controller.token });
+
+export const requestCheck = (controller: SetUpController, id: string, token = controller.token) =>
+  post(controller.base, `/api/v1/mcp-servers/${id}/check`, {}, token);
+
+export const readServer = async (
+  controller: SetUpController,
+  id: string,
+): Promise<McpServerRecord> => {
+  const response = await get(controller.base, `/api/v1/mcp-servers/${id}`, controller.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as McpServerRecord;
+};
