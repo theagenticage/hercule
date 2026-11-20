@@ -716,13 +716,13 @@ describe("a result that is out of date", () => {
     },
   );
 
-  it("is dropped when the Connection's credentials generation moved without any announcement", async () => {
+  it("is dropped when the Connection's credentials generation moved without any announcement, and the server is checked again at once", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       const release = fake.hold();
       await createServer(controller, { connectionId: await connect() });
       await fake.waitForRequests(1);
-      // The scheduler does not look again within this test, so a check that
-      // starts again can only be the one the dropped check asks for.
+      // The loop's own look is a minute away, so a second check can only be
+      // the one the dropped check asks for.
       await runSql(
         controller,
         controller.harness
@@ -731,11 +731,9 @@ describe("a result that is out of date", () => {
       release();
 
       // A dropped check of a server that can still be served marks it due.
-      const row = await eventually(
-        () => readRow(controller),
-        (found) => found.next_check_at !== null,
-      );
-      expect(row).toMatchObject({ status: "checking", tools: "[]", checked_at: null });
+      // The first check listed the tools, and the second one lists them again.
+      await waitForResult(controller);
+      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(2);
     });
   });
 

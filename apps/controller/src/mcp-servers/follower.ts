@@ -121,7 +121,7 @@ export const runConnectionFollower = Effect.scoped(
           if (attempt < MAX_RACE_ATTEMPTS) yield* reconcile(id, attempt + 1);
           return;
         }
-        if (requestCheck) yield* checks.request(id);
+        if (requestCheck) yield* checks.wake;
       });
 
     /**
