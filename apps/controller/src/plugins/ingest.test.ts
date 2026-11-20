@@ -471,6 +471,35 @@ describe("IngestLoops failures", () => {
     expect(seen.open).toEqual([]);
   });
 
+  it("raises one Notification for an AuthError, and one more for an AuthError after a reconnect", async () => {
+    const fixture = createEventSourceFixture();
+    fixture.poll = () => Effect.fail(new AuthError({ message: "Acme rejected the token" }));
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const { connection, ingest } = yield* openConnection(fixture);
+        yield* advance(3600);
+        const afterFirst = yield* listConnectionErrorTitles;
+        // The user reconnects, which sets the Connection `connected`, and the
+        // controller daemon opens it again.
+        const connections = yield* connectionRepository;
+        yield* inTransaction(
+          connections.update(connection.id, { status: "connected" }, yield* nowIso),
+        );
+        const host = yield* PluginHost;
+        const source = (yield* host.listActiveEventSources())[0];
+        if (source === undefined) return yield* Effect.die("the fixture registered no source");
+        yield* ingest.open(source, connection, host.listActiveEventSources);
+        yield* advance(3600);
+        return { afterFirst, afterSecond: yield* listConnectionErrorTitles };
+      }),
+    );
+
+    expect(seen.afterFirst).toHaveLength(1);
+    expect(seen.afterFirst[0]).toContain("needs signing in again");
+    expect(seen.afterSecond).toHaveLength(2);
+  });
+
   it("ignores an AuthError when the credentials were replaced while the poll ran", async () => {
     const fixture = createEventSourceFixture();
     const started = Deferred.makeUnsafe<void>();
