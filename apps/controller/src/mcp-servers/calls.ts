@@ -1,32 +1,32 @@
 /**
- * The calls the MCP Gateway makes to outside MCP servers: reading which
- * servers it may serve, calling one tool of one server, and ending the
- * upstream MCP sessions of a Session Token (spec 21 sections 3.5, 3.6, 3.10,
- * 5.1, 5.3 and 5.6).
+ * The calls the MCP Gateway makes to outside MCP servers: calling one tool of
+ * one server, and ending the upstream MCP sessions of a Session Token (spec 21
+ * sections 3.5, 3.6, 3.10, 5.1, 5.3 and 5.6).
  *
  * Upstream MCP sessions live in memory, one per Session Token and server, and
  * the first call that needs one opens it. A session is replaced when the
  * server's `revision` or its Connection's `credentialsGeneration` moved since
- * it opened. It is closed when its token ends, or, when something else
- * replaced it, once the calls that were using it have ended. A committed
- * change that takes a server's destination away (the server is deleted or
- * switched off, or its `revision` or its Connection's `credentialsGeneration`
- * moved) closes that server's sessions the same way. An opening that nothing
- * waits for any more is cancelled at once, also while its token lives.
+ * it opened. It is closed when the gateway says its token no longer serves the
+ * server (`closeUpstreamSessionsExcept`), or, when something else replaced it,
+ * once the calls that were using it have ended. A committed change that takes
+ * a server's destination away (the server is deleted or switched off, or its
+ * `revision` or its Connection's `credentialsGeneration` moved) closes that
+ * server's sessions the same way. An opening that nothing waits for any more
+ * is cancelled at once, also while its token lives. The gateway ends the calls
+ * of a token that ended, so a call here never waits for that itself.
  *
  * A call is admitted by the promotion state, so a freeze waits for it, and a
  * call that arrives while the controller is not serving is refused at once.
- * Admitted or not, a call checks at the moment each request to outside the
- * controller is about to go out (every request of the opening of a session,
- * the tool's request, and every one sent again). The check runs after the
- * current credentials were read, because reading them can wait for a refresh,
- * and the credentials are read again when a refresh stored new ones meanwhile.
- * It finds out that the caller may still make the call
- * (`McpToolCall.authorize`), that the server and the tool are still there as
- * the call found them, and, last, that the controller is still serving. A
- * refresh of the Connection's credentials that the call causes runs the same
- * check of the caller and the destination under the Connection's refresh
- * permit, right before the request to the provider. A request that only
+ * One rule decides whether a call may go on (`checkBeforeSend`): the caller
+ * may still make it (`McpToolCall.authorize`), the server and the tool are
+ * still there as the call found them, and, last, the controller is still
+ * serving. It runs before the call makes any request that starts an exchange
+ * with the outside server (every request of the opening of a session, the
+ * tool's request, and every one sent again), after the credentials that
+ * request carries were read, because reading them can wait for a refresh, and
+ * the credentials are read again when a refresh stored new ones meanwhile. It
+ * also runs under the Connection's refresh permit, right before a refresh of
+ * the credentials that the call causes calls the provider. A request that only
  * continues an exchange that already went out is not stopped, and carries the
  * credentials stored then.
  */
@@ -41,18 +41,15 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
-import * as SqlClient from "effect/sql/SqlClient";
-import type { SqlError } from "effect/sql/SqlError";
-import { McpSchema, type McpClientError } from "effect/ai";
+import type * as SqlClient from "effect/sql/SqlClient";
+import { McpSchema } from "effect/ai";
 import { McpServerWarningReason } from "@hercule/protocol";
 import { absorbFailures } from "../absorbing";
 import {
-  ConnectionTypes,
-  StrictServingForRefresh,
-  type ConnectionCannotRefresh,
-  type ConnectionCredentialsForUse,
   ConnectionCredentialsUnavailable,
-  RefreshGuard,
+  ConnectionTypes,
+  type ConnectionCredentialsForUse,
+  type RefreshGuard,
   type StoredConnection,
 } from "../connections";
 import { nowIso, RecordChanges } from "../db";
@@ -68,17 +65,16 @@ import {
   type McpServerDependencies,
   type ServerUnavailableReason,
 } from "./catalogue";
-import { removeCredentialValues } from "./credential-values";
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
-  createUpstreamCallState,
-  CurrentUpstreamCall,
+  buildStatusFromFailure,
+  buildStatusFromUnavailable,
   openUpstream,
+  runWithCredentials,
   UpstreamError,
   type OpenedUpstream,
   type PrepareSend,
-  type UpstreamCallState,
 } from "./upstream";
 
 /**
@@ -104,15 +100,10 @@ export interface McpToolCall {
   readonly tool: string;
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
   /**
-   * Runs immediately before every request the call makes to outside the
-   * controller, after the credentials it carries were read: each request of
-   * the opening of the upstream session, the tool's request, and each request
-   * sent again. It also runs under the Connection's refresh permit, right
-   * before a refresh of the Connection's credentials calls the provider,
-   * whether the refresh is for a stale token or after a rejection. When it
-   * fails, nothing more is sent, and `callTool` fails with that refusal. It
-   * sits beside the catalogue's own check that the server and the tool are
-   * still there, at the same points.
+   * Part of the rule that runs before every request that starts an exchange
+   * with the outside server, and under the Connection's refresh permit right
+   * before a refresh calls the provider (see the top of this file). When it
+   * fails, nothing more is sent, and `callTool` fails with that refusal.
    */
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
@@ -125,9 +116,6 @@ export const McpCallDeadline = Context.Reference<Duration.Duration>(
 
 /** What the agent reads when a call could not read the database. */
 const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
-
-/** The answer to the agent when the server answers a call with HTTP 403. */
-const FORBIDDEN_ANSWER = "the server refused this call (HTTP 403)";
 
 /** The answer to the agent when the server's answer was over the size cap. */
 const TOO_LARGE_ANSWER = "the answer was larger than 4 MiB";
@@ -146,11 +134,8 @@ interface UpstreamSlot {
   readonly serverRevision: number;
   /** The Connection's `credentialsGeneration` when the slot was made. */
   readonly credentialsGeneration: number;
-  /**
-   * Ends with the open session, or the reason it could not be opened:
-   * `CutOff` when the opening was cancelled.
-   */
-  readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError | CutOff>;
+  /** Ends with the open session, or the reason it could not be opened. */
+  readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError>;
   /** Completing it cancels an opening that has not ended. */
   readonly cancelOpening: Deferred.Deferred<void>;
   readonly scope: Scope.Closeable;
@@ -160,8 +145,6 @@ interface UpstreamSlot {
   opened: boolean;
   /** The slot is no longer the one new calls use. */
   removed: boolean;
-  /** The session is closed whatever still uses it: its Session Token ended. */
-  forced: boolean;
   closed: boolean;
 }
 
@@ -170,32 +153,6 @@ interface UpstreamSlot {
  * Fails when the stored definition does not fit it.
  */
 const decodeTool = (stored: StoredMcpTool) => Schema.decodeUnknownEffect(McpSchema.Tool)(stored);
-
-/**
- * A call found its upstream MCP session expired, and the call did not run:
- * either the server answered 404 to the tool's own request, or the session was
- * already known to be gone and the request was never sent.
- */
-interface SessionExpired {
-  readonly _tag: "SessionExpired";
-}
-
-/** A call lost its upstream MCP session because the session was closed under it. */
-interface CutOff {
-  readonly _tag: "CutOff";
-}
-
-/**
- * A call's tool request went out and may have run, and then the exchange
- * failed in a way that must not send the tool again: a 401 or an ended MCP
- * session on the reply to a request of the server, not on the tool's own
- * request.
- */
-interface ExchangeBroken {
-  readonly _tag: "ExchangeBroken";
-}
-
-type AttemptFailure = McpCallRefused | UpstreamError | SessionExpired | CutOff | ExchangeBroken;
 
 /** What a call needs to know about the server it goes to, as the database holds it now. */
 interface Destination {
@@ -207,15 +164,8 @@ interface Destination {
   readonly tool: McpSchema.Tool;
 }
 
-const CUT_OFF: CutOff = { _tag: "CutOff" };
-
-/** Builds the answer to the agent for a call whose server or tool failed it. */
-const buildErrorResult = (text: string): McpSchema.CallToolResult =>
-  new McpSchema.CallToolResult({ content: [{ type: "text", text }], isError: true });
-
-/** Returns the line the agent reads when the server named `name` did not answer in time. */
-const buildTimedOutMessage = (name: string): string =>
-  `${name} did not answer in time. Try again later.`;
+const buildNotServingRefusal = (message: string): McpCallRefused =>
+  new McpCallRefused({ reason: "error", message, controllerNotServing: true });
 
 const make = Effect.gen(function* () {
   const catalogue = yield* mcpServerCatalogue;
@@ -226,6 +176,11 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const serviceScope = yield* Effect.scope;
 
+  /** Refuses at once, with the promotion gate's own text, unless the controller is serving. */
+  const refuseUnlessServing = promotion.refuseUnlessServing.pipe(
+    Effect.mapError((error) => buildNotServingRefusal(error.error.message)),
+  );
+
   /**
    * Reads a Connection's credentials as they are stored now, for a request
    * that only continues an exchange that already went out, and for the DELETE
@@ -235,27 +190,33 @@ const make = Effect.gen(function* () {
    * when the credentials cannot be read.
    */
   const readCurrentCredentials = (connectionId: string): PrepareSend =>
-    connectionTypes.readCredentialsForUse(connectionId).pipe(
-      Effect.provideService(StrictServingForRefresh, true),
-      Effect.mapError(
-        (error) =>
-          new UpstreamError({
-            reason: error.reason === "not-serving" ? "not-serving" : "refused",
-            message:
-              error.reason === "not-serving"
-                ? error.message
-                : "The Connection's credentials could not be read",
-          }),
-      ),
-    );
+    connectionTypes
+      .readCredentialsForUse(
+        connectionId,
+        Effect.mapError(
+          promotion.refuseUnlessServing,
+          (error) =>
+            new ConnectionCredentialsUnavailable({
+              reason: "not-serving",
+              message: error.error.message,
+            }),
+        ),
+      )
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new UpstreamError({
+              reason: error.reason === "not-serving" ? "not-serving" : "refused",
+              message:
+                error.reason === "not-serving"
+                  ? error.message
+                  : "The Connection's credentials could not be read",
+            }),
+        ),
+      );
 
   // The upstream MCP sessions: Session Token hash, then server id.
   const slots = new Map<string, Map<string, UpstreamSlot>>();
-
-  // The calls that run, by Session Token hash. Completing a call's `Deferred`
-  // ends that call, so a token that ends also ends a call that holds no
-  // session yet.
-  const runningCalls = new Map<string, Set<Deferred.Deferred<void>>>();
 
   const forgetSlot = (slot: UpstreamSlot): void => {
     slot.removed = true;
@@ -267,15 +228,13 @@ const make = Effect.gen(function* () {
 
   /**
    * Ends the slot's session when it is no longer the one new calls use and
-   * nothing still uses it, or when it is forced shut. An open session is
-   * closed, and its DELETE is best effort, only sent while the controller is
-   * serving. A session that is still opening is cancelled, and the opening's
-   * own exit closes it.
+   * nothing still uses it. An open session is closed, and its DELETE is best
+   * effort, only sent while the controller is serving. A session that is still
+   * opening is cancelled, and the opening's own exit closes it.
    */
   const closeWhenDone = (slot: UpstreamSlot): Effect.Effect<void> =>
     Effect.suspend(() => {
-      const done = slot.removed && (slot.users === 0 || slot.forced);
-      if (slot.closed || !done) return Effect.void;
+      if (slot.closed || !slot.removed || slot.users > 0) return Effect.void;
       if (!slot.opened) return Effect.asVoid(Deferred.succeed(slot.cancelOpening, undefined));
       slot.closed = true;
       return Scope.close(slot.scope, Exit.void);
@@ -299,13 +258,11 @@ const make = Effect.gen(function* () {
       Effect.provideService(Scope.Scope, slot.scope),
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(PromotionState, promotion),
-      Effect.raceFirst(Effect.andThen(Deferred.await(slot.cancelOpening), Effect.fail(CUT_OFF))),
+      Effect.raceFirst(Effect.andThen(Deferred.await(slot.cancelOpening), Effect.interrupt)),
       Effect.onExit((exit) =>
         Effect.gen(function* () {
           if (Exit.isSuccess(exit)) {
             slot.opened = true;
-            // A token that ended while the session opened loses the race: the
-            // session is closed now, and its waiting calls are cut off.
             yield* closeWhenDone(slot);
           } else {
             forgetSlot(slot);
@@ -325,18 +282,17 @@ const make = Effect.gen(function* () {
    */
   const holdSlot = (
     upstreamScope: string,
-    server: StoredMcpServer,
-    credentialsGeneration: number,
-    contribution: RegisteredMcpServer,
+    destination: Destination,
     credentials: ConnectionCredentialsForUse,
     prepareSend: PrepareSend,
   ): Effect.Effect<UpstreamSlot> =>
     Effect.gen(function* () {
+      const { server, connection, contribution } = destination;
       const existing = slots.get(upstreamScope)?.get(server.id);
       const usable =
         existing !== undefined &&
         existing.serverRevision === server.revision &&
-        existing.credentialsGeneration === credentialsGeneration;
+        existing.credentialsGeneration === connection.credentialsGeneration;
       if (usable) {
         existing.users += 1;
         return existing;
@@ -349,14 +305,13 @@ const make = Effect.gen(function* () {
         serverId: server.id,
         connectionId: server.connectionId,
         serverRevision: server.revision,
-        credentialsGeneration,
+        credentialsGeneration: connection.credentialsGeneration,
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),
         users: 1,
         opened: false,
         removed: false,
-        forced: false,
         closed: false,
       };
       const byServer = slots.get(upstreamScope) ?? new Map<string, UpstreamSlot>();
@@ -384,31 +339,23 @@ const make = Effect.gen(function* () {
       return closeWhenDone(slot);
     });
 
-  const closeUpstreamScope = (upstreamScope: string): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      for (const running of runningCalls.get(upstreamScope) ?? []) {
-        Deferred.doneUnsafe(running, Effect.void);
-      }
-      const byServer = slots.get(upstreamScope);
-      slots.delete(upstreamScope);
-      const ended = [...(byServer?.values() ?? [])];
-      for (const slot of ended) {
-        slot.removed = true;
-        slot.forced = true;
-      }
-      return Effect.forEach(ended, closeWhenDone, { concurrency: "unbounded", discard: true });
-    });
-
   /**
-   * Closes the one upstream session a token holds for a server, for a server
-   * the token's session is no longer served. Does nothing when there is none.
+   * Closes the upstream sessions a token holds for every server that is not
+   * in `keptServerIds`, once the calls that use them have ended. With none
+   * kept, the token's every session ends. The gateway calls it with the
+   * servers the token is served now, and with none once the token ended, after
+   * it stopped the token's calls.
    */
-  const closeUpstreamSession = (upstreamScope: string, serverId: string): Effect.Effect<void> =>
+  const closeUpstreamSessionsExcept = (
+    upstreamScope: string,
+    keptServerIds: ReadonlySet<string>,
+  ): Effect.Effect<void> =>
     Effect.suspend(() => {
-      const slot = slots.get(upstreamScope)?.get(serverId);
-      if (slot === undefined) return Effect.void;
-      forgetSlot(slot);
-      return closeWhenDone(slot);
+      const ended = [...(slots.get(upstreamScope)?.values() ?? [])].filter(
+        (slot) => !keptServerIds.has(slot.serverId),
+      );
+      for (const slot of ended) forgetSlot(slot);
+      return Effect.forEach(ended, closeWhenDone, { concurrency: "unbounded", discard: true });
     });
 
   /**
@@ -465,7 +412,9 @@ const make = Effect.gen(function* () {
   );
 
   yield* Effect.addFinalizer(() =>
-    Effect.forEach([...slots.keys()], closeUpstreamScope, { discard: true }),
+    Effect.forEach([...slots.keys()], (scope) => closeUpstreamSessionsExcept(scope, new Set()), {
+      discard: true,
+    }),
   );
 
   /** Writes a failure that is about the whole server as its status, unless something newer happened. */
@@ -488,14 +437,6 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const buildNotServingRefusal = (message: string): McpCallRefused =>
-    new McpCallRefused({ reason: "error", message, controllerNotServing: true });
-
-  /** Refuses at once, with the promotion gate's own text, unless the controller is serving. */
-  const refuseUnlessServing = promotion.refuseUnlessServing.pipe(
-    Effect.mapError((error) => buildNotServingRefusal(error.error.message)),
-  );
-
   /**
    * Runs one call to the end: checks the server, takes the upstream session,
    * sends the call, and when the server answers 401 to the call's own request
@@ -513,7 +454,9 @@ const make = Effect.gen(function* () {
             reason,
             message:
               message ??
-              (reason === "timed-out" ? buildTimedOutMessage(name) : describeRefusal(reason, name)),
+              (reason === "timed-out"
+                ? `${name} did not answer in time. Try again later.`
+                : describeRefusal(reason, name)),
           }),
         );
 
@@ -522,41 +465,46 @@ const make = Effect.gen(function* () {
        * refuses unless the call may go to them (`decideCallRefusal`) and the
        * server still lists the tool.
        */
-      const readDestination: Effect.Effect<Destination, McpCallRefused | SqlError> = Effect.gen(
-        function* () {
-          const view = (yield* catalogue.readViews([input.serverId])).get(input.serverId);
-          if (view === undefined) {
-            return yield* refuse("error", "This server", "This MCP server no longer exists.");
-          }
-          const { server, dependencies } = view;
-          const refusal = decideCallRefusal(view);
-          if (refusal !== null) return yield* new McpCallRefused(refusal);
-          const judged = judgeDependencies(dependencies);
-          if (judged._tag !== "usable") {
-            return yield* Effect.die(`MCP server ${server.id} is usable but has no plugin`);
-          }
-          const stored = server.tools.find((tool) => tool.name === input.tool);
-          if (stored === undefined) {
-            return yield* refuse("error", server.name, "The server does not list this tool.");
-          }
-          const tool = yield* decodeTool(stored).pipe(
+      const readDestination: Effect.Effect<Destination, McpCallRefused> = Effect.gen(function* () {
+        const views = yield* catalogue
+          .readViews([input.serverId])
+          .pipe(
             Effect.mapError(
-              () =>
-                new McpCallRefused({
-                  reason: "error",
-                  message: describeRefusal("error", server.name),
-                }),
+              () => new McpCallRefused({ reason: "error", message: DATABASE_UNREADABLE_ANSWER }),
             ),
           );
-          return {
-            server,
-            dependencies,
-            contribution: judged.contribution,
-            connection: judged.connection,
-            tool,
-          };
-        },
-      );
+        const view = views.get(input.serverId);
+        if (view === undefined) {
+          return yield* refuse("error", "This server", "This MCP server no longer exists.");
+        }
+        const { server, dependencies } = view;
+        const refusal = decideCallRefusal(view);
+        if (refusal !== null) return yield* new McpCallRefused(refusal);
+        const judged = judgeDependencies(dependencies);
+        if (judged._tag !== "usable") {
+          return yield* Effect.die(`MCP server ${server.id} is usable but has no plugin`);
+        }
+        const stored = server.tools.find((tool) => tool.name === input.tool);
+        if (stored === undefined) {
+          return yield* refuse("error", server.name, "The server does not list this tool.");
+        }
+        const tool = yield* decodeTool(stored).pipe(
+          Effect.mapError(
+            () =>
+              new McpCallRefused({
+                reason: "error",
+                message: describeRefusal("error", server.name),
+              }),
+          ),
+        );
+        return {
+          server,
+          dependencies,
+          contribution: judged.contribution,
+          connection: judged.connection,
+          tool,
+        };
+      });
 
       const buildChangedMessage = (expected: Destination): string =>
         `${expected.server.name} was changed while the call ran. Try the call again.`;
@@ -569,7 +517,7 @@ const make = Effect.gen(function* () {
        */
       const checkDestination = (
         expected: Destination | undefined,
-      ): Effect.Effect<Destination, McpCallRefused | SqlError> =>
+      ): Effect.Effect<Destination, McpCallRefused> =>
         Effect.gen(function* () {
           yield* input.authorize;
           const now = yield* readDestination;
@@ -583,13 +531,10 @@ const make = Effect.gen(function* () {
           return now;
         });
 
-      /**
-       * Runs before every request the call makes to outside the controller:
-       * `checkDestination`, and, checked last, that the controller is serving.
-       */
+      /** The rule at the top of this file: `checkDestination`, and, checked last, that the controller is serving. */
       const checkBeforeSend = (
         expected: Destination | undefined,
-      ): Effect.Effect<Destination, McpCallRefused | SqlError> =>
+      ): Effect.Effect<Destination, McpCallRefused> =>
         Effect.gen(function* () {
           const now = yield* checkDestination(expected);
           // Last, so that nothing slow stands between this check and the send.
@@ -598,170 +543,69 @@ const make = Effect.gen(function* () {
         });
 
       const first = yield* checkBeforeSend(undefined);
-      const { server, contribution } = first;
+      const { server, contribution, connection } = first;
       const name = server.name;
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
-      const checkAgain = checkBeforeSend(first);
-      const checkDestinationAgain = checkDestination(first);
 
       // Why a check before a send or a refresh refused it. The client can only
       // fail with its own error, and a refresh only with the Connection's, so
       // the reason is kept here for the code that returns the refusal.
-      const refusedSend: { current: McpCallRefused | SqlError | undefined } = {
-        current: undefined,
-      };
-
-      // Every credential value any attempt of this call sent, on any upstream
-      // session, so a value from the handshake or from a rejected attempt is
-      // removed from the answer of a later one. It lives as long as the call.
-      const sentValues = new Set<string>();
-
-      /** Removes the credential values this call and the session `opened` sent from `value`. */
-      const removeSentValues = <A>(value: A, opened: OpenedUpstream): A =>
-        removeCredentialValues(value, new Set([...opened.sentValues, ...sentValues]));
+      let refusal: McpCallRefused | undefined;
+      const keepRefusal = (refused: McpCallRefused) =>
+        Effect.sync(() => {
+          refusal = refused;
+        });
 
       /**
        * Runs under the Connection's refresh permit, right before a refresh
-       * calls the provider: refuses unless the caller may still make the call
-       * and the destination is unchanged. The refusal is kept in
-       * `refusedSend`, and `describeUnavailable` returns it.
+       * calls the provider: the rule of `checkBeforeSend`.
        */
-      const guardRefresh: Effect.Effect<void, ConnectionCredentialsUnavailable> =
-        checkDestinationAgain.pipe(
-          Effect.asVoid,
-          Effect.catch((refusal) =>
-            Effect.sync(() => {
-              refusedSend.current = refusal;
-            }).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new ConnectionCredentialsUnavailable({
-                    reason: "refused",
-                    message: "The caller's check refused the refresh",
-                  }),
-                ),
+      const guardRefresh: RefreshGuard = checkBeforeSend(first).pipe(
+        Effect.asVoid,
+        Effect.catch((refused) =>
+          keepRefusal(refused).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ConnectionCredentialsUnavailable({
+                  reason: "refused",
+                  message: "The caller's check refused the refresh",
+                }),
               ),
             ),
           ),
-        );
-
-      const describeUnavailable = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
-        switch (error.reason) {
-          case "refused":
-            return refusedSend.current?._tag === "McpCallRefused"
-              ? refusedSend.current
-              : new McpCallRefused({ reason: "error", message: DATABASE_UNREADABLE_ANSWER });
-          case "needs-sign-in":
-            return new McpCallRefused({
-              reason: "needs-sign-in",
-              message: describeRefusal("needs-sign-in", name),
-            });
-          case "not-serving":
-            return buildNotServingRefusal(error.message);
-          case "unreachable":
-          case "credentials-replaced":
-            return new McpCallRefused({
-              reason: "unreachable",
-              message: describeRefusal("unreachable", name),
-            });
-          default:
-            return new McpCallRefused({
-              reason: "error",
-              message: describeRefusal("error", name),
-            });
-        }
-      };
-
-      // The identity of the credentials read last, for a refresh when the
-      // client cannot say which credentials a rejection was about.
-      let lastReadIdentity = "";
-      /**
-       * Reads the Connection's credentials as they are now. Each request reads
-       * them anew, and never reuses an older reading. A refresh this causes
-       * runs `guardRefresh` under the Connection's refresh permit.
-       */
-      const readCredentials = connectionTypes.readCredentialsForUse(server.connectionId).pipe(
-        Effect.provideService(RefreshGuard, guardRefresh),
-        Effect.mapError(describeUnavailable),
-        Effect.tap((read) =>
-          Effect.sync(() => {
-            lastReadIdentity = read.identity;
-          }),
         ),
       );
 
-      /**
-       * Decides what a failure of the call means. A tool's own answer, a
-       * JSON-RPC error or HTTP 403, is returned to the agent as a result. A
-       * 401 or an ended MCP session sends the call again only when it was the
-       * answer to the call's own request, which the server then did not run.
-       */
-      const decideFailure = (
-        slot: UpstreamSlot,
-        opened: OpenedUpstream,
-        error: McpClientError.McpClientError,
-        call: UpstreamCallState,
-      ): Effect.Effect<
-        McpSchema.CallToolResult,
-        UpstreamError | SessionExpired | CutOff | ExchangeBroken
-      > => {
-        const reason = error.reason;
-        if (slot.forced) return Effect.fail(CUT_OFF);
-        if (reason._tag === "ClosedError" && reason.sessionExpired === true) {
-          // Nothing else may use this session; the next call opens a new one.
-          forgetSlot(slot);
-          // The session is gone either because the server answered 404 to the
-          // tool's own request, or because another request found it gone and
-          // this one was never sent. Both leave the tool unrun. A 404 on any
-          // other request of this call, sent after the tool, says nothing.
-          return call.toolPostSent && call.toolPostStatus !== 404
-            ? Effect.fail({ _tag: "ExchangeBroken" })
-            : Effect.fail({ _tag: "SessionExpired" });
-        }
-        // The server's own error for this call. A failure of the client
-        // itself has no code. Its text is the tool's answer, which the agent
-        // needs, but never keeps a credential the call sent.
-        if (reason._tag === "ProtocolError" && reason.code !== undefined) {
-          return Effect.succeed(
-            buildErrorResult(
-              removeSentValues(
-                reason.description ?? "The server answered the call with an error.",
-                opened,
-              ),
-            ),
+      /** Returns the refusal that a failure to give credentials means for this call. */
+      const buildUnavailableRefusal = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
+        if (error.reason === "refused") {
+          return (
+            refusal ?? new McpCallRefused({ reason: "error", message: buildChangedMessage(first) })
           );
         }
-        if (reason._tag === "HttpError" && reason.status === 403) {
-          return Effect.succeed(buildErrorResult(FORBIDDEN_ANSWER));
-        }
-        // The tool went out, and then a request that continues its exchange was
-        // refused before it was sent, so the call may have run.
-        if (call.toolPostSent && call.refusal !== undefined) {
-          return Effect.fail({ _tag: "ExchangeBroken" });
-        }
-        const failure = opened.describeFailure(error, call);
-        return failure.reason === "unauthorized" && call.toolPostStatus !== 401
-          ? Effect.fail({ _tag: "ExchangeBroken" })
-          : Effect.fail(failure);
+        const { status } = buildStatusFromUnavailable(error, connection, contribution.displayName);
+        return new McpCallRefused({ reason: status, message: describeRefusal(status, name) });
       };
 
       /**
        * Prepares a request that starts an exchange: reads the Connection's
-       * credentials as they are now, and only then runs the checks before a
-       * send, so a wait for credentials never lets an older check stand. The
-       * request carries the credentials it returns, which are read again when
-       * a refresh stored new ones meanwhile. When a check refuses, the
-       * refusal is kept in `refusedSend` and the request is not sent.
+       * credentials as they are now, and only then runs the rule of
+       * `checkBeforeSend`, so a wait for credentials never lets an older check
+       * stand. The request carries the credentials it returns, which are read
+       * again when a refresh stored new ones meanwhile. When the rule refuses,
+       * the refusal is kept and the request is not sent.
        */
       const prepareSend: PrepareSend = Effect.gen(function* () {
         while (true) {
           // Read before the credentials, so that a refresh that stores new
           // ones in between shows as a different version, never as the same.
           const version = yield* connectionTypes.readCredentialsVersion(server.connectionId);
-          const credentials = yield* readCredentials;
-          yield* checkDestinationAgain;
+          const credentials = yield* connectionTypes
+            .readCredentialsForUse(server.connectionId, guardRefresh)
+            .pipe(Effect.mapError(buildUnavailableRefusal));
+          yield* checkDestination(first);
           // A refresh does not move the Connection's `credentialsGeneration`,
-          // so a refresh that stored new tokens while the checks above ran is
+          // so a refresh that stored new tokens while the check above ran is
           // found by the version of the stored credentials. Then they are read
           // again, because they are no longer the current ones.
           const stored = yield* connectionTypes.readCredentialsVersion(server.connectionId);
@@ -770,237 +614,133 @@ const make = Effect.gen(function* () {
           return credentials;
         }
       }).pipe(
-        Effect.catch((refusal) =>
-          Effect.sync(() => {
-            refusedSend.current = refusal;
-          }).pipe(
+        Effect.catch((refused) =>
+          keepRefusal(refused).pipe(
             Effect.andThen(
-              Effect.fail(
-                new UpstreamError({
-                  reason: "refused",
-                  message:
-                    refusal._tag === "McpCallRefused"
-                      ? refusal.message
-                      : "Hercule could not read its own database",
-                }),
-              ),
+              Effect.fail(new UpstreamError({ reason: "refused", message: refused.message })),
             ),
           ),
         ),
       );
 
+      // Every credential value any attempt of this call sent, on any upstream
+      // session, so a value from the handshake or from a rejected attempt is
+      // removed from the answer of a later one. It lives as long as the call.
+      const sentValues = new Set<string>();
+
       /**
-       * Sends the call once, on the upstream MCP session of this token. The
-       * checks before a send run first, unless `alreadyChecked` is the result
-       * of one that just ran. Every request that goes to the server then
-       * prepares itself with `prepareSend`, which reads the credentials and
-       * checks again at that moment.
+       * Sends the call once, on the upstream MCP session of this token. Every
+       * request that starts an exchange prepares itself with `prepareSend`,
+       * which reads the credentials and checks again at that moment.
+       * `credentials` only build the address of an opening.
        */
-      const attempt = (
-        alreadyChecked: Destination | undefined,
-      ): Effect.Effect<McpSchema.CallToolResult, AttemptFailure | SqlError> =>
-        Effect.gen(function* () {
-          const destination = alreadyChecked ?? (yield* checkAgain);
-          // Only the address of the opening is built from these: its requests
-          // read the credentials again.
-          const credentials = yield* readCredentials;
-          return yield* Effect.acquireUseRelease(
-            holdSlot(
-              input.upstreamScope,
-              destination.server,
-              destination.connection.credentialsGeneration,
-              destination.contribution,
-              credentials,
-              prepareSend,
-            ),
-            (slot) =>
-              Effect.gen(function* () {
-                const opened = yield* Deferred.await(slot.opening);
-                const call = createUpstreamCallState(
+      const attempt = (credentials: ConnectionCredentialsForUse) =>
+        Effect.acquireUseRelease(
+          holdSlot(input.upstreamScope, first, credentials, prepareSend),
+          (slot) =>
+            Effect.flatMap(Deferred.await(slot.opening), (opened) =>
+              opened
+                .callTool({
+                  tool: first.tool,
+                  arguments: input.arguments,
                   prepareSend,
-                  readCurrentCredentials(server.connectionId),
+                  readCurrentCredentials: readCurrentCredentials(server.connectionId),
                   sentValues,
-                );
-                return yield* opened.client
-                  .callTool({
-                    tool: destination.tool,
-                    ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
-                  })
-                  .pipe(
-                    Effect.provideService(CurrentUpstreamCall, call),
-                    Effect.map((result) => removeSentValues(result, opened)),
-                    Effect.catch((error) => decideFailure(slot, opened, error, call)),
-                  );
+                })
+                .pipe(
+                  // Nothing else may use this session; the next call opens a new one.
+                  Effect.tapErrorTag("SessionExpired", () => Effect.sync(() => forgetSlot(slot))),
+                ),
+            ),
+          releaseSlot,
+        );
+
+      /** Sends the call, and once more on a new session when the server expired the one it used. */
+      const sendReplacingExpiredSession = (credentials: ConnectionCredentialsForUse) =>
+        attempt(credentials).pipe(
+          Effect.catchTag("SessionExpired", () => attempt(credentials)),
+          Effect.catchTag("SessionExpired", () =>
+            Effect.fail(
+              new UpstreamError({
+                reason: "protocol",
+                message: "The server ended the MCP session",
               }),
-            releaseSlot,
-          );
-        });
+            ),
+          ),
+        );
 
       /** Refuses the call, and writes the status when the failure is about the whole server. */
       const refuseUpstreamFailure = (failure: UpstreamError) =>
         Effect.gen(function* () {
           switch (failure.reason) {
-            case "unreachable":
-              yield* writeFailure(server, basis, "unreachable", failure.message);
-              return yield* refuse("unreachable", name);
             case "timeout":
               return yield* refuse("timed-out", name);
             case "too-large":
               return yield* refuse("error", name, `${name}: ${TOO_LARGE_ANSWER}.`);
             case "not-serving":
               return yield* Effect.fail(buildNotServingRefusal(failure.message));
-            case "unauthorized":
-              yield* writeFailure(
-                server,
-                basis,
-                "error",
-                `${contribution.displayName}'s MCP server refused the Connection's token`,
-              );
-              return yield* refuse("error", name);
-            default:
-              yield* writeFailure(server, basis, "error", failure.message);
-              return yield* refuse("error", name);
+            case "refused": {
+              if (refusal !== undefined) return yield* Effect.fail(refusal);
+              // Another call's checks refused the opening this call waited
+              // for. Its own checks give this call's reason.
+              yield* checkBeforeSend(first);
+              return yield* refuse("error", name, buildChangedMessage(first));
+            }
+            default: {
+              const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
+              yield* writeFailure(server, basis, status, detail);
+              return yield* refuse(status, name);
+            }
           }
         });
 
-      /**
-       * Asks the Connection for credentials after the server refused the ones
-       * the call sent. Refuses the call when it cannot. Nothing is refreshed
-       * unless the call may still be made and its destination is unchanged.
-       */
-      const refreshAfterRejection = (failure: UpstreamError) =>
-        Effect.gen(function* () {
-          yield* checkAgain;
-          const refreshed = yield* Effect.result(
-            connectionTypes
-              .refreshAfterRejection(server.connectionId, failure.sentIdentity ?? lastReadIdentity)
-              .pipe(Effect.provideService(RefreshGuard, guardRefresh)),
-          );
-          if (refreshed._tag === "Success") return;
-          const error: ConnectionCredentialsUnavailable | ConnectionCannotRefresh =
-            refreshed.failure;
-          if (error._tag === "ConnectionCannotRefresh") {
-            return yield* refuseUpstreamFailure(failure);
-          }
-          return yield* Effect.fail(describeUnavailable(error));
-        });
-
-      let refreshed = false;
-      let replaced = false;
-      let alreadyChecked: Destination | undefined = first;
-      while (true) {
-        const outcome = yield* Effect.result(attempt(alreadyChecked));
-        alreadyChecked = undefined;
-        if (outcome._tag === "Success") return outcome.success;
-        const failure = outcome.failure;
-        switch (failure._tag) {
-          case "McpCallRefused":
-          case "SqlError":
-            return yield* Effect.fail(failure);
-          case "CutOff":
-            return yield* refuse(
-              "error",
-              name,
-              `${name} was changed or its session ended while the call ran. Try the call again.`,
-            );
-          case "ExchangeBroken":
-            return yield* refuse(
+      return yield* runWithCredentials({
+        connections: connectionTypes,
+        connectionId: server.connectionId,
+        guardRefresh,
+        action: sendReplacingExpiredSession,
+      }).pipe(
+        Effect.catchTags({
+          UpstreamError: refuseUpstreamFailure,
+          ConnectionCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
+          ExchangeBroken: () =>
+            refuse(
               "error",
               name,
               `The call was sent to ${name}, but the exchange with it broke, so the call may have run. Check before trying it again.`,
-            );
-          case "SessionExpired":
-            if (!replaced) {
-              replaced = true;
-              continue;
-            }
-            return yield* refuseUpstreamFailure(
-              new UpstreamError({
-                reason: "protocol",
-                message: "The server ended the MCP session",
-              }),
-            );
-          case "UpstreamError":
-            if (failure.reason === "refused") {
-              if (refusedSend.current !== undefined) return yield* Effect.fail(refusedSend.current);
-              // Another call's checks refused the opening this call waited
-              // for. Its own checks give this call's reason.
-              yield* checkAgain;
-              return yield* refuse("error", name, buildChangedMessage(first));
-            }
-            if (failure.reason === "unauthorized" && !refreshed) {
-              refreshed = true;
-              yield* refreshAfterRejection(failure);
-              continue;
-            }
-            return yield* refuseUpstreamFailure(failure);
-        }
-      }
-    }).pipe(
-      // A refresh of the Connection's credentials, or a read of them, must not
-      // start its request to the provider once the controller stops serving.
-      Effect.provideService(StrictServingForRefresh, true),
-      Effect.catchTag("SqlError", () =>
-        Effect.fail(new McpCallRefused({ reason: "error", message: DATABASE_UNREADABLE_ANSWER })),
-      ),
-    );
-
-  const callTool = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
-    Effect.flatMap(McpCallDeadline, (deadline) => {
-      const bounded: Effect.Effect<McpSchema.CallToolResult, McpCallRefused> = Effect.flatMap(
-        Effect.timeoutOption(runCall(input), deadline),
-        Option.match({
-          onNone: () =>
-            Effect.fail(
-              new McpCallRefused({
-                reason: "timed-out",
-                message: "The call took too long. Try again later.",
-              }),
             ),
-          onSome: Effect.succeed,
         }),
       );
-      // The call ends when its token ends, wherever it is: waiting for a
-      // check, for a session to open, or for the server.
-      const endsWithToken = Effect.suspend(() => {
-        const ended = Deferred.makeUnsafe<void>();
-        const running = runningCalls.get(input.upstreamScope) ?? new Set();
-        running.add(ended);
-        runningCalls.set(input.upstreamScope, running);
-        return bounded.pipe(
-          Effect.raceFirst(
-            Effect.andThen(
-              Deferred.await(ended),
-              Effect.fail(
-                new McpCallRefused({
-                  reason: "error",
-                  message: "This session ended, so the call was stopped.",
-                }),
-              ),
-            ),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              running.delete(ended);
-              if (running.size === 0 && runningCalls.get(input.upstreamScope) === running) {
-                runningCalls.delete(input.upstreamScope);
-              }
+    });
+
+  const callTool = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
+    Effect.flatMap(McpCallDeadline, (deadline) =>
+      promotion
+        .admit(
+          Effect.flatMap(
+            Effect.timeoutOption(runCall(input), deadline),
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new McpCallRefused({
+                    reason: "timed-out",
+                    message: "The call took too long. Try again later.",
+                  }),
+                ),
+              onSome: Effect.succeed,
             }),
           ),
-        );
-      });
-      return promotion
-        .admit(endsWithToken)
+        )
         .pipe(
           Effect.catch((error) =>
             error instanceof McpCallRefused
               ? Effect.fail(error)
               : Effect.fail(buildNotServingRefusal(error.error.message)),
           ),
-        );
-    });
+        ),
+    );
 
-  return { callTool, closeUpstreamScope, closeUpstreamSession };
+  return { callTool, closeUpstreamSessionsExcept };
 });
 
 /** The calls of the MCP Gateway to outside MCP servers. */

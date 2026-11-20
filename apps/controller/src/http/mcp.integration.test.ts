@@ -764,6 +764,31 @@ describe("list changes", () => {
   });
 });
 
+describe("a call that is still opening its upstream session when its token stops resolving", () => {
+  it("is stopped, and the cancelled opening sends nothing more", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[2]]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+    const mark = countUpstreamRequests();
+    const release = upstream.hold("initialize");
+    try {
+      const pending = callEcho(thread.token, "charlie__echo", sessionId);
+      await eventually(
+        () => Promise.resolve(upstream.requests.slice(mark)),
+        (requests) => requests.some((one) => one.method === "initialize"),
+      );
+
+      await endResumable(arranged, thread.session);
+
+      const answer = await pending;
+      expect(answer.body.error.message).toBe("The request was cancelled");
+    } finally {
+      release();
+    }
+    expect(listToolPostsSince(mark)).toEqual([]);
+  });
+});
+
 describe("refused calls", () => {
   it("answers an unknown tool, writes one warning per turn, and one audit entry per call", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);

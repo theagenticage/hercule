@@ -267,7 +267,6 @@ export const makeCallPolicy = Effect.gen(function* () {
         : Effect.suspend(() => {
             server = { id: decision.serverId, name: decision.serverName };
             tool = decision.tool;
-            state.calledServerIds.add(decision.serverId);
             return catalogue
               .callTool({
                 upstreamScope: state.tokenHash,

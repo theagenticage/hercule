@@ -27,12 +27,19 @@
  * - No failure carries the server's answer, its headers, the request or a
  *   credential: each failure has a fixed message.
  *
+ * The opened session lists the server's tools and calls one of them. Both
+ * remove from what the server answered every credential value the session
+ * sent, so a server that echoes its request never hands the Connection's
+ * token on. A call also decides which of its failures may be tried again
+ * (see `callTool` of `OpenedUpstream`).
+ *
  * The file also holds what every caller does with an upstream failure:
  * `runWithCredentials` gets the Connection's credentials and refreshes them
  * once when the server refuses them, and `buildStatusFromFailure` says what
  * status a failure gives the server.
  */
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Ref from "effect/Ref";
@@ -48,9 +55,12 @@ import type {
   ConnectionCredentialsForUse,
   ConnectionCredentialsUnavailable,
   ConnectionTypes,
+  RefreshGuard,
+  StoredConnection,
 } from "../connections";
 import type { RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
+import { removeCredentialValues } from "./credential-values";
 
 /** The largest message a server may send, or the controller may send: one JSON answer or one SSE event. */
 export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
@@ -112,12 +122,12 @@ export type PrepareSend = Effect.Effect<ConnectionCredentialsForUse, UpstreamErr
 
 /**
  * What one call keeps for itself while its requests go through the upstream
- * client, which concurrent calls share. A call provides one (see
- * `CurrentUpstreamCall`), and the client reads and writes it for each request
- * the call causes, so one call never sees the credentials, the status or the
- * identity of another.
+ * client, which concurrent calls share. `callTool` of `OpenedUpstream` makes
+ * one and provides it (see `CurrentUpstreamCall`), and the client reads and
+ * writes it for each request the call causes, so one call never sees the
+ * credentials, the status or the identity of another.
  */
-export interface UpstreamCallState {
+interface UpstreamCallState {
   /**
    * Runs before the call's own `tools/call` request, which starts the call's
    * exchange. The request carries the credentials it returns.
@@ -146,13 +156,7 @@ export interface UpstreamCallState {
    * whether the tool ran.
    */
   toolPostStatus: number | undefined;
-  /**
-   * Every credential value any attempt of this call sent, longer than
-   * `MIN_SECRET_LENGTH`: the values of the headers the plugin built and of the
-   * credentials record. The caller of one logical call gives every attempt the
-   * same set, also an attempt on another upstream session, and removes the
-   * values from the text it returns.
-   */
+  /** The call's `sentValues` (see `ToolCall`). */
   readonly sentValues: Set<string>;
 }
 
@@ -165,29 +169,37 @@ export interface UpstreamCallState {
  */
 const MIN_SECRET_LENGTH = 8;
 
-/**
- * Creates the state of one attempt of a call. `prepareSend` prepares its
- * `tools/call` request and `readCurrentCredentials` the requests that continue
- * its exchange. `sentValues` collects the credential values it sends.
- */
-export const createUpstreamCallState = (
-  prepareSend: PrepareSend,
-  readCurrentCredentials: PrepareSend,
-  sentValues: Set<string>,
-): UpstreamCallState => ({
-  prepareSend,
-  readCurrentCredentials,
-  sentCredentials: undefined,
-  refusal: undefined,
-  toolPostSent: false,
-  toolPostStatus: undefined,
-  sentValues,
-});
-
-export const CurrentUpstreamCall = Context.Reference<UpstreamCallState | undefined>(
+const CurrentUpstreamCall = Context.Reference<UpstreamCallState | undefined>(
   "hercule/controller/mcp-servers/CurrentUpstreamCall",
   { defaultValue: () => undefined },
 );
+
+/** The answer to the agent when the server answers a call with HTTP 403. */
+const FORBIDDEN_ANSWER = "the server refused this call (HTTP 403)";
+
+/** Builds the tool result of a call that failed: `text` tells the agent what happened. */
+export const buildErrorResult = (text: string): McpSchema.CallToolResult =>
+  new McpSchema.CallToolResult({ content: [{ type: "text", text }], isError: true });
+
+/**
+ * A call found its upstream MCP session expired, and the call did not run:
+ * either the server answered 404 to the tool's own request, or the session was
+ * already known to be gone and the request was never sent. The caller may send
+ * the call again on a new session.
+ */
+export interface SessionExpired {
+  readonly _tag: "SessionExpired";
+}
+
+/**
+ * A call's tool request went out and may have run, and then the exchange
+ * failed in a way that must not send the tool again: a 401 or an ended MCP
+ * session on the reply to a request of the server, not on the tool's own
+ * request.
+ */
+export interface ExchangeBroken {
+  readonly _tag: "ExchangeBroken";
+}
 
 /** Tells whether the request's body is a JSON-RPC request for `tools/call`. */
 const isToolCallRequest = (request: HttpClientRequest.HttpClientRequest): boolean => {
@@ -369,30 +381,66 @@ export const describeClientFailure = (
   }
 };
 
-/** An open upstream client, and what a caller needs to use and judge it. */
+/** One call of a tool on an open upstream session. */
+export interface ToolCall {
+  readonly tool: McpSchema.Tool;
+  readonly arguments: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * Runs before the call's own `tools/call` request, which starts its
+   * exchange, and gives the credentials the request carries (see
+   * `PrepareSend`).
+   */
+  readonly prepareSend: PrepareSend;
+  /**
+   * Reads the credentials as they are stored now, for a request that only
+   * continues the call's exchange, such as the reply to a request of the
+   * server. It runs no check of the caller, and starts no refresh while the
+   * controller is not serving.
+   */
+  readonly readCurrentCredentials: PrepareSend;
+  /**
+   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that any
+   * attempt of the logical call sent: the values of the headers the plugin
+   * built and of the credentials record. The caller gives every attempt the
+   * same set, also an attempt on another upstream session, so a value from a
+   * rejected attempt is removed from the answer of a later one.
+   */
+  readonly sentValues: Set<string>;
+}
+
+/** An open upstream session, and what a caller does with it. */
 export interface OpenedUpstream {
-  readonly client: McpClient.McpClient;
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
   /**
-   * Every credential value, longer than `MIN_SECRET_LENGTH`, that any request
-   * on this session sent, the handshake and the calls' requests included: the
-   * values of the headers the plugin built and of the credentials record. It
-   * lives as long as the session. A caller removes them from what the server
-   * answered, which it stores or hands on.
+   * Lists the server's tools. Removes from them every credential value the
+   * session sent. A tool whose name holds one is left out and logged,
+   * because the name is what a call sends back, so rewriting it would
+   * dispatch to another tool or to none. Fails with an `UpstreamError`.
    */
-  readonly sentValues: ReadonlySet<string>;
+  readonly listTools: (
+    timeout: Duration.Duration,
+  ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, UpstreamError>;
   /**
-   * Converts a failure of `client` into an `UpstreamError`. `call` is the
-   * call whose request failed, when there is one (see `UpstreamCallState`):
-   * the failure then carries that call's refusal and the identity of the
-   * credentials it sent. Without it, the failure carries what the client sent
-   * last.
+   * Calls a tool and returns the server's answer with every credential value
+   * the session and the call sent removed. The tool's own errors are answers:
+   * a JSON-RPC error or HTTP 403 comes back as a result with `isError`.
+   *
+   * Fails with:
+   *
+   * - `SessionExpired` when the call did not run because its MCP session is
+   *   gone, so the caller may send it again on a new session;
+   * - `ExchangeBroken` when the tool's request went out and a later request
+   *   of its exchange failed, so the call may have run;
+   * - an `UpstreamError` otherwise. Only a 401 to the tool's own request
+   *   fails with reason `unauthorized`, which is what lets the caller refresh
+   *   the credentials and send the call again. The failure of a request that
+   *   was refused before it was sent is the one `prepareSend` or
+   *   `readCurrentCredentials` failed with.
    */
-  readonly describeFailure: (
-    error: McpClientError.McpClientError,
-    call?: UpstreamCallState,
-  ) => UpstreamError;
+  readonly callTool: (
+    call: ToolCall,
+  ) => Effect.Effect<McpSchema.CallToolResult, UpstreamError | SessionExpired | ExchangeBroken>;
 }
 
 /** What `openUpstream` needs. */
@@ -646,6 +694,96 @@ export const openUpstream = (
       (call === undefined ? Ref.getUnsafe(outboundRefusal) : call.refusal) ??
       describeClientFailure(error, (call?.sentCredentials ?? lastSent).identity);
 
+    /** Removes the credential values the session sent, and those of `call` when it is given, from `value`. */
+    const removeSentValues = <A>(value: A, call?: UpstreamCallState): A =>
+      removeCredentialValues(
+        value,
+        call === undefined ? sentValues : new Set([...sentValues, ...call.sentValues]),
+      );
+
+    /** Decides what a failure of a call's request means: see `callTool` of `OpenedUpstream`. */
+    const decideCallFailure = (
+      error: McpClientError.McpClientError,
+      call: UpstreamCallState,
+    ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | SessionExpired | ExchangeBroken> => {
+      const reason = error.reason;
+      if (reason._tag === "ClosedError" && reason.sessionExpired === true) {
+        // The session is gone either because the server answered 404 to the
+        // tool's own request, or because another request found it gone and
+        // this one was never sent. Both leave the tool unrun. A 404 on any
+        // other request of this call, sent after the tool, says nothing.
+        return Effect.fail(
+          call.toolPostSent && call.toolPostStatus !== 404
+            ? { _tag: "ExchangeBroken" }
+            : { _tag: "SessionExpired" },
+        );
+      }
+      // The server's own error for this call. A failure of the client itself
+      // has no code.
+      if (reason._tag === "ProtocolError" && reason.code !== undefined) {
+        return Effect.succeed(
+          buildErrorResult(
+            removeSentValues(
+              reason.description ?? "The server answered the call with an error.",
+              call,
+            ),
+          ),
+        );
+      }
+      if (reason._tag === "HttpError" && reason.status === 403) {
+        return Effect.succeed(buildErrorResult(FORBIDDEN_ANSWER));
+      }
+      // The tool went out, and then a request that continues its exchange was
+      // refused before it was sent, so the call may have run.
+      if (call.toolPostSent && call.refusal !== undefined) {
+        return Effect.fail({ _tag: "ExchangeBroken" });
+      }
+      const failure = describeFailure(error, call);
+      return failure.reason === "unauthorized" && call.toolPostStatus !== 401
+        ? Effect.fail({ _tag: "ExchangeBroken" })
+        : Effect.fail(failure);
+    };
+
+    const buildOpened = (mcpClient: McpClient.McpClient, revision: string): OpenedUpstream => ({
+      revision,
+      listTools: (timeout) =>
+        Effect.gen(function* () {
+          const tools = yield* mcpClient
+            .listTools({ timeout })
+            .pipe(Effect.mapError((error) => describeFailure(error)));
+          const kept = tools.filter(
+            (tool) => removeCredentialValues(tool.name, sentValues) === tool.name,
+          );
+          if (kept.length < tools.length) {
+            yield* Effect.logWarning(
+              `${contribution.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
+            );
+          }
+          return removeSentValues(kept);
+        }),
+      callTool: (call) => {
+        const state: UpstreamCallState = {
+          prepareSend: call.prepareSend,
+          readCurrentCredentials: call.readCurrentCredentials,
+          sentCredentials: undefined,
+          refusal: undefined,
+          toolPostSent: false,
+          toolPostStatus: undefined,
+          sentValues: call.sentValues,
+        };
+        return mcpClient
+          .callTool({
+            tool: call.tool,
+            ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
+          })
+          .pipe(
+            Effect.provideService(CurrentUpstreamCall, state),
+            Effect.map((result) => removeSentValues(result, state)),
+            Effect.catch((error) => decideCallFailure(error, state)),
+          );
+      },
+    });
+
     const order = [
       ...REVISIONS.filter((entry) => entry.revision === target.firstRevision),
       ...REVISIONS.filter((entry) => entry.revision !== target.firstRevision),
@@ -670,12 +808,7 @@ export const openUpstream = (
         ),
       );
       if (outcome._tag === "Success") {
-        return {
-          client: outcome.success,
-          revision,
-          sentValues,
-          describeFailure,
-        };
+        return buildOpened(outcome.success, revision);
       }
       yield* Scope.close(attemptScope, Exit.fail(outcome.failure));
       if (!isVersionRefusal(outcome.failure, revision)) {
@@ -712,6 +845,71 @@ export const buildStatusFromFailure = (
   }
 };
 
+/**
+ * Converts a Connection's failure to give credentials into the status an MCP
+ * Server shows for it, with a detail a person can read, and what made the
+ * status: `connection` when the Connection needs the user, `null` when trying
+ * again may work. The text is fixed here and never the Connection's own
+ * message, which may hold what the provider sent.
+ */
+export const buildStatusFromUnavailable = (
+  error: ConnectionCredentialsUnavailable,
+  connection: Pick<StoredConnection, "label">,
+  displayName: string,
+): {
+  readonly status: "unreachable" | "error" | "needs-sign-in";
+  readonly detail: string;
+  readonly cause: "connection" | null;
+} => {
+  switch (error.reason) {
+    case "needs-sign-in":
+      return {
+        status: "needs-sign-in",
+        detail: `Reconnect ${connection.label} in Settings > Connections`,
+        cause: "connection",
+      };
+    case "switched-off":
+      return {
+        status: "error",
+        detail: `The Connection ${connection.label} is switched off`,
+        cause: "connection",
+      };
+    case "unreachable":
+      return {
+        status: "unreachable",
+        detail: `${displayName} could not be reached to refresh the sign-in`,
+        cause: null,
+      };
+    case "credentials-replaced":
+      // The Connection is fine: the user reconnected twice while the sign-in
+      // was refreshed. The backoff checks again soon.
+      return {
+        status: "unreachable",
+        detail: `The sign-in of ${connection.label} was replaced while it was being refreshed`,
+        cause: null,
+      };
+    case "no-credentials":
+      return {
+        status: "error",
+        detail: `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
+        cause: null,
+      };
+    case "invalid-config":
+      return {
+        status: "error",
+        detail: `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
+        cause: null,
+      };
+    case "missing":
+      return { status: "error", detail: "The Connection of this server is missing", cause: null };
+    case "not-serving":
+    case "refused":
+      // Only a caller that gives the refresh a guard gets these two, and a
+      // check gives none.
+      return { status: "error", detail: "The refresh of the sign-in was refused", cause: null };
+  }
+};
+
 /** What `runWithCredentials` asks of the Connections: the two ways to get credentials for use. */
 type CredentialSource = Pick<
   ConnectionTypes["Service"],
@@ -723,44 +921,60 @@ type CredentialSource = Pick<
  * refuses them, refreshes them once and runs it again. Returns what the action
  * returned.
  *
- * The retry is allowed only when the action fails with `unauthorized`, so an
- * action must fail that way only when the server refused the request that
- * starts its exchange, before the server did anything. An action that sent a
- * request the server may already have run, such as a tool call whose later
- * request got the 401, must fail with another reason: running it again could
- * do the work twice.
+ * The retry is allowed only when the action fails with an `UpstreamError` of
+ * reason `unauthorized`, so an action must fail that way only when the server
+ * refused the request that starts its exchange, before the server did
+ * anything. An action that sent a request the server may already have run,
+ * such as a tool call whose later request got the 401, must fail another way:
+ * running it again could do the work twice. Any other failure of the action
+ * ends it.
  *
- * `checkRefreshAllowed` runs before the refresh, and when it fails the
- * refresh and the retry do not happen: a refresh changes the Connection, so
- * the caller can refuse it when what it works for has changed.
+ * A refresh changes the Connection, so a caller can refuse it when what it
+ * works for has changed, in one of two ways. `checkRefreshAllowed` runs
+ * before a refresh after a rejection, and when it fails the refresh and the
+ * retry do not happen. `guardRefresh` runs under the Connection's refresh
+ * permit, right before every request to the provider this causes, also the
+ * refresh of a stale token that the first read starts (`RefreshGuard`).
  *
  * Fails with:
  *
  * - `ConnectionCredentialsUnavailable` when the Connection cannot give
- *   credentials, or cannot give new ones after the rejection;
+ *   credentials, or cannot give new ones after the rejection, and as
+ *   `guardRefresh` does;
  * - the action's `UpstreamError`, also when the Connection has nothing to
  *   refresh (pasted credentials), and when the retry fails too;
  * - what `checkRefreshAllowed` fails with.
  */
-export const runWithCredentials = <A, E, R>(input: {
+export const runWithCredentials = <
+  A,
+  F extends { readonly _tag: string } = never,
+  E = never,
+  R = never,
+>(input: {
   readonly connections: CredentialSource;
   readonly connectionId: string;
-  readonly action: (credentials: ConnectionCredentialsForUse) => Effect.Effect<A, UpstreamError, R>;
-  readonly checkRefreshAllowed: Effect.Effect<void, E, R>;
-}): Effect.Effect<A, UpstreamError | ConnectionCredentialsUnavailable | E, R> =>
+  readonly action: (
+    credentials: ConnectionCredentialsForUse,
+  ) => Effect.Effect<A, UpstreamError | F, R>;
+  readonly checkRefreshAllowed?: Effect.Effect<void, E, R>;
+  readonly guardRefresh?: RefreshGuard;
+}): Effect.Effect<A, UpstreamError | F | ConnectionCredentialsUnavailable | E, R> =>
   Effect.gen(function* () {
-    const { connections, connectionId, action } = input;
-    const credentials = yield* connections.readCredentialsForUse(connectionId);
+    const { connections, connectionId, action, guardRefresh } = input;
+    const credentials = yield* connections.readCredentialsForUse(connectionId, guardRefresh);
     const first = yield* Effect.result(action(credentials));
     if (first._tag === "Success") return first.success;
     const rejected = first.failure;
-    if (rejected.reason !== "unauthorized") return yield* Effect.fail(rejected);
+    if (!(rejected instanceof UpstreamError) || rejected.reason !== "unauthorized") {
+      return yield* Effect.fail(rejected);
+    }
 
-    yield* input.checkRefreshAllowed;
+    if (input.checkRefreshAllowed !== undefined) yield* input.checkRefreshAllowed;
     const refreshed = yield* Effect.result(
       connections.refreshAfterRejection(
         connectionId,
         rejected.sentIdentity ?? credentials.identity,
+        guardRefresh,
       ),
     );
     if (refreshed._tag === "Failure") {

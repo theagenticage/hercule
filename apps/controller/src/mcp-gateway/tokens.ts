@@ -56,8 +56,6 @@ export interface TokenState {
   readonly streams: Set<OpenStream>;
   /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
   readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
-  /** The servers a call of this token went to, so the upstream session of one that is no longer served can be closed. */
-  readonly calledServerIds: Set<string>;
   /** The names `tools/list` sent to this token. A call is accepted only under one of them. */
   readonly names: NameLedger;
   /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
@@ -103,7 +101,6 @@ export const makeTokenStates = Effect.gen(function* () {
       mcpSessions: new Map(),
       streams: new Set(),
       runningCalls: new Set(),
-      calledServerIds: new Set(),
       names: makeNameLedger(),
       admission: Semaphore.makeUnsafe(1),
     };
@@ -238,7 +235,11 @@ export const makeTokenStates = Effect.gen(function* () {
 
   // -- Keeping in step with the database ------------------------------------
 
-  /** Forgets a Session Token that no longer resolves: ends its streams and calls, and closes its upstream sessions. */
+  /**
+   * Forgets a Session Token that no longer resolves: ends its streams, stops
+   * its calls and then closes its upstream sessions, so no call is still using
+   * one.
+   */
   const forgetToken = (state: TokenState): Effect.Effect<void> =>
     Effect.gen(function* () {
       states.delete(state.tokenHash);
@@ -247,7 +248,7 @@ export const makeTokenStates = Effect.gen(function* () {
         discard: true,
       });
       state.mcpSessions.clear();
-      yield* catalogue.closeUpstreamScope(state.tokenHash);
+      yield* catalogue.closeUpstreamSessionsExcept(state.tokenHash, new Set());
     });
 
   /**
@@ -258,8 +259,8 @@ export const makeTokenStates = Effect.gen(function* () {
    *   `list_changed`. Each stream is judged against what it was told itself,
    *   so a `tools/list` that one client made never hides the change from
    *   another. A token with no stream needs no comparison;
-   * - the upstream session of every server a call of this token went to, and
-   *   that the session is not served any more, is closed.
+   * - the upstream sessions of the servers the session is not served any
+   *   more are closed.
    */
   const reconcileToken = (state: TokenState): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -277,14 +278,9 @@ export const makeTokenStates = Effect.gen(function* () {
           { discard: true },
         );
       }
-      const servedIds = new Set(served.map(({ server }) => server.id));
-      yield* Effect.forEach(
-        [...state.calledServerIds].filter((serverId) => !servedIds.has(serverId)),
-        (serverId) => {
-          state.calledServerIds.delete(serverId);
-          return catalogue.closeUpstreamSession(state.tokenHash, serverId);
-        },
-        { discard: true },
+      yield* catalogue.closeUpstreamSessionsExcept(
+        state.tokenHash,
+        new Set(served.map(({ server }) => server.id)),
       );
     });
 

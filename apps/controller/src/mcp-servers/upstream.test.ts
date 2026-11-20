@@ -14,12 +14,11 @@
  * - the HTTP requests to the outside server create no trace span, so no URL or
  *   error text reaches a trace;
  * - each call's requests carry that call's own credentials, whatever another
- *   call that shares the client sends, and a call records the answer to its own
- *   `tools/call` request apart from any other request it causes. Of the
- *   credential values it sent, it records only those long enough to be removed
- *   from answers.
+ *   call that shares the client sends, and of the credential values it sent,
+ *   only those long enough are removed from its answer.
  */
 import { describe, expect, it } from "vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Tracer from "effect/Tracer";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -27,13 +26,7 @@ import { McpClientError, McpProtocol } from "effect/ai";
 import { TestDatabase } from "../db/testing";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { startFakeUpstream, type FakeUpstream } from "./testing";
-import {
-  checkUrlOnOrigin,
-  createUpstreamCallState,
-  CurrentUpstreamCall,
-  describeClientFailure,
-  openUpstream,
-} from "./upstream";
+import { checkUrlOnOrigin, describeClientFailure, openUpstream } from "./upstream";
 
 const ORIGIN = "https://mcp.example.com";
 
@@ -181,7 +174,7 @@ describe("the fallback to an older MCP revision", () => {
 });
 
 describe("openUpstream", () => {
-  it("gives each call's requests that call's own credentials, and records the answer to its tool request", async () => {
+  it("gives each call's requests that call's own credentials, and removes only the long ones from its answer", async () => {
     const fake = await startFakeUpstream();
     try {
       const credentialsOf = (token: string) => ({
@@ -190,16 +183,8 @@ describe("openUpstream", () => {
         config: {},
         identity: `identity-${token}`,
       });
-      const stateOf = (token: string) =>
-        createUpstreamCallState(
-          Effect.succeed(credentialsOf(token)),
-          Effect.succeed(credentialsOf(token)),
-          new Set(),
-        );
-      const first = stateOf("token-one-1234");
-      const second = stateOf("token-two-5678");
 
-      await Effect.runPromise(
+      const results = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const opened = yield* openUpstream({
@@ -218,13 +203,19 @@ describe("openUpstream", () => {
               credentials: credentialsOf("opening-token-0"),
               firstRevision: null,
             });
-            const [tool] = yield* opened.client.listTools();
+            const [tool] = yield* opened.listTools(Duration.seconds(5));
             if (tool === undefined) return yield* Effect.die("the fake lists no tool");
-            const callWith = (state: typeof first) =>
-              opened.client
-                .callTool({ tool, arguments: { text: "hi" } })
-                .pipe(Effect.provideService(CurrentUpstreamCall, state));
-            yield* Effect.all([callWith(first), callWith(second)], { concurrency: 2 });
+            const callWith = (token: string) =>
+              opened.callTool({
+                tool,
+                arguments: { text: token, org: "acme" },
+                prepareSend: Effect.succeed(credentialsOf(token)),
+                readCurrentCredentials: Effect.succeed(credentialsOf(token)),
+                sentValues: new Set(),
+              });
+            return yield* Effect.all([callWith("token-one-1234"), callWith("token-two-5678")], {
+              concurrency: 2,
+            });
           }),
         ).pipe(
           Effect.provide(FetchHttpClient.layer),
@@ -238,12 +229,11 @@ describe("openUpstream", () => {
         .map((request) => request.authorization)
         .sort();
       expect(sent).toEqual(["Bearer token-one-1234", "Bearer token-two-5678"]);
-      expect(first).toMatchObject({
-        sentCredentials: credentialsOf("token-one-1234"),
-        toolPostSent: true,
-        toolPostStatus: 200,
-      });
-      expect([...second.sentValues].sort()).toEqual(["Bearer token-two-5678", "token-two-5678"]);
+      for (const result of results) {
+        expect(JSON.stringify(result.content)).toContain(
+          '{\\"text\\":\\"[removed]\\",\\"org\\":\\"acme\\"}',
+        );
+      }
     } finally {
       await fake.stop();
     }
@@ -276,7 +266,7 @@ describe("openUpstream", () => {
               credentials: { credentials: {}, config: {}, identity: "identity-1" },
               firstRevision: null,
             });
-            return yield* opened.client.listTools();
+            return yield* opened.listTools(Duration.seconds(5));
           }),
         ).pipe(
           Effect.provideService(Tracer.Tracer, recordingTracer),

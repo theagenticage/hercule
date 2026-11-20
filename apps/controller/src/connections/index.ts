@@ -22,9 +22,8 @@ export {
   ConnectionCredentialsUnavailable,
   ConnectionTypes,
   ConnectionTypesLayer,
-  RefreshGuard,
-  StrictServingForRefresh,
   type ConnectionCredentialsForUse,
+  type RefreshGuard,
   type RegisteredConnectionType,
 } from "./runtime";
 export {

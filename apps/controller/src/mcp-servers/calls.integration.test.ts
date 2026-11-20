@@ -24,8 +24,8 @@
  * - the credentials and the URL each request carries, and the credentials
  *   removed from what the server answers, in values and in object keys;
  * - closing sessions when a server loses its destination, when the gateway
- *   closes one, when a token ends, and cancelling an opening nobody waits
- *   for, also while its token lives.
+ *   says a token no longer serves a server, and cancelling an opening nobody
+ *   waits for, also while its token lives.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
@@ -142,13 +142,6 @@ const textOf = (result: {
 /** Counts the times the fake provider was asked to refresh a token. */
 const countRefreshes = (provider: Rig["provider"]) =>
   provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
-
-/** Returns what `pending` settles with, or `"still waiting"` when it does not within `millis`. */
-const settleWithin = <A>(pending: Promise<A>, millis: number): Promise<A | "still waiting"> =>
-  Promise.race([
-    pending,
-    new Promise<"still waiting">((resolve) => setTimeout(() => resolve("still waiting"), millis)),
-  ]);
 
 const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
 
@@ -659,20 +652,17 @@ describe("a refresh that waited for the Connection's permit while the caller los
         );
         const rejections = () =>
           requestsOf(fake, "tools/call").filter((request) => request.status === 401).length;
-        // Once the second call is rejected too, the caller may make the call
-        // for the check before the refresh, and not for the check under the permit.
-        let checksAfterRejection = 0;
+        // Once the second call is rejected too, it waits for the permit, and
+        // the caller may no longer make the call.
         const waiter = call({
           upstreamScope: SCOPE_A,
-          authorize: Effect.suspend(() => {
-            if (rejections() < 2) return Effect.void;
-            checksAfterRejection += 1;
-            return checksAfterRejection === 1 ? Effect.void : Effect.fail(leftTheList());
-          }),
+          authorize: Effect.suspend(() =>
+            rejections() < 2 ? Effect.void : Effect.fail(leftTheList()),
+          ),
         });
         await eventually(
-          () => Promise.resolve(checksAfterRejection),
-          (count) => count >= 1,
+          () => Promise.resolve(rejections()),
+          (count) => count >= 2,
         );
         letRefreshAnswer();
 
@@ -762,8 +752,8 @@ describe("upstream MCP sessions", () => {
         const { mcpServerCalls } = controller.harness;
         const endedBefore = fake.requests.filter((request) => request.method === "?").length;
 
-        await Effect.runPromise(mcpServerCalls.closeUpstreamScope(SCOPE_A));
-        await Effect.runPromise(mcpServerCalls.closeUpstreamScope(SCOPE_A));
+        await Effect.runPromise(mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()));
+        await Effect.runPromise(mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()));
 
         const ended = fake.requests.filter((request) => request.method === "?").slice(endedBefore);
         expect(ended.map((request) => request.sessionId)).toEqual([sessionA]);
@@ -788,7 +778,9 @@ describe("upstream MCP sessions", () => {
         });
         const endedBefore = requestsOf(fake, "?").length;
 
-        await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
+        await Effect.runPromise(
+          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()),
+        );
 
         expect(
           requestsOf(fake, "?")
@@ -809,7 +801,9 @@ describe("upstream MCP sessions", () => {
         await Effect.runPromise(promotion.freeze(tokenId, new Date(Date.now() + 60_000)));
         const before = fake.requests.length;
 
-        const closing = Effect.runPromise(mcpServerCalls.closeUpstreamScope(SCOPE_A));
+        const closing = Effect.runPromise(
+          mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()),
+        );
         // A DELETE that waited for the thaw would be sent after it.
         await new Promise((resolve) => setTimeout(resolve, 100));
         await Effect.runPromise(promotion.thaw(tokenId));
@@ -1491,7 +1485,7 @@ describe("closing upstream MCP sessions", () => {
     );
   });
 
-  it("closes the one session the gateway names, and no other", async () => {
+  it("closes the sessions of the servers a token is no longer served, and no other", async () => {
     await withReadyServer(
       async ({ controller, serverId, fake, call }) => {
         await call({ upstreamScope: SCOPE_A });
@@ -1500,11 +1494,14 @@ describe("closing upstream MCP sessions", () => {
           (request) => request.sessionId,
         );
         const endedBefore = endedSessions(fake).length;
+        const { mcpServerCalls } = controller.harness;
 
         await Effect.runPromise(
-          controller.harness.mcpServerCalls.closeUpstreamSession(SCOPE_A, serverId),
+          mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set([serverId])),
         );
+        expect(endedSessions(fake)).toHaveLength(endedBefore);
 
+        await Effect.runPromise(mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()));
         expect(endedSessions(fake).slice(endedBefore)).toEqual([sessionA]);
         const opened = requestsOf(fake, "initialize").length;
         await call({ upstreamScope: SCOPE_A });
@@ -1514,21 +1511,6 @@ describe("closing upstream MCP sessions", () => {
       },
       { legacy: true },
     );
-  });
-
-  it("ends a call that holds no session yet when its token ends", async () => {
-    await withReadyServer(async ({ controller, call }) => {
-      let reached: () => void = () => undefined;
-      const reachedAuthorize = new Promise<void>((resolve) => {
-        reached = resolve;
-      });
-      const pending = call({ authorize: Effect.andThen(Effect.sync(reached), Effect.never) });
-      await reachedAuthorize;
-
-      await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
-
-      expect(await settleWithin(pending, 2_000)).toMatchObject({ _tag: "Failure" });
-    });
   });
 
   it("cancels an opening that no call waits for any more, while its token lives", async () => {
