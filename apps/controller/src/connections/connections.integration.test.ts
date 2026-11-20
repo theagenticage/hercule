@@ -41,7 +41,10 @@ import {
   buildAccountName,
   listConnections,
   readConnection,
+  backdateCredentialsReplacedAt,
+  LONG_AGO,
   readConnectionsSurface,
+  readCredentialsReplacedAt,
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
@@ -1068,6 +1071,32 @@ describe("POST /connections/:id/credentials", () => {
         displayName: one.displayName,
       });
       expect(await Effect.runPromise(surface.credentials(one.id))).toEqual({ token: GOOD });
+    });
+  });
+});
+
+describe("the time a connection's credentials were last replaced", () => {
+  it("is set when the connection is created, moves when the user pastes new credentials, and stays when the user edits anything else", async () => {
+    await withConnections(async ({ base, sql }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      expect(await readCredentialsReplacedAt(sql)).toBe(one.createdAt);
+
+      await backdateCredentialsReplacedAt(sql);
+      const patched = await send("PATCH", base, `/api/v1/connections/${one.id}`, {
+        body: { label: "renamed" },
+        token,
+      });
+      expect(patched.status, await patched.clone().text()).toBe(200);
+      expect(await readCredentialsReplacedAt(sql)).toBe(LONG_AGO);
+
+      const replaced = await post(
+        base,
+        `/api/v1/connections/${one.id}/credentials`,
+        { credentials: { token: ROTATED } },
+        token,
+      );
+      expect(replaced.status, await replaced.clone().text()).toBe(200);
+      expect(await readCredentialsReplacedAt(sql)).not.toBe(LONG_AGO);
     });
   });
 });

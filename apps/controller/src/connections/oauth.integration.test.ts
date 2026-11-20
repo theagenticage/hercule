@@ -45,10 +45,13 @@ import {
   QUIET_LOOP_TIMINGS,
 } from "../promotion/testing";
 import {
+  backdateCredentialsReplacedAt,
   buildAccount,
   buildAccountName,
   buildJsonResponse,
   listConnections,
+  LONG_AGO,
+  readCredentialsReplacedAt,
   readConnectionsSurface,
   type ConnectionRecord,
   type TestPlugin,
@@ -709,6 +712,35 @@ describe("GET /oauth/callback", () => {
       expect(
         await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
       ).toMatchObject({ accessToken: "good-second" });
+    });
+  });
+
+  it("moves the time the credentials were replaced on a reconnect, and not on a refresh", async () => {
+    await withOAuth(async ({ base, sql }, registry, token, provider) => {
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({
+          access_token: FIRST_TOKEN,
+          refresh_token: "refresh-1",
+          token_type: "bearer",
+          expires_in: 1,
+        });
+      const before = await connect(base, token);
+      await backdateCredentialsReplacedAt(sql);
+      // The token expires at once, so reading it refreshes it.
+      expect(
+        await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
+      ).toMatchObject({ accessToken: REFRESHED_TOKEN });
+      expect(await readCredentialsReplacedAt(sql)).toBe(LONG_AGO);
+
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({ access_token: "good-second", token_type: "bearer" });
+      const url = await startOAuthOrFail(base, token, { connectionId: before.id });
+      await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "another-code",
+      });
+
+      expect(await readCredentialsReplacedAt(sql)).not.toBe(LONG_AGO);
     });
   });
 

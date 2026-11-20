@@ -31,6 +31,8 @@ const ConnectionReferencesLayer: Layer.Layer<ConnectionReferences, never, SqlCli
             const actingResources = yield* resources.listActingThroughConnection(connectionId);
             const namingTriggers = yield* workflows.listTriggersNamingConnection(connectionId);
             const namingSteps = yield* workflows.listStepsNamingConnection(connectionId);
+            // TODO(#1208): also list the MCP Servers that use the Connection, as
+            // `mcpServer` references, once the `mcp_servers` table exists.
             return [
               ...actingResources.map((resource): ConnectionReference => ({
                 kind: "resource",

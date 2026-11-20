@@ -19,6 +19,7 @@
  * a write waits until the freeze ends. Once the controller is sealed, it
  * never happens.
  */
+import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,11 +27,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   ConnectionUnavailable,
+  decodeAgainst,
   type ConnectionStatus,
   type ConnectionSummary,
   type ConnectionType,
@@ -79,6 +82,83 @@ export interface RegisteredConnectionType {
  */
 const CREDENTIALS_REPLACED =
   "the connection's credentials were replaced while its access token was being refreshed: ask for them again";
+
+/**
+ * What the core needs to call an outside server with a Connection's
+ * credential.
+ *
+ * - `credentials` are what `ConnectionsRuntime.credentials` gives a plugin:
+ *   the fields the user pasted, or `{ accessToken }` for OAuth tokens.
+ * - `config` is the Connection's config decoded against its type's config
+ *   schema (`{}` for a type with none).
+ * - `identity` is a fingerprint of the credential values, which never
+ *   reveals them. It changes when the credentials change, and a caller hands
+ *   it back to `refreshAfterRejection` to say which credentials the outside
+ *   server refused.
+ */
+export interface ConnectionCredentialsForUse {
+  readonly credentials: Record<string, string>;
+  readonly config: unknown;
+  readonly identity: string;
+}
+
+/**
+ * The core cannot give a Connection's credentials for use right now.
+ * `reason` is one of:
+ *
+ * - `needs-sign-in`: the Connection needs the user to sign in again. It is
+ *   `needs-reauth`, or the provider refused to refresh its token.
+ * - `unreachable`: the provider could not be reached to refresh the token.
+ *   The Connection is left as it was, so trying again later may work.
+ * - `switched-off`: the user disabled the Connection.
+ * - `missing`: there is no such Connection, or no plugin in this build
+ *   declares its type, or its config no longer fits its type.
+ *
+ * `message` is one line a person can read.
+ */
+export class ConnectionCredentialsUnavailable extends Schema.TaggedError<ConnectionCredentialsUnavailable>()(
+  "ConnectionCredentialsUnavailable",
+  {
+    reason: Schema.Literals(["needs-sign-in", "unreachable", "switched-off", "missing"]),
+    message: Schema.String,
+  },
+) {}
+
+/**
+ * A Connection that holds pasted credentials and no OAuth tokens has nothing
+ * to refresh: a rejected pasted credential stays rejected until the user
+ * replaces it.
+ */
+export class ConnectionCannotRefresh extends Schema.TaggedError<ConnectionCannotRefresh>()(
+  "ConnectionCannotRefresh",
+  { message: Schema.String },
+) {}
+
+/**
+ * Computes the fingerprint of a set of credentials: the SHA-256 of their
+ * names and values as JSON, in name order, as hex. The order the fields were
+ * stored in does not change it.
+ */
+const computeCredentialsIdentity = (credentials: Record<string, string>): string =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(Object.entries(credentials).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    )
+    .digest("hex");
+
+/**
+ * Runs `effect` again, once, when it failed because the user reconnected
+ * while a token refresh was in flight. The second run reads the new
+ * credentials, which are fine.
+ */
+const retryWhenCredentialsReplaced = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.retry(effect, {
+    times: 1,
+    while: (error) =>
+      error instanceof ConnectionUnavailable && error.message === CREDENTIALS_REPLACED,
+  });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -280,6 +360,11 @@ const make = Effect.gen(function* () {
    * tokens again first, so a caller that waited for another caller's refresh
    * gets the new tokens without refreshing again.
    *
+   * It refreshes when the access token is stale, or, when `rejectedIdentity`
+   * is given, when the stored access token still has that identity: an outside
+   * server refused it, whatever its expiry says. A token with another identity
+   * was replaced meanwhile and is returned as it is.
+   *
    * - With no refresh token or no client to refresh with, it marks the
    *   connection `needs-reauth` and fails.
    * - When the token endpoint rejects the refresh, it marks the connection
@@ -294,6 +379,7 @@ const make = Effect.gen(function* () {
   const refreshTokens = (
     row: StoredConnection,
     type: ConnectionType,
+    rejectedIdentity: string | undefined,
   ): Effect.Effect<TokenSet, ConnectionUnavailable | ProviderUnreachable> =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(
@@ -307,7 +393,11 @@ const make = Effect.gen(function* () {
       const held = Redacted.value(stored.value);
       const tokens = yield* parseStoredTokens(row.id, held);
       const millis = yield* Clock.currentTimeMillis;
-      if (!isStale(tokens, millis)) return tokens;
+      const needsRefresh =
+        rejectedIdentity === undefined
+          ? isStale(tokens, millis)
+          : computeCredentialsIdentity({ accessToken: tokens.accessToken }) === rejectedIdentity;
+      if (!needsRefresh) return tokens;
 
       const endpoint = yield* findRefreshEndpoint(row, type);
       const { refreshToken } = tokens;
@@ -395,7 +485,7 @@ const make = Effect.gen(function* () {
       // The gate is passed before the permit is taken, so no caller holds
       // the permit while it waits for a freeze to end.
       return yield* promotion.whenServing(
-        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, type)),
+        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, type, undefined)),
       );
     });
 
@@ -413,20 +503,21 @@ const make = Effect.gen(function* () {
    * connection with no secrets whose type signs in through a redirect flow or
    * a device flow is also marked `needs-reauth`: signing in again is how the
    * user gives it a token.
+   *
+   * Fails with `ProviderUnreachable` when a refresh could not reach the
+   * provider. `readStoredCredentials` turns that into a `ConnectionUnavailable`
+   * for a plugin; the core's own reads keep it apart.
    */
-  const readStoredCredentials = (
+  const readStoredCredentialsOrUnreachable = (
     row: StoredConnection,
-  ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
+  ): Effect.Effect<Record<string, string>, ConnectionUnavailable | ProviderUnreachable> =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(secrets.values({ kind: "connection", id: row.id }));
       const tokens = stored.find((one) => one.name === OAUTH_TOKENS);
       if (tokens !== undefined) {
-        return yield* readFreshTokenSet(row, tokens.value).pipe(
-          Effect.map((fresh) => ({ accessToken: fresh.accessToken })),
-          Effect.catchTag("ProviderUnreachable", (error) =>
-            Effect.fail(new ConnectionUnavailable({ message: error.message })),
-          ),
-        );
+        return yield* Effect.map(readFreshTokenSet(row, tokens.value), (fresh) => ({
+          accessToken: fresh.accessToken,
+        }));
       }
       if (stored.length === 0) {
         const message = `the connection ${row.id} holds no credentials`;
@@ -437,6 +528,105 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(new ConnectionUnavailable({ message }));
       }
       return Object.fromEntries(stored.map((one) => [one.name, Redacted.value(one.value)]));
+    });
+
+  /**
+   * Returns a connection's credentials as `readStoredCredentialsOrUnreachable`
+   * does, but fails with a `ConnectionUnavailable` when the provider could not
+   * be reached: a plugin cannot tell the two apart.
+   */
+  const readStoredCredentials = (
+    row: StoredConnection,
+  ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
+    Effect.catchTag(readStoredCredentialsOrUnreachable(row), "ProviderUnreachable", (error) =>
+      Effect.fail(new ConnectionUnavailable({ message: error.message })),
+    );
+
+  /**
+   * Returns the connection and its registered type when the core may use the
+   * connection's credentials, or fails with a `ConnectionCredentialsUnavailable`
+   * that says why not: `missing` for no such connection or an unregistered
+   * type, `switched-off` for a `disabled` one, and `needs-sign-in` for one
+   * that is `needs-reauth`. Reads only, so it never refreshes.
+   */
+  const readConnectionForUse = (
+    connectionId: string,
+  ): Effect.Effect<
+    { readonly row: StoredConnection; readonly type: RegisteredConnectionType },
+    ConnectionCredentialsUnavailable
+  > =>
+    Effect.gen(function* () {
+      const row = Option.getOrUndefined(yield* Effect.orDie(connections.one(connectionId)));
+      if (row === undefined) {
+        return yield* Effect.fail(
+          new ConnectionCredentialsUnavailable({
+            reason: "missing",
+            message: `there is no connection ${connectionId}`,
+          }),
+        );
+      }
+      const type = yield* findRegisteredType(row);
+      if (type === undefined) {
+        return yield* Effect.fail(
+          new ConnectionCredentialsUnavailable({
+            reason: "missing",
+            message: `no plugin in this build declares the connection type ${row.type}`,
+          }),
+        );
+      }
+      if (row.status === "disabled") {
+        return yield* Effect.fail(
+          new ConnectionCredentialsUnavailable({
+            reason: "switched-off",
+            message: `the connection '${row.label}' is disabled: enable it in Settings > Connections`,
+          }),
+        );
+      }
+      if (row.status === "needs-reauth") {
+        return yield* Effect.fail(
+          new ConnectionCredentialsUnavailable({
+            reason: "needs-sign-in",
+            message: `the connection '${row.label}' needs signing in again: reconnect it in Settings > Connections`,
+          }),
+        );
+      }
+      return { row, type };
+    });
+
+  /**
+   * Returns the credentials with their config and identity, ready for the
+   * core to use. Fails with `missing` when the connection's config does not
+   * fit its type's config schema, because the type changed since the config
+   * was written and the core cannot hand a caller a config it cannot trust.
+   */
+  const buildCredentialsForUse = (
+    row: StoredConnection,
+    type: RegisteredConnectionType,
+    credentials: Record<string, string>,
+  ): Effect.Effect<ConnectionCredentialsForUse, ConnectionCredentialsUnavailable> =>
+    Effect.gen(function* () {
+      const { configSchema } = type.contribution;
+      const config =
+        configSchema === undefined
+          ? row.config
+          : yield* Effect.mapError(
+              decodeAgainst(configSchema, row.config),
+              (error) =>
+                new ConnectionCredentialsUnavailable({
+                  reason: "missing",
+                  message: `the config of the connection '${row.label}' does not fit its type: ${error.message}`,
+                }),
+            );
+      return { credentials, config, identity: computeCredentialsIdentity(credentials) };
+    });
+
+  /** Converts a failed read of a token into the error the core's callers see. */
+  const toCredentialsUnavailable = (
+    error: ConnectionUnavailable | ProviderUnreachable,
+  ): ConnectionCredentialsUnavailable =>
+    new ConnectionCredentialsUnavailable({
+      reason: error._tag === "ProviderUnreachable" ? "unreachable" : "needs-sign-in",
+      message: error.message,
     });
 
   const runtimeFor = (pluginId: string): ConnectionsRuntime => {
@@ -511,6 +701,98 @@ const make = Effect.gen(function* () {
      * run outside any transaction: never call it inside `withTransaction`.
      */
     readFreshTokenSet,
+
+    /**
+     * Returns a Connection's credentials, config and identity for the core to
+     * call an outside server with. Unlike `runtimeFor(...).credentials`, it is
+     * not scoped to a plugin and keeps an unreachable provider apart from a
+     * refused refresh. OAuth tokens are refreshed first when they are stale,
+     * as `readFreshTokenSet` explains, and a refresh the provider refuses
+     * marks the Connection `needs-reauth`.
+     *
+     * Fails with a `ConnectionCredentialsUnavailable` whose `reason` is
+     * `needs-sign-in` (the Connection is `needs-reauth`, holds no credentials
+     * of a flow it needs, or the provider refused the refresh), `unreachable`
+     * (the provider could not be reached; the Connection is left alone),
+     * `switched-off` (the Connection is `disabled`) or `missing` (no such
+     * Connection, no registered type, or a config that no longer fits it).
+     *
+     * This may call the provider and write the Connection's status, so it must
+     * run outside any transaction.
+     */
+    readCredentialsForUse: (
+      connectionId: string,
+    ): Effect.Effect<ConnectionCredentialsForUse, ConnectionCredentialsUnavailable> =>
+      Effect.gen(function* () {
+        const { row, type } = yield* readConnectionForUse(connectionId);
+        const credentials = yield* retryWhenCredentialsReplaced(
+          readStoredCredentialsOrUnreachable(row),
+        ).pipe(Effect.mapError(toCredentialsUnavailable));
+        return yield* buildCredentialsForUse(row, type, credentials);
+      }),
+
+    /**
+     * Returns a Connection's credentials after an outside server answered 401
+     * to a request that carried the credentials with identity
+     * `rejectedIdentity`. It runs under the Connection's refresh permit, so
+     * callers that were rejected together refresh once between them:
+     *
+     * - when the stored credentials no longer have that identity, someone
+     *   refreshed or reconnected meanwhile, and it returns them as they are;
+     * - otherwise it refreshes the OAuth tokens now, even when they are not
+     *   stale, with the outcome rules of the stale refresh: a refusal marks the
+     *   Connection `needs-reauth` and fails with `needs-sign-in`, and an
+     *   unreachable provider leaves the Connection alone and fails with
+     *   `unreachable`.
+     *
+     * Fails with `ConnectionCannotRefresh`, and changes nothing, when the
+     * Connection holds pasted credentials and no OAuth tokens and they are the
+     * ones that were rejected. Fails with a `ConnectionCredentialsUnavailable`
+     * as `readCredentialsForUse` does.
+     *
+     * This may call the provider and write the Connection's status, so it must
+     * run outside any transaction.
+     */
+    refreshAfterRejection: (
+      connectionId: string,
+      rejectedIdentity: string,
+    ): Effect.Effect<
+      ConnectionCredentialsForUse,
+      ConnectionCredentialsUnavailable | ConnectionCannotRefresh
+    > =>
+      Effect.gen(function* () {
+        const { row, type } = yield* readConnectionForUse(connectionId);
+        const credentials = yield* retryWhenCredentialsReplaced(
+          Effect.gen(function* () {
+            const tokens = yield* Effect.orDie(
+              secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
+            );
+            if (Option.isSome(tokens)) {
+              // The gate is passed before the permit is taken, as in `readFreshTokenSet`.
+              const refreshed = yield* promotion.whenServing(
+                readOrCreateRefreshPermit(row.id).withPermits(1)(
+                  refreshTokens(row, type.contribution, rejectedIdentity),
+                ),
+              );
+              return { accessToken: refreshed.accessToken };
+            }
+            const pasted = yield* readStoredCredentialsOrUnreachable(row);
+            if (computeCredentialsIdentity(pasted) === rejectedIdentity) {
+              return yield* Effect.fail(
+                new ConnectionCannotRefresh({
+                  message: `the connection '${row.label}' holds pasted credentials, which cannot be refreshed: replace them in Settings > Connections`,
+                }),
+              );
+            }
+            return pasted;
+          }),
+        ).pipe(
+          Effect.mapError((error) =>
+            error._tag === "ConnectionCannotRefresh" ? error : toCredentialsUnavailable(error),
+          ),
+        );
+        return yield* buildCredentialsForUse(row, type, credentials);
+      }),
 
     /**
      * Returns a string that changes whenever the connection's credentials

@@ -5,12 +5,15 @@
  * with a device flow.
  */
 import { expect } from "vitest";
+import * as Effect from "effect/Effect";
+import type * as SqlClient from "effect/sql/SqlClient";
 import type {
   ActivationContext,
   ConnectionsRuntime,
   ExternalAccount,
   Plugin,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import { get } from "../http/testing";
 
 /** A connection as the API returns it. */
@@ -81,6 +84,38 @@ export const listConnections = async (
   const response = await get(base, "/api/v1/connections", token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
+};
+
+/** The time a test gives a Connection's `credentials_replaced_at` before it acts. */
+export const LONG_AGO = "2020-01-01T00:00:00.000Z";
+
+/**
+ * Sets `credentials_replaced_at` of every Connection in the database to
+ * `LONG_AGO`, so a later write to it is told apart from the one that created
+ * the Connection even within one millisecond.
+ */
+export const backdateCredentialsReplacedAt = (sql: SqlClient.SqlClient): Promise<void> =>
+  Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        sql,
+        Effect.asVoid(sql`UPDATE connections SET credentials_replaced_at = ${LONG_AGO}`),
+      ),
+    ),
+  );
+
+/** Reads `credentials_replaced_at` of the only Connection in the database. */
+export const readCredentialsReplacedAt = async (
+  sql: SqlClient.SqlClient,
+): Promise<string | null | undefined> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      sql<{ readonly credentials_replaced_at: string | null }>`
+        SELECT credentials_replaced_at FROM connections
+      `,
+    ),
+  );
+  return rows[0]?.credentials_replaced_at;
 };
 
 /**

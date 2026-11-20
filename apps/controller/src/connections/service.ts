@@ -197,6 +197,9 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   const steps = named.flatMap((each) =>
     each.kind === "step" ? [`${each.stepId} in the workflow ${each.workflowName}`] : [],
   );
+  const mcpServers = named.flatMap((each) =>
+    each.kind === "mcpServer" ? [`${each.mcpServerName} (${each.mcpServerId})`] : [],
+  );
   const parts: Array<string> = [];
   if (resources.length > 0) {
     parts.push(
@@ -214,6 +217,12 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
     parts.push(
       `workflow steps act through this connection: ${steps.join(", ")}; ` +
         "point those steps at another connection, or delete them, before deleting this one",
+    );
+  }
+  if (mcpServers.length > 0) {
+    parts.push(
+      `MCP servers call out with this connection's credentials: ${mcpServers.join(", ")}; ` +
+        "remove each server first with `hercule mcp-server delete <id>`, then delete this connection",
     );
   }
   return parts.join("; ");
@@ -804,6 +813,7 @@ const make = Effect.gen(function* () {
               status: "connected",
               statusDetail: null,
               warning: readAccountWarning(account),
+              credentialsReplacedAt: now,
             },
             now,
           );
@@ -1113,6 +1123,7 @@ const make = Effect.gen(function* () {
                 status: "connected",
                 statusDetail: null,
                 warning: readAccountWarning(account),
+                credentialsReplacedAt: at,
               },
               at,
             );
