@@ -7,22 +7,25 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { SessionActor } from "../actor";
-import { McpServerCalls, type ServedMcpServer } from "../mcp-servers";
+import { isServable, mcpServerCatalogue, type McpServerView } from "../mcp-servers";
 import { SessionTokens } from "../permissions";
 import { sessionRepository } from "../sessions";
-import { selectServed } from "./served";
+import { holdsMcpUse } from "./served";
 
 /** Builds the fresh database reads the gateway makes for a Session Token and its session. */
 export const makeFreshReads = Effect.gen(function* () {
   const tokens = yield* SessionTokens;
   const sessions = yield* sessionRepository;
-  const catalogue = yield* McpServerCalls;
+  const catalogue = yield* mcpServerCatalogue;
 
-  const readListedServers = (sessionId: string): Effect.Effect<ReadonlyArray<ServedMcpServer>> =>
-    Effect.orDie(
-      Effect.flatMap(sessions.readMcpServers(sessionId), (listed) =>
-        catalogue.readServedServers(listed.map((entry) => entry.mcpServerId)),
-      ),
+  /** Reads the ids of the servers in the session's own list. */
+  const readListedServerIds = (sessionId: string): Effect.Effect<ReadonlyArray<string>> =>
+    Effect.orDie(sessions.readMcpServerIds(sessionId));
+
+  /** Reads the servers of the session's list as the catalogue holds them now, served or not. */
+  const readListedViews = (sessionId: string): Effect.Effect<ReadonlyArray<McpServerView>> =>
+    Effect.flatMap(readListedServerIds(sessionId), (ids) =>
+      Effect.map(Effect.orDie(catalogue.readViews(ids)), (views) => [...views.values()]),
     );
 
   return {
@@ -30,17 +33,13 @@ export const makeFreshReads = Effect.gen(function* () {
     resolveActor: (tokenHash: string): Effect.Effect<Option.Option<SessionActor>> =>
       Effect.orDie(tokens.resolveUncached(tokenHash)),
 
-    /** Reads the ids of the servers in the session's own list. */
-    readListedServerIds: (sessionId: string): Effect.Effect<ReadonlyArray<string>> =>
-      Effect.map(Effect.orDie(sessions.readMcpServers(sessionId)), (listed) =>
-        listed.map((entry) => entry.mcpServerId),
-      ),
+    readListedServerIds,
+    readListedViews,
 
-    /** Reads the session's list of servers as the catalogue holds them now, served or not. */
-    readListedServers,
-
-    /** Reads the servers the session is served now. */
-    readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<ServedMcpServer>> =>
-      Effect.map(readListedServers(actor.sessionId), (records) => selectServed(records, actor)),
+    /** Reads the servers the session is served now: none without `mcp.use`. */
+    readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<McpServerView>> =>
+      holdsMcpUse(actor)
+        ? Effect.map(readListedViews(actor.sessionId), (views) => views.filter(isServable))
+        : Effect.succeed([]),
   };
 });

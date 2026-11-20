@@ -42,6 +42,7 @@ import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
 import { judgeDependencies, type McpServerDependencies } from "./catalogue";
+import { removeCredentialValues } from "./credential-values";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import { computeBackoffMillis, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
@@ -226,6 +227,11 @@ const make = Effect.gen(function* () {
           "error",
           `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
         );
+      case "not-serving":
+      case "refused":
+        // Only a caller that gives the refresh a guard gets these two, and a
+        // check gives none.
+        return buildFailedResult("error", "The refresh of the sign-in was refused");
       case "missing":
         return buildFailedResult("error", "The Connection of this server is missing");
       case "invalid-config":
@@ -257,7 +263,23 @@ const make = Effect.gen(function* () {
         const tools = yield* opened.client
           .listTools({ timeout: LIST_DEADLINE })
           .pipe(Effect.mapError(opened.describeFailure));
-        return { tools, revision: opened.revision };
+        // A server that echoes what it received, in a tool's description or
+        // schema, must not hand the Connection's token on to the harness.
+        // A tool whose name holds a credential value is left out instead: the
+        // name is what a call sends back to the server, so rewriting it would
+        // dispatch to another tool or to none.
+        const kept = tools.filter(
+          (tool) => removeCredentialValues(tool.name, opened.sentValues) === tool.name,
+        );
+        if (kept.length < tools.length) {
+          yield* Effect.logWarning(
+            `${contribution.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
+          );
+        }
+        return {
+          tools: removeCredentialValues(kept, opened.sentValues),
+          revision: opened.revision,
+        };
       }),
     ).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),

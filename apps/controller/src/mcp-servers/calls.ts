@@ -37,7 +37,6 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -57,20 +56,21 @@ import {
   type StoredConnection,
 } from "../connections";
 import { nowIso, RecordChanges } from "../db";
-import { Notifier } from "../notifications";
-import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import type { Notifier } from "../notifications";
+import type { PluginHost, RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
-import { removeCredentialValues } from "./credential-values";
-import { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from "./repository";
 import {
-  buildFailureEdit,
+  decideCallRefusal,
+  describeRefusal,
   isSameDependencies,
   judgeDependencies,
-  readDependencies,
-  writeServerState,
+  mcpServerCatalogue,
   type McpServerDependencies,
-  type StateBasis,
-} from "./state";
+  type ServerUnavailableReason,
+} from "./catalogue";
+import { removeCredentialValues } from "./credential-values";
+import type { StoredMcpServer, StoredMcpTool } from "./repository";
+import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
   createUpstreamCallState,
   CurrentUpstreamCall,
@@ -94,19 +94,6 @@ export class McpCallRefused extends Schema.TaggedError<McpCallRefused>()("McpCal
   message: Schema.String,
   controllerNotServing: Schema.optionalKey(Schema.Boolean),
 }) {}
-
-/**
- * A server as the gateway serves it: its record with the full tool
- * definitions, and whether it may be served now. `servable` is true when the
- * server is switched on, has a stored tool list (`checkedAt` is set), its
- * plugin is active, and its Connection exists and is not switched off. A server
- * that is servable but not `ready` is still served: its calls are refused with
- * its status (spec 21 section 3.3).
- */
-export interface ServedMcpServer {
-  readonly server: StoredMcpServer;
-  readonly servable: boolean;
-}
 
 /** What `callTool` takes. */
 export interface McpToolCall {
@@ -226,31 +213,15 @@ const CUT_OFF: CutOff = { _tag: "CutOff" };
 const buildErrorResult = (text: string): McpSchema.CallToolResult =>
   new McpSchema.CallToolResult({ content: [{ type: "text", text }], isError: true });
 
-/** Returns the line the agent reads for a refused call of the server named `name`. */
-const describeRefusal = (reason: McpServerWarningReason, name: string): string => {
-  switch (reason) {
-    case "switched-off":
-      return `${name} is switched off. Ask the user to switch it on in Settings.`;
-    case "checking":
-      return `${name} is still being checked. Try again in a minute.`;
-    case "needs-sign-in":
-      return `${name} needs sign-in. Ask the user to reconnect it in Settings > Connections.`;
-    case "unreachable":
-      return `${name} could not be reached. Try again later.`;
-    case "timed-out":
-      return `${name} did not answer in time. Try again later.`;
-    default:
-      return `${name} has an error. Ask the user to open it in Settings and check it.`;
-  }
-};
+/** Returns the line the agent reads when the server named `name` did not answer in time. */
+const buildTimedOutMessage = (name: string): string =>
+  `${name} did not answer in time. Try again later.`;
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const servers = yield* mcpServerRepository;
+  const catalogue = yield* mcpServerCatalogue;
+  const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const plugins = yield* PluginHost;
   const promotion = yield* PromotionState;
-  const notifier = yield* Notifier;
   const recordChanges = yield* RecordChanges;
   const httpClient = yield* HttpClient.HttpClient;
   const serviceScope = yield* Effect.scope;
@@ -277,33 +248,6 @@ const make = Effect.gen(function* () {
           }),
       ),
     );
-
-  const readDependenciesOf = (server: StoredMcpServer) =>
-    readDependencies(server).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql),
-      Effect.provideService(PluginHost, plugins),
-    );
-
-  const readServedServers = (ids: ReadonlyArray<string>) =>
-    Effect.gen(function* () {
-      const served: Array<ServedMcpServer> = [];
-      for (const id of ids) {
-        const found = yield* servers.readById(id);
-        if (Option.isNone(found)) continue;
-        const server = found.value;
-        const { plugin, connection } = yield* readDependenciesOf(server);
-        served.push({
-          server,
-          servable:
-            server.enabled &&
-            server.checkedAt !== null &&
-            plugin._tag === "active" &&
-            connection !== undefined &&
-            connection.status !== "disabled",
-        });
-      }
-      return served;
-    });
 
   // The upstream MCP sessions: Session Token hash, then server id.
   const slots = new Map<string, Map<string, UpstreamSlot>>();
@@ -468,32 +412,27 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Closes the upstream sessions of one server that no longer fit it: when it
-   * is deleted or switched off, or its `revision` or its Connection's
-   * `credentialsGeneration` moved since a session opened. Calls that still use
-   * a session finish with it first.
+   * Closes the upstream sessions of the given servers that no longer fit
+   * them: a server was deleted or switched off, or its `revision` or its
+   * Connection's `credentialsGeneration` moved since a session opened. Calls
+   * that still use a session finish with it first.
    */
-  const closeSessionsThatLostDestination = (serverId: string) =>
+  const closeSessionsThatLostDestination = (serverIds: ReadonlySet<string>) =>
     Effect.gen(function* () {
-      const open = [...slots.values()].flatMap((byServer) => {
-        const slot = byServer.get(serverId);
-        return slot === undefined ? [] : [slot];
-      });
-      if (open.length === 0) return;
-      const found = yield* servers.readById(serverId);
-      const connection = Option.isSome(found)
-        ? (yield* readDependenciesOf(found.value)).connection
-        : undefined;
-      for (const slot of open) {
-        const lost =
-          Option.isNone(found) ||
-          !found.value.enabled ||
-          found.value.revision !== slot.serverRevision ||
-          connection === undefined ||
-          connection.credentialsGeneration !== slot.credentialsGeneration;
-        if (!lost) continue;
-        forgetSlot(slot);
-        yield* closeWhenDone(slot);
+      const views = yield* catalogue.readViews([...serverIds]);
+      for (const byServer of [...slots.values()]) {
+        for (const slot of [...byServer.values()]) {
+          if (!serverIds.has(slot.serverId)) continue;
+          const view = views.get(slot.serverId);
+          const lost =
+            view === undefined ||
+            !view.server.enabled ||
+            view.server.revision !== slot.serverRevision ||
+            view.dependencies.connection?.credentialsGeneration !== slot.credentialsGeneration;
+          if (!lost) continue;
+          forgetSlot(slot);
+          yield* closeWhenDone(slot);
+        }
       }
     });
 
@@ -505,25 +444,21 @@ const make = Effect.gen(function* () {
   yield* Effect.forkIn(
     Effect.gen(function* () {
       while (true) {
-        const changedServers = new Set<string>();
-        const changedConnections = new Set<string>();
-        for (const change of yield* Queue.takeAll(changes)) {
-          (change.topic === "mcpServer" ? changedServers : changedConnections).add(change.id);
-        }
+        const pending = yield* changes.takePending;
+        const changed = new Set(pending.map((change) => change.id));
         const affected = new Set<string>();
         for (const byServer of slots.values()) {
           for (const slot of byServer.values()) {
-            if (changedServers.has(slot.serverId) || changedConnections.has(slot.connectionId)) {
+            if (changed.has(slot.serverId) || changed.has(slot.connectionId)) {
               affected.add(slot.serverId);
             }
           }
         }
-        for (const serverId of affected) {
-          yield* absorbFailures(
-            `Closing the upstream MCP sessions of MCP server ${serverId} after it changed`,
-            closeSessionsThatLostDestination(serverId),
-          );
-        }
+        if (affected.size === 0) continue;
+        yield* absorbFailures(
+          "Closing the upstream MCP sessions of the servers that changed",
+          closeSessionsThatLostDestination(affected),
+        );
       }
     }),
     serviceScope,
@@ -544,17 +479,13 @@ const make = Effect.gen(function* () {
       `Writing the status of MCP server ${server.id} after a call failed`,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        yield* writeServerState(
+        yield* state.writeCheckResult(
           server.id,
           basis,
           buildFailureEdit(server, { status, detail }, at),
           at,
         );
-      }).pipe(
-        Effect.provideService(SqlClient.SqlClient, sql),
-        Effect.provideService(Notifier, notifier),
-        Effect.provideService(PluginHost, plugins),
-      ),
+      }),
     );
 
   const buildNotServingRefusal = (message: string): McpCallRefused =>
@@ -572,59 +503,58 @@ const make = Effect.gen(function* () {
    */
   const runCall = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
     Effect.gen(function* () {
-      const refuse = (reason: McpServerWarningReason, name: string, message?: string) =>
+      const refuse = (
+        reason: ServerUnavailableReason | "timed-out",
+        name: string,
+        message?: string,
+      ) =>
         Effect.fail(
-          new McpCallRefused({ reason, message: message ?? describeRefusal(reason, name) }),
+          new McpCallRefused({
+            reason,
+            message:
+              message ??
+              (reason === "timed-out" ? buildTimedOutMessage(name) : describeRefusal(reason, name)),
+          }),
         );
 
       /**
        * Reads the server, its plugin and its Connection as they are now, and
-       * refuses unless the call may go to them: the server exists, is
-       * switched on and `ready`, its plugin and Connection can serve it, and
-       * it still lists the tool.
+       * refuses unless the call may go to them (`decideCallRefusal`) and the
+       * server still lists the tool.
        */
       const readDestination: Effect.Effect<Destination, McpCallRefused | SqlError> = Effect.gen(
         function* () {
-          const found = yield* servers.readById(input.serverId);
-          if (Option.isNone(found)) {
+          const view = (yield* catalogue.readViews([input.serverId])).get(input.serverId);
+          if (view === undefined) {
             return yield* refuse("error", "This server", "This MCP server no longer exists.");
           }
-          const server = found.value;
-          const name = server.name;
-          const dependencies = yield* readDependenciesOf(server);
-
-          if (!server.enabled) return yield* refuse("switched-off", name);
+          const { server, dependencies } = view;
+          const refusal = decideCallRefusal(view);
+          if (refusal !== null) return yield* new McpCallRefused(refusal);
           const judged = judgeDependencies(dependencies);
-          if (judged._tag === "unusable") {
-            return judged.status === "needs-sign-in"
-              ? yield* refuse("needs-sign-in", name)
-              : yield* refuse("error", name, `${name} is not available: ${judged.detail}.`);
+          if (judged._tag !== "usable") {
+            return yield* Effect.die(`MCP server ${server.id} is usable but has no plugin`);
           }
-          const { contribution, connection } = judged;
-          // Checked at use, because the credentials of a Connection of another
-          // type would go to this server's origin.
-          if (connection.type !== contribution.connectionType) {
-            return yield* refuse("error", name);
-          }
-          if (server.checkedAt === null || server.status === "checking") {
-            return yield* refuse("checking", name);
-          }
-          if (server.status !== "ready") return yield* refuse(server.status, name);
-
           const stored = server.tools.find((tool) => tool.name === input.tool);
           if (stored === undefined) {
-            return yield* refuse("error", name, "The server does not list this tool.");
+            return yield* refuse("error", server.name, "The server does not list this tool.");
           }
           const tool = yield* decodeTool(stored).pipe(
             Effect.mapError(
               () =>
                 new McpCallRefused({
                   reason: "error",
-                  message: describeRefusal("error", name),
+                  message: describeRefusal("error", server.name),
                 }),
             ),
           );
-          return { server, dependencies, contribution, connection, tool };
+          return {
+            server,
+            dependencies,
+            contribution: judged.contribution,
+            connection: judged.connection,
+            tool,
+          };
         },
       );
 
@@ -1070,7 +1000,7 @@ const make = Effect.gen(function* () {
         );
     });
 
-  return { readServedServers, callTool, closeUpstreamScope, closeUpstreamSession };
+  return { callTool, closeUpstreamScope, closeUpstreamSession };
 });
 
 /** The calls of the MCP Gateway to outside MCP servers. */

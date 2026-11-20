@@ -195,7 +195,7 @@ export interface CallRefusal {
 }
 
 /** Returns the line the agent reads when a call to the server named `name` is refused for `reason`. */
-const describeRefusal = (reason: ServerUnavailableReason, name: string): string => {
+export const describeRefusal = (reason: ServerUnavailableReason, name: string): string => {
   switch (reason) {
     case "switched-off":
       return `${name} is switched off. Ask the user to switch it on in Settings.`;

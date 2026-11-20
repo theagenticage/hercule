@@ -10,7 +10,6 @@ export {
   McpServerCalls,
   McpServerCallsLayer,
   type McpToolCall,
-  type ServedMcpServer,
 } from "./calls";
 export {
   decideCallRefusal,

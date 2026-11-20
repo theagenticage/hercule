@@ -14,7 +14,7 @@ import { absorbFailures } from "../absorbing";
 import { buildSessionStamp, type SessionActor } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { McpCallRefused, McpServerCalls } from "../mcp-servers";
+import { decideCallRefusal, isServable, McpCallRefused, McpServerCalls } from "../mcp-servers";
 import { PromotionState } from "../promotion";
 import { SessionService } from "../sessions";
 import type { JsonObject } from "./protocol";
@@ -22,7 +22,6 @@ import { makeFreshReads } from "./reads";
 import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
-  buildNotServedRefusal,
   buildRefusalWarning,
   buildToolGoneRefusal,
   buildUnknownToolRefusal,
@@ -30,7 +29,7 @@ import {
   type Refusal,
   type SeenWarning,
 } from "./refusals";
-import { holdsMcpUse, isServed } from "./served";
+import { holdsMcpUse } from "./served";
 import { notifyListChanged, type TokenState } from "./tokens";
 
 /** What a call turned out to be, before anything is sent. */
@@ -101,9 +100,9 @@ export const makeCallPolicy = Effect.gen(function* () {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
-      const records = yield* reads.readListedServers(actor.sessionId);
-      const listed = records.find(({ server }) => server.name === meaning.serverName);
-      if (listed === undefined) {
+      const views = yield* reads.readListedViews(actor.sessionId);
+      const view = views.find(({ server }) => server.name === meaning.serverName);
+      if (view === undefined) {
         return {
           _tag: "refused",
           refusal: buildNotInListRefusal(
@@ -113,9 +112,18 @@ export const makeCallPolicy = Effect.gen(function* () {
           ),
         };
       }
-      const { server } = listed;
-      if (!isServed(listed))
-        return { _tag: "refused", refusal: buildNotServedRefusal(server, meaning.tool) };
+      const { server } = view;
+      const unavailable = isServable(view) ? null : decideCallRefusal(view);
+      if (unavailable !== null) {
+        return {
+          _tag: "refused",
+          refusal: {
+            ...unavailable,
+            server: { id: server.id, name: server.name },
+            tool: meaning.tool,
+          },
+        };
+      }
       if (!server.tools.some((tool) => tool.name === meaning.tool)) {
         return { _tag: "refused", refusal: buildToolGoneRefusal(server, meaning.tool) };
       }

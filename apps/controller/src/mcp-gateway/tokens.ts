@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -302,9 +301,9 @@ export const makeTokenStates = Effect.gen(function* () {
    * change is lost.
    */
   const followChanges = Effect.gen(function* () {
-    const queue = yield* changes.subscribe(["session", "mcpServer", PROFILE_GRANTS_TOPIC]);
+    const subscription = yield* changes.subscribe(["session", "mcpServer", PROFILE_GRANTS_TOPIC]);
     while (true) {
-      const batch = yield* Queue.takeAll(queue);
+      const batch = yield* subscription.takePending;
       // A server or a profile can be in any session's list, so those changes
       // look at every token. A session change looks at that session's own.
       const everyToken = batch.some((change) => change.topic !== "session");

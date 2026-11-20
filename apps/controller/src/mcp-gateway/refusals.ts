@@ -83,40 +83,6 @@ export const buildToolGoneRefusal = (
   message: `The MCP server "${server.name}" no longer offers a tool named "${showToolName(toolName)}".`,
 });
 
-/**
- * Returns the refusal for a server that is in the list but may not be served:
- * it is switched off, it has no stored tool list yet, or its plugin or
- * Connection cannot be used.
- */
-export const buildNotServedRefusal = (server: StoredMcpServer, tool: string): Refusal => {
-  const named = { id: server.id, name: server.name };
-  if (!server.enabled) {
-    return {
-      reason: "switched-off",
-      server: named,
-      tool,
-      message: `The MCP server "${server.name}" is switched off. Ask the user to switch it on in Settings > MCP servers.`,
-    };
-  }
-  if (server.checkedAt === null) {
-    return {
-      reason: "checking",
-      server: named,
-      tool,
-      message: `The MCP server "${server.name}" has not listed its tools yet. Try again in a minute.`,
-    };
-  }
-  return {
-    reason: server.status === "ready" ? "error" : server.status,
-    server: named,
-    tool,
-    message:
-      `The MCP server "${server.name}" cannot be used right now` +
-      (server.statusDetail === null ? "." : `: ${server.statusDetail}`) +
-      " Ask the user to look at it in Settings > MCP servers.",
-  };
-};
-
 /** Returns the line the Thread shows for a refused call. */
 export const buildRefusalWarning = (refusal: Refusal): string =>
   `A tool call was refused. ${refusal.message}`;

@@ -1,10 +1,10 @@
 /**
- * Tests what the MCP Gateway asks of `McpServerCalls` - which servers it may
- * serve, a call of one tool, and ending a token's upstream sessions - against a
+ * Tests what the MCP Gateway asks of `McpServerCalls` - a call of one tool, and
+ * ending a token's upstream sessions - against a
  * real controller and a fake outside MCP server that speaks the protocol for
  * real:
  *
- * - which servers are servable, and what a refused call says for each reason;
+ * - what a refused call says for each reason;
  * - a call is answered, with the original tool name and the arguments;
  * - upstream MCP sessions: one per Session Token and server, shared by
  *   concurrent first calls, replaced when the server or its Connection's
@@ -158,70 +158,6 @@ const readRunningWork = (promotion: Rig["controller"]["harness"]["promotion"]) =
     Effect.map(Stream.runHead(promotion.gateChanges), (state) => Option.getOrThrow(state).running),
   );
 
-describe("which servers the gateway may serve", () => {
-  it("returns the servers that exist, in the order asked, and says which are servable", async () => {
-    await withReadyServer(async ({ controller, serverId }) => {
-      const { mcpServerCalls } = controller.harness;
-      const missing = "0199e0e7-0000-7000-8000-0000000000aa";
-
-      const served = await Effect.runPromise(
-        mcpServerCalls.readServedServers([missing, serverId, missing]),
-      );
-
-      expect(served).toHaveLength(1);
-      expect(served[0]).toMatchObject({
-        servable: true,
-        server: { id: serverId, status: "ready", enabled: true },
-      });
-      expect(served[0]?.server.tools.map((tool) => tool.name)).toEqual(
-        TOOLS.map((tool) => tool.name),
-      );
-    });
-  });
-
-  it.each([
-    ["the server is switched off", "UPDATE mcp_servers SET enabled = 0"],
-    ["it has no stored tool list", "UPDATE mcp_servers SET checked_at = NULL"],
-    ["its Connection is switched off", "UPDATE connections SET status = 'disabled'"],
-  ])("does not mark a server servable when %s", async (_name, statement) => {
-    await withReadyServer(async ({ controller, serverId }) => {
-      await runSql(controller, controller.harness.sql.unsafe(statement));
-
-      const served = await Effect.runPromise(
-        controller.harness.mcpServerCalls.readServedServers([serverId]),
-      );
-
-      expect(served.map((one) => one.servable)).toEqual([false]);
-    });
-  });
-
-  it("still marks a server servable when its Connection needs signing in, and refuses its calls", async () => {
-    await withReadyServer(async ({ controller, serverId, call, fake }) => {
-      await runSql(
-        controller,
-        controller.harness.sql`UPDATE connections SET status = 'needs-reauth'`,
-      );
-      await runSql(
-        controller,
-        controller.harness.sql`UPDATE mcp_servers SET status = 'needs-sign-in'`,
-      );
-      const before = fake.requests.length;
-
-      const served = await Effect.runPromise(
-        controller.harness.mcpServerCalls.readServedServers([serverId]),
-      );
-      const result = await call();
-
-      expect(served.map((one) => one.servable)).toEqual([true]);
-      expect(result).toMatchObject({
-        _tag: "Failure",
-        failure: { reason: "needs-sign-in" },
-      });
-      expect(fake.requests).toHaveLength(before);
-    });
-  });
-});
-
 describe("a refused call", () => {
   it.each(["checking", "needs-sign-in", "unreachable", "error"] as const)(
     "is refused with the status %s as the reason, without contacting the server",
@@ -237,6 +173,21 @@ describe("a refused call", () => {
       });
     },
   );
+
+  it("is refused as needs-sign-in when the server's Connection needs signing in, without contacting the server", async () => {
+    await withReadyServer(async ({ controller, fake, call }) => {
+      await runSql(
+        controller,
+        controller.harness.sql`UPDATE connections SET status = 'needs-reauth'`,
+      );
+      const before = fake.requests.length;
+
+      const result = await call();
+
+      expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "needs-sign-in" } });
+      expect(fake.requests).toHaveLength(before);
+    });
+  });
 
   it("is refused as switched off for a server that is switched off", async () => {
     await withReadyServer(async ({ controller, serverId, fake, call }) => {

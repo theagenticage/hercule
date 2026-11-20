@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import type { SessionActor } from "../actor";
-import type { ServedMcpServer, StoredMcpTool } from "../mcp-servers";
+import type { McpServerView, StoredMcpTool } from "../mcp-servers";
 import { buildInstructions } from "./instructions";
 import type { NameLedger, ToolKey } from "./tool-names";
 
@@ -26,25 +26,11 @@ export const holdsMcpUse = (actor: SessionActor): boolean =>
   actor.profileGrants.includes("mcp.use");
 
 /**
- * Returns whether the server is served: it is in the list the caller read, it
- * may be served now, and its tool list is stored. A server that is not `ready`
- * is still served, and a call to it is refused with the reason.
- */
-export const isServed = ({ server, servable }: ServedMcpServer): boolean =>
-  servable && server.enabled && server.checkedAt !== null;
-
-/** Returns the servers of the session's list that it is served now: none without `mcp.use`. */
-export const selectServed = (
-  records: ReadonlyArray<ServedMcpServer>,
-  actor: SessionActor,
-): ReadonlyArray<ServedMcpServer> => (holdsMcpUse(actor) ? records.filter(isServed) : []);
-
-/**
  * Builds the one-line instructions for the served servers. They name the
  * servers, or say why there are none. Needs no tool names.
  */
 export const buildServedInstructions = (
-  served: ReadonlyArray<ServedMcpServer>,
+  served: ReadonlyArray<McpServerView>,
   actor: SessionActor,
 ): string =>
   buildInstructions(
@@ -58,7 +44,7 @@ export const buildServedInstructions = (
  * Pure: the caller records the names in the ledger once it has sent them.
  */
 export const projectTools = (
-  served: ReadonlyArray<ServedMcpServer>,
+  served: ReadonlyArray<McpServerView>,
   ledger: NameLedger,
 ): { readonly tools: ReadonlyArray<ServedTool>; readonly leftOut: ReadonlyArray<ToolKey> } => {
   const { named, leftOut } = ledger.allocate(
@@ -87,7 +73,7 @@ export const projectTools = (
  * `list_changed` when its last fingerprint differs from the current one.
  */
 export const fingerprintServed = (
-  served: ReadonlyArray<ServedMcpServer>,
+  served: ReadonlyArray<McpServerView>,
   actor: SessionActor,
   ledger: NameLedger,
 ): string =>
