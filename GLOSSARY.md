@@ -528,7 +528,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 _Avoid_: tool server, connector, integration. Not the MCP Gateway.
 
 **MCP Gateway**:
-*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The controller's one MCP endpoint, `<controller>/mcp`, that every session's harness is given as its one MCP server, with the session's own Session Token. It answers with the tools of the session's MCP Servers and forwards each call with a credential the controller holds, so no vendor token reaches a runner.
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The controller's one MCP endpoint, `<controller>/mcp`, that the harness of every session on a runner and harness that support it is given as its one MCP server, with the session's own Session Token. It answers with the tools of the session's MCP Servers and forwards each call with a credential the controller holds, so no vendor token reaches a runner.
 _Avoid_: proxy, bridge. Not an MCP Server (a record it serves from).
 
 ### Automation

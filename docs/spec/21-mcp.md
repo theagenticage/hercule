@@ -2,7 +2,7 @@
 
 *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207); [ADR 0059](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md). First build: [#1208](https://github.com/theagenticage/hercule/issues/1208).)*
 
-An **MCP Server** is a record on the controller: a remote server that offers tools to sessions, and what it is reached with. The **MCP Gateway** is the controller's one MCP endpoint. Every session's harness is given the gateway as its one MCP server, with the session's own Session Token. The gateway lists the tools of the MCP Servers in that session's list and forwards each call with a credential the controller holds. No vendor token reaches a runner.
+An **MCP Server** is a record on the controller: a remote server that offers tools to sessions. The record stores the server's source and how the controller signs in to it. The **MCP Gateway** is the controller's one MCP endpoint. Every session on a runner and harness that support it is given the gateway as its one MCP server, with the session's own Session Token. The gateway lists the tools of the MCP Servers in that session's list and forwards each call with a credential the controller holds. No vendor token reaches a runner.
 
 This is the "agent-tools extension point" that [./01-overview-and-scope.md](./01-overview-and-scope.md) and [./05-plugins.md](./05-plugins.md) deferred, for MCP servers. Skills stay deferred.
 
@@ -10,7 +10,7 @@ This document owns the behaviour of the catalogue and the gateway: how a server 
 
 - the record's fields, the `Project`, `Session` and setting fields that name servers, and the `McpServerLeftOutReason` enum: [./02-domain-model.md](./02-domain-model.md#mcp-server);
 - the plugin side (`registerMcpServer`, `McpServerContribution`, the `mcp-servers` capability): [./05-plugins.md](./05-plugins.md);
-- `SessionSpec.mcpServers`, the harness capability `mcpPassthrough`, the adapter mappings and how a gateway call reads in the event stream: [./06-providers.md](./06-providers.md#4-harnessadapter);
+- `SessionSpec.mcpServers`, the harness capability `mcpPassthrough`, the adapter mappings, how a gateway call reads in the event stream and the shape of the `runtime.warning` that names MCP Servers: [./06-providers.md](./06-providers.md#4-harnessadapter);
 - the operations, their CLI rows, the `mcpServer` live topic and the gateway route as a transport: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md);
 - the grant family `mcp`, the shipped profiles, the secrets table and its owners, and the audit entry: [./13-security.md](./13-security.md);
 - the screens: [./14-web-app.md](./14-web-app.md) and [./17-desktop-app.md](./17-desktop-app.md).
@@ -22,7 +22,7 @@ Terms are [GLOSSARY.md](../../GLOSSARY.md)'s: **MCP Server**, **MCP Gateway**, *
 ### 1.1 The idea
 
 - A server is set up once, on the controller. It is a plugin's server, reached with the plugin's Connection, or a server the user added by URL, reached with its own sign-in.
-- A session's harness is given one MCP server: the gateway, at the fixed address `<controller>/mcp`, with the session's Session Token as bearer. Every session on every runner gets the same address.
+- A session's harness is given one MCP server: the gateway, at the fixed address `<controller>/mcp`, with the session's Session Token as bearer. Every session on a runner and harness that support it gets the same address.
 - The gateway knows the session from the token. It lists the tools of the servers in that session's own list, each tool named `<server name>__<tool>`, from lists the controller stored.
 - A call goes to the gateway. The gateway checks the grant and the list, takes a fresh credential, sends the call to the server and returns the answer.
 - A session's list can change while it runs, because the address stays the same and the gateway answers from the list as it is now ([section 3.7](#37-list-changes)).
@@ -36,21 +36,21 @@ Two new controller domains, one new route.
 | Piece | Owns |
 |---|---|
 | `mcp-servers` (domain) | The catalogue. The MCP Server records and their stored tool lists. The status of a server and how it is checked. The upstream MCP client. The sign-in of a server added by URL. The `mcpServer` operations |
-| `mcp-gateway` (domain) | The session-facing side. Who is calling. The `mcp.use` check. The session's served list. The protocol. Open streams and `notifications/tools/list_changed`. Refusal lines on the thread. The audit entry for a call |
+| `mcp-gateway` (domain) | The session-facing side. Session Token authentication. The `mcp.use` check. The session's served list. The protocol. Open streams and `notifications/tools/list_changed`. Refusal lines on the Thread. The audit entry for a call |
 | `http/mcp.ts` (route) | `POST /mcp`, `GET /mcp` and `DELETE /mcp`, beside `/api/v1`. It resolves the bearer and hands the request to `mcp-gateway` in one line. It is not derived from the contract ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)) |
 
-`mcp-servers` knows nothing about projects or threads. The gateway is a domain of its own, and not part of `mcp-servers`, because it needs a session's list and writes to a session's stream. It is not part of `sessions` because it is a protocol endpoint with its own state (open streams) and its own tests.
+`mcp-servers` knows nothing about Projects or Threads. The gateway is a domain of its own, and not part of `mcp-servers`, because it needs a session's list and writes to a session's stream. It is not part of `sessions` because it is a protocol endpoint with its own state (open streams) and its own tests.
 
 ### 1.3 The domain graph
 
 The controller's domains form a DAG, checked by `pnpm dep-lint` with no allowlist of edges ([ADR 0033](../adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md)). The new edges:
 
 - `projects`, `sessions`, `settings` and `mcp-gateway` import `mcp-servers`. `mcp-servers` imports none of them. A list of server ids is validated against the catalogue by the domain that holds the list.
-- `mcp-gateway` imports `sessions`, to read a session's list and to write a line on its thread. `sessions` never imports `mcp-gateway`.
-- `mcp-servers` imports `connections`, `secrets`, `plugins` and `notifications`. `connections` never imports `mcp-servers`. Two things cross that boundary the other way, by the two seams `connections` already has:
-  - **A Connection's status change** reaches `mcp-servers` through the Connection observer (`connections/observer.ts`), which the controller daemon implements at boot. The observer gains a report of a status change. A Connection that needs sign-in moves its servers to `needs-sign-in`, and a reconnect makes them list again ([section 5.3](#53-status)).
+- `mcp-gateway` imports `sessions`, to read a session's list and to write a line on its Thread. `sessions` never imports `mcp-gateway`.
+- `mcp-servers` imports `connections`, `secrets`, `plugins` and `notifications`. `connections` never imports `mcp-servers`. Two things cross that boundary the other way:
+  - **A Connection's status and credential changes** are published by `connections` after the commit, and `mcp-servers` subscribes to them at boot. A slow or failed subscriber never touches the change that is already committed. A Connection that needs sign-in moves its servers to `needs-sign-in`, and a reconnect makes them list again ([section 5.3](#53-status)).
   - **Deleting a Connection** is guarded through `ConnectionReferences` (`connections/references.ts`). It gains a `ConnectionReference` kind, `mcpServer`. The controller daemon provides it from `mcp-servers`, as it does for resources and workflows. A delete is refused while a server uses the Connection, with a message to remove the server first.
-- The start of a session (the shared path where the start is claimed and the frame is built) is in the controller daemon, which may import both `sessions` and `mcp-servers`. It records which servers a start left out ([section 3.8](#38-left-out-at-the-last-start)).
+- The start of a session is claimed and its frame is built in the `sessions` domain (`sessions/service.ts`), which imports `mcp-servers`. The record of which servers a start left out is written there, in the claim's transaction ([section 3.8](#38-left-out-at-the-last-start)). The gateway entry is added to the frame's `SessionSpec` when each start's frame is built, from the runner's capabilities and the harness. It is not read from an older stored spec ([./06-providers.md](./06-providers.md#4-harnessadapter)).
 
 The gateway hears of each change that alters what a session is served ([section 3.7](#37-list-changes)) after its commit. The means is an implementer's choice. The `mcpServer` live topic and the session topic announce the same changes to clients.
 
@@ -91,15 +91,15 @@ Two servers may share a name: work and hobby Sentry are both `sentry`. One list 
 ### 2.3 One server per address and account
 
 - **A plugin server:** one per contribution and external account. The account is the Connection's `accountId` ([./08-events-and-connections.md](./08-events-and-connections.md#81-record)), not its id. A second is refused `conflict`, and the message names the existing server.
-- **A URL server:** one per normalized URL in v1. A second account at the same URL is refused `conflict`.
+- **A URL server:** one per normalized URL in v1. A second account at the same URL is refused `conflict`. A normalized URL has the scheme and host in lower case, the default port dropped and a trailing `/` dropped. The path and the query are kept.
 
   **Open:** two accounts at one URL. The controller cannot know the external account behind a pasted token or a sign-in, so v1 refuses a second server at one URL. [#1218](https://github.com/theagenticage/hercule/issues/1218) decides how; Rogier made it a required follow-up.
 - **A URL on a plugin's origin:** adding by URL an address on the `origin` of a plugin's contribution (any URL on `https://mcp.sentry.dev`) is refused `conflict`. The message points at that Connection's row in Settings > MCP servers.
-- **Replace.** When the user switches on a plugin's server and a URL server on that contribution's origin exists, the client offers "Replace". Replace is `mcpServer.update { source: { kind: "plugin", ... } }` on the URL server. The record keeps its id, its name and every list that names it. It moves to the plugin's Connection, and its own sign-in secrets are deleted. ([#1210](https://github.com/theagenticage/hercule/issues/1210).)
+- **Replace.** When the user switches on a plugin's server and a URL server on that contribution's origin exists, the client offers "Replace". Replace is `mcpServer.update { source: { kind: "plugin", ... } }` on the URL server. The record keeps its id, its name and every list that names it. It moves to the plugin's Connection, and its own sign-in secrets are deleted. When several URL servers sit on the plugin's origin, the Replace dialog lets the user pick one. Replace closes the server's upstream MCP sessions ([section 3.10](#310-upstream-sessions)). ([#1210](https://github.com/theagenticage/hercule/issues/1210).)
 
 ### 2.4 What deleting does
 
-Deleting an MCP Server removes it from every project's list, every session's list and the default list. (The default list drops ids it does not know when it is read.) Sessions that are running get `notifications/tools/list_changed` ([section 3.7](#37-list-changes)).
+Deleting an MCP Server removes it from every project's list and every session's list. The default list is not rewritten: it drops ids it does not know when it is read. Sessions that are running get `notifications/tools/list_changed` ([section 3.7](#37-list-changes)).
 
 Deleting a Connection that an MCP Server uses is refused ([section 1.3](#13-the-domain-graph)).
 
@@ -111,9 +111,14 @@ The route is `POST /mcp`, `GET /mcp` and `DELETE /mcp` on the controller. It is 
 
 - **Only a Session Token.** The route resolves the bearer as a Session Token itself. A user credential, an API key, a missing token and the token of an ended session all get HTTP 401. The `WWW-Authenticate` header carries no `resource_metadata`, so no harness starts an OAuth sign-in. The token is never logged.
 - **No browsers.** A request with an `Origin` header is refused 403.
-- **The promotion gate.** The route passes it like other session calls.
+- **Frozen or sealed controller.** The Origin check and the gates sit in the controller's request handling, before the MCP layer. While the controller is frozen or sealed, the gateway sends nothing upstream and starts no check:
+  - a `tools/call` is refused with the gate's error;
+  - `tools/list` still answers from the stored lists;
+  - a call already sent may finish;
+  - scheduled checks and refresh writes wait for the phase to end.
 - **Streams end** when the session ends, when the controller freezes or seals, and at shutdown.
-- **The grant.** Every call needs `mcp.use` in the session's profile ([./13-security.md](./13-security.md#61-grant-families)). `mcp.use` alone allows acting through the server's Connection. `connection.use` is not also required, because the user put that server on that thread.
+- **An `Mcp-Session-Id` belongs to one token.** An `Mcp-Session-Id` the gateway issues is bound to the Session Token it was created with. A request that names it with any other token gets 404. `DELETE` ends that MCP session only, never the Thread or its token. A resume mints a new token, so the old token's streams end with it.
+- **The grant.** Every call needs `mcp.use` in the session's profile ([./13-security.md](./13-security.md#61-grant-families)). `mcp.use` alone allows acting through the server's Connection. `connection.use` is not also required, because the user put that server on that Thread.
 - **The list.** A call is allowed only for a server in the session's own list ([section 3.5](#35-a-call)).
 
 **A direct call is like the CLI.** The harness is given the Session Token, and so is the agent's shell. An agent can send a call to the gateway with `curl`, and then the harness's approval card is not shown. That command is itself under the Access Mode. So the controller's guard on a call is `mcp.use` plus the session's list. The Access Mode guards the harness's tool calls as for every other tool. The gateway has no approval mechanism of its own.
@@ -124,16 +129,18 @@ The route is `POST /mcp`, `GET /mcp` and `DELETE /mcp` on the controller. It is 
 
 ### 3.2 Protocol revisions and what is spoken
 
-The gateway speaks every revision that Effect 4.0.7 implements: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` and `2026-07-28`. That covers both handshakes:
+Towards sessions, the gateway serves two protocol eras:
 
-- the older one: `initialize`, the `Mcp-Session-Id` header, the GET stream and DELETE;
-- the stateless 2026-07-28 one: `server/discover` and `subscriptions/listen`.
+- the Streamable HTTP transport of `2025-03-26`, `2025-06-18` and `2025-11-25`: `initialize`, the `Mcp-Session-Id` header, the GET stream and DELETE;
+- the stateless `2026-07-28`: `server/discover` and `subscriptions/listen`.
 
-Effect picks one per client from its first message. No harness capability is needed. Claude Code 2.1.329 sends the new handshake first. Codex and pi send the old one.
+`2024-11-05`, the old two-endpoint HTTP+SSE transport, is not offered. Where Effect's HTTP layer lacks a part, the gateway's route supplies it on Effect's protocol modules. Effect 4.0.7 has no GET stream and answers GET with 405, so the route supplies the GET stream. The era is chosen per client from its first message. No harness capability is needed.
+
+Claude Code 2.1.329 tries modern discovery first and then falls back to the older handshake. Codex and pi use the older one. That Claude Code works on the modern path is verified at build time ([section 3.11](#311-build-time-verifications)).
 
 Only tools: `tools/list` and `tools/call`. There are no resources, no prompts and no completions. A server's sampling or elicitation request is answered "not supported".
 
-The `instructions` of the server are one first line of at most 250 characters that names the servers inside, because Codex shows the model that line and no tool names.
+The `instructions` of the server are one first line that names the servers inside, because Codex shows the model that line and no tool names. The names are in a fixed order (by server name), and the line is cut at 250 characters.
 
 ### 3.3 What a session sees
 
@@ -152,16 +159,16 @@ A tool is named `<server name>__<tool name>`. The harness puts the gateway's own
 
 - The tool's own name is normalized to `[A-Za-z0-9_]`. Other characters become `_`.
 - If `mcp__tools__` (12 characters) plus the full name passes 64 characters, the tool part is cut. It ends in `_` plus 6 hex characters of a hash of the original name. 64 is pi's limit. Claude Code drops a tool above 128.
-- Uniqueness is checked over the whole list a session is sent. A clash also gets a hash suffix.
-- The gateway maps every name it sends back to the server and the original tool name.
+- Uniqueness is checked over the whole list a session is sent. Names are given in a fixed order: by server name, then by the tool's original name. A clash gets a suffix, `_` plus 6 hex characters of a hash of the server's name and the original tool name. A second clash leaves the tool out, and the gateway writes that to the controller's log.
+- The gateway maps every name it sends back to the server's name and the original tool name. Within one Session Token, a name the gateway has sent keeps its meaning: a later change to the list never gives it to another tool. Which server of that name it reaches is the one the list holds when the call is dispatched ([section 3.5](#35-a-call)).
 
 ### 3.5 A call
 
-1. The name must map to a tool in the stored list of a server the session is served ([section 3.3](#33-what-a-session-sees)). Anything else is refused without contacting a server.
+1. The name must map to a tool in the stored list of a server the session is served ([section 3.3](#33-what-a-session-sees)). A call goes to the server that the session's list holds when the call is dispatched. Anything else is refused without contacting a server.
 2. The session's profile must hold `mcp.use`.
 3. The server must be `ready`. Else the call is refused with the reason.
 4. The gateway takes a fresh credential ([section 5.1](#51-a-plugin-servers-credential)), sends the call upstream ([section 3.10](#310-upstream-sessions)) and returns the server's answer.
-5. A call with no answer within 60 seconds is refused as a timeout.
+5. A call with no answer within 60 seconds is refused as a timeout. The 60 seconds cover the whole call: opening the upstream MCP session, the refresh, the retry and the tool.
 
 Answers have a size cap. Its size is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
 
@@ -178,7 +185,7 @@ A call is refused when:
 What happens:
 
 - **The agent** gets a tool result with `isError: true` and a message that says what the user can do: "Sentry (work) needs sign-in. Ask the user to reconnect it in Settings > Connections."
-- **The thread** gets a `runtime.warning` line, at most once per server and reason in a turn. The warning carries the server's id and the reason, so the apps draw a button that fixes it: "Reconnect <Connection>", "Sign in…" or "Open server" ([./14-web-app.md](./14-web-app.md), [./17-desktop-app.md](./17-desktop-app.md)).
+- **The Thread** gets a `runtime.warning` line, at most once per server and reason in a turn, or once per minute outside a turn. The warning's optional field `mcpServers` is an array of `{ mcpServerId, reason }` ([./06-providers.md](./06-providers.md#4-harnessadapter)), so one line can name several servers and each gets its own button that fixes it: "Reconnect <Connection>", "Sign in…" or "Open server" ([./14-web-app.md](./14-web-app.md), [./17-desktop-app.md](./17-desktop-app.md)). A client draws no button when the server no longer exists or the reason has no fix.
 - **The audit log** gets the entry of [section 3.9](#39-audit).
 
 Three kinds of failure stay apart:
@@ -195,9 +202,10 @@ After the commit of any change that alters what a session is served, the gateway
 
 - the session's list changed (`session.update`);
 - a server was switched on or off, or deleted;
-- a server has a new stored tool list.
+- a server has a new stored tool list;
+- the session's profile gained or lost `mcp.use`. The next `tools/list` answers by the new grant.
 
-A harness lists again when it opens its stream, so a change before that is not missed.
+The gateway also sends `list_changed` once when a stream opens, so a change between a session's first list and its stream is not missed.
 
 What each harness does with it:
 
@@ -208,26 +216,29 @@ What each harness does with it:
 
 ### 3.8 Left out at the last start
 
-At every start of a session, the controller records for each server in the session's list whether it can be called at that start and, if not, the `McpServerLeftOutReason` ([./02-domain-model.md](./02-domain-model.md#mcp-server)). A start is the shared path where the start is claimed and the frame is built, so a resume records it too. A server is left out when it cannot be called at that start:
+At every start of a session, the controller records for each server in the session's list whether it can be called at that start and, if not, the `McpServerLeftOutReason` ([./02-domain-model.md](./02-domain-model.md#mcp-server)). A start is the claim and the frame it builds ([section 1.3](#13-the-domain-graph)), so a resume records it too. `leftOut` is written only at a start. An entry added since keeps `null`, and a client reads `null` as "not checked at a start yet". A server is left out when it cannot be called at that start:
 
 | Reason | When |
 |---|---|
+| `runner-too-old` | the runner lacks the `mcpServers` capability |
+| `harness-unsupported` | the harness's `mcpPassthrough` is `unsupported` |
+| `missing-grant` | the session's profile lacks `mcp.use` |
 | `switched-off` | `enabled` is false |
 | `checking` | its first list has not ended |
 | `needs-sign-in`, `unreachable`, `error` | its status at the start |
-| `runner-too-old` | the runner lacks the `mcpServers` capability |
-| `harness-unsupported` | the harness's `mcpPassthrough` is `unsupported` |
 
-The controller writes one `runtime.warning` for the servers left out. It names each with its reason and fix.
+The rows are in the order of precedence. When several reasons apply to one server, the first one in this table is the one recorded.
 
-This record is a diagnostic. It is never changed while the session runs. What the gateway serves is decided by the live rule ([section 3.3](#33-what-a-session-sees)). So a server that was `needs-sign-in` at the start but has a stored list is listed, and a call to it is refused with the reason, until it is `ready` again. A server left out because it had no stored list yet is listed as soon as it has one (`list_changed`), and one left out because it was not `ready` can be called as soon as it is.
+The controller writes one `runtime.warning` for the servers left out, with the field `mcpServers` naming each server and its reason ([section 3.6](#36-a-refused-call)).
+
+This record is a diagnostic. It is never changed while the session runs. The reasons `runner-too-old` and `harness-unsupported` describe delivery only: the gateway still answers a live Session Token by the live rule ([section 3.3](#33-what-a-session-sees)). So a server that was `needs-sign-in` at the start but has a stored list is listed, and a call to it is refused with the reason, until it is `ready` again. A server left out because it had no stored list yet is listed as soon as it has one (`list_changed`), and one left out because it was not `ready` can be called as soon as it is.
 
 ### 3.9 Audit
 
 The gateway writes one audit entry per `tools/call`. Its home is [./13-security.md](./13-security.md#11-audit). It holds:
 
 - the actor and the session;
-- the MCP Server and the tool's original name;
+- the MCP Server and the tool's original name, both empty when the call named none (an unknown tool name, a missing grant);
 - the outcome: answered, refused with a reason, or failed;
 - the duration.
 
@@ -235,15 +246,24 @@ It never holds the arguments or the result.
 
 ### 3.10 Upstream sessions
 
-The gateway speaks to each server in the revision that Effect's client negotiates with it.
+Towards servers, the gateway tries `2026-07-28` first and falls back to the older handshake by MCP's versioning rules. It remembers per server what worked.
 
-- A server on the older handshake gets one MCP session per Hercule session and server. It is opened at that session's first call to that server and closed when the session ends. So a server that keeps state per MCP session never mixes two threads.
+- **Scope.** An upstream MCP session belongs to one Session Token (one harness incarnation) and one server. So a server that keeps state per MCP session never mixes two Threads, and a resume starts with fresh remote state.
+- **Opening and closing.** Its first call opens it. Concurrent first calls share one opening. It closes when the token ends, or when the server is switched off, deleted or replaced.
+- **A destination that is lost.** Replace, a swap of accounts in a list, switching off and deleting close every upstream MCP session of the server that lost the destination. The next call opens a new one with the new credential. A swap is the user's explicit act in the composer, so a name stays valid: a call goes to the server the list holds when the call is dispatched ([section 3.5](#35-a-call)).
+- **A check** uses a short-lived connection of its own.
+- **The credential is per request.** Every request upstream carries the credential current when it is sent, and an upstream MCP session survives a credential refresh. If Effect's client fixes its headers when it is built, the gateway gives it a transport that adds the credential per request.
+- **An expired upstream MCP session.** When the server answers 404 for an MCP session that has expired, the gateway opens a new upstream session and sends the call once more, because a 404 for an unknown session means the call did not run. Nothing else is ever sent twice when it may have run.
 - A stateless server needs nothing kept.
 - The gateway keeps no open connection to an outside server and does not listen for its own `list_changed` in v1. A changed list is found by the checks of [section 5.4](#54-when-a-server-is-listed).
 
 ### 3.11 Build-time verifications
 
-**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules. [#1208](https://github.com/theagenticage/hercule/issues/1208).
+**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules, as it does for the GET stream ([section 3.2](#32-protocol-revisions-and-what-is-spoken)). [#1208](https://github.com/theagenticage/hercule/issues/1208).
+
+**Verify at build time:** that each adapter works on the wire paths the gateway serves, with the real harness: Claude Code on the modern path (`server/discover`, `subscriptions/listen`) and on the older one, Codex and pi on the older one. Claude Code's probe showed that it tries modern discovery first and then falls back. That it works on the modern path, and sees `list_changed` there, is not proven. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
+
+**Verify at build time:** that Effect's MCP client keeps an upstream MCP session across a credential refresh when the credential is supplied per request ([section 3.10](#310-upstream-sessions)). If it cannot, the gateway writes the transport. [#1208](https://github.com/theagenticage/hercule/issues/1208).
 
 **Verify at build time:** that each harness opens a new MCP session after a 404 when the controller restarted, on the older handshake. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
 
@@ -255,13 +275,20 @@ Facts behind these, from the exploration: [how each harness caches and re-reads 
 
 Three lists name servers. The fields are in [./02-domain-model.md](./02-domain-model.md).
 
-- **A Project's `mcpServerIds`:** what a new thread in the project starts with. It is a default only. Changing it never touches threads that exist.
+- **A Project's `mcpServerIds`:** what a new Thread in the project starts with. It is a default only. Changing it never touches Threads that exist.
 - **The setting `thread.mcpServerIds`:** what a Thread with no project starts with. Unset or empty means no servers.
-- **A Session's `mcpServers`:** the session's own list. Each entry holds the server's id and name, and whether the last start left it out and why ([section 3.8](#38-left-out-at-the-last-start)). Changing a thread's list never touches its project.
+- **A Session's `mcpServers`:** the session's own list. Each entry holds the server's id and name, and whether the last start left it out and why ([section 3.8](#38-left-out-at-the-last-start)). Changing a Thread's list never touches its project.
 
 Every session kind has the field. Only a Thread's can be non-empty in v1. An Agent's session, a workflow step and an assistant's session have an empty list until [#222](https://github.com/theagenticage/hercule/issues/222).
 
-No list may hold two servers with the same name. The write is refused `validation`, and the message names both.
+A list write is refused `validation` when:
+
+- it holds two servers with the same name (the message names both);
+- it names an id that is unknown or was deleted;
+- it names one id twice;
+- it is `mcpServerIds` on a `session.spawn` with `agentId`, until [#222](https://github.com/theagenticage/hercule/issues/222).
+
+The default list is not rewritten when a server is deleted. It drops ids it does not know when it is read.
 
 ### 4.2 Who sets a list
 
@@ -272,12 +299,12 @@ Every list write needs the grant `mcp.manage`, checked inside the operation in a
 - `session.update` with `mcpServerIds`;
 - `settings.update` of `thread.mcpServerIds`, which only the user can call already.
 
-`mcp.manage` is a grant only the user gives, like `skill.write` and `skill.apply`. The `unrestricted` profile leaves it out. An MCP Server reaches an outside account, and its tool descriptions steer every thread that has it. The family, the shipped profiles and the migration are in [./13-security.md](./13-security.md#61-grant-families).
+`mcp.manage` is a grant only the user gives, like `skill.write` and `skill.apply`. The `unrestricted` profile leaves it out. A session holds it only when the user put it on the session's profile or approved a Permission Request for it. A session that holds it may write lists like the user, including an explicit list on `session.spawn`. An MCP Server reaches an outside account, and its tool descriptions steer every Thread that has it. The family, the shipped profiles and the migration are in [./13-security.md](./13-security.md#61-grant-families).
 
 ### 4.3 What a new session starts with
 
-- **A Thread the user starts:** the spawn's `mcpServerIds` if given. An explicit empty list is kept as empty. Else its project's list. Else the setting `thread.mcpServerIds`. On the Draft Thread the composer shows the list the thread will start with, and the user changes it there.
-- **A Thread a session starts, and a fork a session makes (`session.continue`):** a copy of the calling session's own list. A session never gives a thread more servers than it has.
+- **A Thread the user starts:** the spawn's `mcpServerIds` if given. An explicit empty list is kept as empty. Else its project's list. Else the setting `thread.mcpServerIds`. On the Draft Thread the composer shows the list the Thread will start with, and the user changes it there. A Draft Thread sends `mcpServerIds` only when the user changed the list.
+- **A Thread a session starts, and a fork a session makes (`session.continue`):** a copy of the calling session's own list, when the call has no `mcpServerIds`. A session that holds `mcp.manage` may give an explicit list ([section 4.2](#42-who-sets-a-list)).
 - **A fork the user makes:** a copy of its parent's list.
 - **An Agent's session, a workflow step, an assistant's session:** an empty list until #222.
 
@@ -287,9 +314,9 @@ Every list write needs the grant `mcp.manage`, checked inside the operation in a
 
 [./06-providers.md](./06-providers.md#4-harnessadapter) owns `SessionSpec.mcpServers` and the adapters. In short:
 
-- Every session gets one entry, the gateway's, named `tools`, when its runner lists the capability `mcpServers` and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
+- Every session on a runner and harness that support it gets one entry, the gateway's, named `tools`: its runner lists the capability `mcpServers` and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
 - The cost is one idle connection per session to the controller. Codex also shows the model one line about the server.
-- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212).
+- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212).
 - Tool search is the harness's own. The gateway offers no search tool.
 
 ## 5. Credentials and status
@@ -300,7 +327,9 @@ A plugin server is reached with its Connection's credential, fresh: the existing
 
 On an HTTP 401 from the server, before the tool ran, if the token sent is still the stored one, the gateway asks `connections` to refresh now and retries once. If a newer token is already stored, it uses that. It never refreshes on a timeout and never on a tool error. Then:
 
-- **The refresh fails.** The Connection is marked `needs-reauth`, as today, and its servers move to `needs-sign-in`. The fix is "Reconnect <Connection>".
+- **The provider refuses the refresh.** The refresh follows the existing Connection rules ([./05-plugins.md](./05-plugins.md#101-the-setup-flow-contribution)). The Connection is marked `needs-reauth`, and its servers move to `needs-sign-in`. The fix is "Reconnect <Connection>".
+- **The provider cannot be reached.** The Connection is left as it is, and the call is refused as `unreachable`, for this call only.
+- **The credential is a pasted one.** It has no refresh. A 401 moves the server to `error` ("refused the Connection's token").
 - **The refresh works and the server still refuses the fresh token.** The MCP Server goes to `error`, with the reason ("Sentry's MCP server refused the Connection's token"). The Connection is left alone. Reconnecting gives a token of the same kind, and marking the Connection would stop the Inbox polls for nothing.
 
 ### 5.2 A URL server's sign-in
@@ -320,10 +349,13 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 | `checking` | From creation, or from switching on, until the first list ends. A later check does not go back to `checking`. Its result sets the status |
 | `ready` | The last list or call succeeded |
 | `needs-sign-in` | The credential is not usable ([sections 5.1](#51-a-plugin-servers-credential) and [5.2](#52-a-url-servers-sign-in)) |
-| `unreachable` | No answer: a connection failure or a timeout. Checked again with backoff |
-| `error` | The server answers but refuses or fails: a 401 after a working refresh, a 403, a protocol error, a revision Effect cannot speak, or the plugin switched off |
+| `unreachable` | No answer: no connection, or a timeout on a check. Checked again with backoff |
+| `error` | The server answers but refuses or fails: a 401 after a working refresh, a protocol error, a revision the gateway cannot speak, or the plugin switched off |
 
 - A server keeps its last stored tools in every status.
+- **Server-wide failures change the status:** no connection, a timeout on a check, a 401 after a working refresh, a protocol error and an unsupported revision. A tool result with `isError: true`, a tool-level error, or a 403 on one tool is that call's answer and changes nothing.
+- A check's result never overwrites a newer change: switching off, a reconnect, Replace or a delete.
+- The remedy for `error` is "Check now" and the detail. It is never "Reconnect".
 - A plugin server follows its Connection. A Connection that moves to `needs-reauth` moves its servers to `needs-sign-in`. This reaches `mcp-servers` through the Connection observer ([section 1.3](#13-the-domain-graph)).
 - A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off").
 
@@ -343,9 +375,11 @@ A list that differs from the stored one triggers `list_changed` for the sessions
 
 ### 5.5 Notifications
 
-Entering `needs-sign-in`, `unreachable` or `error` raises one Notification per episode, never for a server that is switched off. A plugin server never raises one for `needs-sign-in`, because its Connection already does. The Notification subject gains MCP Server ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)).
+Entering `needs-sign-in`, `unreachable` or `error` raises one Notification per episode, never for a server that is switched off. An episode ends when the server is `ready` again. A plugin server never raises one for `needs-sign-in`, because its Connection already does. The Notification subject gains MCP Server ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)).
 
 ### 5.6 Outbound rules
+
+These rules cover every URL the controller follows for a server, sign-in included: discovery, metadata, registration, exchange and refresh.
 
 - A URL is `http` or `https` and holds no user name or password.
 - A redirect is not followed with a credential to another origin.
@@ -379,7 +413,7 @@ Sentry kills the old access token the moment it is refreshed. The gateway never 
 
 **Verify at build time:** that GitHub accepts the Connection's token as `Bearer`, with that `X-MCP-Toolsets`. [#1209](https://github.com/theagenticage/hercule/issues/1209).
 
-**GitHub has no special rule.** A GitHub MCP server is a plugin server like any other, reached with its own Connection. No code compares it with the workspace's account. A thread whose GitHub server acts as another account than the one its repository pushes as may meet a mismatch, which the agent reports.
+**GitHub has no special rule.** A GitHub MCP server is a plugin server like any other, reached with its own Connection. No code compares it with the workspace's account. A Thread whose GitHub server acts as another account than the one its repository pushes as may meet a mismatch, which the agent reports.
 
 **Open:** a plugin-neutral fix, for example a plugin server that declares it acts through "the session's Connection of my type", so GitHub's account matches the workspace's. [#1219](https://github.com/theagenticage/hercule/issues/1219) decides.
 
@@ -405,14 +439,14 @@ Sentry kills the old access token the moment it is refreshed. The gateway never 
 1. The model calls `mcp__tools__sentry__search_issues`. The harness applies the Access Mode, and sends `sentry__search_issues` to the gateway with the session's token.
 2. The gateway resolves the token, checks `mcp.use`, maps the name to a server in the session's list and a tool in its stored list, and checks that the server is `ready` ([section 3.5](#35-a-call)).
 3. It takes a fresh credential, sends the call upstream, and returns the answer. On a 401 it refreshes once and tries again ([section 5.1](#51-a-plugin-servers-credential)).
-4. It writes the audit entry. A refused call also gets a tool result with `isError: true` and a `runtime.warning` on the thread ([section 3.6](#36-a-refused-call)).
+4. It writes the audit entry. A refused call also gets a tool result with `isError: true` and a `runtime.warning` on the Thread ([section 3.6](#36-a-refused-call)).
 
-### 7.4 A list changes while a thread runs
+### 7.4 A list changes while a Thread runs
 
-1. The user changes the thread's list, or switches a server on or off, or a daily check finds a new tool list.
+1. The user changes the Thread's list, or switches a server on or off, or a daily check finds a new tool list.
 2. After the commit, the gateway sends `notifications/tools/list_changed` on the open stream of each session the change touches ([section 3.7](#37-list-changes)).
 3. The harness lists again and the gateway answers from the stored lists. A server taken away is already refused at the next call.
-4. A Codex thread without the `mcp_tool_list_changed` feature does not list again. A server added now is usable from the next start.
+4. A Codex Thread without the `mcp_tool_list_changed` feature does not list again. A server added now is usable from the next start.
 
 ## Post-v1
 
