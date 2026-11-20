@@ -20,6 +20,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   HarnessNotInstalled,
+  MAX_MESSAGE_LENGTH,
   MCP_SERVERS_CAPABILITY,
   SessionSpec,
   SteerRefused,
@@ -2521,6 +2522,27 @@ describe("a warning the controller writes while a turn runs", () => {
       "item.completed",
     ]);
     expect(rows[1]?.delta).toBe("Hello");
+  });
+
+  it("cuts a warning to the protocol's message bound, never inside a character", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        // An emoji is two UTF-16 units, so the cut falls inside one.
+        yield* sessions.writeRuntimeWarning(sessionId, "😀".repeat(MAX_MESSAGE_LENGTH));
+        yield* sessions.writeRuntimeWarning(sessionId, "short");
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    const [cut, short] = warnings.map((warning) => warning.message);
+    expect(cut!.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+    // `encodeURIComponent` throws on a lone surrogate.
+    expect(() => encodeURIComponent(cut!)).not.toThrow();
+    expect(cut!.endsWith("...")).toBe(true);
+    expect(short).toBe("short");
   });
 
   it("does not take the sequence number of a report that is folded but not yet written", async () => {

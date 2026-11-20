@@ -49,6 +49,7 @@ import {
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  MAX_MESSAGE_LENGTH,
   MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
   type HarnessMcpServer,
@@ -812,6 +813,20 @@ const MAX_TITLE_LENGTH = 80;
  */
 const cutTitle = (title: string): string =>
   Array.from(title.trim()).slice(0, MAX_TITLE_LENGTH).join("").trimEnd();
+
+/**
+ * Cuts a warning to the `MAX_MESSAGE_LENGTH` characters a `runtime.warning`
+ * may hold and ends a cut one with `...`. Never cuts inside a character that
+ * takes two UTF-16 units, which would store text that is not valid Unicode.
+ */
+const boundWarningMessage = (message: string): string => {
+  if (message.length <= MAX_MESSAGE_LENGTH) return message;
+  const ellipsis = "...";
+  const kept = message.slice(0, MAX_MESSAGE_LENGTH - ellipsis.length);
+  const lastUnit = kept.charCodeAt(kept.length - 1);
+  const splitsPair = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
+  return `${splitsPair ? kept.slice(0, -1) : kept}${ellipsis}`;
+};
 
 /**
  * Cleans text a model generated: line breaks and repeated spaces become
@@ -3331,7 +3346,10 @@ const make = Effect.gen(function* () {
      * in a transaction of its own, and announces the session's transcript.
      * `mcpServers` is given when the warning is about MCP Servers, so a client
      * can draw a button for each. For a write made by the controller itself
-     * while a request runs, such as the MCP Gateway's refused call.
+     * while a request runs, such as the MCP Gateway's refused call. The
+     * message is cut to `MAX_MESSAGE_LENGTH`, because a caller composes it
+     * from names it does not control, and a longer one cannot be sent to
+     * clients.
      */
     writeRuntimeWarning: (
       sessionId: string,
@@ -3344,7 +3362,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.flatMap(nowIso, (at) =>
-          appendRuntimeWarning(sessionId, message, at, mcpServersRefused),
+          appendRuntimeWarning(sessionId, boundWarningMessage(message), at, mcpServersRefused),
         ),
       ),
 

@@ -28,16 +28,17 @@ export const buildMissingGrantRefusal = (): Refusal => ({
     "Ask the user to add it to the profile.",
 });
 
-/** The longest part of a caller's tool name that a message repeats. */
+/** The longest part of a tool name that a message repeats. */
 const MAX_SHOWN_TOOL_NAME_LENGTH = 64;
 
 /**
- * Returns a tool name the caller sent, made safe to repeat in a message that
- * is stored in the Thread: characters that no tool name has become `?`, and
- * the name is cut at 64 characters. The request body may be 1 MiB, so an
+ * Returns a tool name made safe to repeat in a message that is stored in the
+ * Thread: characters that no tool name has become `?`, and the name is cut at
+ * 64 characters. A name the caller sent can be as long as the 1 MiB request
+ * body, and a name an upstream server listed has no limit either, so an
  * unbounded name would reach the Thread's transcript as written.
  */
-const showCallerToolName = (toolName: string): string => {
+const showToolName = (toolName: string): string => {
   const safe = toolName.replace(/[^A-Za-z0-9_.-]/g, "?");
   return safe.length > MAX_SHOWN_TOOL_NAME_LENGTH
     ? `${safe.slice(0, MAX_SHOWN_TOOL_NAME_LENGTH)}...`
@@ -52,7 +53,7 @@ const showCallerToolName = (toolName: string): string => {
 export const buildUnknownToolRefusal = (toolName: string): Refusal => ({
   reason: "unknown-tool",
   message:
-    `No MCP tool named "${showCallerToolName(toolName)}" is offered to this session right now. ` +
+    `No MCP tool named "${showToolName(toolName)}" is offered to this session right now. ` +
     "List the tools again and call one of those. If the tool is still missing, " +
     "ask the user to check which MCP servers are in this Thread's list.",
 });
@@ -79,7 +80,7 @@ export const buildToolGoneRefusal = (
   reason: "unknown-tool",
   server: { id: server.id, name: server.name },
   tool: toolName,
-  message: `The MCP server "${server.name}" no longer offers a tool named "${toolName}".`,
+  message: `The MCP server "${server.name}" no longer offers a tool named "${showToolName(toolName)}".`,
 });
 
 /**

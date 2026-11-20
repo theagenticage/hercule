@@ -970,6 +970,25 @@ describe("which MCP sessions and revisions a message may name", () => {
     expect((await sendWithVersion("2025-06-18")).status).toBe(200);
   });
 
+  it("refuses a supplied revision that differs from a 2025-03-26 session's, on a request and on a JSON-RPC response", async () => {
+    const thread = await spawnThread(["mcp.use"], []);
+    const { sessionId } = await initialize(thread.token, "2025-03-26");
+    const headers = { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" };
+
+    const conflicting = await sendMcp(thread.token, request("ping"), headers);
+    expect(conflicting.status).toBe(400);
+    expect(conflicting.body.error.code).toBe(-32020);
+    const response = await sendMcp(thread.token, { jsonrpc: "2.0", id: 1, result: {} }, headers);
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe(-32020);
+    // A client of 2025-03-26 sends no header at all, and a response without one is accepted.
+    const bare = { "mcp-session-id": sessionId };
+    expect((await sendMcpWithHeaders(thread.token, request("ping"), bare)).status).toBe(200);
+    expect(
+      (await sendMcpWithHeaders(thread.token, { jsonrpc: "2.0", id: 1, result: {} }, bare)).status,
+    ).toBe(202);
+  });
+
   it("refuses a modern request whose headers disagree with its payload", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     await sendMcp(thread.token, request("tools/list", STATELESS_META));
@@ -1171,6 +1190,45 @@ describe("streams", () => {
     const read = await readUntilEnd(response, 3_000);
     expect(read.ended()).toBe(true);
     expect(read.text()).toBe("");
+  });
+
+  it("opens no stream when the controller froze while the stream was being admitted", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const response = await getDirectly(thread.token, sessionId);
+
+    // Freezes the controller right after the admission has found it serving
+    // and has read the token, and waits until the drain of the open streams
+    // has run, so the stream that is added next has no drain left to end it.
+    const tokens = arranged.harness.sessionTokens as unknown as {
+      resolveUncached: (tokenHash: string) => Effect.Effect<unknown, unknown>;
+    };
+    const resolveUncached = tokens.resolveUncached;
+    let froze = false;
+    tokens.resolveUncached = (tokenHash) =>
+      Effect.gen(function* () {
+        const resolved = yield* resolveUncached(tokenHash);
+        if (!froze) {
+          froze = true;
+          yield* Effect.orDie(
+            arranged.harness.promotion.freeze(
+              "frozen-mid-admission",
+              new Date(Date.now() + 60_000),
+            ),
+          );
+          yield* Effect.sleep("200 millis");
+        }
+        return resolved;
+      });
+    try {
+      const read = await readUntilEnd(response, 3_000);
+      expect(read.ended()).toBe(true);
+      expect(read.text()).toBe("");
+      await read.cancel();
+    } finally {
+      tokens.resolveUncached = resolveUncached;
+      await Effect.runPromise(arranged.harness.promotion.thaw("frozen-mid-admission"));
+    }
   });
 
   it("keeps one stream per MCP session when two GETs race to replace each other", async () => {

@@ -18,9 +18,6 @@ export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 /** The revisions of the stateful era: `initialize`, `Mcp-Session-Id`, the GET stream and DELETE. */
 const STATEFUL_REVISIONS: ReadonlyArray<string> = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
-/** The oldest stateful revision, the only one whose clients need not send `MCP-Protocol-Version`. */
-const REVISION_WITHOUT_VERSION_HEADER = "2025-03-26";
-
 /** The revision a client gets when it asks for one the gateway does not offer. */
 const NEWEST_STATEFUL_REVISION = "2025-11-25";
 
@@ -140,12 +137,12 @@ const buildUnsupportedHeaderRevision = (
 });
 
 /**
- * Checks the `MCP-Protocol-Version` header of a request that names a stateful
+ * Checks the `MCP-Protocol-Version` header of a message that names a stateful
  * MCP session against the revision that session negotiated. Returns the
- * refusal, or `undefined` when the request may go on. A request with no header
+ * refusal, or `undefined` when the message may go on. A message with no header
  * is accepted, as the transport specification asks. A header is refused when
- * it names no revision the gateway offers, and, for a session whose revision
- * requires the header, when it differs from the negotiated revision.
+ * it names no revision the gateway offers, and when it differs from the
+ * negotiated revision, whichever revision that is.
  */
 export const checkSessionVersionHeader = (
   header: string | undefined,
@@ -155,7 +152,7 @@ export const checkSessionVersionHeader = (
   if (header !== STATELESS_REVISION && !STATEFUL_REVISIONS.includes(header)) {
     return buildUnsupportedHeaderRevision(header, [...STATEFUL_REVISIONS, STATELESS_REVISION]);
   }
-  if (negotiated !== REVISION_WITHOUT_VERSION_HEADER && header !== negotiated) {
+  if (header !== negotiated) {
     return buildHeaderMismatch(
       `MCP-Protocol-Version header '${header}' does not match negotiated protocol version '${negotiated}'`,
     );

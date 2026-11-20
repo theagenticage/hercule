@@ -558,6 +558,15 @@ const make = Effect.gen(function* () {
             return old;
           });
           if (replaced === undefined) return false;
+          // The phase is read after the add, not before it. A freeze that
+          // starts from now on drains this stream with the others. A freeze
+          // that has drained already changed the phase first, so this read
+          // sees it. Read before the add, a freeze could drain in between and
+          // leave this stream open for a frozen controller.
+          if (!(yield* isServing)) {
+            state.streams.delete(stream);
+            return false;
+          }
           yield* Effect.forEach(replaced, (old) => old.end, { discard: true });
           return true;
         }),
@@ -996,7 +1005,16 @@ const make = Effect.gen(function* () {
           const sessionId = request.headers[SESSION_ID_HEADER];
           const session = sessionId === undefined ? undefined : state.mcpSessions.get(sessionId);
           if (sessionId !== undefined && session === undefined) return respondSessionNotFound();
-          if (message._tag === "response") return respondAccepted();
+          if (message._tag === "response") {
+            const refusal =
+              session === undefined
+                ? undefined
+                : checkSessionVersionHeader(
+                    request.headers["mcp-protocol-version"],
+                    session.revision,
+                  );
+            return refusal === undefined ? respondAccepted() : respondRefusal(refusal, null);
+          }
           return yield* handleMessage(request, caller, state, session, message);
         }
       }
