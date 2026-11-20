@@ -16,6 +16,7 @@ import {
   type Resolution,
   type ResolutionOrigin,
 } from "@hercule/contract";
+import { MAX_SHOWN_COUNT } from "./read-limits";
 import { formatMessageTime } from "./threads/message-time";
 
 /**
@@ -182,15 +183,6 @@ export const isNotificationMuted = (
  */
 export const toggleMuteKey = (muted: ReadonlyArray<MuteKey>, key: MuteKey): MuteKey[] =>
   muted.includes(key) ? muted.filter((kept) => kept !== key) : [...muted, key];
-
-/** The largest count the sidebar shows as a number; above it, the count reads "99+". */
-const MAX_SHOWN_COUNT = 99;
-
-/**
- * How many notifications the sidebar reads to count the new ones: one more
- * than the largest count it shows as a number, so it can tell 99 from more.
- */
-export const UNSEEN_COUNT_READ_LIMIT = MAX_SHOWN_COUNT + 1;
 
 /**
  * Formats the sidebar's count of new notifications: `undefined` for none, so
