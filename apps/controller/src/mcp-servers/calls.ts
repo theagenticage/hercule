@@ -11,18 +11,21 @@
  * replaced it, once the calls that were using it have ended. A committed
  * change that takes a server's destination away (the server is deleted or
  * switched off, or its `revision` or its Connection's `credentialsGeneration`
- * moved) closes that server's sessions the same way, and an opening that
- * nothing waits for any more is cancelled.
+ * moved) closes that server's sessions the same way. An opening that nothing
+ * waits for any more is cancelled at once, also while its token lives.
  *
  * A call is admitted by the promotion state, so a freeze waits for it, and a
  * call that arrives while the controller is not serving is refused at once.
- * Admitted or not, a call checks before every request it makes to outside the
- * controller (the opening of a session, a refresh of the Connection's
- * credentials, the tool's request, and every request sent again) that the
- * controller is still serving, that the caller may still make the call
- * (`McpToolCall.authorize`), and that the server and the tool are still there
- * as the call found them. A request that only continues an exchange that
- * already went out is not stopped.
+ * Admitted or not, a call checks at the moment each request to outside the
+ * controller is about to go out (every request of the opening of a session,
+ * the tool's request, and every one sent again), and again when a refresh of
+ * the Connection's credentials is about to call the provider. The check runs
+ * after the current credentials were read, because reading them can wait for
+ * a refresh. It finds out that the caller may still make the call
+ * (`McpToolCall.authorize`), that the server and the tool are still there as
+ * the call found them, and, last, that the controller is still serving. A
+ * request that only continues an exchange that already went out is not
+ * stopped.
  */
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -43,6 +46,7 @@ import { McpServerWarningReason } from "@hercule/protocol";
 import { absorbFailures } from "../absorbing";
 import {
   ConnectionTypes,
+  StrictServingForRefresh,
   type ConnectionCannotRefresh,
   type ConnectionCredentialsForUse,
   type ConnectionCredentialsUnavailable,
@@ -69,6 +73,7 @@ import {
   openUpstream,
   UpstreamError,
   type OpenedUpstream,
+  type PrepareSend,
   type UpstreamCallState,
 } from "./upstream";
 
@@ -109,11 +114,13 @@ export interface McpToolCall {
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
   /**
    * Runs immediately before every request the call makes to outside the
-   * controller: the opening of the upstream session, a refresh of the
-   * Connection's credentials, the tool's request, and each request sent
-   * again. When it fails, nothing more is sent, and `callTool` fails with
-   * that refusal. It sits beside the catalogue's own check that the server
-   * and the tool are still there, at the same points.
+   * controller, after the credentials it carries were read: each request of
+   * the opening of the upstream session, the tool's request, and each request
+   * sent again. It also runs before a refresh of the Connection's
+   * credentials, which a rejection causes. When it fails, nothing more is
+   * sent, and `callTool` fails with that refusal. It sits beside the
+   * catalogue's own check that the server and the tool are still there, at
+   * the same points.
    */
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
@@ -305,8 +312,9 @@ const make = Effect.gen(function* () {
     contribution: RegisteredMcpServer,
     credentials: ConnectionCredentialsForUse,
     firstRevision: string | null,
+    prepareSend: PrepareSend,
   ) =>
-    openUpstream({ contribution, credentials, firstRevision, refuseWhenNotServing: true }).pipe(
+    openUpstream({ contribution, credentials, firstRevision, prepareSend }).pipe(
       Effect.provideService(Scope.Scope, slot.scope),
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(PromotionState, promotion),
@@ -331,7 +339,8 @@ const make = Effect.gen(function* () {
    * Takes hold of the session for this token and server, and starts opening
    * it when there is none. A session made for an older `revision` of the
    * server, or an older `credentialsGeneration` of its Connection, is
-   * replaced. Call `releaseSlot` when the call is done with it.
+   * replaced. `prepareSend` prepares each request of the opening. Call
+   * `releaseSlot` when the call is done with it.
    */
   const holdSlot = (
     upstreamScope: string,
@@ -339,6 +348,7 @@ const make = Effect.gen(function* () {
     credentialsGeneration: number,
     contribution: RegisteredMcpServer,
     credentials: ConnectionCredentialsForUse,
+    prepareSend: PrepareSend,
   ): Effect.Effect<UpstreamSlot> =>
     Effect.gen(function* () {
       const existing = slots.get(upstreamScope)?.get(server.id);
@@ -374,15 +384,22 @@ const make = Effect.gen(function* () {
       // The old session ends without holding up this call.
       if (existing !== undefined) yield* Effect.forkIn(closeWhenDone(existing), serviceScope);
       yield* Effect.forkIn(
-        openSlot(slot, contribution, credentials, server.protocolVersion),
+        openSlot(slot, contribution, credentials, server.protocolVersion, prepareSend),
         serviceScope,
       );
       return slot;
     });
 
+  /**
+   * Lets go of the slot. When it is still opening and this was the last call
+   * waiting for it, the opening is cancelled and the slot is removed, because
+   * a session nobody waits for would open for nothing, whatever the state of
+   * its token. An open session stays, for the next call of the token.
+   */
   const releaseSlot = (slot: UpstreamSlot): Effect.Effect<void> =>
     Effect.suspend(() => {
       slot.users -= 1;
+      if (slot.users === 0 && !slot.opened) forgetSlot(slot);
       return closeWhenDone(slot);
     });
 
@@ -574,18 +591,21 @@ const make = Effect.gen(function* () {
         },
       );
 
+      const buildChangedMessage = (expected: Destination): string =>
+        `${expected.server.name} was changed while the call ran. Try the call again.`;
+
       /**
        * Runs before every request the call makes to outside the controller:
-       * refuses unless the controller is serving, the caller may still make
-       * the call, and the destination is still there. With `expected`, the
-       * destination must also be the one the call began with: the same
-       * `revision`, plugin state, and Connection status and generation.
+       * refuses unless the caller may still make the call, the destination is
+       * still there, and, checked last, the controller is serving. With
+       * `expected`, the destination must also be the one the call began with:
+       * the same `revision`, plugin state, and Connection status and
+       * generation.
        */
       const checkBeforeSend = (
         expected: Destination | undefined,
       ): Effect.Effect<Destination, McpCallRefused | SqlError> =>
         Effect.gen(function* () {
-          yield* refuseUnlessServing;
           yield* input.authorize;
           const now = yield* readDestination;
           if (
@@ -593,12 +613,10 @@ const make = Effect.gen(function* () {
             (now.server.revision !== expected.server.revision ||
               !isSameDependencies(expected.dependencies, now.dependencies))
           ) {
-            return yield* refuse(
-              "error",
-              expected.server.name,
-              `${expected.server.name} was changed while the call ran. Try the call again.`,
-            );
+            return yield* refuse("error", expected.server.name, buildChangedMessage(expected));
           }
+          // Last, so that nothing slow stands between this check and the send.
+          yield* refuseUnlessServing;
           return now;
         });
 
@@ -615,6 +633,8 @@ const make = Effect.gen(function* () {
               reason: "needs-sign-in",
               message: describeRefusal("needs-sign-in", name),
             });
+          case "not-serving":
+            return buildNotServingRefusal(error.message);
           case "unreachable":
           case "credentials-replaced":
             return new McpCallRefused({
@@ -686,24 +706,63 @@ const make = Effect.gen(function* () {
         if (reason._tag === "HttpError" && reason.status === 403) {
           return Effect.succeed(buildErrorResult(FORBIDDEN_ANSWER));
         }
-        const failure = opened.describeFailure(error, call.sentIdentity);
+        const failure = opened.describeFailure(error, call);
         return failure.reason === "unauthorized" && call.toolPostStatus !== 401
           ? Effect.fail({ _tag: "ExchangeBroken" })
           : Effect.fail(failure);
       };
 
+      // Why the checks before a send refused it. The client can only fail
+      // with its own error, so the reason is kept here for the loop below.
+      const refusedSend: { current: McpCallRefused | SqlError | undefined } = {
+        current: undefined,
+      };
+
+      /**
+       * Prepares a request that starts an exchange: reads the Connection's
+       * credentials as they are now, and only then runs the checks before a
+       * send, so a wait for credentials never lets an older check stand. The
+       * request carries the credentials it returns. When a check refuses, the
+       * refusal is kept in `refusedSend` and the request is not sent.
+       */
+      const prepareSend: PrepareSend = Effect.gen(function* () {
+        const credentials = yield* readCredentials;
+        yield* checkAgain;
+        return credentials;
+      }).pipe(
+        Effect.catch((refusal) =>
+          Effect.sync(() => {
+            refusedSend.current = refusal;
+          }).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new UpstreamError({
+                  reason: "refused",
+                  message:
+                    refusal._tag === "McpCallRefused"
+                      ? refusal.message
+                      : "Hercule could not read its own database",
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+
       /**
        * Sends the call once, on the upstream MCP session of this token. The
-       * checks before a send run first, which also guards the opening of the
-       * session, unless `alreadyChecked` is the result of one that just ran. A
-       * call that waited for the session to open checks again, and reads the
-       * credentials again, because it may have waited a long time.
+       * checks before a send run first, unless `alreadyChecked` is the result
+       * of one that just ran. Every request that goes to the server then
+       * prepares itself with `prepareSend`, which reads the credentials and
+       * checks again at that moment.
        */
       const attempt = (
         alreadyChecked: Destination | undefined,
       ): Effect.Effect<McpSchema.CallToolResult, AttemptFailure | SqlError> =>
         Effect.gen(function* () {
           const destination = alreadyChecked ?? (yield* checkAgain);
+          // Only the address of the opening is built from these: its requests
+          // read the credentials again.
           const credentials = yield* readCredentials;
           return yield* Effect.acquireUseRelease(
             holdSlot(
@@ -712,16 +771,15 @@ const make = Effect.gen(function* () {
               destination.connection.credentialsGeneration,
               destination.contribution,
               credentials,
+              prepareSend,
             ),
             (slot) =>
               Effect.gen(function* () {
-                const waited = !slot.opened;
                 const opened = yield* Deferred.await(slot.opening);
-                const sending = waited ? yield* checkAgain : destination;
-                const call = createUpstreamCallState(waited ? yield* readCredentials : credentials);
+                const call = createUpstreamCallState(prepareSend);
                 return yield* opened.client
                   .callTool({
-                    tool: sending.tool,
+                    tool: destination.tool,
                     ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
                   })
                   .pipe(
@@ -820,6 +878,13 @@ const make = Effect.gen(function* () {
               }),
             );
           case "UpstreamError":
+            if (failure.reason === "refused") {
+              if (refusedSend.current !== undefined) return yield* Effect.fail(refusedSend.current);
+              // Another call's checks refused the opening this call waited
+              // for. Its own checks give this call's reason.
+              yield* checkAgain;
+              return yield* refuse("error", name, buildChangedMessage(first));
+            }
             if (failure.reason === "unauthorized" && !refreshed) {
               refreshed = true;
               yield* refreshAfterRejection(failure);
@@ -829,6 +894,9 @@ const make = Effect.gen(function* () {
         }
       }
     }).pipe(
+      // A refresh of the Connection's credentials, or a read of them, must not
+      // start its request to the provider once the controller stops serving.
+      Effect.provideService(StrictServingForRefresh, true),
       Effect.catchTag("SqlError", () =>
         Effect.fail(
           new McpCallRefused({

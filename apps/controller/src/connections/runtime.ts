@@ -130,6 +130,9 @@ export interface ConnectionCredentialsForUse {
  * - `no-credentials`: the Connection is not `needs-reauth` but holds no
  *   credentials, and its type has no sign-in flow that could give it a token.
  *   The user has to enter them again.
+ * - `not-serving`: the controller is frozen or sealed, and the caller asked
+ *   for a strict refresh (`StrictServingForRefresh`), so nothing was sent to
+ *   the provider. `message` is then the promotion gate's own text.
  *
  * `message` is one line a person can read.
  */
@@ -144,10 +147,29 @@ export class ConnectionCredentialsUnavailable extends Schema.TaggedError<Connect
       "invalid-config",
       "credentials-replaced",
       "no-credentials",
+      "not-serving",
     ]),
     message: Schema.String,
   },
 ) {}
+
+/**
+ * Makes a refresh of OAuth tokens refuse to start its provider request unless
+ * the controller is serving at that moment. It fails with
+ * `ConnectionCredentialsUnavailable` of reason `not-serving` instead.
+ *
+ * Without it, a refresh that runs inside work the promotion gate already
+ * counted is let through while the controller is frozen, so that the work can
+ * finish. A caller that must not start anything new once the controller
+ * stops serving, such as a call of the MCP Gateway, provides `true`. The
+ * check runs after the refresh permit is taken, because a refresh can wait
+ * for the permit while a freeze begins. A provider request that already
+ * started is never cut off.
+ */
+export const StrictServingForRefresh = Context.Reference<boolean>(
+  "hercule/controller/connections/StrictServingForRefresh",
+  { defaultValue: () => false },
+);
 
 /**
  * A Connection that holds pasted credentials and no OAuth tokens has nothing
@@ -447,6 +469,9 @@ const make = Effect.gen(function* () {
    *   `ProviderUnreachable` and leaves the status unchanged. The error is not
    *   converted here, so a caller can tell this apart from a connection that
    *   needs reconnecting.
+   * - With `StrictServingForRefresh` provided, it fails with `not-serving`
+   *   when the controller is not serving at the moment the request would
+   *   start, which is after the permit was taken.
    * - When the user reconnected meanwhile, it fails and changes nothing, as
    *   `writeWhileTokensHeld` explains. The refresh is bound to the generation
    *   of `row`, so `row` must have been read before the call.
@@ -487,6 +512,17 @@ const make = Effect.gen(function* () {
       const { refreshToken } = tokens;
       if (refreshToken === undefined || Option.isNone(endpoint)) {
         return yield* cannotRefresh(row, held);
+      }
+      if (yield* StrictServingForRefresh) {
+        yield* promotion.refuseUnlessServing.pipe(
+          Effect.mapError(
+            (refused) =>
+              new ConnectionCredentialsUnavailable({
+                reason: "not-serving",
+                message: refused.error.message,
+              }),
+          ),
+        );
       }
       // The request and the write that stores its answer are uninterruptible
       // together. A provider that rotates its refresh token invalidates the old

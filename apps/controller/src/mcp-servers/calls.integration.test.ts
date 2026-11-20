@@ -15,17 +15,23 @@
  * - what changes a server's status and what is only the call's answer;
  * - the deadline, the size cap, and a frozen controller;
  * - the checks before every request that leaves the controller: `authorize`,
- *   the destination, and the freeze, including while a session opens;
+ *   the destination, and the freeze, including while a session opens, after
+ *   the credentials were read (also when reading them waits for a refresh),
+ *   and for a refresh that waited for the Connection's permit while the
+ *   controller froze;
  * - a failure of the reply to a request of the server never sends the tool
  *   again;
  * - the credentials and the URL each request carries, and the credentials
- *   removed from what the server answers;
+ *   removed from what the server answers, in values and in object keys;
  * - closing sessions when a server loses its destination, when the gateway
- *   closes one, when a token ends, and cancelling an opening nobody needs.
+ *   closes one, when a token ends, and cancelling an opening nobody waits
+ *   for, also while its token lives.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
 import { del } from "../http/testing";
@@ -37,6 +43,7 @@ import {
   refreshedToken,
   requestUpdate,
   runSql,
+  storeOauthTokens,
   waitForResult,
   createServer,
   withRig,
@@ -144,6 +151,12 @@ const settleWithin = <A>(pending: Promise<A>, millis: number): Promise<A | "stil
   ]);
 
 const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
+
+/** Returns how many units of admitted work the promotion gate counts as running now. */
+const readRunningWork = (promotion: Rig["controller"]["harness"]["promotion"]) =>
+  Effect.runPromise(
+    Effect.map(Stream.runHead(promotion.gateChanges), (state) => Option.getOrThrow(state).running),
+  );
 
 describe("which servers the gateway may serve", () => {
   it("returns the servers that exist, in the order asked, and says which are servable", async () => {
@@ -269,6 +282,52 @@ describe("a refused call", () => {
       });
       expect(fake.requests).toHaveLength(before);
     });
+  });
+
+  it("is refused, and nothing is sent, when `authorize` starts refusing while the Connection's token is refreshed", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, provider, call }) => {
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        let letRefreshAnswer: () => void = () => undefined;
+        const refreshAnswers = new Promise<void>((resolve) => {
+          letRefreshAnswer = resolve;
+        });
+        provider.answers.token = async () => {
+          await refreshAnswers;
+          return refreshedToken();
+        };
+        const before = fake.requests.length;
+        let allowed = true;
+
+        const pending = call({
+          authorize: Effect.suspend(() =>
+            allowed
+              ? Effect.void
+              : Effect.fail(
+                  new McpCallRefused({ reason: "not-in-list", message: "left the list" }),
+                ),
+          ),
+        });
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        allowed = false;
+        letRefreshAnswer();
+
+        expect(await pending).toMatchObject({
+          _tag: "Failure",
+          failure: { reason: "not-in-list", message: "left the list" },
+        });
+        expect(fake.requests).toHaveLength(before);
+      },
+      { oauth: true },
+    );
   });
 
   it.each([
@@ -511,6 +570,65 @@ describe("a call admitted before a freeze", () => {
         expect(requestsOf(fake, "tools/call")).toHaveLength(0);
       },
       { legacy: true },
+    );
+  });
+});
+
+describe("a refresh that waited for the Connection's permit while the controller froze", () => {
+  it("does not call the provider once the controller is frozen, and refuses the call as not serving", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, provider, call }) => {
+        const { promotion } = controller.harness;
+        const tokenId = "0199f0b7-0000-7000-8000-00000000eeee";
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        // The first call takes the refresh permit, and its provider request
+        // waits. It fails, so the token stays stale for the call after it.
+        let letRefreshAnswer: () => void = () => undefined;
+        const refreshAnswers = new Promise<void>((resolve) => {
+          letRefreshAnswer = resolve;
+        });
+        provider.answers.token = async () => {
+          await refreshAnswers;
+          return buildJsonResponse({}, 500);
+        };
+        const holder = call({ upstreamScope: SCOPE_B });
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        const runningBefore = await readRunningWork(promotion);
+        // The second call is admitted, and waits for the permit.
+        const waiter = call({ upstreamScope: SCOPE_A });
+        await eventually(
+          () => readRunningWork(promotion),
+          (running) => running > runningBefore,
+        );
+        const freezing = Effect.runPromise(
+          promotion.freeze(tokenId, new Date(Date.now() + 60_000)),
+        );
+        await eventually(
+          () => Effect.runPromise(promotion.phase),
+          (phase) => phase._tag === "Frozen",
+        );
+        letRefreshAnswer();
+
+        const results = await Promise.all([holder, waiter]);
+        await freezing;
+        await Effect.runPromise(promotion.thaw(tokenId));
+
+        expect(results[0]).toMatchObject({ _tag: "Failure", failure: { reason: "unreachable" } });
+        expect(results[1]).toMatchObject({
+          _tag: "Failure",
+          failure: { controllerNotServing: true },
+        });
+        expect(provider.tokenRequests).toHaveLength(1);
+      },
+      { oauth: true },
     );
   });
 });
@@ -975,6 +1093,63 @@ describe("what each request carries and what comes back", () => {
     );
   });
 
+  it("reads the credentials again for each request of the opening, so the rest of the handshake carries the current ones", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        const opened = requestsOf(fake, "initialize").length;
+        const release = fake.hold("initialize");
+        const pending = call({ upstreamScope: SCOPE_B });
+        await eventually(
+          () => Promise.resolve(requestsOf(fake, "initialize").length),
+          (count) => count === opened + 1,
+        );
+        // Another caller refreshed the token while the handshake waited.
+        await storeOauthTokens(controller, connectionId, {
+          accessToken: "rotated-token",
+          refreshToken: "refresh-2",
+        });
+        release();
+
+        expect(await pending).toMatchObject({ _tag: "Success" });
+
+        const carried = (method: string) => requestsOf(fake, method).at(-1)?.authorization;
+        expect(carried("initialize")).toBe("Bearer stored-token");
+        expect(carried("notifications/initialized")).toBe("Bearer rotated-token");
+        expect(carried("tools/call")).toBe("Bearer rotated-token");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
+  it("removes the credentials of the request from a key of the result", async () => {
+    await withReadyServer(
+      async ({ fake, call }) => {
+        fake.intercept = ({ method, id, authorization }) =>
+          method === "tools/call"
+            ? new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id,
+                  result: {
+                    content: [{ type: "text", text: "ok" }],
+                    structuredContent: { [authorization ?? ""]: 1 },
+                  },
+                }),
+                { status: 200, headers: { "content-type": "application/json" } },
+              )
+            : undefined;
+
+        const result = await call();
+
+        expect(result).toMatchObject({
+          _tag: "Success",
+          success: { structuredContent: { "[removed]": 1 } },
+        });
+      },
+      { oauth: true },
+    );
+  });
+
   it.each([
     [
       "a JSON-RPC error",
@@ -1094,9 +1269,9 @@ describe("closing upstream MCP sessions", () => {
     });
   });
 
-  it("cancels an opening that no call waits for any more when its token ends", async () => {
+  it("cancels an opening that no call waits for any more, while its token lives", async () => {
     await withReadyServer(
-      async ({ controller, fake, call }) => {
+      async ({ fake, call }) => {
         const before = {
           initialize: requestsOf(fake, "initialize").length,
           initialized: requestsOf(fake, "notifications/initialized").length,
@@ -1106,7 +1281,6 @@ describe("closing upstream MCP sessions", () => {
         const abandoned = await call({}, Duration.millis(200));
         expect(abandoned).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
 
-        await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
         release();
         // A cancelled opening never goes on to send what follows the handshake.
         await sleep(300);
@@ -1114,6 +1288,9 @@ describe("closing upstream MCP sessions", () => {
         expect(requestsOf(fake, "initialize")).toHaveLength(before.initialize + 1);
         expect(requestsOf(fake, "notifications/initialized")).toHaveLength(before.initialized);
         expect(endedSessions(fake)).toHaveLength(before.ended);
+        // The abandoned opening is not reused: the next call opens its own session.
+        expect(await call()).toMatchObject({ _tag: "Success" });
+        expect(requestsOf(fake, "initialize")).toHaveLength(before.initialize + 2);
       },
       { legacy: true },
     );

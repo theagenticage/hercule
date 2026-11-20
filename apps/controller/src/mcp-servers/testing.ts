@@ -464,6 +464,31 @@ export interface McpServerRow {
 export const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
   Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
 
+/**
+ * Replaces the OAuth tokens a Connection holds, as another refresh would, and
+ * sets them to expire `lifetimeMillis` from now: 8 hours unless said, or a
+ * time already past, for a token that needs a refresh.
+ */
+export const storeOauthTokens = (
+  controller: SetUpController,
+  connectionId: string,
+  tokens: { readonly accessToken: string; readonly refreshToken?: string },
+  lifetimeMillis = 8 * 60 * 60 * 1000,
+) =>
+  runSql(
+    controller,
+    controller.harness.secrets.set(
+      { kind: "connection", id: connectionId },
+      OAUTH_TOKENS,
+      Redacted.make(
+        JSON.stringify({
+          ...tokens,
+          expiresAt: new Date(Date.now() + lifetimeMillis).toISOString(),
+        }),
+      ),
+    ),
+  );
+
 /** Reads the stored row of the only server there is. */
 export const readRow = async (controller: SetUpController): Promise<McpServerRow> => {
   const sql = controller.harness.sql;

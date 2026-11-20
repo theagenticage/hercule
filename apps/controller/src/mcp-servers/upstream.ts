@@ -5,17 +5,22 @@
  * The rules this file enforces for every request that leaves the controller:
  *
  * - The URL and headers come only from the plugin's `buildUpstreamRequest`,
- *   called with the credentials the upstream was opened with, after the
+ *   called with the credentials the request is about to carry, after the
  *   controller is known to be serving. The URL must be `http` or `https`, on
  *   the contribution's origin, with no user name or password. Otherwise
  *   nothing is sent.
  * - A redirect is never followed, so a credential never reaches another
  *   origin. A 3xx answer is an error.
  * - Nothing is sent while the controller is frozen or sealed: a background
- *   caller waits for the thaw, and a caller that asked to refuse (the
- *   gateway's calls) gets a failure at once, for every new request. A request
- *   that only continues an exchange that was already sent, such as the reply
- *   to a request of the server, is let through, so that exchange settles.
+ *   caller waits for the thaw. A caller that gives a `PrepareSend` (the
+ *   gateway's calls and the opening of its sessions) gets a failure at once,
+ *   for every request that starts an exchange: `PrepareSend` reads the current
+ *   credentials and runs the caller's checks (is the controller serving, may
+ *   the call still be made, is the destination unchanged) right before the
+ *   request goes out, so a wait for credentials never lets an old check
+ *   stand. A request that only continues an exchange that was already sent,
+ *   such as the reply to a request of the server, is let through, so that
+ *   exchange settles.
  * - The HTTP client creates no trace spans, so no URL or error text reaches a
  *   trace, and no trace headers go to the outside server.
  * - No failure carries the server's answer, its headers, the request or a
@@ -54,6 +59,8 @@ export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
  *   nothing was sent;
  * - `not-serving`: the controller is frozen or sealed, so nothing was sent;
  *   `message` is then the promotion gate's own text;
+ * - `refused`: the caller's `PrepareSend` refused the request, so nothing was
+ *   sent. The caller knows why;
  * - `protocol`: the server answered, but not with something we can use (a
  *   redirect, an HTTP 4xx other than 401 and 429, a message that is not MCP).
  */
@@ -65,6 +72,7 @@ const UPSTREAM_FAILURE_REASONS = [
   "too-large",
   "not-on-origin",
   "not-serving",
+  "refused",
   "protocol",
 ] as const;
 
@@ -83,6 +91,16 @@ export class UpstreamError extends Schema.TaggedError<UpstreamError>()("Upstream
 }) {}
 
 /**
+ * Runs right before a request that starts an exchange goes out, and returns
+ * the credentials the request carries. It reads the credentials as they are
+ * then, runs the caller's checks after that read, and fails when a check
+ * refuses. A failure sends nothing: the request fails with the
+ * `UpstreamError` it fails with, which should have reason `refused` or
+ * `not-serving`.
+ */
+export type PrepareSend = Effect.Effect<ConnectionCredentialsForUse, UpstreamError>;
+
+/**
  * What one call keeps for itself while its requests go through the upstream
  * client, which concurrent calls share. A call provides one (see
  * `CurrentUpstreamCall`), and the client reads and writes it for each request
@@ -91,14 +109,18 @@ export class UpstreamError extends Schema.TaggedError<UpstreamError>()("Upstream
  */
 export interface UpstreamCallState {
   /**
-   * The credentials every request of this call carries. The call reads them
-   * when it is about to send, so a call that waited never sends older ones
-   * than a call that refreshed them meanwhile. Without them, a request carries
-   * the credentials of the last request the client sent.
+   * Runs before the call's own `tools/call` request, which starts the call's
+   * exchange. The request carries the credentials it returns.
    */
-  readonly credentials: ConnectionCredentialsForUse;
-  /** The identity of the credentials the call's last request carried. `undefined` until one was sent. */
-  sentIdentity: string | undefined;
+  readonly prepareSend: PrepareSend;
+  /**
+   * The credentials the call's `tools/call` request carried, and so every
+   * request that continues its exchange, such as the reply to a request of the
+   * server. `undefined` until that request was sent.
+   */
+  sentCredentials: ConnectionCredentialsForUse | undefined;
+  /** Why the client refused to send a request of this call, when it did. */
+  refusal: UpstreamError | undefined;
   /** The call's own `tools/call` request was sent. */
   toolPostSent: boolean;
   /**
@@ -116,15 +138,20 @@ export interface UpstreamCallState {
   readonly sentValues: Set<string>;
 }
 
-/** Credential values at most this long are too short to remove from text without damaging it. */
+/**
+ * Credential values of this many characters or fewer are too short to remove
+ * from text without damaging it. A Connection a user pastes holds short fields
+ * that are no secret, such as Sentry's organization slug, and removing them
+ * would mangle ordinary answers. Every token and key a supported Connection
+ * type holds is far longer.
+ */
 const MIN_SECRET_LENGTH = 8;
 
-/** Creates the state of a call that will send with `credentials`. */
-export const createUpstreamCallState = (
-  credentials: ConnectionCredentialsForUse,
-): UpstreamCallState => ({
-  credentials,
-  sentIdentity: undefined,
+/** Creates the state of a call whose `tools/call` request `prepareSend` prepares. */
+export const createUpstreamCallState = (prepareSend: PrepareSend): UpstreamCallState => ({
+  prepareSend,
+  sentCredentials: undefined,
+  refusal: undefined,
   toolPostSent: false,
   toolPostStatus: undefined,
   sentValues: new Set(),
@@ -180,6 +207,7 @@ const FIXED_MESSAGES: Record<UpstreamFailureReason, string> = {
   "not-on-origin":
     "The plugin built a request to an address outside its server's origin, so nothing was sent",
   "not-serving": "The controller is not serving",
+  refused: "The request was not sent, because a check before it refused it",
   protocol: "The server answered with something that is not valid MCP",
 };
 
@@ -320,14 +348,22 @@ export interface OpenedUpstream {
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
   /**
-   * Converts a failure of `client` into an `UpstreamError`. `sentIdentity` is
-   * the identity of the credentials of the request that failed, when the
-   * caller knows it (see `UpstreamCallState`). Without it, the failure
-   * carries the identity of the credentials the client sent last.
+   * Every credential value, longer than `MIN_SECRET_LENGTH`, that a request
+   * belonging to no call sent: the values of the headers the plugin built and
+   * of the credentials record. A caller removes them from what the server
+   * answered, which it stores or hands on.
+   */
+  readonly sentValues: ReadonlySet<string>;
+  /**
+   * Converts a failure of `client` into an `UpstreamError`. `call` is the
+   * call whose request failed, when there is one (see `UpstreamCallState`):
+   * the failure then carries that call's refusal and the identity of the
+   * credentials it sent. Without it, the failure carries what the client sent
+   * last.
    */
   readonly describeFailure: (
     error: McpClientError.McpClientError,
-    sentIdentity?: string,
+    call?: UpstreamCallState,
   ) => UpstreamError;
 }
 
@@ -335,20 +371,23 @@ export interface OpenedUpstream {
 export interface UpstreamTarget {
   readonly contribution: RegisteredMcpServer;
   /**
-   * The credentials the requests that belong to no call carry: the opening and
-   * the closing of the upstream session. A call sends its own (see
+   * The credentials the transport's address is built from, and that the
+   * closing of the upstream session carries. Without `prepareSend`, every
+   * request that belongs to no call carries them. A call sends its own (see
    * `UpstreamCallState`).
    */
   readonly credentials: ConnectionCredentialsForUse;
   /** The revision that worked last time, tried first, or `null`. */
   readonly firstRevision: string | null;
   /**
-   * What a new request does while the controller is frozen or sealed. By
-   * default it waits for the thaw, as a check does. When `true`, it fails with
-   * `not-serving` at once, as the gateway's calls do, even for a caller that
-   * the freeze is waiting for.
+   * Runs before every request that belongs to no call and starts an
+   * exchange, such as the handshake that opens the session, and gives the
+   * credentials it carries (see `PrepareSend`). With it, such a request fails
+   * at once while the controller is frozen or sealed, even for a caller that
+   * the freeze is waiting for. Without it, such a request waits for the
+   * thaw, as a check does.
    */
-  readonly refuseWhenNotServing?: boolean;
+  readonly prepareSend?: PrepareSend;
 }
 
 /**
@@ -362,11 +401,11 @@ export interface UpstreamTarget {
  * Any other failure ends the attempt, because another revision would not
  * change it.
  *
- * Fails with an `UpstreamError`: `not-on-origin` before anything is sent, and
- * `not-serving` when `refuseWhenNotServing` is set and the controller is not
- * serving, and otherwise as `describeClientFailure` converts the client's
- * failure. Needs an `HttpClient`, and sends only while the controller is
- * serving.
+ * Fails with an `UpstreamError`: `not-on-origin` before anything is sent,
+ * `not-serving` when `prepareSend` is set and the controller is not serving,
+ * the failure of `prepareSend` itself, and otherwise as
+ * `describeClientFailure` converts the client's failure. Needs an
+ * `HttpClient`, and sends only while the controller is serving.
  */
 export const openUpstream = (
   target: UpstreamTarget,
@@ -383,9 +422,10 @@ export const openUpstream = (
 
     const outboundRefusal = yield* Ref.make<UpstreamError | undefined>(undefined);
 
-    // What a request that belongs to no call carries: what the client sent last.
+    // What the closing of the session carries, and what a request carries when
+    // nothing prepares it: what the client sent last.
     let lastSent = target.credentials;
-    let lastSentIdentity = target.credentials.identity;
+    const sentValues = new Set<string>();
 
     const buildRequest = (credentials: ConnectionCredentialsForUse) =>
       Effect.try({
@@ -428,86 +468,139 @@ export const openUpstream = (
         reason: new HttpClientError.TransportError({ request, description }),
       });
 
-    const refuseWhenNotServing = promotion.refuseUnlessServing.pipe(
-      Effect.mapError((refused) => buildFailure("not-serving", { message: refused.error.message })),
-    );
+    /**
+     * Builds the request with `used`, checks its URL, and sends it. A request
+     * of a call that starts an exchange (`call` and `startsExchange`) records
+     * its credentials, so the replies that continue the exchange carry the
+     * same ones. `toolPost` is the call when this is the call's own
+     * `tools/call` request.
+     */
+    const sendWith = (
+      request: HttpClientRequest.HttpClientRequest,
+      used: ConnectionCredentialsForUse,
+      call: UpstreamCallState | undefined,
+      startsExchange: boolean,
+      toolPost: UpstreamCallState | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const built = yield* buildRequest(used);
+        lastSent = used;
+        if (call !== undefined && startsExchange) call.sentCredentials = used;
+        for (const value of [...Object.values(built.headers), ...Object.values(used.credentials)]) {
+          if (value.length > MIN_SECRET_LENGTH) (call?.sentValues ?? sentValues).add(value);
+        }
+        // The URL that is sent is the one just built and checked, so a
+        // credential in the URL is the current one.
+        const refused = checkUrlOnOrigin(contribution.origin, built.url);
+        if (refused !== undefined) return yield* Effect.fail(refused);
+        // A request that goes out clears an older refusal of the requests that
+        // belong to no call, so a later failure is not taken for it. The closing
+        // of the session does not, because a failed opening closes its transport
+        // before its failure is described.
+        if (call === undefined && startsExchange) yield* Ref.set(outboundRefusal, undefined);
+        if (toolPost !== undefined) toolPost.toolPostSent = true;
+        const response = yield* sendingClient.execute(
+          HttpClientRequest.setUrl(HttpClientRequest.setHeaders(request, built.headers), built.url),
+        );
+        if (toolPost !== undefined) toolPost.toolPostStatus = response.status;
+        return response;
+      });
+
+    /**
+     * Sends a request that belongs to a call or to no call and starts an
+     * exchange, or continues one. See the rules at the top of this file.
+     */
+    const sendExchange = (
+      request: HttpClientRequest.HttpClientRequest,
+      call: UpstreamCallState | undefined,
+    ) =>
+      Effect.gen(function* () {
+        // The call's own `tools/call` request, which is the first request of
+        // the call that carries one.
+        const toolPost =
+          call !== undefined && !call.toolPostSent && isToolCallRequest(request) ? call : undefined;
+        // Once the tool request went out, the other requests of the call only
+        // continue its exchange, such as the reply to a request of the server.
+        // They carry the same credentials and are let through while not
+        // serving, so the exchange settles.
+        const continuing = call?.toolPostSent === true ? call.sentCredentials : undefined;
+        if (continuing !== undefined) {
+          return yield* promotion.whenServing(
+            sendWith(request, continuing, call, false, undefined),
+          );
+        }
+        const prepareSend = call?.prepareSend ?? target.prepareSend;
+        if (prepareSend === undefined) {
+          return yield* promotion.whenServing(sendWith(request, lastSent, call, true, toolPost));
+        }
+        // The request is counted from the moment `prepareSend` starts, so a
+        // freeze that comes while it reads the credentials waits for this
+        // request. `prepareSend` ends with the check that the controller is
+        // serving, and nothing but building the request stands between that
+        // check and the send.
+        return yield* promotion
+          .admit(
+            Effect.flatMap(prepareSend, (used) => sendWith(request, used, call, true, toolPost)),
+          )
+          .pipe(
+            Effect.catch((failure) =>
+              failure instanceof UpstreamError || failure instanceof HttpClientError.HttpClientError
+                ? Effect.fail(failure)
+                : Effect.fail(buildFailure("not-serving", { message: failure.error.message })),
+            ),
+          );
+      }).pipe(
+        // The client may fail only with its own error type, so the refusal is
+        // kept aside and `describeFailure` returns it. A call keeps its own,
+        // because calls share this client.
+        Effect.catchTag("UpstreamError", (refused) =>
+          Effect.andThen(
+            call === undefined
+              ? Ref.set(outboundRefusal, refused)
+              : Effect.sync(() => {
+                  call.refusal = refused;
+                }),
+            Effect.fail(buildTransportFailure(request, refused.message)),
+          ),
+        ),
+      );
+
+    /**
+     * Sends the DELETE that ends the upstream MCP session. The server ends
+     * the session by itself in time, so a DELETE is never worth waiting for a
+     * thaw, or sending after one: it is not sent unless the controller is
+     * serving. It carries the credentials the client sent last and runs no
+     * check of a call, because it happens when a call's token has ended.
+     */
+    const sendSessionEnd = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.flatMap(promotion.phase, (phase) =>
+        phase._tag === "Serving"
+          ? promotion
+              .whenServing(sendWith(request, lastSent, undefined, false, undefined))
+              .pipe(
+                Effect.catchTag("UpstreamError", (refused) =>
+                  Effect.fail(buildTransportFailure(request, refused.message)),
+                ),
+              )
+          : Effect.fail(buildTransportFailure(request, "The controller is not serving")),
+      );
 
     const client = HttpClient.makeWith<never, never, HttpClientError.HttpClientError, never>(
       (pending) =>
-        Effect.flatMap(pending, (request) => {
-          const send = Effect.gen(function* () {
-            const call = yield* CurrentUpstreamCall;
-            // The call's own `tools/call` request, which is the first request of
-            // the call that carries one.
-            const toolPost =
-              call !== undefined && !call.toolPostSent && isToolCallRequest(request)
-                ? call
-                : undefined;
-            // Only a request that continues an exchange already sent is let
-            // through while not serving: the exchange settles.
-            const continuesExchange = call !== undefined && toolPost === undefined;
-            if (target.refuseWhenNotServing === true && !continuesExchange) {
-              yield* refuseWhenNotServing;
-            }
-            return yield* promotion.whenServing(
-              Effect.gen(function* () {
-                const used = call?.credentials ?? lastSent;
-                const built = yield* buildRequest(used);
-                lastSent = used;
-                lastSentIdentity = used.identity;
-                if (call !== undefined) {
-                  call.sentIdentity = used.identity;
-                  for (const value of [
-                    ...Object.values(built.headers),
-                    ...Object.values(used.credentials),
-                  ]) {
-                    if (value.length > MIN_SECRET_LENGTH) call.sentValues.add(value);
-                  }
-                }
-                // The URL that is sent is the one just built and checked, so a
-                // credential in the URL is the current one.
-                const refused = checkUrlOnOrigin(contribution.origin, built.url);
-                if (refused !== undefined) return yield* Effect.fail(refused);
-                yield* Ref.set(outboundRefusal, undefined);
-                if (toolPost !== undefined) toolPost.toolPostSent = true;
-                const response = yield* sendingClient.execute(
-                  HttpClientRequest.setUrl(
-                    HttpClientRequest.setHeaders(request, built.headers),
-                    built.url,
-                  ),
-                );
-                if (toolPost !== undefined) toolPost.toolPostStatus = response.status;
-                return response;
-              }),
-            );
-          }).pipe(
-            // The client may fail only with its own error type, so the
-            // refusal is kept aside and `describeFailure` returns it.
-            Effect.catchTag("UpstreamError", (refused) =>
-              Ref.set(outboundRefusal, refused).pipe(
-                Effect.andThen(Effect.fail(buildTransportFailure(request, refused.message))),
-              ),
-            ),
-          );
-          if (request.method !== "DELETE") return send;
-          // A DELETE only ends the upstream MCP session, which the server
-          // ends by itself in time. It is never worth waiting for a thaw, or
-          // sending after one, so it is not sent unless the controller serves.
-          return Effect.flatMap(promotion.phase, (phase) =>
-            phase._tag === "Serving"
-              ? send
-              : Effect.fail(buildTransportFailure(request, "The controller is not serving")),
-          );
-        }),
+        Effect.flatMap(pending, (request) =>
+          request.method === "DELETE"
+            ? sendSessionEnd(request)
+            : Effect.flatMap(CurrentUpstreamCall, (call) => sendExchange(request, call)),
+        ),
       Effect.succeed,
     );
 
     const describeFailure = (
       error: McpClientError.McpClientError,
-      sentIdentity?: string,
+      call?: UpstreamCallState,
     ): UpstreamError =>
-      Ref.getUnsafe(outboundRefusal) ??
-      describeClientFailure(error, sentIdentity ?? lastSentIdentity);
+      (call === undefined ? Ref.getUnsafe(outboundRefusal) : call.refusal) ??
+      describeClientFailure(error, (call?.sentCredentials ?? lastSent).identity);
 
     const order = [
       ...REVISIONS.filter((entry) => entry.revision === target.firstRevision),
@@ -536,6 +629,7 @@ export const openUpstream = (
         return {
           client: outcome.success,
           revision,
+          sentValues,
           describeFailure,
         };
       }

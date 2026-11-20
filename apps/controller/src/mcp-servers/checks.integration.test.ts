@@ -16,7 +16,8 @@
  * - no answer makes the server `unreachable`, and the scheduler follows the
  *   backoff, which Check now ends;
  * - a redirect is not followed, and a URL off the plugin's origin is refused
- *   without any request;
+ *   without any request; a credential a server echoes in a tool definition is
+ *   removed before it is stored;
  * - the revision whose handshake worked is stored even when the listing then
  *   fails, and the retry after a refresh starts with it;
  * - a result is dropped when the server, its Connection or its plugin changed
@@ -515,6 +516,25 @@ describe("what a check never does", () => {
     } finally {
       await target.stop();
     }
+  });
+
+  it("stores no credential the server echoes in a tool definition, which the gateway would hand to the harness", async () => {
+    await withRig(
+      async ({ controller, connect }) => {
+        await createServer(controller, { connectionId: await connect() });
+
+        const row = await waitForResult(controller);
+
+        expect(row.status).toBe("ready");
+        expect(row.tools).not.toContain("t0ken");
+        expect(JSON.parse(row.tools)).toMatchObject([
+          { name: "[removed]", description: "sent [removed] to this tool" },
+        ]);
+      },
+      {
+        fake: { tools: [{ name: "Bearer t0ken", description: "sent Bearer t0ken to this tool" }] },
+      },
+    );
   });
 
   it("sends nothing when the plugin builds a URL off its origin", async () => {

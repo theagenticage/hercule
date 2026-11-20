@@ -33,6 +33,7 @@ import { nowIso } from "../db";
 import { Notifier } from "../notifications";
 import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
+import { removeCredentialValues } from "./credential-values";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import {
@@ -195,6 +196,10 @@ const make = Effect.gen(function* () {
           "error",
           `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
         );
+      case "not-serving":
+        // Only a strict refresh fails this way, and a check never asks for
+        // one: it waits for the thaw instead.
+        return buildFailedResult("unreachable", "The controller was not serving");
       case "missing":
         return buildFailedResult("error", "The Connection of this server is missing");
       case "invalid-config":
@@ -226,7 +231,12 @@ const make = Effect.gen(function* () {
         const tools = yield* opened.client
           .listTools({ timeout: LIST_DEADLINE })
           .pipe(Effect.mapError(opened.describeFailure));
-        return { tools, revision: opened.revision };
+        // A server that echoes what it received, in a tool's name, description
+        // or schema, must not hand the Connection's token on to the harness.
+        return {
+          tools: removeCredentialValues(tools, opened.sentValues),
+          revision: opened.revision,
+        };
       }),
     ).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
