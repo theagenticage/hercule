@@ -45,7 +45,7 @@ import { prepareTooling } from "../sessions/tooling";
 import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
-import type { HarnessRunnerContext } from "./index";
+import type { SessionStartContext } from "./index";
 import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
 import { ensureRootBoundary } from "../workspaces";
 
@@ -71,8 +71,8 @@ const createTemporaryHome = (): string => {
  * The directory is created on first use, so a run that skips every test here
  * writes nothing.
  */
-let tool: HarnessRunnerContext["herculeTool"] | undefined;
-const prepareTool = (): HarnessRunnerContext["herculeTool"] => {
+let tool: SessionStartContext["herculeTool"] | undefined;
+const prepareTool = (): SessionStartContext["herculeTool"] => {
   if (tool === undefined) {
     const under = createTemporaryHome();
     const {
@@ -115,7 +115,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
   it(
     "reports an empty config directory as not logged in, with the machine's version and models",
     async () => {
-      const context: HarnessRunnerContext = {
+      const context: SessionStartContext = {
         cwd: null,
         attachmentsDir: null,
         mcpServers: [],
@@ -216,7 +216,6 @@ const authed =
             {
               cwd: null,
               attachmentsDir: null,
-              mcpServers: [],
               editMarks: null,
               attachmentUploader: NO_CONTROLLER_UPLOADER,
               home: CONFIG_DIR,
@@ -330,8 +329,8 @@ const waitForTranscript = async (nativeSessionId: string): Promise<string | unde
  */
 const buildContext = (
   cwd: string,
-  herculeTool: HarnessRunnerContext["herculeTool"] = prepareTool(),
-): HarnessRunnerContext => ({
+  herculeTool: SessionStartContext["herculeTool"] = prepareTool(),
+): SessionStartContext => ({
   cwd,
   attachmentsDir: null,
   mcpServers: [],
@@ -812,7 +811,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       },
       run: runProcess,
     });
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
       mcpServers: [],
@@ -968,7 +967,7 @@ describe.skipIf(binary === undefined)(
           },
           run: runProcess,
         });
-        const context: HarnessRunnerContext = {
+        const context: SessionStartContext = {
           cwd: scratch,
           attachmentsDir: null,
           mcpServers: [
@@ -1114,7 +1113,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
       },
       run: runProcess,
     });
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: workspaceRoot,
       attachmentsDir: null,
       mcpServers: [],
@@ -1394,7 +1393,7 @@ describe.skipIf(binary === undefined)(
           : { text: "done" },
       );
       const { adapter, seen, running } = createRealAdapter();
-      const context: HarnessRunnerContext = {
+      const context: SessionStartContext = {
         cwd: workspaceRoot,
         attachmentsDir: null,
         mcpServers: [],
@@ -1555,7 +1554,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
     }
     const mock = startMockApi(decide);
     const { adapter, seen } = createRealAdapter();
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       cwd: workspace,
       attachmentsDir: null,
       mcpServers: [],
@@ -2462,7 +2461,7 @@ describe.skipIf(binary === undefined)(
           },
           run: runProcess,
         });
-        const context: HarnessRunnerContext = {
+        const context: SessionStartContext = {
           cwd: checkout,
           attachmentsDir: null,
           mcpServers: [],

@@ -59,7 +59,7 @@ import type {
   AdapterTurnInput,
   EditMarks,
   HarnessAdapter,
-  HarnessRunnerContext,
+  SessionStartContext,
   ProbeOptions,
   SessionUsageReport,
 } from "./index";
@@ -79,7 +79,7 @@ const HERCULE_TOOL = {
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
-const CONTEXT: HarnessRunnerContext = {
+const CONTEXT: SessionStartContext = {
   cwd: null,
   attachmentsDir: null,
   mcpServers: [],
@@ -585,14 +585,14 @@ const SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-const WORKING: HarnessRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
+const WORKING: SessionStartContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
 /**
  * The context of a Thread that sees User Material. For Claude the paths are
  * empty: the runner links the material into the Harness Home instead, and
  * the field being present is what marks the session.
  */
-const THREAD: HarnessRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
+const THREAD: SessionStartContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
 
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
@@ -1082,7 +1082,7 @@ describe("a Claude Code session", () => {
     readonly skillOverrides: Record<string, string>;
   }
 
-  const startAndReadSettings = async (spec: SessionSpec, ctx: HarnessRunnerContext) => {
+  const startAndReadSettings = async (spec: SessionSpec, ctx: SessionStartContext) => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
     const [options] = run.options;
@@ -4176,7 +4176,7 @@ describe("a text generation", () => {
 
   const generate = (
     adapter: HarnessAdapter,
-    context: HarnessRunnerContext = CONTEXT,
+    context: SessionStartContext = CONTEXT,
   ): Promise<TextGenerationOutcome> =>
     Effect.runPromise(
       Effect.catch(

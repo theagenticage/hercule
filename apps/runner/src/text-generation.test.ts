@@ -65,7 +65,6 @@ const buildAdapter = (generateText: HarnessAdapter["generateText"]): HarnessAdap
 const buildContext = (binary: string | undefined): HarnessRunnerContext => ({
   cwd: null,
   attachmentsDir: null,
-  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: scratchDir,

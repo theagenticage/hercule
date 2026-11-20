@@ -109,6 +109,7 @@ import type {
   HarnessRunnerContext,
   ProbeOptions,
   ResolvedMcpServer,
+  SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
 } from "./index";
@@ -1091,7 +1092,7 @@ const buildMcpServerLaunch = (
  * reachable (spec 06 section 9.1).
  */
 const buildSessionOptions = (
-  ctx: HarnessRunnerContext,
+  ctx: SessionStartContext,
   spec: SessionSpec,
   binary: string,
   native: Options,
@@ -1731,7 +1732,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     startSession: (
       sessionId: string,
       spec: SessionSpec,
-      ctx: HarnessRunnerContext,
+      ctx: SessionStartContext,
     ): Effect.Effect<SessionBinding, AdapterError> =>
       Effect.gen(function* () {
         const binary = ctx.binary;

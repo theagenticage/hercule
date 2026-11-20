@@ -26,7 +26,7 @@ import {
 import { ensureRootBoundary } from "../../workspaces";
 import { pi } from "./adapter";
 import { readPiProvider } from "./provider";
-import type { HarnessRunnerContext, UserMaterial } from "../index";
+import type { SessionStartContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
 import {
   cleanupHomes,
@@ -57,7 +57,7 @@ const BUDGET_MS = 180_000;
 const PATIENCE_MS = BUDGET_MS / 2;
 
 /** Builds a context with the real binary, the given key, and fresh directories for this run. */
-const buildLiveContext = (zaiApiKey: string | null): HarnessRunnerContext => ({
+const buildLiveContext = (zaiApiKey: string | null): SessionStartContext => ({
   ...buildContext(
     createScratchDir(),
     createScratchDir(),

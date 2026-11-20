@@ -31,7 +31,6 @@ const REQUEST = "0199e0e7-0000-7000-8000-0000000000a1";
 const CONTEXT: HarnessRunnerContext = {
   cwd: null,
   attachmentsDir: null,
-  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: `/var/hercule/runner/providers/${ACCOUNT_ID}`,
@@ -472,7 +471,6 @@ describe("a device login", () => {
   const CODEX_CONTEXT: HarnessRunnerContext = {
     cwd: null,
     attachmentsDir: null,
-    mcpServers: [],
     editMarks: null,
     attachmentUploader: NO_CONTROLLER_UPLOADER,
     home: mkdtempSync(join(tmpdir(), "hercule-login-")),

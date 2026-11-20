@@ -472,7 +472,6 @@ export const connect = (
         // a login never load the skill.
         herculeTool: options.herculeTool,
         attachmentsDir: null,
-        mcpServers: [],
         editMarks: null,
         attachmentUploader: options.attachmentUploader,
       };

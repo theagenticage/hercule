@@ -73,7 +73,7 @@ import {
   startAsyncQuestionModel,
   startMockModel,
 } from "./mock-model.testing";
-import type { HarnessRunnerContext } from "../index";
+import type { SessionStartContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
@@ -109,7 +109,7 @@ const createHomeWithLogin = (): string => {
   return home;
 };
 
-const buildContext = (home: string): HarnessRunnerContext => ({
+const buildContext = (home: string): SessionStartContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
   mcpServers: [],
@@ -132,7 +132,7 @@ const buildContext = (home: string): HarnessRunnerContext => ({
  * `developer_instructions` config value, the setting that the app-server's
  * `developerInstructions` param overrides.
  */
-const renderPrompt = async (ctx: HarnessRunnerContext): Promise<string> => {
+const renderPrompt = async (ctx: SessionStartContext): Promise<string> => {
   const { seam, spawns, requests } = buildScriptedSeam();
   await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
   const { developerInstructions } = listSentParams(requests, "thread/start")[0] as {
@@ -1425,7 +1425,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     const home = createScratchDir("usage-resume");
     mkdirSync(join(home, "codex"));
     writeFileSync(join(home, "codex", "config.toml"), model.config);
-    const context: HarnessRunnerContext = {
+    const context: SessionStartContext = {
       ...buildContext(home),
       env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
     };

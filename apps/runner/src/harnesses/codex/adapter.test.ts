@@ -35,7 +35,7 @@ import {
 } from "@hercule/protocol";
 import type { OutputSchema, ProbeResult, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
-import type { EditMarks, HarnessRunnerContext } from "../index";
+import type { EditMarks, SessionStartContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { USAGE_READ_DEADLINE } from "../probe";
@@ -221,7 +221,7 @@ describe("what the Codex adapter reports about a machine", () => {
     const home = createCodexHome();
     // The app-server reports no account for a key given through a model provider.
     const { seam, spawns } = buildScriptedSeam({ "account/read": () => LOGGED_OUT });
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       credentialVariables: ["OPENAI_API_KEY"],
       credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
@@ -447,7 +447,7 @@ describe("the home directories a session's app-server gets", () => {
   it("reads the key of an account through a model provider of its own, and keeps it out of the arguments and the Harness Home", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
       credentialVariables: ["OPENAI_API_KEY", "CODEX_API_KEY"],
@@ -482,7 +482,7 @@ describe("the home directories a session's app-server gets", () => {
   it("starts no model provider of its own for an account that signs in with ChatGPT, and drops a key of the runner's", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
       credentialVariables: ["OPENAI_API_KEY"],
@@ -625,7 +625,7 @@ describe("the home directories a session's app-server gets", () => {
   it("moves HOME for a Thread that sees the user's material too, and gives it the account's own Harness Home", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, HOME: "/Users/someone" },
       userMaterial: NO_USER_MATERIAL_PATHS,
@@ -645,7 +645,7 @@ describe("the home directories a session's app-server gets", () => {
   });
 
   it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
-    const startWith = async (userMaterial: HarnessRunnerContext["userMaterial"]) => {
+    const startWith = async (userMaterial: SessionStartContext["userMaterial"]) => {
       const home = createCodexHome();
       const { seam, spawns } = buildScriptedSeam();
       const ctx = buildContext(home);
@@ -2159,9 +2159,9 @@ describe("the user's own instructions on a Codex Thread", () => {
 
   /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
   const buildThreadContext = (
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
     instructionsFile: string,
-  ): HarnessRunnerContext => ({
+  ): SessionStartContext => ({
     ...ctx,
     herculeTool: TOOL,
     userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
@@ -4529,7 +4529,7 @@ describe("a probe that reads usage", () => {
       "account/read": () => CHATGPT,
       "account/rateLimits/read": () => PLUS_RATE_LIMITS,
     });
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(createCodexHome()),
       credentialVariables: ["OPENAI_API_KEY"],
       credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },

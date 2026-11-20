@@ -86,7 +86,6 @@ describe("the Claude Code probe's own query", () => {
         {
           cwd: null,
           attachmentsDir: null,
-          mcpServers: [],
           editMarks: null,
           home: makeFolder("hercule-claude-probe-seam-home-"),
           binary: writeVersionOnlyBinary(),

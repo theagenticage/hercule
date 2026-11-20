@@ -20,7 +20,7 @@ import {
   switchBranch,
   type Workspaces,
 } from "../workspaces";
-import type { HarnessRunnerContext, ResolvedMcpServer } from "../harnesses";
+import type { HarnessRunnerContext, ResolvedMcpServer, SessionStartContext } from "../harnesses";
 import { createHarnessHome } from "../harnesses/account";
 import { endSentence } from "../report";
 import {
@@ -80,7 +80,7 @@ const PRIMARY_WORKSPACE_REASON =
 /** The context a session start resolved on this machine. */
 export interface Resolved {
   /** The adapter's context, except for its edit marks, which need the session's edit watch. */
-  readonly ctx: Omit<HarnessRunnerContext, "editMarks">;
+  readonly ctx: Omit<SessionStartContext, "editMarks">;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */

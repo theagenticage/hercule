@@ -125,7 +125,6 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
     buildContext: () => ({
       cwd: null,
       attachmentsDir: null,
-      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: root,
@@ -230,7 +229,6 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
     buildContext: () => ({
       cwd: null,
       attachmentsDir: null,
-      mcpServers: [],
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: root,

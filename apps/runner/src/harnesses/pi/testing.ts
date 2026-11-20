@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { HarnessCredential, HarnessEvent, SessionSpec } from "@hercule/protocol";
-import type { HarnessRunnerContext } from "../index";
+import type { SessionStartContext } from "../index";
 import type { Ran } from "../process";
 import {
   CWD,
@@ -61,7 +61,7 @@ export const buildContext = (
   home: string,
   cwd: string | null = null,
   credential: HarnessCredential | null = TEST_CREDENTIAL,
-): HarnessRunnerContext => ({
+): SessionStartContext => ({
   cwd,
   attachmentsDir: null,
   mcpServers: [],
@@ -447,7 +447,7 @@ export const createDriving = (
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof makePiAdapter>;
-  readonly ctx: HarnessRunnerContext;
+  readonly ctx: SessionStartContext;
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
@@ -504,7 +504,7 @@ export const listSentCommands = (
  */
 type SessionContextOverrides = Partial<
   Pick<
-    HarnessRunnerContext,
+    SessionStartContext,
     | "editMarks"
     | "librarySkillsFolder"
     | "repositorySkillsFolders"

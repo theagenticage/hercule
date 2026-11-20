@@ -163,15 +163,6 @@ export interface HarnessRunnerContext {
    */
   readonly attachmentsDir: string | null;
   /**
-   * The MCP servers the harness is given, with the controller's address and
-   * the session's token already filled in (spec 06 section 4). Today the one
-   * entry is the MCP Gateway. The runner builds the list from the start
-   * frame's `SessionSpec.mcpServers`, so the adapter never reads the token
-   * from anywhere else. Empty when the frame has none, and for operations that
-   * run no session: a probe, an install or a login.
-   */
-  readonly mcpServers: ReadonlyArray<ResolvedMcpServer>;
-  /**
    * Where this session's harness records when its commands and edits run, so
    * the runner can work out which session changed a file (spec 19 section
    * 4.1). `null` for a session whose edits are not observed (it has no
@@ -219,6 +210,19 @@ export interface EditMarks {
    */
   readonly recordRequestOnRunningItem: (requestId: string) => void;
 }
+
+/**
+ * The context of a session start: the runner's context plus the MCP servers
+ * the harness is given, with the controller's address and the session's token
+ * already filled in (spec 06 section 4). Today the one entry is the MCP
+ * Gateway. The runner builds the list from the start frame's
+ * `SessionSpec.mcpServers`, so the adapter never reads the token from
+ * anywhere else. Empty when the frame has none. A probe, an install, a login
+ * and a text generation run no session and carry no list.
+ */
+export type SessionStartContext = HarnessRunnerContext & {
+  readonly mcpServers: ReadonlyArray<ResolvedMcpServer>;
+};
 
 /**
  * The context of a text generation. The runner has already found the harness
@@ -392,7 +396,7 @@ export interface HarnessAdapter {
   readonly startSession: (
     sessionId: string,
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
   ) => Effect.Effect<SessionBinding, AdapterError>;
 
   /**
