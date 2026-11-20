@@ -909,6 +909,111 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
 });
 
 /**
+ * Checks that the Session Token reaches the MCP Gateway but no file the SDK
+ * writes. With `DEBUG_CLAUDE_AGENT_SDK` set in the runner's environment, the
+ * SDK appends the CLI's whole launch command, `--mcp-config` included, to a
+ * debug file under the config directory, and the CLI writes the same into its
+ * own debug log. A token in the config would stay on disk. The SDK is loaded
+ * under a fresh URL, because it decides once per process whether to write a
+ * debug file.
+ */
+describe.skipIf(binary === undefined)(
+  "the MCP Gateway's token in a real Claude Code session",
+  () => {
+    const SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff40";
+    const SYNTHETIC_TOKEN = "synthetic-session-token-0123456789";
+
+    const readFilesUnder = (folder: string): ReadonlyArray<string> =>
+      readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(entry.parentPath, entry.name);
+        return entry.isDirectory() ? readFilesUnder(path) : [path];
+      });
+
+    it(
+      "sends the token to the gateway and writes it to no debug file",
+      async () => {
+        const root = createTemporaryHome();
+        const debugConfigDir = join(root, "sdk-config");
+        const home = join(root, "harness-home");
+        const scratch = join(root, "scratch");
+        mkdirSync(home);
+        mkdirSync(scratch);
+        const authorizations: Array<string | null> = [];
+        const gateway = Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            authorizations.push(request.headers.get("authorization"));
+            return new Response("not a gateway", { status: 500 });
+          },
+        });
+        vi.stubEnv("DEBUG_CLAUDE_AGENT_SDK", "1");
+        vi.stubEnv("CLAUDE_CONFIG_DIR", debugConfigDir);
+        const sdkUrl = import.meta.resolve("@anthropic-ai/claude-agent-sdk");
+        const { query: freshQuery } = (await import(`${sdkUrl}?debug-file`)) as {
+          readonly query: typeof sdkQuery;
+        };
+        const adapter = makeClaudeCodeAdapter({
+          stream: ({ options, input }) => {
+            const started = freshQuery({ prompt: input, options });
+            return {
+              [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+              interrupt: () => started.interrupt().then(() => undefined),
+              setModel: (model) => started.setModel(model),
+              stopTask: (taskId) => started.stopTask(taskId),
+              close: () => void started.return(undefined).catch(() => undefined),
+            };
+          },
+          query: () => {
+            throw new Error("this test starts a session, not a probe");
+          },
+          run: runProcess,
+        });
+        const context: HarnessRunnerContext = {
+          cwd: scratch,
+          attachmentsDir: null,
+          mcpServers: [
+            {
+              name: "tools",
+              url: `http://127.0.0.1:${gateway.port}/mcp`,
+              headers: { Authorization: `Bearer ${SYNTHETIC_TOKEN}` },
+            },
+          ],
+          editMarks: null,
+          attachmentUploader: NO_CONTROLLER_UPLOADER,
+          home,
+          binary: binary!,
+          env: {
+            PATH: process.env["PATH"] ?? "",
+            HOME: join(root, "user"),
+            ANTHROPIC_API_KEY: "sk-ant-placeholder",
+          },
+          modelArgument: "{model}",
+          credentialVariables: [],
+          herculeTool: prepareTool(),
+        };
+
+        try {
+          await Effect.runPromise(adapter.startSession(SESSION_ID, SPEC, context));
+          await vi.waitUntil(() => authorizations.length > 0, { timeout: 30_000, interval: 100 });
+        } finally {
+          await Effect.runPromise(adapter.stopSession(SESSION_ID, "stopped"));
+          await gateway.stop(true);
+          vi.unstubAllEnvs();
+        }
+
+        expect(authorizations[0]).toBe(`Bearer ${SYNTHETIC_TOKEN}`);
+        const debugFiles = readFilesUnder(join(debugConfigDir, "debug"));
+        expect(debugFiles.length).toBeGreaterThan(0);
+        for (const file of debugFiles) {
+          expect(readFileSync(file, "utf8"), file).not.toContain(SYNTHETIC_TOKEN);
+        }
+      },
+      Duration.toMillis(PROBE_DEADLINE) * 2,
+    );
+  },
+);
+
+/**
  * Checks that the boundary at the workspace root stops Claude Code's search
  * for `.claude/` folders there (#369). A workspace with no single checkout runs
  * in its root, which is not a repository, so without the boundary the search

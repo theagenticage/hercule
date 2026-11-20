@@ -23,6 +23,7 @@ import {
   type CanUseTool,
   type EffortLevel,
   type HookCallback,
+  type McpHttpServerConfig,
   type Options,
   type PermissionMode,
   type PermissionUpdate,
@@ -107,6 +108,7 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  ResolvedMcpServer,
   SessionUsageReport,
   TextGenerationContext,
 } from "./index";
@@ -1017,6 +1019,46 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
   "and `hercule session input` sends a message to one that exists.";
 
 /**
+ * Returns the `mcpServers` option for the servers a session may use, and the
+ * environment variables that hold their header values.
+ *
+ * A header value, such as the gateway's `Bearer <Session Token>`, never goes
+ * into the option itself. The SDK turns the option into the CLI's
+ * `--mcp-config` argument, and with `DEBUG_CLAUDE_AGENT_SDK` set it writes that
+ * whole command, and the CLI writes its own copy, to a debug file. So each
+ * header is `${MCP_HEADER_<n>_<m>}` in the option and the value is in the
+ * environment, where the CLI expands it when it connects.
+ *
+ * The static `Authorization` header also keeps Claude Code from starting an
+ * OAuth sign-in of its own.
+ */
+const buildMcpServerLaunch = (
+  servers: ReadonlyArray<ResolvedMcpServer>,
+): {
+  readonly mcpServerEntries: Record<string, McpHttpServerConfig>;
+  readonly mcpHeaderValues: Record<string, string>;
+} => {
+  const mcpHeaderValues: Record<string, string> = {};
+  const mcpServerEntries = Object.fromEntries(
+    servers.map((server, serverIndex) => [
+      server.name,
+      {
+        type: "http",
+        url: server.url,
+        headers: Object.fromEntries(
+          Object.entries(server.headers).map(([header, value], headerIndex) => {
+            const variable = `MCP_HEADER_${serverIndex}_${headerIndex}`;
+            mcpHeaderValues[variable] = value;
+            return [header, `\${${variable}}`];
+          }),
+        ),
+      } satisfies McpHttpServerConfig,
+    ]),
+  );
+  return { mcpServerEntries, mcpHeaderValues };
+};
+
+/**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory. Its config
  * directory is always the Harness Home, which every session of the
@@ -1071,6 +1113,7 @@ const buildSessionOptions = (
     spec.coordination,
     spec.memory,
   ]);
+  const { mcpServerEntries, mcpHeaderValues } = buildMcpServerLaunch(ctx.mcpServers);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
@@ -1129,18 +1172,7 @@ const buildSessionOptions = (
       ],
     },
     strictMcpConfig: true,
-    // The static `Authorization` header keeps Claude Code from starting an
-    // OAuth sign-in of its own.
-    ...(ctx.mcpServers.length === 0
-      ? {}
-      : {
-          mcpServers: Object.fromEntries(
-            ctx.mcpServers.map((server) => [
-              server.name,
-              { type: "http", url: server.url, headers: { ...server.headers } },
-            ]),
-          ),
-        }),
+    ...(ctx.mcpServers.length === 0 ? {} : { mcpServers: mcpServerEntries }),
     includePartialMessages: true,
     // Without this, the SDK sends only a subagent's tool calls and results,
     // and none of its text, so a subagent's transcript would have no words in
@@ -1160,6 +1192,7 @@ const buildSessionOptions = (
     ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
     env: {
       ...buildEnv(ctx),
+      ...mcpHeaderValues,
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       // Claude Code keeps the tool list of an MCP server on disk and can start
       // a session from it. The gateway's list depends on the session's token,

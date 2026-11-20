@@ -926,7 +926,7 @@ describe("a Claude Code session", () => {
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
   });
 
-  it("gives the harness the resolved MCP servers, with a static bearer header and no cached tool list", async () => {
+  it("gives the harness the resolved MCP servers, with the bearer header in the environment and no cached tool list", async () => {
     const run = createDriving();
     const gateway = {
       name: "tools",
@@ -938,9 +938,12 @@ describe("a Claude Code session", () => {
     );
 
     const [options] = run.options;
+    // The token itself is in the environment only; the SDK writes the option,
+    // but never the environment, to its debug file.
     expect(options?.mcpServers).toEqual({
-      tools: { type: "http", url: gateway.url, headers: gateway.headers },
+      tools: { type: "http", url: gateway.url, headers: { Authorization: "${MCP_HEADER_0_0}" } },
     });
+    expect(options?.env?.["MCP_HEADER_0_0"]).toBe("Bearer a-session-token");
     // The session's list depends on its token, so a list cached for an older
     // token must never start a session.
     expect(options?.env?.["MCP_DISCOVERY_CACHE"]).toBe("0");
