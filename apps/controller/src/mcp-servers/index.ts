@@ -4,7 +4,7 @@
  * server records and the `mcpServer` operations. It knows nothing about
  * Projects or Sessions.
  */
-export { McpServerChecks, McpServerChecksLayer, McpUpstreamHttpClient } from "./checks";
+export { McpServerChecks, McpServerChecksLayer } from "./checks";
 export { runConnectionFollower } from "./follower";
 export {
   buildLeftOutWarning,

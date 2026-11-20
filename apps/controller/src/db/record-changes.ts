@@ -4,8 +4,9 @@
  * the record itself.
  *
  * It receives only `{ topic, id }` for each `record` change, the small part
- * every such listener needs. The live topics keep their own listener
- * (`AfterCommit`) and are not touched by this one.
+ * every such listener needs. Nothing calls it directly: the one `AfterCommit`
+ * the controller provides (`LiveTopicsLayer`) publishes each committed change
+ * to the live topics and to this service.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

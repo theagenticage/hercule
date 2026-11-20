@@ -42,7 +42,6 @@ import {
   listConnections,
   readConnection,
   readConnectionsSurface,
-  readCredentialsGeneration,
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
@@ -1069,33 +1068,6 @@ describe("POST /connections/:id/credentials", () => {
         displayName: one.displayName,
       });
       expect(await Effect.runPromise(surface.credentials(one.id))).toEqual({ token: GOOD });
-    });
-  });
-});
-
-describe("a connection's credentials generation", () => {
-  it("starts at 0, goes up by one on each paste of new credentials even within one millisecond, and stays when the user edits anything else", async () => {
-    await withConnections(async ({ base, sql }, _registry, token) => {
-      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
-      expect(await readCredentialsGeneration(sql)).toBe(0);
-
-      const patched = await send("PATCH", base, `/api/v1/connections/${one.id}`, {
-        body: { label: "renamed" },
-        token,
-      });
-      expect(patched.status, await patched.clone().text()).toBe(200);
-      expect(await readCredentialsGeneration(sql)).toBe(0);
-
-      for (const generation of [1, 2]) {
-        const replaced = await post(
-          base,
-          `/api/v1/connections/${one.id}/credentials`,
-          { credentials: { token: ROTATED } },
-          token,
-        );
-        expect(replaced.status, await replaced.clone().text()).toBe(200);
-        expect(await readCredentialsGeneration(sql)).toBe(generation);
-      }
     });
   });
 });

@@ -41,13 +41,19 @@ export const computeBackoffMillis = (failedChecks: number): number =>
   BACKOFF_MILLIS[Math.min(Math.max(failedChecks, 1), BACKOFF_MILLIS.length) - 1] as number;
 
 /** Returns the id of the plugin that offers a contribution: `sentry/sentry` is offered by `sentry`. */
-export const readPluginId = (contributionId: string): string =>
+export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));
 
-/** Whether the plugin that offers a server's contribution can serve it. */
+/**
+ * Whether the plugin that offers a server's contribution can serve it. A
+ * plugin that is `switched-off` is enabled by nobody, and one that
+ * `failed-to-start` is enabled but its activation failed. The two need
+ * different words, because the user's remedy is different.
+ */
 export type PluginState =
   | { readonly _tag: "active"; readonly contribution: RegisteredMcpServer }
   | { readonly _tag: "switched-off"; readonly pluginName: string }
+  | { readonly _tag: "failed-to-start"; readonly pluginName: string }
   | { readonly _tag: "missing" };
 
 /**
@@ -55,16 +61,16 @@ export type PluginState =
  * plugin. A check or the follower reads it before it decides, and
  * `writeServerState` reads it again before it writes.
  */
-export interface Surroundings {
+export interface McpServerDependencies {
   /** `undefined` when the Connection no longer exists. */
   readonly connection: StoredConnection | undefined;
   readonly plugin: PluginState;
 }
 
 /** Reads the Connection and the plugin of a server as they are now. */
-export const readSurroundings = (
+export const readDependencies = (
   server: Pick<StoredMcpServer, "connectionId" | "contributionId">,
-): Effect.Effect<Surroundings, SqlError, SqlClient.SqlClient | PluginHost> =>
+): Effect.Effect<McpServerDependencies, SqlError, SqlClient.SqlClient | PluginHost> =>
   Effect.gen(function* () {
     const connections = yield* connectionRepository;
     const plugins = yield* PluginHost;
@@ -72,20 +78,29 @@ export const readSurroundings = (
     const found = yield* plugins.findMcpServer(server.contributionId);
     if (Option.isNone(found)) return { connection, plugin: { _tag: "missing" } };
     const { pluginId } = found.value;
-    if (yield* plugins.isActive(pluginId)) {
+    const loaded = (yield* plugins.loaded()).find((plugin) => plugin.id === pluginId);
+    if (loaded?.status._tag === "active") {
       return { connection, plugin: { _tag: "active", contribution: found.value } };
     }
-    const pluginName =
-      (yield* plugins.loaded()).find((plugin) => plugin.id === pluginId)?.displayName ?? pluginId;
-    return { connection, plugin: { _tag: "switched-off", pluginName } };
+    const pluginName = loaded?.displayName ?? pluginId;
+    return {
+      connection,
+      plugin: {
+        _tag: loaded?.status._tag === "errored" ? "failed-to-start" : "switched-off",
+        pluginName,
+      },
+    };
   });
 
 /**
- * Tells whether two readings of the surroundings are the same for a server:
+ * Tells whether two readings of the dependencies are the same for a server:
  * the same plugin state, and the same Connection with the same status and
  * credentials generation.
  */
-export const isSameSurroundings = (before: Surroundings, now: Surroundings): boolean =>
+export const isSameDependencies = (
+  before: McpServerDependencies,
+  now: McpServerDependencies,
+): boolean =>
   before.plugin._tag === now.plugin._tag &&
   before.connection?.status === now.connection?.status &&
   before.connection?.credentialsGeneration === now.connection?.credentialsGeneration;
@@ -108,10 +123,14 @@ export interface Usable {
 /**
  * Judges whether a server's plugin and Connection can serve it. When they
  * cannot, returns what the server shows: its plugin is missing or switched
- * off, or its Connection is gone, `disabled` or `needs-reauth`. The check and
+ * off or failed to start, or its Connection is gone, `disabled` or
+ * `needs-reauth`. The check and
  * the follower both use it, so they show the same words.
  */
-export const judgeSurroundings = ({ plugin, connection }: Surroundings): Usable | Unusable => {
+export const judgeDependencies = ({
+  plugin,
+  connection,
+}: McpServerDependencies): Usable | Unusable => {
   switch (plugin._tag) {
     case "missing":
       return {
@@ -125,6 +144,13 @@ export const judgeSurroundings = ({ plugin, connection }: Surroundings): Usable 
         _tag: "unusable",
         status: "error",
         detail: `The ${plugin.pluginName} plugin is switched off`,
+        cause: "plugin",
+      };
+    case "failed-to-start":
+      return {
+        _tag: "unusable",
+        status: "error",
+        detail: `The ${plugin.pluginName} plugin failed to start: see Settings > Plugins`,
         cause: "plugin",
       };
     case "active":
@@ -159,20 +185,20 @@ export const judgeSurroundings = ({ plugin, connection }: Surroundings): Usable 
 
 /**
  * What a state write was based on: the server's `revision` and the
- * surroundings the writer read before it decided. The write happens only if
+ * dependencies the writer read before it decided. The write happens only if
  * the server still has this revision and its Connection and plugin are still
  * as they were: a user change, a reconnect, a switched-off Connection or a
  * stopped plugin since then makes the result stale.
  */
 export interface StateBasis {
   readonly revision: number;
-  readonly surroundings: Surroundings;
+  readonly dependencies: McpServerDependencies;
 }
 
 /**
  * Reads the server and returns it when `basis` still holds: the server exists,
  * is enabled, still has `basis`'s revision, and its Connection and plugin are
- * still as `basis`'s surroundings. Returns `None` otherwise. Reads only.
+ * still as `basis`'s dependencies. Returns `None` otherwise. Reads only.
  */
 export const readServerWhileBasisHolds = (
   id: string,
@@ -184,7 +210,7 @@ export const readServerWhileBasisHolds = (
     if (Option.isNone(found)) return found;
     const current = found.value;
     if (!current.enabled || current.revision !== basis.revision) return Option.none();
-    if (!isSameSurroundings(basis.surroundings, yield* readSurroundings(current))) {
+    if (!isSameDependencies(basis.dependencies, yield* readDependencies(current))) {
       return Option.none();
     }
     return found;
@@ -209,7 +235,7 @@ export const markDueWhenUsable = (
       Effect.gen(function* () {
         const found = yield* servers.readById(id);
         if (Option.isNone(found) || !found.value.enabled) return;
-        const judged = judgeSurroundings(yield* readSurroundings(found.value));
+        const judged = judgeDependencies(yield* readDependencies(found.value));
         if (judged._tag === "usable") yield* servers.update(id, { nextCheckAt: at }, undefined);
       }),
     );
@@ -219,7 +245,7 @@ export const markDueWhenUsable = (
  * Writes an edit to a server, unless something newer happened, and returns
  * whether it was written. It is dropped when the server is gone, switched off,
  * no longer has `basis`'s revision, or its Connection or plugin differ from
- * `basis`'s surroundings.
+ * `basis`'s dependencies.
  *
  * In the same transaction it keeps the Notification episode (`notified_status`):
  *

@@ -62,7 +62,7 @@ export interface StoredMcpServer {
 }
 
 /** What a server depends on outside its own row, by id. */
-export interface McpServerDependencies {
+export interface McpServerDependencyIds {
   readonly id: string;
   readonly connectionId: string;
   /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
@@ -220,7 +220,7 @@ const make = Effect.gen(function* () {
      * Returns the Connection and the plugin contribution of every server,
      * without the tool definitions the other reads decode.
      */
-    listDependencies: (): Effect.Effect<ReadonlyArray<McpServerDependencies>, SqlError> =>
+    listDependencyIds: (): Effect.Effect<ReadonlyArray<McpServerDependencyIds>, SqlError> =>
       Effect.map(
         sql<{
           readonly id: Uint8Array;

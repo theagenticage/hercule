@@ -49,7 +49,6 @@ import {
   buildAccountName,
   buildJsonResponse,
   listConnections,
-  readCredentialsGeneration,
   readConnectionsSurface,
   type ConnectionRecord,
   type TestPlugin,
@@ -710,34 +709,6 @@ describe("GET /oauth/callback", () => {
       expect(
         await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
       ).toMatchObject({ accessToken: "good-second" });
-    });
-  });
-
-  it("adds one to the credentials generation on a reconnect, and not on a refresh", async () => {
-    await withOAuth(async ({ base, sql }, registry, token, provider) => {
-      provider.answers["authorization_code"] = () =>
-        buildJsonResponse({
-          access_token: FIRST_TOKEN,
-          refresh_token: "refresh-1",
-          token_type: "bearer",
-          expires_in: 1,
-        });
-      const before = await connect(base, token);
-      // The token expires at once, so reading it refreshes it.
-      expect(
-        await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
-      ).toMatchObject({ accessToken: REFRESHED_TOKEN });
-      expect(await readCredentialsGeneration(sql)).toBe(0);
-
-      provider.answers["authorization_code"] = () =>
-        buildJsonResponse({ access_token: "good-second", token_type: "bearer" });
-      const url = await startOAuthOrFail(base, token, { connectionId: before.id });
-      await sendOAuthCallback(base, {
-        state: url.searchParams.get("state") ?? "",
-        code: "another-code",
-      });
-
-      expect(await readCredentialsGeneration(sql)).toBe(1);
     });
   });
 

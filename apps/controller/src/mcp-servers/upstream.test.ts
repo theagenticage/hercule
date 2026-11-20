@@ -7,6 +7,10 @@
  * - every failure of the MCP client becomes one failure reason with a message
  *   that never holds what the server sent, and a 401 names the credentials it
  *   rejected;
+ * - the fallback to an older MCP revision follows MCP's versioning rules, also
+ *   against a server built on the official TypeScript SDK: it happens when the
+ *   server shows it does not speak the modern handshake, and never on a 401,
+ *   403, 429, 5xx, a transport failure or a timeout;
  * - the HTTP requests to the outside server create no trace span, so no URL or
  *   error text reaches a trace.
  */
@@ -14,10 +18,10 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Tracer from "effect/Tracer";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { McpClientError } from "effect/ai";
+import { McpClientError, McpProtocol } from "effect/ai";
 import { TestDatabase } from "../db/testing";
 import { ServingPromotionStateLayer } from "../promotion/testing";
-import { startFakeUpstream } from "./testing";
+import { startFakeUpstream, type FakeUpstream } from "./testing";
 import { checkUrlOnOrigin, describeClientFailure, openUpstream } from "./upstream";
 
 const ORIGIN = "https://mcp.example.com";
@@ -71,8 +75,14 @@ describe("describeClientFailure", () => {
         new McpClientError.HttpError({ status: 400, description: "a body the server wrote" }),
         "protocol",
       ],
-      [new McpClientError.HttpError({ status: 500 }), "protocol"],
+      [new McpClientError.HttpError({ status: 403 }), "protocol"],
+      [new McpClientError.HttpError({ status: 404 }), "protocol"],
       [new McpClientError.HttpError({ status: 302 }), "protocol"],
+      [new McpClientError.HttpError({ status: 500 }), "unreachable"],
+      [new McpClientError.HttpError({ status: 503 }), "unreachable"],
+      [new McpClientError.HttpError({ status: 429 }), "unreachable"],
+      [new McpClientError.ClosedError({ description: "MCP HTTP transport closed" }), "unreachable"],
+      [new McpClientError.ClosedError({ sessionExpired: true }), "protocol"],
       [new McpClientError.HttpError({ status: 400, code: -32022 }), "unsupported-revision"],
     ] as const;
 
@@ -82,6 +92,81 @@ describe("describeClientFailure", () => {
       expect(failure.message).not.toMatch(/ECONNREFUSED|10\.0\.0\.1|body the server wrote/);
     }
   });
+});
+
+/** Opens an upstream to the fake with the credentials of nobody, and returns the outcome. */
+const openUpstreamTo = (fake: FakeUpstream, firstRevision: string | null = null) =>
+  Effect.runPromise(
+    Effect.result(
+      Effect.scoped(
+        openUpstream({
+          contribution: {
+            id: "sentry/desk",
+            pluginId: "sentry",
+            displayName: "Desk",
+            description: "",
+            connectionType: "sentry/desk",
+            origin: fake.origin,
+            buildUpstreamRequest: () => ({ url: fake.url, headers: {} }),
+          },
+          credentials: { credentials: {}, config: {}, identity: "identity-1" },
+          firstRevision,
+        }).pipe(Effect.map((opened) => opened.revision)),
+      ).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.provide(ServingPromotionStateLayer),
+        Effect.provide(TestDatabase),
+      ),
+    ),
+  );
+
+describe("the fallback to an older MCP revision", () => {
+  it.each([
+    ["2025-06-18", McpProtocol.v2025_06_18],
+    ["2025-03-26", McpProtocol.v2025_03_26],
+  ])(
+    "reaches a server built on the official SDK that speaks only %s, which answers server/discover with HTTP 400 and code -32000",
+    async (revision, protocol) => {
+      const fake = await startFakeUpstream({
+        protocols: [protocol],
+        answersLikeOfficialSdk: true,
+      });
+      try {
+        const outcome = await openUpstreamTo(fake);
+
+        expect(outcome).toMatchObject({ _tag: "Success", success: revision });
+        // The modern handshake is refused first, the way the SDK refuses it.
+        expect(fake.requests[0]).toMatchObject({ method: "server/discover", status: 400 });
+        expect(fake.requests.at(-1)?.method).not.toBe("server/discover");
+      } finally {
+        await fake.stop();
+      }
+    },
+  );
+
+  it.each([
+    [401, "unauthorized", 1],
+    [403, "protocol", 1],
+    [429, "unreachable", 1],
+    [503, "unreachable", 1],
+    // A 404 or a 405 to server/discover shows an older server, but `initialize` gets the same answer, which ends it.
+    [404, "protocol", 2],
+    [405, "protocol", 2],
+  ])(
+    "does not fall back when the server answers HTTP %i to every request: the failure is %s, after %i request(s)",
+    async (status, reason, requestCount) => {
+      const fake = await startFakeUpstream();
+      fake.refuseWithStatus = status;
+      try {
+        const outcome = await openUpstreamTo(fake);
+
+        expect(outcome).toMatchObject({ _tag: "Failure", failure: { reason } });
+        expect(fake.requests).toHaveLength(requestCount);
+      } finally {
+        await fake.stop();
+      }
+    },
+  );
 });
 
 describe("openUpstream", () => {

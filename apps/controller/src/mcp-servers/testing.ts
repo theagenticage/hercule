@@ -45,6 +45,12 @@ export interface FakeUpstreamSettings {
   /** The MCP revisions the fake speaks. The default is the two newest. */
   readonly protocols: ReadonlyArray<McpProtocol.ProtocolAdapter>;
   readonly tools: ReadonlyArray<FakeTool>;
+  /**
+   * Makes the fake refuse requests the way a server built on the official
+   * TypeScript SDK does, instead of the way Effect's own server does (see
+   * `buildSdkRefusal`). Off by default.
+   */
+  readonly answersLikeOfficialSdk: boolean;
 }
 
 /** One request the fake received. `status` is `undefined` while the fake still holds the answer. */
@@ -72,6 +78,8 @@ export interface FakeUpstream {
   authorize: (authorization: string | null, method: string) => boolean;
   /** When set, every request gets a 302 to this address instead of an answer. */
   redirectTo: string | undefined;
+  /** When set, every request gets this HTTP status and an empty body instead of an answer. */
+  refuseWithStatus: number | undefined;
   /** Replaces the revisions it speaks and the tools it lists, for the requests that follow. */
   configure: (settings: Partial<FakeUpstreamSettings>) => Promise<void>;
   /**
@@ -84,6 +92,55 @@ export interface FakeUpstream {
   waitForRequests: (count: number) => Promise<void>;
   stop: () => Promise<void>;
 }
+
+/** The versions the official TypeScript SDK's server accepts in `MCP-Protocol-Version`, newest first. */
+const SDK_SUPPORTED_VERSIONS = [
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+  "2024-10-07",
+];
+
+/**
+ * Builds the refusal a server on the official TypeScript SDK (1.30.0,
+ * `webStandardStreamableHttp.js`) gives a request before it reaches the
+ * protocol, or `undefined` when the SDK lets the request through. Status,
+ * code and message are the SDK's own:
+ *
+ * - a request other than `initialize` with no `Mcp-Session-Id` is HTTP 400,
+ *   code -32000, "Bad Request: Server not initialized". `server/discover` is
+ *   such a request, because the SDK knows only `initialize`;
+ * - a request with a session and an `MCP-Protocol-Version` the server does
+ *   not support is HTTP 400, code -32000, "Bad Request: Unsupported protocol
+ *   version". The server supports the versions up to the newest it speaks.
+ */
+const buildSdkRefusal = (
+  request: Request,
+  method: string,
+  settings: FakeUpstreamSettings,
+): Response | undefined => {
+  if (method === "initialize") return undefined;
+  const refuse = (message: string) =>
+    new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  if (request.headers.get("mcp-session-id") === null) {
+    return refuse("Bad Request: Server not initialized");
+  }
+  const newest = Math.min(
+    ...settings.protocols.map((adapter) => SDK_SUPPORTED_VERSIONS.indexOf(adapter.protocolVersion)),
+  );
+  const supported = SDK_SUPPORTED_VERSIONS.slice(Math.max(newest, 0));
+  const requested = request.headers.get("mcp-protocol-version");
+  if (requested !== null && !supported.includes(requested)) {
+    return refuse(
+      `Bad Request: Unsupported protocol version: ${requested} (supported versions: ${supported.join(", ")})`,
+    );
+  }
+  return undefined;
+};
 
 const buildHandler = (settings: FakeUpstreamSettings) => {
   const [first, ...rest] = settings.protocols;
@@ -129,6 +186,7 @@ export const startFakeUpstream = (
   let settings: FakeUpstreamSettings = {
     protocols: initial.protocols ?? [McpProtocol.v2026_07_28, McpProtocol.v2025_11_25],
     tools: initial.tools ?? [{ name: "echo", description: "Echoes its text" }],
+    answersLikeOfficialSdk: initial.answersLikeOfficialSdk ?? false,
   };
   let built = buildHandler(settings);
   const requests: Array<RecordedRequest> = [];
@@ -160,12 +218,16 @@ export const startFakeUpstream = (
       const response =
         fake.redirectTo !== undefined
           ? new Response(null, { status: 302, headers: { location: fake.redirectTo } })
-          : !fake.authorize(recorded.authorization, method)
-            ? new Response("unauthorized", {
-                status: 401,
-                headers: { "www-authenticate": "Bearer" },
-              })
-            : await built.handler(request, Context.empty());
+          : fake.refuseWithStatus !== undefined
+            ? new Response(null, { status: fake.refuseWithStatus })
+            : !fake.authorize(recorded.authorization, method)
+              ? new Response("unauthorized", {
+                  status: 401,
+                  headers: { "www-authenticate": "Bearer" },
+                })
+              : ((settings.answersLikeOfficialSdk
+                  ? buildSdkRefusal(request, method, settings)
+                  : undefined) ?? (await built.handler(request, Context.empty())));
       requests.push(recorded);
       for (const waiting of arrivals.filter((one) => requests.length >= one.count)) {
         waiting.resolve();
@@ -184,6 +246,7 @@ export const startFakeUpstream = (
     requests,
     authorize: () => true,
     redirectTo: undefined,
+    refuseWithStatus: undefined,
     configure: async (changes) => {
       settings = { ...settings, ...changes };
       const previous = built;
@@ -268,7 +331,7 @@ const insertConnection = (
  */
 export const insertOauthConnection = (
   harness: ServerHarness,
-  tokens: { readonly accessToken: string; readonly refreshToken: string },
+  tokens: { readonly accessToken: string; readonly refreshToken?: string },
   pluginId = DESK_PLUGIN_ID,
 ): Promise<string> =>
   insertConnection(harness, pluginId, `${pluginId}/desk`, {

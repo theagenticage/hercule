@@ -9,7 +9,10 @@
  * - each way a read refuses, and the Connection status it leaves behind;
  * - the refresh after an outside server rejected the credentials: skipped when
  *   the stored credentials already changed, done once for concurrent callers,
- *   and refused for pasted credentials.
+ *   and refused, without touching the Connection, when there is nothing to
+ *   refresh with;
+ * - what a plugin reads: a stale token is refreshed whatever the Connection's
+ *   status says, which only the core's own reads refuse.
  *
  * The clock is a `TestClock` at the epoch, so a token's expiry is set in
  * milliseconds after the epoch.
@@ -221,6 +224,11 @@ const answerRefreshWithNewToken = (): void => {
 const FRESH_TOKENS: TokenSet = {
   accessToken: "stored-token",
   refreshToken: "refresh-1",
+  expiresAt: expiresAt(HOUR),
+};
+
+const TOKENS_WITHOUT_REFRESH: TokenSet = {
+  accessToken: "stored-token",
   expiresAt: expiresAt(HOUR),
 };
 
@@ -461,6 +469,61 @@ describe("the credentials the core reads to call an outside server", () => {
     },
   );
 
+  it("fails with no-credentials, and leaves the Connection connected, when a Connection without a sign-in flow holds no credentials", async () => {
+    const { failure, status } = await run({ type: PASTED_TYPE }, (id) =>
+      Effect.gen(function* () {
+        return { failure: yield* Effect.flip(readForUse(id)), status: yield* readStatus(id) };
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "ConnectionCredentialsUnavailable",
+      reason: "no-credentials",
+    });
+    expect(status).toBe("connected");
+  });
+
+  it("fails with credentials-replaced, and leaves the Connection connected, when the user reconnects during the refresh and again during the repeat", async () => {
+    const { failure, status, notifications } = await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        const arrivals = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+        const releases = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+        let requests = 0;
+        provider.answers.token = async () => {
+          const turn = requests++;
+          arrivals[turn]?.resolve();
+          await releases[turn]?.promise;
+          return buildJsonResponse({
+            access_token: "refreshed-token",
+            refresh_token: "refresh-2",
+            token_type: "bearer",
+            expires_in: 8 * 60 * 60,
+          });
+        };
+        const reading = yield* Effect.forkChild(readForUse(id));
+        for (const [turn, arrival] of arrivals.entries()) {
+          yield* Effect.promise(() => arrival.promise);
+          // The reconnect stores another token set that is still inside the refresh margin.
+          yield* storeTokens(id, { ...STALE_TOKENS, accessToken: `reconnected-${String(turn)}` });
+          releases[turn]?.resolve();
+        }
+        return {
+          failure: yield* Effect.flip(Fiber.join(reading)),
+          status: yield* readStatus(id),
+          notifications: yield* countNeedsSignInNotifications(id),
+        };
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "ConnectionCredentialsUnavailable",
+      reason: "credentials-replaced",
+    });
+    expect(status).toBe("connected");
+    expect(notifications).toBe(0);
+  });
+
   it("fails with missing for a Connection that does not exist", async () => {
     const failure = await run({}, () =>
       Effect.flip(readForUse("0199e0e7-0000-7000-8000-000000000000")),
@@ -618,6 +681,30 @@ describe("the refresh after an outside server rejected the credentials", () => {
     expect(provider?.tokenRequests).toEqual([]);
   });
 
+  it.each([
+    ["OAuth tokens with no refresh token", SIGN_IN_TYPE, TOKENS_WITHOUT_REFRESH],
+    ["OAuth tokens of a type with no refresh endpoint", PASTED_TYPE, FRESH_TOKENS],
+  ] as const)(
+    "fails with ConnectionCannotRefresh, and leaves the Connection alone with no Notification, for %s",
+    async (_name, type, tokens) => {
+      const { failure, status, notifications } = await run({ type, tokens }, (id) =>
+        Effect.gen(function* () {
+          const { identity } = yield* readForUse(id);
+          return {
+            failure: yield* Effect.flip(refreshAfterRejection(id, identity)),
+            status: yield* readStatus(id),
+            notifications: yield* countNeedsSignInNotifications(id),
+          };
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionCannotRefresh" });
+      expect(status).toBe("connected");
+      expect(notifications).toBe(0);
+      expect(provider?.tokenRequests).toEqual([]);
+    },
+  );
+
   it("returns pasted credentials the user replaced after the rejected request went out", async () => {
     const replaced = await run({ type: PASTED_TYPE, pasted: { apiKey: "key-1" } }, (id) =>
       Effect.gen(function* () {
@@ -632,4 +719,26 @@ describe("the refresh after an outside server rejected the credentials", () => {
 
     expect(replaced.credentials).toEqual({ apiKey: "key-2" });
   });
+});
+
+describe("the credentials a plugin reads", () => {
+  it.each(["needs-reauth", "disabled"] as const)(
+    "refreshes a stale token of a %s Connection, as it always did, where the core's own read refuses",
+    async (status) => {
+      const { read, coreRead } = await run({ tokens: STALE_TOKENS, status }, (id) =>
+        Effect.gen(function* () {
+          answerRefreshWithNewToken();
+          const types = yield* ConnectionTypes;
+          return {
+            read: yield* types.runtimeFor("oauthy").credentials(id),
+            coreRead: yield* Effect.flip(readForUse(id)),
+          };
+        }),
+      );
+
+      expect(read).toEqual({ accessToken: "refreshed-token" });
+      expect(refreshRequests()).toHaveLength(1);
+      expect(coreRead).toMatchObject({ _tag: "ConnectionCredentialsUnavailable" });
+    },
+  );
 });
