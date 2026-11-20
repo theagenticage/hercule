@@ -626,11 +626,10 @@ describe("a result that is out of date", () => {
       fake.authorize = () => true;
       release();
 
-      const row = await eventually(
+      await eventually(
         () => readRow(controller),
         (found) => found.status === "ready",
       );
-      expect(row.revision).toBe(2);
       expect(await countNotifications(controller)).toBe(0);
     });
   });

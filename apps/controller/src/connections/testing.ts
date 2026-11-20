@@ -5,8 +5,6 @@
  * with a device flow.
  */
 import { expect } from "vitest";
-import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/sql/SqlClient";
 import type {
   ActivationContext,
   ConnectionsRuntime,
@@ -83,20 +81,6 @@ export const listConnections = async (
   const response = await get(base, "/api/v1/connections", token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
-};
-
-/** Reads `credentials_generation` of the only Connection in the database. */
-export const readCredentialsGeneration = async (
-  sql: SqlClient.SqlClient,
-): Promise<number | undefined> => {
-  const rows = await Effect.runPromise(
-    Effect.orDie(
-      sql<{ readonly credentials_generation: number }>`
-        SELECT credentials_generation FROM connections
-      `,
-    ),
-  );
-  return rows[0]?.credentials_generation;
 };
 
 /**
