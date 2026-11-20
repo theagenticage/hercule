@@ -857,6 +857,16 @@ const TABLE = {
   "wikiPage.read": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages/:id" },
   "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
   "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
+  "wikiPage.archive": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/archive",
+  },
+  "wikiPage.restore": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/restore",
+  },
 
   "skill.query": { requires: "skill.read", method: "GET", path: "/api/v1/skills" },
   "skill.read": { requires: "skill.read", method: "GET", path: "/api/v1/skills/:name" },

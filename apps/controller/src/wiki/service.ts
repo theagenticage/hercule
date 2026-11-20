@@ -1,16 +1,19 @@
 /**
- * The Wiki operations: `wikiPage.query`, `read`, `create` and `update`
- * (spec 19 sections 2.3 and 3).
+ * The Wiki operations: `wikiPage.query`, `read`, `create`, `update`,
+ * `archive` and `restore` (spec 19 sections 2.3 and 3).
  *
  * The checks run in the order the API promises, and the first check that fails
  * decides the error: the grant (`Forbidden`), the input (`Validation`), the page or
- * the repository (`NotFound`), then the slug, the revision and the page cap
- * (`Conflict`, `CapExceeded`).
+ * the repository (`NotFound`), then the slug and the revision (`Conflict`),
+ * whether the page is archived (`InvalidState`), and the page cap
+ * (`CapExceeded`).
  *
- * Every write stores a whole revision and writes one `wikiPage.written` audit
- * entry in the same transaction. The entry holds ids only, never a title or a
- * body: every actor holding `event.read` reads the log. The entry also
- * announces the page on the `wikiPage` live topic after the commit.
+ * A create or an update stores a whole revision and writes one
+ * `wikiPage.written` audit entry in the same transaction. An archive or a
+ * restore stores no revision and writes `wikiPage.archived` or
+ * `wikiPage.restored`. An entry holds ids only, never a title, a body or an
+ * archive reason: every actor holding `event.read` reads the log. The entry
+ * also announces the page on the `wikiPage` live topic after the commit.
  */
 import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
@@ -24,11 +27,13 @@ import {
   createCapExceededError,
   createConflictError,
   createDecodeValidationError,
+  createInvalidStateError,
   createNotFoundError,
   DEFAULT_PAGE_LIMIT,
   Id,
   MAX_WIKI_PAGES,
   MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_ARCHIVE_FIELDS,
   WIKI_PAGE_SORT_FIELDS,
   WIKI_PAGE_UPDATE_FIELDS,
   WikiPageCreateInput,
@@ -37,6 +42,7 @@ import {
   type CapExceeded,
   type Conflict,
   type Forbidden,
+  type InvalidState,
   type NotFound,
   type Validation,
   type WikiPage,
@@ -62,15 +68,21 @@ const QueryInput = Schema.Struct({
 });
 const ReadInput = Schema.Struct({ id: Id, revision: Schema.optionalKey(WikiRevisionNumber) });
 const UpdateInput = Schema.Struct({ id: Id, ...WIKI_PAGE_UPDATE_FIELDS });
+const ArchiveInput = Schema.Struct({ id: Id, ...WIKI_PAGE_ARCHIVE_FIELDS });
+const RestoreInput = Schema.Struct({ id: Id });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 export type ReadInput = Schema.Schema.Type<typeof ReadInput>;
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
+export type ArchiveInput = Schema.Schema.Type<typeof ArchiveInput>;
+export type RestoreInput = Schema.Schema.Type<typeof RestoreInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeRead = Schema.decodeUnknownEffect(ReadInput);
 const decodeCreate = Schema.decodeUnknownEffect(WikiPageCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+const decodeArchive = Schema.decodeUnknownEffect(ArchiveInput);
+const decodeRestore = Schema.decodeUnknownEffect(RestoreInput);
 
 /** One page of page summaries, in the contract's shape. */
 export interface WikiPageListing {
@@ -84,6 +96,25 @@ const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<WikiPageSortField>
 ];
 
 const NO_SUCH_PAGE = "no such wiki page; `hercule wiki-page list` shows the pages there are";
+
+/**
+ * Returns the message for a write refused because the page has moved past the
+ * revision the caller read. `current` is the page's revision now, and
+ * `whatToDo` ends the message with the caller's next step.
+ */
+const describeMovedRevision = (current: number, whatToDo: string): string =>
+  `The page changed since you read it (now revision ${String(current)}). ${whatToDo}`;
+
+/**
+ * Creates the error for a Wiki that already holds the most pages it can.
+ * `count` is how many it holds, and `whatToDo` ends the message with what the
+ * caller can do instead.
+ */
+const createPageCapError = (count: number, whatToDo: string): CapExceeded =>
+  createCapExceededError(
+    { count: count + 1, cap: MAX_WIKI_PAGES },
+    `This wiki has ${String(MAX_WIKI_PAGES)} pages, the most it can hold. ${whatToDo}`,
+  );
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -109,17 +140,36 @@ const make = Effect.gen(function* () {
       at: page.updatedAt,
     });
 
+  /**
+   * Records an archive or a restore in the audit log, which also announces
+   * the page on its live topic.
+   */
+  const recordArchiveChange = (
+    kind: "wikiPage.archived" | "wikiPage.restored",
+    page: WikiPageSummary,
+    actor: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    audit.append({
+      kind,
+      actor,
+      record: { topic: "wikiPage", id: page.id },
+      payload: { pageId: page.id, resourceId: page.resourceId },
+      at,
+    });
+
   return {
     /**
      * Returns one page of page summaries, of one repository or of every
-     * repository. Fails with `Validation` when `resourceId` names a Resource
+     * repository: the pages that are not archived, or with `archived: true`
+     * only the archived ones. Fails with `Validation` when `resourceId` names a Resource
      * that is not a repo. An id that names no Resource, a deleted one
      * included, matches nothing.
      */
     query: (input: QueryInput): Effect.Effect<WikiPageListing, Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("wikiPage.query");
-        const { resourceId, limit, cursor, sort } = yield* Effect.mapError(
+        const { resourceId, archived, limit, cursor, sort } = yield* Effect.mapError(
           decodeQuery(input),
           createDecodeValidationError,
         );
@@ -133,6 +183,7 @@ const make = Effect.gen(function* () {
         const listing = yield* refuseCursor(
           pages.list({
             resourceId,
+            archived: archived ?? false,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             sort: resolveSortKeys(sort, DEFAULT_SORT),
@@ -147,7 +198,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns a page as of `revision`, or its current revision when none is
-     * given, with the page's 50 newest revisions, newest first. Fails with
+     * given, with the page's 50 newest revisions, newest first. An archived
+     * page is read like any other, and carries its archive mark. Fails with
      * `NotFound` when there is no such page or the page has no such revision.
      */
     read: (
@@ -188,8 +240,10 @@ const make = Effect.gen(function* () {
      * - `Validation` when the repository cannot be chosen, or the Resource
      *   is not a repo;
      * - `NotFound` when `resourceId` names no Resource;
-     * - `Conflict` when the Wiki already has a page with this slug;
-     * - `CapExceeded` when the Wiki already holds 500 pages.
+     * - `Conflict` when the Wiki already has a page with this slug, archived
+     *   or not;
+     * - `CapExceeded` when the Wiki already holds 500 pages that are not
+     *   archived.
      */
     create: (
       input: WikiPageCreateInput,
@@ -206,20 +260,23 @@ const make = Effect.gen(function* () {
             const { resourceId, repository } = yield* resolveRepository(decoded.resourceId).pipe(
               Effect.provideService(SqlClient.SqlClient, sql),
             );
-            const taken = yield* pages.findIdBySlug(resourceId, decoded.slug);
+            const taken = yield* pages.findBySlug(resourceId, decoded.slug);
             if (Option.isSome(taken)) {
+              const { id, isArchived } = taken.value;
               return yield* Effect.fail(
                 createConflictError(
-                  `A page with this slug already exists: ${taken.value}. Read it with \`hercule wiki-page read ${taken.value}\`, then change it with \`hercule wiki-page update\`.`,
+                  isArchived
+                    ? `A page with this slug already exists and is archived: ${id}. Read it with \`hercule wiki-page read ${id}\`, then bring it back with \`hercule wiki-page restore ${id}\`, or choose another slug.`
+                    : `A page with this slug already exists: ${id}. Read it with \`hercule wiki-page read ${id}\`, then change it with \`hercule wiki-page update\`.`,
                 ),
               );
             }
             const count = yield* pages.countPages(resourceId);
             if (count >= MAX_WIKI_PAGES) {
               return yield* Effect.fail(
-                createCapExceededError(
-                  { count: count + 1, cap: MAX_WIKI_PAGES },
-                  `This wiki has ${String(MAX_WIKI_PAGES)} pages, the most it can hold. Update an existing page instead.`,
+                createPageCapError(
+                  count,
+                  "Update an existing page instead, or archive one that no longer helps with `hercule wiki-page archive`.",
                 ),
               );
             }
@@ -242,13 +299,17 @@ const make = Effect.gen(function* () {
     /**
      * Writes the next revision of a page and returns the page as written. The
      * body is always given whole; a title or a summary left out keeps its
-     * value. Fails with `NotFound` when there is no such page, and with
-     * `Conflict` when the page is no longer at `expectedRevision`. Nothing is
-     * merged for the caller: it reads the page again and merges its change.
+     * value. Fails with `NotFound` when there is no such page, with `Conflict`
+     * when the page is no longer at `expectedRevision`, and with
+     * `InvalidState` when the page is archived. Nothing is merged for the
+     * caller: it reads the page again and merges its change.
      */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<WikiPage, Forbidden | Validation | NotFound | Conflict | SqlError> =>
+    ): Effect.Effect<
+      WikiPage,
+      Forbidden | Validation | NotFound | Conflict | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("wikiPage.update");
         const decoded = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
@@ -257,10 +318,19 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const current = yield* readSummaryOrFail(decoded.id);
             if (current.revision !== decoded.expectedRevision) {
-              const now = String(current.revision);
               return yield* Effect.fail(
                 createConflictError(
-                  `The page changed since you read it (now revision ${now}). Read it again, merge your change into it, and update with \`--expected-revision ${now}\`.`,
+                  describeMovedRevision(
+                    current.revision,
+                    `Read it again, merge your change into it, and update with \`--expected-revision ${String(current.revision)}\`.`,
+                  ),
+                ),
+              );
+            }
+            if (current.archived !== undefined) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `This page is archived, and an archived page takes no update. Bring it back first with \`hercule wiki-page restore ${current.id}\`.`,
                 ),
               );
             }
@@ -272,6 +342,109 @@ const make = Effect.gen(function* () {
               at: yield* nowIso,
             });
             yield* recordWrite(page);
+            return page;
+          }),
+        );
+      }),
+
+    /**
+     * Archives a page and returns it with its archive mark. The page leaves
+     * the listing, the page count and the titles sessions are shown. Its
+     * revisions are kept, and `read` still returns it. Fails with:
+     *
+     * - `NotFound` when there is no such page;
+     * - `Conflict` when the page is no longer at `expectedRevision`, so
+     *   nobody archives a page for what it no longer says;
+     * - `InvalidState` when the page is already archived.
+     */
+    archive: (
+      input: ArchiveInput,
+    ): Effect.Effect<
+      WikiPageSummary,
+      Forbidden | Validation | NotFound | Conflict | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("wikiPage.archive");
+        const decoded = yield* Effect.mapError(decodeArchive(input), createDecodeValidationError);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const current = yield* readSummaryOrFail(decoded.id);
+            if (current.revision !== decoded.expectedRevision) {
+              return yield* Effect.fail(
+                createConflictError(
+                  describeMovedRevision(
+                    current.revision,
+                    `Read it again, and archive it with \`--expected-revision ${String(current.revision)}\` if it should still go.`,
+                  ),
+                ),
+              );
+            }
+            if (current.archived !== undefined) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `This page is already archived (by ${current.archived.by}: ${current.archived.reason}).`,
+                ),
+              );
+            }
+            const archived = {
+              at: yield* nowIso,
+              by: yield* currentStamp,
+              reason: decoded.reason,
+            };
+            yield* pages.markArchived(current.id, archived);
+            const page = { ...current, archived };
+            yield* recordArchiveChange("wikiPage.archived", page, archived.by, archived.at);
+            return page;
+          }),
+        );
+      }),
+
+    /**
+     * Restores an archived page and returns it without its archive mark, at
+     * the revision it was archived at. Fails with:
+     *
+     * - `NotFound` when there is no such page;
+     * - `InvalidState` when the page is not archived;
+     * - `CapExceeded` when the Wiki already holds 500 pages that are not
+     *   archived.
+     */
+    restore: (
+      input: RestoreInput,
+    ): Effect.Effect<
+      WikiPageSummary,
+      Forbidden | Validation | NotFound | InvalidState | CapExceeded | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("wikiPage.restore");
+        const { id } = yield* Effect.mapError(decodeRestore(input), createDecodeValidationError);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { archived, ...page } = yield* readSummaryOrFail(id);
+            if (archived === undefined) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  "This page is not archived, so there is nothing to restore.",
+                ),
+              );
+            }
+            const count = yield* pages.countPages(page.resourceId);
+            if (count >= MAX_WIKI_PAGES) {
+              return yield* Effect.fail(
+                createPageCapError(
+                  count,
+                  "Archive a page that no longer helps with `hercule wiki-page archive` before restoring this one.",
+                ),
+              );
+            }
+            yield* pages.clearArchived(page.id);
+            yield* recordArchiveChange(
+              "wikiPage.restored",
+              page,
+              yield* currentStamp,
+              yield* nowIso,
+            );
             return page;
           }),
         );

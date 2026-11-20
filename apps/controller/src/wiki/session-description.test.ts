@@ -20,10 +20,10 @@ describe("buildWikiDescription", () => {
     expect(describeFor(["wiki.write", "task.read"])).toBeUndefined();
   });
 
-  it("asks a session that may also write to record what it learns", () => {
-    expect(describeFor(["wiki.read"])?.text).not.toContain("write it down");
+  it("tells only a session that may also write what belongs in the wiki and what does not", () => {
+    expect(describeFor(["wiki.read"])?.text).not.toContain("worklog");
     expect(describeFor(["wiki.read", "wiki.write"])?.text).toMatch(
-      /hercule wiki-page list --resource <id>`\. When you learn .* write it down\./,
+      /hercule wiki-page list --resource <id>`\. The wiki holds lasting knowledge .* It is not a worklog: never write a page about a ticket, a pull request or a thread/,
     );
   });
 

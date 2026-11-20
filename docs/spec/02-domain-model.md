@@ -673,7 +673,7 @@ Purpose: one message in a Discussion. It carries its author as `actor` only: a s
 
 ### Wiki Page
 
-Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
+Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* A page that no longer helps is archived: it carries who archived it, when and why, leaves the listing, takes no update, and is still read by its id until it is restored. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 ### Edit
 
@@ -978,7 +978,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
 - **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
 
-*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2).
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2). *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* An archived Wiki Page is not deleted either: archiving only takes it out of the listing ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library:
 

@@ -57,10 +57,23 @@ const readRepositoryLines = (paragraph: string | undefined): ReadonlyArray<strin
   paragraph?.split("\n\n").at(-1)?.split("\n");
 
 describe("the coordination paragraph", () => {
-  it("names a repository's page count and its five most recently changed titles, newest first", async () => {
+  it("names a repository's page count and its five most recently changed titles, newest first, leaving archived pages out", async () => {
     await withFleet(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web.git");
-      await seedPages(arranged, web, 7);
+      await seedPages(arranged, web, 8);
+      // The newest page is archived, so it is neither counted nor named.
+      await runWithDatabase(
+        arranged,
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(
+            sql,
+            sql`UPDATE wiki_pages
+                SET archived_at = '2026-10-20T10:00:00.000Z', archived_by = 'user',
+                    archive_reason = 'Out of date'
+                WHERE slug = 'page-8'`,
+          ),
+        ),
+      );
       const reader = await createProfile(arranged, "wiki-reader", ["wiki.read"]);
 
       const frame = await spawnWithCheckouts(arranged, reader.id, [web]);

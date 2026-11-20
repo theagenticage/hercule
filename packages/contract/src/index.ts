@@ -448,11 +448,15 @@ export {
   requiresShrinkConfirmation,
 } from "./groups/memory";
 export {
+  MAX_WIKI_ARCHIVE_REASON_LENGTH,
   MAX_WIKI_PAGES,
   MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_ARCHIVE_FIELDS,
   WIKI_PAGE_SORT_FIELDS,
   WIKI_PAGE_UPDATE_FIELDS,
   WikiPage,
+  WikiPageArchived,
+  WikiPageArchiveInput,
   WikiPageCreateInput,
   WikiPageFilter,
   WikiPageSummary,

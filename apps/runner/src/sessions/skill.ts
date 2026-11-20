@@ -85,14 +85,27 @@ for new posts, the first post to read from. Read it, then post who changes what:
   discussion on any subject in the repository you have checked out.
 
 The wiki holds what a repository's own docs do not say; those docs win over it.
+It is lasting knowledge, one page per subject: how something is run or checked,
+a trap in a tool, a fact about a machine or an outside service, an exception a
+human allowed to a rule. It is not a worklog: nothing about one ticket, pull
+request or thread goes in it, and a decision or a rule goes in the repository's
+own docs.
 
 - List a repository's pages: \`hercule wiki-page list --resource <id>\`. The
-  repository's id is on its line in your instructions.
+  repository's id is on its line in your instructions. List them before you
+  write, so you add to the page on a subject instead of starting a second one.
 - Read a page and its revision number: \`hercule wiki-page read <page-id>\`.
-- Write a new page, with its body on stdin:
-  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
 - Change a page by writing its whole body again, passing the revision you read:
-  \`hercule wiki-page update <page-id> --expected-revision 3 < page.md\`. If the
-  update is refused because the page changed since, read it again, merge your
-  change into it, and update again with the new revision.
+  \`hercule wiki-page update <page-id> --expected-revision 3 < page.md\`. Put
+  what you learned where it belongs in the page, and take out what is no
+  longer true. If the update is refused because the page changed since, read
+  it again, merge your change into it, and update again with the new revision.
+- Write a new page only when no page covers the subject, with its body on
+  stdin. Name it for the subject, never for a ticket or a date:
+  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
+- Archive a page that no longer helps, after moving what is still worth
+  keeping to the page that takes over:
+  \`hercule wiki-page archive <page-id> --expected-revision 3 --reason "Merged into the page release-process"\`.
+  The page leaves the list but is not deleted, and
+  \`hercule wiki-page restore <page-id>\` brings it back.
 `;
