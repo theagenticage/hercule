@@ -10,6 +10,7 @@ import { TASK_STAGES } from "@hercule/contract";
 import {
   CORE_INBOX_FIELD_KEYS,
   ENTITY_STATUS_STAGES,
+  HOST_API,
   type EntityKindDeclaration,
   type EventSourceContribution,
   type PluginManifest,
@@ -20,7 +21,7 @@ import { registerEventSourceContribution, type RegisteredEventSource } from "./e
 const MANIFEST: PluginManifest = {
   id: "acme",
   displayName: "Acme",
-  hostApi: 8,
+  hostApi: HOST_API,
   capabilities: ["event-sources", "events", "entities"],
   configSchema: Schema.Struct({}),
 };

@@ -214,7 +214,7 @@ export const buildSourcePlugin = (
 ): PluginDetail => ({
   id,
   displayName,
-  hostApi: 8,
+  hostApi: 9,
   capabilities: [],
   enabled: true,
   status: { _tag: "active" },

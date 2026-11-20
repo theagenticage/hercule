@@ -12,6 +12,7 @@ export {
   type RunningIngest,
 } from "./ingest";
 export type { RegisteredHarness } from "./harnesses";
+export type { RegisteredMcpServer } from "./mcp-servers";
 export { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
 export { findAccountKind, findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";

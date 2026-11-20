@@ -15,6 +15,7 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type ActionContext,
   type ActivationContext,
@@ -24,6 +25,7 @@ import {
   type IngestConnection,
   type FeedDeclaration,
   type IngestContext,
+  type McpServerContribution,
   type PollResult,
   type Plugin,
   type PluginCapability,
@@ -328,6 +330,60 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerWorkflowAction(host, action),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+/** The MCP server of `buildMcpServerPlugin`, with the Connection type `<plugin id>/desk`. */
+export const buildDeskMcpServer = (pluginId: string): McpServerContribution => ({
+  id: "desk",
+  displayName: "Desk",
+  description: "Read and update Desk tickets.",
+  connectionType: `${pluginId}/desk`,
+  origin: "https://mcp.desk.example",
+  buildUpstreamRequest: ({ credentials }) => ({
+    url: "https://mcp.desk.example/mcp",
+    headers: { Authorization: `Bearer ${credentials["token"] ?? ""}` },
+  }),
+});
+
+/**
+ * Builds a plugin that registers the Connection type `desk` and one MCP
+ * server, the server first when `serverFirst` is true. The server is
+ * `buildDeskMcpServer` unless `server` replaces it, and `registerType: false`
+ * leaves the Connection type out. The manifest requests `connections` and
+ * `mcp-servers` unless `capabilities` replaces them.
+ */
+export const buildMcpServerPlugin = (
+  id: string,
+  options: {
+    readonly server?: McpServerContribution;
+    readonly serverFirst?: boolean;
+    readonly registerType?: boolean;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+  } = {},
+): Plugin => ({
+  manifest: {
+    id,
+    displayName: `Plugin ${id}`,
+    hostApi: HOST_API,
+    capabilities: options.capabilities ?? ["connections", "mcp-servers"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) => {
+    const registerType =
+      options.registerType === false
+        ? Effect.void
+        : registerConnectionType(host, {
+            type: "desk",
+            displayName: "Desk",
+            setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+            validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
+          });
+    const server = registerMcpServer(host, options.server ?? buildDeskMcpServer(id));
+    return options.serverFirst === true
+      ? Effect.andThen(server, registerType)
+      : Effect.andThen(registerType, server);
+  },
   activate: () => Effect.succeed(Effect.void),
 });
 
