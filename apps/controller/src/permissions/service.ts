@@ -16,11 +16,11 @@
  * fails with `conflict` rather than creating a second "reviewer" that is
  * silently renamed.
  *
- * Only the user gives a profile `skill.write` or `skill.apply`. A session is
- * refused when its `profile.create` or `profile.update` would add either one,
- * even when it holds `permission.write`. See `GRANTS_ONLY_THE_USER_GIVES`.
- * For the same reason, a session is refused when it puts an Agent or an
- * assistant on a profile that holds either one: see
+ * Only the user gives a profile one of `GRANTS_ONLY_THE_USER_GIVES`
+ * (`skill.write`, `skill.apply` and `mcp.manage`). A session is refused when
+ * its `profile.create` or `profile.update` would add one of them, even when
+ * it holds `permission.write`. For the same reason, a session is refused when
+ * it puts an Agent or an assistant on a profile that holds one: see
  * `requireMayAssignAgentProfile`.
  */
 import * as Context from "effect/Context";
@@ -86,7 +86,7 @@ const NAME_TAKEN = (name: string): Conflict =>
 const NO_SUCH_PROFILE = "no such permission profile";
 
 /** The refusal for a session that would give a grant only the user gives. */
-const ONLY_THE_USER_GIVES_SKILL_GRANTS =
+const ONLY_THE_USER_GIVES_THESE_GRANTS =
   `Only the user gives a profile ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, so a session token is refused ` +
   "whatever grants its profile holds. Ask for the grant with `hercule permission request <grant>`; " +
   "the user decides it.";
@@ -95,7 +95,7 @@ const ONLY_THE_USER_GIVES_SKILL_GRANTS =
  * The refusal for a session that would put an Agent or an assistant on a
  * profile holding a grant only the user gives.
  */
-const ONLY_THE_USER_ASSIGNS_SKILL_GRANTS =
+const ONLY_THE_USER_ASSIGNS_PROFILES_WITH_THESE_GRANTS =
   `Only the user puts an Agent or an assistant on a profile that holds ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, ` +
   "because its sessions run with that profile's grants, a workflow's agent step included. " +
   "So a session token is refused whatever grants its profile holds. " +
@@ -119,7 +119,7 @@ export const requireMayGiveGrants = (
   grants: ReadonlyArray<Grant>,
 ): Effect.Effect<void, Forbidden> =>
   isSessionGivingUserOnlyGrant(actor, grants)
-    ? Effect.fail(createForbiddenError("permission.write", ONLY_THE_USER_GIVES_SKILL_GRANTS))
+    ? Effect.fail(createForbiddenError("permission.write", ONLY_THE_USER_GIVES_THESE_GRANTS))
     : Effect.void;
 
 /**
@@ -137,7 +137,9 @@ export const requireMayAssignAgentProfile = (
   grants: ReadonlyArray<Grant>,
 ): Effect.Effect<void, Forbidden> =>
   isSessionGivingUserOnlyGrant(actor, grants)
-    ? Effect.fail(createForbiddenError("agent.write", ONLY_THE_USER_ASSIGNS_SKILL_GRANTS))
+    ? Effect.fail(
+        createForbiddenError("agent.write", ONLY_THE_USER_ASSIGNS_PROFILES_WITH_THESE_GRANTS),
+      )
     : Effect.void;
 
 const make = Effect.gen(function* () {

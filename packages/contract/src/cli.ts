@@ -4507,6 +4507,95 @@ export const CLI = {
         "the skill was uploaded, not imported from GitHub, so there is no source to check",
     },
   },
+  "mcpServer.query": {
+    command: "mcp-server list",
+    help: "Lists the MCP servers, with their status and the tools they offer. Each row has the server's id, name, source, whether it is switched on, its status and its tools. Read one with `hercule mcp-server read`.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "mcpServer.read": {
+    command: "mcp-server read",
+    help: "Shows an MCP server: its status and what to do about it, where it comes from, and its tools.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+    },
+  },
+  "mcpServer.create": {
+    command: "mcp-server create",
+    help: "Adds an MCP server from a plugin's Connection. It starts in `checking`; run `hercule mcp-server read` to see the result. A server of the same contribution and account that already exists is refused.",
+    examples: [
+      {
+        args: [
+          "--source",
+          '{"kind":"plugin","contributionId":"sentry/sentry","connectionId":"0199e0e7-1111-7000-8000-00000000abcd"}',
+        ],
+      },
+      {
+        args: [
+          "--source",
+          '{"kind":"plugin","contributionId":"sentry/sentry","connectionId":"0199e0e7-1111-7000-8000-00000000abcd","name":"work_sentry"}',
+        ],
+      },
+    ],
+    fields: {
+      source: {
+        flag: "source",
+        help: 'Where the server comes from, as JSON: {"kind":"plugin","contributionId":"<plugin>/<contribution>","connectionId":"<id>"}, with an optional "name" that is fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without a name, the server takes its contribution\'s name.',
+      },
+    },
+    errors: {
+      conflict:
+        "a server of this contribution and account exists already; the message names it. Switch it on with `hercule mcp-server update`, or read it with `hercule mcp-server read`",
+    },
+  },
+  "mcpServer.update": {
+    command: "mcp-server update",
+    help: "Switches an MCP server on or off. A server that is off gives its tools to no session, and stays on every list that names it.",
+    examples: [{ args: ["1f3a9c2e", "--enabled", "false"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+      enabled: {
+        flag: "enabled",
+        help: "true to switch the server on, false to switch it off. Without it the call is refused.",
+      },
+    },
+  },
+  "mcpServer.delete": {
+    command: "mcp-server delete",
+    help: "Removes an MCP server from every project and every thread that names it. To stop using it without losing it, switch it off with `hercule mcp-server update`.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+    },
+  },
+  "mcpServer.check": {
+    command: "mcp-server check",
+    help: "Lists the server's tools again. It does not wait; run `hercule mcp-server read` later to see the result.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+    },
+    errors: {
+      invalid_state: "the server is switched off; switch it on with `hercule mcp-server update`",
+    },
+  },
   "skill.diff": {
     command: "skill diff",
     help: "Shows what a waiting revision changes, file by file, compared with the current revision.",
@@ -5574,6 +5663,11 @@ export const NOUNS = {
   skill: {
     summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
     flow: "hercule skill import <folder> adds or updates skills (a session runs hercule skill propose <folder> instead), hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill reject deletes a proposed revision, hercule skill delete <name> removes one.",
+  },
+  "mcp-server": {
+    summary:
+      "MCP servers: remote servers that offer tools to sessions, which reach them through the controller.",
+    flow: "hercule mcp-server list shows them with their status, hercule mcp-server read <id> shows one with its tools, hercule mcp-server create adds one from a plugin's Connection, hercule mcp-server update switches one on or off, hercule mcp-server check lists its tools again, hercule mcp-server delete removes one.",
   },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",

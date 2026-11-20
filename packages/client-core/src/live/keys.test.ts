@@ -616,6 +616,21 @@ describe("skill pushes", () => {
   });
 });
 
+describe("MCP server pushes", () => {
+  it("invalidates the list and the named servers' pages, never another server's", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"]);
+    assert.deepStrictEqual(keys, [queryKeys.mcpServers(), queryKeys.mcpServer("a")]);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.mcpServer("b"))));
+  });
+
+  it("invalidates every server's page after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("mcpServer", []), [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer(),
+    ]);
+  });
+});
+
 describe("wiki page pushes", () => {
   it("invalidates the listing and the changed pages", () => {
     assert.deepStrictEqual(buildQueryKeys("wikiPage", ["first", "second"]), [

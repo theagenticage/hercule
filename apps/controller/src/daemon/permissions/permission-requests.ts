@@ -260,7 +260,7 @@ const make = Effect.gen(function* () {
      *
      * Fails with `NotFound` when there is no such request, with `Forbidden`
      * when a session decides a request for a grant only the user gives
-     * (`skill.write` or `skill.apply`), whatever the outcome, and with
+     * (one of `GRANTS_ONLY_THE_USER_GIVES`), whatever the outcome, and with
      * `InvalidState` when:
      *
      * - it was already decided or was withdrawn;
