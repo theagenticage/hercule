@@ -29,10 +29,10 @@
  * - a request that comes during a check makes it run once more.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect } from "effect";
+import { Effect } from "effect";
 import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
-import { createDeviceProvider, buildJsonResponse, readConnection } from "../connections/testing";
+import { buildJsonResponse, readConnection } from "../connections/testing";
 import {
   collectPushes,
   fetchTicket,
@@ -41,8 +41,7 @@ import {
   waitForLiveToSettle,
   waitWithin,
 } from "../http/testing";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
+import type { SetUpController } from "../workflows/testing";
 import {
   countNotifications,
   createServer,
@@ -50,90 +49,19 @@ import {
   insertOauthConnection,
   readRow,
   readServer,
+  refreshedToken,
   requestCheck,
   requestUpdate,
   runSql,
   startFakeUpstream,
   waitForResult,
-  type FakeUpstream,
-  type FakeUpstreamSettings,
+  withRig,
   type McpServerRow,
 } from "./testing";
 
 const MINUTE = 60 * 1000;
 
 const LONG_AGO = "2020-01-01T00:00:00.000Z";
-
-interface RigOptions {
-  readonly fake?: Partial<FakeUpstreamSettings>;
-  readonly oauth?: boolean;
-  readonly buildUpstreamRequest?: (credentials: Record<string, string>) => {
-    readonly url: string;
-    readonly headers: Record<string, string>;
-  };
-  /** How often, in milliseconds, the scheduler looks for checks that are due. Without it, it looks once a minute. */
-  readonly checkInterval?: number;
-}
-
-/** What `withRig` hands the test. */
-interface Rig {
-  readonly controller: SetUpController;
-  readonly fake: FakeUpstream;
-  readonly provider: ReturnType<typeof createDeviceProvider>;
-  /** Makes a Connection of the plugin's type: pasted `t0ken`, or OAuth tokens `stored-token`. */
-  readonly connect: () => Promise<string>;
-}
-
-/**
- * Starts the fake outside server, and a controller with a plugin that offers
- * it. With `oauth`, the Connection holds OAuth tokens and the refresh goes to
- * a fake provider.
- */
-const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOptions = {}) => {
-  const fake = await startFakeUpstream(options.fake);
-  const provider = createDeviceProvider();
-  const { buildUpstreamRequest } = options;
-  try {
-    await withSetUpController(
-      async (controller) => {
-        const connect = () =>
-          options.oauth === true
-            ? insertOauthConnection(controller.harness, {
-                accessToken: "stored-token",
-                refreshToken: "refresh-1",
-              })
-            : createConnection(controller.base, controller.token, "acme/desk", { token: "t0ken" });
-        await body({ controller, fake, provider, connect });
-      },
-      [
-        buildMcpServerPlugin("acme", {
-          server:
-            buildUpstreamRequest === undefined
-              ? buildDeskMcpServer("acme", fake)
-              : {
-                  ...buildDeskMcpServer("acme", fake),
-                  buildUpstreamRequest: ({ credentials }) => buildUpstreamRequest(credentials),
-                },
-          ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
-        }),
-      ],
-      options.checkInterval === undefined
-        ? {}
-        : { mcpServerCheckInterval: Duration.millis(options.checkInterval) },
-    );
-  } finally {
-    await fake.stop();
-    await provider.stop();
-  }
-};
-
-const refreshedToken = () =>
-  buildJsonResponse({
-    access_token: "refreshed-token",
-    refresh_token: "refresh-2",
-    token_type: "bearer",
-    expires_in: 8 * 60 * 60,
-  });
 
 /** Returns how many minutes from now the server's next check is planned, rounded. */
 const readMinutesToNextCheck = (row: McpServerRow): number =>

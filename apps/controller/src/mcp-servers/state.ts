@@ -40,6 +40,47 @@ const BACKOFF_MILLIS = [
 export const computeBackoffMillis = (failedChecks: number): number =>
   BACKOFF_MILLIS[Math.min(Math.max(failedChecks, 1), BACKOFF_MILLIS.length) - 1] as number;
 
+/**
+ * Builds the edit that stores a failure of a server: a failed check, or a
+ * failure of a call that is about the whole server (spec 21 section 5.3). A
+ * server that cannot be reached backs off: the failures in a row are counted
+ * and the next check is planned by `computeBackoffMillis`. Any other failure
+ * waits a day. The tools are left as they were. `protocolVersion` is the MCP
+ * revision whose handshake worked, when one did.
+ */
+export const buildFailureEdit = (
+  server: Pick<StoredMcpServer, "failedChecks">,
+  failure: {
+    readonly status: "unreachable" | "error" | "needs-sign-in";
+    readonly detail: string;
+    readonly cause?: "plugin" | "connection" | null;
+  },
+  at: string,
+  protocolVersion?: string,
+): McpServerEdit => {
+  const planAfter = (millis: number): string => new Date(Date.parse(at) + millis).toISOString();
+  const revisionEdit = protocolVersion === undefined ? {} : { protocolVersion };
+  if (failure.status === "unreachable") {
+    const failedChecks = server.failedChecks + 1;
+    return {
+      status: "unreachable",
+      statusDetail: failure.detail,
+      statusCause: null,
+      failedChecks,
+      nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
+      ...revisionEdit,
+    };
+  }
+  return {
+    status: failure.status,
+    statusDetail: failure.detail,
+    statusCause: failure.cause ?? null,
+    failedChecks: 0,
+    nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
+    ...revisionEdit,
+  };
+};
+
 /** Returns the id of the plugin that offers a contribution: `sentry/sentry` is offered by `sentry`. */
 export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));

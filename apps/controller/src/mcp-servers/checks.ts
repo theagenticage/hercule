@@ -36,7 +36,7 @@ import { PromotionState } from "../promotion";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import {
-  computeBackoffMillis,
+  buildFailureEdit,
   DAILY_CHECK_MILLIS,
   judgeDependencies,
   markDueWhenUsable,
@@ -120,9 +120,8 @@ const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
 
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
- * and resets the schedule to a day. A server that cannot be reached backs off
- * (spec 21 section 5.3). Any other failure waits a day. A failure also stores
- * the revision whose handshake worked, when one did.
+ * and resets the schedule to a day. A failure is stored as `buildFailureEdit`
+ * builds it, with the revision whose handshake worked, when one did.
  */
 const buildEdit = (
   server: StoredMcpServer,
@@ -131,8 +130,6 @@ const buildEdit = (
   worked: WorkedRevision,
 ): McpServerEdit => {
   const atMillis = Date.parse(at);
-  const revisionEdit = worked.current === null ? {} : { protocolVersion: worked.current };
-  const planAfter = (millis: number): string => new Date(atMillis + millis).toISOString();
   if (result._tag === "ready") {
     return {
       status: "ready",
@@ -142,28 +139,10 @@ const buildEdit = (
       checkedAt: at,
       protocolVersion: result.revision,
       failedChecks: 0,
-      nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
+      nextCheckAt: new Date(atMillis + DAILY_CHECK_MILLIS).toISOString(),
     };
   }
-  if (result.status === "unreachable") {
-    const failedChecks = server.failedChecks + 1;
-    return {
-      status: "unreachable",
-      statusDetail: result.detail,
-      statusCause: null,
-      failedChecks,
-      nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
-      ...revisionEdit,
-    };
-  }
-  return {
-    status: result.status,
-    statusDetail: result.detail,
-    statusCause: result.cause,
-    failedChecks: 0,
-    nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
-    ...revisionEdit,
-  };
+  return buildFailureEdit(server, result, at, worked.current ?? undefined);
 };
 
 const make = Effect.gen(function* () {
