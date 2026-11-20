@@ -255,7 +255,11 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [121, "link-taken-at", Effect.succeed(linkTakenAt)],
   [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
   [123, "session-taint", Effect.succeed(sessionTaint)],
-  // 124 to 127 are taken by migrations on branches that have not merged yet.
+  // 124 to 127 are left for the MCP branches, which were open when this was
+  // written. A gap is only safe while no database has run 128: the migrator
+  // refuses a migration below the database's version that it never ran. So
+  // whichever of the two lands on main second takes ids above the other's
+  // highest before it merges.
   [128, "wiki-page-archive", Effect.succeed(wikiPageArchive)],
 ];
 
