@@ -1206,10 +1206,8 @@ const make = Effect.gen(function* () {
                   ]),
                 );
               }
-              const entries = yield* mcpServerLists.resolveList(given.mcpServerIds, [
-                "mcpServerIds",
-              ]);
-              yield* sessions.setMcpServers(id, entries);
+              yield* mcpServerLists.checkList(given.mcpServerIds, ["mcpServerIds"]);
+              yield* sessions.setMcpServers(id, given.mcpServerIds);
             }
             if (touchesModel) {
               yield* sessions.setSelection(id, yield* resolveModelSelection(session, given));

@@ -57,7 +57,7 @@ import {
 } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { ExternalEntityService } from "../../external-entities";
-import { mcpServerListRule, requireMcpManage, type ListedMcpServer } from "../../mcp-servers";
+import { mcpServerListRule, requireMcpManage } from "../../mcp-servers";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
@@ -373,10 +373,10 @@ interface Placing {
   /** The session's role, or undefined for none. */
   readonly role: string | undefined;
   /**
-   * The session's own list of MCP Servers, checked, in list order. Absent for
-   * a session that places with none.
+   * The ids of the servers in the session's own list, checked or copied from a
+   * list that was, in list order. Absent for a session that places with none.
    */
-  readonly mcpServers?: ReadonlyArray<ListedMcpServer>;
+  readonly mcpServerIds?: ReadonlyArray<string>;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -916,6 +916,15 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Checks a list of MCP Server ids the spawn was given or read from the
+   * user's setting, and returns it. Fails with `Validation`.
+   */
+  const checkedMcpServerIds = (
+    ids: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<string>, Validation | SqlError> =>
+    Effect.as(mcpServerLists.checkList(ids, ["mcpServerIds"]), ids);
+
+  /**
    * Returns the ids of the MCP Servers a Thread starts with when its spawn
    * gives no list (spec 21 section 4.3):
    *
@@ -923,22 +932,29 @@ const make = Effect.gen(function* () {
    * - a Thread the user starts gets the list of its Project, or, when it has
    *   no Project, the user's setting `thread.mcpServerIds`. A Thread in a
    *   Project never reads the setting.
+   *
+   * The caller's and the Project's list are copied as they are: they were
+   * checked when they were written, and a delete of a server removes it from
+   * them in its own transaction. The setting is checked again
+   * (`mcpServerListRule`), because deleting a server does not rewrite it. Run
+   * it inside the transaction that writes the session, so a server deleted at
+   * the same moment cannot slip into the list.
    */
   const chooseDefaultMcpServerIds = (
     actor: Actor,
     caller: StoredSession | undefined,
     project: Option.Option<{ readonly mcpServerIds: ReadonlyArray<string> }>,
-  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError> => {
-    if (caller !== undefined) {
-      return Effect.succeed(caller.mcpServers.map((entry) => entry.mcpServerId));
-    }
-    if (Option.isSome(project)) return Effect.succeed(project.value.mcpServerIds);
-    // A run or a plugin cannot start a Thread (refused before this), so the
-    // actor here is the user.
-    return actor._tag === "user"
-      ? settingsOperations.readThreadMcpServerIds(actor.userId)
-      : Effect.succeed([]);
-  };
+  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError | Validation> =>
+    Effect.gen(function* () {
+      if (caller !== undefined) return caller.mcpServers.map((entry) => entry.mcpServerId);
+      if (Option.isSome(project)) return project.value.mcpServerIds;
+      // A run or a plugin cannot start a Thread (refused before this), so the
+      // actor here is the user.
+      if (actor._tag !== "user") return [];
+      return yield* checkedMcpServerIds(
+        yield* settingsOperations.readThreadMcpServerIds(actor.userId),
+      );
+    });
 
   /**
    * Writes the workspace and the session in one transaction, joining the
@@ -998,7 +1014,7 @@ const make = Effect.gen(function* () {
             title: open.title,
             titleParts: open.titleParts,
             role: open.role,
-            mcpServers: open.mcpServers,
+            mcpServerIds: open.mcpServerIds,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
@@ -1562,14 +1578,13 @@ const make = Effect.gen(function* () {
               createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
             );
           }
-          // An Agent's session has no MCP Servers yet. The list is checked
-          // here, inside the transaction that writes the session, so a server
-          // deleted at the same moment cannot slip into it.
-          const mcpServers = yield* mcpServerLists.resolveList(
-            decoded.mcpServerIds ??
-              (agent === undefined ? yield* chooseDefaultMcpServerIds(actor, caller, project) : []),
-            ["mcpServerIds"],
-          );
+          // An Agent's session has no MCP Servers yet.
+          const mcpServerIds =
+            decoded.mcpServerIds !== undefined
+              ? yield* checkedMcpServerIds(decoded.mcpServerIds)
+              : agent === undefined
+                ? yield* chooseDefaultMcpServerIds(actor, caller, project)
+                : [];
           // A Thread that names no model starts on its project's default entry
           // when the project has a profile (spec 06 section 17.9). An Agent
           // keeps its own entry.
@@ -1737,7 +1752,7 @@ const make = Effect.gen(function* () {
                       .find((title) => title.length > 0),
                   },
             role: decoded.role,
-            mcpServers,
+            mcpServerIds,
             kind: "session.spawned",
             projectId,
             taskSource: {
@@ -1821,10 +1836,8 @@ const make = Effect.gen(function* () {
           // A fork a session makes copies that session's list, and a fork the
           // user makes copies its parent's. An Agent's lineage has no list yet.
           const listSource = actor._tag === "session" ? yield* one(actor.sessionId) : parent;
-          const mcpServers = yield* mcpServerLists.resolveList(
-            parent.agentId === null ? listSource.mcpServers.map((entry) => entry.mcpServerId) : [],
-            ["mcpServerIds"],
-          );
+          const mcpServerIds =
+            parent.agentId === null ? listSource.mcpServers.map((entry) => entry.mcpServerId) : [];
           const nativeSessionId = yield* resumableNativeSession(parent);
           // Called only for its failures: it fails when the account can no
           // longer run in the harness, or this build no longer carries it. It
@@ -1864,7 +1877,7 @@ const make = Effect.gen(function* () {
             // A fork takes no role from its parent: a fork of a Thread gets a
             // generated one, like any Thread.
             role: undefined,
-            mcpServers,
+            mcpServerIds,
             kind: "session.continued",
             projectId: parent.projectId ?? undefined,
             // A fork takes its parent's Task when that is live, and no fork

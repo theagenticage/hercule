@@ -292,7 +292,7 @@ const make = Effect.gen(function* () {
             yield* validateTextGenerationProviderAccount(patch);
             yield* validateThreadProviderAccount(patch, actor.userId);
             if (mcpServerIds !== undefined) {
-              yield* mcpServerLists.resolveList(mcpServerIds, ["user", THREAD_MCP_SERVERS]);
+              yield* mcpServerLists.checkList(mcpServerIds, ["user", THREAD_MCP_SERVERS]);
             }
             const written = [
               ...(patch.controller === undefined

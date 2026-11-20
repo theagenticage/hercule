@@ -1137,7 +1137,7 @@ const insertQueuedSessionWithServers = (
       sql,
       rows.replaceMcpServers(
         sessionId,
-        options.servers.map((server) => ({ mcpServerId: server.id, name: server.name })),
+        options.servers.map((server) => server.id),
       ),
     );
     return sessionId;
@@ -1161,9 +1161,9 @@ const readRuntimeWarnings = (sessionId: string) =>
 const readLeftOut = (sessionId: string) =>
   Effect.gen(function* () {
     const rows = yield* sessionRepository;
-    return (yield* rows.readMcpServers(sessionId)).map(
-      (entry) => [entry.name, entry.leftOut] as const,
-    );
+    return (yield* rows.one(sessionId))
+      .pipe(Option.getOrThrow)
+      .mcpServers.map((entry) => [entry.name, entry.leftOut] as const);
   });
 
 describe("the MCP servers of a session at a start", () => {

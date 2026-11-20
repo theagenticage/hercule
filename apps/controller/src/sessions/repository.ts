@@ -205,12 +205,6 @@ export interface StoredSession {
   readonly mcpServers: ReadonlyArray<SessionMcpServer>;
 }
 
-/** One entry of a session's list as a writer gives it: the server and its name now. */
-export interface McpServerEntry {
-  readonly mcpServerId: string;
-  readonly name: string;
-}
-
 export interface NewSession {
   /**
    * Created by the caller, not here. A spawn opens the workspace in the same
@@ -376,8 +370,9 @@ const buildColumnList = (): string =>
   `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests, ` +
   // The list is one subquery on the primary key, so a page of sessions costs one query.
   "(SELECT json_group_array(json_object('id', hex(mcp_server_id), 'name', name, " +
-  "'leftOut', left_out)) FROM (SELECT mcp_server_id, name, left_out FROM session_mcp_servers " +
-  "WHERE session_id = sessions.id ORDER BY position)) AS mcp_servers";
+  "'leftOut', left_out)) FROM (SELECT entry.mcp_server_id, server.name, entry.left_out " +
+  "FROM session_mcp_servers AS entry JOIN mcp_servers AS server ON server.id = entry.mcp_server_id " +
+  "WHERE entry.session_id = sessions.id ORDER BY entry.position)) AS mcp_servers";
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -1514,15 +1509,15 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Replaces the session's list of MCP Servers with the entries given, in
-     * that order. An entry for a server that was already in the list keeps
-     * the `leftOut` it had, because a start writes that field and an edit does
-     * not. A new entry gets `null`. It announces nothing: the caller announces
-     * the session once it has written everything.
+     * Replaces the session's list of MCP Servers with the servers given, in
+     * that order. A server that was already in the list keeps the `leftOut` it
+     * had, because a start writes that field and an edit does not. A new one
+     * gets `null`. It announces nothing: the caller announces the session once
+     * it has written everything.
      */
     replaceMcpServers: (
       sessionId: string,
-      entries: ReadonlyArray<McpServerEntry>,
+      mcpServerIds: ReadonlyArray<string>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const session = uuidFromString(sessionId);
@@ -1535,31 +1530,20 @@ const make = Effect.gen(function* () {
         );
         yield* sql`DELETE FROM session_mcp_servers WHERE session_id = ${session}`;
         yield* Effect.forEach(
-          entries,
-          (entry, position) =>
-            sql`INSERT INTO session_mcp_servers
-                  (session_id, position, mcp_server_id, name, left_out)
-                VALUES (${session}, ${position}, ${uuidFromString(entry.mcpServerId)},
-                        ${entry.name}, ${leftOutById.get(entry.mcpServerId) ?? null})`,
+          mcpServerIds,
+          (id, position) =>
+            sql`INSERT INTO session_mcp_servers (session_id, position, mcp_server_id, left_out)
+                VALUES (${session}, ${position}, ${uuidFromString(id)}, ${leftOutById.get(id) ?? null})`,
           { discard: true },
         );
       }),
 
-    /** Returns the session's list of MCP Servers in list order, empty when it has none. */
-    readMcpServers: (sessionId: string): Effect.Effect<ReadonlyArray<SessionMcpServer>, SqlError> =>
+    /** Returns the ids of the servers in the session's list, in list order. */
+    readMcpServerIds: (sessionId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
-        sql<{
-          readonly mcp_server_id: Uint8Array;
-          readonly name: string;
-          readonly left_out: McpServerLeftOutReason | null;
-        }>`SELECT mcp_server_id, name, left_out FROM session_mcp_servers
+        sql<{ readonly mcp_server_id: Uint8Array }>`SELECT mcp_server_id FROM session_mcp_servers
            WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`,
-        (rows) =>
-          rows.map((row) => ({
-            mcpServerId: uuidToString(row.mcp_server_id),
-            name: row.name,
-            leftOut: row.left_out,
-          })),
+        (rows) => rows.map((row) => uuidToString(row.mcp_server_id)),
       ),
 
     /**

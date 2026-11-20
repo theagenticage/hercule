@@ -10,7 +10,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { McpServerStatus } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import type { ServerAvailability } from "./left-out";
 
 /**
  * One tool as the MCP server listed it. The gateway answers `tools/list` from
@@ -66,12 +65,6 @@ export interface McpServerDependencyIds {
   readonly id: string;
   readonly connectionId: string;
   /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
-  readonly contributionId: string;
-}
-
-/** A server's switch and stored status, with the Connection and contribution its status depends on. */
-export interface StoredAvailability extends ServerAvailability {
-  readonly connectionId: string;
   readonly contributionId: string;
 }
 
@@ -188,39 +181,18 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns the switch and the stored status of each server that exists,
-     * with the Connection and the plugin contribution it depends on, by its
-     * id, in one query and without the tool definitions. An id that no server
-     * has is left out of the map. The stored status can lag the Connection
-     * and the plugin, so a reader that needs the current state judges them
-     * too (`readCurrentAvailability`).
+     * Returns each server that exists, by its id, in one query. An id that no
+     * server has is left out of the map.
      */
-    readAvailability: (
+    readMany: (
       ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, StoredAvailability>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<string, StoredMcpServer>, SqlError> =>
       ids.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
-            sql<{
-              readonly id: Uint8Array;
-              readonly enabled: number;
-              readonly status: McpServerStatus;
-              readonly connection_id: Uint8Array;
-              readonly contribution_id: string;
-            }>`SELECT id, enabled, status, connection_id, contribution_id FROM mcp_servers
-               WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
-            (rows) =>
-              new Map(
-                rows.map((row) => [
-                  uuidToString(row.id),
-                  {
-                    enabled: row.enabled === 1,
-                    status: row.status,
-                    connectionId: uuidToString(row.connection_id),
-                    contributionId: row.contribution_id,
-                  },
-                ]),
-              ),
+            sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
+                              WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.id), toServer(row)])),
           ),
 
     /** Returns every server, sorted by name and then by id. */

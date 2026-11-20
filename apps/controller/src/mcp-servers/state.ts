@@ -13,11 +13,15 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { connectionRepository, type StoredConnection } from "../connections";
 import { announce, nowIso, withTransaction } from "../db";
 import { Notifier } from "../notifications";
-import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
+import {
+  isSameDependencies,
+  judgeDependencies,
+  mcpServerCatalogue,
+  type McpServerDependencies,
+} from "./catalogue";
 import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
 
 const MINUTE_MILLIS = 60 * 1000;
@@ -47,120 +51,6 @@ export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));
 
 /**
- * Whether the plugin that offers a server's contribution can serve it. A
- * plugin that is `switched-off` is enabled by nobody, and one that
- * `failed-to-start` is enabled but its activation failed. The two need
- * different words, because the user's remedy is different.
- */
-export type PluginState =
-  | { readonly _tag: "active"; readonly contribution: RegisteredMcpServer }
-  | { readonly _tag: "switched-off"; readonly pluginName: string }
-  | { readonly _tag: "failed-to-start"; readonly pluginName: string }
-  | { readonly _tag: "missing" };
-
-/**
- * What a server depends on outside its own row: its Connection and its
- * plugin. A check reads it before it decides, and `writeCheckResult` reads it
- * again before it writes.
- */
-export interface McpServerDependencies {
-  /** `undefined` when the Connection no longer exists. */
-  readonly connection: StoredConnection | undefined;
-  readonly plugin: PluginState;
-}
-
-/**
- * Tells whether two readings of the dependencies are the same for a server:
- * the same plugin state, and the same Connection with the same status and
- * credentials generation.
- */
-export const isSameDependencies = (
-  before: McpServerDependencies,
-  now: McpServerDependencies,
-): boolean =>
-  before.plugin._tag === now.plugin._tag &&
-  before.connection?.status === now.connection?.status &&
-  before.connection?.credentialsGeneration === now.connection?.credentialsGeneration;
-
-/** What a server shows when its plugin or its Connection cannot serve it. */
-export interface Unusable {
-  readonly _tag: "unusable";
-  readonly status: "error" | "needs-sign-in";
-  readonly detail: string;
-  readonly cause: "plugin" | "connection";
-}
-
-/** A server whose plugin is active and whose Connection exists and is not `needs-reauth` or `disabled`. */
-export interface Usable {
-  readonly _tag: "usable";
-  readonly contribution: RegisteredMcpServer;
-  readonly connection: StoredConnection;
-}
-
-/**
- * Judges whether a server's plugin and Connection can serve it. When they
- * cannot, returns what the server shows: its plugin is missing or switched
- * off or failed to start, or its Connection is gone, `disabled` or
- * `needs-reauth`. The check and
- * the follower both use it, so they show the same words.
- */
-export const judgeDependencies = ({
-  plugin,
-  connection,
-}: McpServerDependencies): Usable | Unusable => {
-  switch (plugin._tag) {
-    case "missing":
-      return {
-        _tag: "unusable",
-        status: "error",
-        detail: "The plugin that offered this server is not in this build",
-        cause: "plugin",
-      };
-    case "switched-off":
-      return {
-        _tag: "unusable",
-        status: "error",
-        detail: `The ${plugin.pluginName} plugin is switched off`,
-        cause: "plugin",
-      };
-    case "failed-to-start":
-      return {
-        _tag: "unusable",
-        status: "error",
-        detail: `The ${plugin.pluginName} plugin failed to start: see Settings > Plugins`,
-        cause: "plugin",
-      };
-    case "active":
-      break;
-  }
-  if (connection === undefined) {
-    return {
-      _tag: "unusable",
-      status: "error",
-      detail: "The Connection of this server is gone",
-      cause: "connection",
-    };
-  }
-  if (connection.status === "disabled") {
-    return {
-      _tag: "unusable",
-      status: "error",
-      detail: `The Connection ${connection.label} is switched off`,
-      cause: "connection",
-    };
-  }
-  if (connection.status === "needs-reauth") {
-    return {
-      _tag: "unusable",
-      status: "needs-sign-in",
-      detail: `Reconnect ${connection.label} in Settings > Connections`,
-      cause: "connection",
-    };
-  }
-  return { _tag: "usable", contribution: plugin.contribution, connection };
-};
-
-/**
  * What a state write was based on: the server's `revision` and the
  * dependencies the writer read before it decided. The write happens only if
  * the server still has this revision and its Connection and plugin are still
@@ -175,33 +65,10 @@ export interface StateBasis {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
-  const connections = yield* connectionRepository;
-  const plugins = yield* PluginHost;
   const notifier = yield* Notifier;
   const promotion = yield* PromotionState;
 
-  /** Reads the Connection and the plugin of a server as they are now. */
-  const readDependencies = (
-    server: Pick<StoredMcpServer, "connectionId" | "contributionId">,
-  ): Effect.Effect<McpServerDependencies, SqlError> =>
-    Effect.gen(function* () {
-      const connection = Option.getOrUndefined(yield* connections.one(server.connectionId));
-      const found = yield* plugins.findMcpServer(server.contributionId);
-      if (Option.isNone(found)) return { connection, plugin: { _tag: "missing" } };
-      const { pluginId } = found.value;
-      const loaded = (yield* plugins.loaded()).find((plugin) => plugin.id === pluginId);
-      if (loaded?.status._tag === "active") {
-        return { connection, plugin: { _tag: "active", contribution: found.value } };
-      }
-      const pluginName = loaded?.displayName ?? pluginId;
-      return {
-        connection,
-        plugin: {
-          _tag: loaded?.status._tag === "errored" ? "failed-to-start" : "switched-off",
-          pluginName,
-        },
-      };
-    });
+  const { readDependencies } = yield* mcpServerCatalogue;
 
   /**
    * Writes an edit to a server that is still as `current`, and keeps the

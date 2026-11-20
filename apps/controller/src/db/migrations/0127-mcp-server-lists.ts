@@ -6,9 +6,10 @@
  *   starts with. One row is one entry, and `position` keeps the order the
  *   caller gave.
  * - `session_mcp_servers` holds a session's own list. Each row also keeps
- *   the server's `name` as it was when the entry was written, and `left_out`:
- *   the reason the last start left the server out, or NULL when it could be
- *   called or has not been checked at a start yet.
+ *   `left_out`: the reason the last start left the server out, or NULL when
+ *   it could be called or has not been checked at a start yet. A row holds no
+ *   name: a server's name never changes, so a reader joins it from
+ *   `mcp_servers`.
  *
  * `mcp_server_id` references `mcp_servers` with no cascade. Deleting a server
  * has to go through the lists' adapter, which also announces every record
@@ -47,7 +48,6 @@ export default Effect.gen(function* () {
       session_id BLOB NOT NULL REFERENCES sessions (id),
       position INTEGER NOT NULL,
       mcp_server_id BLOB NOT NULL REFERENCES mcp_servers (id),
-      name TEXT NOT NULL,
       left_out TEXT
         CHECK (left_out IS NULL OR left_out IN (
           'switched-off', 'checking', 'needs-sign-in', 'unreachable', 'error',

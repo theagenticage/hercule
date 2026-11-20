@@ -209,6 +209,26 @@ const make = Effect.gen(function* () {
     one,
 
     /**
+     * Returns each Connection that exists, by its id, using one query. An id
+     * with no Connection is missing from the map.
+     */
+    readMany: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, StoredConnection>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.flatMap(
+            sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
+                               WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) =>
+              Effect.map(
+                Effect.forEach(rows, toConnection),
+                (connections) =>
+                  new Map(connections.map((connection) => [connection.id, connection])),
+              ),
+          ),
+
+    /**
      * Returns a map from Connection id to its qualified type, using one query.
      * An id with no Connection is missing from the map.
      */
