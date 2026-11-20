@@ -1218,6 +1218,48 @@ describe("the MCP servers of a session at a start", () => {
     });
   });
 
+  it("judges the servers without reading their stored tool lists", async () => {
+    // A tool list can be several MiB, and the claim holds the database writer. The
+    // column is made invalid JSON on purpose, past its CHECK: a claim that decoded
+    // it would fail.
+    const leftOut = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const sql = yield* SqlClient.SqlClient;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "ready" },
+          { name: "linear", status: "needs-sign-in" },
+        ]);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`PRAGMA ignore_check_constraints = ON`;
+            yield* sql`UPDATE mcp_servers SET tools = 'not json'`;
+            yield* sql`PRAGMA ignore_check_constraints = OFF`;
+          }),
+        );
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: [
+            { id: ids[0]!, name: "sentry" },
+            { id: ids[1]!, name: "linear" },
+          ],
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return yield* readLeftOut(sessionId);
+      }),
+    );
+
+    expect(leftOut).toEqual([
+      ["sentry", null],
+      ["linear", "needs-sign-in"],
+    ]);
+  });
+
   it("leaves out every server for the runner, the harness and the profile, in that order, and writes no warning when nothing is left out", async () => {
     const result = await run(
       Effect.gen(function* () {

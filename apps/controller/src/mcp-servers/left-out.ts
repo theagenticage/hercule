@@ -3,7 +3,7 @@
  * last start (spec 21 section 3.8), and the words the Thread says it in.
  */
 import { MAX_FACT_ITEMS, type McpServerLeftOutReason } from "@hercule/protocol";
-import { decideUnavailableReason, type McpServerView } from "./catalogue";
+import { decideUnavailableReason, type McpServerAvailabilityView } from "./catalogue";
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
@@ -36,7 +36,7 @@ export interface StartDelivery {
  */
 export const decideLeftOutReason = (
   delivery: StartDelivery,
-  view: McpServerView,
+  view: McpServerAvailabilityView,
 ): McpServerLeftOutReason | null => {
   if (!delivery.runnerReachesMcpServers) return "runner-too-old";
   if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";

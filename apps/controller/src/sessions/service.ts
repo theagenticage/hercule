@@ -1086,7 +1086,7 @@ const make = Effect.gen(function* () {
           "mcp.use",
         ),
       } as const;
-      const views = yield* catalogue.readViews(listedIds);
+      const views = yield* catalogue.readViews(listedIds, "without-tools");
       const reasons = new Map<string, McpServerLeftOutReason>();
       const leftOut: Array<LeftOutServer> = [];
       for (const mcpServerId of listedIds) {
