@@ -47,7 +47,7 @@ const BASKET = buildPlace("relay:project:basket", "Basket rebuild", {
 const RELAY: PluginDetail = {
   id: "relay",
   displayName: "Relay",
-  hostApi: 8,
+  hostApi: 9,
   capabilities: ["entities"],
   enabled: true,
   status: { _tag: "active" },

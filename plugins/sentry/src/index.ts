@@ -2,13 +2,15 @@
  * The Sentry plugin: the Sentry connection type, the event source that polls
  * Sentry for issues entering, leaving and changing, the External Entities
  * (issues, shown as Errors in the Inbox) with their lookup and saved query,
- * and the workflow actions that resolve, archive and assign an issue.
+ * the workflow actions that resolve, archive and assign an issue, and the MCP
+ * server that gives sessions Sentry's tools.
  */
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type EventSourceContribution,
   type Plugin,
@@ -18,6 +20,7 @@ import { connectionType, SENTRY_CONNECTION_TYPE } from "./connection-type";
 import { SENTRY_ENTITY_KINDS, SENTRY_SAVED_QUERIES } from "./entity-kinds";
 import { sentryEntityLookup } from "./entity-lookup";
 import { openSentryIngest } from "./ingest";
+import { sentryMcpServer } from "./mcp-server";
 import { SENTRY_EVENT_KINDS } from "./kinds";
 import { SENTRY_SIGNAL_KINDS } from "./signal-kinds";
 import { SENTRY_HUE } from "./status-icons";
@@ -57,7 +60,14 @@ export const sentry: Plugin = {
     id: "sentry",
     displayName: "Sentry",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "entities", "workflow-actions"],
+    capabilities: [
+      "connections",
+      "event-sources",
+      "events",
+      "entities",
+      "workflow-actions",
+      "mcp-servers",
+    ],
     configSchema: Schema.Struct({}),
     mark: { paths: [SENTRY_MARK_PATH], hue: SENTRY_HUE },
   },
@@ -66,6 +76,7 @@ export const sentry: Plugin = {
       yield* registerConnectionType(host, connectionType);
       yield* registerEventSource(host, eventSource);
       for (const action of SENTRY_WORKFLOW_ACTIONS) yield* registerWorkflowAction(host, action);
+      yield* registerMcpServer(host, sentryMcpServer);
     }),
   // The host opens and polls the ingest handles itself, so there is nothing
   // for the plugin to start.
