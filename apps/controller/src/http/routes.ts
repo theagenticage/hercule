@@ -516,6 +516,20 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
   }),
 );
 
+// TODO(#1208): the MCP Server service is not built yet, so every endpoint
+// answers `internal`. Replace with one-line handlers on that service.
+const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
+  Effect.succeed(
+    handlers
+      .handle("query", () => Effect.fail(createInternalError("not built yet")))
+      .handle("read", () => Effect.fail(createInternalError("not built yet")))
+      .handle("create", () => Effect.fail(createInternalError("not built yet")))
+      .handle("update", () => Effect.fail(createInternalError("not built yet")))
+      .handle("delete", () => Effect.fail(createInternalError("not built yet")))
+      .handle("check", () => Effect.fail(createInternalError("not built yet"))),
+  ),
+);
+
 const skillRoutes = HttpApiBuilder.group(api, "skill", (handlers) =>
   Effect.gen(function* () {
     const skills = yield* SkillService;
@@ -1280,6 +1294,7 @@ export const handlerLayers = Layer.mergeAll(
   discussionRoutes,
   wikiPageRoutes,
   skillRoutes,
+  mcpServerRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

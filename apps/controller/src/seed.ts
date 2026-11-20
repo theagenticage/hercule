@@ -45,10 +45,16 @@ import { Settings, type SettingError } from "./settings";
  * The worker profile gets no `skill` grant, because a workflow step has no
  * reason to read or change the user's skills.
  *
+ * The assistant profile gets `mcp.read`, so an assistant can see which MCP
+ * Servers the user has. The worker profile gets `mcp.read` and `mcp.use`, so
+ * a workflow's agent step can call the tools of the servers on its thread.
+ * Neither gets `mcp.manage`.
+ *
  * The unrestricted profile holds every grant the user has except
- * `skill.write` and `skill.apply`. It is the default profile of every Thread,
- * so with them any Thread that read a hostile README could change a skill
- * that then steers every later Thread.
+ * `GRANTS_ONLY_THE_USER_GIVES`: `skill.write`, `skill.apply` and
+ * `mcp.manage`. It is the default profile of every Thread, so with them any
+ * Thread that read a hostile README could change a skill that then steers
+ * every later Thread, or add an MCP Server whose tool descriptions do.
  */
 export const SHIPPED_PROFILES: ReadonlyArray<{
   readonly name: string;
@@ -80,6 +86,7 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "wiki.write",
       "skill.read",
       "skill.write",
+      "mcp.read",
       "settings.read",
       "event.read",
       "event.emit",
@@ -112,6 +119,8 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "discussion.write",
       "wiki.read",
       "wiki.write",
+      "mcp.read",
+      "mcp.use",
       "event.read",
     ],
   },

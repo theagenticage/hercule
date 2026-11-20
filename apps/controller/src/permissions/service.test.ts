@@ -225,23 +225,24 @@ const SESSION: Actor = {
   _tag: "session",
   sessionId: "0199e0e7-0002-7000-8000-000000000000",
   profileId: "0199e0e7-0003-7000-8000-000000000000",
-  grants: ["permission.write", "skill.write", "skill.apply"],
-  profileGrants: ["permission.write", "skill.write", "skill.apply"],
+  grants: ["permission.write", "skill.write", "skill.apply", "mcp.manage"],
+  profileGrants: ["permission.write", "skill.write", "skill.apply", "mcp.manage"],
   assistantId: null,
   agentId: null,
 };
 
 /**
- * Checks that `error` is the refusal of a skill grant to a session: a 403
- * naming `permission.write`, whose message says only the user gives it.
+ * Checks that `error` is the refusal of a grant only the user gives to a
+ * session: a 403 naming `permission.write`, whose message says only the user
+ * gives it and names all three grants.
  */
-const expectSkillGrantRefusal = (error: unknown) =>
+const expectUserOnlyGrantRefusal = (error: unknown) =>
   expect(error).toMatchObject({
     error: {
       code: "forbidden",
       details: { grant: "permission.write" },
       message: expect.stringMatching(
-        /^Only the user gives a profile `skill\.write` or `skill\.apply`/,
+        /^Only the user gives a profile `skill\.write`, `skill\.apply` or `mcp\.manage`/,
       ) as unknown,
     },
   });
@@ -250,8 +251,8 @@ const expectSkillGrantRefusal = (error: unknown) =>
 const asSession = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.provideService(CurrentActor, SESSION));
 
-describe("giving a profile skill.write or skill.apply", () => {
-  it("refuses a session's profile.create holding either, naming permission.write", async () => {
+describe("giving a profile skill.write, skill.apply or mcp.manage", () => {
+  it("refuses a session's profile.create holding one, naming permission.write", async () => {
     const errors = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -260,11 +261,12 @@ describe("giving a profile skill.write or skill.apply", () => {
             asSession(profiles.create({ name: "a", grants: ["task.read", "skill.write"] })),
           ),
           yield* Effect.flip(asSession(profiles.create({ name: "b", grants: ["skill.apply"] }))),
+          yield* Effect.flip(asSession(profiles.create({ name: "c", grants: ["mcp.manage"] }))),
         ];
       }),
     );
     for (const error of errors) {
-      expectSkillGrantRefusal(error);
+      expectUserOnlyGrantRefusal(error);
     }
   });
 
@@ -279,7 +281,7 @@ describe("giving a profile skill.write or skill.apply", () => {
     expect(created.grants).toEqual(["task.read", "skill.read"]);
   });
 
-  it("refuses a session's profile.update that adds either, and leaves the profile as it was", async () => {
+  it("refuses a session's profile.update that adds one, and leaves the profile as it was", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -291,12 +293,15 @@ describe("giving a profile skill.write or skill.apply", () => {
           yield* Effect.flip(
             asSession(profiles.update({ id: created.id, grants: [...READER, "skill.apply"] })),
           ),
+          yield* Effect.flip(
+            asSession(profiles.update({ id: created.id, grants: [...READER, "mcp.manage"] })),
+          ),
         ];
         return { errors, after: yield* profiles.read({ id: created.id }) };
       }),
     );
     for (const error of outcome.errors) {
-      expectSkillGrantRefusal(error);
+      expectUserOnlyGrantRefusal(error);
     }
     expect(outcome.after.grants).toEqual(READER);
   });
@@ -356,13 +361,14 @@ describe("giving a profile skill.write or skill.apply", () => {
   });
 });
 
-describe("putting an Agent on a profile that holds skill.write or skill.apply", () => {
+describe("putting an Agent on a profile that holds skill.write, skill.apply or mcp.manage", () => {
   it("refuses a session, naming agent.write, and says to ask the user", async () => {
     const errors = await Effect.runPromise(
       Effect.all(
         [
           Effect.flip(requireMayAssignAgentProfile(SESSION, ["task.read", "skill.write"])),
           Effect.flip(requireMayAssignAgentProfile(SESSION, ["skill.apply"])),
+          Effect.flip(requireMayAssignAgentProfile(SESSION, ["mcp.manage"])),
         ],
         { concurrency: 1 },
       ),
@@ -373,7 +379,7 @@ describe("putting an Agent on a profile that holds skill.write or skill.apply", 
           code: "forbidden",
           details: { grant: "agent.write" },
           message: expect.stringMatching(
-            /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write` or `skill\.apply`.*ask the user/,
+            /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write`, `skill\.apply` or `mcp\.manage`.*ask the user/,
           ) as unknown,
         },
       });

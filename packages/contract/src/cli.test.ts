@@ -302,6 +302,13 @@ const COMMANDS: Record<string, string> = {
   "skill.reject": "skill reject",
   "skill.applyUpdates": "skill apply-updates",
 
+  "mcpServer.query": "mcp-server list",
+  "mcpServer.read": "mcp-server read",
+  "mcpServer.create": "mcp-server create",
+  "mcpServer.update": "mcp-server update",
+  "mcpServer.delete": "mcp-server delete",
+  "mcpServer.check": "mcp-server check",
+
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
   "conversation.queryMessages": "conversation message list",
@@ -535,6 +542,11 @@ const RESOLVES: Record<string, string> = {
   "memory.delete id": "assistant.query",
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
+
+  "mcpServer.read id": "mcpServer.query",
+  "mcpServer.update id": "mcpServer.query",
+  "mcpServer.delete id": "mcpServer.query",
+  "mcpServer.check id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
