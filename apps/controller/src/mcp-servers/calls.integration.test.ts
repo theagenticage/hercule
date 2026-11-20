@@ -13,14 +13,22 @@
  * - a 401 to the call's own request: one refresh, the same upstream session,
  *   one more try, and the outcome for each way the refresh can end;
  * - what changes a server's status and what is only the call's answer;
- * - the deadline, the size cap, the `authorize` check before every send, and a
- *   frozen controller.
+ * - the deadline, the size cap, and a frozen controller;
+ * - the checks before every request that leaves the controller: `authorize`,
+ *   the destination, and the freeze, including while a session opens;
+ * - a failure of the reply to a request of the server never sends the tool
+ *   again;
+ * - the credentials and the URL each request carries, and the credentials
+ *   removed from what the server answers;
+ * - closing sessions when a server loses its destination, when the gateway
+ *   closes one, when a token ends, and cancelling an opening nobody needs.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
+import { del } from "../http/testing";
 import { McpCallDeadline, McpCallRefused, type McpToolCall } from "./calls";
 import {
   countNotifications,
@@ -123,6 +131,19 @@ const requestsOf = (fake: FakeUpstream, method: string) =>
 const textOf = (result: {
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
 }): string | undefined => result.content[0]?.text;
+
+/** Counts the times the fake provider was asked to refresh a token. */
+const countRefreshes = (provider: Rig["provider"]) =>
+  provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
+
+/** Returns what `pending` settles with, or `"still waiting"` when it does not within `millis`. */
+const settleWithin = <A>(pending: Promise<A>, millis: number): Promise<A | "still waiting"> =>
+  Promise.race([
+    pending,
+    new Promise<"still waiting">((resolve) => setTimeout(() => resolve("still waiting"), millis)),
+  ]);
+
+const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
 
 describe("which servers the gateway may serve", () => {
   it("returns the servers that exist, in the order asked, and says which are servable", async () => {
@@ -232,8 +253,10 @@ describe("a refused call", () => {
     });
   });
 
-  it("is refused with the refusal of `authorize`, and nothing is sent", async () => {
+  it("is refused with the refusal of `authorize` before the upstream session is even opened", async () => {
     await withReadyServer(async ({ fake, call }) => {
+      const before = fake.requests.length;
+
       const result = await call({
         authorize: Effect.fail(
           new McpCallRefused({ reason: "not-in-list", message: "not in the list" }),
@@ -244,9 +267,46 @@ describe("a refused call", () => {
         _tag: "Failure",
         failure: { reason: "not-in-list", message: "not in the list" },
       });
-      expect(requestsOf(fake, "tools/call")).toHaveLength(0);
+      expect(fake.requests).toHaveLength(before);
     });
   });
+
+  it.each([
+    [
+      "the server is switched off",
+      "switched-off",
+      ({ controller, serverId }: ReadyRig) =>
+        requestUpdate(controller, serverId, { enabled: false }),
+    ],
+    [
+      "the tool is no longer listed",
+      "error",
+      ({ controller }: ReadyRig) =>
+        runSql(controller, controller.harness.sql`UPDATE mcp_servers SET tools = '[]'`),
+    ],
+  ])(
+    "is refused, and the tool is not sent, when %s while the upstream session opens",
+    async (_name, reason, change) => {
+      await withReadyServer(
+        async (rig) => {
+          const release = rig.fake.hold("initialize");
+          const pending = rig.call();
+          await eventually(
+            () => Promise.resolve(requestsOf(rig.fake, "initialize").length),
+            (count) => count === 1,
+          );
+          await change(rig);
+          release();
+
+          const result = await pending;
+
+          expect(result).toMatchObject({ _tag: "Failure", failure: { reason } });
+          expect(requestsOf(rig.fake, "tools/call")).toHaveLength(0);
+        },
+        { legacy: true },
+      );
+    },
+  );
 });
 
 describe("a call", () => {
@@ -418,6 +478,40 @@ describe("a call", () => {
       expect(fake.requests).toHaveLength(before);
       expect(await call()).toMatchObject({ _tag: "Success" });
     });
+  });
+});
+
+describe("a call admitted before a freeze", () => {
+  it("sends nothing more once the controller is frozen, even while its session is still opening", async () => {
+    await withReadyServer(
+      async ({ controller, fake, call }) => {
+        const { promotion } = controller.harness;
+        const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
+        const release = fake.hold("initialize");
+        const pending = call();
+        await eventually(
+          () => Promise.resolve(requestsOf(fake, "initialize").length),
+          (count) => count === 1,
+        );
+        // The freeze waits for the admitted call, so it ends only after the call does.
+        const freezing = Effect.runPromise(
+          promotion.freeze(tokenId, new Date(Date.now() + 60_000)),
+        );
+        await eventually(
+          () => Effect.runPromise(promotion.phase),
+          (phase) => phase._tag === "Frozen",
+        );
+        release();
+
+        const result = await pending;
+        await freezing;
+        await Effect.runPromise(promotion.thaw(tokenId));
+
+        expect(result).toMatchObject({ _tag: "Failure", failure: { controllerNotServing: true } });
+        expect(requestsOf(fake, "tools/call")).toHaveLength(0);
+      },
+      { legacy: true },
+    );
   });
 });
 
@@ -599,9 +693,6 @@ describe("a 401 to the call's own request", () => {
     fake.authorize = (authorization, method) =>
       method !== "tools/call" || authorization === "Bearer refreshed-token";
   };
-
-  const countRefreshes = (provider: Rig["provider"]) =>
-    provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
 
   it("refreshes the credentials, keeps the upstream session, and sends the call once more", async () => {
     await withReadyServer(
@@ -789,18 +880,17 @@ describe("a 401 to the call's own request", () => {
     );
   });
 
-  it("asks `authorize` again before the second send, and sends nothing more when it refuses", async () => {
+  it("asks `authorize` before the refresh and the second send, and refreshes and sends nothing more when it refuses", async () => {
     await withReadyServer(
       async ({ fake, provider, call }) => {
         provider.answers.token = refreshedToken;
         refuseStoredToken(fake);
-        let asked = 0;
-        const authorize = Effect.suspend(() => {
-          asked += 1;
-          return asked === 1
+        // Allowed until the tool has been sent once.
+        const authorize = Effect.suspend(() =>
+          requestsOf(fake, "tools/call").length === 0
             ? Effect.void
-            : Effect.fail(new McpCallRefused({ reason: "not-in-list", message: "left the list" }));
-        });
+            : Effect.fail(new McpCallRefused({ reason: "not-in-list", message: "left the list" })),
+        );
 
         const result = await call({ authorize });
 
@@ -808,10 +898,224 @@ describe("a 401 to the call's own request", () => {
           _tag: "Failure",
           failure: { reason: "not-in-list", message: "left the list" },
         });
-        expect(asked).toBe(2);
         expect(requestsOf(fake, "tools/call")).toHaveLength(1);
+        expect(countRefreshes(provider)).toBe(0);
       },
       { oauth: true },
+    );
+  });
+});
+
+describe("a reply to a request of the server", () => {
+  /** Answers a `tools/call` with a request of the server (a ping) that the client must reply to. */
+  const askServerRequest = () =>
+    new Response(
+      `data: ${JSON.stringify({ jsonrpc: "2.0", id: "from-server", method: "ping" })}\n\n`,
+      {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      },
+    );
+
+  it.each([[401], [404]])(
+    "that the server refuses with HTTP %i never sends the tool again, refreshes nothing and changes no status",
+    async (status) => {
+      await withReadyServer(
+        async ({ controller, fake, provider, call }) => {
+          provider.answers.token = refreshedToken;
+          // A reply has no JSON-RPC method, which the fake records as `?`.
+          fake.intercept = ({ method }) =>
+            method === "tools/call"
+              ? askServerRequest()
+              : method === "?"
+                ? new Response("refused", { status })
+                : undefined;
+
+          const result = await call();
+
+          expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
+          if (result._tag !== "Failure") return;
+          expect(result.failure.message).toContain("may have run");
+          expect(requestsOf(fake, "tools/call")).toHaveLength(1);
+          expect(countRefreshes(provider)).toBe(0);
+          expect((await readRow(controller)).status).toBe("ready");
+        },
+        { oauth: true, legacy: true },
+      );
+    },
+  );
+});
+
+describe("what each request carries and what comes back", () => {
+  it("sends the URL the plugin builds for the credentials current at that moment", async () => {
+    await withReadyServer(
+      async ({ fake, provider, call }) => {
+        provider.answers.token = refreshedToken;
+        await call();
+        // The stored token is refused from now on, so the call refreshes it.
+        fake.authorize = (authorization, method) =>
+          method !== "tools/call" || authorization === "Bearer refreshed-token";
+
+        await call({ arguments: { text: "second" } });
+
+        const sent = requestsOf(fake, "tools/call").slice(1);
+        expect(sent.map((request) => [request.url, request.status])).toEqual([
+          ["/mcp?key=stored-token", 401],
+          ["/mcp?key=refreshed-token", 200],
+        ]);
+      },
+      {
+        oauth: true,
+        legacy: true,
+        buildUpstreamRequest: (credentials, upstream) => ({
+          url: `${upstream.url}?key=${credentials["accessToken"] ?? ""}`,
+          headers: { Authorization: `Bearer ${credentials["accessToken"] ?? ""}` },
+        }),
+      },
+    );
+  });
+
+  it.each([
+    [
+      "a JSON-RPC error",
+      (echo: string) =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32602, message: `bad arguments, request carried ${echo}` },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ],
+    [
+      "an ordinary result",
+      (echo: string, id: unknown) =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: `you sent ${echo}` }] },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ],
+  ])(
+    "removes the credentials of the request from %s the server sends back",
+    async (_name, buildAnswer) => {
+      await withReadyServer(
+        async ({ fake, call }) => {
+          fake.intercept = ({ method, id, authorization }) =>
+            method === "tools/call" ? buildAnswer(authorization ?? "", id) : undefined;
+
+          const result = await call();
+
+          const text = result._tag === "Success" ? textOf(result.success) : result.failure.message;
+          expect(text).not.toContain("stored-token");
+          expect(text).toContain("[removed]");
+        },
+        { oauth: true },
+      );
+    },
+  );
+});
+
+describe("closing upstream MCP sessions", () => {
+  /** The `Mcp-Session-Id` of every DELETE the fake received. */
+  const endedSessions = (fake: FakeUpstream) =>
+    fake.requests.filter((request) => request.method === "?").map((request) => request.sessionId);
+
+  it.each([
+    [
+      "switched off",
+      ({ controller, serverId }: ReadyRig) =>
+        requestUpdate(controller, serverId, { enabled: false }),
+    ],
+    [
+      "deleted",
+      ({ controller, serverId }: ReadyRig) =>
+        del(controller.base, `/api/v1/mcp-servers/${serverId}`, controller.token),
+    ],
+  ])("closes the sessions of a server that is %s", async (_name, change) => {
+    await withReadyServer(
+      async (rig) => {
+        await rig.call();
+        const session = requestsOf(rig.fake, "tools/call")[0]?.sessionId;
+        expect(session).not.toBeNull();
+
+        expect((await change(rig)).status).toBe(200);
+
+        await eventually(
+          () => Promise.resolve(endedSessions(rig.fake)),
+          (ended) => ended.includes(session ?? null),
+        );
+      },
+      { legacy: true },
+    );
+  });
+
+  it("closes the one session the gateway names, and no other", async () => {
+    await withReadyServer(
+      async ({ controller, serverId, fake, call }) => {
+        await call({ upstreamScope: SCOPE_A });
+        await call({ upstreamScope: SCOPE_B });
+        const [sessionA, sessionB] = requestsOf(fake, "tools/call").map(
+          (request) => request.sessionId,
+        );
+        const endedBefore = endedSessions(fake).length;
+
+        await Effect.runPromise(
+          controller.harness.mcpServerCalls.closeUpstreamSession(SCOPE_A, serverId),
+        );
+
+        expect(endedSessions(fake).slice(endedBefore)).toEqual([sessionA]);
+        const opened = requestsOf(fake, "initialize").length;
+        await call({ upstreamScope: SCOPE_A });
+        await call({ upstreamScope: SCOPE_B });
+        expect(requestsOf(fake, "initialize")).toHaveLength(opened + 1);
+        expect(requestsOf(fake, "tools/call")[3]?.sessionId).toBe(sessionB);
+      },
+      { legacy: true },
+    );
+  });
+
+  it("ends a call that holds no session yet when its token ends", async () => {
+    await withReadyServer(async ({ controller, call }) => {
+      let reached: () => void = () => undefined;
+      const reachedAuthorize = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const pending = call({ authorize: Effect.andThen(Effect.sync(reached), Effect.never) });
+      await reachedAuthorize;
+
+      await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
+
+      expect(await settleWithin(pending, 2_000)).toMatchObject({ _tag: "Failure" });
+    });
+  });
+
+  it("cancels an opening that no call waits for any more when its token ends", async () => {
+    await withReadyServer(
+      async ({ controller, fake, call }) => {
+        const before = {
+          initialize: requestsOf(fake, "initialize").length,
+          initialized: requestsOf(fake, "notifications/initialized").length,
+          ended: endedSessions(fake).length,
+        };
+        const release = fake.hold("initialize");
+        const abandoned = await call({}, Duration.millis(200));
+        expect(abandoned).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
+
+        await Effect.runPromise(controller.harness.mcpServerCalls.closeUpstreamScope(SCOPE_A));
+        release();
+        // A cancelled opening never goes on to send what follows the handshake.
+        await sleep(300);
+
+        expect(requestsOf(fake, "initialize")).toHaveLength(before.initialize + 1);
+        expect(requestsOf(fake, "notifications/initialized")).toHaveLength(before.initialized);
+        expect(endedSessions(fake)).toHaveLength(before.ended);
+      },
+      { legacy: true },
     );
   });
 });

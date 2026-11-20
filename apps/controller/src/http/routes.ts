@@ -956,6 +956,8 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * plugins domain. The two are wired together here, where the whole controller
  * is assembled.
  */
+const McpServerCallsWithChangesLayer = McpServerCallsLayer.pipe(Layer.provide(LiveTopicsLayer));
+
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
@@ -1145,11 +1147,16 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(McpServerChecksLayer),
     Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
   ),
-  // The gateway's calls to outside MCP servers.
-  McpServerCallsLayer,
+  // The gateway's calls to outside MCP servers. They follow the committed
+  // changes of servers and Connections to close the sessions of a server that
+  // lost its destination.
+  McpServerCallsWithChangesLayer,
   // The route `/mcp` hands every request to the gateway, which answers a
   // session's harness from the session's list of servers.
-  McpGatewayLayer.pipe(Layer.provide(LiveTopicsLayer), Layer.provide(McpServerCallsLayer)),
+  McpGatewayLayer.pipe(
+    Layer.provide(LiveTopicsLayer),
+    Layer.provide(McpServerCallsWithChangesLayer),
+  ),
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
