@@ -33,7 +33,6 @@ import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
 import { McpServerChecks } from "./checks";
-import { McpServerListHolders } from "./list-holders";
 import { mcpServerRepository, type StoredMcpServer } from "./repository";
 
 /** What `update` takes: the server and the fields to change. */
@@ -70,7 +69,6 @@ const make = Effect.gen(function* () {
   const plugins = yield* PluginHost;
   const audit = yield* AuditLog;
   const checks = yield* McpServerChecks;
-  const listHolders = yield* McpServerListHolders;
 
   const readOrFail = (id: string): Effect.Effect<StoredMcpServer, NotFound | SqlError> =>
     Effect.flatMap(
@@ -232,7 +230,6 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             yield* readOrFail(id);
-            yield* listHolders.removeServer(id);
             yield* servers.remove(id);
             yield* audit.append({
               kind: "mcpServer.deleted",

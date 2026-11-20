@@ -38,12 +38,12 @@ import { mcpServerRepository } from "./repository";
 import {
   computeBackoffMillis,
   DAILY_CHECK_MILLIS,
-  judgeSurroundings,
+  judgeDependencies,
   markDueWhenUsable,
   readServerWhileBasisHolds,
-  readSurroundings,
+  readDependencies,
   writeServerState,
-  type Surroundings,
+  type McpServerDependencies,
 } from "./state";
 import { MAX_UPSTREAM_MESSAGE_BYTES, openUpstream, type UpstreamError } from "./upstream";
 
@@ -70,16 +70,6 @@ export class McpServerChecks extends Context.Service<
     readonly requestDue: Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/mcp-servers/McpServerChecks") {}
-
-/**
- * The HTTP client a check reaches outside MCP servers with. Unset, it is the
- * environment's `HttpClient`, which is `fetch`. A test sets it to send a
- * vendor's address to a fake server.
- */
-export const McpUpstreamHttpClient = Context.Reference<HttpClient.HttpClient | undefined>(
-  "hercule/controller/mcp-servers/McpUpstreamHttpClient",
-  { defaultValue: () => undefined },
-);
 
 /** How long listing the tools may take, from the first request to the last page. */
 const LIST_DEADLINE = Duration.seconds(60);
@@ -109,7 +99,7 @@ type CheckResult =
       readonly cause: "plugin" | "connection" | null;
     };
 
-const failed = (
+const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
   detail: string,
   cause: "plugin" | "connection" | null = null,
@@ -183,7 +173,7 @@ const make = Effect.gen(function* () {
   const plugins = yield* PluginHost;
   const promotion = yield* PromotionState;
   const notifier = yield* Notifier;
-  const httpClient = (yield* McpUpstreamHttpClient) ?? (yield* HttpClient.HttpClient);
+  const httpClient = yield* HttpClient.HttpClient;
   const scope = yield* Effect.scope;
 
   /**
@@ -198,22 +188,26 @@ const make = Effect.gen(function* () {
   ): CheckResult => {
     switch (error.reason) {
       case "needs-sign-in":
-        return failed(
+        return buildFailedResult(
           "needs-sign-in",
           `Reconnect ${connection.label} in Settings > Connections`,
           "connection",
         );
       case "switched-off":
-        return failed("error", `The Connection ${connection.label} is switched off`, "connection");
+        return buildFailedResult(
+          "error",
+          `The Connection ${connection.label} is switched off`,
+          "connection",
+        );
       case "unreachable":
-        return failed(
+        return buildFailedResult(
           "unreachable",
           `${contribution.displayName} could not be reached to refresh the sign-in`,
         );
       case "missing":
-        return failed("error", "The Connection of this server is missing");
+        return buildFailedResult("error", "The Connection of this server is missing");
       case "invalid-config":
-        return failed(
+        return buildFailedResult(
           "error",
           `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
         );
@@ -255,19 +249,19 @@ const make = Effect.gen(function* () {
     switch (failure.reason) {
       case "unreachable":
       case "timeout":
-        return failed("unreachable", failure.message);
+        return buildFailedResult("unreachable", failure.message);
       case "unauthorized":
-        return failed(
+        return buildFailedResult(
           "error",
           `${contribution.displayName}'s MCP server refused the Connection's token`,
         );
       default:
-        return failed("error", failure.message);
+        return buildFailedResult("error", failure.message);
     }
   };
 
   /**
-   * Works out the outcome of one check from the surroundings read at its
+   * Works out the outcome of one check from the dependencies read at its
    * start. Never fails except for the database: every other failure is an
    * outcome that becomes the server's status.
    *
@@ -279,17 +273,18 @@ const make = Effect.gen(function* () {
    */
   const evaluate = (
     server: StoredMcpServer,
-    surroundings: Surroundings,
+    dependencies: McpServerDependencies,
     worked: WorkedRevision,
   ): Effect.Effect<CheckResult, SqlError, SqlClient.SqlClient | PluginHost> =>
     Effect.gen(function* () {
-      const judged = judgeSurroundings(surroundings);
-      if (judged._tag === "unusable") return failed(judged.status, judged.detail, judged.cause);
+      const judged = judgeDependencies(dependencies);
+      if (judged._tag === "unusable")
+        return buildFailedResult(judged.status, judged.detail, judged.cause);
       const { contribution, connection } = judged;
       // Checked at use, not only at create, because the credentials of a
       // Connection of another type would go to this server's origin.
       if (connection.type !== contribution.connectionType) {
-        return failed(
+        return buildFailedResult(
           "error",
           `This server needs a ${contribution.connectionType} Connection, and ${connection.label} is another type`,
         );
@@ -305,7 +300,7 @@ const make = Effect.gen(function* () {
       if (outcome._tag === "Failure" && outcome.failure.reason === "unauthorized") {
         const current = yield* readServerWhileBasisHolds(server.id, {
           revision: server.revision,
-          surroundings,
+          dependencies,
         });
         if (Option.isNone(current)) return { _tag: "discarded" } satisfies CheckResult;
         const refresh = yield* Effect.result(
@@ -332,7 +327,7 @@ const make = Effect.gen(function* () {
 
       const tools = outcome.success.tools.map(toStoredTool);
       if (new TextEncoder().encode(JSON.stringify(tools)).length > MAX_UPSTREAM_MESSAGE_BYTES) {
-        return failed("error", "The server's tool list is larger than 4 MiB");
+        return buildFailedResult("error", "The server's tool list is larger than 4 MiB");
       }
       return { _tag: "ready", tools, revision: outcome.success.revision } satisfies CheckResult;
     });
@@ -350,15 +345,15 @@ const make = Effect.gen(function* () {
       const found = yield* servers.readById(id);
       if (Option.isNone(found) || !found.value.enabled) return;
       const server = found.value;
-      const surroundings = yield* readSurroundings(server);
+      const dependencies = yield* readDependencies(server);
       const worked: WorkedRevision = { current: null };
-      const result = yield* evaluate(server, surroundings, worked);
+      const result = yield* evaluate(server, dependencies, worked);
       const at = yield* nowIso;
       const written =
         result._tag !== "discarded" &&
         (yield* writeServerState(
           id,
-          { revision: server.revision, surroundings },
+          { revision: server.revision, dependencies },
           buildEdit(server, result, at, worked),
           at,
         ));

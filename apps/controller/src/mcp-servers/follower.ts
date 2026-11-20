@@ -23,8 +23,8 @@ import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import { McpServerChecks } from "./checks";
-import { mcpServerRepository, type McpServerDependencies, type McpServerEdit } from "./repository";
-import { judgeSurroundings, readPluginId, readSurroundings, writeServerState } from "./state";
+import { mcpServerRepository, type McpServerDependencyIds, type McpServerEdit } from "./repository";
+import { judgeDependencies, parsePluginId, readDependencies, writeServerState } from "./state";
 
 /** How many times a reconcile reads the server again after losing a race with another write. */
 const MAX_RACE_ATTEMPTS = 3;
@@ -66,8 +66,8 @@ export const runConnectionFollower = Effect.scoped(
         const found = yield* servers.readById(id);
         if (Option.isNone(found) || !found.value.enabled) return;
         const server = found.value;
-        const surroundings = yield* readSurroundings(server);
-        const judged = judgeSurroundings(surroundings);
+        const dependencies = yield* readDependencies(server);
+        const judged = judgeDependencies(dependencies);
         const at = yield* nowIso;
 
         let edit: McpServerEdit | undefined;
@@ -113,7 +113,7 @@ export const runConnectionFollower = Effect.scoped(
         if (edit === undefined) return;
 
         const written = yield* promotion.whenServing(
-          writeServerState(id, { revision: server.revision, surroundings }, edit, at),
+          writeServerState(id, { revision: server.revision, dependencies }, edit, at),
         );
         if (!written) {
           // Something else changed the server, its Connection or its plugin
@@ -130,13 +130,13 @@ export const runConnectionFollower = Effect.scoped(
      * in all. Returns `undefined` when every try failed, after logging that
      * the daily check of each server is what brings it in step then.
      */
-    const readSelectedIds = (selected: (server: McpServerDependencies) => boolean) =>
+    const readSelectedIds = (selected: (server: McpServerDependencyIds) => boolean) =>
       Effect.gen(function* () {
         for (let attempt = 1; attempt <= MAX_FAILURE_ATTEMPTS; attempt++) {
           let ids: ReadonlyArray<string> | undefined;
           yield* absorbFailures(
             "Reading the MCP servers to follow their Connections failed",
-            Effect.flatMap(servers.listDependencies(), (all) =>
+            Effect.flatMap(servers.listDependencyIds(), (all) =>
               Effect.sync(() => {
                 ids = all.filter(selected).map((server) => server.id);
               }),
@@ -156,7 +156,7 @@ export const runConnectionFollower = Effect.scoped(
      * is logged, and reconciled again after `RETRY_DELAY`, up to
      * `MAX_FAILURE_ATTEMPTS` times in all.
      */
-    const reconcileSelected = (selected: (server: McpServerDependencies) => boolean) =>
+    const reconcileSelected = (selected: (server: McpServerDependencyIds) => boolean) =>
       Effect.gen(function* () {
         let pending = (yield* readSelectedIds(selected)) ?? [];
         for (let attempt = 1; pending.length > 0; attempt++) {
@@ -185,7 +185,7 @@ export const runConnectionFollower = Effect.scoped(
       yield* reconcileSelected(
         (server) =>
           connectionIds.has(server.connectionId) ||
-          pluginIds.has(readPluginId(server.contributionId)),
+          pluginIds.has(parsePluginId(server.contributionId)),
       );
     }
   }),

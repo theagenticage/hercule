@@ -80,7 +80,6 @@ import {
   SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
-  McpServerListHoldersLayer,
   Provisioning,
   ProvisioningLayer,
   TextGenerationLayer,
@@ -1128,15 +1127,10 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  // Deleting a server removes it from the lists that hold it, through the
-  // controller daemon, which reaches the Projects and Sessions the domain
-  // cannot import. The checks are merged into the output because the
-  // controller daemon's scheduler requests them too, and a check must be one
-  // instance to run at most once per server.
-  McpServerServiceLayer.pipe(
-    Layer.provideMerge(McpServerChecksLayer),
-    Layer.provide(McpServerListHoldersLayer),
-  ),
+  // The checks are merged into the output because the controller daemon's
+  // scheduler requests them too, and a check must be one instance to run at
+  // most once per server.
+  McpServerServiceLayer.pipe(Layer.provideMerge(McpServerChecksLayer)),
   // The record changes that in-process followers, such as the MCP Server
   // follower, read. Merged beside the live topics, which keep their own
   // listener.

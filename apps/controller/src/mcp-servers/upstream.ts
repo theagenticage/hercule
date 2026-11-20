@@ -81,14 +81,14 @@ type ClientProtocol = Parameters<typeof McpClient.http>[0]["protocol"];
  * (Sentry's server answers `2025-06-18`). This is the one place that cast is
  * made.
  */
-const asClientProtocol = (adapter: unknown): ClientProtocol => adapter as ClientProtocol;
+const castToClientProtocol = (adapter: unknown): ClientProtocol => adapter as ClientProtocol;
 
 /** The MCP revisions to try, newest first. */
 const REVISIONS: ReadonlyArray<{ readonly revision: string; readonly protocol: ClientProtocol }> = [
   { revision: "2026-07-28", protocol: McpProtocol.v2026_07_28 },
   { revision: "2025-11-25", protocol: McpProtocol.v2025_11_25 },
-  { revision: "2025-06-18", protocol: asClientProtocol(McpProtocol.v2025_06_18) },
-  { revision: "2025-03-26", protocol: asClientProtocol(McpProtocol.v2025_03_26) },
+  { revision: "2025-06-18", protocol: castToClientProtocol(McpProtocol.v2025_06_18) },
+  { revision: "2025-03-26", protocol: castToClientProtocol(McpProtocol.v2025_03_26) },
 ];
 
 /** What a person reads for each reason, unless a failure has a more precise line. */
