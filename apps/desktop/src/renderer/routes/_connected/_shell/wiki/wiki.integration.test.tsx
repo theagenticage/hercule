@@ -136,6 +136,21 @@ const JUST_OVER_REVISIONS: readonly WikiRevision[] = Array.from({ length: 50 }, 
   buildRevision(51 - index, "Just over", "user", "2026-10-01T09:00:00.000Z"),
 );
 
+/**
+ * A page the agent archived on Friday 9 October. The list does not hold it,
+ * as `wikiPage.query` leaves archived pages out, but it is still read by its id.
+ */
+const ARCHIVED = buildPage({
+  id: "01a06d02-7e00-7000-8000-000000000006",
+  slug: "old-deploys",
+  title: "Old deploys",
+  archived: {
+    at: "2026-10-09T12:00:00.000Z",
+    by: AGENT_ACTOR,
+    reason: "Merged into the page Deploy runbook",
+  },
+});
+
 /** The id of a page the controller does not have. */
 const UNKNOWN_ID = "01a06d02-7e00-7000-8000-0000000000ff";
 
@@ -150,7 +165,7 @@ const buildLongList = (count: number): WikiPageSummary[] =>
   );
 
 /** Every page the controller can read, listed or not. */
-const READABLE_PAGES = [...PAGES, LONG, JUST_OVER];
+const READABLE_PAGES = [...PAGES, LONG, JUST_OVER, ARCHIVED];
 
 /** What `wikiPage.read` answers for each page's id: its revisions, newest first. */
 const REVISIONS_BY_PAGE: Readonly<Record<string, readonly WikiRevision[]>> = {
@@ -559,6 +574,18 @@ describe("an open wiki page", () => {
         .map((item) => item.textContent),
     ).toEqual(expect.arrayContaining(["Tag the commit", "Run the build"]));
     expect(screen.queryByText(/This is not the current page/)).toBeNull();
+    expect(screen.queryByText(/^Archived /)).toBeNull();
+  });
+
+  it("says above an archived page who archived it, when and why", async () => {
+    await openWiki(`/wiki/${ARCHIVED.id}`);
+
+    const page = await screen.findByRole("region", { name: "Old deploys" });
+    expect(page.querySelector(".archived-band")?.textContent).toBe(
+      "Archived Fri by Write the retry runbook. Merged into the page Deploy runbook",
+    );
+    // The archived page is not a row of the list.
+    expect(readList()).not.toContain("Old deploys");
   });
 
   it("lists the history, newest first, with who wrote each revision, when, and which revision renamed the page", async () => {

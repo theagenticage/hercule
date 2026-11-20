@@ -1383,7 +1383,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
 
 ### discussion, wikiPage
 
-*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Eight operations let concurrent sessions coordinate on a repository: `discussion.query`, `discussion.read`, `discussion.create` and `discussion.post`, and `wikiPage.query`, `wikiPage.read`, `wikiPage.create` and `wikiPage.update`. Their records, inputs, grants (families `discussion` and `wiki`), routes and CLI rows are owned by [./19-agent-coordination.md](./19-agent-coordination.md) section 3 and are not restated here.
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Eight operations let concurrent sessions coordinate on a repository: `discussion.query`, `discussion.read`, `discussion.create` and `discussion.post`, and `wikiPage.query`, `wikiPage.read`, `wikiPage.create` and `wikiPage.update`. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* Two more, `wikiPage.archive` and `wikiPage.restore`, take a page out of the listing and bring it back. Their records, inputs, grants (families `discussion` and `wiki`), routes and CLI rows are owned by [./19-agent-coordination.md](./19-agent-coordination.md) section 3 and are not restated here.
 
 ### skill
 
