@@ -79,13 +79,6 @@ export interface TriggerReading {
 }
 
 /**
- * How many held events a trigger's row lists. The rest are counted in one
- * line, because the count, not the list, tells the user how many events wait,
- * and the oldest few show what the trigger matched.
- */
-export const HELD_EVENT_PREVIEW_LIMIT = 3;
-
-/**
  * The held events a trigger's row lists, and the line that counts the rest.
  * Each row holds:
  *

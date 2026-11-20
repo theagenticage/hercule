@@ -1,6 +1,6 @@
 /**
  * Tests `buildTurns(rows, agent)`, which groups an agent's transcript rows
- * into turns, and `readUserSender`, which reads who sent a user message.
+ * into turns.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/harnesses/claude-code.ts` / `claude-code-normalize.ts`):
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { appendPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
-import { buildTurns, readUserSender } from "./turns";
+import { buildTurns } from "./turns";
 
 const SESSION_ID = "session-1";
 
@@ -1269,17 +1269,6 @@ describe("buildTurns runtime notes", () => {
       ["warning", "Retrying the request."],
       ["error", "HarnessNotInstalled"],
     ]);
-  });
-});
-
-describe("readUserSender", () => {
-  it("returns the sending session's id, and undefined when the message has no sender", () => {
-    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
-      "s-sender",
-    );
-    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
-    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
-    expect(readUserSender(undefined)).toBeUndefined();
   });
 });
 

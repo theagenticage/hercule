@@ -215,7 +215,6 @@ export {
   describeHeldEvents,
   describeTrigger,
   describeTriggerOn,
-  HELD_EVENT_PREVIEW_LIMIT,
   type TriggerReading,
 } from "./trigger-display";
 export {
@@ -369,7 +368,6 @@ export {
   isNotificationMuted,
   parseMuteKind,
   toggleMuteKey,
-  UNSEEN_COUNT_READ_LIMIT,
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
@@ -1125,6 +1123,7 @@ export {
   type SenderReading,
   waitForOptionalReads,
 } from "./threads/sender";
+export { HELD_EVENT_PREVIEW_LIMIT, UNSEEN_COUNT_READ_LIMIT } from "./read-limits";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

@@ -5,6 +5,10 @@
  * A sender is known only by its session id. What the screen shows depends on
  * what the app could read about that session, and both apps must agree, so
  * the rule lives here with a test rather than inside a component.
+ *
+ * This module imports nothing from `turns.ts`, because a thread's loader reads
+ * who sent a message with `collectSenderSessionIds`. A loader is part of the
+ * web app's first screen, and so is every module it imports.
  */
 import {
   toIdTail,
@@ -17,7 +21,7 @@ import { describeActor, type ActorReading, type ActorTarget } from "../actor-dis
 import { findAnsweredAssistantId } from "../assistants/conversation";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
-import { readUserSender } from "./turns";
+import { readJsonObject } from "../json-shape";
 
 /**
  * How to show the agent that sent a message. It is an `ActorReading`, so a
@@ -112,6 +116,16 @@ export const readSenderSession = (client: HerculeClient, id: string): Promise<Se
     }
     throw error;
   });
+
+/**
+ * Returns the id of the session whose agent sent a `user_message`, from its
+ * detail's `senderSessionId`. Returns `undefined` for a message the session's
+ * owner sent, which carries no sender.
+ */
+export const readUserSender = (detail: unknown): string | undefined => {
+  const sender = readJsonObject(detail)?.senderSessionId;
+  return typeof sender === "string" && sender !== "" ? sender : undefined;
+};
 
 /**
  * Returns the id of the session whose agent queued `input`, or `undefined`
