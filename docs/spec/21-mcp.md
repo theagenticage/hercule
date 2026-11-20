@@ -174,6 +174,8 @@ A tool is named `<server name>__<tool name>`. The harness puts the gateway's own
 
 Answers have a size cap. Its size is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
 
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **The cap is 4 MiB per message from a server**: one JSON answer, or one event of an SSE answer. It is large enough for a screenshot in an image block (Sentry's `get_snapshot_image`), and it bounds what one call can hold in the controller's memory. An answer over it is refused as a tool result with `isError: true` ("the answer was larger than 4 MiB"). A tool list is bounded the same way per message, and also by the client's own limits of 100 pages and 10,000 tools; a server's stored tool definitions are refused above 4 MiB in all, which sets the server to `error`.
+
 ### 3.6 A refused call
 
 A call is refused when:
@@ -250,6 +252,8 @@ It never holds the arguments or the result.
 
 Towards servers, the gateway tries `2026-07-28` first and falls back to the older handshake by MCP's versioning rules. It remembers per server what worked.
 
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The revisions are tried in the order `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`. The next one is tried only when the server refuses the revision: an HTTP 400 that carries MCP's unsupported-version error, or an `initialize` answered with another revision. A 401, any other 400, a timeout or no connection ends the attempt. Effect 4.0.7's `McpClient` speaks only `2025-11-25` and `2026-07-28` and refuses a server that answers an older revision, but Sentry answered `2025-06-18`. Effect's own protocol modules for `2025-06-18` and `2025-03-26` work with the same client, so the gateway passes those to it. A server that speaks none of the four is `error`. An older server can be left with one upstream MCP session from a refused `initialize`, which it ends itself; because the revision that worked is remembered, this happens once per server.
+
 - **Scope.** An upstream MCP session belongs to one Session Token (one harness incarnation) and one server. So a server that keeps state per MCP session never mixes two Threads, and a resume starts with fresh remote state.
 - **Opening and closing.** Its first call opens it. Concurrent first calls share one opening. It closes when the token ends, or when the server is switched off, deleted or replaced.
 - **A destination that is lost.** Replace, a swap of accounts in a list, switching off and deleting close every upstream MCP session of the server that lost the destination. The next call opens a new one with the new credential. A swap is the user's explicit act in the composer, so a name stays valid: a call goes to the server the list holds when the call is dispatched ([section 3.5](#35-a-call)).
@@ -261,11 +265,11 @@ Towards servers, the gateway tries `2026-07-28` first and falls back to the olde
 
 ### 3.11 Build-time verifications
 
-**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules, as it does for the GET stream ([section 3.2](#32-protocol-revisions-and-what-is-spoken)). [#1208](https://github.com/theagenticage/hercule/issues/1208).
+~~**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules, as it does for the GET stream ([section 3.2](#32-protocol-revisions-and-what-is-spoken)). [#1208](https://github.com/theagenticage/hercule/issues/1208).~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Checked: it cannot.** Effect 4.0.7's `McpServer` keeps one tool registry per server. Whether a tool is listed depends only on the client's protocol revision, capabilities and name (its `EnabledWhen` annotation), never on the request or its token, and `notifications/tools/list_changed` goes to every connected client. So the gateway writes its session-facing protocol itself: the JSON-RPC methods of section 3.2, on the message schemas of Effect's `McpSchema`.
 
 **Verify at build time:** that each adapter works on the wire paths the gateway serves, with the real harness: Claude Code on the modern path (`server/discover`, `subscriptions/listen`) and on the older one, Codex and pi on the older one. Claude Code's probe showed that it tries modern discovery first and then falls back. That it works on the modern path, and sees `list_changed` there, is not proven. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
 
-**Verify at build time:** that Effect's MCP client keeps an upstream MCP session across a credential refresh when the credential is supplied per request ([section 3.10](#310-upstream-sessions)). If it cannot, the gateway writes the transport. [#1208](https://github.com/theagenticage/hercule/issues/1208).
+~~**Verify at build time:** that Effect's MCP client keeps an upstream MCP session across a credential refresh when the credential is supplied per request ([section 3.10](#310-upstream-sessions)). If it cannot, the gateway writes the transport. [#1208](https://github.com/theagenticage/hercule/issues/1208).~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Checked: it does.** Effect's `McpClient` sends through the HTTP client it is given, so a client that adds the current credential to each request carries a new credential on the same `Mcp-Session-Id`. A probe against a fake server showed two calls on one upstream session with two different tokens. The gateway writes no transport of its own.
 
 **Verify at build time:** that each harness opens a new MCP session after a 404 when the controller restarted, on the older handshake. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
 
@@ -360,8 +364,11 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 - The remedy for `error` is "Check now" and the detail. It is never "Reconnect".
 - A plugin server follows its Connection. A Connection that moves to `needs-reauth` moves its servers to `needs-sign-in`. This reaches `mcp-servers` through the Connection observer ([section 1.3](#13-the-domain-graph)).
 - A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off").
+- *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A Connection that is switched off is like a plugin that is switched off** (decided by Rogier, 2026-11-20). Its servers are `error`, with the reason ("The Connection Sentry (work) is switched off"), and they are not served: `tools/list` leaves them out and a call is refused. Switching the Connection on lists the servers again.
 
 The backoff schedule for `unreachable` is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
+
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **The backoff for `unreachable`:** the server is checked again after 1 minute, then 5 minutes, then 15 minutes, then 1 hour, and then every hour until a check succeeds. A success, a reconnect of its Connection, switching it on and `mcpServer.check` start the schedule over. The daily list of section 5.4 goes on beside it.
 
 ### 5.4 When a server is listed
 
@@ -394,10 +401,10 @@ Three plugins offer a server in v1. Each is reached with the plugin's Connection
 
 ### 6.1 Sentry
 
-- URL: `https://mcp.sentry.dev/mcp?disable-skills=project-management`. The query drops 18 tools that the Connection's scopes do not cover.
+- URL: `https://mcp.sentry.dev/mcp?disable-skills=project-management`. The query drops ~~18~~ 19 tools that the Connection's scopes do not cover, and 55 remain *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The server does not filter its list by the token's scopes: without the query it lists 74 tools. So the query is what keeps the unusable tools out, and a scope the token lacks would show only when such a tool is called, as that call's own answer.
 - Header: `Authorization: Sentry-Bearer <token>`.
 
-**Verify at build time:** that `mcp.sentry.dev` accepts a Hercule Sentry Connection's token as `Sentry-Bearer`. This is unproven. A proof call is the first acceptance criterion of [#1208](https://github.com/theagenticage/hercule/issues/1208). If it fails, that slice stops and reports, because it then needs another route to "no second sign-in".
+~~**Verify at build time:** that `mcp.sentry.dev` accepts a Hercule Sentry Connection's token as `Sentry-Bearer`. This is unproven. A proof call is the first acceptance criterion of [#1208](https://github.com/theagenticage/hercule/issues/1208). If it fails, that slice stops and reports, because it then needs another route to "no second sign-in".~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Proven on 2026-11-20** ([the proof](https://github.com/theagenticage/hercule/issues/1208#issuecomment-7041913349)). A token from Hercule's Sentry application, made by the Connection's device flow with its six scopes, was accepted as `Sentry-Bearer` (`initialize`, `tools/list` and a `whoami` call all answered 200), and the same token as plain `Bearer` got 401. Sentry answered the older revision `2025-06-18` it was asked for.
 
 Sentry kills the old access token the moment it is refreshed. The gateway never hands a token out, so a refresh cannot break a running session.
 
