@@ -300,7 +300,7 @@ const make = Effect.gen(function* () {
             : undefined,
           opening: [buildSubscriptionAcknowledgement(id, honored)],
           closing: buildRpcResult(id, buildListenResult(id)),
-          ...tokenStates.streamLifecycle(state),
+          ...tokenStates.buildStreamHooks(state),
         }),
       );
     });
@@ -461,7 +461,7 @@ const make = Effect.gen(function* () {
           mcpSessionId: session.id,
           listChanged: buildListChangedNotification(),
           opening: [],
-          ...tokenStates.streamLifecycle(state),
+          ...tokenStates.buildStreamHooks(state),
         }),
       );
     });

@@ -78,6 +78,7 @@ export const cancelCall = (
   return running === undefined ? Effect.void : Effect.asVoid(Fiber.interrupt(running));
 };
 
+/** Builds the gateway's per-token state and the operations on it. */
 export const makeTokenStates = Effect.gen(function* () {
   const reads = yield* makeFreshReads;
   const catalogue = yield* McpServerCalls;
@@ -222,7 +223,7 @@ export const makeTokenStates = Effect.gen(function* () {
       );
 
   /** Returns the two hooks a stream's response body needs: admit it when it is read, release it when it ends. */
-  const streamLifecycle = (state: TokenState) => ({
+  const buildStreamHooks = (state: TokenState) => ({
     admit: admitStream(state),
     release: (stream: OpenStream): Effect.Effect<void> =>
       Effect.sync(() => {
@@ -344,7 +345,7 @@ export const makeTokenStates = Effect.gen(function* () {
     openMcpSession,
     endMcpSession,
     runCall,
-    streamLifecycle,
+    buildStreamHooks,
 
     /** Refuses every new stream from now on and ends the open ones. For a controller that is stopping. */
     closeStreams: Effect.suspend(() => {

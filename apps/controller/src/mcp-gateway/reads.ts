@@ -12,6 +12,7 @@ import { SessionTokens } from "../permissions";
 import { sessionRepository } from "../sessions";
 import { selectServed } from "./served";
 
+/** Builds the fresh database reads the gateway makes for a Session Token and its session. */
 export const makeFreshReads = Effect.gen(function* () {
   const tokens = yield* SessionTokens;
   const sessions = yield* sessionRepository;

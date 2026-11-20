@@ -64,6 +64,7 @@ const isPromotionRefusal = (error: unknown): error is ControllerSealed | Promoti
 const buildErrorResult = (message: string): McpSchema.CallToolResult =>
   new McpSchema.CallToolResult({ content: [{ type: "text", text: message }], isError: true });
 
+/** Builds the policy every `tools/call` goes through. */
 export const makeCallPolicy = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const reads = yield* makeFreshReads;

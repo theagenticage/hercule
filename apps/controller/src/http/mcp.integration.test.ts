@@ -13,11 +13,13 @@
  *   entry per call;
  * - a controller that is frozen.
  *
- * The outside server is the catalogue's fake upstream. Both eras run end to
- * end through the real `McpServerCalls`. The tests that need a call to hold,
- * or to be refused for a reason the fake cannot give, replace
- * `callTool` with a stand-in: how the catalogue reaches a server is tested in
- * the `mcp-servers` domain.
+ * The outside server is the catalogue's fake upstream, which speaks only the
+ * legacy revision so that each token's upstream MCP session can be seen: its
+ * `initialize` and its DELETE. Both eras run end to end through the real
+ * `McpServerCalls`, and what a test says about a call that was or was not
+ * sent is read from the requests the fake received. Only the refusal of a
+ * call the controller finds frozen after the gateway admitted it cannot be
+ * arranged over the wire, so that one test replaces `callTool`.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -26,7 +28,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpCallRefused } from "../mcp-servers";
 import type { Profile } from "@hercule/contract";
-import type { McpSchema } from "effect/ai";
+import { McpProtocol } from "effect/ai";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import {
@@ -55,6 +57,7 @@ let PLUGINS: ReadonlyArray<Plugin>;
 
 beforeAll(async () => {
   upstream = await startFakeUpstream({
+    protocols: [McpProtocol.v2025_11_25],
     tools: [
       { name: "echo", description: "Echoes its text" },
       { name: "get-issue.details", description: "Reads an issue" },
@@ -70,7 +73,7 @@ afterAll(async () => {
 // -- One controller for the whole file --------------------------------------
 
 let arranged: Arranged;
-let servers: readonly [ServerRef, ServerRef, ServerRef];
+let servers: readonly [ServerRef, ServerRef, ServerRef, ServerRef];
 let finishFleet: () => void;
 let fleetDone: Promise<void>;
 
@@ -84,7 +87,7 @@ beforeAll(async () => {
         arranged = fleet;
         const created = await createServers(
           { harness: fleet.harness, base: fleet.harness.base, token: fleet.token },
-          ["alpha", "bravo", "charlie"],
+          ["alpha", "bravo", "charlie", "delta"],
         );
         servers = created as unknown as typeof servers;
         // Every server lists its tools once its first check ends.
@@ -110,59 +113,43 @@ afterAll(async () => {
   await fleetDone;
 });
 
+// -- What the fake upstream received -------------------------------------------
+
+/** Returns how many requests the fake upstream has received, to measure what a test caused. */
+const countUpstreamRequests = (): number => upstream.requests.length;
+
+/** Returns the `tools/call` requests the fake upstream received after `mark`. */
+const listToolPostsSince = (mark: number) =>
+  upstream.requests.slice(mark).filter((one) => one.method === "tools/call");
+
+/** Returns the upstream MCP sessions the fake upstream was told to end after `mark`, by DELETE. */
+const listEndedSessionsSince = (mark: number): ReadonlyArray<string | null> =>
+  upstream.requests
+    .slice(mark)
+    .filter((one) => one.method === "?")
+    .map((one) => one.sessionId);
+
 // -- Stand-in for the catalogue's call ---------------------------------------
 
 type CallTool = (typeof arranged.harness.mcpServerCalls)["callTool"];
-type CallInput = Parameters<CallTool>[0];
 
-/** The parts of the catalogue's service that the stand-in replaces. */
-interface ReplaceableCalls {
-  callTool: CallTool;
-  closeUpstreamScope: (scope: string) => Effect.Effect<void>;
-  closeUpstreamSession: (scope: string, serverId: string) => Effect.Effect<void>;
-}
+let originalCallTool: CallTool | undefined;
 
-const replaceable = () => arranged.harness.mcpServerCalls as ReplaceableCalls;
-
-let original: ReplaceableCalls | undefined;
-
-/** The calls the stand-in answered, in order. */
-let calls: Array<CallInput> = [];
-/** The scopes the gateway closed, in order. */
-let closedScopes: Array<string> = [];
-/** The upstream sessions the gateway closed, as scope and server id, in order. */
-let closedSessions: Array<readonly [string, string]> = [];
-
-/** Makes every call the gateway forwards run `answer`, and records it and every close. */
-const standInForServers = (
-  answer: (input: CallInput) => ReturnType<CallTool> = (input) =>
-    Effect.map(input.authorize, () => buildAnswer(`called ${input.tool}`)),
-): void => {
-  original ??= { ...replaceable() };
-  calls = [];
-  closedScopes = [];
-  closedSessions = [];
-  const mutable = replaceable();
-  mutable.callTool = (input) => {
-    calls.push(input);
-    return answer(input);
-  };
-  mutable.closeUpstreamScope = (scope) =>
-    Effect.sync(() => {
-      closedScopes.push(scope);
-    });
-  mutable.closeUpstreamSession = (scope, serverId) =>
-    Effect.sync(() => {
-      closedSessions.push([scope, serverId]);
-    });
+/**
+ * Makes the catalogue refuse every call with `refusal`. For the one case the
+ * wire cannot arrange: the controller froze between the gateway's admission
+ * of the call and the catalogue's first request.
+ */
+const refuseCallsWith = (refusal: McpCallRefused): void => {
+  const calls = arranged.harness.mcpServerCalls as { callTool: CallTool };
+  originalCallTool ??= calls.callTool;
+  calls.callTool = () => Effect.fail(refusal);
 };
 
 afterEach(() => {
-  if (original !== undefined) Object.assign(replaceable(), original);
+  if (originalCallTool === undefined) return;
+  (arranged.harness.mcpServerCalls as { callTool: CallTool }).callTool = originalCallTool;
 });
-
-const buildAnswer = (text: string): McpSchema.CallToolResult =>
-  ({ content: [{ type: "text", text }] }) as unknown as McpSchema.CallToolResult;
 
 // -- A client of the gateway --------------------------------------------------
 
@@ -681,7 +668,6 @@ describe("MCP sessions", () => {
 
 describe("list changes", () => {
   it("sends list_changed on the GET stream when a server joins or leaves the list, and the next tools/list shows it", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
     expect(await listToolNames(thread.token, sessionId)).toEqual([
@@ -709,17 +695,17 @@ describe("list changes", () => {
       // A server that left is refused at once, and the names of the others stay.
       expect((await updateList(thread.session.id, [servers[2].id])).status).toBe(200);
       await waitForListChanges(stream, 3);
+      const mark = countUpstreamRequests();
       const refused = await callEcho(thread.token, "alpha__echo", sessionId);
       expect(refused.body.result.isError).toBe(true);
       expect(textOf(refused)).toContain("not in this Thread's list");
-      expect(calls).toEqual([]);
+      expect(listToolPostsSince(mark)).toEqual([]);
     } finally {
       stream.close();
     }
   });
 
   it("sends list_changed on subscriptions/listen, acknowledges it first, and a change of the profile's mcp.use is one", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const listen = await openListen(thread.token, 900);
     try {
@@ -735,10 +721,11 @@ describe("list changes", () => {
       await waitForListChanges(listen, 2);
       const listed = await sendMcp(thread.token, request("tools/list", STATELESS_META));
       expect(listed.body.result.tools).toEqual([]);
+      const mark = countUpstreamRequests();
       const refused = await callEcho(thread.token, "alpha__echo", undefined);
       expect(refused.body.result.isError).toBe(true);
       expect(textOf(refused)).toContain("mcp.use");
-      expect(calls).toEqual([]);
+      expect(listToolPostsSince(mark)).toEqual([]);
 
       // And a change that alters nothing the session is served sends nothing.
       const before = listChanges(listen).length;
@@ -751,22 +738,26 @@ describe("list changes", () => {
     }
   });
 
-  it("ends the streams and closes the upstream sessions of a token that stopped resolving", async () => {
-    standInForServers();
+  it("ends the streams and the upstream sessions of a token that stopped resolving", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+    const mark = countUpstreamRequests();
+    expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+      undefined,
+    );
+    const upstreamSession = listToolPostsSince(mark)[0]?.sessionId;
+    expect(upstreamSession).toBeTruthy();
     const stream = await openGetStream(thread.token, sessionId);
     await waitForListChanges(stream, 1);
 
     await endResumable(arranged, thread.session);
 
     expect(await waitWithin(5_000, () => stream.ended)).toBe(true);
-    // The harness's one runner reports the end of this Thread for every
-    // Thread it runs, so other tokens close too. This one's scope is its hash.
-    expect(await waitWithin(5_000, () => closedScopes.includes(hashToken(thread.token)))).toBe(
-      true,
-    );
-    expect(closedScopes).not.toContain(thread.token);
+    expect(
+      await waitWithin(5_000, () => listEndedSessionsSince(mark).includes(upstreamSession ?? null)),
+      "the upstream MCP session was not ended",
+    ).toBe(true);
     expect(
       (await sendMcp(thread.token, request("ping"), { "mcp-session-id": sessionId })).status,
     ).toBe(401);
@@ -775,20 +766,20 @@ describe("list changes", () => {
 
 describe("refused calls", () => {
   it("answers an unknown tool, writes one warning per turn, and one audit entry per call", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
     const sessionStarted = thread.session.id;
     reportTurnStarted(arranged, sessionStarted, 2);
     await waitForTurnRow(sessionStarted, "turn.started", "t2");
 
+    const mark = countUpstreamRequests();
     const first = await callEcho(thread.token, "alpha__nothing", sessionId);
     const second = await callEcho(thread.token, "alpha__nothing", sessionId);
     for (const answer of [first, second]) {
       expect(answer.body.result.isError).toBe(true);
       expect(textOf(answer)).toContain("alpha__nothing");
     }
-    expect(calls).toEqual([]);
+    expect(listToolPostsSince(mark)).toEqual([]);
 
     await eventually(
       () => readWarnings(sessionStarted),
@@ -820,7 +811,6 @@ describe("refused calls", () => {
   });
 
   it("tells the Thread which server a refused call meant, when the server is known", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0], servers[1]]);
     const { sessionId } = await initialize(thread.token);
     await listToolNames(thread.token, sessionId);
@@ -843,62 +833,79 @@ describe("refused calls", () => {
     });
   });
 
-  it("refuses a call whose server left the list while the call was on its way, without sending it", async () => {
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    standInForServers((input) =>
-      Effect.flatMap(
-        Effect.promise(() => held),
-        () => Effect.map(input.authorize, () => buildAnswer("sent")),
-      ),
-    );
+  it("refuses a call whose server left the list while its upstream session opened, and sends no tool request", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
     await listToolNames(thread.token, sessionId);
+    const mark = countUpstreamRequests();
 
-    const running = callEcho(thread.token, "alpha__echo", sessionId);
-    await waitWithin(5_000, () => calls.length === 1);
-    expect((await updateList(thread.session.id, [])).status).toBe(200);
-    release();
-    const answer = await running;
-    expect(answer.body.result.isError).toBe(true);
-    expect(textOf(answer)).toContain("not sent");
-    const [entry] = await readCallAudit(thread.session.id);
-    expect(entry?.payload).toMatchObject({ outcome: "refused", reason: "not-in-list" });
-  });
+    const release = upstream.hold("initialize");
+    try {
+      const running = callEcho(thread.token, "alpha__echo", sessionId);
+      expect(
+        await waitWithin(5_000, () =>
+          upstream.requests.slice(mark).some((one) => one.method === "initialize"),
+        ),
+      ).toBe(true);
+      // The rows go without a change event, so the gateway never hears of it
+      // and cannot close the session that is opening. Only the check the
+      // catalogue makes before it sends a request can refuse the call.
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`DELETE FROM session_mcp_servers
+              WHERE session_id = unhex(replace(${thread.session.id}, '-', ''))`,
+          ),
+        ),
+      );
+      release();
+      const answer = await running;
+      expect(answer.body.result.isError).toBe(true);
+      expect(textOf(answer)).toContain("not sent");
+    } finally {
+      release();
+    }
 
-  it("returns what the catalogue refuses as a tool result and audits its reason", async () => {
-    standInForServers(() =>
-      Effect.fail(
-        new McpCallRefused({
-          reason: "needs-sign-in",
-          message: "alpha needs sign-in. Ask the user to reconnect it in Settings > Connections.",
-        }),
-      ),
-    );
-    const thread = await spawnThread(["mcp.use"], [servers[0]]);
-    const { sessionId } = await initialize(thread.token);
-    await listToolNames(thread.token, sessionId);
-    const refused = await callEcho(thread.token, "alpha__echo", sessionId);
-    expect(refused.body.result.isError).toBe(true);
-    expect(textOf(refused)).toBe(
-      "alpha needs sign-in. Ask the user to reconnect it in Settings > Connections.",
-    );
+    expect(listToolPostsSince(mark)).toEqual([]);
     const [warning] = await eventually(
       () => readWarnings(thread.session.id),
       (warnings) => warnings.length >= 1,
     );
-    expect(warning?.mcpServers).toEqual([{ mcpServerId: servers[0].id, reason: "needs-sign-in" }]);
+    expect(warning?.mcpServers).toEqual([{ mcpServerId: servers[0].id, reason: "not-in-list" }]);
     const [entry] = await readCallAudit(thread.session.id);
-    expect(entry?.payload).toMatchObject({ outcome: "refused", reason: "needs-sign-in" });
+    expect(entry?.payload).toMatchObject({ outcome: "refused", reason: "not-in-list" });
+  });
+
+  it("returns a refusal of the catalogue as a tool result, tells the Thread its reason and audits it", async () => {
+    // Delta is the one server that only this test calls: the refused call writes its status as `error`.
+    const delta = servers[3];
+    const thread = await spawnThread(["mcp.use"], [delta]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+
+    // The server accepts every request but the tool's, which it refuses as unauthorized.
+    upstream.authorize = (_authorization, method) => method !== "tools/call";
+    let refused: Answer;
+    try {
+      refused = await callEcho(thread.token, "delta__echo", sessionId);
+    } finally {
+      upstream.authorize = () => true;
+    }
+    expect(refused.body.result.isError).toBe(true);
+    expect(textOf(refused)).toContain("delta");
+    const [warning] = await eventually(
+      () => readWarnings(thread.session.id),
+      (warnings) => warnings.length >= 1,
+    );
+    expect(warning?.mcpServers).toEqual([{ mcpServerId: delta.id, reason: "error" }]);
+    const [entry] = await readCallAudit(thread.session.id);
+    expect(entry?.payload).toMatchObject({ outcome: "refused", reason: "error" });
   });
 });
 
 describe("a frozen controller", () => {
   it("still answers tools/list, refuses tools/call with the gate's message, and writes no audit entry and no warning", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
     const stream = await openGetStream(thread.token, sessionId);
@@ -913,10 +920,11 @@ describe("a frozen controller", () => {
       expect(await waitWithin(5_000, () => stream.ended)).toBe(true);
       expect(await listToolNames(thread.token, sessionId)).toContain("alpha__echo");
 
+      const mark = countUpstreamRequests();
       const refused = await callEcho(thread.token, "alpha__echo", sessionId);
       expect(refused.body.result.isError).toBe(true);
       expect(textOf(refused)).toContain("promotion");
-      expect(calls).toEqual([]);
+      expect(listToolPostsSince(mark)).toEqual([]);
       // A new stream is refused until the controller serves again.
       const reopened = await openGetStream(thread.token, sessionId);
       expect(reopened.response.status).toBe(503);
@@ -1047,13 +1055,14 @@ describe("which MCP sessions and revisions a message may name", () => {
       ["another tool name", { ...honest, "mcp-name": "alpha__other" }],
       ["no tool name", without("mcp-name")],
     ];
+    const mark = countUpstreamRequests();
     for (const [label, headers] of cases) {
       // `sendMcp` adds the honest headers first, so the case replaces or, for a missing one, leaves them out.
       const answer = await sendMcpWithHeaders(thread.token, call, headers);
       expect(answer.status, label).toBe(400);
       expect(answer.body.error.code, label).toBe(-32020);
     }
-    expect(calls).toEqual([]);
+    expect(listToolPostsSince(mark)).toEqual([]);
   });
 });
 
@@ -1145,7 +1154,6 @@ describe("the body limit", () => {
 
 describe("names a call may use", () => {
   it("refuses a tool name that no tools/list sent to this token, and tells the open streams to list again", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
     const stream = await openGetStream(thread.token, sessionId);
@@ -1153,17 +1161,18 @@ describe("names a call may use", () => {
       await waitForListChanges(stream, 1);
 
       // The name is the one `tools/list` would send, but nothing sent it yet.
+      const mark = countUpstreamRequests();
       const refused = await callEcho(thread.token, "alpha__echo", sessionId);
       expect(refused.body.result.isError).toBe(true);
       expect(textOf(refused)).toContain("List the tools again");
-      expect(calls).toEqual([]);
+      expect(listToolPostsSince(mark)).toEqual([]);
       await waitForListChanges(stream, 2);
 
       await listToolNames(thread.token, sessionId);
       expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
         undefined,
       );
-      expect(calls).toHaveLength(1);
+      expect(listToolPostsSince(mark)).toHaveLength(1);
     } finally {
       stream.close();
     }
@@ -1292,7 +1301,6 @@ describe("streams", () => {
   });
 
   it("tells every stream of a token about a change, even when another client listed the tools after it", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const watching = await initialize(thread.token);
     const listing = await initialize(thread.token);
@@ -1321,27 +1329,36 @@ describe("streams", () => {
     }
   });
 
-  it("closes the upstream session of a server that left the list, and no other", async () => {
-    standInForServers();
+  it("ends the upstream session of a server that left the list, and no other", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0], servers[1]]);
     const { sessionId } = await initialize(thread.token);
     await listToolNames(thread.token, sessionId);
+    const mark = countUpstreamRequests();
     await callEcho(thread.token, "alpha__echo", sessionId);
     await callEcho(thread.token, "bravo__echo", sessionId);
+    const [alphaSession, bravoSession] = listToolPostsSince(mark).map((one) => one.sessionId);
+    expect(alphaSession).toBeTruthy();
+    expect(bravoSession).toBeTruthy();
+    expect(alphaSession).not.toBe(bravoSession);
 
     expect((await updateList(thread.session.id, [servers[1].id])).status).toBe(200);
 
     expect(
-      await waitWithin(5_000, () => closedSessions.length >= 1),
-      "the gateway closed no upstream session",
+      await waitWithin(5_000, () => listEndedSessionsSince(mark).length >= 1),
+      "no upstream MCP session was ended",
     ).toBe(true);
-    expect(closedSessions).toEqual([[hashToken(thread.token), servers[0].id]]);
+    // Bravo's session is still open: its next call reuses it.
+    expect(listEndedSessionsSince(mark)).toEqual([alphaSession]);
+    expect((await callEcho(thread.token, "bravo__echo", sessionId)).body.result.isError).toBe(
+      undefined,
+    );
+    expect(listToolPostsSince(mark).at(-1)?.sessionId).toBe(bravoSession);
+    expect(listEndedSessionsSince(mark)).toEqual([alphaSession]);
   });
 });
 
 describe("subscriptions/listen", () => {
   it("sends only the notifications it was asked for, and refuses a request the protocol schema refuses", async () => {
-    standInForServers();
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const listen = await openListen(thread.token, 901, { promptsListChanged: true });
     try {
@@ -1370,14 +1387,12 @@ describe("subscriptions/listen", () => {
 
 describe("a refusal while the controller does not serve", () => {
   it("is logged only when the catalogue finds the controller frozen after all: no audit entry and no warning", async () => {
-    standInForServers(() =>
-      Effect.fail(
-        new McpCallRefused({
-          reason: "error",
-          message: "The controller is frozen for a promotion.",
-          controllerNotServing: true,
-        }),
-      ),
+    refuseCallsWith(
+      new McpCallRefused({
+        reason: "error",
+        message: "The controller is frozen for a promotion.",
+        controllerNotServing: true,
+      }),
     );
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
