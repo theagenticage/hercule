@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP in Hercule - exploration</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --hair: #e1e0d9; --axis: #c3c2b7; --wash: #f0efec;
+  --new: #2a78d6; --new-fill: #e4eefb;
+  --chg: #b87a00; --chg-fill: #fdf3d9;
+  --same-fill: #fcfcfb; --out-fill: #f4f3ef;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-quiet: #c3c2b7;
+  --good: #006300; --bad: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --hair: #2c2c2a; --axis: #383835; --wash: #242422;
+    --new: #3987e5; --new-fill: #13294a;
+    --chg: #c98500; --chg-fill: #33270a;
+    --same-fill: #1a1a19; --out-fill: #141413;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-quiet: #52514e;
+    --good: #0ca30c; --bad: #e66767;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--page); }
+body {
+  margin: 0 auto; padding: 48px 32px 96px; max-width: 1284px;
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink);
+}
+h1 { font-size: 34px; line-height: 1.15; margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 22px; margin: 72px 0 6px; padding-top: 20px; border-top: 1px solid var(--hair); letter-spacing: -0.005em; }
+h2 .n { color: var(--muted); font-weight: 400; margin-right: 10px; font-variant-numeric: tabular-nums; }
+h3 { font-size: 16px; margin: 32px 0 6px; }
+p { margin: 8px 0; max-width: 78ch; }
+.lede { color: var(--ink2); font-size: 17px; max-width: 70ch; }
+.meta { color: var(--muted); font-size: 13px; margin-top: 14px; }
+a { color: inherit; text-decoration-color: var(--axis); text-underline-offset: 3px; }
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+code { background: var(--wash); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--surface); border: 1px solid var(--hair); border-radius: 8px; padding: 14px 16px; overflow-x: auto; line-height: 1.5; margin: 10px 0; }
+pre code { background: none; padding: 0; }
+pre .c { color: var(--muted); }
+ul { padding-left: 20px; margin: 8px 0; max-width: 78ch; }
+li { margin: 4px 0; }
+nav { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 28px 0 0; font-size: 13px; color: var(--ink2); }
+nav a { text-decoration: none; border-bottom: 1px solid var(--hair); }
+.cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 20px 0 8px; }
+.card { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 14px 16px; }
+.card .q { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.card .a { font-weight: 650; font-size: 17px; margin-bottom: 6px; }
+.card p { font-size: 13px; color: var(--ink2); margin: 0; }
+.fig { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 18px; margin: 16px 0; overflow-x: auto; }
+.fig svg { display: block; max-width: none; }
+.cap { font-size: 13px; color: var(--ink2); margin: 10px 2px 0; max-width: 90ch; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 12px 0; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--hair); }
+th { font-weight: 600; color: var(--ink2); font-size: 12px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; padding-right: 16px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--hair); color: var(--ink2); margin-right: 4px; white-space: nowrap; }
+.tag.new { border-color: var(--new); background: var(--new-fill); color: var(--ink); }
+.tag.chg { border-color: var(--chg); background: var(--chg-fill); color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink2); margin: 12px 2px 0; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1.5px solid var(--axis); background: var(--same-fill); }
+.legend i.new { border-color: var(--new); background: var(--new-fill); }
+.legend i.chg { border-color: var(--chg); background: var(--chg-fill); }
+.legend i.out { border-style: dashed; background: var(--out-fill); }
+.legend i.s1 { border: 0; background: var(--series-1); } .legend i.s2 { border: 0; background: var(--series-2); } .legend i.s3 { border: 0; background: var(--series-3); }
+.note { border-left: 3px solid var(--axis); padding: 2px 0 2px 14px; color: var(--ink2); margin: 14px 0; max-width: 78ch; }
+
+/* diagrams */
+svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--ink); }
+svg .t { font-size: 12.5px; font-weight: 600; }
+svg .s { font-size: 11px; fill: var(--ink2); }
+svg .zone { font-size: 11px; font-weight: 600; fill: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+svg .lane { font-size: 11px; fill: var(--muted); }
+svg .region { fill: none; stroke: var(--hair); stroke-width: 1; }
+svg .box { fill: var(--same-fill); stroke: var(--axis); stroke-width: 1.25; }
+svg .box.new { fill: var(--new-fill); stroke: var(--new); stroke-width: 1.5; }
+svg .box.chg { fill: var(--chg-fill); stroke: var(--chg); stroke-width: 1.5; }
+svg .box.out { fill: var(--out-fill); stroke: var(--axis); stroke-dasharray: 4 3; }
+svg .edge { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+svg .edge.soft { stroke: var(--muted); stroke-width: 1.25; }
+svg .edge.dash { stroke-dasharray: 4 3; }
+svg .badge { fill: var(--ink); }
+svg .badge-t { fill: var(--page); font-size: 10.5px; font-weight: 700; text-anchor: middle; }
+svg .life { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 3 3; }
+svg .msg { font-size: 11.5px; }
+svg .msg-s { font-size: 10.5px; fill: var(--ink2); }
+svg .notebox { fill: var(--wash); stroke: none; }
+svg .state { fill: var(--same-fill); stroke: var(--ink); stroke-width: 1.5; }
+svg .state.ok { fill: var(--new-fill); stroke: var(--new); }
+svg .state.warn { fill: var(--chg-fill); stroke: var(--chg); }
+svg .state.off { fill: var(--out-fill); stroke: var(--axis); stroke-dasharray: 4 3; }
+
+/* charts */
+.chart-title { font-weight: 600; font-size: 14px; margin: 0 0 2px; }
+.chart-sub { font-size: 12.5px; color: var(--ink2); margin: 0 0 14px; }
+.bars { display: grid; grid-template-columns: max-content 1fr; gap: 10px 14px; align-items: center; font-size: 12.5px; }
+.bars .name { color: var(--ink2); white-space: nowrap; }
+.bars .track { position: relative; height: 18px; }
+.bars .bar { position: absolute; left: 0; top: 0; height: 18px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+.bars .val { position: absolute; top: 0; line-height: 18px; padding-left: 8px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.group { display: grid; grid-template-columns: 96px 1fr; gap: 0 14px; align-items: center; font-size: 12.5px; padding: 7px 0; border-bottom: 1px solid var(--hair); }
+.group:last-child { border-bottom: 0; }
+.group .name { color: var(--ink2); }
+.group .rows { display: grid; gap: 2px; }
+.group .track { position: relative; height: 12px; }
+.group .bar { position: absolute; left: 0; top: 0; height: 12px; border-radius: 0 4px 4px 0; min-width: 2px; }
+.group .val { position: absolute; top: -3px; line-height: 18px; padding-left: 6px; font-size: 11.5px; color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.s1 { background: var(--series-1); } .s2 { background: var(--series-2); } .s3 { background: var(--series-3); }
+[data-tip] { cursor: default; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--page); font-size: 12px; padding: 6px 9px; border-radius: 6px; max-width: 320px; display: none; z-index: 10; line-height: 1.4; }
+.pass { color: var(--good); font-weight: 600; } .fail { color: var(--bad); font-weight: 600; }
+@media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, 1fr); } .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>MCP in Hercule</h1>
+<p class="lede">An exploration. What it takes to give sessions MCP tools that are set up once and work on every runner, whether a plugin can bring its service's MCP server along with its sign-in, and whether Hercule's own API should speak MCP beside the CLI.</p>
+<p class="meta">17 November 2026, changed after Rogier's review the same day after his review of the screens prototype on 19 November, and after his decisions of 20 November (see <a href="#decisions">section 10</a>) · Nothing here is built. The facts behind it are in three research notes
+(<a href="../../research/mcp-protocol-and-harnesses.md">protocol and harnesses</a>,
+<a href="../../research/mcp-vendor-auth.md">vendor sign-in</a>,
+<a href="../../research/mcp-t3code.md">t3-code</a>,
+<a href="../../research/mcp-oauth-redirect.md">how an OAuth sign-in comes back</a>,
+<a href="../../research/mcp-tool-list-changes.md">how harnesses handle a tool list that changes</a>) and one measurement
+(<a href="../../research/mcp-cli-vs-mcp.md">CLI against MCP</a>, scripts in <a href="benchmark/">benchmark/</a>).</p>
+
+<nav>
+  <a href="#answers">Short answers</a><a href="#idea">The idea</a><a href="#map">Module map</a><a href="#seams">Seams</a>
+  <a href="#interfaces">Interface changes</a><a href="#flows">Flows</a><a href="#states">State machines</a>
+  <a href="#measure">CLI against MCP</a><a href="#others">Shapes not chosen</a><a href="#decisions">Decisions</a><a href="#slices">Slices</a>
+</nav>
+
+<h2 id="answers"><span class="n">1</span>Short answers</h2>
+<div class="cards">
+  <div class="card"><div class="q">Set up once, use on every runner?</div><div class="a">Yes</div><p>The controller keeps the MCP servers and stands between every session and every server. A runner stores nothing.</p></div>
+  <div class="card"><div class="q">No second sign-in for a service?</div><div class="a">Yes, for Sentry, Linear, GitHub</div><p>Their MCP servers take the token the Connection already holds. This comes from their docs and source. It is not yet proven with a real call.</p></div>
+  <div class="card"><div class="q">Can a plugin bring MCP, sign-in included?</div><div class="a">Yes</div><p>About ten lines per plugin: the server's address, and how to present the Connection's token to it.</p></div>
+  <div class="card"><div class="q">Servers that are not from a plugin?</div><div class="a">Yes</div><p>A URL added in Settings or with the CLI. No sign-in, a pasted token, or OAuth run once by the controller.</p></div>
+  <div class="card"><div class="q">Hercule's own API over MCP?</div><div class="a">Possible; a small gain, at a cost</div><p>All <span id="runs-total">280</span> measured runs passed, by CLI and by MCP alike. A tool per operation saves about one request per task. The CLI costs the least context. Keep the CLI as the main surface.</p></div>
+</div>
+
+<h3>Three things that are all called "MCP support"</h3>
+<table>
+  <tr><th style="width:36px"></th><th style="width:30%">What</th><th style="width:34%">Example</th><th>How this page answers it</th></tr>
+  <tr><td><b>A</b></td><td>Other people's MCP servers reach sessions</td><td>A thread on any runner can call Notion's or Context7's tools</td><td rowspan="2">One mechanism: the <b>MCP gateway</b> in the controller (sections 2 to 7)</td></tr>
+  <tr><td><b>B</b></td><td>A plugin brings its service's MCP server, with its sign-in</td><td>The Sentry plugin: issues in the Inbox <i>and</i> Sentry's tools in threads, one sign-in</td></tr>
+  <tr><td><b>C</b></td><td>Hercule's own operations as MCP tools</td><td><code>task_create</code> as a tool, in place of <code>hercule task create</code></td><td>A separate question, answered by a measurement (section 8)</td></tr>
+</table>
+
+<h2 id="idea"><span class="n">2</span>The idea in one picture</h2>
+<p>A session only ever holds its own Session Token, which it already has today for the <code>hercule</code> CLI. It points its harness at the controller. The controller checks the token, takes the service's credential from the Connection, and makes the call. The vendor's token never leaves the controller.</p>
+<div class="fig">
+<svg width="1180" height="212" viewBox="0 0 1180 212" role="img" aria-label="A session calls the controller's gateway with its Session Token; the gateway calls the vendor's MCP server with the Connection's token.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="context-stroke"/></marker>
+  </defs>
+  <text class="zone" x="20" y="24">Any runner</text>
+  <text class="zone" x="428" y="24">Controller</text>
+  <text class="zone" x="900" y="24">Outside</text>
+  <rect class="box out" x="20" y="40" width="260" height="120" rx="8"/>
+  <text class="t" x="36" y="66">Session</text>
+  <text class="s" x="36" y="86">Claude Code or Codex; pi from 0.99</text>
+  <text class="s" x="36" y="112">holds: its Session Token</text>
+  <text class="s" x="36" y="130">knows: one address, the gateway's</text>
+  <rect class="box new" x="428" y="40" width="330" height="120" rx="8"/>
+  <text class="t" x="444" y="66">MCP gateway</text>
+  <text class="s" x="444" y="86">1. which thread is this, and which server has this tool?</text>
+  <text class="s" x="444" y="104">2. take the credential from the Connection, fresh</text>
+  <text class="s" x="444" y="122">3. make the call, pass the answer back</text>
+  <text class="s" x="444" y="140">holds: every server, every sign-in</text>
+  <rect class="box out" x="900" y="40" width="260" height="120" rx="8"/>
+  <text class="t" x="916" y="66">The service's MCP server</text>
+  <text class="s" x="916" y="86">mcp.sentry.dev, mcp.linear.app, ...</text>
+  <text class="s" x="916" y="112">sees: the controller, with the</text>
+  <text class="s" x="916" y="130">Connection's token</text>
+  <path class="edge" d="M280 100H426" marker-end="url(#arr)"/>
+  <path class="edge" d="M758 100H898" marker-end="url(#arr)"/>
+  <text class="msg" x="353" y="90" text-anchor="middle">Session Token</text>
+  <text class="msg-s" x="353" y="118" text-anchor="middle">POST /mcp</text>
+  <text class="msg" x="829" y="90" text-anchor="middle">Connection's token</text>
+  <text class="msg-s" x="829" y="118" text-anchor="middle">POST mcp.sentry.dev/mcp</text>
+  <text class="s" x="20" y="194">Same shape as git credentials today (ADR 0016): the session asks Hercule, Hercule holds the secret. Here the controller also makes the call, so no token reaches a runner at all.</text>
+</svg>
+</div>
+
+<h3>What a session actually gets</h3>
+<p>Every session gets one MCP server: the gateway, at one fixed address that is the same for every thread and every runner. The gateway knows the thread from the Session Token, and answers with the tools of that thread's servers. This is everything the harness is given:</p>
+<div class="two">
+<pre><code><span class="c">// Claude Code: the SDK's mcpServers option</span>
+mcpServers: {
+  tools: {
+    type: "http",
+    url: "http://controller:4937/mcp",
+    headers: { Authorization: "Bearer &lt;session token&gt;" },
+  },
+}
+
+<span class="c">// pi: Hercule keeps --no-extensions and switches on
+// exactly what it needs, then adds the gateway from
+// its own extension.</span>
+pi --no-extensions -e builtin:mcp -e builtin:tool-search \
+   -e &lt;Hercule's extension&gt; ...
+pi.registerMcpServer("tools", { url, headers, exposure: "deferred" })</code></pre>
+<pre><code><span class="c"># Codex: config on thread/start</span>
+mcp_servers.tools.url = "http://controller:4937/mcp"
+mcp_servers.tools.bearer_token_env_var = "HERCULE_TOKEN"
+
+<span class="c"># Codex reads a changed tool list only with this switch,
+# which is under development (0.164 and later).</span>
+features.mcp_tool_list_changed = true
+
+<span class="c"># What the agent sees, in a thread with Sentry and Linear:</span>
+mcp__tools__sentry__search_issues
+mcp__tools__linear__create_issue</code></pre>
+</div>
+<p>The harness names every MCP tool <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. The gateway is the one server, so its name is in front of every tool; it is ours to choose, and it is short and neutral. The gateway puts the MCP Server's name in front of each tool. A Session Token lives exactly as long as its harness process, so there is nothing to refresh on the runner.</p>
+<p><b>Tool search is the harness's own.</b> Claude Code, Codex and pi each show the model tool names or one line, and load a tool's details when the model searches. The gateway offers no search tool of its own. What it must do well: keep each full name short (pi cuts at 64 characters, Claude Code drops a tool above 128), and write a first line of instructions that says what is inside, because Codex shows the model that one line and no names.</p>
+<p><b>A thread's list can change while it runs.</b> The gateway then sends the standard "tool list changed" message. Taking a server away works at once on every harness, because the gateway refuses the call. An added server is usable at once on Claude Code, on Codex with the switch above, and on pi (tested on Claude Code and Codex on 20 November; pi from its source).</p>
+<p>The gateway speaks MCP on both sides. Facing a session it accepts the older handshake that the clients in Codex and pi still send. Facing a server it speaks the revision that server has. So a harness on an old revision can use a server that only speaks the newest one (2026-07-28), which it could not reach directly. The first build forwards tools only: no resources, no prompts, and no questions from a server to the user.</p>
+
+<h2 id="map"><span class="n">3</span>Module map</h2>
+<p>One new domain in the controller and one new route. Everything else is a small change to a module that exists. Numbers follow one tool call; letters follow setup and session start.</p>
+<div class="fig">
+<svg width="1180" height="812" viewBox="0 0 1180 812" role="img" aria-label="Module map: clients, controller, runner and outside services, with the new and changed modules marked.">
+  <!-- shared packages -->
+  <rect class="region" x="20" y="10" width="1140" height="92" rx="10"/>
+  <text class="zone" x="34" y="32">Shared packages</text>
+  <g>
+    <rect class="box chg" x="34" y="42" width="214" height="48" rx="6"/><text class="t" x="46" y="62">@hercule/contract</text><text class="s" x="46" y="79">mcpServer.*, CLI rows, grants</text>
+    <rect class="box chg" x="260" y="42" width="214" height="48" rx="6"/><text class="t" x="272" y="62">@hercule/protocol</text><text class="s" x="272" y="79">SessionStart.mcpGateway, capability</text>
+    <rect class="box chg" x="486" y="42" width="214" height="48" rx="6"/><text class="t" x="498" y="62">@hercule/plugin-host</text><text class="s" x="498" y="79">registerMcpServer, host API 9</text>
+    <rect class="box chg" x="712" y="42" width="214" height="48" rx="6"/><text class="t" x="724" y="62">@hercule/client-core</text><text class="s" x="724" y="79">reads, and what a status means</text>
+    <rect class="box" x="938" y="42" width="208" height="48" rx="6"/><text class="t" x="950" y="62">@hercule/cli</text><text class="s" x="950" y="79">commands derive from the rows</text>
+  </g>
+
+  <!-- clients -->
+  <rect class="region" x="20" y="116" width="212" height="530" rx="10"/>
+  <text class="zone" x="34" y="138">Clients</text>
+  <rect class="box chg" x="34" y="160" width="184" height="62" rx="6"/><text class="t" x="46" y="180">apps/desktop</text><text class="s" x="46" y="197">Settings › MCP servers</text><text class="s" x="46" y="211">composer: a thread's servers</text>
+  <rect class="box chg" x="34" y="234" width="184" height="48" rx="6"/><text class="t" x="46" y="254">apps/web</text><text class="s" x="46" y="271">the same two screens</text>
+  <rect class="box" x="34" y="294" width="184" height="48" rx="6"/><text class="t" x="46" y="314">hercule CLI</text><text class="s" x="46" y="331">hercule mcp-server add ...</text>
+  <rect class="box" x="34" y="354" width="184" height="34" rx="6"/><text class="t" x="46" y="375">apps/android</text>
+  <text class="s" x="34" y="414">The thread view needs nothing:</text>
+  <text class="s" x="34" y="428">an MCP tool call already shows</text>
+  <text class="s" x="34" y="442">as a row with its server name.</text>
+
+  <!-- controller -->
+  <rect class="region" x="250" y="116" width="512" height="530" rx="10"/>
+  <text class="zone" x="264" y="138">Controller</text>
+  <text class="lane" x="264" y="156">http/</text>
+  <rect class="box" x="264" y="162" width="168" height="54" rx="6"/><text class="t" x="276" y="183">API routes</text><text class="s" x="276" y="200">/api/v1/mcp-servers</text>
+  <rect class="box new" x="452" y="162" width="296" height="54" rx="6"/><text class="t" x="464" y="183">MCP gateway route</text><text class="s" x="464" y="200">POST /mcp · one address · Session Token in</text>
+
+  <text class="lane" x="264" y="238">daemon/</text>
+  <rect class="box chg" x="520" y="244" width="228" height="48" rx="6"/><text class="t" x="532" y="264">daemon/sessions</text><text class="s" x="532" y="281">start frame says: it has the gateway</text>
+
+  <text class="lane" x="264" y="314">domains</text>
+  <rect class="box" x="264" y="322" width="168" height="42" rx="6"/><text class="t" x="276" y="340">connections</text><text class="s" x="276" y="355">credentials, refreshed</text>
+  <rect class="box chg" x="264" y="374" width="94" height="42" rx="6"/><text class="t" x="273" y="392">permissions</text><text class="s" x="273" y="407">mcp.* grants</text>
+  <rect class="box chg" x="366" y="374" width="66" height="42" rx="6"/><text class="t" x="373" y="392">projects</text><text class="s" x="373" y="407">its servers</text>
+  <rect class="box chg" x="264" y="426" width="80" height="42" rx="6"/><text class="t" x="274" y="444">sessions</text><text class="s" x="274" y="459">its list</text>
+  <rect class="box chg" x="352" y="426" width="80" height="42" rx="6"/><text class="t" x="362" y="444">db</text><text class="s" x="362" y="459">one table</text>
+  <rect class="box chg" x="264" y="478" width="168" height="42" rx="6"/><text class="t" x="276" y="496">plugins</text><text class="s" x="276" y="511">registry of offered servers</text>
+
+  <rect class="box new" x="452" y="322" width="296" height="198" rx="6"/>
+  <text class="t" x="464" y="343">mcp-servers</text>
+  <text class="s" x="464" y="360">new; knows nothing of projects or sessions</text>
+  <rect class="box" x="464" y="372" width="272" height="30" rx="5"/><text class="s" x="474" y="391"><tspan font-weight="600" fill="var(--ink)">service</tspan> · the operations, and URL sign-ins</text>
+  <rect class="box" x="464" y="408" width="272" height="30" rx="5"/><text class="s" x="474" y="427"><tspan font-weight="600" fill="var(--ink)">gateway</tspan> · a thread's tools; forwards a call</text>
+  <rect class="box" x="464" y="444" width="272" height="30" rx="5"/><text class="s" x="474" y="463"><tspan font-weight="600" fill="var(--ink)">upstream</tspan> · MCP client (effect/ai McpClient)</text>
+  <rect class="box" x="464" y="480" width="272" height="30" rx="5"/><text class="s" x="474" y="499"><tspan font-weight="600" fill="var(--ink)">tools</tspan> · what each server listed, last check</text>
+
+  <text class="lane" x="264" y="550">plugins/ (compiled in)</text>
+  <rect class="box chg" x="264" y="558" width="92" height="52" rx="6"/><text class="t" x="274" y="578">sentry</text><text class="s" x="274" y="595">+ its server</text>
+  <rect class="box chg" x="364" y="558" width="92" height="52" rx="6"/><text class="t" x="374" y="578">linear</text><text class="s" x="374" y="595">+ its server</text>
+  <rect class="box chg" x="464" y="558" width="92" height="52" rx="6"/><text class="t" x="474" y="578">github</text><text class="s" x="474" y="595">+ its server</text>
+    <text class="s" x="264" y="630">A plugin declares its server in register(): data and one pure function.</text>
+
+  <!-- runner -->
+  <rect class="region" x="780" y="116" width="380" height="530" rx="10"/>
+  <text class="zone" x="794" y="138">Runner (one per machine)</text>
+  <rect class="box out" x="794" y="162" width="352" height="54" rx="6"/><text class="t" x="806" y="183">Harness process: the agent</text><text class="s" x="806" y="200">its own MCP client · HERCULE_TOKEN in its environment</text>
+  <rect class="box chg" x="794" y="244" width="180" height="48" rx="6"/><text class="t" x="806" y="264">sessions/context</text><text class="s" x="806" y="281">the gateway's address</text>
+  <text class="lane" x="836" y="320">harnesses/</text>
+  <rect class="box chg" x="794" y="336" width="112" height="62" rx="6"/><text class="t" x="804" y="356">claude-code</text><text class="s" x="804" y="373">mcpServers</text><text class="s" x="804" y="387">option</text>
+  <rect class="box chg" x="914" y="336" width="112" height="62" rx="6"/><text class="t" x="924" y="356">codex</text><text class="s" x="924" y="373">thread/start</text><text class="s" x="924" y="387">config</text>
+  <rect class="box chg" x="1034" y="336" width="112" height="62" rx="6"/><text class="t" x="1044" y="356">pi</text><text class="s" x="1044" y="373">builtin:mcp,</text><text class="s" x="1044" y="387">switched on</text>
+  <rect class="box" x="794" y="426" width="352" height="42" rx="6"/><text class="t" x="806" y="444">credentials/ · skills/ · workspaces/</text><text class="s" x="806" y="459">untouched: no vendor token ever reaches a runner</text>
+  <rect class="box out" x="794" y="496" width="352" height="54" rx="6"/><text class="t" x="806" y="517">Local MCP servers (stdio)</text><text class="s" x="806" y="534">a later slice: started by the harness, defined on the controller</text>
+  <text class="s" x="794" y="578">A runner without the capability still gets the start frame,</text>
+  <text class="s" x="794" y="592">without the field. The thread says so (never silent).</text>
+
+  <!-- outside -->
+  <rect class="region" x="20" y="664" width="1140" height="128" rx="10"/>
+  <text class="zone" x="34" y="686">Outside</text>
+  <rect class="box out" x="34" y="700" width="198" height="72" rx="6"/><text class="t" x="46" y="722">Service APIs</text><text class="s" x="46" y="739">what plugins poll today</text><text class="s" x="46" y="754">unchanged</text>
+  <rect class="box out" x="246" y="700" width="250" height="72" rx="6"/><text class="t" x="258" y="722">Authorization servers</text><text class="s" x="258" y="739">a sign-in, once, from the controller</text><text class="s" x="258" y="754">only for a server added by URL</text>
+  <rect class="box out" x="520" y="700" width="626" height="72" rx="6"/><text class="t" x="532" y="722">Remote MCP servers</text>
+  <text class="s" x="532" y="739">mcp.sentry.dev · mcp.linear.app · api.githubcopilot.com/mcp · any other URL the user adds</text>
+  <text class="s" x="532" y="754">each sees one client: the controller</text>
+
+  <!-- edges: one tool call -->
+  <path class="edge" d="M794 189H750" marker-end="url(#arr)"/>
+  <circle class="badge" cx="771" cy="189" r="9"/><text class="badge-t" x="771" y="193">1</text>
+  <path class="edge" d="M486 216V320" marker-end="url(#arr)"/>
+  <circle class="badge" cx="486" cy="268" r="9"/><text class="badge-t" x="486" y="272">2</text>
+  <path class="edge" d="M452 343H434" marker-end="url(#arr)"/>
+  <circle class="badge" cx="442" cy="343" r="9"/><text class="badge-t" x="442" y="347">3</text>
+  <path class="edge" d="M452 499H434" marker-end="url(#arr)"/>
+  <circle class="badge" cx="442" cy="499" r="9"/><text class="badge-t" x="442" y="503">4</text>
+  <path class="edge" d="M720 520V698" marker-end="url(#arr)"/>
+  <circle class="badge" cx="720" cy="640" r="9"/><text class="badge-t" x="720" y="644">5</text>
+
+  <!-- edges: setup and start -->
+  <path class="edge soft" d="M218 189H262" marker-end="url(#arr)"/>
+  <rect x="231" y="181" width="16" height="16" rx="4" fill="var(--muted)"/><text class="badge-t" x="239" y="193">A</text>
+  <path class="edge soft" d="M748 268H792" marker-end="url(#arr)"/>
+  <rect x="763" y="260" width="16" height="16" rx="4" fill="var(--muted)"/><text class="badge-t" x="771" y="272">B</text>
+  <path class="edge soft" d="M820 292V334" marker-end="url(#arr)"/>
+  <path class="edge soft" d="M1000 336V218" marker-end="url(#arr)"/>
+  <rect x="992" y="262" width="16" height="16" rx="4" fill="var(--muted)"/><text class="badge-t" x="1000" y="274">C</text>
+  <path class="edge soft" d="M410 558V522" marker-end="url(#arr)"/>
+  <text class="s" x="418" y="544">register()</text>
+  <path class="edge soft dash" d="M264 343H257V698" marker-end="url(#arr)"/>
+</svg>
+<div class="legend">
+  <span><i class="new"></i>New module</span><span><i class="chg"></i>Existing module, changed</span><span><i></i>Existing module, used as it is</span><span><i class="out"></i>Not Hercule's code</span>
+</div>
+<p class="cap"><b>One tool call:</b> <b>1</b> the harness posts to the gateway with its Session Token · <b>2</b> the route hands the call to the domain in one line · <b>3</b> the domain takes the Connection's credential, refreshed if it is about to expire · <b>4</b> the plugin's declaration says where the server is and how the credential goes in the request · <b>5</b> the controller calls the server and returns the answer.
+<b>Setup and start:</b> <b>A</b> a client adds or switches on a server through the API · <b>B</b> the start frame says that the session has the gateway; the thread's list of servers stays on the controller · <b>C</b> the adapter gives the harness the gateway as its one MCP server. The API handlers call the same domain as the gateway. The dashed line is the one-time sign-in for a server added by URL.</p>
+</div>
+
+<div class="two">
+<div>
+<h3>New</h3>
+<table>
+  <tr><td style="width:44%"><code>apps/controller/src/mcp-servers/</code></td><td>The domain. Keeps the MCP Servers and is the gateway: it checks a call, takes the credential and forwards it. It also keeps the sign-in of a server added by URL. It does not know about projects: a server is a building block.</td></tr>
+  <tr><td><code>apps/controller/src/http/mcp.ts</code></td><td>The second transport beside the API routes. One line into the domain, like every handler.</td></tr>
+  <tr><td>Glossary: <b>MCP Server</b></td><td>A record on the controller: a remote server that offers tools to sessions, and what it is reached with: a plugin's Connection, or its own sign-in.</td></tr>
+</table>
+</div>
+<div>
+<h3>Changed</h3>
+<table>
+  <tr><td style="width:36%"><code>contract</code></td><td>Six operations with their CLI rows, three grants.</td></tr>
+  <tr><td><code>protocol</code></td><td>One optional field on <code>SessionStart</code>, one runner capability. The list of servers is not in the frame.</td></tr>
+  <tr><td><code>plugin-host</code></td><td>One capability, one registration function. Host API 8 to 9.</td></tr>
+  <tr><td><code>projects</code>, <code>sessions</code> domains</td><td>A Project names its MCP Servers. A thread starts with that list, keeps its own copy, and the user can change it.</td></tr>
+  <tr><td><code>plugins/sentry, linear, github</code></td><td>Each declares its service's server: about ten lines.</td></tr>
+  <tr><td><code>runner</code> adapters</td><td>One mapping function each, as spec 06 already asks.</td></tr>
+  <tr><td><code>desktop</code>, <code>web</code></td><td>One Settings screen with every server and its switch; a thread's servers under the composer's plus button.</td></tr>
+</table>
+</div>
+</div>
+
+<h2 id="seams"><span class="n">4</span>Seams</h2>
+<p>Five places where behaviour can change without editing the code around it. Two are new. Two exist and get one more thing through them. One is used exactly as it is.</p>
+<table>
+  <tr><th style="width:17%">Seam</th><th style="width:27%">What a caller must know</th><th style="width:27%">What sits behind it</th><th>Adapters, and why the seam is real</th></tr>
+  <tr><td><span class="tag new">new</span><br><b>The gateway</b><br><code>POST /mcp</code></td>
+    <td>One address and a Session Token. Nothing about which servers exist, their sign-ins or their protocol versions.</td>
+    <td>Who is calling, the grant check, which servers this session gets, the credential, one retry after a refresh, the error a person can act on, the audit entry.</td>
+    <td>Three callers that differ: Claude Code, Codex, pi. Three harness MCP clients on three protocol revisions. The gateway is the one place that absorbs that.</td></tr>
+  <tr><td><span class="tag new">new</span><br><b>The MCP Server catalogue</b><br><code>mcpServer.*</code></td>
+    <td>Six operations. A server has a name, a status and its tools.</td>
+    <td>Where a server came from. A plugin's declaration and a URL the user typed end as the same record, so nothing above this seam knows the difference.</td>
+    <td>Two sources: plugin and user. This is what makes "not from a plugin" free once "from a plugin" works.</td></tr>
+  <tr><td><span class="tag">reused</span><br><b>Connections</b><br><code>credentials(id)</code></td>
+    <td>"Give me this Connection's credential, fresh."</td>
+    <td>Encrypted storage, one refresh at a time, <code>needs-reauth</code>, the reconnect screen. All of it exists.</td>
+    <td>Every plugin's poll loop and every workflow action already cross it. The gateway is one more caller. This is what removes the second sign-in.</td></tr>
+  <tr><td><span class="tag chg">widened</span><br><b>Plugin registration</b><br><code>registerMcpServer</code></td>
+    <td>A pure function from a Connection to a URL and headers.</td>
+    <td>Each vendor's quirk: Sentry wants <code>Sentry-Bearer</code>, GitHub picks tool sets by header, Linear is plain <code>Bearer</code>.</td>
+    <td>Three plugins, three different answers. The gateway has no vendor name in it.</td></tr>
+  <tr><td><span class="tag chg">widened</span><br><b>Session delivery</b><br><code>SessionStart.mcpGateway</code></td>
+    <td>One fact: this session has the gateway.</td>
+    <td>How each harness is given an MCP server, and what it needs switched on to search tools and to notice a changed list.</td>
+    <td>Three adapters, one mapping function each. A changed list needs no new frame: the harness hears it from the gateway.</td></tr>
+</table>
+<p class="note">The gateway is the deep module here: its interface is a URL, and everything hard is behind it. The test surface is the same URL: a fake MCP server on one side, a session token on the other, and every rule above can be checked without a harness.</p>
+
+<h2 id="interfaces"><span class="n">5</span>Interface changes</h2>
+<p>Sketches, to make the size concrete. Names follow the repository's rules; the spec work decides the final spelling.</p>
+
+<h3>plugin-host: a plugin declares its service's server</h3>
+<div class="two">
+<pre><code><span class="c">// packages/plugin-host/src/mcp-servers.ts</span>
+<span class="c">/** A remote MCP server a plugin offers to sessions,
+ *  reached with a Connection of the plugin's own type. */</span>
+export interface McpServerContribution {
+  <span class="c">/** The host makes the qualified id `sentry/sentry`. */</span>
+  readonly id: string;
+  readonly displayName: string;
+  <span class="c">/** One line for Settings: what an agent can do with it. */</span>
+  readonly description: string;
+  <span class="c">/** The qualified type of the Connection it is reached with. */</span>
+  readonly connection: { readonly type: string };
+  <span class="c">/** The server's address without path or query, known
+   *  before any Connection exists. It is how a server the
+   *  user added by hand is recognised as this one. */</span>
+  readonly origin: string;
+  <span class="c">/** Returns where the server is and the headers that carry
+   *  the credential, for one Connection. Pure: no I/O. */</span>
+  readonly buildUpstreamRequest: (connection: {
+    readonly credentials: Record&lt;string, string&gt;;
+    readonly config: unknown;
+  }) =&gt; {
+    readonly url: string;
+    readonly headers: Readonly&lt;Record&lt;string, string&gt;&gt;;
+  };
+}</code></pre>
+<pre><code><span class="c">// plugins/sentry/src/mcp-server.ts - the whole change</span>
+export const mcpServer: McpServerContribution = {
+  id: "sentry",
+  displayName: "Sentry",
+  description:
+    "Search and read issues, events and traces; update an issue.",
+  connection: { type: SENTRY_CONNECTION_TYPE },
+  origin: "https://mcp.sentry.dev",
+  buildUpstreamRequest: ({ credentials }) =&gt; ({
+    <span class="c">// The Connection's scopes do not cover project
+    // management, so those 18 tools are left out.</span>
+    url: "https://mcp.sentry.dev/mcp" +
+      "?disable-skills=project-management",
+    headers: {
+      Authorization: `Sentry-Bearer ${credentials.accessToken}`,
+    },
+  }),
+};
+
+<span class="c">// plugins/sentry/src/index.ts, in register()</span>
+yield* registerMcpServer(host, mcpServer);</code></pre>
+</div>
+
+<h3>contract: the record, six operations, three grants</h3>
+<div class="two">
+<pre><code><span class="c">// packages/contract/src/groups/mcp-server.ts</span>
+export const McpServer = Schema.Struct({
+  id: Id,
+  <span class="c">/** What sessions see in front of each of its tools:
+   *  mcp__tools__&lt;name&gt;__&lt;tool&gt;.
+   *  Two servers may share a name; one project may not
+   *  name both. */</span>
+  name: McpServerName,
+  source: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("plugin"),
+                    contributionId: QualifiedContributionId }),
+    Schema.Struct({ kind: Schema.Literal("user"),
+                    url: Schema.String }),
+  ]),
+  <span class="c">/** A plugin's server: the Connection it is reached with.
+   *  A server added by URL has none; it keeps its own
+   *  sign-in, which is never part of the record. */</span>
+  connectionId: Schema.NullOr(Id),
+  enabled: Schema.Boolean,
+  status: McpServerStatus,   <span class="c">// section 7</span>
+  statusDetail: Schema.NullOr(Schema.String),
+  <span class="c">/** The tools it listed when it was last checked. */</span>
+  tools: Schema.Array(McpToolSummary),
+  checkedAt: Schema.NullOr(Timestamp),
+});</code></pre>
+<pre><code><span class="c">// operations.ts                    requires</span>
+"mcpServer.query"   GET    /mcp-servers        mcp.read
+"mcpServer.read"    GET    /mcp-servers/:id    mcp.read
+"mcpServer.create"  POST   /mcp-servers        mcp.manage
+"mcpServer.update"  PATCH  /mcp-servers/:id    mcp.manage
+"mcpServer.delete"  DELETE /mcp-servers/:id    mcp.manage
+"mcpServer.check"   POST   /mcp-servers/:id/check  mcp.manage
+
+<span class="c">// grants.ts: a new family</span>
+"mcp.read" | "mcp.manage" | "mcp.use"
+<span class="c">// mcp.use is what the gateway checks on every call.</span>
+
+<span class="c">// cli.ts: one row each, as the contract demands</span>
+hercule mcp-server list
+hercule mcp-server add notion --url https://mcp.notion.com/mcp
+hercule mcp-server add sentry --plugin sentry/sentry \
+                              --connection 7b41d0a5
+hercule mcp-server check 1f3a9c2e
+
+<span class="c">// groups/project.ts: a Project names its servers</span>
+mcpServerIds: Schema.Array(Id)
+<span class="c">// groups/session.ts: a thread has its own list, which
+// starts as its project's. A client reads it, with the
+// servers that were left out at the last start and why.</span>
+mcpServers: Schema.Array(SessionMcpServer)
+hercule project update 9c41d7e0 --mcp-server 1f3a9c2e \
+                                --mcp-server 7b2d40aa
+
+<span class="c">// One server per address and external account:
+// a second create answers `conflict`.</span></code></pre>
+</div>
+
+<h3>protocol and runner: names in the start frame, one mapping per adapter</h3>
+<div class="two">
+<pre><code><span class="c">// packages/protocol/src/sessions.ts, on SessionStart.
+/** Present when the session gets the gateway as its one
+ *  MCP server. The thread's servers are not in the frame:
+ *  the gateway knows them from the session's token, so a
+ *  changed list needs no new frame. */</span>
+mcpGateway: Schema.optionalKey(Schema.Literal(true)),
+
+<span class="c">/** A runner lists it in its hello. Without it, the
+ *  controller leaves the field out and says so on the thread. */</span>
+export const MCP_GATEWAY_CAPABILITY = "mcp-gateway";
+
+<span class="c">// apps/runner/src/harnesses/index.ts, on HarnessRunnerContext</span>
+readonly mcpGateway?: {
+  <span class="c">/** `&lt;controller url&gt;/mcp`, the same for every session. */</span>
+  readonly url: string;
+};</code></pre>
+<pre><code><span class="c">// apps/controller/src/mcp-servers/index.ts</span>
+export class McpServers extends Context.Service&lt;McpServers, {
+  <span class="c">// the six operations, called by the API handlers</span>
+  readonly query, read, create, update, delete, check;
+
+  <span class="c">/** Returns the tools of these servers as one list, each
+   *  named `&lt;server name&gt;__&lt;tool&gt;`, from what each
+   *  server listed when it was last checked. */</span>
+  readonly listTools: (
+    serverIds: ReadonlyArray&lt;Id&gt;,
+  ) =&gt; Effect&lt;ReadonlyArray&lt;McpTool&gt;&gt;;
+
+  <span class="c">/** Forwards one tool call from a session to a server
+   *  and returns the server's answer. Fails with the
+   *  reason a person can act on. */</span>
+  readonly forwardCall: (
+    actor: SessionActor,
+    serverId: Id,
+    call: McpToolCall,
+  ) =&gt; Effect&lt;McpToolResult, GatewayRefusal&gt;;
+  <span class="c">// Which servers a session has is decided above this
+  // domain. A thread keeps its own list, which starts as
+  // its project's. The route reads that list, and finds
+  // the server by the name in front of the tool.</span>
+}&gt;() {}</code></pre>
+</div>
+
+<h3>What does not change</h3>
+<ul>
+  <li><b>Connections.</b> No new method. The gateway calls the same <code>credentials</code> the poll loops call.</li>
+  <li><b>The secrets table.</b> The token of a server added by URL is stored there too, owned by its MCP Server.</li>
+  <li><b>The normalized event stream.</b> <code>tool_call { kind: "mcp" }</code> with <code>detail.server</code> exists (spec 06 section 6.3), so the transcript and the apps already draw these calls. One addition: a call the gateway refuses also gets a line of its own on the thread, as a <code>runtime.warning</code>. The prototype showed why: the failed call sits inside a closed work stretch, so the user never sees it.</li>
+  <li><b>Approvals.</b> An MCP tool call reaches the same approval seam as any other tool on Claude Code and Codex. The Access Mode decides, as today.</li>
+</ul>
+
+<h2 id="flows"><span class="n">6</span>Flows</h2>
+<h3>6.1 A plugin's server, with no second sign-in</h3>
+<p>The user already connected Sentry for the Inbox. Settings › MCP servers lists that Connection with a switch, because its plugin offers a server. Switching it on is the whole setup.</p>
+<div class="fig"><div id="seq-plugin"></div></div>
+
+<h3>6.2 A server that is not from a plugin</h3>
+<p>The user adds a URL. The controller finds out what the server needs. OAuth runs once, on the controller, whichever machine the browser is on.</p>
+<div class="fig"><div id="seq-user"></div>
+<p class="cap">Step 8 is the sharp edge. MCP requires the redirect to be <code>localhost</code> or HTTPS, and a controller reached at a tailnet address over plain HTTP is neither. So the desktop app listens on the user's own machine for a moment, receives the redirect, and hands the whole query string (code, state, issuer or error) to the controller, which exchanges the code with the verifier it kept. Pasting the redirected address is the last resort: the web app without HTTPS on the controller, and a CLI run over SSH. MCP has no device code. No client we looked at splits the listener and the exchange over two machines, so slice 3 starts by proving it (<a href="../../research/mcp-oauth-redirect.md">note</a>).</p></div>
+
+<h3>6.3 A session starts</h3>
+<div class="fig"><div id="seq-start"></div></div>
+
+<h3>6.4 The agent calls a tool</h3>
+<div class="fig"><div id="seq-call"></div></div>
+
+<h2 id="states"><span class="n">7</span>State machines</h2>
+<h3>7.1 An MCP Server</h3>
+<p>Five states. The status is stored, because Settings shows it and a start frame leaves out a server that is not <code>ready</code>, and says so on the thread.</p>
+<div class="fig">
+<svg width="1180" height="404" viewBox="0 0 1180 404" role="img" aria-label="State machine of an MCP Server: checking, ready, needs sign-in, unreachable, disabled.">
+  <circle cx="44" cy="200" r="6" fill="var(--ink)"/>
+  <path class="edge" d="M50 200H138" marker-end="url(#arr)"/><text class="msg-s" x="94" y="192" text-anchor="middle">added</text>
+  <rect class="state" x="140" y="178" width="150" height="44" rx="22"/><text class="t" x="215" y="204" text-anchor="middle">checking</text>
+  <rect class="state ok" x="520" y="60" width="170" height="44" rx="22"/><text class="t" x="605" y="86" text-anchor="middle">ready</text>
+  <rect class="state warn" x="520" y="178" width="170" height="44" rx="22"/><text class="t" x="605" y="204" text-anchor="middle">needs sign-in</text>
+  <rect class="state warn" x="520" y="296" width="170" height="44" rx="22"/><text class="t" x="605" y="322" text-anchor="middle">unreachable</text>
+  <rect class="state off" x="960" y="178" width="150" height="44" rx="22"/><text class="t" x="1035" y="204" text-anchor="middle">disabled</text>
+
+  <path class="edge" d="M205 178V86Q205 74 217 74H518" marker-end="url(#arr)"/><text class="msg-s" x="370" y="66" text-anchor="middle">the server listed its tools</text>
+  <path class="edge" d="M520 92H247Q235 92 235 104V176" marker-end="url(#arr)"/><text class="msg-s" x="370" y="108" text-anchor="middle">calls keep failing: check again</text>
+  <path class="edge" d="M290 192H518" marker-end="url(#arr)"/><text class="msg-s" x="405" y="184" text-anchor="middle">401, or its Connection needs sign-in</text>
+  <path class="edge" d="M520 208H292" marker-end="url(#arr)"/><text class="msg-s" x="405" y="224" text-anchor="middle">the user signed in</text>
+  <path class="edge" d="M235 222V298Q235 310 247 310H518" marker-end="url(#arr)"/><text class="msg-s" x="370" y="302" text-anchor="middle">no answer, or an error</text>
+  <path class="edge" d="M520 328H217Q205 328 205 316V224" marker-end="url(#arr)"/><text class="msg-s" x="370" y="344" text-anchor="middle">retry with backoff, or "Check again"</text>
+  <path class="edge" d="M605 104V176" marker-end="url(#arr)"/><text class="msg-s" x="615" y="136">a call got 401</text><text class="msg-s" x="615" y="150">after one refresh</text>
+
+  <path class="edge soft" d="M690 82H1023Q1035 82 1035 94V176" marker-end="url(#arr)"/>
+  <path class="edge soft" d="M690 200H958" marker-end="url(#arr)"/>
+  <path class="edge soft" d="M690 318H1023Q1035 318 1035 306V224" marker-end="url(#arr)"/>
+  <text class="msg-s" x="824" y="192" text-anchor="middle">the user switches it off</text>
+  <path class="edge soft" d="M1080 222V368Q1080 380 1068 380H187Q175 380 175 368V224" marker-end="url(#arr)"/><text class="msg-s" x="824" y="372" text-anchor="middle">the user switches it on</text>
+</svg>
+<p class="cap">A server that acts through a Connection follows it: when the Connection goes to <code>needs-reauth</code>, the server goes to <code>needs sign-in</code>, and reconnecting the Connection brings both back. Entering <code>needs sign-in</code> or <code>unreachable</code> tells the user once, as a Notification. A session that is already running keeps its list; a call to a server that is not ready fails with the reason.</p>
+</div>
+
+<h3>7.2 One tool call inside the gateway</h3>
+<p>Every way out carries a message a person or an agent can act on. Nothing falls back silently.</p>
+<div class="fig">
+<svg width="1180" height="268" viewBox="0 0 1180 268" role="img" aria-label="The steps of one tool call inside the gateway, with each refusal.">
+  <g>
+    <rect class="state" x="20" y="36" width="150" height="48" rx="8"/><text class="t" x="95" y="56" text-anchor="middle">received</text><text class="s" x="95" y="72" text-anchor="middle">POST /mcp</text>
+    <rect class="state" x="212" y="36" width="150" height="48" rx="8"/><text class="t" x="287" y="56" text-anchor="middle">identified</text><text class="s" x="287" y="72" text-anchor="middle">token is a live session's</text>
+    <rect class="state" x="404" y="36" width="150" height="48" rx="8"/><text class="t" x="479" y="56" text-anchor="middle">allowed</text><text class="s" x="479" y="72" text-anchor="middle">grant, and in its list</text>
+    <rect class="state" x="596" y="36" width="150" height="48" rx="8"/><text class="t" x="671" y="56" text-anchor="middle">credentialed</text><text class="s" x="671" y="72" text-anchor="middle">fresh from the Connection</text>
+    <rect class="state" x="788" y="36" width="150" height="48" rx="8"/><text class="t" x="863" y="56" text-anchor="middle">forwarded</text><text class="s" x="863" y="72" text-anchor="middle">waiting on the server</text>
+    <rect class="state ok" x="1010" y="36" width="150" height="48" rx="8"/><text class="t" x="1085" y="56" text-anchor="middle">answered</text><text class="s" x="1085" y="72" text-anchor="middle">audit entry</text>
+  </g>
+  <path class="edge" d="M170 60H210" marker-end="url(#arr)"/><path class="edge" d="M362 60H402" marker-end="url(#arr)"/><path class="edge" d="M554 60H594" marker-end="url(#arr)"/><path class="edge" d="M746 60H786" marker-end="url(#arr)"/><path class="edge" d="M938 60H1008" marker-end="url(#arr)"/>
+  <path class="edge" d="M880 36C880 6 690 6 690 34" marker-end="url(#arr)"/><text class="msg-s" x="896" y="20">401: refresh once, try again</text>
+
+  <path class="edge soft" d="M287 84V150" marker-end="url(#arr)"/><path class="edge soft" d="M479 84V150" marker-end="url(#arr)"/><path class="edge soft" d="M671 84V150" marker-end="url(#arr)"/><path class="edge soft" d="M863 84V150" marker-end="url(#arr)"/>
+  <rect class="state warn" x="212" y="152" width="150" height="88" rx="8"/><text class="t" x="287" y="174" text-anchor="middle">401</text><text class="s" x="287" y="192" text-anchor="middle">no token, or the</text><text class="s" x="287" y="206" text-anchor="middle">session has ended</text>
+  <rect class="state warn" x="404" y="152" width="150" height="88" rx="8"/><text class="t" x="479" y="174" text-anchor="middle">403</text><text class="s" x="479" y="192" text-anchor="middle">"missing grant mcp.use"</text><text class="s" x="479" y="206" text-anchor="middle">or "this thread does not</text><text class="s" x="479" y="220" text-anchor="middle">have sentry"</text>
+  <rect class="state warn" x="596" y="152" width="150" height="88" rx="8"/><text class="t" x="671" y="174" text-anchor="middle">tool error</text><text class="s" x="671" y="192" text-anchor="middle">"Sentry needs sign-in.</text><text class="s" x="671" y="206" text-anchor="middle">Ask the user to reconnect</text><text class="s" x="671" y="220" text-anchor="middle">it in Settings."</text>
+  <rect class="state warn" x="788" y="152" width="150" height="88" rx="8"/><text class="t" x="863" y="174" text-anchor="middle">tool error</text><text class="s" x="863" y="192" text-anchor="middle">the server's own error,</text><text class="s" x="863" y="206" text-anchor="middle">or "no answer within</text><text class="s" x="863" y="220" text-anchor="middle">60 s"</text>
+</svg>
+<p class="cap">The third refusal also moves the MCP Server to <code>needs sign-in</code> (7.1). The server's own sign-in challenge is never passed to the harness: a harness that sees one tries to open a browser on the runner. Each refusal also puts a line on the thread, with what the user can do about it.</p>
+</div>
+
+<h2 id="measure"><span class="n">8</span>CLI against MCP, measured</h2>
+<p>t3-code reaches for MCP first. Its repository holds no measurement behind that choice: the one written reason compares MCP with building a plugin per harness, not with a CLI (<a href="../../research/mcp-t3code.md">note</a>). So this measures it for Hercule.</p>
+<p><b>Method.</b> A real controller from this branch's binary, in a throwaway home. Ten tasks an agent meets in practice, each in a project of its own, each checked against the controller's state afterwards. Four ways to reach Hercule:</p>
+<table>
+  <tr><th style="width:120px">Arm</th><th>What the agent has</th></tr>
+  <tr><td><code>cli</code></td><td>Today: <code>hercule</code> on PATH, the orientation in the system prompt, the skill.</td></tr>
+  <tr><td><code>mcp-search</code></td><td>One MCP tool per operation, 214 tools, derived from the same contract table as the CLI. The harness loads a tool's schema only when the agent searches for it. This is what Claude Code and Codex do by default.</td></tr>
+  <tr><td><code>mcp-meta</code></td><td>Two MCP tools: <code>hercule_help</code> and <code>hercule_call</code>. The CLI's idea, spoken over MCP.</td></tr>
+  <tr><td><code>mcp-eager</code></td><td>The 214 tools, all loaded up front. What an older harness, or tool search switched off, would do.</td></tr>
+</table>
+
+<div class="two" style="align-items:start">
+  <div>
+    <div class="fig" style="margin-top:16px">
+      <p class="chart-title">What every session carries before it does anything</p>
+      <p class="chart-sub">Tokens added to the first request, Claude Code with Sonnet. Lower is better.</p>
+      <div class="bars" id="chart-fixed"></div>
+    </div>
+    <h3>What it shows</h3>
+    <ul id="findings">
+      <li><b>Success is the same.</b> All 280 runs passed their check: every arm, on Sonnet, on Haiku and on Codex. Nothing here supports "more correct calling" for MCP.</li>
+      <li><b>A tool per operation saves about one request on Claude Code.</b> Sonnet: 5 requests a task against 6, and 10.7 s against 13.2 s. Haiku: 4 against 6. The agent finds its tools in one search; with the CLI it reads help twice first. On Codex the two are level: 22.4 s against 22.3 s.</li>
+      <li><b>The CLI carries the least into every session</b>: about 600 tokens, against about 3,400 for the names of 214 tools. Every session pays this, also the many that never call Hercule. With all tools loaded it is about 92,000, in every request.</li>
+      <li><b>Each has a task it is better at.</b> Moving data into a file, the CLI pipes it: 88K tokens against 121K. Six writes in a row, tools run side by side in one request: 120K against 178K.</li>
+      <li><b>Typed tools fail less on the first try.</b> Runs with a refused call that the agent then corrected, on Sonnet: 6 of 30 by CLI, 0 of 30 with a tool per operation, 4 of 30 with two tools. Four of the six CLI refusals were one papercut: <code>--project</code> refused an id tail that most flags accept. That is fixed on this branch.</li>
+      <li><b>The two-tool shape is the weakest.</b> Most lookups, most refused calls, and the slowest on Codex (27.2 s). A free-form <code>input</code> gives away what typed tools are good at.</li>
+    </ul>
+  </div>
+  <div class="fig">
+    <p class="chart-title">Tokens read per task</p>
+    <p class="chart-sub">Median input tokens over every request of a run, Claude Code with Sonnet, three runs per bar.</p>
+    <div id="chart-tasks"></div>
+    <div class="legend"><span><i class="s1"></i>cli</span><span><i class="s2"></i>mcp-search</span><span><i class="s3"></i>mcp-meta</span></div>
+  </div>
+</div>
+
+<h3>Every run</h3>
+<div id="table-summary"></div>
+<p class="cap">Medians per run. "Lookups" are calls that only read documentation: <code>--help</code>, <code>hercule_help</code>, a tool search, opening the skill. Codex reports usage per turn, so it has no per-request figures. Run with Claude Code 2.1.325 and Codex 0.169.0, the versions installed on 17 November.</p>
+
+<h3>What it does not show</h3>
+<ul>
+  <li>Whether the CLI and MCP tools get in each other's way when a session has both. Every run had one or the other.</li>
+  <li>The agent ran with the user's API key, not a Session Token with a Permission Profile, so no run met a 403.</li>
+  <li>Ten tasks over tasks, projects, initiatives, the wiki and profiles. No session spawning, no long transcripts, no workflow YAML.</li>
+  <li>Three runs per task and arm, 30 per arm. A difference of 10% in tokens is inside the noise. The context cost, the pass rates and the request counts are not.</li>
+</ul>
+
+<h3>Recommendation</h3>
+<ul>
+  <li><b>Keep the CLI as the one surface every session has.</b> It costs the least context, it is the only one that works on pi today, a shell can pipe it, and nothing measured here beats it on success.</li>
+  <li><b>Do not add a tool per operation to every session.</b> The gain is one request per Hercule task on Claude Code, and none on Codex. The price is a second way to do everything, about 2,800 more tokens in every session on a harness that defers tools, and about 91,000 more on one that does not.</li>
+  <li><b>Where it could pay: an Agent that does little but call Hercule</b>, such as a triage agent. There the saved request is most of the work. That makes it a choice per Agent, not a default.</li>
+  <li><b>If Hercule's own tools are wanted later</b>, for an assistant session without a shell (spec 12, post-v1), the gateway serves them at <code>/mcp/hercule</code> from the same contract table. The prototype in <code>benchmark/mcp-server.ts</code> is that derivation, in about 300 lines. It needs the command tree moved from <code>@hercule/cli</code> into <code>@hercule/contract</code>.</li>
+</ul>
+
+<h2 id="others"><span class="n">9</span>Shapes not chosen</h2>
+<table>
+  <tr><th style="width:24%">Shape</th><th style="width:36%">How it would work</th><th>Why not</th></tr>
+  <tr><td><b>One gateway address per server</b></td>
+    <td>The first shape on this page: <code>/mcp/sentry</code>, <code>/mcp/linear</code>, and the harness is given the thread's servers one by one.</td>
+    <td>It keeps each service's usual tool names, and Codex shows the model a line per server. But a thread's list could not change while it runs: Codex does not let a loaded thread's servers change, and every other harness needs its own call for it. With one address a changed list is one standard message. Rogier decided for one address on 20 November.</td></tr>
+  <tr><td><b>Hand the vendor's token to the runner</b></td>
+    <td>The start frame carries each server's real URL. The harness asks a helper command for the header (<code>headersHelper</code> on Claude Code, <code>http_headers_helper</code> on Codex), and the helper asks the runner, which asks the controller, as <code>gh</code> does today.</td>
+    <td>It works on paper and keeps the controller out of the data path. But the refresh depends on each harness re-running its helper after a 401, which the Claude SDK's types do not even list. Sentry and GitHub kill the old token the moment it is refreshed, GitHub about every 8 hours, so every long session would rely on that. A server that challenges for sign-in makes the harness try OAuth on the runner. pi gets nothing. And every vendor token then lives in runner memory.</td></tr>
+  <tr><td><b>A bridge process per session on the runner</b></td>
+    <td><code>hercule mcp-bridge sentry</code> as a stdio server the harness starts. It forwards to the vendor with a token from the runner.</td>
+    <td>Uniform across harnesses, but one extra process of the 99 MB binary per server per session, and the controller sees no call: no grant check per call and no audit.</td></tr>
+  <tr><td><b>Each harness signs in itself</b></td>
+    <td>Link the user's own harness MCP config, as User Material does for instructions.</td>
+    <td>The opposite of the brief: one sign-in per server per harness per machine, stored in three different places. ADR 0032 already left this out for that reason.</td></tr>
+  <tr><td><b>Plugin-written tools instead of the vendor's server</b></td>
+    <td>A plugin's workflow actions (<code>sentry/issue.resolve</code>) offered to sessions as tools, run inside the controller.</td>
+    <td>Not wrong, and nearly free later: an action already has a name, a description, an input schema and the Connection it acts through. But Sentry's own server has 59 usable tools against the plugin's three actions, kept current by Sentry. Start with the vendor's server; add a plugin's own tools where no vendor server exists.</td></tr>
+</table>
+
+<h2 id="decisions"><span class="n">10</span>Decisions, and where this differs from the spec</h2>
+<table>
+  <tr><th style="width:26%">Decision</th><th style="width:36%">Recommendation</th><th>What it touches</th></tr>
+  <tr><td><b>1. Gateway in the controller</b>, or tokens handed to runners<br><span class="tag chg">decided, 20 Nov</span></td><td>Gateway. It is the more robust of the two and the only one where a sign-in problem always reaches the user through Hercule.</td><td>New ADR. Every tool call passes the controller: one more hop on the tailnet, and a controller that is down takes MCP tools with it, as it does the CLI.</td></tr>
+  <tr><td><b>2. Where a sign-in lives</b><br><span class="tag chg">decided, 20 Nov</span></td><td><b>Separate.</b> A server from a plugin is reached with the plugin's Connection, so nothing new is signed in to. A server added by URL keeps its own sign-in, on the server's own page, as the prototype draws it. It is not a Connection and does not show in the Connections list.</td><td>The <code>mcp-servers</code> domain stores those sign-ins itself, in the same secrets table, and shares the code that refreshes a token with <code>connections</code>. No built-in <code>mcp</code> plugin and no new Connection type. The gateway has two places a credential comes from.</td></tr>
+  <tr><td><b>3. One fixed address</b><br><span class="tag chg">decided, 20 Nov</span></td><td>Every session gets one MCP server, the gateway, at one address that is the same for every thread. The gateway knows the thread from the Session Token and answers with the tools of that thread's servers, each with its server's name in front. The harness's own tool search does the searching; the gateway offers none.</td><td>The start frame only says that the session has the gateway. The list of servers is not in it, which <b>differs from spec 06 section 4 and #222</b>: they put a raw <code>mcpServers</code> config on the Agent and the stored <code>SessionSpec</code>. A list that differs per thread at one address is safe on all three harnesses (<a href="../../research/mcp-tool-list-changes.md">note</a>). Nothing is kept per thread between starts, so a thread resumed after days gets its current list.</td></tr>
+  <tr><td><b>3a. Harness versions</b><br><span class="tag chg">decided, 20 Nov</span></td><td>The design assumes the latest version of each harness, which is what runs. It does not design around the versions the spec names as pinned.</td><td>Spec 06 names pinned versions and says pi has no MCP. On 20 November the machine ran Claude Code 2.1.329, Codex 0.171.0 and pi 1.5.2.</td></tr>
+  <tr><td><b>4. Who gets which server</b><br><span class="tag chg">decided in review</span></td><td><b>A thread has its own list of servers.</b> It starts as the list its Project names; a thread with no project starts from a default list kept in Settings. The user changes a thread's list under the composer's plus button, on the Draft Thread and on a started thread. An MCP Server is a building block and knows nothing of projects or threads. Two Connections to one service, such as a work and a hobby Sentry, are two servers; each project names the right one. Workflow steps and assistant sessions get none until an Agent can name servers too.</td><td>The glossary says a Project has "no behaviour, and one default only". It gains a second thing it names. The domain graph gets edges from <code>projects</code> and <code>sessions</code> to <code>mcp-servers</code>, never the reverse. The session record carries the list, so a client can read it, with the servers left out at the last start. One list cannot hold two servers with the same name. A change to a started thread's list reaches the agent through the gateway's "tool list changed" message. Taking a server away works at once everywhere. An added server is usable at once on Claude Code, on Codex with its <code>mcp_tool_list_changed</code> switch on, and on pi.</td></tr>
+  <tr><td><b>4a. Where servers are managed</b><br><span class="tag chg">decided in review</span></td><td>Settings › MCP servers is the one place: one list with switches. First every Connection whose plugin offers a server, on or off, then the servers added by URL. A Connection's own page only says that it offers agent tools and links to that list. Off is <code>enabled: false</code>, never a delete: the name and the projects that name the server stay. For now a project is given a server on the server's own page, a box per project.</td><td>No grid of projects against servers, and not the sidebar's project menu. The prototype is in <code>apps/desktop/src/renderer/specimens/prototype-mcp/</code>.</td></tr>
+  <tr><td><b>4b. GitHub</b></td><td>A session's GitHub server uses the Connection that already backs its workspace, so the tools act as the same account that pushes.</td><td>ADR 0016: identity follows the repo.</td></tr>
+  <tr><td><b>5. Taint</b><br><span class="tag chg">decided, 20 Nov</span></td><td><b>No.</b> A result from an MCP server does not mark the session tainted. Much of what a server returns is trusted, or holds no text an outsider wrote.</td><td>Spec 13 section 10 stays as it is. What still guards the Skill Library: no shipped Permission Profile can apply a skill.</td></tr>
+  <tr><td><b>6. OAuth for user-added servers</b><br><span class="tag chg">partly decided in review</span></td><td><b>How the sign-in comes back:</b> the desktop app catches the redirect on the user's machine and hands it to the controller. That is acceptable for now. Pasting the address is the last resort only. <b>Still open:</b> a relay page on hercule.sh for the web app, and which client registration to use. Client ID Metadata Documents need one public HTTPS document for all Hercule installs. Dynamic registration needs none but is deprecated, with removal no earlier than July 2027.</td><td>Spec 13 section 3.1 ("ships no OAuth client secret and hosts no OAuth relay"). A relay page would change that line. A static metadata document is not a relay, but it is the first thing Hercule would host.</td></tr>
+  <tr><td><b>7. Hercule's own MCP server</b><br><span class="tag chg">decided, 20 Nov</span></td><td>Not in v1, and no door is closed. The server name <code>hercule</code> is kept for it, so no server the user adds can take it, and the command tree it would be derived from stays in one place.</td><td>ADR 0013 and spec 11 stand for v1. #199 stays open for after v1.</td></tr>
+  <tr><td><b>8. Which tools are callable</b><br><span class="tag chg">decided in review</span></td><td>Not in v1. The gateway can do it: it answers <code>tools/list</code> and forwards <code>tools/call</code> itself, so a tool can be switched off for every harness in one place. One ticket to look into it later, including whether a project may override a server's tool settings.</td><td>v1 stores and shows each server's tool list, and changes nothing in it.</td></tr>
+  <tr><td><b>9. Duplicates</b><br><span class="tag chg">decided in review</span></td><td>One server per address and external account; a second is refused as a conflict. Nothing is created by itself: a plugin's server exists once the user switches it on. When a plugin offers an address the user added by hand, switching it on offers "Replace": the record keeps its name and the projects that name it, and moves to the plugin's Connection. Adding by hand an address a plugin already offers is refused, with a pointer to that Connection's row in the list.</td><td>The same rule as a repo Resource and its remote. The plugin's declaration carries the server's address as plain data (section 5).</td></tr>
+  <tr><td><b>10. pi</b><br><span class="tag chg">decided, 20 Nov</span></td><td>Hercule keeps starting pi with <code>--no-extensions</code>, so that only what Hercule chose runs. It switches pi's built-in MCP on explicitly, with <code>-e builtin:mcp</code>, and its tool search with <code>-e builtin:tool-search</code>, and adds the gateway from its own extension with the tools set to <code>deferred</code>.</td><td>The pi harness then declares <code>mcpPassthrough: "native"</code>. From pi's source at 1.5.2; not run yet.</td></tr>
+</table>
+
+<h2 id="slices"><span class="n">11</span>Slices</h2>
+<p>Each slice has a ticket, and a Hercule task linked to it (label <code>mcp</code>). Before slice 1 comes <a href="https://github.com/theagenticage/hercule/issues/1207">#1207</a>: the ADR, the spec and the glossary. The return page on hercule.sh is <a href="https://github.com/theagenticage/hercule/issues/1206">#1206</a>.</p>
+<table>
+  <tr><th style="width:36px"></th><th style="width:30%">Slice</th><th style="width:38%">What works afterwards</th><th>Proves</th></tr>
+  <tr><td>0</td><td><b>Prototype of the management screens.</b> Done on 19 November, with fake data: <code>pnpm --filter @hercule/desktop prototype:mcp</code>.</td><td>Settings › MCP servers as one list with switches, adding by URL, a thread's servers in the composer, the "Replace" dialog.</td><td>It changed decision 4 and added 4a: a thread has its own list, and the record must be readable by clients.</td></tr>
+  <tr><td>1</td><td><b>Gateway and one plugin's server.</b> <a href="https://github.com/theagenticage/hercule/issues/1208">#1208</a> The domain, the route, <code>registerMcpServer</code>, Sentry, the start frame, the Claude Code adapter.</td><td>A thread whose list holds the Sentry server calls Sentry's tools, on any runner. No sign-in beyond the Sentry Connection.</td><td>That Sentry accepts the Connection's token: the one claim that still rests on documentation. Both asks in the brief.</td></tr>
+  <tr><td>2</td><td><b>Codex, Linear, GitHub.</b> <a href="https://github.com/theagenticage/hercule/issues/1209">#1209</a></td><td>The same on Codex; three services.</td><td>That the seams hold for a second harness and a second and third vendor.</td></tr>
+  <tr><td>3</td><td><a href="https://github.com/theagenticage/hercule/issues/1210">#1210</a> <b>Servers the user adds</b>: no sign-in or a pasted token first, then OAuth. <b>Before OAuth is built on: one real sign-in</b> against Notion or Linear, with a client on the user's machine receiving the redirect and the controller, on another machine, exchanging the code.</td><td>Any remote MCP server, added once.</td><td>The "not from a plugin" path; decision 6. The test proves the split of listener and exchange, which no client we looked at does.</td></tr>
+  <tr><td>4</td><td><b>The Settings screen</b> on desktop and web, and a thread's servers in the composer. <a href="https://github.com/theagenticage/hercule/issues/1211">#1211</a></td><td>Status, tools and sign-in in one place.</td><td>Until then the CLI rows are the interface, which the contract gives for free.</td></tr>
+  <tr><td>5</td><td><b>pi</b>, by switching on its built-in MCP explicitly. <a href="https://github.com/theagenticage/hercule/issues/1212">#1212</a></td><td>MCP on the third harness.</td><td>That pi's MCP and tool search work under <code>--no-extensions</code>, which so far comes from its source only.</td></tr>
+  <tr><td>later</td><td><b>Which tools are callable</b>: a ticket to look into it. <a href="https://github.com/theagenticage/hercule/issues/1214">#1214</a></td><td>A tool switched off on a server, for every harness.</td><td>Whether a project may override a server's tool settings.</td></tr>
+  <tr><td>6</td><td><b>Local servers</b> (stdio) on runners, <a href="https://github.com/theagenticage/hercule/issues/1213">#1213</a>; <b>per-Agent selection</b>, <a href="https://github.com/theagenticage/hercule/issues/222">#222</a>.</td><td>Playwright-style servers; servers for steps and assistants.</td><td>Needs its own design: a local server is a command the runner starts, which the MCP spec names as a risk for a proxy.</td></tr>
+</table>
+
+<div id="tip"></div>
+
+<script>
+/* The measurement, as summarize.py wrote it. */
+const RESULTS = /*RESULTS-BEGIN*/{"claude/haiku":{"arms":{"cli":{"n":30,"passed":30,"requests":6.0,"firstContext":18656.0,"inputTotal":146455.0,"outputTotal":1162.0,"toolCalls":5.0,"lookupCalls":2.0,"toolErrors":0.0,"wallMs":17360.0,"costUsd":0.005378005},"mcp-meta":{"n":30,"passed":30,"requests":6.0,"firstContext":18489.0,"inputTotal":145010.0,"outputTotal":1224.0,"toolCalls":8.0,"lookupCalls":5.0,"toolErrors":0.0,"wallMs":16475.0,"costUsd":0.00525562},"mcp-search":{"n":30,"passed":30,"requests":4.0,"firstContext":21526.0,"inputTotal":107314.5,"outputTotal":817.0,"toolCalls":4.0,"lookupCalls":1.0,"toolErrors":0.0,"wallMs":14039.0,"costUsd":0.004923914999999999}},"tasks":{"aggregate":{"cli":{"n":3,"passed":3,"requests":7,"firstContext":18643,"inputTotal":158791,"outputTotal":1106,"toolCalls":6,"lookupCalls":3,"toolErrors":0,"wallMs":19709,"costUsd":0.0047123},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":18474,"inputTotal":126805,"outputTotal":1085,"toolCalls":7,"lookupCalls":5,"toolErrors":0,"wallMs":16338,"costUsd":0.00456784},"mcp-search":{"n":3,"passed":3,"requests":3,"firstContext":21515,"inputTotal":70914,"outputTotal":564,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":11333,"costUsd":0.00382292}},"block":{"cli":{"n":3,"passed":3,"requests":9,"firstContext":18657,"inputTotal":224439,"outputTotal":1279,"toolCalls":8,"lookupCalls":2,"toolErrors":0,"wallMs":19983,"costUsd":0.006150850000000001},"mcp-meta":{"n":3,"passed":3,"requests":8,"firstContext":18489,"inputTotal":176776,"outputTotal":1279,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":18589,"costUsd":0.00525036},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":21528,"inputTotal":128501,"outputTotal":812,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":11840,"costUsd":0.00500838}},"bulk":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":18657,"inputTotal":147666,"outputTotal":1318,"toolCalls":5,"lookupCalls":1,"toolErrors":0,"wallMs":15884,"costUsd":0.00556341},"mcp-meta":{"n":3,"passed":3,"requests":8,"firstContext":18492,"inputTotal":198552,"outputTotal":1938,"toolCalls":12,"lookupCalls":6,"toolErrors":0,"wallMs":17538,"costUsd":0.00667152},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":21530,"inputTotal":119964,"outputTotal":1468,"toolCalls":8,"lookupCalls":1,"toolErrors":0,"wallMs":14824,"costUsd":0.0054253800000000005}},"count":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":18631,"inputTotal":90325,"outputTotal":476,"toolCalls":3,"lookupCalls":2,"toolErrors":0,"wallMs":9362,"costUsd":0.0038202200000000005},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":18466,"inputTotal":125471,"outputTotal":712,"toolCalls":7,"lookupCalls":5,"toolErrors":0,"wallMs":12561,"costUsd":0.004087840000000001},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":21505,"inputTotal":94448,"outputTotal":348,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":11331,"costUsd":0.0037814800000000003}},"create":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":18709,"inputTotal":92660,"outputTotal":954,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":12985,"costUsd":0.00419048},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":18540,"inputTotal":121126,"outputTotal":1003,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":14409,"costUsd":0.0037724900000000003},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":21579,"inputTotal":93830,"outputTotal":797,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":13267,"costUsd":0.003934630000000001}},"export":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":18648,"inputTotal":146141,"outputTotal":1458,"toolCalls":5,"lookupCalls":2,"toolErrors":0,"wallMs":14643,"costUsd":0.005664500000000001},"mcp-meta":{"n":3,"passed":3,"requests":7,"firstContext":18479,"inputTotal":153537,"outputTotal":1784,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":16458,"costUsd":0.00526088},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":21520,"inputTotal":125581,"outputTotal":1272,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":13755,"costUsd":0.00518267}},"initiative":{"cli":{"n":3,"passed":3,"requests":5,"firstContext":18656,"inputTotal":128906,"outputTotal":1210,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":18759,"costUsd":0.00579266},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":18483,"inputTotal":164447,"outputTotal":1575,"toolCalls":12,"lookupCalls":6,"toolErrors":0,"wallMs":21877,"costUsd":0.00600054},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":21524,"inputTotal":114694,"outputTotal":1300,"toolCalls":7,"lookupCalls":1,"toolErrors":0,"wallMs":14428,"costUsd":0.005919970000000001}},"profile":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":18668,"inputTotal":85460,"outputTotal":571,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":10040,"costUsd":0.00333152},"mcp-meta":{"n":3,"passed":3,"requests":5,"firstContext":18501,"inputTotal":99582,"outputTotal":627,"toolCalls":5,"lookupCalls":4,"toolErrors":1,"wallMs":17351,"costUsd":0.0031493300000000005},"mcp-search":{"n":3,"passed":3,"requests":3,"firstContext":21539,"inputTotal":67599,"outputTotal":494,"toolCalls":2,"lookupCalls":1,"toolErrors":0,"wallMs":16902,"costUsd":0.00316572}},"update":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":18652,"inputTotal":150548,"outputTotal":913,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":15015,"costUsd":0.00547977},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":18483,"inputTotal":138860,"outputTotal":1079,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":14887,"costUsd":0.005196899999999999},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":21526,"inputTotal":107269,"outputTotal":822,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":13871,"costUsd":0.00513349}},"wiki":{"cli":{"n":3,"passed":3,"requests":8,"firstContext":18706,"inputTotal":192733,"outputTotal":1461,"toolCalls":7,"lookupCalls":1,"toolErrors":0,"wallMs":18375,"costUsd":0.00577772},"mcp-meta":{"n":3,"passed":3,"requests":7,"firstContext":18536,"inputTotal":170977,"outputTotal":1315,"toolCalls":7,"lookupCalls":4,"toolErrors":1,"wallMs":16492,"costUsd":0.0061884800000000005},"mcp-search":{"n":3,"passed":3,"requests":7,"firstContext":21577,"inputTotal":173185,"outputTotal":1823,"toolCalls":6,"lookupCalls":1,"toolErrors":0,"wallMs":19050,"costUsd":0.00577332}}}},"claude/sonnet":{"arms":{"cli":{"n":30,"passed":30,"requests":6.0,"firstContext":17831.0,"inputTotal":122727.5,"outputTotal":535.5,"toolCalls":5.0,"lookupCalls":2.0,"toolErrors":0.0,"wallMs":13179.5,"costUsd":0.06347765},"mcp-eager":{"n":10,"passed":10,"requests":4.0,"firstContext":109022.0,"inputTotal":445326.0,"outputTotal":446.5,"toolCalls":3.0,"lookupCalls":0.0,"toolErrors":0.0,"wallMs":9686.0,"costUsd":0.0915552},"mcp-meta":{"n":30,"passed":30,"requests":6.0,"firstContext":17664.0,"inputTotal":124348.0,"outputTotal":810.0,"toolCalls":7.0,"lookupCalls":4.0,"toolErrors":0.0,"wallMs":13117.0,"costUsd":0.0761417},"mcp-search":{"n":30,"passed":30,"requests":5.0,"firstContext":20704.5,"inputTotal":120383.0,"outputTotal":538.5,"toolCalls":4.0,"lookupCalls":1.0,"toolErrors":0.0,"wallMs":10747.5,"costUsd":0.08200690000000002}},"tasks":{"aggregate":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":17819,"inputTotal":87352,"outputTotal":340,"toolCalls":3,"lookupCalls":2,"toolErrors":0,"wallMs":13110,"costUsd":0.060077799999999994},"mcp-eager":{"n":1,"passed":1,"requests":3,"firstContext":109009,"inputTotal":332615,"outputTotal":255,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":6876,"costUsd":0.0761021},"mcp-meta":{"n":3,"passed":3,"requests":5,"firstContext":17651,"inputTotal":100215,"outputTotal":533,"toolCalls":6,"lookupCalls":4,"toolErrors":0,"wallMs":13228,"costUsd":0.0661803},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":20692,"inputTotal":93216,"outputTotal":323,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":11476,"costUsd":0.0727276}},"block":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":17833,"inputTotal":139355,"outputTotal":521,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":14668,"costUsd":0.0803925},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109025,"inputTotal":446846,"outputTotal":415,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":8951,"costUsd":0.09160549999999999},"mcp-meta":{"n":3,"passed":3,"requests":7,"firstContext":17664,"inputTotal":147430,"outputTotal":828,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":12113,"costUsd":0.0774428},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20705,"inputTotal":121232,"outputTotal":543,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":8936,"costUsd":0.07932299999999999}},"bulk":{"cli":{"n":3,"passed":3,"requests":8,"firstContext":17836,"inputTotal":178263,"outputTotal":833,"toolCalls":7,"lookupCalls":2,"toolErrors":0,"wallMs":15995,"costUsd":0.07983889999999999},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109027,"inputTotal":444243,"outputTotal":874,"toolCalls":6,"lookupCalls":0,"toolErrors":0,"wallMs":9704,"costUsd":0.09320909999999999},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":17667,"inputTotal":123971,"outputTotal":1198,"toolCalls":11,"lookupCalls":5,"toolErrors":0,"wallMs":13006,"costUsd":0.0759839},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20707,"inputTotal":120150,"outputTotal":951,"toolCalls":7,"lookupCalls":1,"toolErrors":0,"wallMs":10159,"costUsd":0.08203260000000001}},"count":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":17809,"inputTotal":84107,"outputTotal":225,"toolCalls":3,"lookupCalls":2,"toolErrors":0,"wallMs":9849,"costUsd":0.0554694},"mcp-eager":{"n":1,"passed":1,"requests":3,"firstContext":108999,"inputTotal":330458,"outputTotal":187,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":6094,"costUsd":0.06684090000000001},"mcp-meta":{"n":3,"passed":3,"requests":5,"firstContext":17640,"inputTotal":96657,"outputTotal":460,"toolCalls":6,"lookupCalls":4,"toolErrors":0,"wallMs":10103,"costUsd":0.05362780000000001},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":20680,"inputTotal":90731,"outputTotal":299,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":10308,"costUsd":0.062093800000000005}},"create":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":17885,"inputTotal":119531,"outputTotal":594,"toolCalls":5,"lookupCalls":1,"toolErrors":0,"wallMs":11444,"costUsd":0.056137000000000006},"mcp-eager":{"n":1,"passed":1,"requests":3,"firstContext":109077,"inputTotal":330471,"outputTotal":478,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":8243,"costUsd":0.0690502},"mcp-meta":{"n":3,"passed":3,"requests":5,"firstContext":17718,"inputTotal":94634,"outputTotal":603,"toolCalls":4,"lookupCalls":2,"toolErrors":0,"wallMs":10688,"costUsd":0.0499844},"mcp-search":{"n":3,"passed":3,"requests":4,"firstContext":20757,"inputTotal":88670,"outputTotal":526,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":9949,"costUsd":0.06049789999999999}},"export":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":17824,"inputTotal":88394,"outputTotal":453,"toolCalls":3,"lookupCalls":2,"toolErrors":0,"wallMs":10459,"costUsd":0.0634583},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109015,"inputTotal":446409,"outputTotal":866,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":10949,"costUsd":0.0962317},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":17656,"inputTotal":124501,"outputTotal":1233,"toolCalls":7,"lookupCalls":4,"toolErrors":0,"wallMs":13482,"costUsd":0.0776829},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20695,"inputTotal":120646,"outputTotal":989,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":11440,"costUsd":0.0845421}},"initiative":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":17829,"inputTotal":142663,"outputTotal":673,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":16881,"costUsd":0.08774069999999999},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109019,"inputTotal":449215,"outputTotal":734,"toolCalls":6,"lookupCalls":0,"toolErrors":0,"wallMs":11383,"costUsd":0.10048460000000001},"mcp-meta":{"n":3,"passed":3,"requests":6,"firstContext":17660,"inputTotal":132118,"outputTotal":1101,"toolCalls":10,"lookupCalls":4,"toolErrors":0,"wallMs":17248,"costUsd":0.0893784},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20703,"inputTotal":130922,"outputTotal":889,"toolCalls":7,"lookupCalls":1,"toolErrors":0,"wallMs":16057,"costUsd":0.09767769999999999}},"profile":{"cli":{"n":3,"passed":3,"requests":4,"firstContext":17845,"inputTotal":81715,"outputTotal":280,"toolCalls":3,"lookupCalls":1,"toolErrors":0,"wallMs":14502,"costUsd":0.051037700000000005},"mcp-eager":{"n":1,"passed":1,"requests":2,"firstContext":109038,"inputTotal":218315,"outputTotal":193,"toolCalls":1,"lookupCalls":0,"toolErrors":0,"wallMs":11508,"costUsd":0.04846},"mcp-meta":{"n":3,"passed":3,"requests":5,"firstContext":17679,"inputTotal":94841,"outputTotal":477,"toolCalls":5,"lookupCalls":4,"toolErrors":0,"wallMs":17038,"costUsd":0.04801509999999999},"mcp-search":{"n":3,"passed":3,"requests":3,"firstContext":20715,"inputTotal":64426,"outputTotal":288,"toolCalls":2,"lookupCalls":1,"toolErrors":0,"wallMs":16824,"costUsd":0.0506466}},"update":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":17829,"inputTotal":137827,"outputTotal":451,"toolCalls":5,"lookupCalls":2,"toolErrors":0,"wallMs":10681,"costUsd":0.0772906},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109017,"inputTotal":446895,"outputTotal":383,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":10707,"costUsd":0.0915049},"mcp-meta":{"n":3,"passed":3,"requests":7,"firstContext":17663,"inputTotal":148948,"outputTotal":792,"toolCalls":9,"lookupCalls":6,"toolErrors":0,"wallMs":10904,"costUsd":0.08092119999999998},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20701,"inputTotal":125033,"outputTotal":509,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":10461,"costUsd":0.08324669999999999}},"wiki":{"cli":{"n":3,"passed":3,"requests":6,"firstContext":17883,"inputTotal":120294,"outputTotal":618,"toolCalls":5,"lookupCalls":2,"toolErrors":1,"wallMs":13418,"costUsd":0.0582631},"mcp-eager":{"n":1,"passed":1,"requests":4,"firstContext":109073,"inputTotal":495492,"outputTotal":531,"toolCalls":4,"lookupCalls":0,"toolErrors":0,"wallMs":9668,"costUsd":0.15757700000000002},"mcp-meta":{"n":3,"passed":3,"requests":8,"firstContext":17714,"inputTotal":220076,"outputTotal":1046,"toolCalls":8,"lookupCalls":4,"toolErrors":2,"wallMs":17675,"costUsd":0.1531516},"mcp-search":{"n":3,"passed":3,"requests":5,"firstContext":20753,"inputTotal":171846,"outputTotal":638,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":12357,"costUsd":0.148771}}}},"codex/default":{"arms":{"cli":{"n":30,"passed":30,"requests":0.0,"firstContext":0.0,"inputTotal":106504.0,"outputTotal":335.0,"toolCalls":6.0,"lookupCalls":3.0,"toolErrors":0.0,"wallMs":22296.5,"costUsd":0.0},"mcp-meta":{"n":30,"passed":30,"requests":0.0,"firstContext":0.0,"inputTotal":136929.5,"outputTotal":377.5,"toolCalls":6.5,"lookupCalls":4.0,"toolErrors":0.0,"wallMs":27193.5,"costUsd":0.0},"mcp-ops":{"n":30,"passed":30,"requests":0.0,"firstContext":0.0,"inputTotal":109755.5,"outputTotal":273.5,"toolCalls":2.5,"lookupCalls":0.0,"toolErrors":0.0,"wallMs":22372.0,"costUsd":0.0}},"tasks":{"aggregate":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":82487,"outputTotal":223,"toolCalls":4,"lookupCalls":2,"toolErrors":0,"wallMs":17573,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":112957,"outputTotal":274,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":40697,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":74018,"outputTotal":157,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":18237,"costUsd":0}},"block":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":137414,"outputTotal":349,"toolCalls":8,"lookupCalls":3,"toolErrors":0,"wallMs":22162,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":139725,"outputTotal":373,"toolCalls":7,"lookupCalls":4,"toolErrors":0,"wallMs":25654,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":166460,"outputTotal":315,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":22478,"costUsd":0}},"bulk":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":167734,"outputTotal":532,"toolCalls":11,"lookupCalls":3,"toolErrors":0,"wallMs":31505,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":166415,"outputTotal":553,"toolCalls":11,"lookupCalls":4,"toolErrors":0,"wallMs":30872,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":99937,"outputTotal":330,"toolCalls":7,"lookupCalls":0,"toolErrors":0,"wallMs":24452,"costUsd":0}},"count":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":81132,"outputTotal":153,"toolCalls":4,"lookupCalls":2,"toolErrors":0,"wallMs":17088,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":113563,"outputTotal":236,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":20153,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":74451,"outputTotal":120,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":16014,"costUsd":0}},"create":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":82595,"outputTotal":311,"toolCalls":4,"lookupCalls":1,"toolErrors":0,"wallMs":17536,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":110912,"outputTotal":317,"toolCalls":4,"lookupCalls":2,"toolErrors":0,"wallMs":23841,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":74028,"outputTotal":243,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":19930,"costUsd":0}},"export":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":103899,"outputTotal":383,"toolCalls":5,"lookupCalls":3,"toolErrors":0,"wallMs":23338,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":136757,"outputTotal":436,"toolCalls":6,"lookupCalls":3,"toolErrors":0,"wallMs":27775,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":96607,"outputTotal":329,"toolCalls":2,"lookupCalls":0,"toolErrors":0,"wallMs":24753,"costUsd":0}},"initiative":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":116201,"outputTotal":481,"toolCalls":11,"lookupCalls":3,"toolErrors":0,"wallMs":24715,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":143205,"outputTotal":476,"toolCalls":11,"lookupCalls":5,"toolErrors":0,"wallMs":29808,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":125612,"outputTotal":366,"toolCalls":6,"lookupCalls":0,"toolErrors":0,"wallMs":23388,"costUsd":0}},"profile":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":81098,"outputTotal":222,"toolCalls":6,"lookupCalls":3,"toolErrors":0,"wallMs":19699,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":90589,"outputTotal":214,"toolCalls":3,"lookupCalls":2,"toolErrors":0,"wallMs":21228,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":133180,"outputTotal":237,"toolCalls":1,"lookupCalls":0,"toolErrors":0,"wallMs":22721,"costUsd":0}},"update":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":110248,"outputTotal":326,"toolCalls":7,"lookupCalls":3,"toolErrors":0,"wallMs":22431,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":137102,"outputTotal":395,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":27186,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":115242,"outputTotal":271,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":23206,"costUsd":0}},"wiki":{"cli":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":128018,"outputTotal":410,"toolCalls":6,"lookupCalls":2,"toolErrors":0,"wallMs":27016,"costUsd":0},"mcp-meta":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":193365,"outputTotal":421,"toolCalls":8,"lookupCalls":5,"toolErrors":0,"wallMs":31934,"costUsd":0},"mcp-ops":{"n":3,"passed":3,"requests":0,"firstContext":0,"inputTotal":140562,"outputTotal":275,"toolCalls":3,"lookupCalls":0,"toolErrors":0,"wallMs":21232,"costUsd":0}}}}}/*RESULTS-END*/;
+const BASELINE = { sonnet: 17266 };
+
+/* ---------- sequence diagrams ---------- */
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs, text) => {
+  const node = document.createElementNS(NS, name);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+/**
+ * Draws one sequence diagram. `actors` are the columns; `steps` are drawn top to
+ * bottom. A step is a message `{ from, to, text, sub }`, a step an actor does on
+ * its own `{ at, text, sub }`, or a note across the diagram `{ note }`.
+ */
+function drawSequence(target, actors, steps) {
+  const width = 1180, margin = 90, top = 58;
+  const gap = (width - 2 * margin) / (actors.length - 1);
+  const xOf = (id) => margin + actors.findIndex((actor) => actor.id === id) * gap;
+  let y = top + 26;
+  const marks = [];
+  for (const step of steps) {
+    if (step.note !== undefined) { y += 12; marks.push({ step, y }); y += 34; continue; }
+    const lines = 1 + (step.sub === undefined ? 0 : 1);
+    y += lines * 14 + 6;
+    marks.push({ step, y });
+    y += step.at === undefined ? 14 : 26;
+  }
+  const height = y + 14;
+  const svg = el("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img" });
+  for (const actor of actors) {
+    const x = xOf(actor.id);
+    svg.append(el("line", { class: "life", x1: x, y1: top, x2: x, y2: height - 6 }));
+    const w = Math.min(gap - 14, 178);
+    svg.append(el("rect", { class: `box ${actor.kind ?? ""}`, x: x - w / 2, y: 8, width: w, height: 44, rx: 6 }));
+    svg.append(el("text", { class: "t", x, y: 27, "text-anchor": "middle" }, actor.label));
+    if (actor.sub) svg.append(el("text", { class: "s", x, y: 43, "text-anchor": "middle" }, actor.sub));
+  }
+  let number = 0;
+  for (const { step, y: at } of marks) {
+    if (step.note !== undefined) {
+      svg.append(el("rect", { class: "notebox", x: margin - 60, y: at - 4, width: width - 2 * margin + 120, height: 24, rx: 6 }));
+      svg.append(el("text", { class: "msg-s", x: width / 2, y: at + 12, "text-anchor": "middle" }, step.note));
+      continue;
+    }
+    number += 1;
+    if (step.at !== undefined) {
+      const x = xOf(step.at);
+      svg.append(el("path", { class: "edge", d: `M${x} ${at}h26v16h-22`, "marker-end": "url(#arr)" }));
+      svg.append(el("text", { class: "msg", x: x + 34, y: at + 4 }, `${number}. ${step.text}`));
+      if (step.sub) svg.append(el("text", { class: "msg-s", x: x + 34, y: at + 18 }, step.sub));
+      continue;
+    }
+    const from = xOf(step.from), to = xOf(step.to);
+    const mid = (from + to) / 2, dir = to > from ? 1 : -1;
+    svg.append(el("path", { class: `edge ${step.reply ? "dash" : ""}`, d: `M${from} ${at}H${to - dir * 2}`, "marker-end": "url(#arr)" }));
+    const textY = step.sub ? at - 20 : at - 6;
+    svg.append(el("text", { class: "msg", x: mid, y: textY, "text-anchor": "middle" }, `${number}. ${step.text}`));
+    if (step.sub) svg.append(el("text", { class: "msg-s", x: mid, y: at - 6, "text-anchor": "middle" }, step.sub));
+  }
+  document.getElementById(target).append(svg);
+}
+
+drawSequence("seq-plugin",
+  [
+    { id: "user", label: "User", sub: "desktop app" },
+    { id: "api", label: "API routes" },
+    { id: "mcp", label: "mcp-servers", kind: "new" },
+    { id: "conn", label: "connections" },
+    { id: "plugin", label: "plugins", sub: "sentry's declaration", kind: "chg" },
+    { id: "vendor", label: "mcp.sentry.dev", kind: "out" },
+  ],
+  [
+    { from: "user", to: "api", text: "switches on Sentry · work", sub: "mcpServer.create { plugin, connectionId }" },
+    { from: "api", to: "mcp", text: "create", sub: "status: checking" },
+    { from: "mcp", to: "conn", text: "credentials(connectionId)", sub: "refreshed if it is about to expire" },
+    { from: "mcp", to: "plugin", text: "buildUpstreamRequest(credentials)", sub: "url + Authorization: Sentry-Bearer ..." },
+    { from: "mcp", to: "vendor", text: "tools/list" },
+    { from: "vendor", to: "mcp", text: "59 tools", reply: true },
+    { at: "mcp", text: "stores the tool names", sub: "status: ready" },
+    { from: "mcp", to: "user", text: '"Ready · 59 tools"', reply: true },
+    { note: "No browser opens. The Connection the Inbox already uses is the sign-in." },
+  ]);
+
+drawSequence("seq-user",
+  [
+    { id: "user", label: "User", sub: "CLI or Settings, and a browser" },
+    { id: "api", label: "API routes" },
+    { id: "mcp", label: "mcp-servers", kind: "new" },
+    { id: "conn", label: "its sign-in", sub: "kept by mcp-servers" },
+    { id: "server", label: "The MCP server", sub: "mcp.notion.com", kind: "out" },
+    { id: "as", label: "Its authorization server", kind: "out" },
+  ],
+  [
+    { from: "user", to: "api", text: "hercule mcp-server add notion --url ...", sub: "mcpServer.create { url }" },
+    { from: "api", to: "mcp", text: "create", sub: "status: checking" },
+    { from: "mcp", to: "server", text: "tools/list, no credential" },
+    { from: "server", to: "mcp", text: "401, and where to sign in", reply: true },
+    { from: "mcp", to: "conn", text: "start OAuth", sub: "discover, register the client, PKCE" },
+    { from: "conn", to: "user", text: "the address to open", sub: "status: needs sign-in", reply: true },
+    { from: "user", to: "as", text: "approves in the browser" },
+    { from: "as", to: "conn", text: "the answer comes back", sub: "caught by the desktop app, handed on whole", reply: true },
+    { from: "conn", to: "as", text: "exchanges the code", sub: "tokens stored encrypted, on the controller only" },
+    { from: "mcp", to: "server", text: "tools/list, with the token", sub: "status: ready" },
+    { note: "Once. Every session on every runner uses it from here on. With a pasted token, steps 5 to 9 are one form field." },
+  ]);
+
+drawSequence("seq-start",
+  [
+    { id: "daemon", label: "daemon/sessions", sub: "controller", kind: "chg" },
+    { id: "projects", label: "projects", sub: "controller", kind: "chg" },
+    { id: "mcp", label: "mcp-servers", sub: "controller", kind: "new" },
+    { id: "runner", label: "Runner", sub: "context, then the adapter", kind: "chg" },
+    { id: "harness", label: "Harness process", kind: "out" },
+    { id: "gw", label: "MCP gateway", sub: "controller", kind: "new" },
+  ],
+  [
+    { from: "daemon", to: "projects", text: "a new thread: its project's servers" },
+    { from: "projects", to: "daemon", text: "two server ids, kept as the thread's list", sub: "no project: the default list in Settings", reply: true },
+    { from: "daemon", to: "runner", text: "SessionStart", sub: "token, skills, mcpGateway: true" },
+    { at: "runner", text: "gives the harness one MCP server", sub: "<controller>/mcp, the same for every session" },
+    { from: "runner", to: "harness", text: "starts it" },
+    { from: "harness", to: "gw", text: "tools/list", sub: "Authorization: Bearer <session token>" },
+    { from: "gw", to: "mcp", text: "the tools of this thread's servers", sub: "one that is not ready is left out, and the thread says so" },
+    { from: "gw", to: "harness", text: "sentry__search_issues, linear__create_issue, ...", sub: "from the lists the controller stored", reply: true },
+    { note: "Later: the user adds a server to the thread. The gateway sends \"tool list changed\", and the harness asks again. No new frame, no restart." },
+  ]);
+
+drawSequence("seq-call",
+  [
+    { id: "harness", label: "Harness process", sub: "any runner", kind: "out" },
+    { id: "route", label: "MCP gateway route", kind: "new" },
+    { id: "mcp", label: "mcp-servers", kind: "new" },
+    { id: "conn", label: "connections" },
+    { id: "plugin", label: "plugins", kind: "chg" },
+    { id: "vendor", label: "mcp.sentry.dev", kind: "out" },
+  ],
+  [
+    { from: "harness", to: "route", text: "tools/call sentry__search_issues", sub: "POST /mcp · Bearer <session token>" },
+    { from: "route", to: "mcp", text: "forwardCall(actor, serverId, call)", sub: "sentry, found in the thread's own list" },
+    { at: "mcp", text: "checks the caller and the server", sub: "live session, holds mcp.use; server is ready" },
+    { from: "mcp", to: "conn", text: "credentials(connectionId)" },
+    { from: "mcp", to: "plugin", text: "buildUpstreamRequest(credentials)" },
+    { from: "mcp", to: "vendor", text: "tools/call search_issues", sub: "Authorization: Sentry-Bearer <token>" },
+    { from: "vendor", to: "mcp", text: "the result", sub: "on 401: refresh once and send again", reply: true },
+    { at: "mcp", text: "writes the audit entry", sub: "actor session:<id>, server, tool" },
+    { from: "mcp", to: "harness", text: "the result", reply: true },
+    { note: "If the retry also gets 401: the Connection goes to needs-reauth, the user is notified, and the agent's tool error says what to ask for." },
+  ]);
+
+/* ---------- charts ---------- */
+const fmt = (value) => Math.round(value).toLocaleString("en-US");
+const tip = document.getElementById("tip");
+document.addEventListener("mousemove", (event) => {
+  const mark = event.target.closest("[data-tip]");
+  if (!mark) { tip.style.display = "none"; return; }
+  tip.textContent = mark.dataset.tip;
+  tip.style.display = "block";
+  tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 340)}px`;
+  tip.style.top = `${event.clientY + 16}px`;
+});
+
+const sonnet = RESULTS["claude/sonnet"];
+if (sonnet) {
+  const fixed = [
+    ["mcp-meta", "two tools: help and call"],
+    ["cli", "the CLI: orientation and skill"],
+    ["mcp-search", "214 tools, found by search"],
+    ["mcp-eager", "214 tools, all loaded"],
+  ].map(([arm, label]) => ({ arm, label, value: sonnet.arms[arm].firstContext - BASELINE.sonnet }));
+  const max = Math.max(...fixed.map((row) => row.value));
+  const chart = document.getElementById("chart-fixed");
+  for (const row of fixed) {
+    const share = (row.value / max) * 82;
+    chart.insertAdjacentHTML("beforeend",
+      `<div class="name">${row.label}</div><div class="track" data-tip="${row.arm}: ${fmt(row.value)} tokens on top of the ${fmt(BASELINE.sonnet)} a session has with no Hercule surface at all"><div class="bar" style="width:${share}%"></div><div class="val" style="left:${share}%">${fmt(row.value)}</div></div>`);
+  }
+
+  const order = ["count", "aggregate", "export", "create", "update", "block", "initiative", "profile", "bulk", "wiki"];
+  const arms = [["cli", "s1"], ["mcp-search", "s2"], ["mcp-meta", "s3"]];
+  const top = Math.max(...order.flatMap((task) => arms.map(([arm]) => sonnet.tasks[task]?.[arm]?.inputTotal ?? 0)));
+  const tasks = document.getElementById("chart-tasks");
+  for (const task of order) {
+    const rows = arms.map(([arm, cls]) => {
+      const cell = sonnet.tasks[task][arm];
+      const share = (cell.inputTotal / top) * 84;
+      return `<div class="track" data-tip="${task}, ${arm}: ${fmt(cell.inputTotal)} input tokens, ${cell.requests} requests, ${cell.toolCalls} tool calls, ${cell.passed}/${cell.n} passed"><div class="bar ${cls}" style="width:${share}%"></div><div class="val" style="left:${share}%">${Math.round(cell.inputTotal / 1000)}K</div></div>`;
+    }).join("");
+    tasks.insertAdjacentHTML("beforeend", `<div class="group"><div class="name">${task}</div><div class="rows">${rows}</div></div>`);
+  }
+}
+
+const TITLES = { "claude/sonnet": "Claude Code · Sonnet 5.5", "claude/haiku": "Claude Code · Haiku 5.5", "codex/default": "Codex · its default model" };
+const ARM_ORDER = ["cli", "mcp-search", "mcp-ops", "mcp-meta", "mcp-eager"];
+const summary = document.getElementById("table-summary");
+let total = 0;
+for (const key of ["claude/sonnet", "claude/haiku", "codex/default"]) {
+  const group = RESULTS[key];
+  if (!group) continue;
+  const rows = ARM_ORDER.filter((arm) => group.arms[arm]).map((arm) => {
+    const cell = group.arms[arm];
+    total += cell.n;
+    const all = cell.passed === cell.n;
+    const dash = (value) => (value ? fmt(value) : "-");
+    return `<tr><td><code>${arm}</code></td><td class="num"><span class="${all ? "pass" : "fail"}">${cell.passed}/${cell.n}</span></td><td class="num">${dash(cell.requests)}</td><td class="num">${dash(cell.firstContext)}</td><td class="num">${fmt(cell.inputTotal)}</td><td class="num">${fmt(cell.outputTotal)}</td><td class="num">${fmt(cell.toolCalls)}</td><td class="num">${fmt(cell.lookupCalls)}</td><td class="num">${(cell.wallMs / 1000).toFixed(1)} s</td></tr>`;
+  }).join("");
+  summary.insertAdjacentHTML("beforeend",
+    `<table><tr><th style="width:22%">${TITLES[key]}</th><th class="num">Passed</th><th class="num">Requests</th><th class="num">First request</th><th class="num">Input tokens</th><th class="num">Output tokens</th><th class="num">Tool calls</th><th class="num">Lookups</th><th class="num">Time</th></tr>${rows}</table>`);
+}
+if (total > 0) document.getElementById("runs-total").textContent = String(total);
+</script>
+</body>
+</html>

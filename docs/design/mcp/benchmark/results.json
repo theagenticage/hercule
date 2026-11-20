@@ -1,0 +1,1510 @@
+{
+ "claude/haiku": {
+  "arms": {
+   "cli": {
+    "n": 30,
+    "passed": 30,
+    "requests": 6.0,
+    "firstContext": 18656.0,
+    "inputTotal": 146455.0,
+    "outputTotal": 1162.0,
+    "toolCalls": 5.0,
+    "lookupCalls": 2.0,
+    "toolErrors": 0.0,
+    "wallMs": 17360.0,
+    "costUsd": 0.005378005
+   },
+   "mcp-meta": {
+    "n": 30,
+    "passed": 30,
+    "requests": 6.0,
+    "firstContext": 18489.0,
+    "inputTotal": 145010.0,
+    "outputTotal": 1224.0,
+    "toolCalls": 8.0,
+    "lookupCalls": 5.0,
+    "toolErrors": 0.0,
+    "wallMs": 16475.0,
+    "costUsd": 0.00525562
+   },
+   "mcp-search": {
+    "n": 30,
+    "passed": 30,
+    "requests": 4.0,
+    "firstContext": 21526.0,
+    "inputTotal": 107314.5,
+    "outputTotal": 817.0,
+    "toolCalls": 4.0,
+    "lookupCalls": 1.0,
+    "toolErrors": 0.0,
+    "wallMs": 14039.0,
+    "costUsd": 0.004923914999999999
+   }
+  },
+  "tasks": {
+   "aggregate": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 18643,
+     "inputTotal": 158791,
+     "outputTotal": 1106,
+     "toolCalls": 6,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 19709,
+     "costUsd": 0.0047123
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18474,
+     "inputTotal": 126805,
+     "outputTotal": 1085,
+     "toolCalls": 7,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 16338,
+     "costUsd": 0.00456784
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 3,
+     "firstContext": 21515,
+     "inputTotal": 70914,
+     "outputTotal": 564,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 11333,
+     "costUsd": 0.00382292
+    }
+   },
+   "block": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 9,
+     "firstContext": 18657,
+     "inputTotal": 224439,
+     "outputTotal": 1279,
+     "toolCalls": 8,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 19983,
+     "costUsd": 0.006150850000000001
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 8,
+     "firstContext": 18489,
+     "inputTotal": 176776,
+     "outputTotal": 1279,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 18589,
+     "costUsd": 0.00525036
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 21528,
+     "inputTotal": 128501,
+     "outputTotal": 812,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 11840,
+     "costUsd": 0.00500838
+    }
+   },
+   "bulk": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18657,
+     "inputTotal": 147666,
+     "outputTotal": 1318,
+     "toolCalls": 5,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 15884,
+     "costUsd": 0.00556341
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 8,
+     "firstContext": 18492,
+     "inputTotal": 198552,
+     "outputTotal": 1938,
+     "toolCalls": 12,
+     "lookupCalls": 6,
+     "toolErrors": 0,
+     "wallMs": 17538,
+     "costUsd": 0.00667152
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 21530,
+     "inputTotal": 119964,
+     "outputTotal": 1468,
+     "toolCalls": 8,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 14824,
+     "costUsd": 0.0054253800000000005
+    }
+   },
+   "count": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 18631,
+     "inputTotal": 90325,
+     "outputTotal": 476,
+     "toolCalls": 3,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 9362,
+     "costUsd": 0.0038202200000000005
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18466,
+     "inputTotal": 125471,
+     "outputTotal": 712,
+     "toolCalls": 7,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 12561,
+     "costUsd": 0.004087840000000001
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 21505,
+     "inputTotal": 94448,
+     "outputTotal": 348,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 11331,
+     "costUsd": 0.0037814800000000003
+    }
+   },
+   "create": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 18709,
+     "inputTotal": 92660,
+     "outputTotal": 954,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 12985,
+     "costUsd": 0.00419048
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18540,
+     "inputTotal": 121126,
+     "outputTotal": 1003,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 14409,
+     "costUsd": 0.0037724900000000003
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 21579,
+     "inputTotal": 93830,
+     "outputTotal": 797,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 13267,
+     "costUsd": 0.003934630000000001
+    }
+   },
+   "export": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18648,
+     "inputTotal": 146141,
+     "outputTotal": 1458,
+     "toolCalls": 5,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 14643,
+     "costUsd": 0.005664500000000001
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 18479,
+     "inputTotal": 153537,
+     "outputTotal": 1784,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 16458,
+     "costUsd": 0.00526088
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 21520,
+     "inputTotal": 125581,
+     "outputTotal": 1272,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 13755,
+     "costUsd": 0.00518267
+    }
+   },
+   "initiative": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 18656,
+     "inputTotal": 128906,
+     "outputTotal": 1210,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 18759,
+     "costUsd": 0.00579266
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18483,
+     "inputTotal": 164447,
+     "outputTotal": 1575,
+     "toolCalls": 12,
+     "lookupCalls": 6,
+     "toolErrors": 0,
+     "wallMs": 21877,
+     "costUsd": 0.00600054
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 21524,
+     "inputTotal": 114694,
+     "outputTotal": 1300,
+     "toolCalls": 7,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 14428,
+     "costUsd": 0.005919970000000001
+    }
+   },
+   "profile": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 18668,
+     "inputTotal": 85460,
+     "outputTotal": 571,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 10040,
+     "costUsd": 0.00333152
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 18501,
+     "inputTotal": 99582,
+     "outputTotal": 627,
+     "toolCalls": 5,
+     "lookupCalls": 4,
+     "toolErrors": 1,
+     "wallMs": 17351,
+     "costUsd": 0.0031493300000000005
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 3,
+     "firstContext": 21539,
+     "inputTotal": 67599,
+     "outputTotal": 494,
+     "toolCalls": 2,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 16902,
+     "costUsd": 0.00316572
+    }
+   },
+   "update": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18652,
+     "inputTotal": 150548,
+     "outputTotal": 913,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 15015,
+     "costUsd": 0.00547977
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 18483,
+     "inputTotal": 138860,
+     "outputTotal": 1079,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 14887,
+     "costUsd": 0.005196899999999999
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 21526,
+     "inputTotal": 107269,
+     "outputTotal": 822,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 13871,
+     "costUsd": 0.00513349
+    }
+   },
+   "wiki": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 8,
+     "firstContext": 18706,
+     "inputTotal": 192733,
+     "outputTotal": 1461,
+     "toolCalls": 7,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 18375,
+     "costUsd": 0.00577772
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 18536,
+     "inputTotal": 170977,
+     "outputTotal": 1315,
+     "toolCalls": 7,
+     "lookupCalls": 4,
+     "toolErrors": 1,
+     "wallMs": 16492,
+     "costUsd": 0.0061884800000000005
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 21577,
+     "inputTotal": 173185,
+     "outputTotal": 1823,
+     "toolCalls": 6,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 19050,
+     "costUsd": 0.00577332
+    }
+   }
+  }
+ },
+ "claude/sonnet": {
+  "arms": {
+   "cli": {
+    "n": 30,
+    "passed": 30,
+    "requests": 6.0,
+    "firstContext": 17831.0,
+    "inputTotal": 122727.5,
+    "outputTotal": 535.5,
+    "toolCalls": 5.0,
+    "lookupCalls": 2.0,
+    "toolErrors": 0.0,
+    "wallMs": 13179.5,
+    "costUsd": 0.06347765
+   },
+   "mcp-eager": {
+    "n": 10,
+    "passed": 10,
+    "requests": 4.0,
+    "firstContext": 109022.0,
+    "inputTotal": 445326.0,
+    "outputTotal": 446.5,
+    "toolCalls": 3.0,
+    "lookupCalls": 0.0,
+    "toolErrors": 0.0,
+    "wallMs": 9686.0,
+    "costUsd": 0.0915552
+   },
+   "mcp-meta": {
+    "n": 30,
+    "passed": 30,
+    "requests": 6.0,
+    "firstContext": 17664.0,
+    "inputTotal": 124348.0,
+    "outputTotal": 810.0,
+    "toolCalls": 7.0,
+    "lookupCalls": 4.0,
+    "toolErrors": 0.0,
+    "wallMs": 13117.0,
+    "costUsd": 0.0761417
+   },
+   "mcp-search": {
+    "n": 30,
+    "passed": 30,
+    "requests": 5.0,
+    "firstContext": 20704.5,
+    "inputTotal": 120383.0,
+    "outputTotal": 538.5,
+    "toolCalls": 4.0,
+    "lookupCalls": 1.0,
+    "toolErrors": 0.0,
+    "wallMs": 10747.5,
+    "costUsd": 0.08200690000000002
+   }
+  },
+  "tasks": {
+   "aggregate": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 17819,
+     "inputTotal": 87352,
+     "outputTotal": 340,
+     "toolCalls": 3,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 13110,
+     "costUsd": 0.060077799999999994
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 3,
+     "firstContext": 109009,
+     "inputTotal": 332615,
+     "outputTotal": 255,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 6876,
+     "costUsd": 0.0761021
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 17651,
+     "inputTotal": 100215,
+     "outputTotal": 533,
+     "toolCalls": 6,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 13228,
+     "costUsd": 0.0661803
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 20692,
+     "inputTotal": 93216,
+     "outputTotal": 323,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 11476,
+     "costUsd": 0.0727276
+    }
+   },
+   "block": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17833,
+     "inputTotal": 139355,
+     "outputTotal": 521,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 14668,
+     "costUsd": 0.0803925
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109025,
+     "inputTotal": 446846,
+     "outputTotal": 415,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 8951,
+     "costUsd": 0.09160549999999999
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 17664,
+     "inputTotal": 147430,
+     "outputTotal": 828,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 12113,
+     "costUsd": 0.0774428
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20705,
+     "inputTotal": 121232,
+     "outputTotal": 543,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 8936,
+     "costUsd": 0.07932299999999999
+    }
+   },
+   "bulk": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 8,
+     "firstContext": 17836,
+     "inputTotal": 178263,
+     "outputTotal": 833,
+     "toolCalls": 7,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 15995,
+     "costUsd": 0.07983889999999999
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109027,
+     "inputTotal": 444243,
+     "outputTotal": 874,
+     "toolCalls": 6,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 9704,
+     "costUsd": 0.09320909999999999
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17667,
+     "inputTotal": 123971,
+     "outputTotal": 1198,
+     "toolCalls": 11,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 13006,
+     "costUsd": 0.0759839
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20707,
+     "inputTotal": 120150,
+     "outputTotal": 951,
+     "toolCalls": 7,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 10159,
+     "costUsd": 0.08203260000000001
+    }
+   },
+   "count": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 17809,
+     "inputTotal": 84107,
+     "outputTotal": 225,
+     "toolCalls": 3,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 9849,
+     "costUsd": 0.0554694
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 3,
+     "firstContext": 108999,
+     "inputTotal": 330458,
+     "outputTotal": 187,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 6094,
+     "costUsd": 0.06684090000000001
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 17640,
+     "inputTotal": 96657,
+     "outputTotal": 460,
+     "toolCalls": 6,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 10103,
+     "costUsd": 0.05362780000000001
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 20680,
+     "inputTotal": 90731,
+     "outputTotal": 299,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 10308,
+     "costUsd": 0.062093800000000005
+    }
+   },
+   "create": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17885,
+     "inputTotal": 119531,
+     "outputTotal": 594,
+     "toolCalls": 5,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 11444,
+     "costUsd": 0.056137000000000006
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 3,
+     "firstContext": 109077,
+     "inputTotal": 330471,
+     "outputTotal": 478,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 8243,
+     "costUsd": 0.0690502
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 17718,
+     "inputTotal": 94634,
+     "outputTotal": 603,
+     "toolCalls": 4,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 10688,
+     "costUsd": 0.0499844
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 20757,
+     "inputTotal": 88670,
+     "outputTotal": 526,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 9949,
+     "costUsd": 0.06049789999999999
+    }
+   },
+   "export": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 17824,
+     "inputTotal": 88394,
+     "outputTotal": 453,
+     "toolCalls": 3,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 10459,
+     "costUsd": 0.0634583
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109015,
+     "inputTotal": 446409,
+     "outputTotal": 866,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 10949,
+     "costUsd": 0.0962317
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17656,
+     "inputTotal": 124501,
+     "outputTotal": 1233,
+     "toolCalls": 7,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 13482,
+     "costUsd": 0.0776829
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20695,
+     "inputTotal": 120646,
+     "outputTotal": 989,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 11440,
+     "costUsd": 0.0845421
+    }
+   },
+   "initiative": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17829,
+     "inputTotal": 142663,
+     "outputTotal": 673,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 16881,
+     "costUsd": 0.08774069999999999
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109019,
+     "inputTotal": 449215,
+     "outputTotal": 734,
+     "toolCalls": 6,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 11383,
+     "costUsd": 0.10048460000000001
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17660,
+     "inputTotal": 132118,
+     "outputTotal": 1101,
+     "toolCalls": 10,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 17248,
+     "costUsd": 0.0893784
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20703,
+     "inputTotal": 130922,
+     "outputTotal": 889,
+     "toolCalls": 7,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 16057,
+     "costUsd": 0.09767769999999999
+    }
+   },
+   "profile": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 4,
+     "firstContext": 17845,
+     "inputTotal": 81715,
+     "outputTotal": 280,
+     "toolCalls": 3,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 14502,
+     "costUsd": 0.051037700000000005
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 2,
+     "firstContext": 109038,
+     "inputTotal": 218315,
+     "outputTotal": 193,
+     "toolCalls": 1,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 11508,
+     "costUsd": 0.04846
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 17679,
+     "inputTotal": 94841,
+     "outputTotal": 477,
+     "toolCalls": 5,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 17038,
+     "costUsd": 0.04801509999999999
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 3,
+     "firstContext": 20715,
+     "inputTotal": 64426,
+     "outputTotal": 288,
+     "toolCalls": 2,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 16824,
+     "costUsd": 0.0506466
+    }
+   },
+   "update": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17829,
+     "inputTotal": 137827,
+     "outputTotal": 451,
+     "toolCalls": 5,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 10681,
+     "costUsd": 0.0772906
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109017,
+     "inputTotal": 446895,
+     "outputTotal": 383,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 10707,
+     "costUsd": 0.0915049
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 7,
+     "firstContext": 17663,
+     "inputTotal": 148948,
+     "outputTotal": 792,
+     "toolCalls": 9,
+     "lookupCalls": 6,
+     "toolErrors": 0,
+     "wallMs": 10904,
+     "costUsd": 0.08092119999999998
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20701,
+     "inputTotal": 125033,
+     "outputTotal": 509,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 10461,
+     "costUsd": 0.08324669999999999
+    }
+   },
+   "wiki": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 6,
+     "firstContext": 17883,
+     "inputTotal": 120294,
+     "outputTotal": 618,
+     "toolCalls": 5,
+     "lookupCalls": 2,
+     "toolErrors": 1,
+     "wallMs": 13418,
+     "costUsd": 0.0582631
+    },
+    "mcp-eager": {
+     "n": 1,
+     "passed": 1,
+     "requests": 4,
+     "firstContext": 109073,
+     "inputTotal": 495492,
+     "outputTotal": 531,
+     "toolCalls": 4,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 9668,
+     "costUsd": 0.15757700000000002
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 8,
+     "firstContext": 17714,
+     "inputTotal": 220076,
+     "outputTotal": 1046,
+     "toolCalls": 8,
+     "lookupCalls": 4,
+     "toolErrors": 2,
+     "wallMs": 17675,
+     "costUsd": 0.1531516
+    },
+    "mcp-search": {
+     "n": 3,
+     "passed": 3,
+     "requests": 5,
+     "firstContext": 20753,
+     "inputTotal": 171846,
+     "outputTotal": 638,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 12357,
+     "costUsd": 0.148771
+    }
+   }
+  }
+ },
+ "codex/default": {
+  "arms": {
+   "cli": {
+    "n": 30,
+    "passed": 30,
+    "requests": 0.0,
+    "firstContext": 0.0,
+    "inputTotal": 106504.0,
+    "outputTotal": 335.0,
+    "toolCalls": 6.0,
+    "lookupCalls": 3.0,
+    "toolErrors": 0.0,
+    "wallMs": 22296.5,
+    "costUsd": 0.0
+   },
+   "mcp-meta": {
+    "n": 30,
+    "passed": 30,
+    "requests": 0.0,
+    "firstContext": 0.0,
+    "inputTotal": 136929.5,
+    "outputTotal": 377.5,
+    "toolCalls": 6.5,
+    "lookupCalls": 4.0,
+    "toolErrors": 0.0,
+    "wallMs": 27193.5,
+    "costUsd": 0.0
+   },
+   "mcp-ops": {
+    "n": 30,
+    "passed": 30,
+    "requests": 0.0,
+    "firstContext": 0.0,
+    "inputTotal": 109755.5,
+    "outputTotal": 273.5,
+    "toolCalls": 2.5,
+    "lookupCalls": 0.0,
+    "toolErrors": 0.0,
+    "wallMs": 22372.0,
+    "costUsd": 0.0
+   }
+  },
+  "tasks": {
+   "aggregate": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 82487,
+     "outputTotal": 223,
+     "toolCalls": 4,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 17573,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 112957,
+     "outputTotal": 274,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 40697,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 74018,
+     "outputTotal": 157,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 18237,
+     "costUsd": 0
+    }
+   },
+   "block": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 137414,
+     "outputTotal": 349,
+     "toolCalls": 8,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 22162,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 139725,
+     "outputTotal": 373,
+     "toolCalls": 7,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 25654,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 166460,
+     "outputTotal": 315,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 22478,
+     "costUsd": 0
+    }
+   },
+   "bulk": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 167734,
+     "outputTotal": 532,
+     "toolCalls": 11,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 31505,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 166415,
+     "outputTotal": 553,
+     "toolCalls": 11,
+     "lookupCalls": 4,
+     "toolErrors": 0,
+     "wallMs": 30872,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 99937,
+     "outputTotal": 330,
+     "toolCalls": 7,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 24452,
+     "costUsd": 0
+    }
+   },
+   "count": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 81132,
+     "outputTotal": 153,
+     "toolCalls": 4,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 17088,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 113563,
+     "outputTotal": 236,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 20153,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 74451,
+     "outputTotal": 120,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 16014,
+     "costUsd": 0
+    }
+   },
+   "create": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 82595,
+     "outputTotal": 311,
+     "toolCalls": 4,
+     "lookupCalls": 1,
+     "toolErrors": 0,
+     "wallMs": 17536,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 110912,
+     "outputTotal": 317,
+     "toolCalls": 4,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 23841,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 74028,
+     "outputTotal": 243,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 19930,
+     "costUsd": 0
+    }
+   },
+   "export": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 103899,
+     "outputTotal": 383,
+     "toolCalls": 5,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 23338,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 136757,
+     "outputTotal": 436,
+     "toolCalls": 6,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 27775,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 96607,
+     "outputTotal": 329,
+     "toolCalls": 2,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 24753,
+     "costUsd": 0
+    }
+   },
+   "initiative": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 116201,
+     "outputTotal": 481,
+     "toolCalls": 11,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 24715,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 143205,
+     "outputTotal": 476,
+     "toolCalls": 11,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 29808,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 125612,
+     "outputTotal": 366,
+     "toolCalls": 6,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 23388,
+     "costUsd": 0
+    }
+   },
+   "profile": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 81098,
+     "outputTotal": 222,
+     "toolCalls": 6,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 19699,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 90589,
+     "outputTotal": 214,
+     "toolCalls": 3,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 21228,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 133180,
+     "outputTotal": 237,
+     "toolCalls": 1,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 22721,
+     "costUsd": 0
+    }
+   },
+   "update": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 110248,
+     "outputTotal": 326,
+     "toolCalls": 7,
+     "lookupCalls": 3,
+     "toolErrors": 0,
+     "wallMs": 22431,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 137102,
+     "outputTotal": 395,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 27186,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 115242,
+     "outputTotal": 271,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 23206,
+     "costUsd": 0
+    }
+   },
+   "wiki": {
+    "cli": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 128018,
+     "outputTotal": 410,
+     "toolCalls": 6,
+     "lookupCalls": 2,
+     "toolErrors": 0,
+     "wallMs": 27016,
+     "costUsd": 0
+    },
+    "mcp-meta": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 193365,
+     "outputTotal": 421,
+     "toolCalls": 8,
+     "lookupCalls": 5,
+     "toolErrors": 0,
+     "wallMs": 31934,
+     "costUsd": 0
+    },
+    "mcp-ops": {
+     "n": 3,
+     "passed": 3,
+     "requests": 0,
+     "firstContext": 0,
+     "inputTotal": 140562,
+     "outputTotal": 275,
+     "toolCalls": 3,
+     "lookupCalls": 0,
+     "toolErrors": 0,
+     "wallMs": 21232,
+     "costUsd": 0
+    }
+   }
+  }
+ }
+}
