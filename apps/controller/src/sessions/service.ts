@@ -1053,11 +1053,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Writes a `runtime.warning` event stamped `at` to the session's stream, in the caller's
-   * transaction, and announces the session's transcript. The write moves the
-   * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
-   * cached ingest state is dropped once the transaction commits, and ingest
-   * reads the new offset. `mcpServers` is given when the warning is about
-   * MCP Servers.
+   * transaction, and announces the session's transcript. The row takes a
+   * sequence number of its own (`sessions.appendRuntimeWarning`), so it is safe
+   * while a runner's turn runs: it moves neither the runner's sequence nor the
+   * text held for the session's open items. `mcpServers` is given when the
+   * warning is about MCP Servers.
    */
   const appendRuntimeWarning = (
     sessionId: string,
@@ -1070,9 +1070,6 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
-      yield* afterCommit(() => {
-        tracking.delete(sessionId);
-      });
       yield* announce({ _tag: "transcript", sessionId });
     });
 

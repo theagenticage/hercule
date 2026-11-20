@@ -28,7 +28,14 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bracketIpv6 } from "@hercule/home";
 import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
-import { listenerOptions, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
+import {
+  buildPerimeterWarning,
+  closeMcpStreams,
+  listenerOptions,
+  operationLayers,
+  serve,
+  webBundle,
+} from "./http";
 import { LOCAL_RUNNER } from "./runners";
 
 export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
@@ -170,6 +177,9 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     yield* stopped;
     console.log("Stopping Hercule.");
     yield* Effect.logInfo("Stopping Hercule.");
+    // The gateway's streams never end by themselves, and the listener's drain
+    // waits for every open response, so they are closed before it starts.
+    yield* closeMcpStreams;
     // Before the listener stops: the local runner says goodbye over its socket
     // to this controller, and a controller that had already stopped listening
     // would treat that as a machine that disappeared.

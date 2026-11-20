@@ -107,7 +107,7 @@ import {
 } from "../secrets";
 import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
 import { HarnessReleasesLayer } from "../harnesses";
-import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
+import { PermissionProfilesLayer, SessionTokens, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
   PluginConfigsLayer,
@@ -146,6 +146,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { McpGateway } from "../mcp-gateway";
 import { McpServerCalls } from "../mcp-servers";
 import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
@@ -522,6 +523,13 @@ export interface ServerHarness {
    */
   readonly mcpServerCalls: McpServerCalls["Service"];
   /**
+   * The MCP Gateway, and the Session Tokens it resolves a caller with. A test
+   * that needs a response before its body is read, which the HTTP listener
+   * never allows, calls `handle` directly.
+   */
+  readonly mcpGateway: McpGateway["Service"];
+  readonly sessionTokens: SessionTokens["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -725,6 +733,8 @@ export const withServer = (
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
         const mcpServerCalls = yield* McpServerCalls;
+        const mcpGateway = yield* McpGateway;
+        const sessionTokens = yield* SessionTokens;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -750,6 +760,8 @@ export const withServer = (
             secrets,
             promotion,
             mcpServerCalls,
+            mcpGateway,
+            sessionTokens,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );

@@ -333,6 +333,19 @@ const make = Effect.gen(function* () {
       return Effect.forEach(ended, closeWhenDone, { concurrency: "unbounded", discard: true });
     });
 
+  /**
+   * Closes the one upstream session a token holds for a server, for a server
+   * the token's session is no longer served. Does nothing when there is none.
+   */
+  const closeUpstreamSession = (upstreamScope: string, serverId: string): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const slot = slots.get(upstreamScope)?.get(serverId);
+      if (slot === undefined) return Effect.void;
+      forgetSlot(slot);
+      slot.forced = true;
+      return closeWhenDone(slot);
+    });
+
   yield* Effect.addFinalizer(() =>
     Effect.forEach([...slots.keys()], closeUpstreamScope, { discard: true }),
   );
@@ -635,7 +648,7 @@ const make = Effect.gen(function* () {
         );
     });
 
-  return { readServedServers, callTool, closeUpstreamScope };
+  return { readServedServers, callTool, closeUpstreamScope, closeUpstreamSession };
 });
 
 /** The calls of the MCP Gateway to outside MCP servers. */

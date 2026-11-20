@@ -6,7 +6,7 @@
 import * as Effect from "effect/Effect";
 import { McpGateway } from "./service";
 
-export { McpGateway, McpGatewayLayer, type McpCaller } from "./service";
+export { buildUnauthorizedResponse, McpGateway, McpGatewayLayer, type McpCaller } from "./service";
 
 /** Follows what each session is served and tells its open streams; runs for the life of the fiber. */
 export const runMcpGatewayFollower: Effect.Effect<never, never, McpGateway> = Effect.flatMap(

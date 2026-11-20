@@ -29,6 +29,8 @@ export interface ServedProjection {
   readonly fingerprint: string;
   /** Tools that got no unique name and are not served. */
   readonly leftOut: ReadonlyArray<ToolKey>;
+  /** The ids of the servers the session is served, whether or not they have a tool. */
+  readonly servedServerIds: ReadonlySet<string>;
 }
 
 /**
@@ -97,7 +99,13 @@ export const buildProjection = ({
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ instructions, tools: tools.map((one) => [one.name, one.definition]) }))
     .digest("hex");
-  return { tools, instructions, fingerprint, leftOut: allocated.leftOut };
+  return {
+    tools,
+    instructions,
+    fingerprint,
+    leftOut: allocated.leftOut,
+    servedServerIds: new Set(served.map(({ server }) => server.id)),
+  };
 };
 
 /** Returns `reservations` with the names of `tools` added, once the gateway has sent them. */

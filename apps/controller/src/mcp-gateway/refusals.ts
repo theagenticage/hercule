@@ -28,12 +28,33 @@ export const buildMissingGrantRefusal = (): Refusal => ({
     "Ask the user to add it to the profile.",
 });
 
-/** No server of the session has a tool of this name. */
+/** The longest part of a caller's tool name that a message repeats. */
+const MAX_SHOWN_TOOL_NAME_LENGTH = 64;
+
+/**
+ * Returns a tool name the caller sent, made safe to repeat in a message that
+ * is stored in the Thread: characters that no tool name has become `?`, and
+ * the name is cut at 64 characters. The request body may be 1 MiB, so an
+ * unbounded name would reach the Thread's transcript as written.
+ */
+const showCallerToolName = (toolName: string): string => {
+  const safe = toolName.replace(/[^A-Za-z0-9_.-]/g, "?");
+  return safe.length > MAX_SHOWN_TOOL_NAME_LENGTH
+    ? `${safe.slice(0, MAX_SHOWN_TOOL_NAME_LENGTH)}...`
+    : safe;
+};
+
+/**
+ * The tool name was not sent to this session by `tools/list` since the
+ * controller started: no server of the session has it, or the harness
+ * remembers it from before a restart.
+ */
 export const buildUnknownToolRefusal = (toolName: string): Refusal => ({
   reason: "unknown-tool",
   message:
-    `No MCP tool named "${toolName}" is offered to this session. ` +
-    "Ask the user to check which MCP servers are in this Thread's list.",
+    `No MCP tool named "${showCallerToolName(toolName)}" is offered to this session right now. ` +
+    "List the tools again and call one of those. If the tool is still missing, " +
+    "ask the user to check which MCP servers are in this Thread's list.",
 });
 
 /** The server the name belongs to is not in the session's list any more. */
