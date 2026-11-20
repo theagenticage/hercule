@@ -1502,6 +1502,16 @@ export type AccountUsageReported = Schema.Schema.Type<typeof AccountUsageReporte
 export const GITHUB_TOKEN_CAPABILITY = "github-token";
 
 /**
+ * The capability for MCP Servers in a start frame (spec 21 section 4.4). The
+ * runner lists it at hello when it gives the harness the one entry that points
+ * it at the MCP Gateway (`SessionSpec.mcpServers`); the controller sends that
+ * entry only to a runner that lists it. A runner without it still gets the
+ * start, only without the entry, so every MCP Server in the session's list is
+ * left out with the reason `runner-too-old`.
+ */
+export const MCP_SERVERS_CAPABILITY = "mcpServers";
+
+/**
  * Sent by the runner when a session's `gh` command needs a GitHub token and
  * the runner's in-memory copy of its Connection's token has gone stale: too
  * old, or close to its expiry. The `gh` shim in the session asks the runner,

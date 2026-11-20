@@ -62,6 +62,7 @@ import {
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
+import { mcpServerListRule, requireMcpManage } from "../../mcp-servers";
 import { PluginHost, type RegisteredHarness } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import {
@@ -140,6 +141,14 @@ export const SessionInputDeadline = Context.Reference<Duration.Duration>(
 );
 
 const HAS_EXITED = "that session has exited";
+
+/**
+ * The refusal of `session.update` with a non-empty `mcpServerIds` on a
+ * session that is not a Thread. Only a Thread has MCP servers until Agents can
+ * have them.
+ */
+const THREAD_ONLY_MCP_SERVERS =
+  "only a Thread can have MCP servers for now (#222); an agent's, a workflow step's and an assistant's session cannot, so send an empty mcpServerIds or leave it out";
 
 /**
  * The refusal of `session.archive` for a session or a run, which holds the
@@ -223,6 +232,7 @@ const make = Effect.gen(function* () {
   const taint = yield* sessionTaint;
   const dedupKeys = yield* dedupKeyRepository;
   const providerAccounts = yield* providerAccountRepository;
+  const mcpServerLists = yield* mcpServerListRule;
   const host = yield* PluginHost;
   const resumableNativeSession = yield* resumable;
   const connections = yield* RunnerConnections;
@@ -1150,13 +1160,23 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes the model selection the session uses from its next turn on.
-     * Returns the updated session. Fails if the session is archived, has
-     * exited or an option is not offered.
+     * Changes the model selection the session uses from its next turn on,
+     * and replaces its list of MCP Servers when the call gives `mcpServerIds`.
+     * Returns the updated session. Fails if the session is archived, or if a
+     * call that changes the model finds the session exited or an option not
+     * offered.
      *
      * The stored `spec` does not change: it is what the runner was started
      * with, and a resume or a fork reads the session's `modelSelection`
      * instead.
+     *
+     * A call with `mcpServerIds` also needs `mcp.manage`, and works on an
+     * exited Thread, because the list is read again at the next start. It
+     * leaves the model selection alone unless it gives `model` or `options`.
+     * The list is checked like a spawn's, and a non-empty one is refused with
+     * `Validation` on a session that is not a Thread. Entries that stay keep
+     * what the last start recorded, and the session is announced, which is
+     * what tells the gateway that the list changed.
      */
     update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -1165,16 +1185,36 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
+        if (given.mcpServerIds !== undefined) yield* requireMcpManage;
+        // A call that gives only a list leaves the model selection alone.
+        const touchesModel =
+          given.mcpServerIds === undefined ||
+          given.model !== undefined ||
+          given.options !== undefined;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const session = yield* readSession(id);
             yield* refuseArchived(session);
-            if (session.status === "exited")
+            if (touchesModel && session.status === "exited")
               return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-            const modelSelection = yield* resolveModelSelection(session, given);
-            yield* sessions.setSelection(id, modelSelection);
-            return (yield* recordComposer)({ ...session, modelSelection });
+            if (given.mcpServerIds !== undefined) {
+              if (session.agentId !== null && given.mcpServerIds.length > 0) {
+                return yield* Effect.fail(
+                  createValidationError([
+                    { path: ["mcpServerIds"], message: THREAD_ONLY_MCP_SERVERS },
+                  ]),
+                );
+              }
+              const entries = yield* mcpServerLists.resolveList(given.mcpServerIds, [
+                "mcpServerIds",
+              ]);
+              yield* sessions.setMcpServers(id, entries);
+            }
+            if (touchesModel) {
+              yield* sessions.setSelection(id, yield* resolveModelSelection(session, given));
+            }
+            return (yield* recordComposer)(yield* readSession(id));
           }),
         );
       }),

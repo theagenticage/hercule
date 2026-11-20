@@ -396,6 +396,35 @@ export const createServer = async (
   return (await response.json()) as McpServerRecord;
 };
 
+/** One server `createServers` made: its id and its name. */
+export interface ServerRef {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * Creates one MCP Server for each name and returns them in that order. Each
+ * server gets a Connection of its own external account, because a server is
+ * unique per account, so two servers may share a name.
+ */
+export const createServers = async (
+  controller: Pick<SetUpController, "harness" | "base" | "token">,
+  names: ReadonlyArray<string>,
+): Promise<ReadonlyArray<ServerRef>> => {
+  const servers: Array<ServerRef> = [];
+  for (const [index, name] of names.entries()) {
+    const connectionId = await insertPastedConnection(
+      controller.harness,
+      "acme/desk",
+      "t0ken",
+      `desk-${String(index)}`,
+    );
+    const server = await createServer(controller, { connectionId, name });
+    servers.push({ id: server.id, name });
+  }
+  return servers;
+};
+
 export const requestUpdate = (controller: SetUpController, id: string, body: unknown) =>
   send("PATCH", controller.base, `/api/v1/mcp-servers/${id}`, { body, token: controller.token });
 

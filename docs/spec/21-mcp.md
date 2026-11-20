@@ -325,7 +325,7 @@ Every list write needs the grant `mcp.manage`, checked inside the operation in a
 
 - Every session on a runner and harness that support it gets one entry, the gateway's, named `tools`: its runner lists the capability `mcpServers` and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
 - The cost is one idle connection per session to the controller. Codex also shows the model one line about the server.
-- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212).
+- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* Codex is `unsupported` until [#1209](https://github.com/theagenticage/hercule/issues/1209) maps the entry in its adapter ([./06-providers.md](./06-providers.md#4-harnessadapter), decided by Rogier, 2026-11-20).
 - Tool search is the harness's own. The gateway offers no search tool.
 
 ## 5. Credentials and status

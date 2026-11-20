@@ -57,6 +57,7 @@ import {
 } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { ExternalEntityService } from "../../external-entities";
+import { mcpServerListRule, requireMcpManage, type ListedMcpServer } from "../../mcp-servers";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
@@ -95,7 +96,7 @@ import {
   type TaskSource,
   type TitleParts,
 } from "../../sessions";
-import { Settings, type SettingError } from "../../settings";
+import { Settings, SettingsOperations, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -213,6 +214,13 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
 };
 
 const NO_SUCH_PROJECT_NAMED = "no such project";
+
+/**
+ * The error message when a spawn from an Agent gives a list of MCP Servers.
+ * An Agent's session has an empty list until Agents can have one.
+ */
+const AGENT_MCP_SERVERS_REFUSED =
+  "an agent's session cannot have MCP servers yet (#222); leave mcpServerIds out, or spawn a Thread without agentId";
 
 /** The error message when a session starts a Thread on a new Task made from things. */
 const NEW_TASK_IS_THE_USERS =
@@ -364,6 +372,11 @@ interface Placing {
   readonly titleParts?: TitleParts | undefined;
   /** The session's role, or undefined for none. */
   readonly role: string | undefined;
+  /**
+   * The session's own list of MCP Servers, checked, in list order. Absent for
+   * a session that places with none.
+   */
+  readonly mcpServers?: ReadonlyArray<ListedMcpServer>;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -401,6 +414,8 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
+  const settingsOperations = yield* SettingsOperations;
+  const mcpServerLists = yield* mcpServerListRule;
   const promotion = yield* PromotionState;
   const one = readSessionOrFail(rows);
   const resumableNativeSession = yield* resumable;
@@ -901,6 +916,31 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Returns the ids of the MCP Servers a Thread starts with when its spawn
+   * gives no list (spec 21 section 4.3):
+   *
+   * - a Thread a session starts gets a copy of the calling session's list;
+   * - a Thread the user starts gets the list of its Project, or, when it has
+   *   no Project, the user's setting `thread.mcpServerIds`. A Thread in a
+   *   Project never reads the setting.
+   */
+  const chooseDefaultMcpServerIds = (
+    actor: Actor,
+    caller: StoredSession | undefined,
+    project: Option.Option<{ readonly mcpServerIds: ReadonlyArray<string> }>,
+  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError> => {
+    if (caller !== undefined) {
+      return Effect.succeed(caller.mcpServers.map((entry) => entry.mcpServerId));
+    }
+    if (Option.isSome(project)) return Effect.succeed(project.value.mcpServerIds);
+    // A run or a plugin cannot start a Thread (refused before this), so the
+    // actor here is the user.
+    return actor._tag === "user"
+      ? settingsOperations.readThreadMcpServerIds(actor.userId)
+      : Effect.succeed([]);
+  };
+
+  /**
    * Writes the workspace and the session in one transaction, joining the
    * caller's when there is one. Returns the new session's id, the workspace
    * frame the runner must be told about after the commit, if any, and the id
@@ -958,6 +998,7 @@ const make = Effect.gen(function* () {
             title: open.title,
             titleParts: open.titleParts,
             role: open.role,
+            mcpServers: open.mcpServers,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
@@ -1413,6 +1454,16 @@ const make = Effect.gen(function* () {
         if (decoded.newTask !== undefined && actor._tag !== "user") {
           return yield* Effect.fail(createForbiddenError("session.spawn", NEW_TASK_IS_THE_USERS));
         }
+        if (decoded.mcpServerIds !== undefined) {
+          yield* requireMcpManage;
+          if (decoded.agentId !== undefined) {
+            return yield* Effect.fail(
+              createValidationError([
+                { path: ["mcpServerIds"], message: AGENT_MCP_SERVERS_REFUSED },
+              ]),
+            );
+          }
+        }
         // A repeat of a call that already committed returns its session before
         // anything is read: the things may have become unreadable since (the
         // plugin was disabled, the account lost access), and the repeat must
@@ -1511,6 +1562,14 @@ const make = Effect.gen(function* () {
               createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
             );
           }
+          // An Agent's session has no MCP Servers yet. The list is checked
+          // here, inside the transaction that writes the session, so a server
+          // deleted at the same moment cannot slip into it.
+          const mcpServers = yield* mcpServerLists.resolveList(
+            decoded.mcpServerIds ??
+              (agent === undefined ? yield* chooseDefaultMcpServerIds(actor, caller, project) : []),
+            ["mcpServerIds"],
+          );
           // A Thread that names no model starts on its project's default entry
           // when the project has a profile (spec 06 section 17.9). An Agent
           // keeps its own entry.
@@ -1678,6 +1737,7 @@ const make = Effect.gen(function* () {
                       .find((title) => title.length > 0),
                   },
             role: decoded.role,
+            mcpServers,
             kind: "session.spawned",
             projectId,
             taskSource: {
@@ -1758,6 +1818,13 @@ const make = Effect.gen(function* () {
           if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
           }
+          // A fork a session makes copies that session's list, and a fork the
+          // user makes copies its parent's. An Agent's lineage has no list yet.
+          const listSource = actor._tag === "session" ? yield* one(actor.sessionId) : parent;
+          const mcpServers = yield* mcpServerLists.resolveList(
+            parent.agentId === null ? listSource.mcpServers.map((entry) => entry.mcpServerId) : [],
+            ["mcpServerIds"],
+          );
           const nativeSessionId = yield* resumableNativeSession(parent);
           // Called only for its failures: it fails when the account can no
           // longer run in the harness, or this build no longer carries it. It
@@ -1797,6 +1864,7 @@ const make = Effect.gen(function* () {
             // A fork takes no role from its parent: a fork of a Thread gets a
             // generated one, like any Thread.
             role: undefined,
+            mcpServers,
             kind: "session.continued",
             projectId: parent.projectId ?? undefined,
             // A fork takes its parent's Task when that is live, and no fork
@@ -1831,6 +1899,7 @@ export const PlacementLayer: Layer.Layer<
   | RunnerConnections
   | PermissionProfiles
   | Settings
+  | SettingsOperations
   | PluginHost
   | Dispatch
   | PromotionState

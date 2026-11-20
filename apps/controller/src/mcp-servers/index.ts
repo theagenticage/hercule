@@ -6,6 +6,13 @@
  */
 export { McpServerChecks, McpServerChecksLayer, McpUpstreamHttpClient } from "./checks";
 export { runConnectionFollower } from "./follower";
+export {
+  buildLeftOutWarning,
+  decideLeftOutReason,
+  type LeftOutServer,
+  type ServerAvailability,
+  type StartDelivery,
+} from "./left-out";
 export { McpServerListHolders } from "./list-holders";
 export { mcpServerListRule, requireMcpManage, type ListedMcpServer } from "./list-rule";
 export { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from "./repository";

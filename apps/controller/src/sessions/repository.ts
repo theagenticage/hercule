@@ -1162,11 +1162,18 @@ const make = Effect.gen(function* () {
      * dropped as a replay by `append`. The session's cached ingest state
      * still holds the old offset, so the caller must drop it once the
      * transaction commits.
+     *
+     * `mcpServers` is given when the warning is about MCP Servers: it names
+     * each server and why (spec 21 section 3.8).
      */
     appendRuntimeWarning: (
       sessionId: string,
       message: string,
       at: string,
+      mcpServers?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerLeftOutReason;
+      }>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
@@ -1176,6 +1183,7 @@ const make = Effect.gen(function* () {
           sessionId,
           at,
           message,
+          ...(mcpServers === undefined ? {} : { mcpServers }),
         };
         // Two scalar subqueries rather than one SELECT with both maxima:
         // SQLite answers a lone MAX from the end of an index, and each
@@ -1536,6 +1544,23 @@ const make = Effect.gen(function* () {
           { discard: true },
         );
       }),
+
+    /** Returns the session's list of MCP Servers in list order, empty when it has none. */
+    readMcpServers: (sessionId: string): Effect.Effect<ReadonlyArray<SessionMcpServer>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly mcp_server_id: Uint8Array;
+          readonly name: string;
+          readonly left_out: McpServerLeftOutReason | null;
+        }>`SELECT mcp_server_id, name, left_out FROM session_mcp_servers
+           WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`,
+        (rows) =>
+          rows.map((row) => ({
+            mcpServerId: uuidToString(row.mcp_server_id),
+            name: row.name,
+            leftOut: row.left_out,
+          })),
+      ),
 
     /**
      * Records why each listed server could not be called at the session's

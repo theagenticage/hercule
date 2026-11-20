@@ -989,7 +989,10 @@ const ExternalEntityDomainLayer = ExternalEntityServiceLayer.pipe(
  * Placement, provided the External Entity service it needs. It is one layer
  * so every group that uses placement shares one instance of it.
  */
-const PlacementDomainLayer = PlacementLayer.pipe(Layer.provide(ExternalEntityDomainLayer));
+const PlacementDomainLayer = PlacementLayer.pipe(
+  Layer.provide(ExternalEntityDomainLayer),
+  Layer.provide(SettingsOperationsLayer),
+);
 
 /**
  * The run service with the services it is built from.

@@ -10,6 +10,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { McpServerStatus } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
+import type { ServerAvailability } from "./left-out";
 
 /**
  * One tool as the MCP server listed it. The gateway answers `tools/list` from
@@ -178,6 +179,33 @@ const make = Effect.gen(function* () {
             sql<{ readonly id: Uint8Array; readonly name: string }>`
               SELECT id, name FROM mcp_servers WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
             (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.name])),
+          ),
+
+    /**
+     * Returns the switch and the status of each server that exists, by its id,
+     * in one query and without the tool definitions. A session's start reads
+     * it to decide which servers it can call. An id that no server has is left
+     * out of the map.
+     */
+    readAvailability: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ServerAvailability>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly id: Uint8Array;
+              readonly enabled: number;
+              readonly status: McpServerStatus;
+            }>`SELECT id, enabled, status FROM mcp_servers
+               WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) =>
+              new Map(
+                rows.map((row) => [
+                  uuidToString(row.id),
+                  { enabled: row.enabled === 1, status: row.status },
+                ]),
+              ),
           ),
 
     /** Returns every server, sorted by name and then by id. */
