@@ -825,9 +825,8 @@ export const buildStatusFromFailure = (
 
 /**
  * Converts a Connection's failure to give credentials into the status an MCP
- * Server shows for it, with a detail a person can read, and what made the
- * status: `connection` when the Connection needs the user, `null` when trying
- * again may work. The text is fixed here and never the Connection's own
+ * Server shows for it, with a detail a person can read, and `cause`
+ * `connection` when the Connection needs the user. The text is fixed here and never the Connection's own
  * message, which may hold what the provider sent.
  */
 export const buildStatusFromUnavailable = (
@@ -837,7 +836,7 @@ export const buildStatusFromUnavailable = (
 ): {
   readonly status: "unreachable" | "error" | "needs-sign-in";
   readonly detail: string;
-  readonly cause: "connection" | null;
+  readonly cause?: "connection";
 } => {
   switch (error.reason) {
     case "needs-sign-in":
@@ -856,7 +855,6 @@ export const buildStatusFromUnavailable = (
       return {
         status: "unreachable",
         detail: `${displayName} could not be reached to refresh the sign-in`,
-        cause: null,
       };
     case "credentials-replaced":
       // The Connection is fine: the user reconnected twice while the sign-in
@@ -864,27 +862,24 @@ export const buildStatusFromUnavailable = (
       return {
         status: "unreachable",
         detail: `The sign-in of ${connection.label} was replaced while it was being refreshed`,
-        cause: null,
       };
     case "no-credentials":
       return {
         status: "error",
         detail: `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
-        cause: null,
       };
     case "invalid-config":
       return {
         status: "error",
         detail: `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
-        cause: null,
       };
     case "missing":
-      return { status: "error", detail: "The Connection of this server is missing", cause: null };
+      return { status: "error", detail: "The Connection of this server is missing" };
     case "not-serving":
     case "refused":
       // Only a caller that gives the refresh a guard gets these two, and a
       // check gives none.
-      return { status: "error", detail: "The refresh of the sign-in was refused", cause: null };
+      return { status: "error", detail: "The refresh of the sign-in was refused" };
   }
 };
 
