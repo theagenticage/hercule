@@ -462,3 +462,53 @@ describe("runner metrics", () => {
     ).rejects.toThrow(/is not one of five-minutes, hour/);
   });
 });
+
+// `mcp-server create` fills its `source` object from three flags and a fixed kind.
+describe("an object field filled from several flags", () => {
+  const mcpServerCreate = lookUpCommand("mcp-server", "create");
+
+  it("builds the object from the flags and the fixed kind", async () => {
+    const args = await parseArguments(
+      mcpServerCreate,
+      ["--plugin", "sentry/sentry", "--connection", ID, "--name", "work_sentry"],
+      refuseStdinRead,
+    );
+    expect(args.payload).toEqual({
+      source: {
+        kind: "plugin",
+        contributionId: "sentry/sentry",
+        connectionId: ID,
+        name: "work_sentry",
+      },
+    });
+  });
+
+  it("leaves the optional name out", async () => {
+    const args = await parseArguments(
+      mcpServerCreate,
+      ["--connection", ID, "--plugin", "sentry/sentry"],
+      refuseStdinRead,
+    );
+    expect(args.payload).toEqual({
+      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: ID },
+    });
+  });
+
+  it("reports a missing key by its flag, not by its place in the payload", async () => {
+    await expect(
+      parseArguments(mcpServerCreate, ["--plugin", "sentry/sentry"], refuseStdinRead),
+    ).rejects.toThrow(new UsageError("missing required --connection", "mcp-server create"));
+    await expect(parseArguments(mcpServerCreate, ["--name", "x"], refuseStdinRead)).rejects.toThrow(
+      "missing required --plugin, --connection",
+    );
+    await expect(parseArguments(mcpServerCreate, [], refuseStdinRead)).rejects.toThrow(
+      "missing required --plugin, --connection",
+    );
+  });
+
+  it("has no --source flag", async () => {
+    await expect(
+      parseArguments(mcpServerCreate, ["--source", "{}"], refuseStdinRead),
+    ).rejects.toThrow("unknown flag --source");
+  });
+});

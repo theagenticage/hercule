@@ -18,6 +18,10 @@ interface FieldRow {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly object?: {
+    readonly fixed: Record<string, string>;
+    readonly flags: Record<string, FieldRow>;
+  };
 }
 
 interface Row {
@@ -41,13 +45,22 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
 /**
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
- * field. Hidden fields are left out, like hidden rows.
+ * field. Hidden fields are left out, like hidden rows. A field filled from
+ * several flags is listed once per flag, named `<field>.<key>`.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
-      .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
+      .flatMap(([name, field]): Array<[string, string, FieldRow]> =>
+        field.object === undefined
+          ? [[id, name, field]]
+          : Object.entries(field.object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
+              id,
+              `${name}.${key}`,
+              keyRow,
+            ]),
+      ),
   );
 
 /** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */
@@ -543,6 +556,7 @@ const RESOLVES: Record<string, string> = {
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
 
+  "mcpServer.create source.connectionId": "connection.query",
   "mcpServer.read id": "mcpServer.query",
   "mcpServer.update id": "mcpServer.query",
   "mcpServer.delete id": "mcpServer.query",
@@ -651,6 +665,18 @@ describe("the contents of a visible row", () => {
     for (const [id, name, field] of listVisibleFields()) {
       expect(field.help?.trim(), `${id} field ${name} has no help`).toBeTruthy();
     }
+  });
+});
+
+describe("the mcp-server create row", () => {
+  it("fills source from three flags and the fixed kind, in the spec's spelling", () => {
+    const source = table["mcpServer.create"]?.fields?.["source"]?.object;
+    expect(source?.fixed).toEqual({ kind: "plugin" });
+    expect(Object.values(source?.flags ?? {}).map((row) => row.flag)).toEqual([
+      "plugin",
+      "connection",
+      "name",
+    ]);
   });
 });
 
