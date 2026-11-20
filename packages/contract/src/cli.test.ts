@@ -400,6 +400,9 @@ const RESOLVES: Record<string, string> = {
   "task.move projectId": "project.query",
   "task.move afterTaskId": "task.query",
   "task.move initiativeId": "initiative.query",
+  "task.query projectId": "project.query",
+  "task.create projectId": "project.query",
+  "task.update projectId": "project.query",
   "task.query initiativeId": "initiative.query",
   "task.create initiativeId": "initiative.query",
   "task.update initiativeId": "initiative.query",
@@ -437,6 +440,7 @@ const RESOLVES: Record<string, string> = {
   "initiative.close id": "initiative.query",
   "initiative.reopen id": "initiative.query",
   "initiative.delete id": "initiative.query",
+  "initiative.query projectId": "project.query",
   "initiative.create projectId": "project.query",
   "initiative.update projectId": "project.query",
 
@@ -446,10 +450,12 @@ const RESOLVES: Record<string, string> = {
   "project.create modelProfileId": "modelProfile.query",
   "project.update modelProfileId": "modelProfile.query",
 
+  "resource.query projectId": "project.query",
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
   "resource.delete id": "resource.query",
 
+  "workspace.query projectId": "project.query",
   "workspace.read id": "workspace.query",
   "workspace.inspect id": "workspace.query",
   "workspace.provision resourceId": "resource.query",

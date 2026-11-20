@@ -616,7 +616,8 @@ export const CLI = {
       },
       projectId: {
         flag: "project",
-        help: "Only tasks in this project, by its full id.",
+        help: "Only tasks in this project, by its id or a tail of eight or more characters.",
+        resolves: "project.query",
       },
       initiativeId: {
         flag: "initiative",
@@ -732,7 +733,8 @@ export const CLI = {
       },
       projectId: {
         flag: "project",
-        help: "The project this task belongs to, by its full id.",
+        help: "The project this task belongs to, by its id or a tail of eight or more characters.",
+        resolves: "project.query",
       },
       initiativeId: {
         flag: "initiative",
@@ -782,7 +784,8 @@ export const CLI = {
       priority: { flag: "priority", help: "How much this matters now." },
       projectId: {
         flag: "project",
-        help: "Move the task to this project; `null` detaches it from the one it has.",
+        help: "Move the task to this project, by its id or a tail of eight or more characters; `null` detaches it from the one it has.",
+        resolves: "project.query",
       },
       initiativeId: {
         flag: "initiative",
@@ -991,7 +994,8 @@ export const CLI = {
       },
       projectId: {
         flag: "project",
-        help: "Only initiatives that draw in this project's lane, by its full id.",
+        help: "Only initiatives that draw in this project's lane, by its id or a tail of eight or more characters.",
+        resolves: "project.query",
       },
     },
   },
@@ -2055,7 +2059,11 @@ export const CLI = {
     examples: [{ args: [] }, { args: ["--kind", "repo"] }],
     fields: {
       kind: { flag: "kind", help: "Only resources of this kind: repo, folder or mailbox." },
-      projectId: { flag: "project", help: "Only resources filed under this project." },
+      projectId: {
+        flag: "project",
+        help: "Only resources filed under this project, by its id or a tail of eight or more characters.",
+        resolves: "project.query",
+      },
     },
   },
   "resource.read": {
@@ -2186,7 +2194,8 @@ export const CLI = {
       },
       projectId: {
         flag: "project",
-        help: "Only workspaces holding a checkout of this project's repos.",
+        help: "Only workspaces holding a checkout of this project's repos, by its id or a tail of eight or more characters.",
+        resolves: "project.query",
       },
       kind: {
         flag: "kind",
