@@ -39,14 +39,16 @@ export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
  * Why an upstream call failed:
  *
  * - `unauthorized`: the server answered HTTP 401;
- * - `unreachable`: no connection, or the exchange broke off;
+ * - `unreachable`: a failure that trying again later may cure: no connection,
+ *   a connection that closed in the middle of an exchange, HTTP 5xx, or HTTP
+ *   429;
  * - `timeout`: the server did not answer in time;
  * - `unsupported-revision`: the server speaks none of the MCP revisions we do;
  * - `too-large`: a message was over `MAX_UPSTREAM_MESSAGE_BYTES`;
  * - `not-on-origin`: the plugin built a URL outside its server's origin, so
  *   nothing was sent;
  * - `protocol`: the server answered, but not with something we can use (a
- *   redirect, another HTTP error, a message that is not MCP).
+ *   redirect, an HTTP 4xx other than 401 and 429, a message that is not MCP).
  */
 const UPSTREAM_FAILURE_REASONS = [
   "unauthorized",
@@ -129,15 +131,53 @@ export const checkUrlOnOrigin = (origin: string, url: string): UpstreamError | u
   return allowed ? undefined : buildFailure("not-on-origin");
 };
 
+/** The newest MCP revision. Its handshake is `server/discover`; every older one starts with `initialize`. */
+const MODERN_REVISION = "2026-07-28";
+
 /**
- * Tells whether a failure of the handshake means the server does not speak
- * the revision we asked for: HTTP 400 with MCP's unsupported-version error
- * code, or the client's own "server answered another revision" error. Every
- * other failure, a 401 included, says nothing about revisions.
+ * The JSON-RPC error codes with which a server that does not know
+ * `server/discover` can answer it: method not found, invalid request, the
+ * official TypeScript SDK's "Bad Request" (-32000, "Server not initialized"
+ * or "Unsupported protocol version"), and MCP's unsupported-version error.
  */
-const isVersionRefusal = (error: McpClientError.McpClientError): boolean => {
+const DISCOVER_REFUSAL_CODES: ReadonlyArray<number> = [
+  McpSchema.METHOD_NOT_FOUND_ERROR_CODE,
+  McpSchema.INVALID_REQUEST_ERROR_CODE,
+  -32000,
+  McpSchema.UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
+];
+
+/** The HTTP statuses with which a server that does not know `server/discover` can answer it. */
+const DISCOVER_REFUSAL_STATUSES: ReadonlyArray<number> = [400, 404, 405];
+
+/**
+ * Tells whether the failure of a handshake shows that the server does not
+ * speak the revision that was tried, so the next older revision should be
+ * tried (MCP's versioning rules):
+ *
+ * - The modern handshake, `server/discover`, is unknown to every older
+ *   server, and they answer it in different ways. It counts as refused on
+ *   HTTP 400, 404 or 405, on a JSON-RPC error with one of the codes in
+ *   `DISCOVER_REFUSAL_CODES`, and when the server's answer lists no support
+ *   for the revision.
+ * - An older handshake, `initialize`, is refused when the server answers
+ *   another revision, or HTTP 400 with MCP's unsupported-version code.
+ *
+ * Every other failure says nothing about revisions and ends the attempt: a
+ * 401, 403, 429, a 5xx, a transport failure and a timeout, because another
+ * revision would not change them.
+ */
+const isVersionRefusal = (error: McpClientError.McpClientError, revision: string): boolean => {
   const reason = error.reason;
   if (reason._tag === "UnsupportedError") return true;
+  if (revision === MODERN_REVISION) {
+    if (reason._tag === "HttpError") return DISCOVER_REFUSAL_STATUSES.includes(reason.status);
+    return (
+      reason._tag === "ProtocolError" &&
+      reason.code !== undefined &&
+      DISCOVER_REFUSAL_CODES.includes(reason.code)
+    );
+  }
   return (
     reason._tag === "HttpError" &&
     reason.status === 400 &&
@@ -168,6 +208,11 @@ export const describeClientFailure = (
       ) {
         return buildFailure("unsupported-revision");
       }
+      if (reason.status === 429 || reason.status >= 500) {
+        return buildFailure("unreachable", {
+          message: `The server answered with HTTP status ${String(reason.status)}`,
+        });
+      }
       const message =
         reason.status >= 300 && reason.status < 400
           ? `The server answered with a redirect (HTTP ${String(reason.status)}), which is not followed`
@@ -181,12 +226,11 @@ export const describeClientFailure = (
     case "LimitError":
       return buildFailure("too-large");
     case "ClosedError":
-      return buildFailure("protocol", {
-        message:
-          reason.sessionExpired === true
-            ? "The server ended the MCP session"
-            : "The connection to the server closed",
-      });
+      // An ended MCP session is the server's answer. A closed connection is
+      // a broken exchange, which may work next time.
+      return reason.sessionExpired === true
+        ? buildFailure("protocol", { message: "The server ended the MCP session" })
+        : buildFailure("unreachable", { message: "The connection to the server closed" });
     default:
       return buildFailure("protocol");
   }
@@ -216,8 +260,8 @@ export interface UpstreamTarget {
  *
  * Revisions are tried in the order `2026-07-28`, `2025-11-25`, `2025-06-18`,
  * `2025-03-26`, with `firstRevision` moved to the front. The next one is tried
- * only when the server refuses the revision. A 401, any other 400, a timeout
- * or a transport failure ends the attempt, because another revision would not
+ * only when the server refuses the revision, as `isVersionRefusal` decides.
+ * Any other failure ends the attempt, because another revision would not
  * change it.
  *
  * Fails with an `UpstreamError`: `not-on-origin` before anything is sent, and
@@ -338,7 +382,7 @@ export const openUpstream = (
         return { client: outcome.success, revision, describeFailure };
       }
       yield* Scope.close(attemptScope, Exit.fail(outcome.failure));
-      if (!isVersionRefusal(outcome.failure)) {
+      if (!isVersionRefusal(outcome.failure, revision)) {
         return yield* Effect.fail(describeFailure(outcome.failure));
       }
     }

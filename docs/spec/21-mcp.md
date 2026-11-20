@@ -255,7 +255,13 @@ It never holds the arguments or the result.
 
 Towards servers, the gateway tries `2026-07-28` first and falls back to the older handshake by MCP's versioning rules. It remembers per server what worked.
 
-*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The revisions are tried in the order `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`. The next one is tried only when the server refuses the revision: an HTTP 400 that carries MCP's unsupported-version error, or an `initialize` answered with another revision. A 401, any other 400, a timeout or no connection ends the attempt. Effect 4.0.7's `McpClient` speaks only `2025-11-25` and `2026-07-28` and refuses a server that answers an older revision, but Sentry answered `2025-06-18`. Effect's own protocol modules for `2025-06-18` and `2025-03-26` work with the same client, so the gateway passes those to it. A server that speaks none of the four is `error`. An older server can be left with one upstream MCP session from a refused `initialize`, which it ends itself; because the revision that worked is remembered, this happens once per server.
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The revisions are tried in the order `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`. The next one is tried only when the server shows it does not speak the revision:
+
+- **The modern handshake, `server/discover`, falls back to the older `initialize` handshake whenever the server shows it does not know it.** Servers say so in different ways, and the official TypeScript SDK's does not use MCP's unsupported-version error: it answers a request before `initialize` with HTTP 400 and code -32000 ("Bad Request: Server not initialized"), and a request with a version it does not support with HTTP 400 and code -32000 ("Unsupported protocol version"). So the fallback happens on an HTTP 400, 404 or 405 to `server/discover`, and on a JSON-RPC error to it with the code method not found (-32601), invalid request (-32600), -32000 or MCP's unsupported-version code (-32022).
+- **Within the older handshake**, an `initialize` answered with another revision, or with HTTP 400 and the unsupported-version code, tries the next older revision.
+- **Nothing else falls back.** A 401, a 403, a 429, an HTTP 5xx, no connection, a connection that closes in the middle of the exchange, and a timeout end the attempt with their own status ([section 5.3](#53-status)), because another revision would not change them.
+
+Effect 4.0.7's `McpClient` speaks only `2025-11-25` and `2026-07-28` and refuses a server that answers an older revision, but Sentry answered `2025-06-18`. Effect's own protocol modules for `2025-06-18` and `2025-03-26` work with the same client, so the gateway passes those to it. A server that speaks none of the four is `error`. An older server can be left with one upstream MCP session from a refused `initialize`, which it ends itself; because the revision that worked is remembered, this happens once per server.
 
 - **Scope.** An upstream MCP session belongs to one Session Token (one harness incarnation) and one server. So a server that keeps state per MCP session never mixes two Threads, and a resume starts with fresh remote state.
 - **Opening and closing.** Its first call opens it. Concurrent first calls share one opening. It closes when the token ends, or when the server is switched off, deleted or replaced.
@@ -358,11 +364,11 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 | `checking` | From creation, or from switching on, until the first list ends. A later check does not go back to `checking`. Its result sets the status |
 | `ready` | The last list or call succeeded |
 | `needs-sign-in` | The credential is not usable ([sections 5.1](#51-a-plugin-servers-credential) and [5.2](#52-a-url-servers-sign-in)) |
-| `unreachable` | No answer: no connection, or a timeout on a check. Checked again with backoff |
-| `error` | The server answers but refuses or fails: a 401 after a working refresh, a protocol error, a revision the gateway cannot speak, or the plugin switched off |
+| `unreachable` | No usable answer, and trying again later may cure it: no connection, a connection that closes in the middle of an exchange, a timeout on a check, an HTTP 5xx, or an HTTP 429. Checked again with backoff |
+| `error` | The server answers but refuses or fails: a 401 after a working refresh, a protocol error (an answer that is not MCP, or an HTTP 4xx other than 401, 429 and the fallback cases of [section 3.10](#310-upstream-sessions)), a revision the gateway cannot speak, or the plugin switched off |
 
 - A server keeps its last stored tools in every status.
-- **Server-wide failures change the status:** no connection, a timeout on a check, a 401 after a working refresh, a protocol error and an unsupported revision. A tool result with `isError: true`, a tool-level error, or a 403 on one tool is that call's answer and changes nothing.
+- **Server-wide failures change the status:** no connection, a connection that closes mid-exchange, a timeout on a check, an HTTP 5xx or 429, a 401 after a working refresh, a protocol error and an unsupported revision. A tool result with `isError: true`, a tool-level error, or a 403 on one tool is that call's answer and changes nothing.
 - A check's result never overwrites a newer change: switching off, a reconnect, Replace or a delete.
 - The remedy for `error` is "Check now" and the detail. It is never "Reconnect".
 - A plugin server follows its Connection. A Connection that moves to `needs-reauth` moves its servers to `needs-sign-in`. This reaches `mcp-servers` through the Connection observer ([section 1.3](#13-the-domain-graph)).

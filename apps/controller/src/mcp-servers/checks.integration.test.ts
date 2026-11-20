@@ -222,26 +222,33 @@ describe("checking a server", () => {
     });
   });
 
-  it("works with a server that speaks only an older revision, and tries that revision first next time", async () => {
-    await withRig(
-      async ({ controller, fake, connect }) => {
-        const server = await createServer(controller, { connectionId: await connect() });
-        const first = await waitForResult(controller);
-        expect(first).toMatchObject({ status: "ready", protocol_version: "2025-06-18" });
-        const before = fake.requests.length;
+  it.each([
+    ["Effect's server", "2025-06-18", McpProtocol.v2025_06_18, false],
+    ["a server on the official SDK", "2025-06-18", McpProtocol.v2025_06_18, true],
+    ["a server on the official SDK", "2025-03-26", McpProtocol.v2025_03_26, true],
+  ])(
+    "works with %s that speaks only %s, and tries that revision first next time",
+    async (_name, revision, protocol, answersLikeOfficialSdk) => {
+      await withRig(
+        async ({ controller, fake, connect }) => {
+          const server = await createServer(controller, { connectionId: await connect() });
+          const first = await waitForResult(controller);
+          expect(first).toMatchObject({ status: "ready", protocol_version: revision });
+          const before = fake.requests.length;
 
-        await requestCheck(controller, server.id);
-        await eventually(
-          () => readRow(controller),
-          (row) => row.checked_at !== first.checked_at,
-        );
+          await requestCheck(controller, server.id);
+          await eventually(
+            () => readRow(controller),
+            (row) => row.checked_at !== first.checked_at,
+          );
 
-        // The first request of the second check already carries the revision that worked.
-        expect(fake.requests[before]?.protocolVersion).toBe("2025-06-18");
-      },
-      { fake: { protocols: [McpProtocol.v2025_06_18] } },
-    );
-  });
+          // The first request of the second check already carries the revision that worked.
+          expect(fake.requests[before]?.protocolVersion).toBe(revision);
+        },
+        { fake: { protocols: [protocol], answersLikeOfficialSdk } },
+      );
+    },
+  );
 
   it("goes to error for a server that speaks none of the revisions", async () => {
     await withRig(
@@ -486,6 +493,25 @@ describe("a server that cannot be reached", () => {
       { checkInterval: 20 },
     );
   });
+
+  it.each([
+    [429, "unreachable", 1],
+    [503, "unreachable", 1],
+    [403, "error", 24 * 60],
+  ])(
+    "answering every request with HTTP %i makes it %s, and it is checked again in %i minute(s)",
+    async (status, expected, minutes) => {
+      await withRig(async ({ controller, fake, connect }) => {
+        fake.refuseWithStatus = status;
+        await createServer(controller, { connectionId: await connect() });
+
+        const row = await waitForResult(controller);
+
+        expect(row.status).toBe(expected);
+        expect(readMinutesToNextCheck(row)).toBe(minutes);
+      });
+    },
+  );
 
   it("is checked again after 1 minute, not the hour it was waiting, when its user asks for a check now", async () => {
     await withRig(
