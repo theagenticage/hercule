@@ -1,0 +1,1050 @@
+/* PROTOTYPE, throwaway. The styles of the MCP prototype. Every class starts
+   with `pm-`. The screens are built from the app's own classes (settings.css,
+   connections.css, skills.css, permission-profiles.css, step.css), and these
+   rules add only what those do not have. */
+
+/* The prototype's Settings frame takes the place of the real one in the main
+   pane, so its header and body must be the pane's own flex children. */
+.pm-host {
+  display: contents;
+}
+
+/* ---------- The panel that switches scene and variant ---------- */
+/* Not part of any design: dark on every theme, so it never reads as the app.
+   It sits over the foot of the sidebar, which no scene is about, so it never
+   covers the screen being judged. */
+.pm-switcher {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 50;
+  display: grid;
+  gap: 8px;
+  width: 252px;
+  padding: 10px;
+  border-radius: 12px;
+  background: oklch(0.24 0.02 265 / 0.97);
+  color: oklch(0.93 0.01 265);
+  font-size: 12px;
+  line-height: 1.3;
+  box-shadow:
+    0 8px 28px oklch(0 0 0 / 0.35),
+    inset 0 0 0 1px oklch(0.82 0.14 80 / 0.45);
+}
+.pm-switcher-tag {
+  color: oklch(0.82 0.14 80);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pm-switcher-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: oklch(1 0 0 / 0.08);
+}
+.pm-switcher-scenes button {
+  flex: 1 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: oklch(0.8 0.01 265);
+  font-weight: 500;
+}
+.pm-switcher-scenes button:hover {
+  color: white;
+}
+.pm-switcher-scenes button[aria-pressed="true"] {
+  background: oklch(1 0 0 / 0.18);
+  color: white;
+}
+.pm-switcher-variant {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+}
+.pm-switcher-variant > span {
+  text-align: center;
+  text-wrap: balance;
+}
+.pm-switcher-variant b {
+  margin-right: 4px;
+  color: oklch(0.82 0.14 80);
+}
+.pm-switcher-variant button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: oklch(1 0 0 / 0.1);
+  color: inherit;
+}
+.pm-switcher-variant button:hover {
+  background: oklch(1 0 0 / 0.2);
+}
+.pm-switcher-variant button:disabled {
+  opacity: 0.3;
+}
+.pm-switcher-knob {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: oklch(0.75 0.01 265);
+}
+.pm-switcher-knob select {
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: oklch(1 0 0 / 0.12);
+  color: white;
+  font: inherit;
+}
+
+/* A strip inside a dialog that fills in examples. Dashed, so it never reads
+   as part of the dialog's design. */
+.pm-aid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 7px 9px;
+  border: 1px dashed color-mix(in oklab, var(--ink) 30%, transparent);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-11);
+}
+.pm-aid > span:first-child {
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pm-aid button {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.pm-aid button:hover {
+  background: var(--hover);
+}
+.pm-aid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- A server's name ---------- */
+/* One way to write a server on every screen: its name, then the label of its
+   Connection in muted type. A long name ends in an ellipsis, as a row's name
+   does. */
+.pm-server-name {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pm-server-name > b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.pm-server-name > .pm-server-account {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  text-overflow: ellipsis;
+}
+/* A table row draws every `span` inside its name cell as the muted second
+   line, so the name takes back the row's own ink and size. */
+.profile-name > .pm-server-name {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+
+/* ---------- A server's status ---------- */
+/* The Connections table's `.health`: quiet when fine, red with a dot when not. */
+.pm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.pm-status--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.pm-status--off {
+  color: var(--faint);
+}
+.pm-status .spin {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---------- Settings > MCP servers ---------- */
+/* As wide as Connections, whose table it resembles, and starting 22px under
+   the header as Skills and Permission profiles do. */
+.set-col:has(> .pm-servers) {
+  width: min(900px, 100%);
+}
+.set-body:has(> .set-col > .pm-servers),
+.set-body:has(> .set-col > .pm-record) {
+  padding-top: 22px;
+}
+.pm-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+.pm-server-head,
+.pm-server-row {
+  grid-template-columns: 34px minmax(0, 1fr) 132px 40px 230px 16px;
+}
+.pm-r,
+.pm-count {
+  text-align: right;
+}
+.pm-count {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* A row that needs sign-in or cannot be reached is tinted from its start,
+   as a Skill whose check failed is. */
+:is(.pm-server-row, .pm-switch-row).is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
+}
+:is(.pm-server-row, .pm-switch-row).is-fail::before,
+:is(.pm-server-row, .pm-switch-row).is-fail + .set-table-row::before {
+  border-top-color: transparent;
+}
+.pm-projects {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: var(--t-12);
+}
+.pm-projects {
+  color: var(--muted);
+}
+.pm-projects.is-none {
+  color: var(--faint);
+}
+/* The line under the table about Connections that could offer tools too. The
+   list's gap is 34px; the line belongs to the table above it. */
+.pm-servers > .pm-offer-note {
+  margin: -22px 0 0;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* The list with switches: two sections, each with the Connections page's
+   heading and lead on one line. */
+.pm-sec-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 10px;
+  min-height: 26px;
+  margin-bottom: 12px;
+}
+.pm-sec-top h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.pm-sec-top > span:not(.spacer) {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The headings share the rows' grid, so each one starts where its cells do. */
+.pm-switch-head,
+.pm-switch-row {
+  grid-template-columns: 34px minmax(0, 1fr) 132px 200px 36px 16px;
+}
+/* "Offered" is wider than the switch's 36px column. It ends at the column's
+   right edge, where the switch ends, and runs out to the left. */
+.pm-head-offered {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+/* The list of a thread with no project: stacked choices with two lines. */
+.pm-default .options {
+  margin-bottom: 0;
+}
+.pm-default-row {
+  align-items: start;
+}
+.pm-default-row .choice-box {
+  margin-top: 3px;
+}
+.pm-default-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+.pm-default-name b {
+  font-weight: var(--w-medium);
+}
+.pm-default-name span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pm-default-name .pm-swap {
+  color: var(--you-ink);
+}
+
+/* ---------- The grid of projects against servers ---------- */
+.pm-grid {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  padding: 0 8px;
+}
+.pm-grid-head {
+  padding-bottom: 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.pm-grid-head .proj {
+  font-size: var(--t-12);
+}
+.pm-grid-row {
+  min-height: 44px;
+  border-top: 1px solid var(--divider);
+}
+.pm-grid-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.pm-grid-name b {
+  font-weight: var(--w-medium);
+}
+.pm-grid-count {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-grid-cell {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+}
+/* A cell that picks one of the servers that share a name. */
+.pm-grid-pick {
+  width: 124px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+}
+/* A choice that cannot be changed yet, at half opacity like the app's other
+   controls that cannot act. */
+.pm-grid-pick:has(> select:disabled) {
+  opacity: 0.5;
+}
+.pm-grid-pick > select {
+  margin: 0 -23px 0 -8px;
+  padding: 0 23px 0 8px;
+}
+
+/* ---------- One server's page ---------- */
+/* The mark beside the server's name at the top of its page. */
+.pm-head-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-md);
+  color: var(--ink);
+}
+/* The band over a server that is not ready: Skills' update band, on the
+   sunken fill for a state that waits on nobody, and on the fail tint with a
+   button for one the user must fix. */
+.pm-band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 9px 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: var(--line-18);
+}
+.pm-band > span:not(.spin) {
+  flex: 1;
+  min-width: 0;
+}
+.pm-band b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.pm-band--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.pm-band--fail b {
+  color: var(--fail-ink);
+}
+/* The controller's own words for what went wrong, on a smaller line under
+   what to do about it. It keeps the band's full ink: at 12px, a lighter red
+   is too faint on the tint to read. */
+.pm-band small {
+  display: block;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+.pm-record .set-sec > h2 + * {
+  margin-top: 12px;
+}
+.pm-record .set-sec > p {
+  margin: 3px 0 12px;
+}
+.pm-record .set-row {
+  min-height: 50px;
+}
+.pm-record .set-label code,
+.pm-add-dialog .fl-hint code,
+.confirm-dialog-body code {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-11);
+  color: var(--ink);
+}
+.pm-record .set-row > span.field {
+  width: 214px;
+}
+.pm-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.pm-value-fine {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* What is wrong with a sign-in, where its healthy value is otherwise shown. */
+.pm-value-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.pm-tool {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 36px;
+  padding: 4px 0;
+  border-top: 1px solid var(--divider);
+}
+.pm-tool code {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-tool span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pm-proj-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 40px;
+  padding: 6px 0;
+  border-top: 1px solid var(--divider);
+}
+.pm-proj-row .proj {
+  color: var(--ink);
+}
+.pm-proj-row.is-none {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-proj-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+/* A box the user ticked whose project must first answer the refusal under
+   it: a short dash in place of the tick, on the unticked box. It is neither
+   ticked nor empty until the user answers. */
+.choice-box.pm-box-waiting::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 1.5px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  pointer-events: none;
+}
+/* The other server of this name that a project names, beside the project. */
+.pm-proj-other {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* Why a project cannot take this server: under the project, from its name. */
+.pm-clash {
+  flex-basis: 100%;
+  margin: 2px 0 6px 24px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.pm-clash-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---------- Settings > Connections ---------- */
+/* The table with one more column, Agent tools, before the row's menu. */
+.connection-list.pm-conn--column :is(.tbl-h, .conn) {
+  grid-template-columns: 34px minmax(0, 1fr) 144px 52px 150px 74px 28px;
+}
+.pm-no-offer {
+  color: var(--faint);
+}
+.pm-tools-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-col:has(> .connection-list) > .pm-tools-sec {
+  margin-top: 4px;
+}
+
+/* ---------- Dialogs ---------- */
+.pm-add-dialog {
+  width: 480px;
+}
+.pm-form {
+  display: grid;
+  gap: 16px;
+}
+.pm-add-dialog .field > input {
+  width: 100%;
+}
+.pm-wait {
+  padding: 6px 2px;
+}
+/* The refusal sits between the two fields, and the form's gap spaces it. */
+.pm-form > .warn.pm-refusal {
+  margin-top: 0;
+}
+.pm-why {
+  margin-top: 14px;
+  padding-top: 12px;
+}
+.pm-why code,
+.hx-step code,
+.pm-paste code {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-11);
+  color: var(--ink);
+}
+.pm-paste {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.pm-paste p {
+  margin: 0;
+}
+.pm-paste .field,
+.hx-step .field {
+  flex: 1;
+  height: 30px;
+}
+.pm-done-lead {
+  margin: 14px 0 0;
+}
+/* Under the wait: the way out when the browser never comes back, as one line
+   that ends in its button. It has no rule above it: the card over it has a
+   border, and the dialog's header a rule of its own. */
+.pm-stuck {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  /* The question is two lines beside its button, broken into even halves. */
+  text-wrap: balance;
+}
+/* What Replace keeps, changes and deletes: three labelled lines. */
+.pm-replace {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.pm-replace > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+}
+.pm-replace span {
+  color: var(--faint);
+}
+.pm-replace b {
+  font-weight: var(--w-medium);
+}
+.pm-configure-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pm-configure-note > .br {
+  flex: none;
+  margin-top: 2px;
+}
+.pm-configure-note code {
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant-ligatures: none;
+  font-size: var(--t-11);
+  color: var(--ink);
+}
+
+/* ---------- The project's menu ---------- */
+.pm-project-menu {
+  width: 348px;
+}
+.pm-menu-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--divider);
+}
+.pm-menu-name {
+  flex: none;
+  font-weight: var(--w-medium);
+}
+.pm-menu-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-menu-state {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-menu-state.is-fail {
+  color: var(--fail-ink);
+}
+.pm-menu-note {
+  margin: 4px 0 0;
+  padding: 8px 8px 4px;
+  border-top: 1px solid var(--divider);
+  color: var(--you-ink);
+  line-height: 1.45;
+}
+
+/* ---------- The thread ---------- */
+/* The element the prototype puts inside the app's composer. It adds no box. */
+.pm-slot {
+  display: contents;
+}
+/* The chip in the composer's row: a pick, like the access mode and the effort. */
+.pm-pick.is-fail {
+  color: var(--fail-ink);
+}
+.pm-pick.is-none {
+  color: var(--faint);
+}
+.pm-pick .dot,
+.pm-lip .dot {
+  margin: 0 -1px;
+}
+/* The entry in the lip: quiet, like the branch beside it. */
+.pm-lip {
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+.pm-lip:hover,
+.pm-lip[aria-expanded="true"] {
+  color: var(--ink);
+}
+.pm-lip.is-fail {
+  color: var(--fail-ink);
+}
+.pm-thread-menu .line {
+  min-height: 30px;
+}
+.pm-line-fail {
+  flex: none;
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.pm-thread-menu .menu-note {
+  margin: 0;
+  line-height: 1.45;
+}
+/* The button that fixes it, after the sentence of a note in the transcript.
+   It sits on the sentence's baseline. The negative margins keep the note's
+   line as tall as its text, so the note's dot stays level with its words. */
+.pm-note-button {
+  margin: -6px 0 -6px 8px;
+  vertical-align: baseline;
+}
+/* The menu is drawn inside the lip or the composer's row, whose text does
+   not wrap. */
+.pm-thread-menu {
+  white-space: normal;
+}
+
+/* ---------- Round two ---------- */
+
+/* Connections: under a Connection's name, the account, then a quiet line
+   that leads to Settings > MCP servers. It is no switch. The account has a
+   column of its own, so the line after it starts at one place on every row;
+   a longer account ends in an ellipsis, by the table's own rule. */
+.connection-list .nm .pm-conn-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+.connection-list .nm .pm-conn-line > span {
+  flex: none;
+  width: 200px;
+}
+/* The note is text with a state mark before it and a chevron after it, so it
+   reads as a link and not as a chip. The mark says on, off or failing at a
+   glance: a dot in the text's colour, a ring, or the app's red dot. */
+.pm-offer {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.pm-offer > .dot:not(.dot--fail) {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.pm-offer.is-on > .dot {
+  background: currentColor;
+  box-shadow: none;
+}
+.pm-offer > .ic {
+  margin-left: -2px;
+}
+.pm-offer.is-on {
+  color: var(--muted);
+}
+.pm-offer.is-fail {
+  color: var(--fail-ink);
+}
+.pm-offer:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* MCP servers: what a thread with no project starts with, as chips. */
+.pm-default-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--divider);
+}
+.pm-server-chip {
+  color: var(--ink);
+}
+
+/* ---------- The picker ---------- */
+/* Skills' import dialog: a header, a list that scrolls, and a foot. */
+.pm-picker {
+  width: 520px;
+}
+.pop-sec.pm-picker-filter {
+  padding: 8px;
+}
+/* A list of servers fades out at its foot while it can scroll further, which
+   reads as "there is more". The fade follows the list's own scroll position:
+   it is gone at the end, and a list that fits has no scroll position, so it
+   shows none. Each list sets how long its fade is, in `--pm-fade-length`. */
+@property --pm-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes pm-fade-list-end {
+  from,
+  96% {
+    --pm-fade: var(--pm-fade-length);
+  }
+  to {
+    --pm-fade: 0px;
+  }
+}
+.pm-picker .skill-import-list,
+.pm-plus-list {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--pm-fade)), transparent);
+  animation: pm-fade-list-end linear both;
+  animation-timeline: scroll(self);
+}
+/* The picker's list shows whole rows of 48px, eight at most and fewer in a low
+   window, and then 6px of the next row, which is that row's empty padding.
+   Its fade is 10px: it lies over those 6px and the padding of the last whole
+   row, so it touches no text. */
+.pm-picker .skill-import-list {
+  --pm-fade-length: 10px;
+  max-height: calc(12px + round(down, min(384px, 46vh - 12px), 48px));
+}
+/* The submenu under the composer's plus is as tall as the room above the
+   composer, and its rows differ in height, so its last row can be cut. A
+   longer fade hides the cut. */
+.pm-plus-list {
+  --pm-fade-length: 28px;
+}
+.pm-pick-row {
+  display: grid;
+  grid-template-columns: 14px 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 5px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.pm-pick-row:hover {
+  background: var(--hover);
+}
+.pm-pick-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.pm-pick-row .pm-grid-pick {
+  width: 138px;
+}
+/* The word that says what the choice beside it picks. */
+.pm-pick-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-picker .menu-note {
+  margin: 0;
+  padding: 14px 8px;
+}
+.skill-import-foot > .pm-picker-foot {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+/* The project's menu, with one item that opens the picker. */
+.pm-menu-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.pm-project-menu:has(.pm-menu-count) {
+  width: auto;
+  min-width: 220px;
+}
+
+/* ---------- The composer's plus menu ---------- */
+/* The popover holds two glass panels side by side, the menu and its submenu,
+   with their feet on one line. It draws nothing itself. */
+.pm-plus {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  overflow: visible;
+  color: var(--ink);
+}
+.pm-plus:popover-open {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.pm-plus-main {
+  width: 268px;
+}
+.pm-plus .ic {
+  flex: none;
+  color: var(--muted);
+}
+.pm-plus-label {
+  flex: 1;
+  min-width: 0;
+}
+.pm-plus-fine {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-plus-fine.is-fail {
+  color: var(--fail-ink);
+}
+/* 360px, the width of the composer's model menu: a row that needs sign-in
+   holds a sentence and a link beside its switch. */
+.pm-plus-sub {
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-height: min(520px, var(--pm-plus-room, 520px));
+}
+/* The panel's heading starts at the same edge as the marks of the rows under it. */
+.pm-plus-sub > .pm-plus-top {
+  flex: none;
+  padding: 12px 14px 2px;
+}
+.pm-plus-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+.pm-plus-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+.pm-plus-row > .br,
+.pm-plus-row > .ic {
+  flex: none;
+}
+.pm-plus-name {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.pm-plus-name small {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+.pm-plus-row > .pm-grid-pick {
+  flex: none;
+}
+/* The foot: what a change here does, then the way to Settings > MCP servers. */
+.pm-plus-foot {
+  display: grid;
+  flex: none;
+  justify-items: start;
+  gap: 4px;
+  padding: 9px 14px 11px;
+  border-top: 1px solid var(--divider);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+/* The note is two short lines, so it wraps without leaving one word alone on the last. */
+.pm-plus-foot > .menu-note {
+  margin: 0;
+  padding: 0;
+  text-wrap: pretty;
+}
+/* The dot on the plus button while one of the thread's servers needs sign-in. */
+.pm-plus-button {
+  position: relative;
+}
+.pm-plus-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  box-shadow: 0 0 0 2px var(--raised);
+}
+
+/* Under the wait: who catches the browser's answer. */
+.pm-return {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.pm-aid button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--raised);
+}
+
+/* The Projects section stops under the header when the page scrolls to it. */
+.pm-projects-sec {
+  scroll-margin-top: 16px;
+}
+
+/* The row under the submenu's list that opens the picker with every server. */
+.pm-plus-more {
+  flex: none;
+  padding: 0 6px 6px;
+}
+.pm-plus-more [role="menuitem"]:hover {
+  background: var(--hover);
+}
+.pm-plus-more .pm-plus-label {
+  padding-left: 25px;
+  color: var(--muted);
+}
+
+/* `?bar=off`: the strips that are not part of the design are not drawn. */
+[data-pm-bar="off"] .pm-aid {
+  display: none;
+}
