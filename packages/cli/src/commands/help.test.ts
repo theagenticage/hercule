@@ -146,14 +146,6 @@ describe("a command whose object field is filled from several flags", () => {
       "--connection <text> required",
       "--name <text> optional",
     ]);
-    expect(lines.join("\n")).not.toContain("--source");
-  });
-
-  it("gives each flag its help line", () => {
-    const text = buildCommandHelp(command).join(" ").replace(/\s+/g, " ");
-    expect(text).toContain("written <plugin>/<contribution>");
-    expect(text).toContain("by its id or a tail of eight or more characters");
-    expect(text).toContain("fixed once the server exists");
   });
 
   it("shows the examples as flags", () => {

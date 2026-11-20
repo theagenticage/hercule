@@ -88,37 +88,21 @@ const SHIPPED: ReadonlyArray<Seeded> = [
 ];
 
 describe("the mcp grants on shipped profiles seeded before they existed", () => {
-  it("adds mcp.read and mcp.use to unrestricted, keeps its other grants, and updates updated_at", async () => {
-    const profiles = await seedAndMigrate(SHIPPED);
+  it.each([
+    ["unrestricted", ["task.read", "permission.write", "mcp.read", "mcp.use"]],
+    ["worker", ["task.read", "event.read", "mcp.read", "mcp.use"]],
+    // The assistant may read the servers but not use their tools.
+    ["assistant", ["task.read", "skill.read", "mcp.read"]],
+  ])(
+    "gives the shipped %s profile its mcp grants, keeps its other grants, and updates updated_at",
+    async (name, grants) => {
+      const profiles = await seedAndMigrate(SHIPPED);
 
-    expect(profiles.get("unrestricted")?.grants).toEqual([
-      "task.read",
-      "permission.write",
-      "mcp.read",
-      "mcp.use",
-    ]);
-    // The row changed, so its updated_at is no longer the first-run time.
-    expect(profiles.get("unrestricted")?.updatedAt).not.toBe(at);
-  });
-
-  it("adds mcp.read and mcp.use to worker", async () => {
-    const profiles = await seedAndMigrate(SHIPPED);
-
-    expect(profiles.get("worker")?.grants).toEqual([
-      "task.read",
-      "event.read",
-      "mcp.read",
-      "mcp.use",
-    ]);
-    expect(profiles.get("worker")?.updatedAt).not.toBe(at);
-  });
-
-  it("adds mcp.read but not mcp.use to assistant", async () => {
-    const profiles = await seedAndMigrate(SHIPPED);
-
-    expect(profiles.get("assistant")?.grants).toEqual(["task.read", "skill.read", "mcp.read"]);
-    expect(profiles.get("assistant")?.updatedAt).not.toBe(at);
-  });
+      expect(profiles.get(name)?.grants).toEqual(grants);
+      // The row changed, so its updated_at is no longer the first-run time.
+      expect(profiles.get(name)?.updatedAt).not.toBe(at);
+    },
+  );
 
   it("gives no profile mcp.manage", async () => {
     const profiles = await seedAndMigrate(SHIPPED);

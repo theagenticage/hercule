@@ -239,9 +239,10 @@ const make = Effect.gen(function* () {
      * Writes the user's switch and raises `revision`, so a check that started
      * before the change cannot write its result.
      *
-     * Switching on also puts the status back to `checking` and clears its
-     * detail and its cause, because the old result no longer holds. Switching
-     * off leaves the status as it is.
+     * Switching on also puts the status back to `checking`, clears its detail
+     * and its cause, resets the failed checks, and marks the next check as due
+     * at `at`: the old result no longer holds, and the check must happen even
+     * when the request for it is lost. Switching off leaves the status as it is.
      */
     writeEnabled: (id: string, enabled: boolean, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
@@ -249,6 +250,7 @@ const make = Effect.gen(function* () {
           ? sql`
             UPDATE mcp_servers
             SET enabled = 1, status = 'checking', status_detail = NULL, status_cause = NULL,
+                failed_checks = 0, next_check_at = ${at},
                 revision = revision + 1, updated_at = ${at}
             WHERE id = ${uuidFromString(id)}
           `
@@ -259,9 +261,30 @@ const make = Effect.gen(function* () {
           `,
       ),
 
-    /** Applies an edit and sets `updated_at`. Only the columns the edit sets are written. */
-    update: (id: string, edit: McpServerEdit, at: string): Effect.Effect<void, SqlError> => {
-      const sets = [sql`updated_at = ${at}`];
+    /**
+     * Resets the failed checks of a server whose user asked for a check now,
+     * and raises `revision`, so a check that is running cannot write its older
+     * result over the reset. It changes nothing the record shows.
+     */
+    resetFailedChecks: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`
+          UPDATE mcp_servers SET failed_checks = 0, revision = revision + 1
+          WHERE id = ${uuidFromString(id)}
+        `,
+      ),
+
+    /**
+     * Applies an edit. Only the columns the edit sets are written. `updatedAt`
+     * is the new `updated_at`; `undefined` leaves it, for an edit that changes
+     * nothing the record shows.
+     */
+    update: (
+      id: string,
+      edit: McpServerEdit,
+      updatedAt: string | undefined,
+    ): Effect.Effect<void, SqlError> => {
+      const sets = updatedAt === undefined ? [] : [sql`updated_at = ${updatedAt}`];
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
       if (edit.statusCause !== undefined) sets.push(sql`status_cause = ${edit.statusCause}`);
@@ -278,6 +301,7 @@ const make = Effect.gen(function* () {
       if (edit.nextCheckAt !== undefined) sets.push(sql`next_check_at = ${edit.nextCheckAt}`);
       if (edit.failedChecks !== undefined) sets.push(sql`failed_checks = ${edit.failedChecks}`);
       if (edit.bumpRevision === true) sets.push(sql`revision = revision + 1`);
+      if (sets.length === 0) return Effect.void;
       return Effect.asVoid(
         sql`UPDATE mcp_servers SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );

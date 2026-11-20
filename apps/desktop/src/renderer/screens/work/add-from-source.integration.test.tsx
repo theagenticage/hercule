@@ -40,7 +40,7 @@ const TASK_ID = "01a06d02-7e00-7000-8000-000000000b01";
 const buildSource = (id: string, displayName: string): PluginDetail => ({
   id,
   displayName,
-  hostApi: 9,
+  hostApi: 8,
   capabilities: ["entities"],
   enabled: true,
   status: { _tag: "active" },

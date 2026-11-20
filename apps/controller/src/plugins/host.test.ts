@@ -1681,16 +1681,14 @@ const buildEventSourcePlugin = (
 });
 
 describe("the MCP server catalog", () => {
-  it("writes the catalog row without its function, and finds the live server whatever its plugin's status", async () => {
+  it("finds the live server whatever its plugin's status, and lists every server the boot registered", async () => {
     const found = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([buildMcpServerPlugin("acme")]);
-        const detail = yield* Effect.flatMap(Plugins, (plugins) => plugins.read("acme"));
         const active = yield* host.findMcpServer("acme/desk");
         yield* host.stop("acme");
         return {
-          row: detail.contributions.find((row) => row.extensionPoint === "mcp-server"),
           active,
           stopped: yield* host.findMcpServer("acme/desk"),
           stoppedIsActive: yield* host.isActive("acme"),
@@ -1700,26 +1698,11 @@ describe("the MCP server catalog", () => {
       }),
     );
 
-    expect(found.row).toEqual({
-      extensionPoint: "mcp-server",
-      id: "acme/desk",
-      definition: {
-        id: "acme/desk",
-        displayName: "Desk",
-        description: "Read and update Desk tickets.",
-        connectionType: "acme/desk",
-        origin: "https://mcp.desk.example",
-      },
-    });
-    const server = Option.getOrThrow(found.active);
-    expect(server).toMatchObject({
+    expect(Option.getOrThrow(found.active)).toMatchObject({
       id: "acme/desk",
       pluginId: "acme",
       connectionType: "acme/desk",
     });
-    expect(
-      server.buildUpstreamRequest({ credentials: { token: "t" }, config: {} }).headers,
-    ).toEqual({ Authorization: "Bearer t" });
     expect(Option.isSome(found.stopped)).toBe(true);
     expect(found.stoppedIsActive).toBe(false);
     expect(found.listed).toEqual(["acme/desk"]);

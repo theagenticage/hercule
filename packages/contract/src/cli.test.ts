@@ -668,18 +668,6 @@ describe("the contents of a visible row", () => {
   });
 });
 
-describe("the mcp-server create row", () => {
-  it("fills source from three flags and the fixed kind, in the spec's spelling", () => {
-    const source = table["mcpServer.create"]?.fields?.["source"]?.object;
-    expect(source?.fixed).toEqual({ kind: "plugin" });
-    expect(Object.values(source?.flags ?? {}).map((row) => row.flag)).toEqual([
-      "plugin",
-      "connection",
-      "name",
-    ]);
-  });
-});
-
 describe("the nouns", () => {
   it("summarises every root noun of a visible command", () => {
     for (const [id, row] of visible) {

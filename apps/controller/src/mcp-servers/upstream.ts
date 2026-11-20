@@ -5,9 +5,10 @@
  * The rules this file enforces for every request that leaves the controller:
  *
  * - The URL and headers come only from the plugin's `buildUpstreamRequest`,
- *   called with the credentials current at the moment of the request. The URL
- *   must be `http` or `https`, on the contribution's origin, with no user name
- *   or password. Otherwise nothing is sent.
+ *   called with the credentials the upstream was opened with, after the
+ *   controller is known to be serving. The URL must be `http` or `https`, on
+ *   the contribution's origin, with no user name or password. Otherwise
+ *   nothing is sent.
  * - A redirect is never followed, so a credential never reaches another
  *   origin. A 3xx answer is an error.
  * - Nothing is sent while the controller is frozen or sealed.
@@ -46,7 +47,7 @@ export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
  * - `protocol`: the server answered, but not with something we can use (a
  *   redirect, another HTTP error, a message that is not MCP).
  */
-export const UPSTREAM_FAILURE_REASONS = [
+const UPSTREAM_FAILURE_REASONS = [
   "unauthorized",
   "unreachable",
   "timeout",
@@ -195,11 +196,6 @@ export interface OpenedUpstream {
   readonly client: McpClient.McpClient;
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
-  /**
-   * The credentials every further request carries. Replace the value to carry
-   * new credentials on the same upstream session, such as after a refresh.
-   */
-  readonly credentials: Ref.Ref<ConnectionCredentialsForUse>;
   /** Converts a failure of `client` into an `UpstreamError`. */
   readonly describeFailure: (error: McpClientError.McpClientError) => UpstreamError;
 }
@@ -240,82 +236,76 @@ export const openUpstream = (
     const baseClient = yield* HttpClient.HttpClient;
     const outer = yield* Scope.Scope;
 
-    const credentials = yield* Ref.make(target.credentials);
-    // The identity of the credentials each request carried, kept by request so
-    // a 401 names the credentials of its own exchange.
-    const identityOfRequest = new WeakMap<HttpClientRequest.HttpClientRequest, string>();
-    const rejectedIdentity = yield* Ref.make<string | undefined>(undefined);
     const outboundRefusal = yield* Ref.make<UpstreamError | undefined>(undefined);
 
-    const buildRequest = (current: ConnectionCredentialsForUse) =>
-      Effect.try({
-        try: () =>
-          contribution.buildUpstreamRequest({
-            credentials: current.credentials,
-            config: current.config,
-          }),
-        // The plugin's function is pure and should not throw. If it does, say
-        // nothing of what it threw, because that may hold the credentials.
-        catch: () => buildFailure("not-on-origin"),
-      });
+    const buildRequest = Effect.try({
+      try: () =>
+        contribution.buildUpstreamRequest({
+          credentials: target.credentials.credentials,
+          config: target.credentials.config,
+        }),
+      // The plugin's function is pure and should not throw. If it does, say
+      // nothing of what it threw, because that may hold the credentials.
+      catch: () => buildFailure("not-on-origin"),
+    });
 
-    const first = yield* buildRequest(target.credentials);
+    const first = yield* buildRequest;
     const refusedFirst = checkUrlOnOrigin(contribution.origin, first.url);
     if (refusedFirst !== undefined) return yield* Effect.fail(refusedFirst);
 
-    const client: HttpClient.HttpClient = baseClient.pipe(
-      HttpClient.mapRequestEffect((request) =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(credentials);
-          const built = yield* buildRequest(current);
-          const refused =
-            checkUrlOnOrigin(contribution.origin, built.url) ??
-            checkUrlOnOrigin(contribution.origin, request.url);
-          if (refused !== undefined) return yield* Effect.fail(refused);
-          const sent = HttpClientRequest.setHeaders(request, built.headers);
-          identityOfRequest.set(sent, current.identity);
-          yield* Ref.set(outboundRefusal, undefined);
-          return sent;
-        }).pipe(
-          // A wrapped client may fail only with the client's own error type,
-          // so the refusal is kept aside and `describeFailure` returns it.
-          Effect.catchTag("UpstreamError", (refused) =>
-            Ref.set(outboundRefusal, refused).pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new HttpClientError.HttpClientError({
-                    reason: new HttpClientError.TransportError({
-                      request,
-                      description: refused.message,
-                    }),
-                  }),
+    const sendingClient = baseClient.pipe(
+      HttpClient.transform((send) =>
+        send.pipe(
+          // A redirect would carry the credentials to another origin.
+          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+          Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+        ),
+      ),
+    );
+
+    // The client does its work inside one `makeWith` step instead of
+    // `mapRequestEffect`, because the HTTP client runs every request mapping
+    // before it runs a `transform`, and the plugin must build the request,
+    // with the credentials, only once the controller is known to be serving.
+    const client = HttpClient.makeWith<never, never, HttpClientError.HttpClientError, never>(
+      (pending) =>
+        Effect.flatMap(pending, (request) =>
+          promotion.whenServing(
+            Effect.gen(function* () {
+              const built = yield* buildRequest;
+              const refused =
+                checkUrlOnOrigin(contribution.origin, built.url) ??
+                checkUrlOnOrigin(contribution.origin, request.url);
+              if (refused !== undefined) return yield* Effect.fail(refused);
+              yield* Ref.set(outboundRefusal, undefined);
+              return yield* sendingClient.execute(
+                HttpClientRequest.setHeaders(request, built.headers),
+              );
+            }).pipe(
+              // The client may fail only with its own error type, so the
+              // refusal is kept aside and `describeFailure` returns it.
+              Effect.catchTag("UpstreamError", (refused) =>
+                Ref.set(outboundRefusal, refused).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      new HttpClientError.HttpClientError({
+                        reason: new HttpClientError.TransportError({
+                          request,
+                          description: refused.message,
+                        }),
+                      }),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-      HttpClient.transform((send, request) =>
-        promotion
-          .whenServing(
-            Effect.tap(send, (response) => {
-              const identity = identityOfRequest.get(request);
-              return response.status === 401 && identity !== undefined
-                ? Ref.set(rejectedIdentity, identity)
-                : Effect.void;
-            }),
-          )
-          .pipe(
-            // A redirect would carry the credentials to another origin.
-            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-            Effect.provideService(HttpClient.TracerPropagationEnabled, false),
-          ),
-      ),
+      Effect.succeed,
     );
 
     const describeFailure = (error: McpClientError.McpClientError): UpstreamError =>
-      Ref.getUnsafe(outboundRefusal) ??
-      describeClientFailure(error, Ref.getUnsafe(rejectedIdentity));
+      Ref.getUnsafe(outboundRefusal) ?? describeClientFailure(error, target.credentials.identity);
 
     const order = [
       ...REVISIONS.filter((entry) => entry.revision === target.firstRevision),
@@ -341,7 +331,7 @@ export const openUpstream = (
         ),
       );
       if (outcome._tag === "Success") {
-        return { client: outcome.success, revision, credentials, describeFailure };
+        return { client: outcome.success, revision, describeFailure };
       }
       yield* Scope.close(attemptScope, Exit.fail(outcome.failure));
       if (!isVersionRefusal(outcome.failure)) {

@@ -6,6 +6,11 @@
  * At most one check runs per server. A request that comes while a check runs
  * makes it run once more when it ends, because the request may be about
  * something the running check has already read.
+ *
+ * A check is background work admitted by the promotion state: it does not
+ * start while the controller is frozen or sealed, and a freeze waits for it to
+ * end. So a check never waits on a freeze while it talks to the outside
+ * server, and a freeze never turns into an `unreachable` status.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -20,9 +25,9 @@ import type { McpSchema } from "effect/ai";
 import { absorbFailures } from "../absorbing";
 import {
   ConnectionTypes,
-  connectionRepository,
   type ConnectionCredentialsForUse,
   type ConnectionCredentialsUnavailable,
+  type StoredConnection,
 } from "../connections";
 import { nowIso } from "../db";
 import { Notifier } from "../notifications";
@@ -30,7 +35,14 @@ import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
-import { computeBackoffMillis, DAILY_CHECK_MILLIS, readBasis, writeServerState } from "./state";
+import {
+  computeBackoffMillis,
+  DAILY_CHECK_MILLIS,
+  judgeSurroundings,
+  readSurroundings,
+  writeServerState,
+  type Surroundings,
+} from "./state";
 import { MAX_UPSTREAM_MESSAGE_BYTES, openUpstream, type UpstreamError } from "./upstream";
 
 /**
@@ -56,6 +68,16 @@ export class McpServerChecks extends Context.Service<
     readonly requestDue: Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/mcp-servers/McpServerChecks") {}
+
+/**
+ * The HTTP client a check reaches outside MCP servers with. Unset, it is the
+ * environment's `HttpClient`, which is `fetch`. A test sets it to send a
+ * vendor's address to a fake server.
+ */
+export const McpUpstreamHttpClient = Context.Reference<HttpClient.HttpClient | undefined>(
+  "hercule/controller/mcp-servers/McpUpstreamHttpClient",
+  { defaultValue: () => undefined },
+);
 
 /** How long listing the tools may take, from the first request to the last page. */
 const LIST_DEADLINE = Duration.seconds(60);
@@ -136,38 +158,44 @@ const buildEdit = (server: StoredMcpServer, result: CheckResult, at: string): Mc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
-  const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
   const plugins = yield* PluginHost;
   const promotion = yield* PromotionState;
   const notifier = yield* Notifier;
-  const httpClient = yield* HttpClient.HttpClient;
+  const httpClient = (yield* McpUpstreamHttpClient) ?? (yield* HttpClient.HttpClient);
   const scope = yield* Effect.scope;
 
-  /** Names the Connection for a person, or says "the Connection" when it is gone. */
-  const readConnectionLabel = (connectionId: string): Effect.Effect<string, SqlError> =>
-    Effect.map(connections.one(connectionId), (found) =>
-      Option.isSome(found) ? found.value.label : "the Connection",
-    );
-
+  /**
+   * Turns a Connection's failure to give credentials into a failed outcome.
+   * The text is fixed here and never the Connection's own message, which may
+   * hold what the provider sent.
+   */
   const describeUnavailable = (
     error: ConnectionCredentialsUnavailable,
-    label: string,
+    contribution: RegisteredMcpServer,
+    connection: StoredConnection,
   ): CheckResult => {
     switch (error.reason) {
       case "needs-sign-in":
         return failed(
           "needs-sign-in",
-          `Reconnect ${label} in Settings > Connections`,
+          `Reconnect ${connection.label} in Settings > Connections`,
           "connection",
         );
       case "switched-off":
-        return failed("error", `The Connection ${label} is switched off`, "connection");
+        return failed("error", `The Connection ${connection.label} is switched off`, "connection");
       case "unreachable":
-        return failed("unreachable", error.message);
+        return failed(
+          "unreachable",
+          `${contribution.displayName} could not be reached to refresh the sign-in`,
+        );
       case "missing":
+        return failed("error", "The Connection of this server is missing");
       case "invalid-config":
-        return failed("error", error.message);
+        return failed(
+          "error",
+          `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
+        );
     }
   };
 
@@ -212,31 +240,30 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Works out the outcome of one check. Never fails except for the database:
-   * every other failure is an outcome that becomes the server's status.
+   * Works out the outcome of one check from the surroundings read at its
+   * start. Never fails except for the database: every other failure is an
+   * outcome that becomes the server's status.
    */
-  const evaluate = (server: StoredMcpServer): Effect.Effect<CheckResult, SqlError> =>
+  const evaluate = (
+    server: StoredMcpServer,
+    surroundings: Surroundings,
+  ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
-      const found = yield* plugins.findMcpServer(server.contributionId);
-      if (Option.isNone(found)) {
+      const judged = judgeSurroundings(surroundings);
+      if (judged._tag === "unusable") return failed(judged.status, judged.detail, judged.cause);
+      const { contribution, connection } = judged;
+      // Checked at use, not only at create, because the credentials of a
+      // Connection of another type would go to this server's origin.
+      if (connection.type !== contribution.connectionType) {
         return failed(
           "error",
-          "The plugin that offered this server is not in this build",
-          "plugin",
+          `This server needs a ${contribution.connectionType} Connection, and ${connection.label} is another type`,
         );
-      }
-      const contribution = found.value;
-      if (!(yield* plugins.isActive(contribution.pluginId))) {
-        const name =
-          (yield* plugins.loaded()).find((plugin) => plugin.id === contribution.pluginId)
-            ?.displayName ?? contribution.pluginId;
-        return failed("error", `The ${name} plugin is switched off`, "plugin");
       }
 
       const read = yield* Effect.result(connectionTypes.readCredentialsForUse(server.connectionId));
-      if (read._tag === "Failure") {
-        return describeUnavailable(read.failure, yield* readConnectionLabel(server.connectionId));
-      }
+      if (read._tag === "Failure")
+        return describeUnavailable(read.failure, contribution, connection);
 
       let outcome = yield* Effect.result(
         listTools(contribution, read.success, server.protocolVersion),
@@ -251,7 +278,7 @@ const make = Effect.gen(function* () {
         if (refresh._tag === "Failure") {
           return refresh.failure._tag === "ConnectionCannotRefresh"
             ? describeUpstreamFailure(outcome.failure, contribution)
-            : describeUnavailable(refresh.failure, yield* readConnectionLabel(server.connectionId));
+            : describeUnavailable(refresh.failure, contribution, connection);
         }
         outcome = yield* Effect.result(
           listTools(contribution, refresh.success, server.protocolVersion),
@@ -267,24 +294,29 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks one server and writes the outcome, unless the server changed
-   * meanwhile: then the outcome is dropped, and whatever changed it requests
-   * its own check.
+   * Checks one server and writes the outcome, unless the server, its
+   * Connection or its plugin changed meanwhile: then the outcome is dropped,
+   * and whatever changed it requests its own check.
    */
   const checkOnce = (id: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const found = yield* servers.readById(id);
       if (Option.isNone(found) || !found.value.enabled) return;
       const server = found.value;
-      const result = yield* evaluate(server);
+      const surroundings = yield* readSurroundings(server);
+      const result = yield* evaluate(server, surroundings);
       const at = yield* nowIso;
-      yield* promotion.whenServing(
-        writeServerState(id, readBasis(server), buildEdit(server, result, at), at).pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-          Effect.provideService(Notifier, notifier),
-        ),
+      yield* writeServerState(
+        id,
+        { revision: server.revision, surroundings },
+        buildEdit(server, result, at),
+        at,
       );
-    });
+    }).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.provideService(PluginHost, plugins),
+      Effect.provideService(Notifier, notifier),
+    );
 
   // "running": a check is in progress. "again": a request came during it.
   const inFlight = new Map<string, "running" | "again">();
@@ -292,7 +324,10 @@ const make = Effect.gen(function* () {
   const runUntilNoRequestIsWaiting = (id: string): Effect.Effect<void> =>
     Effect.gen(function* () {
       while (true) {
-        yield* absorbFailures(`Checking MCP server ${id} failed`, checkOnce(id));
+        yield* absorbFailures(
+          `Checking MCP server ${id} failed`,
+          promotion.whenServing(checkOnce(id)),
+        );
         if (inFlight.get(id) !== "again") return;
         inFlight.set(id, "running");
       }

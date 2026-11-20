@@ -624,10 +624,9 @@ describe("a run whose step acts through a Connection", () => {
 
           const { error } = expectStatus(findStepRecords(run, "review")[0], "failed");
           expect(error.code).toBe("connection_unavailable");
-          expect(error.message).toMatch(
-            new RegExp(
-              `^The credentials of the Connection ${connectionId} could not be read: .*invalid_grant.*\\. If the Connection needs to sign in again, reconnect it under Connections\\.$`,
-            ),
+          // The provider's own error code never reaches the message.
+          expect(error.message).toBe(
+            `The credentials of the Connection ${connectionId} could not be read: the provider refused to refresh the connection's access token. If the Connection needs to sign in again, reconnect it under Connections.`,
           );
           expect(JSON.stringify(run)).not.toContain("refresh-1");
           expect(forge.contexts).toEqual([]);

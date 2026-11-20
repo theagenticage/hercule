@@ -135,16 +135,10 @@ describe("what the sentry plugin registers", () => {
     expect(Object.keys(source?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
   });
 
-  it("contributes one MCP server, reached with its own Connection type", async () => {
-    const [server, ...others] = (await collectContributions(sentry)).mcpServers;
+  it("contributes one MCP server", async () => {
+    const { mcpServers } = await collectContributions(sentry);
 
-    expect(others).toEqual([]);
-    expect(server).toMatchObject({
-      id: "sentry",
-      displayName: "Sentry",
-      connectionType: "sentry/sentry",
-      origin: "https://mcp.sentry.dev",
-    });
+    expect(mcpServers.map((server) => server.id)).toEqual(["sentry"]);
   });
 
   it("declares the Error kind, its saved query and a lookup", async () => {

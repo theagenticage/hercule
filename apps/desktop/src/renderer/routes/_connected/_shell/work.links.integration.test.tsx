@@ -54,7 +54,7 @@ const SEARCH_PATH = "GET /api/v1/external-entities/search";
 const buildSource = (id: string, displayName: string): PluginDetail => ({
   id,
   displayName,
-  hostApi: 9,
+  hostApi: 8,
   capabilities: ["entities"],
   enabled: true,
   status: { _tag: "active" },

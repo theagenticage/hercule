@@ -246,23 +246,32 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Requests a new list of the server's tools and returns at once. Fails
-     * with `NotFound` when there is no such server, and with `InvalidState`
-     * when the server is switched off.
+     * Requests a new list of the server's tools and returns at once. It also
+     * resets the server's failed checks, so a server that was backing off is
+     * checked again on the short waits, and raises its revision, so a check
+     * that is running cannot write its older result over the reset. Fails with
+     * `NotFound` when there is no such server, and with `InvalidState` when the
+     * server is switched off.
      */
     check: (
       id: string,
     ): Effect.Effect<Record<string, never>, Forbidden | NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("mcpServer.check");
-        const server = yield* readOrFail(id);
-        if (!server.enabled) {
-          return yield* Effect.fail(
-            createInvalidStateError(
-              `this MCP server is switched off; switch the server on first: hercule mcp-server update ${id} --enabled true`,
-            ),
-          );
-        }
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const server = yield* readOrFail(id);
+            if (!server.enabled) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `this MCP server is switched off; switch the server on first: hercule mcp-server update ${id} --enabled true`,
+                ),
+              );
+            }
+            yield* servers.resetFailedChecks(id);
+          }),
+        );
         yield* checks.request(id);
         return {};
       }),
