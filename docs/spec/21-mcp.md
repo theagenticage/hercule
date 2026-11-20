@@ -374,7 +374,7 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 - A check's result never overwrites a newer change: switching off, a reconnect, Replace or a delete.
 - The remedy for `error` is "Check now" and the detail. It is never "Reconnect".
 - A plugin server follows its Connection. A Connection that moves to `needs-reauth` moves its servers to `needs-sign-in`. This reaches `mcp-servers` through the Connection observer ([section 1.3](#13-the-domain-graph)).
-- A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off").
+- A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off"). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* A plugin that is enabled but failed to start does not serve them either, and the reason says so, because the remedy differs ("The Sentry plugin failed to start: see Settings > Plugins").
 - *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A Connection that is switched off is like a plugin that is switched off** (decided by Rogier, 2026-11-20). Its servers are `error`, with the reason ("The Connection Sentry (work) is switched off"), and they are not served: `tools/list` leaves them out and a call is refused. Switching the Connection on lists the servers again.
 
 The backoff schedule for `unreachable` is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.

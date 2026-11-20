@@ -44,10 +44,16 @@ export const computeBackoffMillis = (failedChecks: number): number =>
 export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));
 
-/** Whether the plugin that offers a server's contribution can serve it. */
+/**
+ * Whether the plugin that offers a server's contribution can serve it. A
+ * plugin that is `switched-off` is enabled by nobody, and one that
+ * `failed-to-start` is enabled but its activation failed. The two need
+ * different words, because the user's remedy is different.
+ */
 export type PluginState =
   | { readonly _tag: "active"; readonly contribution: RegisteredMcpServer }
   | { readonly _tag: "switched-off"; readonly pluginName: string }
+  | { readonly _tag: "failed-to-start"; readonly pluginName: string }
   | { readonly _tag: "missing" };
 
 /**
@@ -72,12 +78,18 @@ export const readDependencies = (
     const found = yield* plugins.findMcpServer(server.contributionId);
     if (Option.isNone(found)) return { connection, plugin: { _tag: "missing" } };
     const { pluginId } = found.value;
-    if (yield* plugins.isActive(pluginId)) {
+    const loaded = (yield* plugins.loaded()).find((plugin) => plugin.id === pluginId);
+    if (loaded?.status._tag === "active") {
       return { connection, plugin: { _tag: "active", contribution: found.value } };
     }
-    const pluginName =
-      (yield* plugins.loaded()).find((plugin) => plugin.id === pluginId)?.displayName ?? pluginId;
-    return { connection, plugin: { _tag: "switched-off", pluginName } };
+    const pluginName = loaded?.displayName ?? pluginId;
+    return {
+      connection,
+      plugin: {
+        _tag: loaded?.status._tag === "errored" ? "failed-to-start" : "switched-off",
+        pluginName,
+      },
+    };
   });
 
 /**
@@ -111,7 +123,8 @@ export interface Usable {
 /**
  * Judges whether a server's plugin and Connection can serve it. When they
  * cannot, returns what the server shows: its plugin is missing or switched
- * off, or its Connection is gone, `disabled` or `needs-reauth`. The check and
+ * off or failed to start, or its Connection is gone, `disabled` or
+ * `needs-reauth`. The check and
  * the follower both use it, so they show the same words.
  */
 export const judgeDependencies = ({
@@ -131,6 +144,13 @@ export const judgeDependencies = ({
         _tag: "unusable",
         status: "error",
         detail: `The ${plugin.pluginName} plugin is switched off`,
+        cause: "plugin",
+      };
+    case "failed-to-start":
+      return {
+        _tag: "unusable",
+        status: "error",
+        detail: `The ${plugin.pluginName} plugin failed to start: see Settings > Plugins`,
         cause: "plugin",
       };
     case "active":

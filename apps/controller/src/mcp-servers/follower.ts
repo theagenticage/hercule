@@ -102,10 +102,11 @@ export const runConnectionFollower = Effect.scoped(
                 ? { connectionGeneration: judged.connection.credentialsGeneration }
                 : {}),
               // The old status was caused by the plugin or the Connection,
-              // which is fine now, so it no longer holds.
-              ...(server.statusCause === null
-                ? {}
-                : { status: "checking", statusDetail: null, statusCause: null }),
+              // which is fine now, so the cause is cleared. The status and
+              // its detail stay until the check that was just requested
+              // writes its result: a later check never goes back to
+              // `checking` (spec 21 section 5.3).
+              ...(server.statusCause === null ? {} : { statusCause: null }),
             };
             requestCheck = true;
           }
