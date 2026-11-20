@@ -21,15 +21,17 @@
  * to the database happens inside a transaction, so such a change is not a
  * database change: it is a `tap`, which is never written to the database.
  *
- * The listener is optional. A controller with no live socket, such as a
- * migration run or a repository test, provides none, and then nothing is
- * published.
+ * The listeners are optional: `AfterCommit` for the live topics and
+ * `RecordChanges` for in-process followers. A controller with no live socket,
+ * such as a migration run or a repository test, provides none, and then
+ * nothing is published.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hercule/contract";
 import type { SubagentId } from "@hercule/protocol";
+import { RecordChanges } from "./record-changes";
 
 /**
  * One thing a committed transaction changed. The exception is `tap`: a token
@@ -114,12 +116,21 @@ class Pending extends Context.Service<
 const publishNow = (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
   changes.length === 0
     ? Effect.void
-    : Effect.flatMap(
-        Effect.serviceOption(AfterCommit),
-        Option.match({
-          onNone: () => Effect.void,
-          onSome: (listener) => listener.publish(changes),
-        }),
+    : Effect.andThen(
+        Effect.flatMap(
+          Effect.serviceOption(AfterCommit),
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (listener) => listener.publish(changes),
+          }),
+        ),
+        Effect.flatMap(
+          Effect.serviceOption(RecordChanges),
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (listener) => listener.publish(changes),
+          }),
+        ),
       );
 
 /**

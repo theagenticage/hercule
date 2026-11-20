@@ -27,11 +27,12 @@ import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
 import { DiscussionService, DiscussionServiceLayer } from "../discussions";
+import { RecordChangesLayer } from "../db";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
-import { McpServerChecksNoopLayer, McpServerService, McpServerServiceLayer } from "../mcp-servers";
+import { McpServerChecksLayer, McpServerService, McpServerServiceLayer } from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -1129,11 +1130,17 @@ const operationServices = Layer.mergeAll(
   SkillServiceLayer,
   // Deleting a server removes it from the lists that hold it, through the
   // controller daemon, which reaches the Projects and Sessions the domain
-  // cannot import. A check is requested through a port with no checking behind
-  // it yet.
+  // cannot import. The checks are merged into the output because the
+  // controller daemon's scheduler requests them too, and a check must be one
+  // instance to run at most once per server.
   McpServerServiceLayer.pipe(
-    Layer.provide(Layer.mergeAll(McpServerChecksNoopLayer, McpServerListHoldersLayer)),
+    Layer.provideMerge(McpServerChecksLayer),
+    Layer.provide(McpServerListHoldersLayer),
   ),
+  // The record changes that in-process followers, such as the MCP Server
+  // follower, read. Merged beside the live topics, which keep their own
+  // listener.
+  RecordChangesLayer,
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),

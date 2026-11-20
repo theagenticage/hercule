@@ -92,6 +92,26 @@ interface McpServerRow {
   readonly updated_at: string;
 }
 
+/**
+ * The columns an update may set. An absent field is left unchanged, and a
+ * `null` clears a nullable column.
+ */
+export interface McpServerEdit {
+  readonly status?: McpServerStatus;
+  readonly statusDetail?: string | null;
+  readonly statusCause?: string | null;
+  /** The full tool definitions of a successful list. Only a success writes them. */
+  readonly tools?: ReadonlyArray<StoredMcpTool>;
+  readonly checkedAt?: string;
+  readonly protocolVersion?: string;
+  readonly connectionGeneration?: string | null;
+  readonly notifiedStatus?: McpServerStatus | null;
+  readonly nextCheckAt?: string | null;
+  readonly failedChecks?: number;
+  /** Raises `revision`, which ends the result of any check that started before. */
+  readonly bumpRevision?: true;
+}
+
 const COLUMNS =
   "id, name, contribution_id, connection_id, account_id, enabled, status, status_detail, " +
   "status_cause, tools, checked_at, protocol_version, revision, connection_generation, " +
@@ -153,6 +173,18 @@ const make = Effect.gen(function* () {
         sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
                           WHERE connection_id = ${uuidFromString(connectionId)}
                           ORDER BY name, id`,
+        (rows) => rows.map(toServer),
+      ),
+
+    /**
+     * Returns the enabled servers whose next check is due at `now`, or that
+     * have none planned yet, sorted by id.
+     */
+    listDueForCheck: (now: string): Effect.Effect<ReadonlyArray<StoredMcpServer>, SqlError> =>
+      Effect.map(
+        sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
+                          WHERE enabled = 1 AND (next_check_at IS NULL OR next_check_at <= ${now})
+                          ORDER BY id`,
         (rows) => rows.map(toServer),
       ),
 
@@ -226,6 +258,30 @@ const make = Effect.gen(function* () {
             WHERE id = ${uuidFromString(id)}
           `,
       ),
+
+    /** Applies an edit and sets `updated_at`. Only the columns the edit sets are written. */
+    update: (id: string, edit: McpServerEdit, at: string): Effect.Effect<void, SqlError> => {
+      const sets = [sql`updated_at = ${at}`];
+      if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
+      if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
+      if (edit.statusCause !== undefined) sets.push(sql`status_cause = ${edit.statusCause}`);
+      if (edit.tools !== undefined) sets.push(sql`tools = ${JSON.stringify(edit.tools)}`);
+      if (edit.checkedAt !== undefined) sets.push(sql`checked_at = ${edit.checkedAt}`);
+      if (edit.protocolVersion !== undefined) {
+        sets.push(sql`protocol_version = ${edit.protocolVersion}`);
+      }
+      if (edit.connectionGeneration !== undefined) {
+        sets.push(sql`connection_generation = ${edit.connectionGeneration}`);
+      }
+      if (edit.notifiedStatus !== undefined)
+        sets.push(sql`notified_status = ${edit.notifiedStatus}`);
+      if (edit.nextCheckAt !== undefined) sets.push(sql`next_check_at = ${edit.nextCheckAt}`);
+      if (edit.failedChecks !== undefined) sets.push(sql`failed_checks = ${edit.failedChecks}`);
+      if (edit.bumpRevision === true) sets.push(sql`revision = revision + 1`);
+      return Effect.asVoid(
+        sql`UPDATE mcp_servers SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
+      );
+    },
 
     /** Deletes the server. Nothing happens when there is no such server. */
     remove: (id: string): Effect.Effect<void, SqlError> =>

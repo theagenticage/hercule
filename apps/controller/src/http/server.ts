@@ -106,6 +106,7 @@ import {
   recordDeparturesAfterThaws,
   runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
+  runMcpServerChecksScheduler,
   runIngestReconciler,
   runHarnessReleaseCheckLoop,
   runClaimResolverLoop,
@@ -121,6 +122,7 @@ import {
 } from "../daemon";
 import { stopWrites } from "../db";
 import { ClaimResolutionLayer } from "../external-entities";
+import { runConnectionFollower } from "../mcp-servers";
 import { EntityLookupsLayer } from "../plugins";
 import { TaskSummariesLayer } from "../tasks";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
@@ -480,6 +482,11 @@ export const serve = (bundle: WebBundle | undefined) =>
     // nobody is running a session for is read, each at most once per 15
     // minutes. It needs the runners, so it starts beside the probing.
     yield* Effect.forkScoped(runAccountUsageReadingLoop);
+    // The MCP Servers' status follows their Connections and plugins, and the
+    // tools of every enabled server are listed again once a day, with retries
+    // for a server that cannot be reached.
+    yield* Effect.forkScoped(runConnectionFollower);
+    yield* Effect.forkScoped(runMcpServerChecksScheduler);
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
     // listener binds, like the probing, so no arrival is missed.

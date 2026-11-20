@@ -20,6 +20,7 @@ export {
   withTransaction,
   type DatabaseFiles,
 } from "./client";
+export { RecordChanges, RecordChangesLayer, type RecordChange } from "./record-changes";
 export { buildMatchExpression } from "./full-text";
 export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
 export {

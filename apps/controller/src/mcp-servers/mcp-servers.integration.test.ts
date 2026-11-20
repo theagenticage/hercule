@@ -1,7 +1,8 @@
 /**
  * Tests the MCP Server operations over HTTP, against a real controller with
  * two test plugins that each offer one MCP server (`acme/desk` and
- * `bolt/desk`) and a Connection type to reach it with:
+ * `bolt/desk`) and a Connection type to reach it with. The outside server
+ * never answers, so no check ends:
  *
  * - a create takes the contribution's word as the name unless one is given,
  *   and answers in status `checking` with no tools;
@@ -17,17 +18,37 @@
  * - `mcp.read` reads and `mcp.manage` writes;
  * - `connection.delete` is refused while a server uses the Connection.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { McpServer } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send, type ServerHarness } from "../http/testing";
-import { buildMcpServerPlugin } from "../plugins/testing";
 import { WAIT_DEADLINE_MS, createProfile, spawnThreadUnder } from "../sessions/testing";
 import { withFleet } from "../workspaces/testing";
 import { createConnection, withSetUpController } from "../workflows/testing";
+import type { Plugin } from "@hercule/plugin-host";
+import { buildUpstreamDeskPlugin, startFakeUpstream, type FakeUpstream } from "./testing";
 
-const PLUGINS = [buildMcpServerPlugin("acme"), buildMcpServerPlugin("bolt")];
+/**
+ * The outside server holds every answer, so a created server stays in status
+ * `checking` for as long as a test looks at it, and no test reaches the real
+ * network.
+ */
+let upstream: FakeUpstream;
+let PLUGINS: ReadonlyArray<Plugin>;
+
+beforeAll(async () => {
+  upstream = await startFakeUpstream();
+  upstream.hold();
+  PLUGINS = [
+    buildUpstreamDeskPlugin(upstream, { id: "acme" }),
+    buildUpstreamDeskPlugin(upstream, { id: "bolt" }),
+  ];
+});
+
+afterAll(async () => {
+  await upstream.stop();
+});
 
 /** A well-formed id that no MCP Server has. */
 const UNKNOWN_ID = "0199e0e7-0000-7000-8000-00000000dead";
