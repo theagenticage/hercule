@@ -1,7 +1,8 @@
 /**
  * The names the MCP Gateway gives the tools of a session's servers (spec 21
- * section 3.4). A tool is named `<server name>__<tool name>`. Everything here
- * is pure: the caller keeps the reservations and commits them.
+ * section 3.4). A tool is named `<server name>__<tool name>`. Allocation is
+ * pure. The `NameLedger` is the one place that remembers, per Session Token,
+ * which names were sent and what each stands for.
  */
 import { createHash } from "node:crypto";
 
@@ -21,6 +22,16 @@ const SUFFIX_LENGTH = 7;
 export interface ToolKey {
   readonly serverName: string;
   readonly tool: string;
+}
+
+/**
+ * What a name the gateway sent stands for: the tool, and the id of the server
+ * the list held then. A call is dispatched to the server the list holds by
+ * name when the call arrives. The id only lets a refusal name the server a
+ * call meant after the list dropped it.
+ */
+export interface ReservedTool extends ToolKey {
+  readonly serverId: string;
 }
 
 /** A server's tools, to be named. */
@@ -122,4 +133,32 @@ export const allocateToolNames = (
     named.push({ ...key, name });
   }
   return { named, leftOut };
+};
+
+/**
+ * The meaning of every name the gateway has sent to one Session Token since
+ * the controller started. A call is accepted only under one of these names,
+ * and a name keeps its meaning after its tool leaves the list.
+ */
+export interface NameLedger {
+  /** Returns what `name` stands for, or `undefined` when no list sent this token that name. */
+  readonly find: (name: string) => ReservedTool | undefined;
+  /** Names the tools of `servers` so that every name this token holds keeps its meaning. Records nothing. */
+  readonly allocate: (servers: ReadonlyArray<ServerTools>) => AllocatedNames;
+  /** Records `sent` as the names of a `tools/list` response, once the response is being answered. */
+  readonly record: (sent: ReadonlyArray<ReservedTool & { readonly name: string }>) => void;
+}
+
+/** Builds the ledger of a new Session Token: nothing was sent yet. */
+export const makeNameLedger = (): NameLedger => {
+  const reservations = new Map<string, ReservedTool>();
+  return {
+    find: (name) => reservations.get(name),
+    allocate: (servers) => allocateToolNames(servers, reservations),
+    record: (sent) => {
+      for (const { name, serverName, tool, serverId } of sent) {
+        reservations.set(name, { serverName, tool, serverId });
+      }
+    },
+  };
 };

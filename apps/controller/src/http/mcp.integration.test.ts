@@ -952,6 +952,35 @@ describe("which MCP sessions and revisions a message may name", () => {
     expect(response.status).toBe(404);
   });
 
+  it("admits GET and DELETE like any other message: a missing id is 400, another token's session 404, a conflicting revision refused", async () => {
+    const mine = await spawnThread(["mcp.use"], []);
+    const other = await spawnThread(["mcp.use"], []);
+    const { sessionId } = await initialize(mine.token, "2025-06-18");
+    const call = (method: "GET" | "DELETE", token: string, headers: Record<string, string>) =>
+      fetch(`${base()}/mcp`, {
+        method,
+        headers: { authorization: `Bearer ${token}`, accept: "text/event-stream", ...headers },
+      });
+
+    for (const method of ["GET", "DELETE"] as const) {
+      expect((await call(method, mine.token, {})).status, method).toBe(400);
+      expect(
+        (await call(method, other.token, { "mcp-session-id": sessionId })).status,
+        method,
+      ).toBe(404);
+      const conflicting = await call(method, mine.token, {
+        "mcp-session-id": sessionId,
+        "mcp-protocol-version": "2025-11-25",
+      });
+      expect(conflicting.status, method).toBe(400);
+      expect(((await conflicting.json()) as RpcBody).error.code, method).toBe(-32020);
+    }
+    // None of the refusals ended the session.
+    expect(
+      (await sendMcp(mine.token, request("ping"), { "mcp-session-id": sessionId })).status,
+    ).toBe(200);
+  });
+
   it("refuses a request of a legacy session that names another revision than the one it negotiated", async () => {
     const thread = await spawnThread(["mcp.use"], []);
     const { sessionId } = await initialize(thread.token, "2025-06-18");

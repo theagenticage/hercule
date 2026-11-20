@@ -338,8 +338,10 @@ export const buildToolsListResult = (
 ) => (era === "stateless" ? { ...STATELESS_RESULT, ...UNCACHEABLE, tools } : { tools });
 
 /** Adds the stateless era's `resultType` to a `tools/call` result. */
-export const buildToolCallResult = (era: "stateful" | "stateless", result: unknown) =>
-  era === "stateless" ? { ...STATELESS_RESULT, ...(result as JsonObject) } : result;
+export const buildToolCallResult = (
+  era: "stateful" | "stateless",
+  result: McpSchema.CallToolResult,
+) => (era === "stateless" ? { ...STATELESS_RESULT, ...result } : result);
 
 /** The message `list_changed` sends on a stateful stream. */
 export const buildListChangedNotification = () => ({

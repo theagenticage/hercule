@@ -1,13 +1,14 @@
 /**
  * What one session is served (spec 21 section 3.3): the tools of the servers
  * in its list that may be served, under the gateway's names, with the one-line
- * instructions. `tools/list`, the instructions and `list_changed` all read the
- * same projection, so they can never disagree.
+ * instructions. `tools/list`, the instructions and `list_changed` all derive
+ * from the same selection of servers, so they can never disagree.
  */
 import { createHash } from "node:crypto";
+import type { SessionActor } from "../actor";
 import type { ServedMcpServer, StoredMcpTool } from "../mcp-servers";
 import { buildInstructions } from "./instructions";
-import { allocateToolNames, type ToolKey } from "./tool-names";
+import type { NameLedger, ToolKey } from "./tool-names";
 
 /** One tool the session is served, under the name the gateway gives it. */
 export interface ServedTool {
@@ -20,40 +21,9 @@ export interface ServedTool {
   readonly definition: StoredMcpTool;
 }
 
-/** What a session is served right now. */
-export interface ServedProjection {
-  /** The tools, in the order the names were given. */
-  readonly tools: ReadonlyArray<ServedTool>;
-  readonly instructions: string;
-  /** Changes whenever a tool, a tool's definition or the instructions change. */
-  readonly fingerprint: string;
-  /** Tools that got no unique name and are not served. */
-  readonly leftOut: ReadonlyArray<ToolKey>;
-  /** The ids of the servers the session is served, whether or not they have a tool. */
-  readonly servedServerIds: ReadonlySet<string>;
-}
-
-/**
- * What a name the gateway sent stands for: the tool, and the id of the server
- * the list held then. A call is dispatched to the server the list holds by
- * name when the call arrives. The id only lets a refusal name the server a
- * call meant after the list dropped it.
- */
-export interface ReservedTool extends ToolKey {
-  readonly serverId: string;
-}
-
-/** The meaning of every name the gateway has sent to one Session Token, by name. */
-export type NameReservations = ReadonlyMap<string, ReservedTool>;
-
-/** What a projection is built from. */
-export interface ProjectionInput {
-  /** The session's own list of servers, as the records the catalogue holds for it. */
-  readonly records: ReadonlyArray<ServedMcpServer>;
-  /** Whether the session's profile holds `mcp.use`. Without it nothing is served. */
-  readonly holdsMcpUse: boolean;
-  readonly reservations: NameReservations;
-}
+/** Returns whether the session's profile holds `mcp.use`. Without it nothing is served. */
+export const holdsMcpUse = (actor: SessionActor): boolean =>
+  actor.profileGrants.includes("mcp.use");
 
 /**
  * Returns whether the server is served: it is in the list the caller read, it
@@ -63,27 +33,43 @@ export interface ProjectionInput {
 export const isServed = ({ server, servable }: ServedMcpServer): boolean =>
   servable && server.enabled && server.checkedAt !== null;
 
+/** Returns the servers of the session's list that it is served now: none without `mcp.use`. */
+export const selectServed = (
+  records: ReadonlyArray<ServedMcpServer>,
+  actor: SessionActor,
+): ReadonlyArray<ServedMcpServer> => (holdsMcpUse(actor) ? records.filter(isServed) : []);
+
 /**
- * Builds the projection of one session. A session whose profile lacks
- * `mcp.use` is served nothing, and the instructions say why. Pure: it reads
- * nothing, and the caller commits the names of `tools` to its reservations
- * once it has sent them.
+ * Builds the one-line instructions for the served servers. They name the
+ * servers, or say why there are none. Needs no tool names.
  */
-export const buildProjection = ({
-  records,
-  holdsMcpUse,
-  reservations,
-}: ProjectionInput): ServedProjection => {
-  const served = holdsMcpUse ? records.filter(isServed) : [];
-  const allocated = allocateToolNames(
+export const buildServedInstructions = (
+  served: ReadonlyArray<ServedMcpServer>,
+  actor: SessionActor,
+): string =>
+  buildInstructions(
+    served.map(({ server }) => server.name).toSorted(),
+    holdsMcpUse(actor) ? undefined : "missing-grant",
+  );
+
+/**
+ * Names the tools of the served servers with `ledger`, and returns them in
+ * the order the names were given, with the tools that got no unique name.
+ * Pure: the caller records the names in the ledger once it has sent them.
+ */
+export const projectTools = (
+  served: ReadonlyArray<ServedMcpServer>,
+  ledger: NameLedger,
+): { readonly tools: ReadonlyArray<ServedTool>; readonly leftOut: ReadonlyArray<ToolKey> } => {
+  const { named, leftOut } = ledger.allocate(
     served.map(({ server }) => ({
       serverName: server.name,
       tools: server.tools.map((tool) => tool.name),
     })),
-    reservations,
   );
-  const tools = allocated.named.map(({ name, serverName, tool }): ServedTool => {
-    const { server } = served.find((one) => one.server.name === serverName)!;
+  const servers = new Map(served.map(({ server }) => [server.name, server]));
+  const tools = named.map(({ name, serverName, tool }): ServedTool => {
+    const server = servers.get(serverName)!;
     return {
       name,
       serverId: server.id,
@@ -92,33 +78,27 @@ export const buildProjection = ({
       definition: server.tools.find((one) => one.name === tool)!,
     };
   });
-  const instructions = buildInstructions(
-    served.map(({ server }) => server.name).toSorted(),
-    holdsMcpUse ? undefined : "missing-grant",
-  );
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ instructions, tools: tools.map((one) => [one.name, one.definition]) }))
-    .digest("hex");
-  return {
-    tools,
-    instructions,
-    fingerprint,
-    leftOut: allocated.leftOut,
-    servedServerIds: new Set(served.map(({ server }) => server.id)),
-  };
+  return { tools, leftOut };
 };
 
-/** Returns `reservations` with the names of `tools` added, once the gateway has sent them. */
-export const reserveServedTools = (
-  reservations: NameReservations,
-  tools: ReadonlyArray<ServedTool>,
-): NameReservations => {
-  const next = new Map(reservations);
-  for (const { name, serverName, tool, serverId } of tools) {
-    next.set(name, { serverName, tool, serverId });
-  }
-  return next;
-};
+/**
+ * Returns a fingerprint that changes whenever a served tool, a tool's
+ * definition, a tool's name or the instructions change. A stream is told
+ * `list_changed` when its last fingerprint differs from the current one.
+ */
+export const fingerprintServed = (
+  served: ReadonlyArray<ServedMcpServer>,
+  actor: SessionActor,
+  ledger: NameLedger,
+): string =>
+  createHash("sha256")
+    .update(
+      JSON.stringify({
+        instructions: buildServedInstructions(served, actor),
+        tools: projectTools(served, ledger).tools.map((one) => [one.name, one.definition]),
+      }),
+    )
+    .digest("hex");
 
 /**
  * Returns a tool as `tools/list` sends it: the stored definition under the

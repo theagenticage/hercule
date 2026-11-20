@@ -4,37 +4,24 @@
  * from its Session Token, serves the tools of the servers in that session's
  * list under its own names, and forwards each call through the catalogue.
  *
- * The route (`http/mcp.ts`) checks the method, the `Origin` header and the
- * bearer token, and hands the request to `handle`. State kept here lives in
- * memory only: per Session Token, its MCP sessions, the names it was sent, and
- * its open streams. A controller restart drops it, and a harness that names an
- * unknown MCP session gets 404 and opens a new one.
+ * This module is the wire endpoint: it reads a request, checks it against the
+ * protocol, and answers it. The route (`http/mcp.ts`) checks the method, the
+ * `Origin` header and the bearer token, and hands the request to `handle`.
+ * What the gateway keeps per Session Token lives in `tokens.ts`, and what it
+ * does with a `tools/call` in `call-policy.ts`.
  */
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
-import * as Schedule from "effect/Schedule";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/sql/SqlClient";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpSchema } from "effect/ai";
-import { ControllerSealed, PromotionInProgress } from "@hercule/contract";
-import { absorbFailures } from "../absorbing";
-import { buildSessionStamp, type SessionActor } from "../actor";
-import { PROFILE_GRANTS_TOPIC, RecordChanges, withTransaction } from "../db";
-import { AuditLog } from "../events";
-import { McpCallRefused, McpServerCalls, type ServedMcpServer } from "../mcp-servers";
-import { SessionTokens } from "../permissions";
-import { PromotionState } from "../promotion";
-import { SessionService, sessionRepository } from "../sessions";
+import type { SessionActor } from "../actor";
+import { makeCallPolicy } from "./call-policy";
 import {
   buildDiscoverResult,
   buildInitializeResult,
@@ -64,95 +51,25 @@ import {
   type RequestId,
   type RequestRefusal,
 } from "./protocol";
+import { makeFreshReads } from "./reads";
+import { buildServedInstructions, buildToolDefinition, projectTools } from "./served";
+import { buildServerSentBody } from "./streams";
 import {
-  buildMissingGrantRefusal,
-  buildNotInListRefusal,
-  buildNotServedRefusal,
-  buildRefusalWarning,
-  buildToolGoneRefusal,
-  buildUnknownToolRefusal,
-  claimWarning,
-  type Refusal,
-  type SeenWarning,
-} from "./refusals";
-import {
-  buildProjection,
-  buildToolDefinition,
-  isServed,
-  reserveServedTools,
-  type NameReservations,
-  type ServedProjection,
-} from "./served";
-import { buildServerSentBody, type OpenStream } from "./streams";
-
-/** How long a Session Token with no open stream may be gone before the sweep forgets it. */
-const SWEEP_INTERVAL = Duration.minutes(1);
-
-/** The most MCP sessions one Session Token keeps. A harness that never sends DELETE loses its oldest. */
-const MAX_MCP_SESSIONS_PER_TOKEN = 16;
+  cancelCall,
+  makeTokenStates,
+  type McpCaller,
+  type McpSession,
+  type TokenState,
+} from "./tokens";
 
 /** The era of a client, chosen from its first message. */
 type Era = "stateful" | "stateless";
 
-/** One stateful MCP session, which `initialize` creates. */
-interface McpSession {
-  readonly id: string;
-  /** The revision `initialize` negotiated. Later requests of the session must not name another. */
-  readonly revision: string;
-  /** The `tools/call` requests running now, by their JSON-RPC id, so `notifications/cancelled` can stop one. */
-  readonly calls: Map<string, Fiber.Fiber<unknown, unknown>>;
-}
-
-/** What the gateway keeps for one Session Token. */
-interface TokenState {
-  readonly tokenHash: string;
-  readonly sessionId: string;
-  readonly mcpSessions: Map<string, McpSession>;
-  readonly streams: Set<OpenStream>;
-  /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
-  readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
-  /** The servers a call of this token went to, so the upstream session of one that is no longer served can be closed. */
-  readonly calledServerIds: Set<string>;
-  /**
-   * The meaning of every name `tools/list` has sent to this token since the
-   * controller started. A call is accepted only under one of these names.
-   * Replaced, never changed in place.
-   */
-  reservations: NameReservations;
-  /** Serializes the changes of `reservations`. */
-  readonly offering: Semaphore.Semaphore;
-  /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
-  readonly admission: Semaphore.Semaphore;
-  /** When the Thread was last told about each refusal. */
-  readonly warnings: Map<string, SeenWarning>;
-  /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
-  readonly warning: Semaphore.Semaphore;
-}
-
-/** Who is calling: the Session Token the route resolved, and the session behind it. */
-export interface McpCaller {
-  readonly tokenHash: string;
-  readonly actor: SessionActor;
-}
-
-/** What a call turned out to be, before anything is sent. */
-type CallDecision =
-  | { readonly _tag: "refused"; readonly refusal: Refusal }
-  | {
-      readonly _tag: "call";
-      readonly serverId: string;
-      readonly serverName: string;
-      readonly tool: string;
-    };
-
-/** How an audited call ended. */
-type CallOutcome =
-  | { readonly _tag: "answered" }
-  | { readonly _tag: "refused"; readonly reason: string }
-  | { readonly _tag: "failed" };
-
-const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
-  error instanceof ControllerSealed || error instanceof PromotionInProgress;
+/** A message the gateway answers itself: a request or a notification. */
+type DispatchableMessage = Exclude<
+  IncomingMessage,
+  { readonly _tag: "batch" | "invalid" | "response" }
+>;
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
@@ -189,523 +106,101 @@ const respondNotServing = () =>
     "The controller is not serving right now. Try again once it is.",
   );
 
+const respondRefusal = (refusal: RequestRefusal, id: RequestId | null) =>
+  respondJson(buildRefusalBody(id, refusal), refusal.status);
+
 const toServerSentResponse = (body: Stream.Stream<Uint8Array>) =>
   HttpServerResponse.stream(body, {
     contentType: "text/event-stream",
     headers: NO_STORE,
   });
 
+/**
+ * Reads the body of a POST as it arrives and refuses it once it passes the
+ * limit, so a chunked body with no `Content-Length` is never buffered past
+ * it. Fails with the response to send.
+ */
+const readBody = (
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<string, HttpServerResponse.HttpServerResponse> => {
+  const tooLarge = respondRpcError(
+    413,
+    McpSchema.INVALID_REQUEST_ERROR_CODE,
+    "The request body is over 1 MiB",
+  );
+  if (Number(request.headers["content-length"] ?? 0) > MAX_REQUEST_BODY_BYTES) {
+    return Effect.fail(tooLarge);
+  }
+  return Effect.gen(function* () {
+    const chunks: Array<Uint8Array> = [];
+    let total = 0;
+    yield* request.stream.pipe(
+      Stream.mapError(() =>
+        respondRpcError(400, McpSchema.PARSE_ERROR_CODE, "The request body could not be read"),
+      ),
+      Stream.runForEach((chunk) => {
+        total += chunk.byteLength;
+        if (total > MAX_REQUEST_BODY_BYTES) return Effect.fail(tooLarge);
+        chunks.push(chunk);
+        return Effect.void;
+      }),
+    );
+    return new TextDecoder().decode(Buffer.concat(chunks));
+  });
+};
+
+/**
+ * Admits a request to the stateful MCP session its `Mcp-Session-Id` header
+ * names. Every kind of request goes through this one check: a request, a
+ * notification, a response, `initialize`, GET and DELETE. Fails with the
+ * response to send when the header names no session of this token (404, also
+ * for the session of another token), or when the `MCP-Protocol-Version`
+ * header disagrees with the revision the session negotiated. Succeeds with the
+ * session, or with `undefined` when the request names none.
+ */
+const admitMcpSession = (
+  request: HttpServerRequest.HttpServerRequest,
+  state: TokenState,
+  requestId: RequestId | null,
+): Effect.Effect<McpSession | undefined, HttpServerResponse.HttpServerResponse> => {
+  const sessionId = request.headers[SESSION_ID_HEADER];
+  if (sessionId === undefined) return Effect.succeed(undefined);
+  const session = state.mcpSessions.get(sessionId);
+  if (session === undefined) return Effect.fail(respondSessionNotFound());
+  const refusal = checkSessionVersionHeader(
+    request.headers["mcp-protocol-version"],
+    session.revision,
+  );
+  return refusal === undefined
+    ? Effect.succeed(session)
+    : Effect.fail(respondRefusal(refusal, requestId));
+};
+
+/** Like `admitMcpSession`, for GET and DELETE, which mean nothing without a session. */
+const admitRequiredMcpSession = (
+  request: HttpServerRequest.HttpServerRequest,
+  state: TokenState,
+): Effect.Effect<McpSession, HttpServerResponse.HttpServerResponse> =>
+  Effect.flatMap(admitMcpSession(request, state, null), (session) =>
+    session === undefined
+      ? Effect.fail(
+          respondRpcError(
+            400,
+            McpSchema.INVALID_REQUEST_ERROR_CODE,
+            "The Mcp-Session-Id header is required",
+          ),
+        )
+      : Effect.succeed(session),
+  );
+
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const tokens = yield* SessionTokens;
-  const sessions = yield* sessionRepository;
-  const sessionService = yield* SessionService;
-  const catalogue = yield* McpServerCalls;
-  const audit = yield* AuditLog;
-  const changes = yield* RecordChanges;
-  const promotion = yield* PromotionState;
+  const reads = yield* makeFreshReads;
+  const tokenStates = yield* makeTokenStates;
+  const callPolicy = yield* makeCallPolicy;
 
-  const states = new Map<string, TokenState>();
-
-  const stateOf = ({ tokenHash, actor }: McpCaller): TokenState => {
-    const existing = states.get(tokenHash);
-    if (existing !== undefined) return existing;
-    const created: TokenState = {
-      tokenHash,
-      sessionId: actor.sessionId,
-      mcpSessions: new Map(),
-      streams: new Set(),
-      runningCalls: new Set(),
-      calledServerIds: new Set(),
-      reservations: new Map(),
-      offering: Semaphore.makeUnsafe(1),
-      admission: Semaphore.makeUnsafe(1),
-      warnings: new Map(),
-      warning: Semaphore.makeUnsafe(1),
-    };
-    states.set(tokenHash, created);
-    return created;
-  };
-
-  /** Reads the session's own list of servers, as the catalogue serves them now. */
-  const readRecords = (sessionId: string): Effect.Effect<ReadonlyArray<ServedMcpServer>> =>
-    Effect.orDie(
-      Effect.flatMap(sessions.readMcpServers(sessionId), (listed) =>
-        catalogue.readServedServers(listed.map((entry) => entry.mcpServerId)),
-      ),
-    );
-
-  const holdsMcpUse = (actor: SessionActor): boolean => actor.profileGrants.includes("mcp.use");
-
-  /** Builds what the session is served now, and logs tools that got no unique name. Sends and stores nothing. */
-  const readProjection = (
-    state: TokenState,
-    actor: SessionActor,
-  ): Effect.Effect<ServedProjection> =>
-    Effect.gen(function* () {
-      const projection = buildProjection({
-        records: yield* readRecords(actor.sessionId),
-        holdsMcpUse: holdsMcpUse(actor),
-        reservations: state.reservations,
-      });
-      for (const { serverName, tool } of projection.leftOut) {
-        yield* Effect.logWarning(
-          `MCP gateway: the tool ${tool} of server ${serverName} got no unique name and is not offered`,
-        );
-      }
-      return projection;
-    });
-
-  /**
-   * Builds what the session is served and records the names as sent: they
-   * join the token's reservations, which are the only names a call may use.
-   * One at a time per token.
-   */
-  const offerTools = (state: TokenState, actor: SessionActor): Effect.Effect<ServedProjection> =>
-    state.offering.withPermits(1)(
-      Effect.gen(function* () {
-        const projection = yield* readProjection(state, actor);
-        state.reservations = reserveServedTools(state.reservations, projection.tools);
-        return projection;
-      }),
-    );
-
-  // -- Calls ----------------------------------------------------------------
-
-  /** Reads what a call means and whether it may go on, without sending anything. */
-  const decideCall = (
-    state: TokenState,
-    actor: SessionActor,
-    toolName: string,
-  ): Effect.Effect<CallDecision> =>
-    Effect.gen(function* () {
-      if (!holdsMcpUse(actor)) return { _tag: "refused", refusal: buildMissingGrantRefusal() };
-      // A call is accepted only under a name `tools/list` sent to this token
-      // since the controller started, and the name keeps its meaning. A name
-      // a harness remembers from before a restart is refused, because the list
-      // may have changed and a recomputed name could reach another tool than
-      // the one the harness showed. The streams are told to list again.
-      const meaning = state.reservations.get(toolName);
-      if (meaning === undefined) {
-        yield* Effect.forEach([...state.streams], (stream) => stream.notifyListChanged, {
-          discard: true,
-        });
-        return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
-      }
-      const records = yield* readRecords(actor.sessionId);
-      const listed = records.find(({ server }) => server.name === meaning.serverName);
-      if (listed === undefined) {
-        return {
-          _tag: "refused",
-          refusal: buildNotInListRefusal(
-            { id: meaning.serverId, name: meaning.serverName },
-            meaning.serverName,
-            meaning.tool,
-          ),
-        };
-      }
-      const { server } = listed;
-      if (!isServed(listed))
-        return { _tag: "refused", refusal: buildNotServedRefusal(server, meaning.tool) };
-      if (!server.tools.some((tool) => tool.name === meaning.tool)) {
-        return { _tag: "refused", refusal: buildToolGoneRefusal(server, meaning.tool) };
-      }
-      return { _tag: "call", serverId: server.id, serverName: server.name, tool: meaning.tool };
-    });
-
-  /**
-   * Checks again, from the database and not from the token cache, right
-   * before the catalogue sends a request upstream, that the call is still
-   * allowed: the token still resolves, the profile still holds `mcp.use`, and
-   * the server is still in the session's list.
-   */
-  const authorizeCall = (
-    tokenHash: string,
-    serverId: string,
-  ): Effect.Effect<void, McpCallRefused> =>
-    Effect.gen(function* () {
-      const actor = yield* Effect.orDie(tokens.resolveUncached(tokenHash));
-      if (Option.isNone(actor)) {
-        return yield* new McpCallRefused({
-          reason: "error",
-          message: "This session has ended, so the MCP tool call was not sent.",
-        });
-      }
-      if (!holdsMcpUse(actor.value)) {
-        return yield* new McpCallRefused({
-          reason: "missing-grant",
-          message: buildMissingGrantRefusal().message,
-        });
-      }
-      const listed = yield* Effect.orDie(sessions.readMcpServers(actor.value.sessionId));
-      if (!listed.some((entry) => entry.mcpServerId === serverId)) {
-        return yield* new McpCallRefused({
-          reason: "not-in-list",
-          message:
-            "The MCP server is not in this Thread's list any more, so the tool call was not sent.",
-        });
-      }
-    });
-
-  /**
-   * Tells the Thread about a refusal, unless it was told already in this turn
-   * (or this minute, outside a turn). A failed write is logged and changes
-   * nothing for the agent.
-   */
-  const warnThread = (state: TokenState, refusal: Refusal): Effect.Effect<void> =>
-    absorbFailures(
-      "Writing the warning about a refused MCP tool call failed",
-      state.warning.withPermits(1)(
-        Effect.gen(function* () {
-          const turnId = yield* sessionService.readOpenTurnId(state.sessionId);
-          if (!claimWarning(state.warnings, refusal, turnId, Date.now())) return;
-          // `unknown-tool` names a reason only a tool name can have, so such a
-          // line names no server.
-          const server = refusal.reason === "unknown-tool" ? undefined : refusal.server;
-          yield* sessionService.writeRuntimeWarning(
-            state.sessionId,
-            buildRefusalWarning(refusal),
-            server === undefined || refusal.reason === "unknown-tool"
-              ? undefined
-              : [{ mcpServerId: server.id, reason: refusal.reason }],
-          );
-        }),
-      ),
-    );
-
-  /** Writes the audit entry of one call. Never holds the arguments or the result. */
-  const auditCall = (
-    actor: SessionActor,
-    server: { readonly id: string; readonly name: string } | undefined,
-    tool: string | undefined,
-    outcome: CallOutcome,
-    durationMs: number,
-  ): Effect.Effect<void> =>
-    absorbFailures(
-      "Writing the audit entry of an MCP tool call failed",
-      withTransaction(
-        sql,
-        audit.append({
-          kind: "mcpTool.called",
-          actor: buildSessionStamp(actor.sessionId),
-          payload: {
-            sessionId: actor.sessionId,
-            mcpServerId: server?.id ?? null,
-            tool: tool ?? null,
-            outcome: outcome._tag,
-            ...(outcome._tag === "refused" ? { reason: outcome.reason } : {}),
-            durationMs,
-          },
-        }),
-      ),
-    );
-
-  /**
-   * Handles a call the controller is frozen or sealed for: writes one line to
-   * the controller's log and answers with the gate's message. Nothing is
-   * written to the database, so there is no audit entry and no Thread line.
-   * The one place that decision lives (spec 21 section 3.9).
-   */
-  const refuseWhileNotServing = (
-    sessionId: string,
-    serverName: string | undefined,
-    tool: string | undefined,
-    gateMessage: string,
-  ): Effect.Effect<ToolResult> =>
-    Effect.as(
-      Effect.logInfo(
-        `MCP gateway: refused a tool call while the controller does not serve. session ${sessionId}, ` +
-          `server ${serverName ?? "-"}, tool ${tool ?? "-"}, reason: ${gateMessage}`,
-      ),
-      buildErrorResult(gateMessage),
-    );
-
-  /**
-   * Runs one `tools/call` for the session and returns its tool result. A
-   * refusal is a tool result with `isError: true`. Never fails: a defect is
-   * left to the caller.
-   */
-  const runToolCall = (
-    state: TokenState,
-    actor: SessionActor,
-    call: { readonly name: string; readonly arguments: JsonObject | undefined },
-  ): Effect.Effect<ToolResult> =>
-    Effect.gen(function* () {
-      const decision = yield* decideCall(state, actor, call.name);
-      // Admitted, so that a freeze waits for the call and its audit entry, and
-      // so that nothing here writes once the database stops accepting writes.
-      return yield* promotion
-        .admit(executeCall(state, actor, call, decision))
-        .pipe(
-          Effect.catchIf(isPromotionRefusal, (gate) =>
-            refuseWhileNotServing(
-              actor.sessionId,
-              decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
-              decision._tag === "call" ? decision.tool : undefined,
-              gate.error.message,
-            ),
-          ),
-        );
-    });
-
-  const executeCall = (
-    state: TokenState,
-    actor: SessionActor,
-    call: { readonly name: string; readonly arguments: JsonObject | undefined },
-    decision: CallDecision,
-  ): Effect.Effect<ToolResult> => {
-    const startedAt = Date.now();
-    let server: { readonly id: string; readonly name: string } | undefined;
-    let tool: string | undefined;
-    // Whatever happens after the call is accepted, one entry is written: a
-    // call that is interrupted or dies ends as `failed`.
-    let outcome: CallOutcome = { _tag: "failed" };
-    // The catalogue found the controller frozen or sealed after all: that
-    // refusal is logged and answered, never audited (spec 21 section 3.9).
-    let notServing = false;
-
-    const refuse = (refusal: Refusal): Effect.Effect<ToolResult> => {
-      server = refusal.server;
-      tool = refusal.tool;
-      outcome = { _tag: "refused", reason: refusal.reason };
-      return Effect.as(warnThread(state, refusal), buildErrorResult(refusal.message));
-    };
-
-    const run =
-      decision._tag === "refused"
-        ? refuse(decision.refusal)
-        : Effect.suspend(() => {
-            server = { id: decision.serverId, name: decision.serverName };
-            tool = decision.tool;
-            state.calledServerIds.add(decision.serverId);
-            return catalogue
-              .callTool({
-                upstreamScope: state.tokenHash,
-                serverId: decision.serverId,
-                tool: decision.tool,
-                arguments: call.arguments,
-                authorize: authorizeCall(state.tokenHash, decision.serverId),
-              })
-              .pipe(
-                Effect.map((result): ToolResult => {
-                  outcome = { _tag: "answered" };
-                  return result as unknown as ToolResult;
-                }),
-                Effect.catchTag("McpCallRefused", (refused) => {
-                  if (refused.controllerNotServing === true) {
-                    notServing = true;
-                    return refuseWhileNotServing(
-                      actor.sessionId,
-                      decision.serverName,
-                      decision.tool,
-                      refused.message,
-                    );
-                  }
-                  return refuse({
-                    reason: refused.reason,
-                    server: { id: decision.serverId, name: decision.serverName },
-                    tool: decision.tool,
-                    message: refused.message,
-                  });
-                }),
-              );
-          });
-
-    return run.pipe(
-      Effect.onExit(() =>
-        notServing
-          ? Effect.void
-          : Effect.uninterruptible(auditCall(actor, server, tool, outcome, Date.now() - startedAt)),
-      ),
-    );
-  };
-
-  // -- Streams and list changes ---------------------------------------------
-
-  /** Set once the controller is shutting down: no stream opens after that. */
-  let closing = false;
-
-  /**
-   * Decides whether a stream whose response body is being read may open, and
-   * adds it to the token's streams when it may. Everything that can have
-   * changed since the request was checked is read again here: the controller
-   * serves, the token still resolves, and the MCP session still exists. A
-   * stream of a stateful MCP session replaces the one that session had. One
-   * admission at a time per token, so two GETs cannot both replace the old
-   * stream and both stay.
-   */
-  const admitStream =
-    (state: TokenState) =>
-    (stream: OpenStream): Effect.Effect<boolean> =>
-      state.admission.withPermits(1)(
-        Effect.gen(function* () {
-          if (!(yield* isServing)) return false;
-          const actor = yield* Effect.orDie(tokens.resolveUncached(state.tokenHash));
-          if (Option.isNone(actor)) return false;
-          stream.told = (yield* readProjection(state, actor.value)).fingerprint;
-          // Nothing waits between this check and the add, so a token that is
-          // forgotten or a shutdown that starts cannot slip between them.
-          const replaced = yield* Effect.sync(() => {
-            const alive = !closing && states.get(state.tokenHash) === state;
-            const sessionAlive =
-              stream.mcpSessionId === undefined || state.mcpSessions.has(stream.mcpSessionId);
-            if (!alive || !sessionAlive) return undefined;
-            const old = [...state.streams].filter(
-              (other) =>
-                stream.mcpSessionId !== undefined && other.mcpSessionId === stream.mcpSessionId,
-            );
-            state.streams.add(stream);
-            return old;
-          });
-          if (replaced === undefined) return false;
-          // The phase is read after the add, not before it. A freeze that
-          // starts from now on drains this stream with the others. A freeze
-          // that has drained already changed the phase first, so this read
-          // sees it. Read before the add, a freeze could drain in between and
-          // leave this stream open for a frozen controller.
-          if (!(yield* isServing)) {
-            state.streams.delete(stream);
-            return false;
-          }
-          yield* Effect.forEach(replaced, (old) => old.end, { discard: true });
-          return true;
-        }),
-      );
-
-  const releaseStream = (state: TokenState) => (stream: OpenStream) =>
-    Effect.sync(() => {
-      state.streams.delete(stream);
-    });
-
-  const endStreams = (state: TokenState, only?: string): Effect.Effect<void> =>
-    Effect.forEach(
-      [...state.streams].filter((stream) => only === undefined || stream.mcpSessionId === only),
-      (stream) => stream.end,
-      { discard: true },
-    );
-
-  /** Forgets a Session Token that no longer resolves: ends its streams and calls, and closes its upstream sessions. */
-  const forgetToken = (state: TokenState): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      states.delete(state.tokenHash);
-      yield* endStreams(state);
-      yield* Effect.forEach([...state.runningCalls], (call) => Fiber.interrupt(call), {
-        discard: true,
-      });
-      state.mcpSessions.clear();
-      yield* catalogue.closeUpstreamScope(state.tokenHash);
-    });
-
-  /**
-   * Brings one token in step with the database. A token that no longer
-   * resolves is forgotten. Otherwise:
-   *
-   * - each open stream that was last told about another tool list gets
-   *   `list_changed`. Each stream is judged against what it was told itself,
-   *   so a `tools/list` that one client made never hides the change from
-   *   another;
-   * - the upstream session of every server a call of this token went to, and
-   *   that the session is not served any more, is closed.
-   */
-  const reconcileToken = (state: TokenState): Effect.Effect<void> =>
-    state.offering.withPermits(1)(
-      Effect.gen(function* () {
-        const actor = yield* Effect.orDie(tokens.resolveUncached(state.tokenHash));
-        if (Option.isNone(actor)) return yield* forgetToken(state);
-        const projection = yield* readProjection(state, actor.value);
-        yield* Effect.forEach(
-          [...state.streams].filter((stream) => stream.told !== projection.fingerprint),
-          (stream) => {
-            stream.told = projection.fingerprint;
-            return stream.notifyListChanged;
-          },
-          { discard: true },
-        );
-        const unserved = [...state.calledServerIds].filter(
-          (serverId) => !projection.servedServerIds.has(serverId),
-        );
-        yield* Effect.forEach(
-          unserved,
-          (serverId) => {
-            state.calledServerIds.delete(serverId);
-            return catalogue.closeUpstreamSession(state.tokenHash, serverId);
-          },
-          { discard: true },
-        );
-      }),
-    );
-
-  /** Forgets a token that no longer resolves, whether or not it has a stream. */
-  const forgetIfEnded = (state: TokenState): Effect.Effect<void> =>
-    state.offering.withPermits(1)(
-      Effect.gen(function* () {
-        const actor = yield* Effect.orDie(tokens.resolveUncached(state.tokenHash));
-        if (Option.isNone(actor)) yield* forgetToken(state);
-      }),
-    );
-
-  const endAllStreams: Effect.Effect<void> = Effect.suspend(() =>
-    Effect.forEach([...states.values()], (state) => endStreams(state), { discard: true }),
-  );
-
-  /** Refuses every new stream from now on and ends the open ones. For a controller that is stopping. */
-  const closeStreams: Effect.Effect<void> = Effect.suspend(() => {
-    closing = true;
-    return endAllStreams;
-  });
-
-  /**
-   * Follows the committed changes that alter what a session is served, for the
-   * life of the fiber: a session's list or end, a server's switch, status or
-   * tools, and a profile's grants. Subscribes before it reads anything, so no
-   * change is lost.
-   */
-  const followChanges = Effect.gen(function* () {
-    const queue = yield* changes.subscribe(["session", "mcpServer", PROFILE_GRANTS_TOPIC]);
-    while (true) {
-      const batch = yield* Queue.takeAll(queue);
-      // A server or a profile can be in any session's list, so those changes
-      // look at every token. A session change looks at that session's own.
-      const everyToken = batch.some((change) => change.topic !== "session");
-      const changedSessions = new Set(batch.map((change) => change.id));
-      const affected = [...states.values()].filter(
-        (state) => everyToken || changedSessions.has(state.sessionId),
-      );
-      yield* Effect.forEach(
-        affected,
-        (state) =>
-          absorbFailures("Following a change for the MCP Gateway failed", reconcileToken(state)),
-        { discard: true },
-      );
-    }
-  });
-
-  /** Forgets, once a minute, every token that ended, because no change may have told the gateway. */
-  const sweepEndedTokens = Effect.repeat(
-    Effect.suspend(() =>
-      Effect.forEach(
-        [...states.values()],
-        (state) => absorbFailures("Sweeping the MCP Gateway's tokens failed", forgetIfEnded(state)),
-        { discard: true },
-      ),
-    ),
-    Schedule.spaced(SWEEP_INTERVAL),
-  );
-
-  /** Ends every stream whenever the controller freezes or seals, because nothing may be sent then. */
-  const endStreamsWhenNotServing = promotion.phaseChanges.pipe(
-    Stream.filter((phase) => phase._tag !== "Serving"),
-    Stream.runForEach(() => endAllStreams),
-  );
-
-  yield* Effect.addFinalizer(() => endAllStreams);
-
-  // -- HTTP -------------------------------------------------------------------
-
-  const isServing: Effect.Effect<boolean> = Effect.map(
-    promotion.phase,
-    (phase) => phase._tag === "Serving",
-  );
+  /** Reads the instructions the session gets. They need the served servers but no tool names. */
+  const readInstructions = (actor: SessionActor): Effect.Effect<string> =>
+    Effect.map(reads.readServed(actor), (served) => buildServedInstructions(served, actor));
 
   const initialize = (
     caller: McpCaller,
@@ -715,39 +210,29 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
       const revision = negotiateStatefulRevision(params["protocolVersion"]);
-      const projection = yield* readProjection(state, caller.actor);
-      const session: McpSession = { id: crypto.randomUUID(), revision, calls: new Map() };
-      // A harness that never ends its MCP sessions loses the oldest one.
-      if (state.mcpSessions.size >= MAX_MCP_SESSIONS_PER_TOKEN) {
-        const [oldest] = state.mcpSessions.keys();
-        if (oldest !== undefined) yield* endMcpSession(state, oldest);
-      }
-      state.mcpSessions.set(session.id, session);
-      return respondJson(
-        buildRpcResult(id, buildInitializeResult(revision, projection.instructions)),
-        200,
-        { "mcp-session-id": session.id },
-      );
-    });
-
-  /** Ends one MCP session: its streams close and its running calls stop. */
-  const endMcpSession = (state: TokenState, mcpSessionId: string): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const session = state.mcpSessions.get(mcpSessionId);
-      if (session === undefined) return;
-      state.mcpSessions.delete(mcpSessionId);
-      yield* endStreams(state, mcpSessionId);
-      yield* Effect.forEach([...session.calls.values()], (call) => Fiber.interrupt(call), {
-        discard: true,
+      const instructions = yield* readInstructions(caller.actor);
+      const session = yield* tokenStates.openMcpSession(state, revision);
+      return respondJson(buildRpcResult(id, buildInitializeResult(revision, instructions)), 200, {
+        "mcp-session-id": session.id,
       });
     });
 
+  /** Answers `tools/list` and records the names it sends: only these names may be called. */
   const respondToolsList = (era: Era, state: TokenState, actor: SessionActor, id: RequestId) =>
-    Effect.map(offerTools(state, actor), (projection) =>
-      respondJson(
-        buildRpcResult(id, buildToolsListResult(era, projection.tools.map(buildToolDefinition))),
-      ),
-    );
+    Effect.gen(function* () {
+      const { tools, leftOut } = projectTools(yield* reads.readServed(actor), state.names);
+      // Nothing waits between naming the tools and recording the names, so two
+      // lists at once cannot give one name to two tools.
+      state.names.record(tools);
+      for (const { serverName, tool } of leftOut) {
+        yield* Effect.logWarning(
+          `MCP gateway: the tool ${tool} of server ${serverName} got no unique name and is not offered`,
+        );
+      }
+      return respondJson(
+        buildRpcResult(id, buildToolsListResult(era, tools.map(buildToolDefinition))),
+      );
+    });
 
   const respondToolsCall = (
     era: Era,
@@ -772,19 +257,11 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      const running = yield* Effect.forkChild(
-        runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
-      );
-      const key = JSON.stringify(id);
-      session?.calls.set(key, running);
-      state.runningCalls.add(running);
-      const exit = yield* Fiber.await(running).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            session?.calls.delete(key);
-            state.runningCalls.delete(running);
-          }),
-        ),
+      const exit = yield* tokenStates.runCall(
+        state,
+        session,
+        id,
+        callPolicy.runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
       );
       if (Exit.isSuccess(exit)) {
         return respondJson(buildRpcResult(id, buildToolCallResult(era, exit.value)));
@@ -797,12 +274,6 @@ const make = Effect.gen(function* () {
       }
       return yield* Effect.failCause(exit.cause);
     });
-
-  const cancelCall = (session: McpSession | undefined, params: JsonObject) => {
-    const requestId = params["requestId"];
-    const running = session?.calls.get(JSON.stringify(requestId));
-    return running === undefined ? Effect.void : Effect.asVoid(Fiber.interrupt(running));
-  };
 
   /** Opens `subscriptions/listen`: refuses invalid parameters, then streams the notifications it asked for. */
   const listen = (
@@ -820,7 +291,7 @@ const make = Effect.gen(function* () {
           id,
         );
       }
-      if (!(yield* isServing)) return respondNotServing();
+      if (!(yield* tokenStates.isServing)) return respondNotServing();
       return toServerSentResponse(
         buildServerSentBody({
           mcpSessionId: undefined,
@@ -829,8 +300,7 @@ const make = Effect.gen(function* () {
             : undefined,
           opening: [buildSubscriptionAcknowledgement(id, honored)],
           closing: buildRpcResult(id, buildListenResult(id)),
-          admit: admitStream(state),
-          release: releaseStream(state),
+          ...tokenStates.streamLifecycle(state),
         }),
       );
     });
@@ -841,11 +311,11 @@ const make = Effect.gen(function* () {
     caller: McpCaller,
     state: TokenState,
     session: McpSession | undefined,
-    message: Exclude<IncomingMessage, { readonly _tag: "batch" | "invalid" | "response" }>,
+    message: DispatchableMessage,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
     if (message._tag === "notification") {
       return message.method === "notifications/cancelled"
-        ? Effect.as(cancelCall(session, message.params), respondAccepted())
+        ? Effect.as(cancelCall(session, message.params["requestId"]), respondAccepted())
         : Effect.succeed(respondAccepted());
     }
     const { id, method, params } = message;
@@ -862,8 +332,8 @@ const make = Effect.gen(function* () {
         return respondToolsCall(era, state, caller.actor, id, params, session);
       case "server/discover":
         return era === "stateless"
-          ? Effect.map(readProjection(state, caller.actor), (projection) =>
-              respondJson(buildRpcResult(id, buildDiscoverResult(projection.instructions))),
+          ? Effect.map(readInstructions(caller.actor), (instructions) =>
+              respondJson(buildRpcResult(id, buildDiscoverResult(instructions))),
             )
           : Effect.succeed(respondJson(buildMethodNotFound(id, method)));
       case "subscriptions/listen":
@@ -875,29 +345,20 @@ const make = Effect.gen(function* () {
     }
   };
 
-  const respondRefusal = (refusal: RequestRefusal, id: RequestId | null) =>
-    respondJson(buildRefusalBody(id, refusal), refusal.status);
-
   /**
    * Chooses the era of a message from its first words, checks its HTTP headers
    * against that era, and answers it. `session` is the MCP session the
-   * `Mcp-Session-Id` header named, which the caller has already found.
+   * `Mcp-Session-Id` header named, which `admitMcpSession` has already admitted.
    */
   const handleMessage = (
     request: HttpServerRequest.HttpServerRequest,
     caller: McpCaller,
     state: TokenState,
     session: McpSession | undefined,
-    message: Exclude<IncomingMessage, { readonly _tag: "batch" | "invalid" | "response" }>,
+    message: DispatchableMessage,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
     const idOrNull = message._tag === "request" ? message.id : null;
     const headers: HeaderMap = request.headers;
-    // An `initialize` that names an owned MCP session is checked against that
-    // session's revision like any other message, before it opens a new one.
-    if (session !== undefined) {
-      const refusal = checkSessionVersionHeader(headers["mcp-protocol-version"], session.revision);
-      if (refusal !== undefined) return Effect.succeed(respondRefusal(refusal, idOrNull));
-    }
     if (message._tag === "request" && message.method === "initialize") {
       return initialize(caller, state, message.id, message.params);
     }
@@ -929,50 +390,17 @@ const make = Effect.gen(function* () {
     );
   };
 
-  /**
-   * Reads the body of a POST as it arrives and refuses it once it passes the
-   * limit, so a chunked body with no `Content-Length` is never buffered past
-   * it. Fails with the response to send.
-   */
-  const readBody = (
-    request: HttpServerRequest.HttpServerRequest,
-  ): Effect.Effect<string, HttpServerResponse.HttpServerResponse> => {
-    const tooLarge = respondRpcError(
-      413,
-      McpSchema.INVALID_REQUEST_ERROR_CODE,
-      "The request body is over 1 MiB",
-    );
-    if (Number(request.headers["content-length"] ?? 0) > MAX_REQUEST_BODY_BYTES) {
-      return Effect.fail(tooLarge);
-    }
-    return Effect.gen(function* () {
-      const chunks: Array<Uint8Array> = [];
-      let total = 0;
-      yield* request.stream.pipe(
-        Stream.mapError(() =>
-          respondRpcError(400, McpSchema.PARSE_ERROR_CODE, "The request body could not be read"),
-        ),
-        Stream.runForEach((chunk) => {
-          total += chunk.byteLength;
-          if (total > MAX_REQUEST_BODY_BYTES) return Effect.fail(tooLarge);
-          chunks.push(chunk);
-          return Effect.void;
-        }),
-      );
-      return new TextDecoder().decode(Buffer.concat(chunks));
-    });
-  };
-
+  /** Answers a POST. Fails with the response to send when the request is refused before it is dispatched. */
   const handlePost = (
     request: HttpServerRequest.HttpServerRequest,
     routedCaller: McpCaller,
-  ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
       const text = yield* readBody(request);
       // The body may have taken a while to arrive. The Thread can have ended,
       // resumed or lost `mcp.use` since the route resolved the token, so the
       // token and its profile are read again, and that reading serves the request.
-      const actor = yield* Effect.orDie(tokens.resolveUncached(routedCaller.tokenHash));
+      const actor = yield* reads.resolveActor(routedCaller.tokenHash);
       if (Option.isNone(actor)) return buildUnauthorizedResponse();
       const caller: McpCaller = { tokenHash: routedCaller.tokenHash, actor: actor.value };
       let json: unknown;
@@ -1000,48 +428,26 @@ const make = Effect.gen(function* () {
             "The request body is not a JSON-RPC 2.0 message",
           );
         default: {
-          // Every message that names an MCP session must name one this token
-          // owns, an `initialize` and a response too.
-          const state = stateOf(caller);
-          const sessionId = request.headers[SESSION_ID_HEADER];
-          const session = sessionId === undefined ? undefined : state.mcpSessions.get(sessionId);
-          if (sessionId !== undefined && session === undefined) return respondSessionNotFound();
-          if (message._tag === "response") {
-            const refusal =
-              session === undefined
-                ? undefined
-                : checkSessionVersionHeader(
-                    request.headers["mcp-protocol-version"],
-                    session.revision,
-                  );
-            return refusal === undefined ? respondAccepted() : respondRefusal(refusal, null);
-          }
+          const state = tokenStates.findOrCreateState(caller);
+          const session = yield* admitMcpSession(
+            request,
+            state,
+            message._tag === "request" ? message.id : null,
+          );
+          if (message._tag === "response") return respondAccepted();
           return yield* handleMessage(request, caller, state, session, message);
         }
       }
-    }).pipe(Effect.catch((response) => Effect.succeed(response)));
+    });
 
+  /** Answers a GET by opening the server-sent event stream of an MCP session. */
   const handleGet = (
     request: HttpServerRequest.HttpServerRequest,
     caller: McpCaller,
-  ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
-      const state = stateOf(caller);
-      const sessionId = request.headers[SESSION_ID_HEADER];
-      const session = sessionId === undefined ? undefined : state.mcpSessions.get(sessionId);
-      if (sessionId === undefined) {
-        return respondRpcError(
-          400,
-          McpSchema.INVALID_REQUEST_ERROR_CODE,
-          "The Mcp-Session-Id header is required",
-        );
-      }
-      if (session === undefined) return respondSessionNotFound();
-      const refusal = checkSessionVersionHeader(
-        request.headers["mcp-protocol-version"],
-        session.revision,
-      );
-      if (refusal !== undefined) return respondRefusal(refusal, null);
+      const state = tokenStates.findOrCreateState(caller);
+      const session = yield* admitRequiredMcpSession(request, state);
       if (!(request.headers["accept"] ?? "").includes("text/event-stream")) {
         return respondRpcError(
           406,
@@ -1049,40 +455,26 @@ const make = Effect.gen(function* () {
           "The GET stream needs Accept: text/event-stream",
         );
       }
-      if (!(yield* isServing)) return respondNotServing();
+      if (!(yield* tokenStates.isServing)) return respondNotServing();
       return toServerSentResponse(
         buildServerSentBody({
           mcpSessionId: session.id,
           listChanged: buildListChangedNotification(),
           opening: [],
-          admit: admitStream(state),
-          release: releaseStream(state),
+          ...tokenStates.streamLifecycle(state),
         }),
       );
     });
 
+  /** Answers a DELETE by ending the MCP session it names, and nothing else of the token. */
   const handleDelete = (
     request: HttpServerRequest.HttpServerRequest,
     caller: McpCaller,
-  ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
-      const state = stateOf(caller);
-      const sessionId = request.headers[SESSION_ID_HEADER];
-      if (sessionId === undefined) {
-        return respondRpcError(
-          400,
-          McpSchema.INVALID_REQUEST_ERROR_CODE,
-          "The Mcp-Session-Id header is required",
-        );
-      }
-      const session = state.mcpSessions.get(sessionId);
-      if (session === undefined) return respondSessionNotFound();
-      const refusal = checkSessionVersionHeader(
-        request.headers["mcp-protocol-version"],
-        session.revision,
-      );
-      if (refusal !== undefined) return respondRefusal(refusal, null);
-      yield* endMcpSession(state, sessionId);
+      const state = tokenStates.findOrCreateState(caller);
+      const session = yield* admitRequiredMcpSession(request, state);
+      yield* tokenStates.endMcpSession(state, session.id);
       return HttpServerResponse.empty({ status: 204, headers: NO_STORE });
     });
 
@@ -1103,6 +495,7 @@ const make = Effect.gen(function* () {
           ? handleGet(request, caller)
           : handleDelete(request, caller)
       ).pipe(
+        Effect.catch((response) => Effect.succeed(response)),
         Effect.catchCause((cause) =>
           Cause.hasInterrupts(cause)
             ? Effect.failCause(cause)
@@ -1119,32 +512,15 @@ const make = Effect.gen(function* () {
      * the listener waits for every open response and these never end by
      * themselves.
      */
-    closeStreams,
+    closeStreams: tokenStates.closeStreams,
 
     /**
      * Follows the changes that alter what a session is served, sweeps the
      * tokens that ended, and ends every stream when the controller freezes or
      * seals. Runs for the life of the fiber and never returns.
      */
-    follow: Effect.scoped(
-      Effect.all([followChanges, sweepEndedTokens, endStreamsWhenNotServing], {
-        concurrency: "unbounded",
-        discard: true,
-      }),
-    ) as Effect.Effect<never, never, never>,
+    follow: tokenStates.follow,
   };
-});
-
-/** The tool result the gateway sends for a call: the server's answer, or a refusal. */
-interface ToolResult {
-  readonly content: ReadonlyArray<unknown>;
-  readonly isError?: boolean;
-  readonly [key: string]: unknown;
-}
-
-const buildErrorResult = (message: string): ToolResult => ({
-  content: [{ type: "text", text: message }],
-  isError: true,
 });
 
 /** The MCP Gateway: answers a session's harness and follows what the session is served. */
