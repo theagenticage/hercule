@@ -22,6 +22,7 @@ export {
   ConnectionCredentialsUnavailable,
   ConnectionTypes,
   ConnectionTypesLayer,
+  StrictServingForRefresh,
   type ConnectionCredentialsForUse,
   type RegisteredConnectionType,
 } from "./runtime";

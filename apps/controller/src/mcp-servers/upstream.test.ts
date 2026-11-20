@@ -15,7 +15,9 @@
  *   error text reaches a trace;
  * - each call's requests carry that call's own credentials, whatever another
  *   call that shares the client sends, and a call records the answer to its own
- *   `tools/call` request apart from any other request it causes.
+ *   `tools/call` request apart from any other request it causes. Of the
+ *   credential values it sent, it records only those long enough to be removed
+ *   from answers.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -183,12 +185,13 @@ describe("openUpstream", () => {
     const fake = await startFakeUpstream();
     try {
       const credentialsOf = (token: string) => ({
-        credentials: { token },
+        // `org` is too short to count as a secret that must be removed from answers.
+        credentials: { token, org: "acme" },
         config: {},
         identity: `identity-${token}`,
       });
-      const first = createUpstreamCallState(credentialsOf("token-one-1234"));
-      const second = createUpstreamCallState(credentialsOf("token-two-5678"));
+      const first = createUpstreamCallState(Effect.succeed(credentialsOf("token-one-1234")));
+      const second = createUpstreamCallState(Effect.succeed(credentialsOf("token-two-5678")));
 
       await Effect.runPromise(
         Effect.scoped(
@@ -230,7 +233,7 @@ describe("openUpstream", () => {
         .sort();
       expect(sent).toEqual(["Bearer token-one-1234", "Bearer token-two-5678"]);
       expect(first).toMatchObject({
-        sentIdentity: "identity-token-one-1234",
+        sentCredentials: credentialsOf("token-one-1234"),
         toolPostSent: true,
         toolPostStatus: 200,
       });

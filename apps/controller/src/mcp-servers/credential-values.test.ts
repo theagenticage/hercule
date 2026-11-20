@@ -30,4 +30,32 @@ describe("removeCredentialValues", () => {
     const untouched = { text: "nothing" };
     expect(removeCredentialValues(untouched, secrets)).toBe(untouched);
   });
+
+  it("removes a value from object keys too, and keeps every entry when keys end up with one name", () => {
+    const secrets = new Set(["abc123xyz9", "def456uvw8"]);
+    const result = {
+      abc123xyz9: "first",
+      "[removed]": "an honest key",
+      "a-abc123xyz9": { "b-def456uvw8": 1 },
+      "a-def456uvw8": 2,
+    };
+
+    const cleaned = removeCredentialValues(result, secrets);
+
+    expect(cleaned).toEqual({
+      "[removed]-2": "first",
+      "[removed]": "an honest key",
+      "a-[removed]": { "b-[removed]": 1 },
+      "a-[removed]-2": 2,
+    });
+  });
+
+  it("keeps the prototype of an object that has a key named `__proto__`, when it copies it", () => {
+    const parsed = JSON.parse('{"__proto__": {"echo": "abc123xyz9"}}') as object;
+
+    const cleaned = removeCredentialValues(parsed, new Set(["abc123xyz9"]));
+
+    expect(Object.getPrototypeOf(cleaned)).toBe(Object.prototype);
+    expect(Object.keys(cleaned)).toEqual(["__proto__"]);
+  });
 });
