@@ -85,11 +85,11 @@ One reporter's word that two External Refs are related: `part-of`, from a child 
 _Avoid_: edge (the drawn step of a path), link (bare), hierarchy, parent (bare: there can be many)
 
 **Session**:
-One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
+One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A session also has its own list of MCP Servers, which the MCP Gateway serves it; only a Thread's list can hold servers until [#222](https://github.com/theagenticage/hercule/issues/222). Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* Its list of MCP Servers starts the same way: one the user starts takes the list chosen on its Draft Thread, else its Project's, else the default list in Settings; one a session starts copies the calling session's list ([spec 21](./docs/spec/21-mcp.md)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Role**:
@@ -287,7 +287,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and one default only, the Model Profile a new thread in it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)). May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
+A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and ~~one default only, the Model Profile a new thread in it opens on~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* two defaults only for a new thread in it: the Model Profile it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)) and the MCP Servers it starts with ([ADR 0059](./docs/adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md)). Changing the project's MCP Servers later never touches a thread that exists. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -503,7 +503,7 @@ A self-contained unit of functionality that extends Hercule by requesting plugin
 _Avoid_: extension, addon, integration
 
 **Extension Point**:
-A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, workflow action. Plugins cannot define new extension points.
+A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, ~~workflow action.~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* workflow action, MCP server. Plugins cannot define new extension points.
 _Avoid_: hook
 
 **Contribution**:
@@ -522,6 +522,14 @@ The surface a plugin programs against: capability-sliced services handed to the 
 
 **Manifest**:
 A plugin's static self-description: identity, host API version, requested plugin capabilities, config schema. Deliberately coarse; contributions are not in it.
+
+**MCP Server**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A record on the controller: a remote MCP server that offers tools to sessions, and what it is reached with: a plugin's Connection, or its own sign-in when the user added it by URL. A plugin registers the server of its service as a contribution, and the record exists once the user switches it on. It knows nothing about projects or threads. A Project names the MCP Servers a new thread starts with, and a session keeps its own list.
+_Avoid_: tool server, connector, integration. Not the MCP Gateway.
+
+**MCP Gateway**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The controller's one MCP endpoint, `<controller>/mcp`, that every session's harness is given as its one MCP server, with the session's own Session Token. It answers with the tools of the session's MCP Servers and forwards each call with a credential the controller holds, so no vendor token reaches a runner.
+_Avoid_: proxy, bridge. Not an MCP Server (a record it serves from).
 
 ### Automation
 

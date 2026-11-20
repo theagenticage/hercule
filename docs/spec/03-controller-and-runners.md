@@ -244,6 +244,13 @@ Versions are still not compared, and section 2.4 is unchanged: the only hard ref
 - **This amends the capability list above: it also holds `diskUsage`**, `DISK_USAGE_CAPABILITY`, and **`archivedSessionFiles`**, `ARCHIVED_SESSION_FILES_CAPABILITY`. Both sides list each. The runner sends `DiskUsageReport` only when the controller's hello lists `diskUsage`, and the controller sends `archivedSessions` only to a runner whose hello lists `archivedSessionFiles`.
 - **`PROTOCOL_VERSION` does not change.** The new fields of `RunnerFacts` and `RunnerMetrics` are optional, a protocol struct drops a key it does not know when it decodes, and the capabilities keep the new frame and field away from a side built before them. A runner without them stays online for everything else.
 
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **MCP Servers in the session spec.** A session's harness is given one MCP server, the MCP Gateway in the controller ([21-mcp.md](./21-mcp.md)). The field that carries it is `SessionSpec.mcpServers`, which [06-providers](./06-providers.md) section 4 owns, with the entry's shape and the adapter mappings. This section covers only what the controller and the runner each do with it.
+
+- **This amends the capability list above: it also holds `mcpServers`**, `MCP_SERVERS_CAPABILITY` in `@hercule/protocol`. A runner lists it when it reads `SessionSpec.mcpServers`. The controller puts the field in a `SessionStart` only for a runner whose negotiated capabilities hold it.
+- **A runner without it gets a spec without the field.** The start still goes to that runner and the session runs, with no gateway. Every server in the session's list is then left out with the reason `runner-too-old` ([02-domain-model](./02-domain-model.md) Session, `mcpServers`), and the thread says so ([21-mcp.md](./21-mcp.md)). This is the same shape as `skills` above: the field is left out, the frame is not withheld.
+- **The runner binds two values at each start.** It resolves each entry's `url`, a path relative to the controller, against the controller URL it gives the session as `HERCULE_API_URL` (section 6.2, the session supervisor). It binds `bearer: "session-token"` to the session's own token, the one it gives the session as `HERCULE_TOKEN`. The adapter receives the resolved entry: an absolute URL and an `Authorization: Bearer <token>` header. The token is never in the stored spec ([06-providers](./06-providers.md) section 4).
+- **`PROTOCOL_VERSION` does not change.** The field is optional, a protocol struct drops a key it does not know when it decodes, and the capability keeps the field away from a runner built before it.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -841,6 +848,7 @@ Tickets:
 - [Controller packaging & install story](https://github.com/theagenticage/hercule/issues/24) (local runner as child process, Hercule Home, fleet skew)
 - [Runner substrate details: protocol guarantees, defaults, provider CLI delivery](https://github.com/theagenticage/hercule/issues/43) (reconciliation delivery, thresholds and defaults, reserved runners, join/login split, re-point command)
 - [Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets](https://github.com/theagenticage/hercule/issues/406) (frames name an account, a harness and a Harness Home; sign-in per account; placement)
+- [MCP support through a gateway in the controller](https://github.com/theagenticage/hercule/issues/1207) (the `mcpServers` capability)
 
 ADRs:
 
@@ -852,5 +860,6 @@ ADRs:
 - [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace steps and their frames, run pinning)
 - [ADR 0041 - Text generation is one model call on a runner](../adr/0041-text-generation-is-one-model-call-on-a-runner.md) (the text generation frames and capability)
 - [ADR 0048 - Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md) (frames name an account, a harness and a Harness Home; sign-in per account; placement)
+- [ADR 0059 - Sessions reach MCP Servers through a gateway in the controller](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md) (the `mcpServers` capability and what the runner binds in the session spec)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`).

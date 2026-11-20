@@ -111,8 +111,8 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 ### Plugins and extension points
 
 - **UI-contribution extension point** (plugins shipping web, desktop, or mobile UI). Ruled post-v1 by ticket #11: the design is not nailed and it would have to span three surfaces.
-- **Agent-tools extension point** (plugin-contributed MCP servers or skills for sessions). Deferred by ticket #11: no v1 consumer, since hercule-as-a-tool ships built-in (runner CLI plus skill); the session spec keeps per-session MCP config passthrough so the point lands later without redesign. First concrete consumer identified by ticket #14: mid-session mailbox queries (v1: Gmail action steps plus MCP passthrough).
-- **Hercule MCP server** (the public API exposed to sessions as typed MCP tools, t3-code-style self-injection). Ruled post-v1 by ticket #16: v1 delivery is the `hercule` CLI only (one artifact, no per-adapter wiring). High on the revisit list; the MCP passthrough keeps the door open.
+- **Agent-tools extension point** (plugin-contributed MCP servers or skills for sessions). ~~Deferred by ticket #11: no v1 consumer, since hercule-as-a-tool ships built-in (runner CLI plus skill); the session spec keeps per-session MCP config passthrough so the point lands later without redesign. First concrete consumer identified by ticket #14: mid-session mailbox queries (v1: Gmail action steps plus MCP passthrough).~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **The MCP half is in v1:** a plugin may offer an MCP server, and a session reaches the tools of the MCP Servers in its list through the MCP Gateway in the controller ([./05-plugins.md](./05-plugins.md) section 4.5, [./21-mcp.md](./21-mcp.md)). The skills half stays deferred, since hercule-as-a-tool ships built-in (runner CLI plus skill). Mid-session mailbox queries use Gmail action steps.
+- **Hercule MCP server** (the public API exposed to sessions as typed MCP tools, t3-code-style self-injection). Ruled post-v1 by ticket #16: v1 delivery is the `hercule` CLI only (one artifact, no per-adapter wiring). High on the revisit list; ~~the MCP passthrough keeps the door open.~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The MCP Gateway serves other servers' tools, not Hercule's own API, and the MCP server name `hercule` is kept for this later server ([./02-domain-model.md](./02-domain-model.md) MCP Server). The CLI stays the agent surface for Hercule's own operations.
 
 ### Events, channels, and triggers
 
@@ -214,7 +214,7 @@ The full ruled-out list is the "Out of scope" section above. The items that v1 k
 - Fleet auto-discovery and push-install: the join exchange is fully programmatic.
 - Native OS sandboxing: arrives as a probed runner capability behind capability negotiation.
 - Artifact storage: must live inside the Data Root and move with promotion.
-- Agent-tools extension point and Hercule MCP server: the session spec keeps per-session MCP passthrough.
+- Agent-tools extension point and Hercule MCP server: ~~the session spec keeps per-session MCP passthrough.~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The MCP half of the extension point is built; its skills half and the Hercule MCP server wait, and the MCP server name `hercule` is kept for the latter.
 - Presence-aware routing: the sink contract grows additively.
 - Visual workflow authoring: the editor module is ringfenced.
 - Desktop app: `client-core` holds every interpretation of domain data, so no component in either app holds domain logic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): the desktop app has its own components and does not share `ui`, [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)*
