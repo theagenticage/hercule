@@ -21,6 +21,9 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpCallRefused } from "../mcp-servers";
 import type { Profile } from "@hercule/contract";
 import type { McpSchema } from "effect/ai";
@@ -43,6 +46,7 @@ import {
   type ServerRef,
 } from "../mcp-servers/testing";
 import { hashToken } from "../credentials";
+import { withTransaction } from "../db";
 import { send, waitWithin } from "./testing";
 import { endResumable, withFleet } from "../workspaces/testing";
 
@@ -111,28 +115,34 @@ afterAll(async () => {
 type CallTool = (typeof arranged.harness.mcpServerCalls)["callTool"];
 type CallInput = Parameters<CallTool>[0];
 
-const realCallTool = () => arranged.harness.mcpServerCalls.callTool;
-let originalCallTool: CallTool | undefined;
-let originalCloseScope: (typeof arranged.harness.mcpServerCalls)["closeUpstreamScope"] | undefined;
+/** The parts of the catalogue's service that the stand-in replaces. */
+interface ReplaceableCalls {
+  callTool: CallTool;
+  closeUpstreamScope: (scope: string) => Effect.Effect<void>;
+  closeUpstreamSession: (scope: string, serverId: string) => Effect.Effect<void>;
+}
+
+const replaceable = () => arranged.harness.mcpServerCalls as ReplaceableCalls;
+
+let original: ReplaceableCalls | undefined;
 
 /** The calls the stand-in answered, in order. */
 let calls: Array<CallInput> = [];
 /** The scopes the gateway closed, in order. */
 let closedScopes: Array<string> = [];
+/** The upstream sessions the gateway closed, as scope and server id, in order. */
+let closedSessions: Array<readonly [string, string]> = [];
 
-/** Makes every call the gateway forwards run `answer`, and records it. */
+/** Makes every call the gateway forwards run `answer`, and records it and every close. */
 const standInForServers = (
   answer: (input: CallInput) => ReturnType<CallTool> = (input) =>
     Effect.map(input.authorize, () => buildAnswer(`called ${input.tool}`)),
 ): void => {
-  originalCallTool ??= realCallTool();
-  originalCloseScope ??= arranged.harness.mcpServerCalls.closeUpstreamScope;
+  original ??= { ...replaceable() };
   calls = [];
   closedScopes = [];
-  const mutable = arranged.harness.mcpServerCalls as {
-    callTool: CallTool;
-    closeUpstreamScope: (scope: string) => Effect.Effect<void>;
-  };
+  closedSessions = [];
+  const mutable = replaceable();
   mutable.callTool = (input) => {
     calls.push(input);
     return answer(input);
@@ -141,15 +151,14 @@ const standInForServers = (
     Effect.sync(() => {
       closedScopes.push(scope);
     });
+  mutable.closeUpstreamSession = (scope, serverId) =>
+    Effect.sync(() => {
+      closedSessions.push([scope, serverId]);
+    });
 };
 
 afterEach(() => {
-  const mutable = arranged.harness.mcpServerCalls as {
-    callTool: CallTool;
-    closeUpstreamScope: (scope: string) => Effect.Effect<void>;
-  };
-  if (originalCallTool !== undefined) mutable.callTool = originalCallTool;
-  if (originalCloseScope !== undefined) mutable.closeUpstreamScope = originalCloseScope;
+  if (original !== undefined) Object.assign(replaceable(), original);
 });
 
 const buildAnswer = (text: string): McpSchema.CallToolResult =>
@@ -183,11 +192,39 @@ interface Answer {
 
 const base = () => arranged.harness.base;
 
-/** Sends one POST to `/mcp` and reads the answer. */
-const sendMcp = async (
+/** The revision each MCP session negotiated, so a request of the session sends the header a real client sends. */
+const negotiatedRevisions = new Map<string, string>();
+
+/**
+ * Returns the headers a real client sends with a message, besides the
+ * ordinary ones: for the stateless era, the revision, the method and the
+ * tool's name; for a stateful MCP session, the revision it negotiated.
+ */
+const buildWireHeaders = (
+  message: unknown,
+  sessionId: string | undefined,
+): Record<string, string> => {
+  const body = message as { method?: string; params?: Record<string, unknown> } | undefined;
+  const revision = (body?.params?.["_meta"] as Record<string, unknown> | undefined)?.[
+    "io.modelcontextprotocol/protocolVersion"
+  ];
+  if (typeof revision === "string" && body?.method !== undefined) {
+    const name = body.params?.["name"];
+    return {
+      "mcp-protocol-version": revision,
+      "mcp-method": body.method,
+      ...(body.method === "tools/call" && typeof name === "string" ? { "mcp-name": name } : {}),
+    };
+  }
+  const negotiated = sessionId === undefined ? undefined : negotiatedRevisions.get(sessionId);
+  return negotiated === undefined ? {} : { "mcp-protocol-version": negotiated };
+};
+
+/** Sends one POST to `/mcp` with exactly the headers given, besides the ordinary ones, and reads the answer. */
+const sendMcpWithHeaders = async (
   token: string | undefined,
   message: unknown,
-  headers: Record<string, string> = {},
+  headers: Record<string, string>,
 ): Promise<Answer> => {
   const response = await fetch(`${base()}/mcp`, {
     method: "POST",
@@ -209,6 +246,17 @@ const sendMcp = async (
     text,
   };
 };
+
+/** Sends one POST to `/mcp`, with the headers a real client sends for the message, and reads the answer. */
+const sendMcp = (
+  token: string | undefined,
+  message: unknown,
+  headers: Record<string, string> = {},
+): Promise<Answer> =>
+  sendMcpWithHeaders(token, message, {
+    ...(typeof message === "string" ? {} : buildWireHeaders(message, headers["mcp-session-id"])),
+    ...headers,
+  });
 
 let nextId = 1;
 const request = (method: string, params?: Record<string, unknown>) => ({
@@ -238,6 +286,7 @@ const initialize = async (token: string, protocolVersion = "2025-06-18") => {
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
   const sessionId = answer.headers.get("mcp-session-id");
   expect(sessionId).not.toBeNull();
+  negotiatedRevisions.set(sessionId!, answer.body.result.protocolVersion);
   const initialized = await sendMcp(
     token,
     { jsonrpc: "2.0", method: "notifications/initialized" },
@@ -312,25 +361,33 @@ const openGetStream = (token: string, sessionId: string) =>
       authorization: `Bearer ${token}`,
       accept: "text/event-stream",
       "mcp-session-id": sessionId,
+      ...buildWireHeaders(undefined, sessionId),
     },
   });
 
-/** Opens `subscriptions/listen` of the stateless era. */
-const openListen = (token: string, id: number) =>
-  openStream({
+/** Opens `subscriptions/listen` of the stateless era, asking for `notifications` (the tools' `list_changed` by default). */
+const openListen = (
+  token: string,
+  id: number,
+  notifications: Record<string, unknown> = { toolsListChanged: true },
+) => {
+  const message = {
+    jsonrpc: "2.0",
+    id,
+    method: "subscriptions/listen",
+    params: { ...STATELESS_META, notifications },
+  };
+  return openStream({
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      ...buildWireHeaders(message, undefined),
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id,
-      method: "subscriptions/listen",
-      params: { ...STATELESS_META, notifications: { toolsListChanged: true } },
-    }),
+    body: JSON.stringify(message),
   });
+};
 
 const listChanges = (stream: OpenStream) =>
   stream.messages.filter((message) => message.method === "notifications/tools/list_changed");
@@ -572,7 +629,12 @@ describe("the stateless era", () => {
     const thread = await spawnThread(["mcp.use"], []);
     const answer = await sendMcp(thread.token, {
       ...request("tools/list"),
-      params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2099-01-01" } },
+      params: {
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
     });
     expect(answer.status).toBe(400);
     expect(answer.body.error.code).toBe(-32022);
@@ -818,6 +880,7 @@ describe("refused calls", () => {
     );
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
     const refused = await callEcho(thread.token, "alpha__echo", sessionId);
     expect(refused.body.result.isError).toBe(true);
     expect(textOf(refused)).toBe(
@@ -862,5 +925,389 @@ describe("a frozen controller", () => {
     }
     expect(await readCallAudit(thread.session.id)).toEqual([]);
     expect(await readWarnings(thread.session.id)).toEqual([]);
+  });
+});
+
+describe("which MCP sessions and revisions a message may name", () => {
+  it("answers 404 to a session id of another token on initialize and on a JSON-RPC response too", async () => {
+    const mine = await spawnThread(["mcp.use"], []);
+    const other = await spawnThread(["mcp.use"], []);
+    const { sessionId } = await initialize(mine.token);
+
+    const init = await sendMcp(
+      other.token,
+      request("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      }),
+      { "mcp-session-id": sessionId },
+    );
+    expect(init.status).toBe(404);
+    const response = await sendMcp(
+      other.token,
+      { jsonrpc: "2.0", id: 1, result: {} },
+      { "mcp-session-id": sessionId },
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("refuses a request of a legacy session that names another revision than the one it negotiated", async () => {
+    const thread = await spawnThread(["mcp.use"], []);
+    const { sessionId } = await initialize(thread.token, "2025-06-18");
+    const sendWithVersion = (version: string) =>
+      sendMcp(thread.token, request("ping"), {
+        "mcp-session-id": sessionId,
+        "mcp-protocol-version": version,
+      });
+
+    const conflicting = await sendWithVersion("2025-11-25");
+    expect(conflicting.status).toBe(400);
+    expect(conflicting.body.error.code).toBe(-32020);
+    const unknown = await sendWithVersion("2099-01-01");
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.error.code).toBe(-32022);
+    expect((await sendWithVersion("2025-06-18")).status).toBe(200);
+  });
+
+  it("refuses a modern request whose headers disagree with its payload", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await sendMcp(thread.token, request("tools/list", STATELESS_META));
+    const call = request("tools/call", {
+      ...STATELESS_META,
+      name: "alpha__echo",
+      arguments: {},
+    });
+    const honest = buildWireHeaders(call, undefined);
+    const without = (name: string) =>
+      Object.fromEntries(Object.entries(honest).filter(([key]) => key !== name));
+    const cases: ReadonlyArray<readonly [string, Record<string, string>]> = [
+      ["no version header", without("mcp-protocol-version")],
+      ["another method", { ...honest, "mcp-method": "tools/list" }],
+      ["another tool name", { ...honest, "mcp-name": "alpha__other" }],
+      ["no tool name", without("mcp-name")],
+    ];
+    for (const [label, headers] of cases) {
+      // `sendMcp` adds the honest headers first, so the case replaces or, for a missing one, leaves them out.
+      const answer = await sendMcpWithHeaders(thread.token, call, headers);
+      expect(answer.status, label).toBe(400);
+      expect(answer.body.error.code, label).toBe(-32020);
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("who is calling, read after the body", () => {
+  /** Starts a POST whose body arrives in two parts, and returns what releases the second and the answer. */
+  const sendInTwoParts = (token: string, message: unknown, headers: Record<string, string>) => {
+    const text = JSON.stringify(message);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode(text.slice(0, 8)));
+        await held;
+        controller.enqueue(encoder.encode(text.slice(8)));
+        controller.close();
+      },
+    });
+    const answer = fetch(`${base()}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...buildWireHeaders(message, headers["mcp-session-id"]),
+        ...headers,
+      },
+      body,
+      duplex: "half",
+    }).then(async (response) => ({
+      status: response.status,
+      body: (response.headers.get("content-type") ?? "").includes("application/json")
+        ? ((await response.json()) as RpcBody)
+        : ({} as RpcBody),
+    }));
+    return { release, answer };
+  };
+
+  it("lists no tools to a request whose profile lost mcp.use while its body was arriving", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const held = sendInTwoParts(thread.token, request("tools/list"), {
+      "mcp-session-id": sessionId,
+    });
+
+    expect((await updateProfileGrants(thread.profile.id, ["mcp.read"])).status).toBe(200);
+    held.release();
+    const answer = await held.answer;
+    expect(answer.status).toBe(200);
+    expect(answer.body.result.tools).toEqual([]);
+  });
+
+  it("refuses with 401 a request whose Thread ended while its body was arriving", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const held = sendInTwoParts(thread.token, request("tools/list"), {
+      "mcp-session-id": sessionId,
+    });
+
+    await endResumable(arranged, thread.session);
+    held.release();
+    expect((await held.answer).status).toBe(401);
+  });
+});
+
+describe("the body limit", () => {
+  it("refuses a chunked body at the limit with the gateway's own answer, never reading it all", async () => {
+    const thread = await spawnThread(["mcp.use"], []);
+    const chunk = new Uint8Array(64 * 1024).fill(32);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+    });
+    const response = await fetch(`${base()}/mcp`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${thread.token}`, "content-type": "application/json" },
+      body: endless,
+      duplex: "half",
+      signal: AbortSignal.timeout(10_000),
+    });
+    expect(response.status).toBe(413);
+    expect(((await response.json()) as RpcBody).error.code).toBe(-32600);
+    await endless.cancel().catch(() => undefined);
+  });
+});
+
+describe("names a call may use", () => {
+  it("refuses a tool name that no tools/list sent to this token, and tells the open streams to list again", async () => {
+    standInForServers();
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const stream = await openGetStream(thread.token, sessionId);
+    try {
+      await waitForListChanges(stream, 1);
+
+      // The name is the one `tools/list` would send, but nothing sent it yet.
+      const refused = await callEcho(thread.token, "alpha__echo", sessionId);
+      expect(refused.body.result.isError).toBe(true);
+      expect(textOf(refused)).toContain("List the tools again");
+      expect(calls).toEqual([]);
+      await waitForListChanges(stream, 2);
+
+      await listToolNames(thread.token, sessionId);
+      expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+        undefined,
+      );
+      expect(calls).toHaveLength(1);
+    } finally {
+      stream.close();
+    }
+  });
+});
+
+describe("streams", () => {
+  /** Calls the gateway directly with a GET of `sessionId`, and returns the response before anything reads its body. */
+  const getDirectly = async (token: string, sessionId: string) => {
+    const tokenHash = hashToken(token);
+    const actor = await Effect.runPromise(
+      Effect.orDie(arranged.harness.sessionTokens.resolveUncached(tokenHash)),
+    );
+    const response = await Effect.runPromise(
+      arranged.harness.mcpGateway.handle(
+        HttpServerRequest.fromWeb(
+          new Request(`${base()}/mcp`, {
+            method: "GET",
+            headers: { accept: "text/event-stream", "mcp-session-id": sessionId },
+          }),
+        ),
+        { tokenHash, actor: Option.getOrThrow(actor) },
+      ),
+    );
+    expect(response.status).toBe(200);
+    return response;
+  };
+
+  /**
+   * Starts reading a response's body, which is what opens a stream, and
+   * waits until the body ends or `ms` pass. Returns what it read and
+   * whether it ended.
+   */
+  const readUntilEnd = async (held: HttpServerResponse.HttpServerResponse, ms: number) => {
+    const reader = HttpServerResponse.toWeb(held).body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    let ended = false;
+    void (async () => {
+      for (;;) {
+        const chunk = (await reader.read()) as { done: boolean; value?: Uint8Array };
+        if (chunk.done) break;
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      ended = true;
+    })().catch(() => undefined);
+    await waitWithin(ms, () => ended);
+    return { text: () => text, ended: () => ended, cancel: () => reader.cancel().catch(() => {}) };
+  };
+
+  it("opens no stream for an MCP session that ended before the body was read", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const response = await getDirectly(thread.token, sessionId);
+    const deleted = await fetch(`${base()}/mcp`, {
+      method: "DELETE",
+      headers: {
+        authorization: `Bearer ${thread.token}`,
+        "mcp-session-id": sessionId,
+        ...buildWireHeaders(undefined, sessionId),
+      },
+    });
+    expect(deleted.status).toBe(204);
+
+    const read = await readUntilEnd(response, 3_000);
+    expect(read.ended()).toBe(true);
+    expect(read.text()).toBe("");
+  });
+
+  it("keeps one stream per MCP session when two GETs race to replace each other", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const first = await getDirectly(thread.token, sessionId);
+    const second = await getDirectly(thread.token, sessionId);
+
+    const [readFirst, readSecond] = await Promise.all([
+      readUntilEnd(first, 1_500),
+      readUntilEnd(second, 1_500),
+    ]);
+    try {
+      // Only the stream that was admitted last is still open.
+      expect([readFirst.ended(), readSecond.ended()].filter(Boolean)).toHaveLength(1);
+    } finally {
+      await readFirst.cancel();
+      await readSecond.cancel();
+    }
+  });
+
+  it("tells every stream of a token about a change, even when another client listed the tools after it", async () => {
+    standInForServers();
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const watching = await initialize(thread.token);
+    const listing = await initialize(thread.token);
+    await listToolNames(thread.token, watching.sessionId);
+    const stream = await openGetStream(thread.token, watching.sessionId);
+    try {
+      await waitForListChanges(stream, 1);
+
+      // The list changes without the gateway hearing of it, the other client
+      // lists the new tools, and only then does the gateway hear of a change.
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`DELETE FROM session_mcp_servers
+              WHERE session_id = unhex(replace(${thread.session.id}, '-', ''))`,
+          ),
+        ),
+      );
+      expect(await listToolNames(thread.token, listing.sessionId)).toEqual([]);
+      expect((await updateList(thread.session.id, [])).status).toBe(200);
+
+      await waitForListChanges(stream, 2);
+    } finally {
+      stream.close();
+    }
+  });
+
+  it("closes the upstream session of a server that left the list, and no other", async () => {
+    standInForServers();
+    const thread = await spawnThread(["mcp.use"], [servers[0], servers[1]]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+    await callEcho(thread.token, "alpha__echo", sessionId);
+    await callEcho(thread.token, "bravo__echo", sessionId);
+
+    expect((await updateList(thread.session.id, [servers[1].id])).status).toBe(200);
+
+    expect(
+      await waitWithin(5_000, () => closedSessions.length >= 1),
+      "the gateway closed no upstream session",
+    ).toBe(true);
+    expect(closedSessions).toEqual([[hashToken(thread.token), servers[0].id]]);
+  });
+});
+
+describe("subscriptions/listen", () => {
+  it("sends only the notifications it was asked for, and refuses a request the protocol schema refuses", async () => {
+    standInForServers();
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const listen = await openListen(thread.token, 901, { promptsListChanged: true });
+    try {
+      expect(await waitWithin(5_000, () => listen.messages.length >= 1)).toBe(true);
+      expect(listen.messages[0]).toMatchObject({
+        method: "notifications/subscriptions/acknowledged",
+        params: { notifications: {} },
+      });
+      expect((await updateList(thread.session.id, [])).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(listChanges(listen)).toEqual([]);
+    } finally {
+      listen.close();
+    }
+
+    const invalid = await sendMcp(thread.token, {
+      jsonrpc: "2.0",
+      id: 902,
+      method: "subscriptions/listen",
+      params: { ...STATELESS_META, notifications: "tools" },
+    });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe(-32602);
+  });
+});
+
+describe("a refusal while the controller does not serve", () => {
+  it("is logged only when the catalogue finds the controller frozen after all: no audit entry and no warning", async () => {
+    standInForServers(() =>
+      Effect.fail(
+        new McpCallRefused({
+          reason: "error",
+          message: "The controller is frozen for a promotion.",
+          controllerNotServing: true,
+        }),
+      ),
+    );
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+
+    const refused = await callEcho(thread.token, "alpha__echo", sessionId);
+
+    expect(refused.body.result.isError).toBe(true);
+    expect(textOf(refused)).toBe("The controller is frozen for a promotion.");
+    expect(await readCallAudit(thread.session.id)).toEqual([]);
+    expect(await readWarnings(thread.session.id)).toEqual([]);
+  });
+});
+
+// Last in the file: after `closeStreams` the gateway opens no stream any more.
+describe("shutdown", () => {
+  it("ends the open GET stream and the open listen, and opens no new stream", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    const get = await openGetStream(thread.token, sessionId);
+    const listen = await openListen(thread.token, 903);
+    await waitForListChanges(get, 1);
+    await waitForListChanges(listen, 1);
+
+    await Effect.runPromise(arranged.harness.mcpGateway.closeStreams);
+
+    expect(await waitWithin(5_000, () => get.ended && listen.ended)).toBe(true);
+    const reopened = await openGetStream(thread.token, sessionId);
+    expect(await waitWithin(5_000, () => reopened.ended)).toBe(true);
+    expect(reopened.messages).toEqual([]);
   });
 });

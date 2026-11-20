@@ -1228,7 +1228,7 @@ describe("an event the controller writes itself", () => {
         WHERE session_id = unhex(${sessionId.replaceAll("-", "")}) ORDER BY position`,
     );
 
-  it("goes before the first event of a session that never ran, and keeps that event", async () => {
+  it("keeps the first event of a session that never ran", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1240,12 +1240,12 @@ describe("an event the controller writes itself", () => {
     );
 
     expect(stream).toEqual([
-      { runner_seq: 1, tag: "runtime.warning" },
-      { runner_seq: 2, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: 1, tag: "session.started" },
     ]);
   });
 
-  it("goes past every event of a resumed session, and keeps the resumed process's first event", async () => {
+  it("keeps the resumed process's first event, and numbers each warning below zero", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1254,6 +1254,7 @@ describe("an event the controller writes itself", () => {
         // A resume moves the offset to the highest sequence stored, 3.
         yield* sessions.resume(sessionId, "{}");
         yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
+        yield* sessions.appendRuntimeWarning(sessionId, "another notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
@@ -1263,8 +1264,9 @@ describe("an event the controller writes itself", () => {
       { runner_seq: 1, tag: "turn.started" },
       { runner_seq: 2, tag: "turn.started" },
       { runner_seq: 3, tag: "turn.started" },
-      { runner_seq: 4, tag: "runtime.warning" },
-      { runner_seq: 5, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: -2, tag: "runtime.warning" },
+      { runner_seq: 4, tag: "session.started" },
     ]);
   });
 });

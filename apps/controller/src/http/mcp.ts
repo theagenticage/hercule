@@ -23,7 +23,7 @@ import * as Option from "effect/Option";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { hashToken } from "../credentials";
-import { McpGateway } from "../mcp-gateway";
+import { buildUnauthorizedResponse, McpGateway } from "../mcp-gateway";
 import { SessionTokens } from "../permissions";
 import { readBearerToken } from "./bearer";
 
@@ -60,11 +60,7 @@ const answerMcpRequest = Effect.gen(function* () {
   const tokens = yield* SessionTokens;
   const actor =
     tokenHash === undefined ? Option.none() : yield* Effect.orDie(tokens.resolve(tokenHash));
-  if (tokenHash === undefined || Option.isNone(actor)) {
-    return refuse(401, "The MCP gateway needs the Session Token of a running session", {
-      "www-authenticate": "Bearer",
-    });
-  }
+  if (tokenHash === undefined || Option.isNone(actor)) return buildUnauthorizedResponse();
   return yield* (yield* McpGateway).handle(request, { tokenHash, actor: actor.value });
 }).pipe(
   // The route sits outside the error envelope, so a defect must not escape as one.
@@ -76,6 +72,16 @@ const answerMcpRequest = Effect.gen(function* () {
           refuse(500, "The MCP gateway failed"),
         ),
   ),
+);
+
+/**
+ * Ends the gateway's open streams and refuses new ones. The controller runs
+ * it when it is asked to stop, before the listener drains: the listener
+ * waits for every open response, and a gateway stream never ends by itself.
+ */
+export const closeMcpStreams: Effect.Effect<void, never, McpGateway> = Effect.flatMap(
+  McpGateway,
+  (gateway) => gateway.closeStreams,
 );
 
 /** Wraps `app` so that a request for `/mcp` goes to the gateway and every other request to `app`. */

@@ -41,23 +41,28 @@ import {
   buildListChangedNotification,
   buildListenResult,
   buildMethodNotFound,
+  buildRefusalBody,
   buildRpcError,
   buildRpcResult,
   buildSubscribedListChangedNotification,
   buildSubscriptionAcknowledgement,
   buildToolCallResult,
   buildToolsListResult,
-  buildUnsupportedRevision,
+  checkSessionVersionHeader,
+  checkStatelessMetadata,
   classifyMessage,
+  isStatelessMessage,
   MAX_REQUEST_BODY_BYTES,
   negotiateStatefulRevision,
+  readListenRequest,
   readStatelessRevision,
   REQUEST_CANCELLED_ERROR_CODE,
   SESSION_ID_HEADER,
-  STATELESS_REVISION,
+  type HeaderMap,
   type IncomingMessage,
   type JsonObject,
   type RequestId,
+  type RequestRefusal,
 } from "./protocol";
 import {
   buildMissingGrantRefusal,
@@ -92,6 +97,8 @@ type Era = "stateful" | "stateless";
 /** One stateful MCP session, which `initialize` creates. */
 interface McpSession {
   readonly id: string;
+  /** The revision `initialize` negotiated. Later requests of the session must not name another. */
+  readonly revision: string;
   /** The `tools/call` requests running now, by their JSON-RPC id, so `notifications/cancelled` can stop one. */
   readonly calls: Map<string, Fiber.Fiber<unknown, unknown>>;
 }
@@ -102,12 +109,20 @@ interface TokenState {
   readonly sessionId: string;
   readonly mcpSessions: Map<string, McpSession>;
   readonly streams: Set<OpenStream>;
-  /** The meaning of every name sent to this token. Replaced, never changed in place. */
+  /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
+  readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
+  /** The servers a call of this token went to, so the upstream session of one that is no longer served can be closed. */
+  readonly calledServerIds: Set<string>;
+  /**
+   * The meaning of every name `tools/list` has sent to this token since the
+   * controller started. A call is accepted only under one of these names.
+   * Replaced, never changed in place.
+   */
   reservations: NameReservations;
-  /** The fingerprint of what the token was last offered, or `undefined` before the first offer. */
-  fingerprint: string | undefined;
-  /** Serializes the changes of `reservations` and `fingerprint`. */
+  /** Serializes the changes of `reservations`. */
   readonly offering: Semaphore.Semaphore;
+  /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
+  readonly admission: Semaphore.Semaphore;
   /** When the Thread was last told about each refusal. */
   readonly warnings: Map<string, SeenWarning>;
   /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
@@ -145,6 +160,17 @@ const respondJson = (body: unknown, status = 200, headers: Record<string, string
   HttpServerResponse.jsonUnsafe(body, { status, headers: { ...NO_STORE, ...headers } });
 
 const respondAccepted = () => HttpServerResponse.empty({ status: 202, headers: NO_STORE });
+
+/**
+ * Builds the 401 for a request without the Session Token of a running session.
+ * `WWW-Authenticate` carries no `resource_metadata`, so no harness starts an
+ * OAuth sign-in.
+ */
+export const buildUnauthorizedResponse = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.text("The MCP gateway needs the Session Token of a running session", {
+    status: 401,
+    headers: { ...NO_STORE, "www-authenticate": "Bearer" },
+  });
 
 /** Answers a request the gateway cannot read or serve at the HTTP level, with a JSON-RPC error body. */
 const respondRpcError = (
@@ -189,9 +215,11 @@ const make = Effect.gen(function* () {
       sessionId: actor.sessionId,
       mcpSessions: new Map(),
       streams: new Set(),
+      runningCalls: new Set(),
+      calledServerIds: new Set(),
       reservations: new Map(),
-      fingerprint: undefined,
       offering: Semaphore.makeUnsafe(1),
+      admission: Semaphore.makeUnsafe(1),
       warnings: new Map(),
       warning: Semaphore.makeUnsafe(1),
     };
@@ -229,16 +257,15 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Builds what the session is served and records it as sent: the names join
-   * the token's reservations, and the fingerprint is what `list_changed`
-   * compares against. One at a time per token.
+   * Builds what the session is served and records the names as sent: they
+   * join the token's reservations, which are the only names a call may use.
+   * One at a time per token.
    */
   const offerTools = (state: TokenState, actor: SessionActor): Effect.Effect<ServedProjection> =>
     state.offering.withPermits(1)(
       Effect.gen(function* () {
         const projection = yield* readProjection(state, actor);
         state.reservations = reserveServedTools(state.reservations, projection.tools);
-        state.fingerprint = projection.fingerprint;
         return projection;
       }),
     );
@@ -253,20 +280,19 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<CallDecision> =>
     Effect.gen(function* () {
       if (!holdsMcpUse(actor)) return { _tag: "refused", refusal: buildMissingGrantRefusal() };
-      const records = yield* readRecords(actor.sessionId);
-      // A name the gateway sent keeps its meaning. A name it never sent this
-      // token, such as one a harness remembers across a controller restart, is
-      // worked out from the list, because names are deterministic.
-      const reserved = state.reservations.get(toolName);
-      const meaning =
-        reserved ??
-        buildProjection({
-          records,
-          holdsMcpUse: true,
-          reservations: state.reservations,
-        }).tools.find((tool) => tool.name === toolName);
-      if (meaning === undefined)
+      // A call is accepted only under a name `tools/list` sent to this token
+      // since the controller started, and the name keeps its meaning. A name
+      // a harness remembers from before a restart is refused, because the list
+      // may have changed and a recomputed name could reach another tool than
+      // the one the harness showed. The streams are told to list again.
+      const meaning = state.reservations.get(toolName);
+      if (meaning === undefined) {
+        yield* Effect.forEach([...state.streams], (stream) => stream.notifyListChanged, {
+          discard: true,
+        });
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
+      }
+      const records = yield* readRecords(actor.sessionId);
       const listed = records.find(({ server }) => server.name === meaning.serverName);
       if (listed === undefined) {
         return {
@@ -451,6 +477,7 @@ const make = Effect.gen(function* () {
         : Effect.suspend(() => {
             server = { id: decision.serverId, name: decision.serverName };
             tool = decision.tool;
+            state.calledServerIds.add(decision.serverId);
             return catalogue
               .callTool({
                 upstreamScope: state.tokenHash,
@@ -495,12 +522,48 @@ const make = Effect.gen(function* () {
 
   // -- Streams and list changes ---------------------------------------------
 
-  const registerStream = (state: TokenState) => (stream: OpenStream) =>
-    Effect.sync(() => {
-      state.streams.add(stream);
-    });
+  /** Set once the controller is shutting down: no stream opens after that. */
+  let closing = false;
 
-  const unregisterStream = (state: TokenState) => (stream: OpenStream) =>
+  /**
+   * Decides whether a stream whose response body is being read may open, and
+   * adds it to the token's streams when it may. Everything that can have
+   * changed since the request was checked is read again here: the controller
+   * serves, the token still resolves, and the MCP session still exists. A
+   * stream of a stateful MCP session replaces the one that session had. One
+   * admission at a time per token, so two GETs cannot both replace the old
+   * stream and both stay.
+   */
+  const admitStream =
+    (state: TokenState) =>
+    (stream: OpenStream): Effect.Effect<boolean> =>
+      state.admission.withPermits(1)(
+        Effect.gen(function* () {
+          if (!(yield* isServing)) return false;
+          const actor = yield* Effect.orDie(tokens.resolveUncached(state.tokenHash));
+          if (Option.isNone(actor)) return false;
+          stream.told = (yield* readProjection(state, actor.value)).fingerprint;
+          // Nothing waits between this check and the add, so a token that is
+          // forgotten or a shutdown that starts cannot slip between them.
+          const replaced = yield* Effect.sync(() => {
+            const alive = !closing && states.get(state.tokenHash) === state;
+            const sessionAlive =
+              stream.mcpSessionId === undefined || state.mcpSessions.has(stream.mcpSessionId);
+            if (!alive || !sessionAlive) return undefined;
+            const old = [...state.streams].filter(
+              (other) =>
+                stream.mcpSessionId !== undefined && other.mcpSessionId === stream.mcpSessionId,
+            );
+            state.streams.add(stream);
+            return old;
+          });
+          if (replaced === undefined) return false;
+          yield* Effect.forEach(replaced, (old) => old.end, { discard: true });
+          return true;
+        }),
+      );
+
+  const releaseStream = (state: TokenState) => (stream: OpenStream) =>
     Effect.sync(() => {
       state.streams.delete(stream);
     });
@@ -517,20 +580,23 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       states.delete(state.tokenHash);
       yield* endStreams(state);
-      yield* Effect.forEach(
-        [...state.mcpSessions.values()].flatMap((session) => [...session.calls.values()]),
-        (call) => Fiber.interrupt(call),
-        { discard: true },
-      );
+      yield* Effect.forEach([...state.runningCalls], (call) => Fiber.interrupt(call), {
+        discard: true,
+      });
       state.mcpSessions.clear();
       yield* catalogue.closeUpstreamScope(state.tokenHash);
     });
 
   /**
    * Brings one token in step with the database. A token that no longer
-   * resolves is forgotten. Otherwise, when what the session is served has
-   * changed since it was last offered, `list_changed` goes to its open
-   * streams.
+   * resolves is forgotten. Otherwise:
+   *
+   * - each open stream that was last told about another tool list gets
+   *   `list_changed`. Each stream is judged against what it was told itself,
+   *   so a `tools/list` that one client made never hides the change from
+   *   another;
+   * - the upstream session of every server a call of this token went to, and
+   *   that the session is not served any more, is closed.
    */
   const reconcileToken = (state: TokenState): Effect.Effect<void> =>
     state.offering.withPermits(1)(
@@ -538,14 +604,25 @@ const make = Effect.gen(function* () {
         const actor = yield* Effect.orDie(tokens.resolveUncached(state.tokenHash));
         if (Option.isNone(actor)) return yield* forgetToken(state);
         const projection = yield* readProjection(state, actor.value);
-        // A token that never listed has no fingerprint yet. Its open streams
-        // are told too: the client may not have listed since the stream opened.
-        const moved = state.fingerprint !== projection.fingerprint;
-        state.fingerprint = projection.fingerprint;
-        if (!moved) return;
-        yield* Effect.forEach([...state.streams], (stream) => stream.notifyListChanged, {
-          discard: true,
-        });
+        yield* Effect.forEach(
+          [...state.streams].filter((stream) => stream.told !== projection.fingerprint),
+          (stream) => {
+            stream.told = projection.fingerprint;
+            return stream.notifyListChanged;
+          },
+          { discard: true },
+        );
+        const unserved = [...state.calledServerIds].filter(
+          (serverId) => !projection.servedServerIds.has(serverId),
+        );
+        yield* Effect.forEach(
+          unserved,
+          (serverId) => {
+            state.calledServerIds.delete(serverId);
+            return catalogue.closeUpstreamSession(state.tokenHash, serverId);
+          },
+          { discard: true },
+        );
       }),
     );
 
@@ -561,6 +638,12 @@ const make = Effect.gen(function* () {
   const endAllStreams: Effect.Effect<void> = Effect.suspend(() =>
     Effect.forEach([...states.values()], (state) => endStreams(state), { discard: true }),
   );
+
+  /** Refuses every new stream from now on and ends the open ones. For a controller that is stopping. */
+  const closeStreams: Effect.Effect<void> = Effect.suspend(() => {
+    closing = true;
+    return endAllStreams;
+  });
 
   /**
    * Follows the committed changes that alter what a session is served, for the
@@ -624,7 +707,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const revision = negotiateStatefulRevision(params["protocolVersion"]);
       const projection = yield* readProjection(state, caller.actor);
-      const session: McpSession = { id: crypto.randomUUID(), calls: new Map() };
+      const session: McpSession = { id: crypto.randomUUID(), revision, calls: new Map() };
       // A harness that never ends its MCP sessions loses the oldest one.
       if (state.mcpSessions.size >= MAX_MCP_SESSIONS_PER_TOKEN) {
         const [oldest] = state.mcpSessions.keys();
@@ -685,8 +768,14 @@ const make = Effect.gen(function* () {
       );
       const key = JSON.stringify(id);
       session?.calls.set(key, running);
+      state.runningCalls.add(running);
       const exit = yield* Fiber.await(running).pipe(
-        Effect.ensuring(Effect.sync(() => session?.calls.delete(key))),
+        Effect.ensuring(
+          Effect.sync(() => {
+            session?.calls.delete(key);
+            state.runningCalls.delete(running);
+          }),
+        ),
       );
       if (Exit.isSuccess(exit)) {
         return respondJson(buildRpcResult(id, buildToolCallResult(era, exit.value)));
@@ -706,20 +795,33 @@ const make = Effect.gen(function* () {
     return running === undefined ? Effect.void : Effect.asVoid(Fiber.interrupt(running));
   };
 
+  /** Opens `subscriptions/listen`: refuses invalid parameters, then streams the notifications it asked for. */
   const listen = (
     state: TokenState,
     id: RequestId,
+    params: JsonObject,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
+      const honored = readListenRequest(params);
+      if (honored === undefined) {
+        return respondRpcError(
+          400,
+          McpSchema.INVALID_PARAMS_ERROR_CODE,
+          "subscriptions/listen needs the request metadata and the notifications it asks for",
+          id,
+        );
+      }
       if (!(yield* isServing)) return respondNotServing();
       return toServerSentResponse(
         buildServerSentBody({
           mcpSessionId: undefined,
-          listChanged: buildSubscribedListChangedNotification(id),
-          opening: [buildSubscriptionAcknowledgement(id)],
+          listChanged: honored.toolsListChanged
+            ? buildSubscribedListChangedNotification(id)
+            : undefined,
+          opening: [buildSubscriptionAcknowledgement(id, honored)],
           closing: buildRpcResult(id, buildListenResult(id)),
-          register: registerStream(state),
-          unregister: unregisterStream(state),
+          admit: admitStream(state),
+          release: releaseStream(state),
         }),
       );
     });
@@ -757,40 +859,52 @@ const make = Effect.gen(function* () {
           : Effect.succeed(respondJson(buildMethodNotFound(id, method)));
       case "subscriptions/listen":
         return era === "stateless"
-          ? listen(state, id)
+          ? listen(state, id, params)
           : Effect.succeed(respondJson(buildMethodNotFound(id, method)));
       default:
         return Effect.succeed(respondJson(buildMethodNotFound(id, method)));
     }
   };
 
-  /** Chooses the era of a message from its first words, and answers it. */
+  const respondRefusal = (refusal: RequestRefusal, id: RequestId | null) =>
+    respondJson(buildRefusalBody(id, refusal), refusal.status);
+
+  /**
+   * Chooses the era of a message from its first words, checks its HTTP headers
+   * against that era, and answers it. `session` is the MCP session the
+   * `Mcp-Session-Id` header named, which the caller has already found.
+   */
   const handleMessage = (
     request: HttpServerRequest.HttpServerRequest,
     caller: McpCaller,
+    state: TokenState,
+    session: McpSession | undefined,
     message: Exclude<IncomingMessage, { readonly _tag: "batch" | "invalid" | "response" }>,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
-    const state = stateOf(caller);
     if (message._tag === "request" && message.method === "initialize") {
       return initialize(caller, state, message.id, message.params);
     }
     const idOrNull = message._tag === "request" ? message.id : null;
-    const sessionId = request.headers[SESSION_ID_HEADER];
-    if (sessionId !== undefined) {
-      const session = state.mcpSessions.get(sessionId);
-      return session === undefined
-        ? Effect.succeed(respondSessionNotFound())
-        : dispatch("stateful", caller, state, session, message);
+    const headers: HeaderMap = request.headers;
+    if (session !== undefined) {
+      const refusal = checkSessionVersionHeader(headers["mcp-protocol-version"], session.revision);
+      return refusal === undefined
+        ? dispatch("stateful", caller, state, session, message)
+        : Effect.succeed(respondRefusal(refusal, idOrNull));
     }
-    const revision = readStatelessRevision(message.params);
-    if (
-      revision === STATELESS_REVISION ||
-      (revision === undefined && message._tag === "request" && message.method === "server/discover")
-    ) {
-      return dispatch("stateless", caller, state, undefined, message);
-    }
-    if (revision !== undefined) {
-      return Effect.succeed(respondJson(buildUnsupportedRevision(idOrNull, revision), 400));
+    // A `server/discover` that names no revision at all is how a client asks
+    // which revisions the gateway speaks, so it is answered, not checked.
+    const asksWhichRevisions =
+      message._tag === "request" &&
+      message.method === "server/discover" &&
+      readStatelessRevision(message.params) === undefined &&
+      headers["mcp-protocol-version"] === undefined;
+    if (asksWhichRevisions) return dispatch("stateless", caller, state, undefined, message);
+    if (isStatelessMessage(headers, message.params)) {
+      const refusal = checkStatelessMetadata(headers, message.method, message.params);
+      return refusal === undefined
+        ? dispatch("stateless", caller, state, undefined, message)
+        : Effect.succeed(respondRefusal(refusal, idOrNull));
     }
     // A notification with neither a session nor a revision has nothing to act on.
     return Effect.succeed(
@@ -805,30 +919,52 @@ const make = Effect.gen(function* () {
     );
   };
 
-  /** Reads the body of a POST, refusing one over the limit before it is parsed. */
+  /**
+   * Reads the body of a POST as it arrives and refuses it once it passes the
+   * limit, so a chunked body with no `Content-Length` is never buffered past
+   * it. Fails with the response to send.
+   */
   const readBody = (
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<string, HttpServerResponse.HttpServerResponse> => {
-    const tooLarge = Effect.fail(
-      respondRpcError(413, McpSchema.INVALID_REQUEST_ERROR_CODE, "The request body is over 1 MiB"),
+    const tooLarge = respondRpcError(
+      413,
+      McpSchema.INVALID_REQUEST_ERROR_CODE,
+      "The request body is over 1 MiB",
     );
-    if (Number(request.headers["content-length"] ?? 0) > MAX_REQUEST_BODY_BYTES) return tooLarge;
-    return request.text.pipe(
-      Effect.mapError(() =>
-        respondRpcError(400, McpSchema.PARSE_ERROR_CODE, "The request body could not be read"),
-      ),
-      Effect.flatMap((text) =>
-        Buffer.byteLength(text) > MAX_REQUEST_BODY_BYTES ? tooLarge : Effect.succeed(text),
-      ),
-    );
+    if (Number(request.headers["content-length"] ?? 0) > MAX_REQUEST_BODY_BYTES) {
+      return Effect.fail(tooLarge);
+    }
+    return Effect.gen(function* () {
+      const chunks: Array<Uint8Array> = [];
+      let total = 0;
+      yield* request.stream.pipe(
+        Stream.mapError(() =>
+          respondRpcError(400, McpSchema.PARSE_ERROR_CODE, "The request body could not be read"),
+        ),
+        Stream.runForEach((chunk) => {
+          total += chunk.byteLength;
+          if (total > MAX_REQUEST_BODY_BYTES) return Effect.fail(tooLarge);
+          chunks.push(chunk);
+          return Effect.void;
+        }),
+      );
+      return new TextDecoder().decode(Buffer.concat(chunks));
+    });
   };
 
   const handlePost = (
     request: HttpServerRequest.HttpServerRequest,
-    caller: McpCaller,
+    routedCaller: McpCaller,
   ): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
     Effect.gen(function* () {
       const text = yield* readBody(request);
+      // The body may have taken a while to arrive. The Thread can have ended,
+      // resumed or lost `mcp.use` since the route resolved the token, so the
+      // token and its profile are read again, and that reading serves the request.
+      const actor = yield* Effect.orDie(tokens.resolveUncached(routedCaller.tokenHash));
+      if (Option.isNone(actor)) return buildUnauthorizedResponse();
+      const caller: McpCaller = { tokenHash: routedCaller.tokenHash, actor: actor.value };
       let json: unknown;
       try {
         json = JSON.parse(text);
@@ -853,10 +989,16 @@ const make = Effect.gen(function* () {
             McpSchema.INVALID_REQUEST_ERROR_CODE,
             "The request body is not a JSON-RPC 2.0 message",
           );
-        case "response":
-          return respondAccepted();
-        default:
-          return yield* handleMessage(request, caller, message);
+        default: {
+          // Every message that names an MCP session must name one this token
+          // owns, an `initialize` and a response too.
+          const state = stateOf(caller);
+          const sessionId = request.headers[SESSION_ID_HEADER];
+          const session = sessionId === undefined ? undefined : state.mcpSessions.get(sessionId);
+          if (sessionId !== undefined && session === undefined) return respondSessionNotFound();
+          if (message._tag === "response") return respondAccepted();
+          return yield* handleMessage(request, caller, state, session, message);
+        }
       }
     }).pipe(Effect.catch((response) => Effect.succeed(response)));
 
@@ -876,6 +1018,11 @@ const make = Effect.gen(function* () {
         );
       }
       if (session === undefined) return respondSessionNotFound();
+      const refusal = checkSessionVersionHeader(
+        request.headers["mcp-protocol-version"],
+        session.revision,
+      );
+      if (refusal !== undefined) return respondRefusal(refusal, null);
       if (!(request.headers["accept"] ?? "").includes("text/event-stream")) {
         return respondRpcError(
           406,
@@ -884,15 +1031,13 @@ const make = Effect.gen(function* () {
         );
       }
       if (!(yield* isServing)) return respondNotServing();
-      // One stream per MCP session: a harness that opens another has dropped the old one.
-      yield* endStreams(state, session.id);
       return toServerSentResponse(
         buildServerSentBody({
           mcpSessionId: session.id,
           listChanged: buildListChangedNotification(),
           opening: [],
-          register: registerStream(state),
-          unregister: unregisterStream(state),
+          admit: admitStream(state),
+          release: releaseStream(state),
         }),
       );
     });
@@ -911,7 +1056,13 @@ const make = Effect.gen(function* () {
           "The Mcp-Session-Id header is required",
         );
       }
-      if (!state.mcpSessions.has(sessionId)) return respondSessionNotFound();
+      const session = state.mcpSessions.get(sessionId);
+      if (session === undefined) return respondSessionNotFound();
+      const refusal = checkSessionVersionHeader(
+        request.headers["mcp-protocol-version"],
+        session.revision,
+      );
+      if (refusal !== undefined) return respondRefusal(refusal, null);
       yield* endMcpSession(state, sessionId);
       return HttpServerResponse.empty({ status: 204, headers: NO_STORE });
     });
@@ -942,6 +1093,14 @@ const make = Effect.gen(function* () {
               ),
         ),
       ),
+
+    /**
+     * Ends every open stream and refuses new ones. The controller calls it
+     * when it is asked to stop, before the listener starts to drain, because
+     * the listener waits for every open response and these never end by
+     * themselves.
+     */
+    closeStreams,
 
     /**
      * Follows the changes that alter what a session is served, sweeps the

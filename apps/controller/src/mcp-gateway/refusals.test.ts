@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
+  buildRefusalWarning,
+  buildUnknownToolRefusal,
   claimWarning,
   type SeenWarning,
 } from "./refusals";
@@ -36,5 +38,17 @@ describe("claimWarning", () => {
     expect(claimWarning(seen, refusal, undefined, 0)).toBe(true);
     expect(claimWarning(seen, refusal, undefined, 59_999)).toBe(false);
     expect(claimWarning(seen, refusal, undefined, 60_000)).toBe(true);
+  });
+});
+
+describe("buildUnknownToolRefusal", () => {
+  it("repeats a caller's tool name cut to 64 characters, with no character a tool name cannot have", () => {
+    const name = `search\n${"x".repeat(900_000)}`;
+    const refusal = buildUnknownToolRefusal(name);
+
+    expect(refusal.message).toContain('"search?xxxxxxxx');
+    expect(refusal.message).not.toContain("\n");
+    // The Thread's line must stay under the protocol's 4,096 character bound.
+    expect(buildRefusalWarning(refusal).length).toBeLessThan(4_096);
   });
 });

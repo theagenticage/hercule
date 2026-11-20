@@ -2463,6 +2463,90 @@ describe("a runner's runtime warning", () => {
   });
 });
 
+describe("a warning the controller writes while a turn runs", () => {
+  /** Returns the stored rows of the session's stream, in position order, as tag, text and sequence. */
+  const readRows = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly event: string; readonly runner_seq: number }>`
+        SELECT event, runner_seq FROM session_stream
+        WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`;
+      return rows.map((row) => {
+        const event = JSON.parse(row.event) as { _tag: string; delta?: string };
+        return { tag: event._tag, delta: event.delta, seq: row.runner_seq };
+      });
+    });
+
+  const buildEvent = (sessionId: string, event: object) =>
+    ({ eventId: crypto.randomUUID(), sessionId, at, ...event }) as HarnessEvent;
+
+  it("keeps the text held for the open item of the runner", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const report = (seq: number, event: object) =>
+          Effect.gen(function* () {
+            const harnessEvent = buildEvent(sessionId, event);
+            const folded = yield* sessions.foldReport(runnerId, seq, harnessEvent);
+            yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
+          });
+        const delta = (text: string) => ({
+          _tag: "content.delta",
+          turnId: "t1",
+          itemId: "i1",
+          streamKind: "assistant_text",
+          delta: text,
+        });
+
+        yield* report(1, delta("Hel"));
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* report(2, delta("lo"));
+        yield* report(3, {
+          _tag: "item.completed",
+          turnId: "t1",
+          itemId: "i1",
+          kind: "assistant_message",
+          status: "completed",
+        });
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag)).toEqual([
+      "runtime.warning",
+      "content.delta",
+      "item.completed",
+    ]);
+    expect(rows[1]?.delta).toBe("Hello");
+  });
+
+  it("does not take the sequence number of a report that is folded but not yet written", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const started = buildEvent(sessionId, {
+          _tag: "turn.started",
+          turnId: "t1",
+        });
+
+        const folded = yield* sessions.foldReport(runnerId, 1, started);
+        // The report waits for the database's one writer while a refused call is written.
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* withTransaction(sql, sessions.applyReport(runnerId, started, folded!));
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag).toSorted()).toEqual(["runtime.warning", "turn.started"]);
+  });
+});
+
 describe("a report that starts a tool call", () => {
   it("counts the call and announces the session at the slow pace", async () => {
     const published: Array<Change> = [];

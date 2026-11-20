@@ -401,6 +401,10 @@ const make = Effect.gen(function* () {
       return Effect.forEach(ended, closeWhenDone, { concurrency: "unbounded", discard: true });
     });
 
+  /**
+   * Closes the one upstream session a token holds for a server, for a server
+   * the token's session is no longer served. Does nothing when there is none.
+   */
   const closeUpstreamSession = (upstreamScope: string, serverId: string): Effect.Effect<void> =>
     Effect.suspend(() => {
       const slot = slots.get(upstreamScope)?.get(serverId);
