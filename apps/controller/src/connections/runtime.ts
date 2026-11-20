@@ -42,6 +42,7 @@ import {
   type FeedDeclaration,
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
+import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { Secrets } from "../secrets";
 import {
@@ -82,6 +83,14 @@ export interface RegisteredConnectionType {
  */
 const CREDENTIALS_REPLACED =
   "the connection's credentials were replaced while its access token was being refreshed: ask for them again";
+
+/** The status detail of a Connection whose provider refused to refresh its access token. */
+const REFRESH_REFUSED = "the provider refused to refresh the connection's access token";
+
+/** The body of the Notification that a Connection needs signing in again. */
+const NEEDS_SIGN_IN_BODY =
+  "The provider no longer accepts this Connection's sign-in. Reconnect it on the Connections " +
+  "screen. What uses it stays unavailable until you do.";
 
 /**
  * What the core needs to call an outside server with a Connection's
@@ -174,6 +183,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const findOAuthClient = yield* oauthClients;
   const promotion = yield* PromotionState;
+  const notifier = yield* Notifier;
   const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
 
   const toConnectionSummary = (row: StoredConnection): ConnectionSummary => ({
@@ -186,14 +196,29 @@ const make = Effect.gen(function* () {
   });
 
   /**
+   * Returns the registered type of the connection, or `undefined` when no
+   * plugin in this build declares it.
+   */
+  const findRegisteredType = (
+    row: StoredConnection,
+  ): Effect.Effect<RegisteredConnectionType | undefined> =>
+    Effect.map(Ref.get(declared), (all) => all.get(row.type));
+
+  /**
    * Sets the connection's status and detail, unless the user disabled it.
    * Only the user enables a connection again, so a plugin's report or a
    * failed refresh that lands after the user disabled it changes nothing.
+   *
+   * When the status moves to `needs-reauth` from another status and
+   * `raisesNotification` is set, the connection's Notification is raised in
+   * the same transaction. A write that finds the connection `needs-reauth`
+   * already raises none, so one transition raises one Notification.
    */
-  const setStatus = (
+  const changeStatus = (
     connectionId: string,
     status: ConnectionStatus,
     detail: string | null,
+    raisesNotification: boolean,
   ): Effect.Effect<void> =>
     promotion.whenServing(
       Effect.gen(function* () {
@@ -202,6 +227,7 @@ const make = Effect.gen(function* () {
           withTransaction(
             sql,
             Effect.gen(function* () {
+              const before = Option.getOrUndefined(yield* connections.one(connectionId));
               const changed = yield* connections.changeStatusFrom(
                 connectionId,
                 ["connected", "error", "needs-reauth"],
@@ -209,18 +235,40 @@ const make = Effect.gen(function* () {
                 detail,
                 at,
               );
-              if (!changed) return;
+              if (!changed || before === undefined) return;
               yield* announce({
                 _tag: "record",
                 topic: "connection",
                 id: connectionId,
                 kind: "updated",
               });
+              if (raisesNotification && before.status !== status) {
+                const type = (yield* findRegisteredType(before))?.contribution;
+                yield* notifier.createCoreNotification({
+                  kind: "core.connection-error",
+                  title: `${type?.displayName ?? before.type} connection '${before.label}' needs signing in again`,
+                  body: NEEDS_SIGN_IN_BODY,
+                  subject: [{ kind: "connection", id: connectionId }],
+                });
+              }
             }),
           ),
         );
       }),
     );
+
+  const setStatus = (
+    connectionId: string,
+    status: ConnectionStatus,
+    detail: string | null,
+  ): Effect.Effect<void> => changeStatus(connectionId, status, detail, false);
+
+  /**
+   * Marks the connection `needs-reauth` and raises its Notification, with
+   * `message` as the status detail.
+   */
+  const setNeedsReauth = (connectionId: string, message: string): Effect.Effect<void> =>
+    changeStatus(connectionId, "needs-reauth", message, true);
 
   /**
    * Marks the connection `needs-reauth`, with `message` as the status detail,
@@ -231,18 +279,9 @@ const make = Effect.gen(function* () {
     message: string,
   ): Effect.Effect<never, ConnectionUnavailable> =>
     Effect.andThen(
-      setStatus(connectionId, "needs-reauth", message),
+      setNeedsReauth(connectionId, message),
       Effect.fail(new ConnectionUnavailable({ message })),
     );
-
-  /**
-   * Returns the registered type of the connection, or `undefined` when no
-   * plugin in this build declares it.
-   */
-  const findRegisteredType = (
-    row: StoredConnection,
-  ): Effect.Effect<RegisteredConnectionType | undefined> =>
-    Effect.map(Ref.get(declared), (all) => all.get(row.type));
 
   /**
    * Runs `write` in one transaction, but only while the connection still
@@ -295,7 +334,7 @@ const make = Effect.gen(function* () {
     message: string,
   ): Effect.Effect<never, ConnectionUnavailable> =>
     Effect.andThen(
-      writeWhileTokensHeld(connectionId, held, setStatus(connectionId, "needs-reauth", message)),
+      writeWhileTokensHeld(connectionId, held, setNeedsReauth(connectionId, message)),
       Effect.fail(new ConnectionUnavailable({ message })),
     );
 
@@ -422,8 +461,10 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const answer = yield* refreshAccess({ ...endpoint.value, refreshToken }).pipe(
             Effect.provide(FetchHttpClient.layer),
-            Effect.catchTag("ProviderRefused", (error) =>
-              markTokensNeedReauth(row.id, held, error.message),
+            // The provider's own text stays out of the message: the status
+            // detail and the Notification are read by people and agents.
+            Effect.catchTag("ProviderRefused", () =>
+              markTokensNeedReauth(row.id, held, REFRESH_REFUSED),
             ),
           );
           // When the response has no refresh token, the old one is still valid.
@@ -757,7 +798,11 @@ const make = Effect.gen(function* () {
      * Fails with `ConnectionCannotRefresh`, and changes nothing, when the
      * Connection holds pasted credentials and no OAuth tokens and they are the
      * ones that were rejected. Fails with a `ConnectionCredentialsUnavailable`
-     * as `readCredentialsForUse` does.
+     * as `readCredentialsForUse` does. The Connection is read again under the
+     * permit, before the provider is called and on the retry after a
+     * reconnect, so a Connection that another caller just got refused, or
+     * that the user disabled meanwhile, fails with `needs-sign-in` or
+     * `switched-off` and the provider is not called.
      *
      * This may call the provider and write the Connection's status, so it must
      * run outside any transaction.
@@ -780,7 +825,13 @@ const make = Effect.gen(function* () {
               // The gate is passed before the permit is taken, as in `readFreshTokenSet`.
               const refreshed = yield* promotion.whenServing(
                 readOrCreateRefreshPermit(row.id).withPermits(1)(
-                  refreshTokens(row, type.contribution, rejectedIdentity),
+                  // A caller that waited for the permit may find that the
+                  // caller before it got the Connection refused or the user
+                  // disabled it: reading it again here stops a second
+                  // refresh with a refresh token the provider already refused.
+                  Effect.flatMap(readConnectionForUse(row.id), (current) =>
+                    refreshTokens(current.row, current.type.contribution, rejectedIdentity),
+                  ),
                 ),
               );
               return { accessToken: refreshed.accessToken };
@@ -797,7 +848,10 @@ const make = Effect.gen(function* () {
           }),
         ).pipe(
           Effect.mapError((error) =>
-            error._tag === "ConnectionCannotRefresh" ? error : toCredentialsUnavailable(error),
+            error._tag === "ConnectionCannotRefresh" ||
+            error._tag === "ConnectionCredentialsUnavailable"
+              ? error
+              : toCredentialsUnavailable(error),
           ),
         );
         return yield* buildCredentialsForUse(row, type, credentials);
@@ -826,5 +880,5 @@ export class ConnectionTypes extends Context.Service<
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,
   never,
-  SqlClient.SqlClient | Secrets | PluginConfigs | PromotionState
+  SqlClient.SqlClient | Secrets | PluginConfigs | PromotionState | Notifier
 > = Layer.effect(ConnectionTypes)(make);

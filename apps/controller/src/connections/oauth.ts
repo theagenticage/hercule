@@ -43,6 +43,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/http/HttpBody";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { DeviceDeclaration, OAuthDeclaration } from "@hercule/plugin-host";
@@ -307,10 +308,19 @@ export const oauthClients: Effect.Effect<
  * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
  *   status, or when the status is any other client error.
  * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
- *   with a server error, answers with a body that is not JSON, or answers 403
- *   or 429 with no OAuth error.
+ *   with a redirect, answers with a server error, answers with a body that is
+ *   not JSON, or answers 403 or 429 with no OAuth error.
  *
- * `endpointName` names the endpoint in the error messages.
+ * A redirect is never followed: the form holds a secret (a client secret, a
+ * refresh token, a code or a device code), and a 307 or 308 makes a client
+ * send the same form to whatever address the response names.
+ *
+ * `endpointName` names the endpoint in the error messages. A `ProviderRefused`
+ * message names the provider's own error code, because the device flow shows
+ * it to the user who is signing in. A caller that stores or forwards a
+ * refusal elsewhere must not reuse that message: the refresh in `./runtime`
+ * writes a fixed message instead. No other message holds text the provider
+ * sent.
  */
 const postForm = (
   url: string,
@@ -321,8 +331,13 @@ const postForm = (
     const response = yield* HttpClient.post(url, {
       body: HttpBody.urlParams(form),
       acceptJson: true,
-    });
+    }).pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
     const status = String(response.status);
+    if (response.status >= 300 && response.status < 400) {
+      return yield* failProviderUnreachable(
+        `the ${endpointName} answered with a redirect, which is not followed`,
+      );
+    }
     if (response.status >= 500) {
       return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
     }

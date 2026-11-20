@@ -37,7 +37,7 @@
  * - `revision` goes up with every change that makes a running check's result
  *   stale or that ends upstream sessions: switching on or off, a reconnect and
  *   a delete. A check writes its result only if the revision is unchanged.
- * - `connection_generation` is the Connection's `credentials_replaced_at` the
+ * - `connection_generation` is the Connection's `credentials_generation` the
  *   server was last checked against, so a reconnect is noticed.
  * - `notified_status` is the status an open Notification episode is for, so
  *   one failure raises one Notification.
@@ -66,7 +66,7 @@ export default Effect.gen(function* () {
       checked_at TEXT,
       protocol_version TEXT,
       revision INTEGER NOT NULL DEFAULT 0,
-      connection_generation TEXT,
+      connection_generation INTEGER NOT NULL DEFAULT 0,
       notified_status TEXT,
       next_check_at TEXT,
       failed_checks INTEGER NOT NULL DEFAULT 0,

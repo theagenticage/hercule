@@ -45,7 +45,7 @@ export const computeBackoffMillis = (failedChecks: number): number =>
  */
 export interface StateBasis {
   readonly revision: number;
-  readonly connectionGeneration: string | null;
+  readonly connectionGeneration: number;
 }
 
 /** Returns the basis of a result computed from this server as it is now. */

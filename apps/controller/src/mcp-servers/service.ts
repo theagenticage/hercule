@@ -164,7 +164,7 @@ const make = Effect.gen(function* () {
               contributionId,
               connectionId,
               accountId: connection.value.accountId,
-              connectionGeneration: connection.value.credentialsReplacedAt,
+              connectionGeneration: connection.value.credentialsGeneration,
               at,
             });
             yield* audit.append({

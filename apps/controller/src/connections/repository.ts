@@ -60,13 +60,14 @@ export interface StoredConnection {
    */
   readonly intake: IntakeOverrides;
   /**
-   * When the user last replaced the Connection's credentials: creating it,
-   * pasting new ones, or signing in again. `null` for a Connection from
-   * before this was recorded. An ordinary token refresh never moves it, so a
-   * change tells a caller that the credentials may now point at another
-   * destination, and no change tells it they are still the same grant.
+   * A counter that starts at 0 and goes up each time the user replaces the
+   * Connection's credentials: pasting new ones or signing in again. An
+   * ordinary token refresh never moves it, so a change tells a caller that
+   * the credentials may now point at another destination, and no change
+   * tells it they are still the same grant. Two replacements always differ,
+   * even within one millisecond.
    */
-  readonly credentialsReplacedAt: string | null;
+  readonly credentialsGeneration: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -98,8 +99,12 @@ export interface ConnectionEdit {
   readonly statusDetail?: string | null;
   /** `null` clears the warning, as when new credentials come back without one. */
   readonly warning?: string | null;
-  /** Set when the user's action replaced the credentials, and never by a token refresh. */
-  readonly credentialsReplacedAt?: string;
+  /**
+   * Set to `true` when the user's action replaced the credentials, and never
+   * by a token refresh. Adds one to the credentials generation in the same
+   * statement as the other columns.
+   */
+  readonly replacesCredentials?: true;
 }
 
 /** A field a connection listing can be sorted by. */
@@ -132,14 +137,14 @@ interface ConnectionRow {
   readonly config: string;
   readonly feed_intervals: string;
   readonly intake: string;
-  readonly credentials_replaced_at: string | null;
+  readonly credentials_generation: number;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
 const COLUMNS =
   "id, plugin_id, type, label, display_name, account_id, status, status_detail, warning, labels, " +
-  "config, feed_intervals, intake, credentials_replaced_at, created_at, updated_at";
+  "config, feed_intervals, intake, credentials_generation, created_at, updated_at";
 
 /** How a connection listing sorts by each of its sortable fields. */
 const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
@@ -183,7 +188,7 @@ const toConnection = (row: ConnectionRow): Effect.Effect<StoredConnection> =>
       config: parseJson<Record<string, Schema.Json>>(row.config),
       feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
       intake,
-      credentialsReplacedAt: row.credentials_replaced_at,
+      credentialsGeneration: row.credentials_generation,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),
@@ -225,12 +230,12 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO connections
             (id, plugin_id, type, label, display_name, account_id, status, status_detail, warning,
-             labels, config, credentials_replaced_at, created_at, updated_at)
+             labels, config, created_at, updated_at)
           VALUES
             (${id}, ${connection.pluginId}, ${connection.type}, ${connection.label},
              ${connection.displayName}, ${connection.accountId}, 'connected', ${null},
              ${connection.warning ?? null}, ${JSON.stringify(connection.labels)}, ${JSON.stringify(connection.config)},
-             ${connection.at}, ${connection.at}, ${connection.at})
+             ${connection.at}, ${connection.at})
         `;
         return {
           id: uuidToString(id),
@@ -246,7 +251,7 @@ const make = Effect.gen(function* () {
           config: connection.config,
           feedIntervals: {},
           intake: NO_INTAKE_OVERRIDES,
-          credentialsReplacedAt: connection.at,
+          credentialsGeneration: 0,
           createdAt: connection.at,
           updatedAt: connection.at,
         };
@@ -266,8 +271,8 @@ const make = Effect.gen(function* () {
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
       if (edit.warning !== undefined) sets.push(sql`warning = ${edit.warning}`);
-      if (edit.credentialsReplacedAt !== undefined) {
-        sets.push(sql`credentials_replaced_at = ${edit.credentialsReplacedAt}`);
+      if (edit.replacesCredentials) {
+        sets.push(sql`credentials_generation = credentials_generation + 1`);
       }
       return Effect.asVoid(
         sql`UPDATE connections SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,

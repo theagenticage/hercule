@@ -111,12 +111,12 @@ export const runConnectionFollower = Effect.scoped(
           }
         } else {
           const reconnected =
-            connection.value.credentialsReplacedAt !== server.connectionGeneration;
+            connection.value.credentialsGeneration !== server.connectionGeneration;
           if (reconnected || server.statusCause !== null) {
             edit = {
               bumpRevision: true,
               ...(reconnected
-                ? { connectionGeneration: connection.value.credentialsReplacedAt }
+                ? { connectionGeneration: connection.value.credentialsGeneration }
                 : {}),
               // The old status was caused by the plugin or the Connection,
               // which is fine now, so it no longer holds.

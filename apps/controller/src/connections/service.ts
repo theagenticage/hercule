@@ -813,7 +813,7 @@ const make = Effect.gen(function* () {
               status: "connected",
               statusDetail: null,
               warning: readAccountWarning(account),
-              credentialsReplacedAt: now,
+              replacesCredentials: true,
             },
             now,
           );
@@ -1123,7 +1123,7 @@ const make = Effect.gen(function* () {
                 status: "connected",
                 statusDetail: null,
                 warning: readAccountWarning(account),
-                credentialsReplacedAt: at,
+                replacesCredentials: true,
               },
               at,
             );

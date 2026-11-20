@@ -130,7 +130,7 @@ import entityFields from "./0120-entity-fields";
 import linkTakenAt from "./0121-link-taken-at";
 import entityTakeOns from "./0122-entity-take-ons";
 import sessionTaint from "./0123-session-taint";
-import connectionCredentialsReplaced from "./0124-connection-credentials-replaced";
+import connectionCredentialsGeneration from "./0124-connection-credentials-generation";
 import mcpServers from "./0125-mcp-servers";
 import mcpGrants from "./0126-mcp-grants";
 
@@ -257,7 +257,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [121, "link-taken-at", Effect.succeed(linkTakenAt)],
   [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
   [123, "session-taint", Effect.succeed(sessionTaint)],
-  [124, "connection-credentials-replaced", Effect.succeed(connectionCredentialsReplaced)],
+  [124, "connection-credentials-generation", Effect.succeed(connectionCredentialsGeneration)],
   [125, "mcp-servers", Effect.succeed(mcpServers)],
   [126, "mcp-grants", Effect.succeed(mcpGrants)],
 ];

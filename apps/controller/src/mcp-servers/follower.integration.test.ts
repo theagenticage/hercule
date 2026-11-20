@@ -20,7 +20,6 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { McpServer } from "@hercule/contract";
 import { withTransaction } from "../db";
-import { backdateCredentialsReplacedAt } from "../connections/testing";
 import { post, send } from "../http/testing";
 import {
   createConnection,
@@ -35,7 +34,7 @@ interface Row {
   readonly status_detail: string | null;
   readonly status_cause: string | null;
   readonly revision: number;
-  readonly connection_generation: string | null;
+  readonly connection_generation: number;
 }
 
 const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
@@ -94,7 +93,6 @@ const withReadyServer = async (
             token: "t0ken",
           },
         );
-        await backdateCredentialsReplacedAt(controller.harness.sql);
         const response = await post(
           controller.base,
           "/api/v1/mcp-servers",
@@ -183,7 +181,7 @@ describe("a server follows its Connection", () => {
   it("raises the revision and lists again with the new credentials after a reconnect", async () => {
     await withReadyServer(async ({ controller, fake, connectionId }) => {
       const before = await readRow(controller);
-      expect(before.connection_generation).not.toBeNull();
+      expect(before.connection_generation).toBe(0);
 
       const response = await post(
         controller.base,
@@ -201,7 +199,7 @@ describe("a server follows its Connection", () => {
         () => readRow(controller),
         (found) => found.revision > before.revision && found.status === "ready",
       );
-      expect(row.connection_generation).not.toBe(before.connection_generation);
+      expect(row.connection_generation).toBe(1);
     });
   });
 

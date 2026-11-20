@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -27,6 +28,9 @@ import { TestClock } from "effect/testing";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase, inTransaction } from "../db/testing";
+import { AuditLogLayer } from "../events";
+import { NotifierLayer } from "../notifications";
+import { readNotificationBodiesAbout } from "../notifications/testing";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
 import { OAUTH_TOKENS, serializeTokens, type TokenSet } from "./oauth";
@@ -57,6 +61,8 @@ const buildStack = () => {
   return ConnectionTypesLayer.pipe(
     Layer.provideMerge(Layer.succeed(PluginConfigs)({ of: () => Effect.succeed({}) })),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
@@ -185,6 +191,21 @@ const expiresAt = (millis: number): string => new Date(millis).toISOString();
 const refreshRequests = () =>
   provider?.tokenRequests.filter((form) => form["grant_type"] === "refresh_token") ?? [];
 
+/** Counts the Notifications that say a Connection needs signing in again. */
+const countNeedsSignInNotifications = (id: string) =>
+  Effect.map(
+    readNotificationBodiesAbout("core.connection-error", { kind: "connection", id }),
+    (bodies) => bodies.length,
+  );
+
+/** Reads the status detail of the Connection. */
+const readStatusDetail = (id: string) =>
+  Effect.gen(function* () {
+    const connections = yield* connectionRepository;
+    const row = yield* connections.one(id);
+    return Option.isSome(row) ? row.value.statusDetail : undefined;
+  });
+
 /** Makes the token endpoint accept `refresh-1` and issue a new token with a new refresh token. */
 const answerRefreshWithNewToken = (): void => {
   if (provider === undefined) throw new Error("run first");
@@ -266,6 +287,101 @@ describe("the credentials the core reads to call an outside server", () => {
       reason: "needs-sign-in",
     });
     expect(status).toBe("needs-reauth");
+  });
+
+  it("raises one Notification when the provider refuses the refresh, and puts no text of the provider in any message", async () => {
+    const { failure, again, notifications, detail } = await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        provider.answers.token = () =>
+          buildJsonResponse(
+            { error: "invalid_grant", error_description: "Bearer sk-live-leaked-text" },
+            400,
+          );
+        const failure = yield* Effect.flip(readForUse(id));
+        // The Connection is `needs-reauth` now, so this read refuses without the provider.
+        const again = yield* Effect.flip(readForUse(id));
+        return {
+          failure,
+          again,
+          notifications: yield* countNeedsSignInNotifications(id),
+          detail: yield* readStatusDetail(id),
+        };
+      }),
+    );
+
+    expect(notifications).toBe(1);
+    expect(refreshRequests()).toHaveLength(1);
+    for (const message of [failure.message, again.message, detail ?? ""]) {
+      expect(message).not.toContain("invalid_grant");
+      expect(message).not.toContain("sk-live-leaked-text");
+    }
+  });
+
+  it("raises one Notification when a token has expired and its type cannot refresh", async () => {
+    const notifications = await run({ type: PASTED_TYPE, tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        yield* Effect.flip(readForUse(id));
+        return yield* countNeedsSignInNotifications(id);
+      }),
+    );
+
+    expect(notifications).toBe(1);
+  });
+
+  it("never follows a redirect of the token endpoint, and reports an unreachable provider", async () => {
+    const other = createDeviceProvider();
+    try {
+      const { failure, status } = await run({ tokens: STALE_TOKENS }, (id) =>
+        Effect.gen(function* () {
+          if (provider === undefined) throw new Error("run first");
+          provider.answers.token = () =>
+            new Response("send it on: client_secret=anything", {
+              status: 307,
+              headers: { location: `${other.base}/token` },
+            });
+          return { failure: yield* Effect.flip(readForUse(id)), status: yield* readStatus(id) };
+        }),
+      );
+
+      expect(other.tokenRequests).toEqual([]);
+      expect(failure).toMatchObject({
+        _tag: "ConnectionCredentialsUnavailable",
+        reason: "unreachable",
+      });
+      expect(failure.message).not.toContain("send it on");
+      expect(status).toBe("connected");
+    } finally {
+      await other.stop();
+    }
+  });
+
+  it("returns the new credentials, not an error, when the user reconnects while a refresh is in flight", async () => {
+    const read = await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        const requested = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        provider.answers.token = async () => {
+          requested.resolve();
+          await release.promise;
+          return buildJsonResponse({
+            access_token: "refreshed-token",
+            refresh_token: "refresh-2",
+            token_type: "bearer",
+            expires_in: 8 * 60 * 60,
+          });
+        };
+        const reading = yield* Effect.forkChild(readForUse(id));
+        yield* Effect.promise(() => requested.promise);
+        // The user signs in again while the provider is still answering.
+        yield* storeTokens(id, { ...FRESH_TOKENS, accessToken: "reconnected-token" });
+        release.resolve();
+        return yield* Fiber.join(reading);
+      }),
+    );
+
+    expect(read.credentials).toEqual({ accessToken: "reconnected-token" });
   });
 
   it("fails with unreachable, and leaves the Connection as it was, when the provider cannot be reached", async () => {
@@ -388,6 +504,36 @@ describe("the refresh after an outside server rejected the credentials", () => {
       reason: "needs-sign-in",
     });
     expect(status).toBe("needs-reauth");
+  });
+
+  it("does not call the provider again for a caller that waited while another caller got the refresh refused", async () => {
+    const { failures, status, notifications } = await run({ tokens: FRESH_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+        const { identity } = yield* readForUse(id);
+        const failures = yield* Effect.all(
+          [
+            Effect.flip(refreshAfterRejection(id, identity)),
+            Effect.flip(refreshAfterRejection(id, identity)),
+          ],
+          { concurrency: "unbounded" },
+        );
+        return {
+          failures,
+          status: yield* readStatus(id),
+          notifications: yield* countNeedsSignInNotifications(id),
+        };
+      }),
+    );
+
+    expect(refreshRequests()).toHaveLength(1);
+    expect(failures).toEqual([
+      expect.objectContaining({ reason: "needs-sign-in" }),
+      expect.objectContaining({ reason: "needs-sign-in" }),
+    ]);
+    expect(status).toBe("needs-reauth");
+    expect(notifications).toBe(1);
   });
 
   it("fails with unreachable, and leaves the Connection as it was, when the provider cannot be reached", async () => {

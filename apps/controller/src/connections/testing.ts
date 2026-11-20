@@ -13,7 +13,6 @@ import type {
   ExternalAccount,
   Plugin,
 } from "@hercule/plugin-host";
-import { withTransaction } from "../db";
 import { get } from "../http/testing";
 
 /** A connection as the API returns it. */
@@ -86,36 +85,18 @@ export const listConnections = async (
   return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
 };
 
-/** The time a test gives a Connection's `credentials_replaced_at` before it acts. */
-export const LONG_AGO = "2020-01-01T00:00:00.000Z";
-
-/**
- * Sets `credentials_replaced_at` of every Connection in the database to
- * `LONG_AGO`, so a later write to it is told apart from the one that created
- * the Connection even within one millisecond.
- */
-export const backdateCredentialsReplacedAt = (sql: SqlClient.SqlClient): Promise<void> =>
-  Effect.runPromise(
-    Effect.orDie(
-      withTransaction(
-        sql,
-        Effect.asVoid(sql`UPDATE connections SET credentials_replaced_at = ${LONG_AGO}`),
-      ),
-    ),
-  );
-
-/** Reads `credentials_replaced_at` of the only Connection in the database. */
-export const readCredentialsReplacedAt = async (
+/** Reads `credentials_generation` of the only Connection in the database. */
+export const readCredentialsGeneration = async (
   sql: SqlClient.SqlClient,
-): Promise<string | null | undefined> => {
+): Promise<number | undefined> => {
   const rows = await Effect.runPromise(
     Effect.orDie(
-      sql<{ readonly credentials_replaced_at: string | null }>`
-        SELECT credentials_replaced_at FROM connections
+      sql<{ readonly credentials_generation: number }>`
+        SELECT credentials_generation FROM connections
       `,
     ),
   );
-  return rows[0]?.credentials_replaced_at;
+  return rows[0]?.credentials_generation;
 };
 
 /**

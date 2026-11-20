@@ -50,8 +50,8 @@ export interface StoredMcpServer {
    * ends upstream sessions. A check writes its result only if it is unchanged.
    */
   readonly revision: number;
-  /** The Connection's `credentialsReplacedAt` the server was last checked against. */
-  readonly connectionGeneration: string | null;
+  /** The Connection's `credentialsGeneration` the server was last checked against. */
+  readonly connectionGeneration: number;
   /** The status an open Notification episode is for, or `null`. */
   readonly notifiedStatus: McpServerStatus | null;
   readonly nextCheckAt: string | null;
@@ -66,7 +66,7 @@ export interface NewMcpServer {
   readonly contributionId: string;
   readonly connectionId: string;
   readonly accountId: string;
-  readonly connectionGeneration: string | null;
+  readonly connectionGeneration: number;
   readonly at: string;
 }
 
@@ -84,7 +84,7 @@ interface McpServerRow {
   readonly checked_at: string | null;
   readonly protocol_version: string | null;
   readonly revision: number;
-  readonly connection_generation: string | null;
+  readonly connection_generation: number;
   readonly notified_status: McpServerStatus | null;
   readonly next_check_at: string | null;
   readonly failed_checks: number;
@@ -104,7 +104,7 @@ export interface McpServerEdit {
   readonly tools?: ReadonlyArray<StoredMcpTool>;
   readonly checkedAt?: string;
   readonly protocolVersion?: string;
-  readonly connectionGeneration?: string | null;
+  readonly connectionGeneration?: number;
   readonly notifiedStatus?: McpServerStatus | null;
   readonly nextCheckAt?: string | null;
   readonly failedChecks?: number;
