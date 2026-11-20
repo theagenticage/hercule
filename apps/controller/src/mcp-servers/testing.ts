@@ -113,6 +113,8 @@ export interface RecordedRequest {
 /** A request the fake lets in, as `FakeUpstream.intercept` sees it. */
 export interface InterceptedRequest {
   readonly method: string;
+  /** The JSON-RPC request's `id`, which a response must carry to answer it. */
+  readonly id: unknown;
   /** The JSON-RPC request's `params`. */
   readonly params: Record<string, unknown> | undefined;
   readonly authorization: string | null;
@@ -261,13 +263,16 @@ export const startFakeUpstream = (
     async fetch(request) {
       let method = "?";
       let params: Record<string, unknown> | undefined;
+      let id: unknown;
       try {
         const body = (await request.clone().json()) as {
+          readonly id?: unknown;
           readonly method?: unknown;
           readonly params?: Record<string, unknown>;
         };
         if (typeof body.method === "string") method = body.method;
         params = body.params;
+        id = body.id;
       } catch {
         // A request with no JSON body, such as a DELETE, has no method.
       }
@@ -295,6 +300,7 @@ export const startFakeUpstream = (
                 })
               : (fake.intercept({
                   method,
+                  id,
                   params,
                   authorization: recorded.authorization,
                   sessionId: recorded.sessionId,
@@ -582,7 +588,10 @@ export const readServer = async (
 export interface RigOptions {
   readonly fake?: Partial<FakeUpstreamSettings>;
   readonly oauth?: boolean;
-  readonly buildUpstreamRequest?: (credentials: Record<string, string>) => {
+  readonly buildUpstreamRequest?: (
+    credentials: Record<string, string>,
+    upstream: FakeUpstream,
+  ) => {
     readonly url: string;
     readonly headers: Record<string, string>;
   };
@@ -627,7 +636,8 @@ export const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOpt
               ? buildDeskMcpServer("acme", fake)
               : {
                   ...buildDeskMcpServer("acme", fake),
-                  buildUpstreamRequest: ({ credentials }) => buildUpstreamRequest(credentials),
+                  buildUpstreamRequest: ({ credentials }) =>
+                    buildUpstreamRequest(credentials, fake),
                 },
           ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
         }),

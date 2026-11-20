@@ -12,7 +12,10 @@
  *   server shows it does not speak the modern handshake, and never on a 401,
  *   403, 429, 5xx, a transport failure or a timeout;
  * - the HTTP requests to the outside server create no trace span, so no URL or
- *   error text reaches a trace.
+ *   error text reaches a trace;
+ * - each call's requests carry that call's own credentials, whatever another
+ *   call that shares the client sends, and a call records the answer to its own
+ *   `tools/call` request apart from any other request it causes.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -22,7 +25,13 @@ import { McpClientError, McpProtocol } from "effect/ai";
 import { TestDatabase } from "../db/testing";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { startFakeUpstream, type FakeUpstream } from "./testing";
-import { checkUrlOnOrigin, describeClientFailure, openUpstream } from "./upstream";
+import {
+  checkUrlOnOrigin,
+  createUpstreamCallState,
+  CurrentUpstreamCall,
+  describeClientFailure,
+  openUpstream,
+} from "./upstream";
 
 const ORIGIN = "https://mcp.example.com";
 
@@ -170,6 +179,67 @@ describe("the fallback to an older MCP revision", () => {
 });
 
 describe("openUpstream", () => {
+  it("gives each call's requests that call's own credentials, and records the answer to its tool request", async () => {
+    const fake = await startFakeUpstream();
+    try {
+      const credentialsOf = (token: string) => ({
+        credentials: { token },
+        config: {},
+        identity: `identity-${token}`,
+      });
+      const first = createUpstreamCallState(credentialsOf("token-one-1234"));
+      const second = createUpstreamCallState(credentialsOf("token-two-5678"));
+
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const opened = yield* openUpstream({
+              contribution: {
+                id: "sentry/desk",
+                pluginId: "sentry",
+                displayName: "Desk",
+                description: "",
+                connectionType: "sentry/desk",
+                origin: fake.origin,
+                buildUpstreamRequest: ({ credentials }) => ({
+                  url: fake.url,
+                  headers: { Authorization: `Bearer ${credentials["token"] ?? ""}` },
+                }),
+              },
+              credentials: credentialsOf("opening-token-0"),
+              firstRevision: null,
+            });
+            const [tool] = yield* opened.client.listTools();
+            if (tool === undefined) return yield* Effect.die("the fake lists no tool");
+            const callWith = (state: typeof first) =>
+              opened.client
+                .callTool({ tool, arguments: { text: "hi" } })
+                .pipe(Effect.provideService(CurrentUpstreamCall, state));
+            yield* Effect.all([callWith(first), callWith(second)], { concurrency: 2 });
+          }),
+        ).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.provide(ServingPromotionStateLayer),
+          Effect.provide(TestDatabase),
+        ),
+      );
+
+      const sent = fake.requests
+        .filter((request) => request.method === "tools/call")
+        .map((request) => request.authorization)
+        .sort();
+      expect(sent).toEqual(["Bearer token-one-1234", "Bearer token-two-5678"]);
+      expect(first).toMatchObject({
+        sentIdentity: "identity-token-one-1234",
+        toolPostSent: true,
+        toolPostStatus: 200,
+      });
+      expect([...second.sentValues].sort()).toEqual(["Bearer token-two-5678", "token-two-5678"]);
+    } finally {
+      await fake.stop();
+    }
+  });
+
   it("creates no trace span for the requests it sends", async () => {
     const fake = await startFakeUpstream();
     try {
