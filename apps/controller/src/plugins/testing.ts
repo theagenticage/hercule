@@ -586,6 +586,8 @@ export const createEventSourceFixture = (
     readonly capabilities?: ReadonlyArray<PluginCapability>;
     /** The External Entity kinds the source declares. The manifest needs the `entities` capability then. */
     readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
+    /** Gives the Connection type a device flow whose token endpoint is at this base address, so its tokens can be refreshed. */
+    readonly deviceProviderUrl?: string;
   } = {},
 ): EventSourceFixture => {
   let running = 0;
@@ -610,7 +612,17 @@ export const createEventSourceFixture = (
           registerConnectionType(host, {
             type: "acme",
             displayName: "Acme",
-            setup: [],
+            ...(options.deviceProviderUrl === undefined
+              ? { setup: [] }
+              : {
+                  setup: [{ kind: "device" as const }],
+                  device: {
+                    clientId: "acme-client",
+                    deviceCodeUrl: `${options.deviceProviderUrl}/device/code`,
+                    tokenUrl: `${options.deviceProviderUrl}/token`,
+                    scopes: [],
+                  },
+                }),
             configSchema: Schema.Struct({ project: Schema.optionalKey(Schema.String) }),
             validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
           }),

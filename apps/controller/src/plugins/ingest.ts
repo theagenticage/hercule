@@ -283,28 +283,37 @@ const make = Effect.gen(function* () {
        * it did. A reconnect while a poll runs replaces the rejected
        * credentials; marking the Connection then would flag credentials that
        * may well work.
+       *
+       * The check runs under the Connection's refresh permit. A refresh in
+       * flight may have made the provider reject the old token before its
+       * new token is stored, and the poll then fails with the refresh's
+       * doing: once the permit is held, the new token is stored and the
+       * check sees it.
        */
       const markNeedsReauth = (
         credentialsVersion: string,
         cause: Cause.Cause<AuthError | PluginError>,
       ): Effect.Effect<boolean> =>
-        writeStatus((at) =>
-          Effect.gen(function* () {
-            const current = yield* connectionTypes.readCredentialsVersion(connection.id);
-            if (current !== credentialsVersion) return false;
-            if (
-              yield* connections.changeStatusFrom(
-                connection.id,
-                ["connected", "error"],
-                "needs-reauth",
-                summarizeCause(cause),
-                at,
-              )
-            ) {
-              yield* announceConnection;
-            }
-            return true;
-          }),
+        connectionTypes.withRefreshPermit(
+          connection.id,
+          writeStatus((at) =>
+            Effect.gen(function* () {
+              const current = yield* connectionTypes.readCredentialsVersion(connection.id);
+              if (current !== credentialsVersion) return false;
+              if (
+                yield* connections.changeStatusFrom(
+                  connection.id,
+                  ["connected", "error"],
+                  "needs-reauth",
+                  summarizeCause(cause),
+                  at,
+                )
+              ) {
+                yield* announceConnection;
+              }
+              return true;
+            }),
+          ),
         );
 
       /**

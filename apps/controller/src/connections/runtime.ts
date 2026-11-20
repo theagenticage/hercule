@@ -1011,14 +1011,41 @@ const make = Effect.gen(function* () {
     /**
      * Returns a string that changes whenever the connection's credentials
      * change: the name and rotation time of each secret it holds, without
-     * decrypting any. A reconnect either rotates a secret of the same name or
-     * swaps the names, so the string differs after one. An OAuth refresh
-     * rotates the token set, so it changes the string too.
+     * decrypting any, and the connection's credentials generation. A
+     * reconnect either rotates a secret of the same name or swaps the names,
+     * and moves the generation, so the string differs after one. An OAuth
+     * refresh rotates the token set, so it changes the string too.
      */
     readCredentialsVersion: (connectionId: string): Effect.Effect<string> =>
-      Effect.map(Effect.orDie(secrets.refs("connection", [connectionId])), (all) =>
-        JSON.stringify(all.get(connectionId) ?? []),
-      ),
+      Effect.gen(function* () {
+        const refs = yield* Effect.orDie(secrets.refs("connection", [connectionId]));
+        const row = yield* Effect.orDie(connections.one(connectionId));
+        return JSON.stringify({
+          generation: Option.getOrUndefined(row)?.credentialsGeneration,
+          secrets: refs.get(connectionId) ?? [],
+        });
+      }),
+
+    /**
+     * Runs `effect` while holding the connection's refresh permit. It waits
+     * for a refresh that is in flight to commit its new tokens first, and no
+     * refresh starts until `effect` ends.
+     *
+     * A caller whose request with the old credentials was rejected uses it
+     * before it blames the connection: the provider may have invalidated the
+     * old token the moment a refresh answered, a little before the new token
+     * is stored, so the rejection can be the refresh's doing. Once the permit
+     * is held, a caller compares `readCredentialsVersion` with the one it used
+     * and marks the connection only if nothing was stored meanwhile.
+     *
+     * It passes the promotion gate before it takes the permit, as a refresh
+     * does, so nobody holds the permit while a freeze waits.
+     */
+    withRefreshPermit: <A, E, R>(
+      connectionId: string,
+      effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E, R> =>
+      promotion.whenServing(readOrCreateRefreshPermit(connectionId).withPermits(1)(effect)),
   };
 });
 

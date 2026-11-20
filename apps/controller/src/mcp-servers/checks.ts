@@ -381,15 +381,26 @@ const make = Effect.gen(function* () {
 
   const runUntilNoRequestIsWaiting = (id: string): Effect.Effect<void> =>
     Effect.gen(function* () {
-      while (true) {
+      let requestedAgain = true;
+      while (requestedAgain) {
         yield* absorbFailures(
           `Checking MCP server ${id} failed`,
           promotion.whenServing(checkOnce(id)),
         );
-        if (inFlight.get(id) !== "again") return;
-        inFlight.set(id, "running");
+        // Looking for a waiting request and ending the entry are one
+        // synchronous step. With a step between them, a request that came in
+        // between would set "again" on an entry that is then deleted, and
+        // that request would be lost.
+        requestedAgain = yield* Effect.sync(() => {
+          if (inFlight.get(id) === "again") {
+            inFlight.set(id, "running");
+            return true;
+          }
+          inFlight.delete(id);
+          return false;
+        });
       }
-    }).pipe(Effect.ensuring(Effect.sync(() => inFlight.delete(id))));
+    }).pipe(Effect.onInterrupt(() => Effect.sync(() => void inFlight.delete(id))));
 
   const request = (id: string): Effect.Effect<void> =>
     Effect.suspend(() => {
