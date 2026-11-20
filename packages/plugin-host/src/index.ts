@@ -146,8 +146,8 @@ export {
   MAX_MCP_SERVER_DESCRIPTION_LENGTH,
   MAX_MCP_SERVER_NAME_LENGTH,
   McpServerDeclaration,
+  McpServerName,
   McpServerOrigin,
-  McpServerWord,
   type McpServerConnection,
   type McpServerContribution,
 } from "./mcp-servers";

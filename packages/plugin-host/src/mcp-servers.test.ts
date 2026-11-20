@@ -3,13 +3,13 @@ import { Effect, Schema } from "effect";
 import {
   McpServerDeclaration,
   McpServerOrigin,
-  McpServerWord,
+  McpServerName,
   type McpServerContribution,
 } from "./mcp-servers";
 import { PluginError, registerMcpServer } from "./plugin";
 
-describe("McpServerWord", () => {
-  const isValid = Schema.is(McpServerWord);
+describe("McpServerName", () => {
+  const isValid = Schema.is(McpServerName);
 
   it.each(["sentry", "a", "my_server2", "a_b_c", "a".repeat(16), "hercule_two"])(
     "accepts %s",

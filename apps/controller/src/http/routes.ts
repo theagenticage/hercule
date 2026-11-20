@@ -31,6 +31,7 @@ import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
+import { McpServerChecksNoopLayer, McpServerService, McpServerServiceLayer } from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -78,6 +79,7 @@ import {
   SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
+  McpServerListHoldersLayer,
   Provisioning,
   ProvisioningLayer,
   TextGenerationLayer,
@@ -516,18 +518,19 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
   }),
 );
 
-// TODO(#1208): the MCP Server service is not built yet, so every endpoint
-// answers `internal`. Replace with one-line handlers on that service.
 const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
-  Effect.succeed(
-    handlers
-      .handle("query", () => Effect.fail(createInternalError("not built yet")))
-      .handle("read", () => Effect.fail(createInternalError("not built yet")))
-      .handle("create", () => Effect.fail(createInternalError("not built yet")))
-      .handle("update", () => Effect.fail(createInternalError("not built yet")))
-      .handle("delete", () => Effect.fail(createInternalError("not built yet")))
-      .handle("check", () => Effect.fail(createInternalError("not built yet"))),
-  ),
+  Effect.gen(function* () {
+    const mcpServers = yield* McpServerService;
+    return handlers
+      .handle("query", () => withApiErrors(mcpServers.query()))
+      .handle("read", ({ params }) => withApiErrors(mcpServers.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(mcpServers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(mcpServers.update({ ...params, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(mcpServers.delete(params.id)))
+      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)));
+  }),
 );
 
 const skillRoutes = HttpApiBuilder.group(api, "skill", (handlers) =>
@@ -1124,6 +1127,13 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
+  // Deleting a server removes it from the lists that hold it, through the
+  // controller daemon, which reaches the Projects and Sessions the domain
+  // cannot import. A check is requested through a port with no checking behind
+  // it yet.
+  McpServerServiceLayer.pipe(
+    Layer.provide(Layer.mergeAll(McpServerChecksNoopLayer, McpServerListHoldersLayer)),
+  ),
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),

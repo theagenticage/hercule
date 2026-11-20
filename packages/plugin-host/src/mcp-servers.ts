@@ -9,38 +9,42 @@ import { ContributionName } from "./contributions";
 export const MAX_MCP_SERVER_NAME_LENGTH = 16;
 
 /**
- * The name `hercule` is kept for the platform's own tools, so a contribution
- * cannot take it as the word its server's default name is made of.
+ * The name `hercule` is kept for the platform's own tools, so no MCP Server
+ * can take it as its name.
  */
 const RESERVED_MCP_SERVER_NAME = "hercule";
 
 /**
- * The unqualified id a plugin gives an MCP server contribution. It is also the
- * default name of the server record the user creates, so it follows the rules
- * of an MCP Server name:
+ * The rule of an MCP Server's name, which every client and every plugin
+ * follows:
  *
  * - lowercase letters and digits, in groups joined by a single `_`, because
  *   `-` and `.` do not survive Codex's tool names and `__` separates the name
  *   from the tool in a tool name;
  * - 1 to 16 characters;
  * - not `hercule`.
+ *
+ * A contribution's `id` follows it too, because the id is the default name of
+ * the server the user creates from it.
  */
-export const McpServerWord = Schema.String.check(
+export const McpServerName = Schema.String.check(
   Schema.isBetweenLength(1, MAX_MCP_SERVER_NAME_LENGTH, {
-    message: `An MCP server id must be 1 to ${String(MAX_MCP_SERVER_NAME_LENGTH)} characters long, because it is the default name of the server.`,
+    message: `An MCP server name must be 1 to ${String(MAX_MCP_SERVER_NAME_LENGTH)} characters long, because it is the prefix of every tool the server offers. A contribution's id is the default name, so it follows the same rule.`,
   }),
   Schema.isPattern(/^[a-z0-9]+(_[a-z0-9]+)*$/, {
     message:
-      "An MCP server id may hold only lowercase letters, digits and single _ characters between them, because it is the default name of the server and the prefix of its tool names.",
+      "An MCP server name may hold only lowercase letters, digits and single _ characters between them, because it is the prefix of its tool names. A contribution's id is the default name, so it follows the same rule.",
   }),
   Schema.makeFilter(
-    (word) =>
-      word === RESERVED_MCP_SERVER_NAME
-        ? `An MCP server id cannot be ${RESERVED_MCP_SERVER_NAME}, because that name is kept for the platform's own tools.`
+    (name) =>
+      name === RESERVED_MCP_SERVER_NAME
+        ? `An MCP server name cannot be ${RESERVED_MCP_SERVER_NAME}, because that name is kept for the platform's own tools. Choose another name.`
         : undefined,
     { title: `not ${RESERVED_MCP_SERVER_NAME}` },
   ),
 );
+
+export type McpServerName = Schema.Schema.Type<typeof McpServerName>;
 
 /**
  * An origin written the way `URL.origin` writes it: a lowercase `http` or
@@ -74,7 +78,7 @@ export const MAX_MCP_SERVER_DESCRIPTION_LENGTH = 256;
  * qualified.
  */
 export const McpServerDeclaration = Schema.Struct({
-  id: McpServerWord,
+  id: McpServerName,
   displayName: ContributionName,
   description: Schema.String.check(
     Schema.isBetweenLength(1, MAX_MCP_SERVER_DESCRIPTION_LENGTH),

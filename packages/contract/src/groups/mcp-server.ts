@@ -12,6 +12,7 @@
  * has its own source kind, built later.
  */
 import { Schema } from "effect";
+import { McpServerName } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -28,36 +29,11 @@ import { Id, isQualifiedId, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 
 /**
- * The longest MCP Server name. A tool's name for the model is the server's
- * name and the tool's name joined, and a harness limits that whole name, so a
- * long server name would leave no room for the tool's.
+ * The name rule of an MCP Server is owned by the plugin host, because a
+ * plugin's contribution id follows it too: it is the default name of the
+ * server. Clients get it from here.
  */
-export const MAX_MCP_SERVER_NAME_LENGTH = 16;
-
-/** The name kept for Hercule's own tools. */
-const RESERVED_MCP_SERVER_NAME = "hercule";
-
-/**
- * What a client calls an MCP Server: lowercase letters and digits with a
- * single `_` between them, 1 to 16 characters, and not `hercule`.
- *
- * There is no `-` or `.`, because Codex turns them into `_`. There is no
- * double underscore, because that separates the server's name from the
- * tool's in the gateway's tool names (spec 21 section 2.2).
- */
-export const McpServerName = Schema.String.check(
-  Schema.isBetweenLength(1, MAX_MCP_SERVER_NAME_LENGTH),
-  Schema.isPattern(/^[a-z0-9]+(_[a-z0-9]+)*$/, {
-    expected: "lowercase letters and digits, in groups joined by single underscores",
-  }),
-  Schema.makeFilter((name) =>
-    name === RESERVED_MCP_SERVER_NAME
-      ? `The name ${RESERVED_MCP_SERVER_NAME} is kept for Hercule's own tools. Choose another name.`
-      : undefined,
-  ),
-);
-
-export type McpServerName = Schema.Schema.Type<typeof McpServerName>;
+export { MAX_MCP_SERVER_NAME_LENGTH, McpServerName } from "@hercule/plugin-host";
 
 /**
  * What a check or a sign-in last found:
@@ -173,10 +149,10 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     }),
     // Answers at once with the server in status `checking`.
     //
-    // - `not_found`: no such Connection, or it is not of the contribution's
-    //   plugin.
     // - `conflict`: a server of this contribution and account exists.
-    // - `validation`: the name breaks the rules of `McpServerName`.
+    // - `validation`: the name breaks the rules of `McpServerName`, no plugin
+    //   offers the contribution, or the Connection does not exist or is not
+    //   of the contribution's Connection type.
     HttpApiEndpoint.post("create", "/mcp-servers", {
       payload: McpServerCreateInput,
       success: McpServer,
