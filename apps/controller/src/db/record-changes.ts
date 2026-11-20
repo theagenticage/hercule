@@ -11,8 +11,8 @@
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
-import * as Queue from "effect/Queue";
 import type * as Scope from "effect/Scope";
 import type { MutableLiveTopic } from "@hercule/contract";
 import type { Change } from "./after-commit";
@@ -32,15 +32,26 @@ export interface RecordChange {
   readonly id: string;
 }
 
+/** What a subscriber holds: the records changed since it last took them. */
+export interface RecordChangeSubscription {
+  /**
+   * Waits until a change is pending, then returns every pending record and
+   * forgets them. A record that changed several times since the last take is
+   * returned once.
+   */
+  readonly takePending: Effect.Effect<ReadonlyArray<RecordChange>>;
+}
+
 /**
  * Fans the changed records of each committed transaction out to its
  * subscribers.
  *
- * Like `AfterCommitListener.publish`, `publish` never waits: every subscriber
- * has an unbounded queue of these small items, and `withFinalTransaction`
- * calls `publish` while it still holds the writer. A subscriber's queue holds
- * only the topics the subscriber asked for, so a follower of two topics does
- * not collect every other record change of the controller.
+ * Like `AfterCommitListener.publish`, `publish` never waits: it adds the
+ * records to each subscriber's set of pending records and wakes the
+ * subscriber, and `withFinalTransaction` calls it while it still holds the
+ * writer. A subscriber's set holds only the topics the subscriber asked for,
+ * and one entry per record however often the record changed, so a subscriber
+ * that is busy collects at most the records that exist.
  *
  * A subscriber that is slow or fails never touches the committed change or
  * the other subscribers. A subscriber reads the record fresh, so a change it
@@ -50,66 +61,71 @@ export class RecordChanges extends Context.Service<
   RecordChanges,
   {
     /**
-     * Offers the `record` changes and the `profileGrants` changes in the list
+     * Adds the `record` changes and the `profileGrants` changes in the list
      * to every subscriber that asked for their topic, and ignores the other
      * kinds and the changes that only moved a session's counts.
      */
     readonly publish: (changes: ReadonlyArray<Change>) => Effect.Effect<void>;
     /**
-     * Subscribes to the changes of these topics for the life of the scope.
-     * Take from the returned queue with `Queue.takeAll`, which waits for the
-     * next change and takes every change published since. A subscription sees
-     * only what is published after it is made, so subscribe before reading the
-     * state that changes are applied to.
+     * Subscribes to the changes of these topics for the life of the scope. A
+     * subscription sees only what is published after it is made, so subscribe
+     * before reading the state that changes are applied to.
      */
     readonly subscribe: (
       topics: ReadonlyArray<ChangeTopic>,
-    ) => Effect.Effect<Queue.Dequeue<RecordChange>, never, Scope.Scope>;
+    ) => Effect.Effect<RecordChangeSubscription, never, Scope.Scope>;
   }
 >()("hercule/controller/db/RecordChanges") {}
 
 interface Subscriber {
   readonly topics: ReadonlySet<ChangeTopic>;
-  readonly queue: Queue.Queue<RecordChange>;
+  readonly pending: Map<string, RecordChange>;
+  /** Open while `pending` may hold a record. */
+  readonly wake: Latch.Latch;
 }
 
 const make = Effect.sync(() => {
   const subscribers = new Set<Subscriber>();
   return RecordChanges.of({
-    publish: (committed) => {
-      const records: Array<RecordChange> = [];
-      for (const change of committed) {
-        if (change._tag === "profileGrants") {
-          records.push({ topic: PROFILE_GRANTS_TOPIC, id: change.profileId });
-          continue;
+    publish: (committed) =>
+      Effect.sync(() => {
+        for (const change of committed) {
+          let record: RecordChange;
+          if (change._tag === "profileGrants") {
+            record = { topic: PROFILE_GRANTS_TOPIC, id: change.profileId };
+          } else if (change._tag === "record") {
+            if (change.topic === "session" && change.countsOnly === true) continue;
+            record = { topic: change.topic, id: change.id };
+          } else continue;
+          for (const { topics, pending, wake } of subscribers) {
+            if (!topics.has(record.topic)) continue;
+            pending.set(`${record.topic}/${record.id}`, record);
+            wake.openUnsafe();
+          }
         }
-        if (change._tag !== "record") continue;
-        if (change.topic === "session" && change.countsOnly === true) continue;
-        records.push({ topic: change.topic, id: change.id });
-      }
-      return Effect.forEach(
-        [...subscribers],
-        ({ topics, queue }) => {
-          const wanted = records.filter((record) => topics.has(record.topic));
-          return wanted.length === 0 ? Effect.void : Queue.offerAll(queue, wanted);
-        },
-        { discard: true },
-      );
-    },
+      }),
     subscribe: (topics) =>
       Effect.gen(function* () {
         const subscriber: Subscriber = {
           topics: new Set(topics),
-          queue: yield* Queue.unbounded<RecordChange>(),
+          pending: new Map(),
+          wake: Latch.makeUnsafe(false),
         };
         subscribers.add(subscriber);
-        yield* Effect.addFinalizer(() =>
-          Effect.andThen(
-            Effect.sync(() => subscribers.delete(subscriber)),
-            Queue.shutdown(subscriber.queue),
+        yield* Effect.addFinalizer(() => Effect.sync(() => void subscribers.delete(subscriber)));
+        return {
+          // Closing the wake and emptying the set is one synchronous step, so a
+          // record published after it opens the wake again and is never lost.
+          takePending: Effect.andThen(
+            subscriber.wake.await,
+            Effect.sync(() => {
+              subscriber.wake.closeUnsafe();
+              const records = [...subscriber.pending.values()];
+              subscriber.pending.clear();
+              return records;
+            }),
           ),
-        );
-        return subscriber.queue;
+        };
       }),
   });
 });

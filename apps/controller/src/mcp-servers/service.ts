@@ -177,7 +177,7 @@ const make = Effect.gen(function* () {
             return server;
           }),
         );
-        yield* checks.request(created.id);
+        yield* checks.wake;
         return toRecord(created);
       }),
 
@@ -217,7 +217,7 @@ const make = Effect.gen(function* () {
             return { server: yield* readOrFail(id), changed: true };
           }),
         );
-        if (changed && enabled) yield* checks.request(id);
+        if (changed && enabled) yield* checks.wake;
         return toRecord(server);
       }),
 
@@ -274,7 +274,7 @@ const make = Effect.gen(function* () {
             yield* servers.resetSchedule(id, yield* nowIso);
           }),
         );
-        yield* checks.request(id);
+        yield* checks.wake;
         return {};
       }),
   };

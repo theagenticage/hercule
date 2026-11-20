@@ -33,13 +33,19 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as SqlClient from "effect/sql/SqlClient";
 import { McpProtocol, McpSchema, McpServer } from "effect/ai";
 import { expect } from "vitest";
-import type { McpServer as McpServerRecord } from "@hercule/contract";
+import type {
+  ConnectionStatus,
+  McpServer as McpServerRecord,
+  McpServerStatus,
+} from "@hercule/contract";
 import { connectionRepository, OAUTH_TOKENS } from "../connections";
 import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso, withTransaction } from "../db";
 import { get, post, send, type ServerHarness } from "../http/testing";
+import { NO_INTAKE_OVERRIDES } from "../intake-settings";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
+import type { McpServerView, PluginState } from "./catalogue";
 
 /**
  * One tool the fake lists. A call answers as `answer` says:
@@ -684,3 +690,93 @@ export const refreshedToken = () =>
     token_type: "bearer",
     expires_in: 8 * 60 * 60,
   });
+
+/** The facts of one catalogue view a test sets. A fact left out is the healthy one. */
+export interface ViewFacts {
+  readonly enabled?: boolean;
+  readonly status?: McpServerStatus;
+  /** `null` is a server that has no stored tool list yet. */
+  readonly checkedAt?: string | null;
+  readonly plugin?: PluginState["_tag"];
+  /** `gone` is a Connection that no longer exists. */
+  readonly connection?: ConnectionStatus | "gone";
+  /** The type of the Connection. The plugin of the view needs `acme/desk`. */
+  readonly connectionType?: string;
+}
+
+/** Builds the view of one MCP Server from the facts given, without a database. */
+export const buildMcpServerView = ({
+  enabled = true,
+  status = "ready",
+  checkedAt = "2026-01-01T00:00:00.000Z",
+  plugin = "active",
+  connection = "connected",
+  connectionType = "acme/desk",
+}: ViewFacts = {}): McpServerView => {
+  const at = "2026-01-01T00:00:00.000Z";
+  return {
+    server: {
+      id: "server-1",
+      name: "desk",
+      contributionId: "acme/desk",
+      connectionId: "connection-1",
+      accountId: "desk-1",
+      enabled,
+      status,
+      statusDetail: null,
+      statusCause: null,
+      tools: [],
+      checkedAt,
+      protocolVersion: null,
+      revision: 0,
+      connectionGeneration: 0,
+      notifiedStatus: null,
+      nextCheckAt: null,
+      failedChecks: 0,
+      createdAt: at,
+      updatedAt: at,
+    },
+    dependencies: {
+      connection:
+        connection === "gone"
+          ? undefined
+          : {
+              id: "connection-1",
+              pluginId: "acme",
+              type: connectionType,
+              label: "work",
+              displayName: "Desk",
+              accountId: "desk-1",
+              status: connection,
+              statusDetail: undefined,
+              warning: undefined,
+              labels: [],
+              config: {},
+              feedIntervals: {},
+              intake: NO_INTAKE_OVERRIDES,
+              credentialsGeneration: 0,
+              createdAt: at,
+              updatedAt: at,
+            },
+      plugin:
+        plugin === "active"
+          ? {
+              _tag: "active",
+              contribution: {
+                id: "acme/desk",
+                pluginId: "acme",
+                displayName: "Desk",
+                description: "",
+                connectionType: "acme/desk",
+                origin: "https://desk.example",
+                buildUpstreamRequest: () => {
+                  throw new Error("a test of a view never builds a request");
+                },
+              },
+            }
+          : plugin === "missing"
+            ? { _tag: "missing" }
+            : { _tag: plugin, pluginName: "Desk" },
+    },
+  };
+};

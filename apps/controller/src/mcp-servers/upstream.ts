@@ -26,6 +26,11 @@
  *   trace, and no trace headers go to the outside server.
  * - No failure carries the server's answer, its headers, the request or a
  *   credential: each failure has a fixed message.
+ *
+ * The file also holds what every caller does with an upstream failure:
+ * `runWithCredentials` gets the Connection's credentials and refreshes them
+ * once when the server refuses them, and `buildStatusFromFailure` says what
+ * status a failure gives the server.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -39,7 +44,11 @@ import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { McpClient, type McpClientError, McpProtocol, McpSchema } from "effect/ai";
 import { VERSION } from "@hercule/home/version";
-import type { ConnectionCredentialsForUse } from "../connections";
+import type {
+  ConnectionCredentialsForUse,
+  ConnectionCredentialsUnavailable,
+  ConnectionTypes,
+} from "../connections";
 import type { RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
 
@@ -675,4 +684,89 @@ export const openUpstream = (
     }
     // Every revision was refused.
     return yield* Effect.fail(buildFailure("unsupported-revision"));
+  });
+
+/**
+ * Converts a failure of an upstream call into the status an MCP Server shows
+ * for it, with a detail a person can read. A server that cannot be reached or
+ * does not answer in time is `unreachable`, because trying again later may
+ * work. Every other failure is `error`: the server refused the token, or
+ * answered with something Hercule cannot use. `displayName` is the plugin's
+ * name for the server, for the refused-token line.
+ */
+export const buildStatusFromFailure = (
+  failure: UpstreamError,
+  displayName: string,
+): { readonly status: "unreachable" | "error"; readonly detail: string } => {
+  switch (failure.reason) {
+    case "unreachable":
+    case "timeout":
+      return { status: "unreachable", detail: failure.message };
+    case "unauthorized":
+      return {
+        status: "error",
+        detail: `${displayName}'s MCP server refused the Connection's token`,
+      };
+    default:
+      return { status: "error", detail: failure.message };
+  }
+};
+
+/** What `runWithCredentials` asks of the Connections: the two ways to get credentials for use. */
+type CredentialSource = Pick<
+  ConnectionTypes["Service"],
+  "readCredentialsForUse" | "refreshAfterRejection"
+>;
+
+/**
+ * Runs `action` with the credentials of a Connection, and when the server
+ * refuses them, refreshes them once and runs it again. Returns what the action
+ * returned.
+ *
+ * The retry is allowed only when the action fails with `unauthorized`, so an
+ * action must fail that way only when the server refused the request that
+ * starts its exchange, before the server did anything. An action that sent a
+ * request the server may already have run, such as a tool call whose later
+ * request got the 401, must fail with another reason: running it again could
+ * do the work twice.
+ *
+ * `checkRefreshAllowed` runs before the refresh, and when it fails the
+ * refresh and the retry do not happen: a refresh changes the Connection, so
+ * the caller can refuse it when what it works for has changed.
+ *
+ * Fails with:
+ *
+ * - `ConnectionCredentialsUnavailable` when the Connection cannot give
+ *   credentials, or cannot give new ones after the rejection;
+ * - the action's `UpstreamError`, also when the Connection has nothing to
+ *   refresh (pasted credentials), and when the retry fails too;
+ * - what `checkRefreshAllowed` fails with.
+ */
+export const runWithCredentials = <A, E, R>(input: {
+  readonly connections: CredentialSource;
+  readonly connectionId: string;
+  readonly action: (credentials: ConnectionCredentialsForUse) => Effect.Effect<A, UpstreamError, R>;
+  readonly checkRefreshAllowed: Effect.Effect<void, E, R>;
+}): Effect.Effect<A, UpstreamError | ConnectionCredentialsUnavailable | E, R> =>
+  Effect.gen(function* () {
+    const { connections, connectionId, action } = input;
+    const credentials = yield* connections.readCredentialsForUse(connectionId);
+    const first = yield* Effect.result(action(credentials));
+    if (first._tag === "Success") return first.success;
+    const rejected = first.failure;
+    if (rejected.reason !== "unauthorized") return yield* Effect.fail(rejected);
+
+    yield* input.checkRefreshAllowed;
+    const refreshed = yield* Effect.result(
+      connections.refreshAfterRejection(
+        connectionId,
+        rejected.sentIdentity ?? credentials.identity,
+      ),
+    );
+    if (refreshed._tag === "Failure") {
+      return yield* Effect.fail(
+        refreshed.failure._tag === "ConnectionCannotRefresh" ? rejected : refreshed.failure,
+      );
+    }
+    return yield* action(refreshed.success);
   });

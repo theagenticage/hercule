@@ -186,14 +186,13 @@ const make = Effect.gen(function* () {
             if (decoded.modelProfileId !== undefined) {
               yield* requireModelProfile(decoded.modelProfileId);
             }
-            const mcpServers = yield* mcpServerLists.resolveList(decoded.mcpServerIds ?? [], [
-              "mcpServerIds",
-            ]);
+            const mcpServerIds = decoded.mcpServerIds ?? [];
+            yield* mcpServerLists.checkList(mcpServerIds, ["mcpServerIds"]);
             const project = yield* projects.insert({
               name: decoded.name,
               description: decoded.description,
               modelProfileId: decoded.modelProfileId,
-              mcpServerIds: mcpServers.map((server) => server.mcpServerId),
+              mcpServerIds,
               at,
             });
             yield* audit.append({
@@ -262,12 +261,9 @@ const make = Effect.gen(function* () {
 
             // The list is replaced as a whole, so it changed when its ids or
             // their order differ.
-            const mcpServers =
-              patch.mcpServerIds === undefined
-                ? undefined
-                : (yield* mcpServerLists.resolveList(patch.mcpServerIds, ["mcpServerIds"])).map(
-                    (server) => server.mcpServerId,
-                  );
+            const mcpServers = patch.mcpServerIds;
+            if (mcpServers !== undefined)
+              yield* mcpServerLists.checkList(mcpServers, ["mcpServerIds"]);
             const mcpServersChanged =
               mcpServers !== undefined && mcpServers.join() !== before.mcpServerIds.join();
             if (mcpServersChanged) {

@@ -105,7 +105,7 @@ import { excludeDigest, claimAttachments, readClaimableAttachments } from "../at
 import {
   buildLeftOutWarning,
   decideLeftOutReason,
-  readCurrentAvailability,
+  mcpServerCatalogue,
   type LeftOutServer,
   type StartDelivery,
 } from "../mcp-servers";
@@ -169,7 +169,6 @@ import { isResumeHeld } from "./resume-hold";
 import {
   readSessionOrFail,
   sessionRepository,
-  type McpServerEntry,
   type QueuePosition,
   type SessionAccess,
   type StoredSession,
@@ -348,10 +347,11 @@ export interface CreateRequest {
   /** The role the caller chose; `undefined` for a session that starts without one. */
   readonly role: string | undefined;
   /**
-   * The session's own list of MCP Servers, already checked by the caller
-   * (`mcpServerListRule`). Absent for a session that has none.
+   * The ids of the servers in the session's own list, already checked or
+   * copied from a list that was, by the caller (`mcpServerListRule`). Absent
+   * for a session that has none.
    */
-  readonly mcpServers?: ReadonlyArray<McpServerEntry> | undefined;
+  readonly mcpServerIds?: ReadonlyArray<string> | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -967,6 +967,7 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
+  const catalogue = yield* mcpServerCatalogue;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
@@ -1128,31 +1129,29 @@ const make = Effect.gen(function* () {
     at: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      const listed = yield* sessions.readMcpServers(sessionId);
-      if (listed.length === 0) return;
+      const listedIds = yield* sessions.readMcpServerIds(sessionId);
+      if (listedIds.length === 0) return;
       const delivery: StartDelivery = {
         ...gateway,
         profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
           "mcp.use",
         ),
       };
-      const available = yield* readCurrentAvailability(
-        listed.map((entry) => entry.mcpServerId),
-      ).pipe(provideSql, Effect.provideService(PluginHost, host));
+      const views = yield* catalogue.readViews(listedIds);
       const reasons = new Map<string, McpServerLeftOutReason>();
       const leftOut: Array<LeftOutServer> = [];
-      for (const entry of listed) {
-        const server = available.get(entry.mcpServerId);
+      for (const mcpServerId of listedIds) {
+        const view = views.get(mcpServerId);
         // A list entry references its server, and a delete removes the entry first.
-        if (server === undefined) {
+        if (view === undefined) {
           return yield* Effect.die(
-            `session ${sessionId} lists the missing MCP server ${entry.mcpServerId}`,
+            `session ${sessionId} lists the missing MCP server ${mcpServerId}`,
           );
         }
-        const reason = decideLeftOutReason(delivery, server);
+        const reason = decideLeftOutReason(delivery, view);
         if (reason === null) continue;
-        reasons.set(entry.mcpServerId, reason);
-        leftOut.push({ mcpServerId: entry.mcpServerId, name: entry.name, reason });
+        reasons.set(mcpServerId, reason);
+        leftOut.push({ mcpServerId, name: view.server.name, reason });
       }
       yield* sessions.recordLeftOut(sessionId, reasons);
       if (leftOut.length === 0) return;
@@ -2655,8 +2654,8 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
-        if (open.mcpServers !== undefined && open.mcpServers.length > 0) {
-          yield* sessions.replaceMcpServers(open.id, open.mcpServers);
+        if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
+          yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
         }
         // A session a tainted session starts, or a fork of a tainted one,
         // starts tainted (spec 13 section 10).
@@ -2681,9 +2680,9 @@ const make = Effect.gen(function* () {
           record: { topic: "session", id: open.id, conversationId: open.conversationId ?? null },
           payload: {
             ...open.payload,
-            ...(open.mcpServers === undefined || open.mcpServers.length === 0
+            ...(open.mcpServerIds === undefined || open.mcpServerIds.length === 0
               ? {}
-              : { mcpServerIds: open.mcpServers.map((entry) => entry.mcpServerId) }),
+              : { mcpServerIds: open.mcpServerIds }),
             sessionId: open.id,
             runnerId: open.runnerId,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
@@ -3297,8 +3296,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Replaces the session's own list of MCP Servers with the entries given,
-     * joining the caller's transaction. An entry whose server was already in
+     * Replaces the session's own list of MCP Servers with the server ids given,
+     * joining the caller's transaction. A server that was already in
      * the list keeps what the last start recorded for it. The caller has
      * checked the list (`mcpServerListRule`).
      *
@@ -3310,14 +3309,11 @@ const make = Effect.gen(function* () {
      */
     setMcpServers: (
       sessionId: string,
-      entries: ReadonlyArray<McpServerEntry>,
+      after: ReadonlyArray<string>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const before = (yield* sessions.readMcpServers(sessionId)).map(
-          (entry) => entry.mcpServerId,
-        );
-        yield* sessions.replaceMcpServers(sessionId, entries);
-        const after = entries.map((entry) => entry.mcpServerId);
+        const before = yield* sessions.readMcpServerIds(sessionId);
+        yield* sessions.replaceMcpServers(sessionId, after);
         const added = after.filter((id) => !before.includes(id));
         const removed = before.filter((id) => !after.includes(id));
         const session = Option.getOrThrow(yield* sessions.one(sessionId));

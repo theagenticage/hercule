@@ -20,12 +20,6 @@ import {
 import { CurrentActor, checkActorHoldsGrant } from "../actor";
 import { mcpServerRepository } from "./repository";
 
-/** One entry of a validated list: a server that exists, with its name now. */
-export interface ListedMcpServer {
-  readonly mcpServerId: string;
-  readonly name: string;
-}
-
 const MANAGE_REFUSAL =
   "changing the list of MCP servers needs the mcp.manage grant, which only the user gives. Ask the user to change the list, or to approve a Permission Request for mcp.manage";
 
@@ -47,8 +41,7 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Checks a list of MCP Server ids and returns its servers in the given
-     * order, each with its name now. Fails with `Validation` when an id:
+     * Checks a list of MCP Server ids. Fails with `Validation` when an id:
      *
      * - names no server, because it never existed or was deleted;
      * - is given twice;
@@ -59,15 +52,15 @@ const make = Effect.gen(function* () {
      * field the caller read the list from. Call it inside the transaction that
      * writes the list.
      */
-    resolveList: (
+    checkList: (
       ids: ReadonlyArray<string>,
       path: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<ListedMcpServer>, Validation | SqlError> =>
+    ): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
         const names = yield* servers.readNames(ids);
         const issues: Array<Issue> = [];
-        const listed: Array<ListedMcpServer> = [];
         const idOfName = new Map<string, string>();
+        const seen = new Set<string>();
         ids.forEach((id, index) => {
           const at = [...path, String(index)];
           const name = names.get(id);
@@ -78,7 +71,7 @@ const make = Effect.gen(function* () {
             });
             return;
           }
-          if (listed.some((entry) => entry.mcpServerId === id)) {
+          if (seen.has(id)) {
             issues.push({ path: at, message: `the MCP server ${name} (${id}) is listed twice` });
             return;
           }
@@ -91,9 +84,9 @@ const make = Effect.gen(function* () {
             return;
           }
           idOfName.set(name, id);
-          listed.push({ mcpServerId: id, name });
+          seen.add(id);
         });
-        return issues.length === 0 ? listed : yield* Effect.fail(createValidationError(issues));
+        if (issues.length > 0) return yield* Effect.fail(createValidationError(issues));
       }),
 
     /**

@@ -2,8 +2,8 @@
  * Why an MCP Server in a session's list could not be called at the session's
  * last start (spec 21 section 3.8), and the words the Thread says it in.
  */
-import type { McpServerStatus } from "@hercule/contract";
 import { MAX_FACT_ITEMS, type McpServerLeftOutReason } from "@hercule/protocol";
+import { decideUnavailableReason, type McpServerView } from "./catalogue";
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
@@ -16,16 +16,6 @@ export interface StartDelivery {
 }
 
 /**
- * What decides a left-out reason for one server: the user's switch and its
- * status. At a start the status is the current one, with the state of the
- * server's Connection and plugin folded in (`readCurrentAvailability`).
- */
-export interface ServerAvailability {
-  readonly enabled: boolean;
-  readonly status: McpServerStatus;
-}
-
-/**
  * Returns why the server cannot be called at a start, or `null` when it can.
  * When several reasons apply, it returns the first of this order, which is the
  * order of spec 21 section 3.8:
@@ -34,21 +24,26 @@ export interface ServerAvailability {
  * 2. `harness-unsupported`
  * 3. `missing-grant`
  * 4. `switched-off`
- * 5. the server's status, when it is not `ready`: `checking` (its first list
- *    has not ended), `needs-sign-in`, `unreachable` or `error`
+ * 5. `checking`: its first list has not ended, before any cause in its
+ *    Connection or plugin
+ * 6. what its Connection, its plugin and its stored status say
+ *    (`decideUnavailableReason`): `needs-sign-in`, `unreachable` or `error`.
+ *    A server whose plugin or Connection is switched off has the reason
+ *    `error`, so it needs none of its own.
  *
- * A server whose plugin or Connection is switched off has the status `error`,
- * so it needs no reason of its own.
+ * The view is read at the start, so a Connection or plugin that changed
+ * before the follower wrote it is not missed.
  */
 export const decideLeftOutReason = (
   delivery: StartDelivery,
-  server: ServerAvailability,
+  view: McpServerView,
 ): McpServerLeftOutReason | null => {
   if (!delivery.runnerReachesMcpServers) return "runner-too-old";
   if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";
   if (!delivery.profileGrantsMcpUse) return "missing-grant";
-  if (!server.enabled) return "switched-off";
-  return server.status === "ready" ? null : server.status;
+  if (!view.server.enabled) return "switched-off";
+  if (view.server.status === "checking") return "checking";
+  return decideUnavailableReason(view);
 };
 
 const REASON_WORDS: Readonly<Record<McpServerLeftOutReason, string>> = {

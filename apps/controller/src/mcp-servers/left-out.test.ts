@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { McpServerLeftOutReason } from "@hercule/protocol";
 import { buildLeftOutWarning, decideLeftOutReason, type StartDelivery } from "./left-out";
+import { buildMcpServerView, type ViewFacts } from "./testing";
 
 const CAN_DELIVER: StartDelivery = {
   runnerReachesMcpServers: true,
@@ -8,16 +9,17 @@ const CAN_DELIVER: StartDelivery = {
   profileGrantsMcpUse: true,
 };
 
+// What the state of the server alone gives is covered in `catalogue.test.ts`.
 describe("decideLeftOutReason", () => {
-  const readyServer = { enabled: true, status: "ready" } as const;
+  const brokenServer: ViewFacts = { enabled: false, status: "error" };
 
   it.each<{
     readonly name: string;
     readonly delivery: Partial<StartDelivery>;
-    readonly server: Parameters<typeof decideLeftOutReason>[1];
+    readonly server: ViewFacts;
     readonly expected: McpServerLeftOutReason | null;
   }>([
-    { name: "a ready server is callable", delivery: {}, server: readyServer, expected: null },
+    { name: "a ready server is callable", delivery: {}, server: {}, expected: null },
     {
       name: "a runner without the capability wins over everything",
       delivery: {
@@ -25,53 +27,25 @@ describe("decideLeftOutReason", () => {
         harnessPassthrough: "unsupported",
         profileGrantsMcpUse: false,
       },
-      server: { enabled: false, status: "error" },
+      server: brokenServer,
       expected: "runner-too-old",
     },
     {
-      name: "an unsupported harness wins over a missing grant, a switch and a status",
+      name: "an unsupported harness wins over a missing grant and the server's state",
       delivery: { harnessPassthrough: "unsupported", profileGrantsMcpUse: false },
-      server: { enabled: false, status: "error" },
+      server: brokenServer,
       expected: "harness-unsupported",
     },
     {
-      name: "a missing mcp.use wins over a switch and a status",
+      name: "a missing mcp.use wins over the server's state",
       delivery: { profileGrantsMcpUse: false },
-      server: { enabled: false, status: "error" },
+      server: brokenServer,
       expected: "missing-grant",
     },
-    {
-      name: "a switched-off server wins over its status",
-      delivery: {},
-      server: { enabled: false, status: "needs-sign-in" },
-      expected: "switched-off",
-    },
-    {
-      name: "a server whose first list has not ended is checking",
-      delivery: {},
-      server: { enabled: true, status: "checking" },
-      expected: "checking",
-    },
-    {
-      name: "needs-sign-in is its own reason",
-      delivery: {},
-      server: { enabled: true, status: "needs-sign-in" },
-      expected: "needs-sign-in",
-    },
-    {
-      name: "unreachable is its own reason",
-      delivery: {},
-      server: { enabled: true, status: "unreachable" },
-      expected: "unreachable",
-    },
-    {
-      name: "error is its own reason",
-      delivery: {},
-      server: { enabled: true, status: "error" },
-      expected: "error",
-    },
   ])("$name", ({ delivery, server, expected }) => {
-    expect(decideLeftOutReason({ ...CAN_DELIVER, ...delivery }, server)).toBe(expected);
+    expect(decideLeftOutReason({ ...CAN_DELIVER, ...delivery }, buildMcpServerView(server))).toBe(
+      expected,
+    );
   });
 });
 

@@ -116,14 +116,14 @@ describe("the one listener of committed changes", () => {
     const { followed, pushed } = await run(
       Effect.gen(function* () {
         const changes = yield* RecordChanges;
-        const followerQueue = yield* changes.subscribe(["connection"]);
+        const follower = yield* changes.subscribe(["connection"]);
         const pushQueue = yield* subscribeSkippingFirstPush("connection");
 
         yield* announce({ _tag: "record", topic: "connection", id: "c1", kind: "updated" });
         yield* advance(COALESCE_WINDOW_MS);
 
         return {
-          followed: [...(yield* Queue.takeAll(followerQueue))],
+          followed: [...(yield* follower.takePending)],
           pushed: [...(yield* Queue.clear(pushQueue))],
         };
       }),

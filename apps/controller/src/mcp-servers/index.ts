@@ -12,17 +12,22 @@ export {
   type McpToolCall,
   type ServedMcpServer,
 } from "./calls";
+export {
+  decideCallRefusal,
+  isServable,
+  mcpServerCatalogue,
+  type CallRefusal,
+  type McpServerView,
+} from "./catalogue";
 export { McpServerChecks, McpServerChecksLayer } from "./checks";
 export { runConnectionFollower } from "./follower";
 export {
   buildLeftOutWarning,
   decideLeftOutReason,
   type LeftOutServer,
-  type ServerAvailability,
   type StartDelivery,
 } from "./left-out";
 export { McpServerListHolders } from "./list-holders";
-export { mcpServerListRule, requireMcpManage, type ListedMcpServer } from "./list-rule";
+export { mcpServerListRule, requireMcpManage } from "./list-rule";
 export { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from "./repository";
 export { McpServerService, McpServerServiceLayer, type UpdateInput } from "./service";
-export { readCurrentAvailability } from "./state";

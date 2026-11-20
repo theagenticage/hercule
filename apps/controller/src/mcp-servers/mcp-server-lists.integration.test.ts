@@ -327,7 +327,7 @@ const writeSessionList = (
     Effect.flatMap(sessionRepository, (sessions) =>
       sessions.replaceMcpServers(
         sessionId,
-        servers.map((server) => ({ mcpServerId: server.id, name: server.name })),
+        servers.map((server) => server.id),
       ),
     ),
   );
