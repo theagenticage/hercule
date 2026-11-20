@@ -112,14 +112,22 @@ export interface ConnectionCredentialsForUse {
  *   The Connection is left as it was, so trying again later may work.
  * - `switched-off`: the user disabled the Connection.
  * - `missing`: there is no such Connection, or no plugin in this build
- *   declares its type, or its config no longer fits its type.
+ *   declares its type.
+ * - `invalid-config`: the Connection's config no longer fits its type's
+ *   config schema, because the type changed since the config was written.
  *
  * `message` is one line a person can read.
  */
 export class ConnectionCredentialsUnavailable extends Schema.TaggedError<ConnectionCredentialsUnavailable>()(
   "ConnectionCredentialsUnavailable",
   {
-    reason: Schema.Literals(["needs-sign-in", "unreachable", "switched-off", "missing"]),
+    reason: Schema.Literals([
+      "needs-sign-in",
+      "unreachable",
+      "switched-off",
+      "missing",
+      "invalid-config",
+    ]),
     message: Schema.String,
   },
 ) {}
@@ -595,7 +603,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the credentials with their config and identity, ready for the
-   * core to use. Fails with `missing` when the connection's config does not
+   * core to use. Fails with `invalid-config` when the connection's config does not
    * fit its type's config schema, because the type changed since the config
    * was written and the core cannot hand a caller a config it cannot trust.
    */
@@ -613,7 +621,7 @@ const make = Effect.gen(function* () {
               decodeAgainst(configSchema, row.config),
               (error) =>
                 new ConnectionCredentialsUnavailable({
-                  reason: "missing",
+                  reason: "invalid-config",
                   message: `the config of the connection '${row.label}' does not fit its type: ${error.message}`,
                 }),
             );
@@ -715,7 +723,8 @@ const make = Effect.gen(function* () {
      * of a flow it needs, or the provider refused the refresh), `unreachable`
      * (the provider could not be reached; the Connection is left alone),
      * `switched-off` (the Connection is `disabled`) or `missing` (no such
-     * Connection, no registered type, or a config that no longer fits it).
+     * Connection, or no registered type) or `invalid-config` (the config no
+     * longer fits its type's schema).
      *
      * This may call the provider and write the Connection's status, so it must
      * run outside any transaction.

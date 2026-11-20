@@ -67,6 +67,8 @@ const buildStack = () => {
 interface Arrangement {
   readonly type?: typeof SIGN_IN_TYPE | typeof PASTED_TYPE;
   readonly status?: "disabled" | "needs-reauth";
+  /** The stored config, which defaults to one that fits the type's schema. */
+  readonly config?: Record<string, string>;
   /** The pasted credentials, by field name. */
   readonly pasted?: Record<string, string>;
   /** The token set a sign-in stored. */
@@ -132,7 +134,7 @@ const run = <A, E>(
             displayName: "acct",
             accountId: "1",
             labels: [],
-            config: { region: "eu" },
+            config: arrangement.config ?? { region: "eu" },
             at,
           });
           const owner = { kind: "connection", id: row.id } as const;
@@ -302,6 +304,17 @@ describe("the credentials the core reads to call an outside server", () => {
     );
 
     expect(failure).toMatchObject({ _tag: "ConnectionCredentialsUnavailable", reason: "missing" });
+  });
+
+  it("fails with invalid-config when the stored config no longer fits the type's schema", async () => {
+    const failure = await run({ tokens: FRESH_TOKENS, config: { zone: "eu" } }, (id) =>
+      Effect.flip(readForUse(id)),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "ConnectionCredentialsUnavailable",
+      reason: "invalid-config",
+    });
   });
 });
 
