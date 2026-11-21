@@ -92,7 +92,7 @@
  * whose session lease is still active. After the upgrade both workspaces read
  * with the same holders and kept-until time, so the rebuild lost no lease.
  *
- * Migration 131 rebuilds `mcp_servers` so a server can come from an address,
+ * Migration 130 rebuilds `mcp_servers` so a server can come from an address,
  * and `project_mcp_servers` and `session_mcp_servers` are emptied and filled
  * again around that rebuild. When the edge database has not run it yet, and
  * has the MCP Server tables, the fixture writes a switched-off plugin server
@@ -326,7 +326,7 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
 
 /** The migration that gives `mcp_servers` a source that may be an address, and `secrets` the `mcp-server` owner kind. */
-const MCP_SERVER_URL_SOURCE_MIGRATION = 131;
+const MCP_SERVER_URL_SOURCE_MIGRATION = 130;
 
 /** The migration that creates `project_mcp_servers` and `session_mcp_servers`, after `mcp_servers` itself. */
 const MCP_SERVER_LISTS_MIGRATION = 127;
@@ -1590,14 +1590,14 @@ function persistWorkspaceLeases(home: string): boolean {
 }
 
 /**
- * Writes a plugin MCP Server in the shape migration 131 rebuilds, with the
+ * Writes a plugin MCP Server in the shape migration 130 rebuilds, with the
  * Connection it names, and puts it on a Project's list and on a Thread's list
  * (with a left-out reason), into the database the edge binary created. Returns
  * true when it wrote them.
  *
  * The rows go straight into the database because a server needs a plugin that
  * offers a contribution and a signed-in Connection, which this test has
- * neither of. A database that already ran migration 131 is skipped because
+ * neither of. A database that already ran migration 130 is skipped because
  * its table would not be in the old shape, and one that has not run migration
  * 127 is skipped because it has no lists to keep.
  */

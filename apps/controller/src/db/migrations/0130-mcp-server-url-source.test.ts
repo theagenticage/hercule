@@ -16,15 +16,17 @@ import { runMigrations } from "../migrate";
 import { TestDatabaseWriter } from "../testing";
 import { migrations } from "./index";
 
-const BEFORE = migrations.filter(([id]) => id < 131);
-const UP_TO_URL_SOURCE = migrations.filter(([id]) => id <= 131);
+const BEFORE = migrations.filter(([id]) => id < 130);
+const UP_TO_URL_SOURCE = migrations.filter(([id]) => id <= 130);
 
 const AT = "2026-11-01T00:00:00.000Z";
+const LATER = "2026-11-02T00:00:00.000Z";
 
 const PLUGIN_SERVER = "0199e0e77b217000800000000000a001";
 const SECOND_PLUGIN_SERVER = "0199e0e77b217000800000000000a002";
 const URL_SERVER = "0199e0e77b217000800000000000b001";
 const SECOND_URL_SERVER = "0199e0e77b217000800000000000b002";
+const SWITCHED_OFF_SERVER = "0199e0e77b217000800000000000a004";
 
 /** Writes a Connection, a Project and a Session, which the servers and their lists refer to. */
 const insertOwners = Effect.gen(function* () {
@@ -66,6 +68,24 @@ const insertPluginServerBefore = (id: string, contributionId: string, accountId:
          '[{"name":"search","description":"","inputSchema":{}}]')`,
   );
 
+/**
+ * Writes a plugin server that is switched off and has every optional column
+ * null, which the copy must keep null and not turn into an empty string.
+ */
+const insertSwitchedOffPluginServerBefore = (id: string, contributionId: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql`
+      INSERT INTO mcp_servers
+        (id, name, contribution_id, connection_id, account_id, enabled, status, status_detail,
+         status_cause, checked_at, protocol_version, notified_status, next_check_at, created_at,
+         updated_at)
+      VALUES
+        (unhex(${id}), 'off', ${contributionId}, x'01', 'desk-2', 0, 'checking', NULL, NULL,
+         NULL, NULL, NULL, NULL, ${AT}, ${AT})`,
+  );
+
 /** Reads what the migration must not change in a server row. */
 const readServers = Effect.flatMap(
   SqlClient.SqlClient,
@@ -99,7 +119,7 @@ const insertUrlServer = (
   );
 
 describe("the MCP server URL source migration", () => {
-  it("keeps a plugin server, both lists that name it and a secret, as they were", async () => {
+  it("keeps the plugin servers, both lists that name them and the secrets, as they were", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -107,6 +127,7 @@ describe("the MCP server URL source migration", () => {
         yield* insertOwners;
         yield* insertPluginServerBefore(PLUGIN_SERVER, "acme/desk", "desk-1");
         yield* insertPluginServerBefore(SECOND_PLUGIN_SERVER, "acme/other", "desk-1");
+        yield* insertSwitchedOffPluginServerBefore(SWITCHED_OFF_SERVER, "acme/off");
         yield* sql`
           INSERT INTO project_mcp_servers (project_id, position, mcp_server_id)
           VALUES (x'02', 0, unhex(${SECOND_PLUGIN_SERVER})), (x'02', 1, unhex(${PLUGIN_SERVER}))`;
@@ -117,6 +138,10 @@ describe("the MCP server URL source migration", () => {
         yield* sql`
           INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
           VALUES (x'10', 'connection', 'c', 'token', x'aa', x'bb', ${AT})`;
+        yield* sql`
+          INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at,
+                               rotated_at)
+          VALUES (x'11', 'connection', 'c', 'rotated', x'cc', x'dd', ${AT}, ${LATER})`;
         const before = yield* readServers;
 
         yield* runMigrations(UP_TO_URL_SOURCE);
@@ -135,7 +160,9 @@ describe("the MCP server URL source migration", () => {
           secret: yield* sql<Record<string, unknown>>`
             SELECT hex(id) AS id, owner_kind, owner_id, name, hex(nonce) AS nonce,
                    hex(ciphertext) AS ciphertext, created_at, rotated_at
-            FROM secrets`,
+            FROM secrets ORDER BY id`,
+          columns: yield* sql<{ readonly name: string }>`
+            SELECT name FROM pragma_table_info('mcp_servers') ORDER BY cid`,
           // `pragma_foreign_key_list` is the table-valued form of `PRAGMA foreign_key_list`.
           projectListReferences: yield* sql<{ readonly table: string }>`
             SELECT "table" FROM pragma_foreign_key_list('project_mcp_servers') ORDER BY "table"`,
@@ -147,8 +174,24 @@ describe("the MCP server URL source migration", () => {
     );
 
     expect(result.after).toEqual(result.before);
-    expect(result.after).toHaveLength(2);
-    expect(result.sourceKinds).toEqual([{ source_kind: "plugin" }, { source_kind: "plugin" }]);
+    expect(result.after).toHaveLength(3);
+    // The switched-off server's optional columns are still null, not ''.
+    expect(result.after.find((row) => row.name === "off")).toMatchObject({
+      enabled: 0,
+      status_detail: null,
+      status_cause: null,
+      checked_at: null,
+      protocol_version: null,
+      notified_status: null,
+      next_check_at: null,
+    });
+    expect(result.sourceKinds).toEqual([
+      { source_kind: "plugin" },
+      { source_kind: "plugin" },
+      { source_kind: "plugin" },
+    ]);
+    // `tools` stays the last column, so a read that leaves it out skips its overflow pages.
+    expect(result.columns.at(-1)).toEqual({ name: "tools" });
     expect(result.projectList).toEqual([
       { project_id: "02", position: 0, server: SECOND_PLUGIN_SERVER.toUpperCase() },
       { project_id: "02", position: 1, server: PLUGIN_SERVER.toUpperCase() },
@@ -177,6 +220,16 @@ describe("the MCP server URL source migration", () => {
         ciphertext: "BB",
         created_at: AT,
         rotated_at: null,
+      },
+      {
+        id: "11",
+        owner_kind: "connection",
+        owner_id: "c",
+        name: "rotated",
+        nonce: "CC",
+        ciphertext: "DD",
+        created_at: AT,
+        rotated_at: LATER,
       },
     ]);
     expect(result.projectListReferences).toEqual([{ table: "mcp_servers" }, { table: "projects" }]);
