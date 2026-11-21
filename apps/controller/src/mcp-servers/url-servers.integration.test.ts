@@ -44,6 +44,7 @@ import {
   withRig,
   withUrlRig,
   insertUrlServerAt,
+  startFakeUpstream,
   createServer,
   type FakeUpstream,
   type McpServerRow,
@@ -227,6 +228,29 @@ describe("the check of a server added by URL", () => {
 
       expect(recovered.sign_in_offered).toBe("oauth");
     });
+  });
+});
+
+describe("a redirect from a server added by URL", () => {
+  it("is not followed, so the token never reaches the redirect target", async () => {
+    const target = await startFakeUpstream();
+    try {
+      await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+        fake.redirectTo = target.url;
+        await insertUrlServer({ token: "s3cret-t0ken" });
+
+        const row = await waitForResult(controller);
+
+        expect(row.status).toBe("error");
+        expect(row.status_detail).toBe(
+          "The server answered with a redirect (HTTP 302), which is not followed",
+        );
+        expect(fake.requests).toHaveLength(1);
+        expect(target.requests).toEqual([]);
+      });
+    } finally {
+      await target.stop();
+    }
   });
 });
 

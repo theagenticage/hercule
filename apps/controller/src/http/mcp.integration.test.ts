@@ -51,7 +51,7 @@ import {
 } from "../mcp-servers/testing";
 import { hashToken } from "../credentials";
 import { withTransaction } from "../db";
-import { send, waitWithin } from "./testing";
+import { post, send, waitWithin } from "./testing";
 import { endResumable, withFleet } from "../workspaces/testing";
 
 let upstream: FakeUpstream;
@@ -652,6 +652,40 @@ describe("the stateless era", () => {
     });
     expect(answer.status).toBe(400);
     expect(answer.body.error.code).toBe(-32022);
+  });
+});
+
+describe("a server added by URL that holds a token", () => {
+  it("is called through the gateway with the token as a bearer token, and the Session Token goes no further than the gateway", async () => {
+    // A server on the plugin's own origin cannot be added by address, so this one has its own fake.
+    const outside = await startFakeUpstream({ protocols: [McpProtocol.v2025_11_25] });
+    try {
+      const controller = { harness: arranged.harness, base: base(), token: arranged.token };
+      const created = await post(
+        base(),
+        "/api/v1/mcp-servers",
+        { source: { kind: "url", url: outside.url, name: "remote", token: "tok-3f9a1c7e5b2d" } },
+        arranged.token,
+      );
+      const { id } = (await created.json()) as { id: string };
+      await eventually(
+        () => readServer(controller, id),
+        (record) => record.status === "ready",
+      );
+      const thread = await spawnThread(["mcp.use"], [{ id, name: "remote" }]);
+
+      const listed = await sendMcp(thread.token, request("tools/list", STATELESS_META));
+      expect(listed.body.result.tools.map((tool) => tool.name)).toEqual(["remote__echo"]);
+      const answer = await callEcho(thread.token, "remote__echo", undefined);
+
+      expect(answer.body.result.isError).toBeUndefined();
+      expect(textOf(answer)).toBe('{"text":"hello"}');
+      const calls = outside.requests.filter((one) => one.method === "tools/call");
+      expect(calls.map((one) => one.authorization)).toEqual(["Bearer tok-3f9a1c7e5b2d"]);
+      expect(JSON.stringify(outside.requests)).not.toContain(thread.token);
+    } finally {
+      await outside.stop();
+    }
   });
 });
 

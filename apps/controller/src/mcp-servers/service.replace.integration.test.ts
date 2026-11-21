@@ -234,6 +234,27 @@ describe("Replace", () => {
     });
   });
 
+  it("keeps a switched-off server off, still deletes its sign-in, and leaves it in checking", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const connectionId = await connect();
+      const id = await insertUrlServerAt(controller, fake.url, { token: OLD_TOKEN });
+      await readRecord(await requestUpdate(controller, id, { enabled: false }));
+
+      const replaced = await readRecord(
+        await requestUpdate(controller, id, replaceSource(connectionId)),
+      );
+
+      expect(replaced).toMatchObject({
+        id,
+        enabled: false,
+        status: "checking",
+        source: { kind: "plugin", connectionId },
+      });
+      expect(await countSecrets(controller, id)).toBe(0);
+      expect(fake.requests).toEqual([]);
+    });
+  });
+
   it("is refused with validation when it gives neither enabled nor source", async () => {
     await withRig(async ({ controller, fake }) => {
       const id = await insertUrlServerAt(controller, fake.url);

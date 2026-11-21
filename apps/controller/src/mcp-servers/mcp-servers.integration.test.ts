@@ -21,7 +21,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { McpServer } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
-import { del, get, readErrorBody, send } from "../http/testing";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { WAIT_DEADLINE_MS, createProfile, spawnThreadUnder } from "../sessions/testing";
 import { withFleet } from "../workspaces/testing";
@@ -356,6 +356,23 @@ describe("the grants of the MCP Server operations", () => {
             }),
             del(controller.base, `/api/v1/mcp-servers/${server.id}`, reader.token),
             requestCheck(controller, server.id, reader.token),
+            post(
+              controller.base,
+              `/api/v1/mcp-servers/${server.id}/token`,
+              { token: "tok-3f9a1c7e5b2d" },
+              reader.token,
+            ),
+            post(
+              controller.base,
+              "/api/v1/mcp-servers",
+              { source: { kind: "url", url: "https://mcp.example.com/mcp" } },
+              reader.token,
+            ),
+            // Replace: moves a server added by address onto a Connection.
+            send("PATCH", controller.base, `/api/v1/mcp-servers/${server.id}`, {
+              body: { source: { kind: "plugin", contributionId: "acme/desk", connectionId } },
+              token: reader.token,
+            }),
           ];
           for (const response of await Promise.all(writes)) {
             expect(response.status).toBe(403);
