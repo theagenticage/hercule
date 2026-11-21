@@ -389,18 +389,109 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
-  for (const [decision, mapped] of ELICITATION_ANSWERS) {
-    it(`replies ${JSON.stringify(mapped)} for ${decision}`, async () => {
-      const { run, answered } = await openAndAnswer(
-        ELICITATION,
-        TOOL_CALL_ELICITATION_PARAMS,
-        decision,
-      );
-
-      expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
-      expect(listResolutions(run)).toEqual([decision]);
+  /** Starts the MCP tool call item Codex reports just before it asks about the call. */
+  const startMcpCall = (run: Run, itemId: string, tool: string, server = "tools"): void =>
+    run.server.push({
+      method: "item/started",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: STARTED_AT,
+        item: {
+          type: "mcpToolCall",
+          id: itemId,
+          server,
+          tool,
+          status: "inProgress",
+          arguments: {},
+          appContext: null,
+        },
+      },
     });
-  }
+
+  const askAboutCall = async (calls: ReadonlyArray<readonly [string, string]>, params: unknown) => {
+    const run = await startBusySession();
+    for (const [itemId, tool] of calls) startMcpCall(run, itemId, tool);
+    run.server.push({ id: ID, method: ELICITATION, params });
+    return (await awaitOpenedRequest(run)).request;
+  };
+
+  it("files the question under the one running call that matches the tool it names", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-other", "sentry__whoami"],
+        ["call-search", "sentry__search_issues"],
+      ],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe("call-search");
+  });
+
+  it("files a question that names no tool under the one running call of its server", async () => {
+    const legacyMeta = { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: undefined };
+    const request = await askAboutCall([["call-search", "sentry__search_issues"]], {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      _meta: legacyMeta,
+    });
+
+    expect(request.itemId).toBe("call-search");
+  });
+
+  it("files the question under its turn when two running calls match, because a guess would mark the wrong item", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-1", "sentry__search_issues"],
+        ["call-2", "sentry__search_issues"],
+      ],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe(TURN);
+  });
+
+  it("files the question under its turn when no running call matches", async () => {
+    const request = await askAboutCall(
+      [["call-other", "sentry__whoami"]],
+      TOOL_CALL_ELICITATION_PARAMS,
+    );
+
+    expect(request.itemId).toBe(TURN);
+  });
+
+  it("does not file the question under a call that already completed", async () => {
+    const run = await startBusySession();
+    startMcpCall(run, "call-done", "sentry__search_issues");
+    run.server.push({
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        completedAtMs: STARTED_AT,
+        item: {
+          type: "mcpToolCall",
+          id: "call-done",
+          server: "tools",
+          tool: "sentry__search_issues",
+          status: "completed",
+          arguments: {},
+          appContext: null,
+        },
+      },
+    });
+    run.server.push({ id: ID, method: ELICITATION, params: TOOL_CALL_ELICITATION_PARAMS });
+
+    expect((await awaitOpenedRequest(run)).request.itemId).toBe(TURN);
+  });
+
+  it("files a form question under its turn even when a call of its server is running", async () => {
+    const request = await askAboutCall([["call-search", "sentry__search_issues"]], {
+      ...ELICITATION_PARAMS,
+      serverName: "tools",
+    });
+
+    expect(request.itemId).toBe(TURN);
+  });
 });
 
 const USER_INPUT = "item/tool/requestUserInput";

@@ -59,6 +59,8 @@ import type {
   UserMaterial,
 } from "../index";
 import type { ResolvedSkillReference } from "../../skills";
+import type { AttachmentUploader } from "../../attachments";
+import { replaceImagesInValues } from "../tool-result-images";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -740,38 +742,76 @@ const listRolloutDayFolders = async (sessionsFolder: string): Promise<ReadonlyAr
 };
 
 /**
+ * Returns every thread item a notification frame holds. A `ThreadItem` sits in
+ * the params of only these notifications: `item/started` and `item/completed`
+ * hold it in `params.item`, and `turn/started` and `turn/completed` hold a
+ * turn's items in `params.turn.items`. `thread/started` holds whole threads,
+ * but it is dropped and never attached to an event. The items are returned as
+ * they are, mutable, and unchecked: the callers go by an item's `type` alone,
+ * so an item whose other fields are malformed is covered too.
+ */
+const listFrameItems = (frame: NotificationFrame): ReadonlyArray<Record<string, unknown>> => {
+  const params = frame.params as
+    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
+    | null
+    | undefined;
+  const turnItems = params?.turn?.items;
+  return [
+    params?.item,
+    ...(Array.isArray(turnItems) ? (turnItems as ReadonlyArray<unknown>) : []),
+  ].filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+};
+
+/**
  * Removes the generated image from a notification frame, in place, before
  * anything else reads the frame. An `imageGeneration` item holds the image
  * itself, base64 encoded, in `result`. Left in, it would be copied into the
  * frames the adapter queues and into every event's `raw`, and make each one
  * megabytes long, while the image reaches nobody through the stream. The frame
  * comes straight from the decoder, so nothing else holds it yet.
- *
- * A `ThreadItem` sits in the params of only these notifications:
- * `item/started` and `item/completed` hold it in `params.item`, and
- * `turn/started` and `turn/completed` hold a turn's items in
- * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
- * and never attached to an event. The check goes by the item's `type` alone,
- * so an item whose other fields are malformed is covered too.
  */
 const stripImageBytes = (frame: NotificationFrame): void => {
-  const params = frame.params as
-    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
-    | null
-    | undefined;
-  const dropResult = (item: unknown): void => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      (item as { type?: unknown }).type === "imageGeneration"
-    ) {
-      Reflect.deleteProperty(item, "result");
-    }
-  };
-  dropResult(params?.item);
-  const items = params?.turn?.items;
-  if (Array.isArray(items)) items.forEach(dropResult);
+  for (const item of listFrameItems(frame)) {
+    if (item["type"] === "imageGeneration") Reflect.deleteProperty(item, "result");
+  }
 };
+
+/**
+ * Returns the `mcpToolCall` items of a notification frame that hold a result.
+ * An MCP tool's result may hold images (`result.content` has MCP's image
+ * blocks), which are megabytes of base64 until `replaceMcpResultImages` takes
+ * them out.
+ */
+const listMcpResultItems = (frame: NotificationFrame): ReadonlyArray<Record<string, unknown>> =>
+  listFrameItems(frame).filter(
+    (item) => item["type"] === "mcpToolCall" && typeof item["result"] === "object",
+  );
+
+/**
+ * Replaces each image in the result of these `mcpToolCall` items with a
+ * reference to it, in place, before anything else reads the frame: the image
+ * is uploaded to the controller and the item keeps only the reference, so no
+ * event's `raw` carries its bytes (spec 06, images in tool results). Never
+ * fails: an image that cannot be kept becomes `unavailable`, and its bytes
+ * are dropped all the same.
+ */
+const replaceMcpResultImages = (
+  uploader: AttachmentUploader,
+  sessionId: string,
+  items: ReadonlyArray<Record<string, unknown>>,
+  signal: AbortSignal,
+): Effect.Effect<void> =>
+  Effect.map(
+    replaceImagesInValues(
+      uploader,
+      sessionId,
+      items.map((item) => item["result"]),
+      signal,
+    ),
+    (results) => {
+      for (const [index, item] of items.entries()) item["result"] = results[index];
+    },
+  );
 
 export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
@@ -900,6 +940,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     sessionId: string | undefined,
     overrides: ReadonlyArray<string>,
     textGeneration: TextGenerationWatch | undefined,
+    uploader: AttachmentUploader,
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
@@ -928,28 +969,78 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // the lines already kept are still worth reporting.
       }
     })();
+    // Aborted when the host is killed or stopped, which ends the uploads of
+    // images in tool results that are still running.
+    const uploads = new AbortController();
+    // Frames must reach the session in the order Codex sent them, even when
+    // one waits for an image upload. While any frame waits, every later frame
+    // queues behind it. With none waiting, a frame is handled at once.
+    let queued = 0;
+    let tail: Promise<void> = Promise.resolve();
+    const handleInOrder = (
+      handle: () => void,
+      upload?: ReadonlyArray<Record<string, unknown>>,
+    ): void => {
+      if (upload === undefined && queued === 0) {
+        handle();
+        return;
+      }
+      queued += 1;
+      tail = tail
+        .then(async () => {
+          if (upload !== undefined && sessionId !== undefined) {
+            await Effect.runPromise(
+              replaceMcpResultImages(uploader, sessionId, upload, uploads.signal),
+            ).catch(() => {
+              // The upload code never fails, so this is a defect. The bytes
+              // are still dropped rather than passed on.
+              for (const item of upload) Reflect.deleteProperty(item, "result");
+            });
+          }
+          handle();
+        })
+        .finally(() => {
+          queued -= 1;
+        });
+    };
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
         // threw still needs a reply: without one, the turn and the connection
         // would both hang.
-        onServerRequest: (frame) => {
-          try {
-            onServerRequest(host, frame);
-          } catch {
-            refuseRequest(host, frame, {
-              code: INVALID_REQUEST,
-              message: `Hercule could not read this ${frame.method} request`,
-            });
-            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
-          }
-        },
+        onServerRequest: (frame) =>
+          handleInOrder(() => {
+            try {
+              onServerRequest(host, frame);
+            } catch {
+              refuseRequest(host, frame, {
+                code: INVALID_REQUEST,
+                message: `Hercule could not read this ${frame.method} request`,
+              });
+              warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+            }
+          }),
         // Nothing Codex sends may crash the reader: a throw here would fail
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
             stripImageBytes(frame);
-            onNotification(host, frame);
+            // Only a session's host uploads: a text generation or a probe
+            // has no session to keep an image for.
+            const upload = sessionId === undefined ? [] : listMcpResultItems(frame);
+            handleInOrder(
+              () => {
+                try {
+                  onNotification(host, frame);
+                } catch {
+                  warn(
+                    host,
+                    `the app-server sent a ${frame.method} that this build could not read`,
+                  );
+                }
+              },
+              upload.length === 0 ? undefined : upload,
+            );
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
@@ -959,8 +1050,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           warn(host, message);
         },
       }),
-      kill: child.kill,
-      stop: stopChild(child),
+      kill: () => {
+        uploads.abort();
+        child.kill();
+      },
+      stop: Effect.andThen(
+        Effect.sync(() => uploads.abort()),
+        stopChild(child),
+      ),
       complaint: () => complaints.join("\n"),
       sessionId,
       textGeneration,
@@ -1009,6 +1106,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             [...buildApiKeyOverrides(ctx), ...overrides],
             textGeneration,
+            ctx.attachmentUploader,
           ),
         catch: (error) =>
           // Codex is spawned with no working directory, so `ENOENT` means the
@@ -1197,6 +1295,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           // for the rest of a long turn.
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readApprovalPaths(item));
+        }
+        if (item.type === "mcpToolCall") {
+          // Kept while the call runs, so the question Codex asks before it
+          // runs the call can be filed under the call's item.
+          if (frame.method === "item/completed") thread.runningMcpCalls.delete(item.id);
+          else {
+            const { turnId } = frame.params as ItemStartedNotification;
+            thread.runningMcpCalls.set(item.id, {
+              itemId: item.id,
+              turnId,
+              server: item.server,
+              tool: item.tool,
+            });
+          }
         }
         if (asyncItem !== undefined) {
           openAsyncQuestion(
@@ -1474,6 +1586,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       requestId: crypto.randomUUID(),
       threadId: thread.state.threadId,
       paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+      listRunningMcpCalls: (turnId) =>
+        [...thread.runningMcpCalls.values()].filter((call) => call.turnId === turnId),
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
     thread.parks.set(request.requestId, park);
@@ -1978,6 +2092,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               // still need replies, without duplicate resolution events.
               cancelRequests(held, thread, false);
               thread.fileChanges.clear();
+              thread.runningMcpCalls.clear();
             },
             failSession: () => exitSession(held, "crash"),
             reports,

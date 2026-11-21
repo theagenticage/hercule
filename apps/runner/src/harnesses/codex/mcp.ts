@@ -22,28 +22,24 @@ import type { JsonValue } from "./types";
 export type McpToolApprovalMode = "prompt" | "approve";
 
 /**
- * The first Codex release that re-reads a server's tool list when the server
- * says it changed (`features.mcp_tool_list_changed`). Codex refuses a config
- * key it does not know, so the key is sent only to a release that has it.
+ * The Codex releases that re-read a server's tool list when the server says it
+ * changed (`features.mcp_tool_list_changed`), as a semver range. Codex refuses
+ * a config key it does not know, so the key is sent only to a release that has
+ * it.
  */
-const TOOL_LIST_CHANGED_SINCE = [0, 164, 0] as const;
+const TOOL_LIST_CHANGED_RANGE = ">=0.164.0";
 
 /**
  * Checks whether a Codex of this version re-reads a server's tool list when
  * the server says it changed. `version` is what `parseVersion` read from the
- * app-server's user agent, or `null`. Returns false for `null` and for a
- * version that is not three numbers: the key is then left out, which is safe
- * for every release.
+ * app-server's user agent, or `null`. The check is strict: `null`, a
+ * pre-release such as `0.164.0-alpha.1`, and anything that is not a plain
+ * semver version such as `0.164.0junk` or `0.164.0.1` all return false. A
+ * false positive would make Codex refuse to start the thread, while a false
+ * negative only costs a warning.
  */
-export const supportsToolListChanged = (version: string | null): boolean => {
-  const parts = version?.split(".", 3).map((part) => Number.parseInt(part, 10));
-  if (parts === undefined || parts.length !== 3 || !parts.every(Number.isInteger)) return false;
-  for (const [index, part] of parts.entries()) {
-    const needed = TOOL_LIST_CHANGED_SINCE[index]!;
-    if (part !== needed) return part > needed;
-  }
-  return true;
-};
+export const supportsToolListChanged = (version: string | null): boolean =>
+  version !== null && Bun.semver.satisfies(version, TOOL_LIST_CHANGED_RANGE);
 
 /**
  * Returns the warning for a session whose Codex does not re-read its tool
@@ -64,6 +60,13 @@ export const buildNoToolListChangedWarning = (version: string | null): string =>
  *   session's token, never the token: Codex reads the variable itself when it
  *   connects and sends the token as a bearer token.
  * - Each server gets the approval mode of the session's Access Mode.
+ * - Each server is also set `enabled = true` and `disabled_tools = []`. A
+ *   trusted workspace's `.codex/config.toml` is merged into the same table, so
+ *   a project that defines a server of this name with `enabled = false` or a
+ *   list of disabled tools would silently switch the gateway off. These two
+ *   keys undo that. They cannot undo a project's `enabled_tools`, or a per-tool
+ *   `approval_mode` under `[mcp_servers.<name>.tools.<tool>]`: Codex has no way
+ *   to clear those for tool names that are not known in advance.
  * - The tool list feature is set only when the running Codex has it.
  *
  * Exported so the real-binary test starts Codex with exactly this config.
@@ -77,8 +80,10 @@ export const buildMcpServerConfig = (
     ? {}
     : {
         ...Object.fromEntries(
-          servers.flatMap((server) => [
+          servers.flatMap((server): Array<[string, JsonValue]> => [
             [`mcp_servers.${server.name}.url`, server.url],
+            [`mcp_servers.${server.name}.enabled`, true],
+            [`mcp_servers.${server.name}.disabled_tools`, []],
             [`mcp_servers.${server.name}.bearer_token_env_var`, SESSION_TOKEN_VARIABLE],
             [`mcp_servers.${server.name}.default_tools_approval_mode`, approvalMode],
           ]),

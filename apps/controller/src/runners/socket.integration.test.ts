@@ -38,6 +38,7 @@ import { Duration, Effect, Fiber, Option, Redacted, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   FILES_EDITED_CAPABILITY,
+  buildMcpServersCapability,
   GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   MAX_FRAME_BYTES,
@@ -2772,6 +2773,24 @@ describe("signing a runner in to a provider account", () => {
       const { wire, answer } = await greet(harness.base, joined.credential);
       try {
         expect(answer.capabilities).toContain(GITHUB_TOKEN_CAPABILITY);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("offers the MCP Servers capability of each registered harness at hello", async () => {
+    await withRegistry(async (harness) => {
+      const joined = await enlist(harness);
+      const { wire, answer } = await greet(harness.base, joined.credential);
+      try {
+        expect(answer.capabilities).toEqual(
+          expect.arrayContaining(
+            ["claude-code/claude-code", "codex/codex", "pi/pi"].map(buildMcpServersCapability),
+          ),
+        );
+        // The retired plain form stays, for a runner of the first MCP Gateway build.
+        expect(answer.capabilities).toContain("mcpServers");
       } finally {
         wire.close();
       }

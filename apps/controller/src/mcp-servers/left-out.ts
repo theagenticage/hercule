@@ -7,7 +7,7 @@ import { decideUnavailableReason, type McpServerAvailabilityView } from "./catal
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
-  /** Whether the session's runner negotiated the `mcpServers` capability. */
+  /** Whether the session's runner negotiated the MCP Servers capability of the session's harness. */
   readonly runnerReachesMcpServers: boolean;
   /** The session's harness's declared `mcpPassthrough`. */
   readonly harnessPassthrough: "native" | "unsupported";

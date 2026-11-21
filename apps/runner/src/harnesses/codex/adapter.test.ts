@@ -47,7 +47,8 @@ import {
   MAX_PENDING_BYTES,
   MAX_PENDING_THREADS,
 } from "./threads";
-import { NO_USER_MATERIAL_PATHS, writeTestImage } from "../testing";
+import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
+import type { AttachmentUploader } from "../../attachments";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -4435,6 +4436,184 @@ describe("the bytes of a generated image", () => {
   });
 });
 
+describe("the images in the result of an MCP tool call", () => {
+  const IMAGE = PNG_BYTES.toString("base64");
+  const STORED = {
+    id: "0199e0e7-0000-7000-8000-0000000000a1",
+    mimeType: "image/png" as const,
+    sizeBytes: 70,
+  };
+
+  const buildCall = (result: unknown, status = "completed") => ({
+    type: "mcpToolCall",
+    id: "call-1",
+    server: "tools",
+    tool: "sentry__get_snapshot_image",
+    status,
+    arguments: {},
+    appContext: null,
+    result,
+    error: null,
+    durationMs: 5,
+  });
+
+  const completedFrame = (result: unknown, itemId = "call-1") => ({
+    method: "item/completed",
+    params: {
+      threadId: THREAD,
+      turnId: TURN,
+      item: { ...buildCall(result), id: itemId },
+      completedAtMs: 1,
+    },
+  });
+
+  const IMAGE_RESULT = {
+    content: [
+      { type: "text", text: "Snapshot of the issue" },
+      { type: "image", data: IMAGE, mimeType: "image/png" },
+    ],
+    structuredContent: null,
+    _meta: null,
+  };
+
+  /** Starts a session whose uploader is the one given. */
+  const startWithUploader = async (
+    upload: AttachmentUploader["upload"],
+  ): Promise<ReturnType<typeof createDriving>> => {
+    const run = createDriving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...run.ctx,
+        attachmentUploader: { upload },
+      }),
+    );
+    return run;
+  };
+
+  it("become a reference in the item, and the bytes reach no event", async () => {
+    const uploaded: Array<string> = [];
+    const run = await startWithUploader((sessionId, bytes) =>
+      Effect.sync(() => {
+        expect(sessionId).toBe(SESSION);
+        uploaded.push(Buffer.from(bytes).toString("base64"));
+        return { type: "image" as const, attachment: STORED };
+      }),
+    );
+
+    run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    expect(uploaded).toEqual([IMAGE]);
+    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+    const completed = filterByTag(run.seen, "item.completed")[0]!;
+    expect(completed.raw).toMatchObject({
+      payload: {
+        item: {
+          result: {
+            content: [
+              { type: "text", text: "Snapshot of the issue" },
+              { type: "image", attachment: STORED },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  it("are replaced in the items of a completed turn too", async () => {
+    const run = await startWithUploader(() =>
+      Effect.succeed({ type: "image" as const, attachment: STORED }),
+    );
+
+    run.spawns[0]!.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: {
+          id: TURN,
+          items: [buildCall(IMAGE_RESULT)],
+          itemsView: "full",
+          status: "completed",
+        },
+      },
+    });
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+  });
+
+  it("are not kept when the upload fails, and the item says why", async () => {
+    // The default test uploader has no controller, like an upload that fails.
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+    expect(JSON.stringify(filterByTag(run.seen, "item.completed")[0]?.raw)).toContain(
+      '"unavailable":"This test has no controller to keep images."',
+    );
+  });
+
+  it("leave a text-only result as it was, with no upload", async () => {
+    const run = await startWithUploader(() => Effect.die("nothing should be uploaded"));
+    const textOnly = {
+      content: [{ type: "text", text: "3 issues found" }],
+      structuredContent: null,
+      _meta: null,
+    };
+
+    run.spawns[0]!.push(completedFrame(textOnly));
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    expect(filterByTag(run.seen, "item.completed")[0]?.raw).toMatchObject({
+      payload: { item: { result: textOnly } },
+    });
+  });
+
+  it("keep the order of events when an upload holds one frame back", async () => {
+    let finish: () => void = () => undefined;
+    const slow = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const run = await startWithUploader(() =>
+      Effect.promise(() => slow).pipe(Effect.as({ type: "image" as const, attachment: STORED })),
+    );
+
+    run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "call-slow"));
+    run.spawns[0]!.push(
+      completedFrame(
+        { content: [{ type: "text", text: "fast" }], structuredContent: null, _meta: null },
+        "call-fast",
+      ),
+    );
+    await settle();
+    // The second call completed after the first, so it waits for the first.
+    expect(filterByTag(run.seen, "item.completed")).toEqual([]);
+
+    finish();
+    await waitUntil(
+      "completed both calls",
+      () => filterByTag(run.seen, "item.completed").length === 2,
+    );
+
+    expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
+      "call-slow",
+      "call-fast",
+    ]);
+  });
+});
+
 /** The reply to `account/rateLimits/read` for a Plus account, shaped like `GetAccountRateLimitsResponse`. */
 const PLUS_RATE_LIMITS = {
   ordinaryUsageAllowed: true,
@@ -4739,6 +4918,10 @@ describe("the MCP servers a Codex session is given", () => {
         expect.objectContaining({
           config: {
             "mcp_servers.tools.url": GATEWAY.url,
+            // A trusted project's config is merged into this table, so the
+            // keys that could switch the gateway off are set explicitly.
+            "mcp_servers.tools.enabled": true,
+            "mcp_servers.tools.disabled_tools": [],
             "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
             "mcp_servers.tools.default_tools_approval_mode": "prompt",
             "features.mcp_tool_list_changed": true,
@@ -4779,7 +4962,7 @@ describe("the MCP servers a Codex session is given", () => {
   });
 
   it.each(["0.164.0", "0.171.0", "1.0.0"])(
-    "re-reads the tool list on a change, with no warning, at Codex %s",
+    "sends the tool list feature and no warning at Codex %s",
     async (version) => {
       const run = await startWithServers([GATEWAY], SPEC, initializeAs(version));
       await settle();
@@ -4794,6 +4977,11 @@ describe("the MCP servers a Codex session is given", () => {
   it.each([
     ["a Codex at 0.163.9", initializeAs("0.163.9"), "0.163.9"],
     ["a Codex at 0.154.0", initializeAs("0.154.0"), "0.154.0"],
+    // A version that only starts like 0.164.0 must not be taken for it: Codex
+    // refuses a config key it does not know, and the thread would not start.
+    ["a Codex at 0.164.0-alpha.1", initializeAs("0.164.0-alpha.1"), "0.164.0-alpha.1"],
+    ["a Codex at 0.164.0junk", initializeAs("0.164.0junk"), "0.164.0junk"],
+    ["a Codex at 0.164.0.1", initializeAs("0.164.0.1"), "0.164.0.1"],
     [
       "a Codex whose user agent has no version",
       initializeWithUserAgent("unknown"),

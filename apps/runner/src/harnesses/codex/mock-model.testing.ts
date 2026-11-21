@@ -322,6 +322,89 @@ export const startAsyncQuestionModel = (title: string, options: ReadonlyArray<st
   };
 };
 
+/** One request Codex made to the scripted model, as `startScriptedModel` records it. */
+export interface ScriptedModelRequest {
+  /** The `thread-id` header: the Codex thread that made the request. */
+  readonly threadId: string;
+  readonly body: {
+    readonly input: ReadonlyArray<Record<string, unknown>>;
+    readonly tools: ReadonlyArray<Record<string, unknown>>;
+    /** Set on a request of Codex's automatic reviewer: a JSON output schema with a name. */
+    readonly text?: { readonly format?: { readonly name?: string } };
+  };
+}
+
+/**
+ * Runs a local Responses API fixture that answers each request with the items
+ * `script` returns for it, or with one assistant message ("done") when the
+ * script returns `undefined`. `requests` holds every request Codex made, in
+ * order, so a test can read what the model was shown and what it was sent
+ * back. `config` is the `config.toml` text that points Codex at the fixture.
+ */
+export const startScriptedModel = (
+  script: (request: ScriptedModelRequest) => ReadonlyArray<Record<string, unknown>> | undefined,
+) => {
+  const requests: Array<ScriptedModelRequest> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    // Bun cuts a connection after ten idle seconds by default, which would make
+    // Codex reconnect in the middle of a test.
+    idleTimeout: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const asked: ScriptedModelRequest = {
+        threadId: request.headers.get("thread-id") ?? "",
+        body: (await request.json()) as ScriptedModelRequest["body"],
+      };
+      requests.push(asked);
+      const call = requests.length;
+      const items = script(asked) ?? [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-${call}`,
+          content: [{ type: "output_text", text: "done" }],
+        },
+      ];
+      const events = [
+        { type: "response.created", response: { id: `response-${call}` } },
+        ...items.map((item) => ({ type: "response.output_item.done", item })),
+        {
+          type: "response.completed",
+          response: {
+            id: `response-${call}`,
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: 110,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    requests,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
+
 /**
  * Returns the tool a user message asks the model to call: the message
  * `call <tool>` asks for that tool of the MCP Gateway entry. Returns
@@ -335,89 +418,51 @@ const readCalledTool = (input: ReadonlyArray<Record<string, unknown>>): string |
 };
 
 /**
- * Runs a local Responses API fixture whose model calls an MCP tool when the
- * user says `call <tool>`, and answers every other request with a short text.
- * The tool belongs to the MCP Gateway entry, named `tools`, so Codex shows it
- * to the model in the namespace `mcp__tools`.
+ * Runs a scripted model fixture whose model calls an MCP tool when the user
+ * says `call <tool>`, and answers every other request with a short text. The
+ * tool belongs to the MCP Gateway entry, named `tools`, so Codex shows it to
+ * the model in the namespace `mcp__tools`.
  *
  * Codex's automatic reviewer asks the model too, with a JSON output schema.
  * The fixture answers it with `reviewer.outcome`, which a test may change at
- * any time. `config` is the `config.toml` text that points Codex at the
- * fixture.
+ * any time.
  */
 export const startMcpCallModel = () => {
+  let calls = 0;
   const reviewer = { outcome: "allow" as "allow" | "deny" };
-  let sequence = 0;
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(request) {
-      if (request.method !== "POST") return Response.json({ data: [] });
-      const body = (await request.json()) as {
-        readonly input: ReadonlyArray<Record<string, unknown>>;
-        readonly text?: { readonly format?: { readonly name?: string } };
-      };
-      const id = `response-${++sequence}`;
-      const tool = readCalledTool(body.input);
-      const reply = (text: string) => ({
-        type: "message",
-        role: "assistant",
-        id: `message-${id}`,
-        content: [{ type: "output_text", text }],
-      });
-      const item =
-        body.text?.format?.name === "codex_output_schema"
-          ? reply(
-              JSON.stringify({
+  const model = startScriptedModel((request) => {
+    if (request.body.text?.format?.name === "codex_output_schema") {
+      return [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-review-${request.threadId}`,
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
                 outcome: reviewer.outcome,
                 risk_level: "low",
                 user_authorization: "high",
                 rationale: "The fixture reviewer decides.",
               }),
-            )
-          : tool === undefined
-            ? reply("Done.")
-            : {
-                type: "function_call",
-                namespace: "mcp__tools",
-                name: tool,
-                call_id: `call-${id}`,
-                arguments: "{}",
-              };
-      const events = [
-        { type: "response.created", response: { id } },
-        { type: "response.output_item.done", item },
-        {
-          type: "response.completed",
-          response: {
-            id,
-            usage: {
-              input_tokens: 1,
-              input_tokens_details: { cached_tokens: 0 },
-              output_tokens: 1,
-              output_tokens_details: null,
-              total_tokens: 2,
             },
-          },
+          ],
         },
       ];
-      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
-        headers: { "content-type": "text/event-stream" },
-      });
-    },
+    }
+    const tool = readCalledTool(request.body.input);
+    return tool === undefined
+      ? undefined
+      : [
+          {
+            type: "function_call",
+            namespace: "mcp__tools",
+            name: tool,
+            call_id: `call-${++calls}`,
+            arguments: "{}",
+          },
+        ];
   });
-  return {
-    reviewer,
-    config: [
-      'model_provider = "fixture"',
-      'model = "gpt-5.4"',
-      "[model_providers.fixture]",
-      'name = "Isolated fixture"',
-      `base_url = "${server.url.toString()}v1"`,
-      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
-      'wire_api = "responses"',
-      "supports_websockets = false",
-    ].join("\n"),
-    stop: () => server.stop(true),
-  };
+  return { ...model, reviewer };
 };
