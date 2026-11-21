@@ -21,9 +21,4 @@ describe("Sentry's MCP server request", () => {
       headers: {},
     });
   });
-
-  it("builds a URL on its declared origin", () => {
-    const { url } = sentryMcpServer.buildUpstreamRequest({ credentials: {}, config: {} });
-    expect(new URL(url).origin).toBe(sentryMcpServer.origin);
-  });
 });

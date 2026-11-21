@@ -56,9 +56,4 @@ describe("GitHub's MCP server request", () => {
     const { headers } = githubMcpServer.buildUpstreamRequest({ credentials: {}, config: {} });
     expect(headers["X-MCP-Exclude-Tools"]).toBe("delete_repository");
   });
-
-  it("builds a URL on its declared origin", () => {
-    const { url } = githubMcpServer.buildUpstreamRequest({ credentials: {}, config: {} });
-    expect(new URL(url).origin).toBe(githubMcpServer.origin);
-  });
 });

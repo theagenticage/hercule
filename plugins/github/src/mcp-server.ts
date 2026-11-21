@@ -8,29 +8,21 @@ const GITHUB_MCP_ORIGIN = "https://api.githubcopilot.com";
 const GITHUB_MCP_URL = `${GITHUB_MCP_ORIGIN}/mcp/`;
 
 /**
- * The toolsets the server is asked for in the `X-MCP-Toolsets` header: the
- * ones where the Connection's device flow scopes (`repo`, `read:org`,
- * `notifications`, `workflow`) cover every tool, after the tools named in
- * `GITHUB_MCP_EXCLUDED_TOOLS` are excluded. A tool that needs a scope the
- * token lacks makes GitHub answer with an OAuth scope challenge, which the
- * gateway cannot answer, so a toolset with such tools is kept out of the list
- * rather than left to fail.
+ * The toolsets sent in the `X-MCP-Toolsets` header: the ones whose tools the
+ * Connection's device flow scopes (`repo`, `read:org`, `notifications`,
+ * `workflow`) all cover.
  *
- * Read from github/github-mcp-server at commit
- * 9a72d8d38fec18c207cd924b33aa0eb3e186252c on 2026-11-21: `pkg/github/tools.go`
- * for the toolset ids, and for each tool the scopes it declares (listed under
- * "OAuth Challenge Scopes" in that repository's README). `repo` includes
- * `security_events`, so the code security, secret protection, Dependabot and
- * security advisory toolsets are covered.
+ * Pinned to github/github-mcp-server at commit
+ * 9a72d8d38fec18c207cd924b33aa0eb3e186252c (2026-11-21): the toolset ids in
+ * `pkg/github/tools.go` and the scopes each tool declares.
  *
- * Left out, and why:
- * - `gists` (`gist`), `projects` (`project`, `read:project`) and `governance`
- *   (`admin:org`, `admin:enterprise`, `read:enterprise`): scopes the Connection
- *   does not have.
- * - `copilot`, `copilot_automations`, `copilot_issue_intents` and
- *   `copilot_spaces`: they need a Copilot subscription, not a scope.
- * - `github_support_docs_search`: a remote-only toolset whose tools' scopes
- *   are not declared in that repository.
+ * `delete_repository` is excluded by name (`GITHUB_MCP_EXCLUDED_TOOLS`)
+ * because it needs `delete_repo`, which the Connection lacks. GitHub applies
+ * `X-MCP-Exclude-Tools` after the toolsets, so `repos` stays in the list.
+ *
+ * A pasted token gets the same list, because `buildUpstreamRequest` is pure
+ * and cannot ask GitHub which scopes the token has. A tool its scopes do not
+ * cover fails as that call's own answer.
  */
 const GITHUB_MCP_TOOLSETS = [
   "actions",
@@ -52,15 +44,7 @@ const GITHUB_MCP_TOOLSETS = [
   "users",
 ].join(",");
 
-/**
- * The tools sent in the `X-MCP-Exclude-Tools` header. GitHub removes them even
- * when their toolset is enabled (documented in `docs/server-configuration.md`
- * of github/github-mcp-server, section "Excluding Specific Tools").
- *
- * `repos` is kept, because reading files, commits and branches is its main
- * use. Its `delete_repository` needs `delete_repo`, which the Connection does
- * not have, so it is excluded by name.
- */
+/** The tools sent in the `X-MCP-Exclude-Tools` header. See `GITHUB_MCP_TOOLSETS` for why. */
 const GITHUB_MCP_EXCLUDED_TOOLS = "delete_repository";
 
 /**
@@ -70,11 +54,6 @@ const GITHUB_MCP_EXCLUDED_TOOLS = "delete_repository";
  * the `X-MCP-Toolsets` header with the toolsets the device flow's scopes
  * cover, and the `X-MCP-Exclude-Tools` header with the tools to leave out of
  * them.
- *
- * The toolsets are the same for every token, because this function is pure and
- * cannot ask GitHub which scopes a pasted token has. A pasted token whose
- * scopes do not cover a tool in the list gets that tool's own failure when the
- * tool is called.
  *
  * It never throws. When the credentials hold no token it returns no
  * `Authorization` header.

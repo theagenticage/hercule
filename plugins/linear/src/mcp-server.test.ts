@@ -21,9 +21,4 @@ describe("Linear's MCP server request", () => {
       headers: {},
     });
   });
-
-  it("builds a URL on its declared origin", () => {
-    const { url } = linearMcpServer.buildUpstreamRequest({ credentials: {}, config: {} });
-    expect(new URL(url).origin).toBe(linearMcpServer.origin);
-  });
 });

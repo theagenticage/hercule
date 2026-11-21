@@ -1,4 +1,5 @@
 import type { McpServerContribution } from "@hercule/plugin-host";
+import { readToken } from "./api";
 import { LINEAR_CONNECTION_TYPE } from "./connection-type";
 
 /** The origin of Linear's hosted MCP server. It is not `api.linear.app`, which serves the GraphQL API. */
@@ -21,7 +22,7 @@ const LINEAR_MCP_URL = `${LINEAR_MCP_ORIGIN}/mcp`;
  * `Authorization` header.
  */
 const buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"] = ({ credentials }) => {
-  const token = credentials["accessToken"] ?? credentials["apiKey"];
+  const token = readToken(credentials);
   return {
     url: LINEAR_MCP_URL,
     headers: token === undefined ? {} : { Authorization: `Bearer ${token}` },
