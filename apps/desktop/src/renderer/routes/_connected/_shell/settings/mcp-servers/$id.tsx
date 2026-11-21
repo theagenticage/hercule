@@ -19,6 +19,7 @@ import {
   mcpServerQuery,
   mcpServersQuery,
   pluginsQuery,
+  readOnOpen,
   settingsQuery,
 } from "../../../../../app/queries";
 import { LazyConnectionSetupDialog } from "../../../../../screens/settings/connections/lazy-connection-setup-dialog";
@@ -30,7 +31,6 @@ import {
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
 import { ProjectBoxes } from "./-project-boxes";
 import { RemoveSection } from "./-remove-section";
-import { readServersAgain } from "./-keep-server";
 import { useServerSwitch } from "./-switch-server";
 
 /**
@@ -51,8 +51,8 @@ const namesNoServer = (error: unknown): boolean =>
  * The section's layout holds the `mcpServer` topic, which keeps the server
  * current, so the loader reads it only when it is not cached yet; the
  * controller's first push on the topic reads it again. The loader also reads
- * the list of servers and the default list, which the Projects section
- * needs. An id that names no server goes back to the list, and so does a
+ * the list of servers, and the default list each time the page opens, which
+ * the Projects section needs. An id that names no server goes back to the list, and so does a
  * page whose server is deleted while it is open. The section remembers its
  * list, never one server's page.
  */
@@ -64,7 +64,8 @@ export const Route = createFileRoute("/_connected/_shell/settings/mcp-servers/$i
       await Promise.all([
         queryClient.ensureQueryData(mcpServerQuery(client, id)),
         queryClient.ensureQueryData(mcpServersQuery(client)),
-        queryClient.ensureQueryData(settingsQuery(client)),
+        // The Projects section shows the default list, which no push keeps current.
+        readOnOpen(queryClient, settingsQuery(client)),
       ]);
     } catch (error) {
       if (!namesNoServer(error)) throw error;
@@ -101,11 +102,17 @@ function McpServerPage(): JSX.Element {
   const offer = readMcpServerOffers(plugins).find(
     (each) => each.contributionId === query.data.source.contributionId,
   );
-  const flip = useServerSwitch();
+  const flip = useServerSwitch({ kind: "update", serverId: id });
   const check = useMutation({
     mutationFn: () => client.mcpServer.check({ params: { id } }),
     onSettled: async () => {
-      await readServersAgain(queryClient, client, id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: mcpServersQuery(client).queryKey, exact: true }),
+        queryClient.invalidateQueries({
+          queryKey: mcpServerQuery(client, id).queryKey,
+          exact: true,
+        }),
+      ]);
     },
   });
   const [reconnecting, setReconnecting] = useState(false);
@@ -136,15 +143,12 @@ function McpServerPage(): JSX.Element {
       <ServerSection
         view={view}
         plugins={plugins}
-        switchBusy={flip.isPending}
-        switchError={flip.error === null ? null : readErrorMessage(flip.error)}
+        switchBusy={flip.isRunning}
+        switchError={flip.refusal}
         checkBusy={check.isPending}
         checkError={check.error === null ? null : readErrorMessage(check.error)}
         onFlipSwitch={() => {
-          flip.mutate({
-            target: { kind: "update", serverId: id },
-            on: !view.server.enabled,
-          });
+          flip.start(!view.server.enabled);
         }}
         onCheck={startCheck}
       />

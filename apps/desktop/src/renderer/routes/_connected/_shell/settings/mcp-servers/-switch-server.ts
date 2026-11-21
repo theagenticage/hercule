@@ -1,7 +1,6 @@
-import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import type { McpServer } from "@hercule/contract";
-import { keepSavedServer, readServersAgain } from "./-keep-server";
+import { mcpWriteKeys, useMcpWrite, type McpWrite } from "../../../../../app/mcp-write";
+import { mcpServerQuery, mcpServersQuery } from "../../../../../app/queries";
 
 /**
  * What a switch of Settings > MCP servers writes:
@@ -19,29 +18,24 @@ export type ServerSwitchTarget =
     }
   | { readonly kind: "update"; readonly serverId: string };
 
-/** What one press of a switch asks for: `on` is the state the switch is going to. */
-export interface ServerSwitchPress {
-  readonly target: ServerSwitchTarget;
-  readonly on: boolean;
-}
-
 /**
- * Returns the write behind one server's switch, on the list and on the page.
- * `mutate` sends `mcpServer.create` or `mcpServer.update` as the press's
- * target says. The result is put in the cached list and page at once, and the
- * mutation counts as running until both are read again, so the switch never
- * shows the old state in between. A refusal, such as the `conflict` of a
- * second server for one Connection, keeps its message in `error`, and the
- * list is read again, because the refusal may mean it was out of date.
- *
- * Each component that has a switch makes its own, so each switch's busy
- * state and refusal stay with it.
+ * Returns the write behind the switch of `target`, on the list and on the
+ * page. `start(on)` sends `mcpServer.create`, or `mcpServer.update` with the
+ * state the switch is going to. The mutation counts as running until the
+ * list and the page are read again, so the switch never shows the old state
+ * in between, and the response is never put in the cache. A refusal, such as
+ * the `conflict` of a second server for one Connection, stays with the
+ * target, whichever control shows it, and the list is read again, because the
+ * refusal may mean it was out of date.
  */
-export function useServerSwitch(): UseMutationResult<McpServer, Error, ServerSwitchPress> {
+export function useServerSwitch(target: ServerSwitchTarget): McpWrite<boolean> {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ target, on }: ServerSwitchPress) =>
+  return useMcpWrite<boolean>({
+    mutationKey:
+      target.kind === "create"
+        ? mcpWriteKeys.serverCreation(target.contributionId, target.connectionId)
+        : mcpWriteKeys.serverSwitch(target.serverId),
+    mutationFn: (on) =>
       target.kind === "create"
         ? client.mcpServer.create({
             payload: {
@@ -53,15 +47,9 @@ export function useServerSwitch(): UseMutationResult<McpServer, Error, ServerSwi
             },
           })
         : client.mcpServer.update({ params: { id: target.serverId }, payload: { enabled: on } }),
-    onSuccess: (saved) => {
-      keepSavedServer(queryClient, client, saved);
-    },
-    onSettled: async (saved, _error, { target }) => {
-      await readServersAgain(
-        queryClient,
-        client,
-        target.kind === "update" ? target.serverId : saved?.id,
-      );
-    },
+    refresh:
+      target.kind === "create"
+        ? [mcpServersQuery(client).queryKey]
+        : [mcpServersQuery(client).queryKey, mcpServerQuery(client, target.serverId).queryKey],
   });
 }

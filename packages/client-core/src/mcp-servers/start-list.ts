@@ -20,10 +20,10 @@ export interface ThreadStartList {
 
 /**
  * Returns the list a Thread starts with: its project's list, even when that
- * list is empty, and for a Thread in no project the default list. The default
- * list is not rewritten when a server is deleted, so ids no view knows are
- * dropped from it. The source is `none` when a Thread in no project starts
- * with an empty list.
+ * list is empty, and for a Thread in no project the default list. A list is
+ * not always rewritten when a server is deleted, so ids no view knows are
+ * dropped from either list. The source is `none` when a Thread in no project
+ * starts with an empty list.
  *
  * A `projectId` that is not in `projects` is read as no project.
  */
@@ -33,14 +33,15 @@ export const decideThreadStartList = (
   defaultIds: readonly string[],
   views: readonly McpServerView[],
 ): ThreadStartList => {
+  const isKnown = (id: string): boolean => views.some((view) => view.server.id === id);
   const project = projects.find((each) => each.id === projectId);
   if (project !== undefined) {
     return {
-      mcpServerIds: project.mcpServerIds,
+      mcpServerIds: project.mcpServerIds.filter(isKnown),
       source: { kind: "project", projectName: project.name },
     };
   }
-  const known = defaultIds.filter((id) => views.some((view) => view.server.id === id));
+  const known = defaultIds.filter(isKnown);
   return {
     mcpServerIds: known,
     source: known.length === 0 ? { kind: "none" } : { kind: "default" },
@@ -84,18 +85,19 @@ export const describeStartLine = (
  * servers of a thread started in another. An explicit empty list stays
  * empty: it is the user's choice of no servers.
  *
- * Ids no view knows (a server deleted since the pick) are dropped, as the
- * controller drops them from every list it stores. `views` is `undefined`
- * while the catalogue has not been read, and then nothing is dropped.
+ * Ids not in `knownServerIds` (a server deleted since the pick) are dropped,
+ * as the controller drops them from every list it stores. `knownServerIds`
+ * is `undefined` while the list of servers has not been read, and then
+ * nothing is dropped.
  */
 export const resolveDraftMcpServerIds = (
   picks: ThreadPicks,
   projectId: string | null,
-  views: readonly McpServerView[] | undefined,
+  knownServerIds: ReadonlySet<string> | undefined,
 ): readonly string[] | undefined => {
   const pick = picks.mcpServers;
   if (pick === undefined || pick.projectId !== projectId) return undefined;
-  return views === undefined
+  return knownServerIds === undefined
     ? pick.mcpServerIds
-    : pick.mcpServerIds.filter((id) => views.some((view) => view.server.id === id));
+    : pick.mcpServerIds.filter((id) => knownServerIds.has(id));
 };

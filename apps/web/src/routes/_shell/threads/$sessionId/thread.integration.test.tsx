@@ -5415,7 +5415,7 @@ describe("Thread: the MCP servers of the + menu", () => {
   const readServerReads = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter((call) => call.path === "/api/v1/mcp-servers").length;
 
-  it("reads no servers and holds no topic for a thread with none, until the menu opens", async () => {
+  it("reads no servers and holds no topic for a thread with none, until the MCP row opens", async () => {
     const user = userEvent.setup();
     const { api, live } = await openServersThread([]);
     await screen.findByRole("button", { name: "Add to thread" });
@@ -5423,15 +5423,23 @@ describe("Thread: the MCP servers of the + menu", () => {
     expect(readServerReads(api)).toBe(0);
     expect(live.topics()).not.toContain("mcpServer");
 
+    // The `+` menu is also how an image is attached: opening it reads nothing.
     const menu = await openPlusMenu(user);
-    // With no server the row says so, and the menu reads the servers for its submenu.
-    expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain("none");
+    const row = within(menu).getByRole("button", { name: /MCP servers/ });
+    // With no server the row says so without reading them.
+    expect(row.textContent).toContain("none");
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    await user.click(row);
+    await screen.findByRole("dialog", { name: "Servers of this thread" });
+    // The read, and the one more on the topic's first push.
     await waitFor(() => {
-      expect(readServerReads(api)).toBeGreaterThanOrEqual(1);
+      expect(readServerReads(api)).toBe(2);
     });
     expect(live.topics()).toContain("mcpServer");
 
-    await user.keyboard("{Escape}");
+    await user.keyboard("{Escape}{Escape}");
     await waitFor(() => {
       expect(live.topics()).not.toContain("mcpServer");
     });
@@ -5684,6 +5692,178 @@ describe("Thread: the MCP servers of the + menu", () => {
     });
   });
 
+  /** Returns the answers of a controller whose `session.update` waits on `gate`, then answers with `refusal` or applies the list. */
+  const holdUpdate = (
+    state: { session: Session },
+    gate: Promise<void>,
+    refusal?: { readonly status: number; readonly body: unknown },
+  ): Record<string, Handler> => ({
+    [`PATCH /api/v1/sessions/${SESSION_ID}`]: async (call) => {
+      await gate;
+      if (refusal !== undefined) return refusal;
+      const { mcpServerIds } = call.body as { mcpServerIds: string[] };
+      state.session = {
+        ...state.session,
+        mcpServers: buildSessionServers(
+          mcpServerIds.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+        ),
+      };
+      return { body: state.session };
+    },
+  });
+
+  it("keeps the write guard when the menu is closed and opened again while the write runs", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = { session: buildSession({ status: "idle", mcpServers: [] }) };
+    const { api } = await openServersThread([S_NOTION], holdUpdate(state, gate));
+
+    const first = await openServersSubmenu(user);
+    await user.click(within(first).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+
+    const reopened = await openServersSubmenu(user);
+    const stripe = within(reopened).getByRole("switch", { name: "stripe in this thread" });
+    expect(stripe.getAttribute("aria-disabled")).toBe("true");
+    await user.click(stripe);
+
+    // The second change was ignored, so it cannot start from the list the first one started from.
+    expect(readUpdates(api)).toHaveLength(1);
+    release();
+    await waitFor(() => {
+      expect(stripe.getAttribute("aria-disabled")).not.toBe("true");
+    });
+  });
+
+  it("shows a refusal that arrives after the menu was closed when the menu opens again", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = { session: buildSession({ status: "idle", mcpServers: [] }) };
+    const { api } = await openServersThread(
+      [S_NOTION],
+      holdUpdate(state, gate, {
+        status: 403,
+        body: {
+          error: {
+            code: "forbidden",
+            message: "Changing a thread's servers needs mcp.manage.",
+            details: { grant: "mcp.manage" },
+          },
+        },
+      }),
+    );
+
+    const first = await openServersSubmenu(user);
+    await user.click(within(first).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    await user.keyboard("{Escape}{Escape}");
+    release();
+    await waitFor(() => {
+      expect(
+        api.calls.filter(
+          (call) => call.method === "GET" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+
+    const reopened = await openServersSubmenu(user);
+
+    expect((await within(reopened).findByRole("alert")).textContent).toBe(
+      "Changing a thread's servers needs mcp.manage.",
+    );
+  });
+
+  it.each([
+    [
+      "invalid",
+      { status: 400, body: buildErrorBody("validation", "A server in the list does not exist.") },
+      true,
+    ],
+    [
+      "forbidden",
+      {
+        status: 403,
+        body: buildErrorBody("forbidden", "Changing a thread's servers needs mcp.manage."),
+      },
+      false,
+    ],
+  ] as const)(
+    "reads the thread again after a refusal as %s, and the servers too only when it is invalid",
+    async (_kind, refusal, readsServers) => {
+      const user = userEvent.setup();
+      const { api, live } = await openServersThread([S_NOTION], {
+        [`PATCH /api/v1/sessions/${SESSION_ID}`]: refusal,
+      });
+      const submenu = await openServersSubmenu(user);
+      await waitFor(() => {
+        expect(live.topics()).toContain("mcpServer");
+      });
+      // The topic's first push reads the servers once more; the count is taken after it.
+      await waitFor(() => {
+        expect(readServerReads(api)).toBe(2);
+      });
+      const sessionReads = () =>
+        api.calls.filter(
+          (call) => call.method === "GET" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+        ).length;
+      const before = sessionReads();
+
+      await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+      await waitFor(() => {
+        expect(sessionReads()).toBeGreaterThan(before);
+      });
+      if (readsServers) {
+        await waitFor(() => {
+          expect(readServerReads(api)).toBeGreaterThan(2);
+        });
+      } else {
+        expect(readServerReads(api)).toBe(2);
+      }
+    },
+  );
+
+  it("reads a project that is not on the first page by its id, and starts from its list", async () => {
+    const user = userEvent.setup();
+    const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: { body: beyondFirstPage },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    // The foot and the reset name the thread's project, not the default list.
+    await within(submenu).findByText(
+      "Starts from webshop's list. Changes are for this thread only.",
+    );
+    expect(within(submenu).getByRole("button", { name: "Back to webshop's list" })).toBeDefined();
+    expect(api.calls.filter((call) => call.path === `/api/v1/projects/${WEBSHOP.id}`)).toHaveLength(
+      1,
+    );
+  });
+
   it("opens the picker from 'more servers', which lists every server, and writes its choice at once", async () => {
     const user = userEvent.setup();
     const { api } = await openServersThread([S_GITHUB]);
@@ -5774,10 +5954,12 @@ describe("Thread: the lines about MCP servers", () => {
     expect(reconnect.getAttribute("href")).toBe(
       `/connections?reconnect=${findConnectionOf(S_LINEAR).id}`,
     );
-    // A line the user must act on reads as an error, a line with nothing to do stays a warning.
+    // A line the user must act on is drawn in the failure colours, and a screen
+    // reader still hears a warning, as for a line with nothing to do.
     const line = await findLine("MCP servers were left out.");
     expect(line.className).toContain("text-fail");
-    expect(within(line).getByText("Error:")).toBeDefined();
+    expect(within(line).getByText("Warning:")).toBeDefined();
+    expect(within(line).queryByText("Error:")).toBeNull();
     const quiet = await findLine("Retrying the request.");
     expect(quiet.className).toContain("text-muted");
     expect(within(quiet).getByText("Warning:")).toBeDefined();
@@ -5846,6 +6028,42 @@ describe("Thread: the lines about MCP servers", () => {
     expect(
       withLine.api.calls.filter((call) => call.path === "/api/v1/mcp-servers").length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reads the servers once for a page with several such lines, and not again when the window gains focus", async () => {
+    const warn = (message: string, mcpServerId: string): TurnEvent => ({
+      _tag: "runtime.warning",
+      eventId: "",
+      sessionId: SESSION_ID,
+      at: AT,
+      turnId: "t1",
+      message,
+      mcpServers: [{ mcpServerId, reason: "needs-sign-in" }],
+    });
+    const { api, live } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), [
+        warn("Linear was left out.", S_LINEAR.id),
+        warn("Notion was left out.", S_NOTION.id),
+      ]),
+      buildMcpServerRoutes(),
+    );
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    // The read, and the one more on the topic's first push: one for the page, not one for each line.
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(2);
+    });
+
+    // The topic keeps the servers fresh, so coming back to the window reads nothing.
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await settle();
+    expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(2);
   });
 
   it("reads no servers for a thread whose only warning is about something else", async () => {

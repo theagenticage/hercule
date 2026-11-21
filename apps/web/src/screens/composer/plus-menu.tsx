@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useRef, type JSX, type ReactNode } from "react";
 import type { ThreadServersRow } from "@hercule/client-core/mcp-servers";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { cn, Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@hercule/ui";
@@ -20,7 +20,9 @@ const holdFocus = (event: Event): void => {
  *   red dot, so the problem shows with the menu closed.
  *
  * The component holds no domain: the caller builds the `submenu` and decides
- * the numbers and the reason. The file input sits outside the menu, so the
+ * the numbers and the reason. The caller also owns whether the submenu is
+ * open (`serversOpen`), because it reads the servers only once the submenu
+ * opens, not when the menu does. The file input sits outside the menu, so the
  * menu unmounting when the row is picked does not take the picker with it.
  */
 export function PlusMenu({
@@ -29,6 +31,8 @@ export function PlusMenu({
   attachDisabledReason,
   onFiles,
   serversRow,
+  serversOpen,
+  onServersOpenChange,
   submenu,
 }: {
   readonly open: boolean;
@@ -37,6 +41,9 @@ export function PlusMenu({
   readonly attachDisabledReason: string | null;
   readonly onFiles: (files: readonly File[]) => void;
   readonly serversRow: ThreadServersRow;
+  /** Whether the submenu "Servers of this thread" is open. */
+  readonly serversOpen: boolean;
+  readonly onServersOpenChange: (open: boolean) => void;
   /** The content of the submenu "Servers of this thread". */
   readonly submenu: ReactNode;
 }): JSX.Element {
@@ -77,6 +84,8 @@ export function PlusMenu({
           <PlusMenuRows
             attachDisabledReason={attachDisabledReason}
             serversRow={serversRow}
+            serversOpen={serversOpen}
+            onServersOpenChange={onServersOpenChange}
             submenu={submenu}
             onAttach={() => {
               picker.current?.click();
@@ -110,15 +119,18 @@ export function PlusMenu({
 function PlusMenuRows({
   attachDisabledReason,
   serversRow,
+  serversOpen: showsServers,
+  onServersOpenChange: setShowsServers,
   submenu,
   onAttach,
 }: {
   readonly attachDisabledReason: string | null;
   readonly serversRow: ThreadServersRow;
+  readonly serversOpen: boolean;
+  readonly onServersOpenChange: (open: boolean) => void;
   readonly submenu: ReactNode;
   readonly onAttach: () => void;
 }): JSX.Element {
-  const [showsServers, setShowsServers] = useState(false);
   const row = useRef<HTMLDivElement>(null);
   return (
     <>

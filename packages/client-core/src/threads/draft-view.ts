@@ -25,8 +25,8 @@ import {
  * present, except the MCP Servers. A draft reads those only once the user
  * opens its list of servers, so an untouched draft has none.
  */
-type DraftCatalogs = Required<Omit<ThreadCatalogs, "mcpServerViews">> &
-  Pick<ThreadCatalogs, "mcpServerViews">;
+type DraftCatalogs = Required<Omit<ThreadCatalogs, "knownMcpServerIds">> &
+  Pick<ThreadCatalogs, "knownMcpServerIds">;
 
 /**
  * The records a Draft Thread is built from, as the app's queries return them:

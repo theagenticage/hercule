@@ -1093,3 +1093,258 @@ describe("Settings > MCP servers > one server's page > Remove", () => {
     expect(router.state.location.pathname).toBe(`/settings/mcp-servers/${S_WORK.id}`);
   });
 });
+
+describe("Settings > MCP servers > a write's guard and its refusal belong to the list", () => {
+  /** Returns a controller whose default-list write waits on `gate`, then answers like the real one or with `refusal`. */
+  const holdDefaultListWrite = (
+    world: World,
+    gate: ReturnType<typeof buildGate>,
+    refusal?: unknown,
+  ) =>
+    ({
+      "PATCH /api/v1/settings": async (call: { body: unknown }) => {
+        await gate.opened;
+        if (refusal !== undefined) return refusal as never;
+        world.defaultIds = (call.body as { user: { "thread.mcpServerIds": string[] } }).user[
+          "thread.mcpServerIds"
+        ];
+        return { body: readSettings(world) };
+      },
+    }) satisfies Record<string, Handler>;
+
+  it("keeps the default list's guard when its picker is closed and opened again while the write runs", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const world = buildWorld();
+    const { api } = await openList({ world, extra: holdDefaultListWrite(world, gate) });
+
+    await user.click(await screen.findByRole("button", { name: "Change…" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("checkbox", { name: "linear" }),
+    );
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+
+    await user.click(screen.getByRole("button", { name: "Change…" }));
+    const reopened = await screen.findByRole("dialog");
+    const notion = within(reopened).getByRole("checkbox", { name: "notion" });
+    expect(notion.getAttribute("aria-disabled")).toBe("true");
+    await user.click(notion);
+
+    // The second choice was ignored, so it cannot overwrite the first.
+    expect(listWrites(api)).toHaveLength(1);
+    gate.release();
+    await waitFor(() => {
+      expect(world.defaultIds).toEqual([S_GITHUB.id, S_LINEAR.id]);
+    });
+    await waitFor(() => {
+      expect(notion.getAttribute("aria-disabled")).not.toBe("true");
+    });
+  });
+
+  it("shows the refusal of a write that arrives after the picker was closed", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const world = buildWorld();
+    await openList({
+      world,
+      extra: holdDefaultListWrite(
+        world,
+        gate,
+        refuseForMissingGrant("Changing the default list needs mcp.manage."),
+      ),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Change…" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("checkbox", { name: "linear" }),
+    );
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Done" }));
+    gate.release();
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Changing the default list needs mcp.manage.",
+    );
+  });
+
+  it.each([
+    [
+      "invalid",
+      { status: 400, body: buildErrorBody("validation", "A server in the list does not exist.") },
+      true,
+    ],
+    ["forbidden", refuseForMissingGrant("Changing the default list needs mcp.manage."), false],
+  ] as const)(
+    "reads the list again after a refusal as %s, and the servers too only when it is invalid",
+    async (_kind, refusal, readsServers) => {
+      const user = userEvent.setup();
+      const { api, live } = await openList({ extra: { "PATCH /api/v1/settings": refusal } });
+      await user.click(await screen.findByRole("button", { name: "Change…" }));
+      // The topic's first push reads the servers once more; the count is taken after it.
+      await waitFor(() => {
+        expect(live.topics()).toContain("mcpServer");
+      });
+      await waitFor(() => {
+        expect(readCalls(api, "/api/v1/mcp-servers")).toBe(2);
+      });
+      const settingsReads = readCalls(api, "/api/v1/settings");
+
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("checkbox", { name: "linear" }),
+      );
+
+      await waitFor(() => {
+        expect(readCalls(api, "/api/v1/settings")).toBeGreaterThan(settingsReads);
+      });
+      if (readsServers) {
+        await waitFor(() => {
+          expect(readCalls(api, "/api/v1/mcp-servers")).toBeGreaterThan(2);
+        });
+      } else {
+        expect(readCalls(api, "/api/v1/mcp-servers")).toBe(2);
+      }
+    },
+  );
+
+  it("keeps a server's switch still on its page while its write from the list is running", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const { api, router } = await openList({
+      extra: {
+        [`PATCH /api/v1/mcp-servers/${S_WORK.id}`]: async () => {
+          await gate.opened;
+          return { body: { ...S_WORK, enabled: false } };
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("switch", { name: "Offer sentry work to threads" }));
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    await act(() =>
+      router.navigate({ to: "/settings/mcp-servers/$id", params: { id: S_WORK.id } }),
+    );
+
+    const offered = await screen.findByRole("switch", { name: "Offered to threads" });
+    expect(offered.getAttribute("aria-disabled")).toBe("true");
+    await user.click(offered);
+    expect(listWrites(api)).toHaveLength(1);
+    gate.release();
+  });
+});
+
+describe("Settings > MCP servers > the lists are read again when the section opens", () => {
+  it("shows a default list changed while the section was closed", async () => {
+    const { api, world, router } = await openList();
+    const group = async () =>
+      (await screen.findByText("Threads without a project")).closest("section")!;
+    await waitFor(async () => {
+      expect(readPageText(await group())).toContain("github");
+    });
+    const reads = readCalls(api, "/api/v1/settings");
+
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    world.defaultIds = [S_LINEAR.id];
+    await act(() => router.navigate({ to: "/settings/mcp-servers" }));
+
+    await waitFor(async () => {
+      expect(readPageText(await group())).toContain("linear");
+    });
+    expect(readPageText(await group())).not.toContain("github");
+    expect(readCalls(api, "/api/v1/settings")).toBeGreaterThan(reads);
+  });
+});
+
+describe("Settings > MCP servers > one server's page > a click is decided on the list as it is then", () => {
+  const C_THIRD = makeId("c", 8);
+  const S_THIRD = buildServer(7, "sentry", C_THIRD);
+  const findBox = async (name: string): Promise<HTMLElement> => {
+    const heading = await screen.findByText(name, { selector: "span.font-emph" });
+    return heading.closest("li")!;
+  };
+
+  it("refuses a confirmed swap, and names the new occupant, when the list names another server of the name by then", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld();
+    world.servers.push(S_THIRD);
+    const { api } = await openPage(S_HOBBY, {
+      world,
+      extra: {
+        "GET /api/v1/connections": {
+          body: { items: [...CONNECTIONS, buildConnection(C_THIRD, "sentry", "third")] },
+        },
+      },
+    });
+
+    const webshop = await findBox("webshop");
+    // The controller's list changes after the page was drawn, before the click.
+    world.projects[0] = { ...world.projects[0]!, mcpServerIds: [S_THIRD.id, S_LINEAR.id] };
+    await user.click(within(webshop).getByRole("checkbox"));
+    expect(readPageText(webshop)).toContain("webshop already uses sentry work.");
+    // The refusal reads the project list again, which now names the third server.
+    await waitFor(() => {
+      expect(readCalls(api, "/api/v1/projects")).toBeGreaterThan(1);
+    });
+
+    await user.click(within(webshop).getByRole("button", { name: "Use sentry hobby" }));
+
+    await waitFor(() => {
+      expect(readPageText(webshop)).toContain("webshop already uses sentry third.");
+    });
+    // The swap the user confirmed was for the work account, so nothing was written.
+    expect(listWrites(api)).toEqual([]);
+  });
+});
+
+describe("Settings > MCP servers > one server's page > Remove > leaving the page", () => {
+  const openRemoval = async (options?: Parameters<typeof openApp>[1]) => {
+    const user = userEvent.setup();
+    const app = await openPage(S_WORK, options);
+    await user.click(await screen.findByRole("button", { name: "Remove server…" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sentry work?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+    return app;
+  };
+
+  it("drops the deleted server's page read, so its address never paints the server again", async () => {
+    const { api, router } = await openRemoval();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/settings/mcp-servers");
+    });
+    const reads = readCalls(api, `/api/v1/mcp-servers/${S_WORK.id}`);
+
+    await act(() =>
+      router.navigate({ to: "/settings/mcp-servers/$id", params: { id: S_WORK.id } }),
+    );
+
+    // The address is read again, not painted from the cache, and goes back to the list.
+    expect(router.state.location.pathname).toBe("/settings/mcp-servers");
+    expect(readCalls(api, `/api/v1/mcp-servers/${S_WORK.id}`)).toBeGreaterThan(reads);
+  });
+
+  it("goes back to the list when the server was deleted elsewhere first, and reads the servers again", async () => {
+    const world = buildWorld();
+    const { api, router } = await openRemoval({
+      world,
+      extra: {
+        [`DELETE /api/v1/mcp-servers/${S_WORK.id}`]: () => {
+          world.servers = world.servers.filter((each) => each.id !== S_WORK.id);
+          return { status: 404, body: buildErrorBody("not_found", "no such server") };
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/settings/mcp-servers");
+    });
+    expect(readCalls(api, "/api/v1/mcp-servers")).toBeGreaterThan(1);
+    const row = await findRow("Offer sentry work to threads");
+    expect(readPageText(row)).toContain("switch it on to see its tools");
+  });
+});

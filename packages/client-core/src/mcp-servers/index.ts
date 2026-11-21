@@ -7,10 +7,11 @@
  */
 export { describeAgentToolsNote, type AgentToolsNote } from "./agent-tools-note";
 export {
+  buildMcpWarningLine,
   decideStatusBand,
   decideWarningFix,
-  isActionableWarning,
   type McpServerWarningEntry,
+  type McpWarningLine,
   type StatusBand,
   type StatusBandAction,
   type WarningFix,
@@ -19,8 +20,11 @@ export { chooseNamedServer, groupServersByName, type ServerNameGroup } from "./n
 export { describeOfferAddress, readMcpServerOffers, type McpServerOffer } from "./offers";
 export {
   buildProjectBoxes,
+  decideProjectBoxWrite,
   describeProjectRefusal,
   type ProjectBox,
+  type ProjectBoxAction,
+  type ProjectBoxWrite,
   type ProjectBoxTarget,
   type ProjectRefusal,
   type TextPart,

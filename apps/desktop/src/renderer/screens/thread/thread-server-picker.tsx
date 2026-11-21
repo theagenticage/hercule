@@ -77,7 +77,7 @@ export default function ThreadServerPicker({
       mcpServerIds={servers.ids}
       title="MCP servers of this thread"
       foot={foot}
-      reset={reset}
+      reset={reset === null ? null : { label: reset.label, readIds: servers.readStartIds }}
       busy={servers.busy}
       error={servers.refusal}
       onChange={servers.change}

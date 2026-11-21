@@ -5,9 +5,10 @@
  * swap, Remove, and the redirects to the list.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@hercule/contract";
+import { queryKeys } from "@hercule/client-core";
 import { buildErrorBody } from "@hercule/client-core/testing";
 import {
   forgetLastSettingsSection,
@@ -15,6 +16,8 @@ import {
 } from "../../../../../app/last-settings-section";
 import { holdAnswer } from "../../../../../app/testing";
 import {
+  LINEAR,
+  LINEAR_ID,
   SENTRY_HOBBY,
   SENTRY_HOBBY_ID,
   SENTRY_WORK,
@@ -329,6 +332,44 @@ describe("a server's page, Projects", () => {
     expect(world.projects[0]!.mcpServerIds).toEqual([SENTRY_HOBBY_ID]);
   });
 
+  it("refuses a tick, without a write, when the list names the other server of the name by the time of the press", async () => {
+    const { world, calls, context } = await openPage(SENTRY_WORK, {
+      servers: [SENTRY_WORK, SENTRY_HOBBY],
+      projects: [WEBSHOP, OPS],
+    });
+    const row = findProjectRow("webshop");
+
+    // A read has put the other server in the webshop's list, which the box has not drawn yet.
+    context.queryClient.setQueryData(queryKeys.projects(), [named(WEBSHOP, SENTRY_HOBBY_ID), OPS]);
+    fireEvent.click(within(row).getByRole("checkbox"));
+
+    await waitFor(() => {
+      expect(within(findProjectRow("webshop")).getByRole("alert").textContent).toContain(
+        "webshop already uses sentry hobby",
+      );
+    });
+    expect(findCalls(calls, "PATCH", `/api/v1/projects/${WEBSHOP.id}`)).toEqual([]);
+    expect(world.projects[0]!.mcpServerIds).toEqual([]);
+  });
+
+  it("unticks only this server, whatever else the list names by the time of the press", async () => {
+    const { world, context } = await openPage(SENTRY_WORK, {
+      servers: [SENTRY_WORK, SENTRY_HOBBY, LINEAR],
+      projects: [named(WEBSHOP, SENTRY_WORK_ID), OPS],
+    });
+    const row = findProjectRow("webshop");
+
+    context.queryClient.setQueryData(queryKeys.projects(), [
+      named(WEBSHOP, SENTRY_WORK_ID, LINEAR_ID),
+      OPS,
+    ]);
+    fireEvent.click(within(row).getByRole("checkbox"));
+
+    await waitFor(() => {
+      expect(world.projects[0]!.mcpServerIds).toEqual([LINEAR_ID]);
+    });
+  });
+
   it("closes the refusal with Keep and leaves the list as it was", async () => {
     await openPage(SENTRY_WORK, {
       servers: [SENTRY_WORK, SENTRY_HOBBY],
@@ -445,6 +486,22 @@ describe("a server's page, Remove", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(world.servers).toHaveLength(1);
+  });
+
+  it("goes back to the list when the controller says the server is gone", async () => {
+    const { router } = await openPage(SENTRY_WORK, {
+      handlers: {
+        [`DELETE ${WORK_URL}`]: { status: 404, body: buildErrorBody("not_found", "no server") },
+      },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Remove server…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove sentry work?" });
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(LIST_PATH);
+    });
   });
 
   it("keeps a refusal in the dialog", async () => {

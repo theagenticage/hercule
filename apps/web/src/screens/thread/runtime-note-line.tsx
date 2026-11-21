@@ -89,13 +89,20 @@ function RuntimeNoteMark({
  * `actions` are the buttons a note can end with, such as the Reconnect of a
  * note about an MCP server. They follow the message and wrap under it when
  * the line is narrow.
+ *
+ * `tone` is how the line is coloured, apart from what its severity says to a
+ * screen reader. `"fail"` draws any severity in the failure colour, for a
+ * warning the user must act on, while the mark keeps the severity's shape and
+ * the screen reader still hears "Warning".
  */
 export function RuntimeNoteLine({
   note,
   actions,
+  tone,
 }: {
   readonly note: RuntimeNote;
   readonly actions?: ReactNode;
+  readonly tone?: "quiet" | "fail";
 }): JSX.Element {
   const message = (
     <p className="min-w-0">
@@ -107,7 +114,9 @@ export function RuntimeNoteLine({
     <div
       className={cn(
         "flex items-start gap-2 text-meta wrap-anywhere",
-        note.severity === "error" ? "text-fail" : "text-muted",
+        (tone ?? (note.severity === "error" ? "fail" : "quiet")) === "fail"
+          ? "text-fail"
+          : "text-muted",
       )}
     >
       {/* The box is one line high, so the mark stays centred on the first line of a message that wraps. */}

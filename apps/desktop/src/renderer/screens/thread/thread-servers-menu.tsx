@@ -198,8 +198,8 @@ function SubmenuRows({
                 aria-disabled={servers.busy}
                 onClick={() => {
                   if (servers.busy) return;
-                  const { mcpServerIds } = menu.reset!;
-                  servers.change(() => mcpServerIds);
+                  // The start list is read when the user presses, not when the menu drew it.
+                  servers.change(() => servers.readStartIds());
                 }}
               >
                 {menu.reset.label}

@@ -14,6 +14,7 @@ const SERVERS: ThreadServers = {
   projectId: null,
   row: { words: "none", failing: false },
   change: () => undefined,
+  readStartIds: () => [],
   busy: false,
   refusal: null,
   clearRefusal: () => undefined,

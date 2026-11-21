@@ -36,7 +36,7 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
     settings.user["thread.mcpServerIds"] ?? [],
     views,
   );
-  const failure = write.error === null ? null : readErrorMessage(write.error);
+  const failure = write.refusal === null ? null : readErrorMessage(write.refusal);
 
   return (
     <section>
@@ -86,11 +86,9 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
           mcpServerIds={mcpServerIds}
           foot="Threads started in no project from now on. A thread can still change its own."
           reset={null}
-          pending={write.isPending}
+          pending={write.writing}
           failure={failure}
-          onChange={(ids) => {
-            write.mutate(() => ids);
-          }}
+          onChange={write.write}
           onClose={() => {
             setPicking(false);
           }}

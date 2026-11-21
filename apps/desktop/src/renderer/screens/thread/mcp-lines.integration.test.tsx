@@ -72,9 +72,10 @@ describe("a thread's line about MCP servers", () => {
       [SIGNED_OUT],
     );
 
-    const button = await within(readNote()).findByRole("button", {
-      name: "Reconnect Sentry · work",
-    });
+    // The plain warning stands in until the line's code has loaded, so the line is found again on each try.
+    const button = await waitFor(() =>
+      within(readNote()).getByRole("button", { name: "Reconnect Sentry · work" }),
+    );
     expect(readNote().className).toBe("error-note");
     // The marker keeps the warning's name for a screen reader.
     expect(within(readNote()).getByRole("img", { name: "Warning" })).toBeTruthy();
@@ -89,7 +90,9 @@ describe("a thread's line about MCP servers", () => {
     async (reason) => {
       const { readNote, router } = await openLine([{ mcpServerId: LINEAR_ID, reason }], [LINEAR]);
 
-      const button = await within(readNote()).findByRole("button", { name: "Open server" });
+      const button = await waitFor(() =>
+        within(readNote()).getByRole("button", { name: "Open server" }),
+      );
       expect(readNote().className).toBe("error-note");
       fireEvent.click(button);
 
@@ -143,7 +146,9 @@ describe("a thread's line about MCP servers", () => {
       [SIGNED_OUT, LINEAR, SENTRY_HOBBY],
     );
 
-    await within(readNote()).findByRole("button", { name: "Reconnect Sentry · work" });
+    await waitFor(() =>
+      within(readNote()).getByRole("button", { name: "Reconnect Sentry · work" }),
+    );
 
     expect(
       within(readNote())

@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { buildErrorBody } from "@hercule/client-core/testing";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
   SENTRY_HOBBY_CONNECTION,
@@ -128,6 +129,25 @@ describe("Settings > Connections, agent tools", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/settings/mcp-servers/${LINEAR.id}`);
     });
+  });
+
+  it("says the tools are not available, in plain text, when the servers cannot be read, and keeps the Connection's actions", async () => {
+    await openConnections({
+      servers: [SENTRY_WORK],
+      handlers: {
+        [`GET ${SERVER_LIST_PATH}`]: {
+          status: 403,
+          body: buildErrorBody("forbidden", "This token lacks mcp.read."),
+        },
+      },
+    });
+
+    const row = findRow("Sentry · work");
+    await waitFor(() => {
+      expect(within(row).getByText("agent tools: not available")).toBeTruthy();
+    });
+    expect(within(row).queryByRole("button", { name: /^agent tools/ })).toBeNull();
+    expect(within(row).getByRole("button", { name: "More for Sentry · work" })).toBeTruthy();
   });
 
   it("shows no note, and no menu item, for a Connection whose plugin offers no server", async () => {

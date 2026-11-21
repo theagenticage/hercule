@@ -57,15 +57,33 @@ export const decideWarningFix = (
   }
 };
 
+/** A thread's warning line: how it is drawn, and the buttons it offers. */
+export interface McpWarningLine {
+  /**
+   * `fail` when at least one server has a button, because the user must act;
+   * `quiet` when there is nothing to do, as quiet as any warning.
+   */
+  readonly tone: "quiet" | "fail";
+  /** One button for each entry that has a fix, in the order of the entries. Entries are not merged. */
+  readonly fixes: readonly { readonly key: string; readonly fix: WarningFix }[];
+}
+
 /**
- * Checks whether the user can act on a warning: at least one server it names
- * has a fix button. Such a line is drawn in the failure colours, because the
- * user must act; a line with nothing to do stays as quiet as any warning.
+ * Returns how a `runtime.warning` naming `entries` is drawn: its tone and
+ * its buttons, decided by `decideWarningFix` from the servers as they are
+ * now. `key` identifies a button among the others of one line (the server
+ * and the reason), so an app can use it as the element key.
  */
-export const isActionableWarning = (
+export const buildMcpWarningLine = (
   entries: readonly McpServerWarningEntry[],
   views: readonly McpServerView[],
-): boolean => entries.some((entry) => decideWarningFix(entry, views) !== null);
+): McpWarningLine => {
+  const fixes = entries.flatMap((entry) => {
+    const fix = decideWarningFix(entry, views);
+    return fix === null ? [] : [{ key: `${entry.mcpServerId}:${entry.reason}`, fix }];
+  });
+  return { tone: fixes.length === 0 ? "quiet" : "fail", fixes };
+};
 
 /** The button of a server's status band. */
 export type StatusBandAction =

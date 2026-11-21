@@ -12,10 +12,16 @@ import { useThreadServers } from "./use-thread-servers";
  * This is the one place the composer touches MCP servers. The composer owns
  * whether the menu is open, so opening one of its selectors closes this menu.
  *
+ * The servers are read when the MCP row opens its submenu or the picker
+ * opens, not when the `+` menu does: the menu is also how an image is
+ * attached.
+ *
  * Opening "N more servers…" closes the menu and opens the picker, which is
- * drawn until the user is done. A refusal of a write is shown under the
- * submenu, or in the picker, whichever made it, and does not outlive that
- * menu.
+ * drawn until the user is done. A refusal of a write belongs to the thread's
+ * list, not to the control that started the write, so it shows under the
+ * submenu or in the picker, whichever is open when it arrives. It is
+ * forgotten when the user closes the menu or the picker having seen it, or
+ * when the next write starts.
  */
 export function ThreadPlusMenu({
   client,
@@ -51,6 +57,10 @@ export function ThreadPlusMenu({
 }): JSX.Element {
   // Whether the picker is open. It opens from the `+` menu, which closes.
   const [picking, setPicking] = useState(false);
+  // Whether the MCP row has opened its submenu. It closes with the menu,
+  // however the menu closes: the composer closes it when one of its selectors opens.
+  const [showsServers, setShowsServers] = useState(false);
+  if (!open && showsServers) setShowsServers(false);
   const servers = useThreadServers({
     client,
     live,
@@ -60,12 +70,16 @@ export function ThreadPlusMenu({
     defaultIds,
     picks,
     recordThreadChoice,
-    wanted: open || picking,
+    wanted: showsServers || picking,
   });
 
+  // A refusal is forgotten once the user has seen it and closes the control.
+  // While a write runs, its refusal has not arrived yet, so it is kept.
+  const forgetSeenRefusal = (): void => {
+    if (!servers.writing) servers.clearRefusal();
+  };
   const handleOpenChange = (next: boolean): void => {
-    // A refusal belongs to the menu that made it, so it does not outlive that menu.
-    if (!next) servers.clearRefusal();
+    if (!next) forgetSeenRefusal();
     onOpenChange(next);
   };
 
@@ -77,6 +91,8 @@ export function ThreadPlusMenu({
         attachDisabledReason={attachDisabledReason}
         onFiles={onFiles}
         serversRow={servers.row}
+        serversOpen={showsServers}
+        onServersOpenChange={setShowsServers}
         submenu={
           servers.views !== undefined && servers.start !== undefined ? (
             <ThreadServersMenu
@@ -87,10 +103,10 @@ export function ThreadPlusMenu({
               writing={servers.writing}
               refusal={servers.refusal}
               onChoose={servers.chooseServer}
-              onReset={servers.setList}
+              onReset={servers.resetToStart}
               onOpenPicker={() => {
                 setPicking(true);
-                handleOpenChange(false);
+                onOpenChange(false);
               }}
             />
           ) : (
@@ -113,9 +129,11 @@ export function ThreadPlusMenu({
           start={servers.start}
           writing={servers.writing}
           refusal={servers.refusal}
-          onChange={servers.setList}
+          onChange={servers.changeList}
+          onReset={servers.resetToStart}
           onClose={() => {
             setPicking(false);
+            forgetSeenRefusal();
           }}
         />
       ) : null}

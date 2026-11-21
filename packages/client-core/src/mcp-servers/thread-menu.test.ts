@@ -111,7 +111,7 @@ describe("buildThreadServerMenu", () => {
     expect(menu.moreCount).toBe(2);
   });
 
-  it("shows every name of a thread that has more than eight servers", () => {
+  it("shows every name of a thread that has more than eight servers, and no other", () => {
     const servers = buildManyServers(10);
     const views = buildViews(servers);
     const nine = servers.slice(0, 9).map((server) => server.id);
@@ -122,7 +122,7 @@ describe("buildThreadServerMenu", () => {
     expect(menu.moreCount).toBe(1);
   });
 
-  it("keeps every row in place while the thread's list changes after the menu opened", () => {
+  it("keeps the surviving rows in their order while the thread's list changes after the menu opened", () => {
     const servers = buildManyServers(10);
     const views = buildViews(servers);
     const nine = servers.slice(0, 9).map((server) => server.id);
@@ -134,7 +134,20 @@ describe("buildThreadServerMenu", () => {
       order,
     );
 
-    expect(afterSwitchingOff.rows.map((row) => row.name)).toEqual(order.slice(0, 9));
+    // The thread owns eight names now, so eight rows; the switched-off name gives way.
+    expect(afterSwitchingOff.rows.map((row) => row.name)).toEqual(
+      order.filter((name) => name !== "tool03").slice(0, 8),
+    );
+  });
+
+  it("appends a name the thread gained while the menu was open and the order lacks", () => {
+    const views = buildViews([LINEAR, SENTRY_WORK, buildServer("s-new", "zulu", "c-linear")]);
+    const order = ["sentry", "linear"];
+
+    const menu = menuOf(views, ["s-new"], order);
+
+    expect(menu.rows.map((row) => row.name)).toEqual(["sentry", "linear", "zulu"]);
+    expect(menu.rows.at(-1)?.on).toBe(true);
   });
 
   it("shows a name the thread gets from the picker, though it was beyond the first eight", () => {
@@ -144,6 +157,26 @@ describe("buildThreadServerMenu", () => {
     const menu = menuOf(views, ["s-tool10"], order);
 
     expect(menu.rows.map((row) => row.name)).toContain("tool10");
+  });
+
+  it("never shows nine rows for a thread that owns one server", () => {
+    const views = buildViews(buildManyServers(10));
+    const order = orderMenuNames(views, []);
+
+    const menu = menuOf(views, ["s-tool10"], order);
+
+    expect(menu.rows).toHaveLength(8);
+    expect(menu.moreCount).toBe(2);
+  });
+
+  it("never shows nine rows when the owned name was added while the menu was open", () => {
+    const views = buildViews([...buildManyServers(8), buildServer("s-new", "zulu", "c-linear")]);
+    const order = orderMenuNames(views, []).filter((name) => name !== "zulu");
+
+    const menu = menuOf(views, ["s-new"], order);
+
+    expect(menu.rows).toHaveLength(8);
+    expect(menu.rows.map((row) => row.name)).toContain("zulu");
   });
 
   it("drops the row of a name whose servers were all deleted since the menu opened", () => {

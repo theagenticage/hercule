@@ -11,10 +11,13 @@ import { ChevronRightIcon } from "../../../icons/chevron-right";
  * the server in Settings > MCP servers. It is no switch.
  */
 export interface AgentTools {
-  /** "agent tools off", "agent tools on" or "agent tools: needs sign-in". */
+  /** "agent tools off", "agent tools on", "agent tools: needs sign-in" or "agent tools: not available". */
   readonly text: string;
-  /** `fail` for a server that needs sign-in, is unreachable or is in error. */
-  readonly tone: "off" | "on" | "fail";
+  /**
+   * `fail` for a server that needs sign-in, is unreachable or is in error.
+   * `unavailable` when the servers could not be read, so nothing is known.
+   */
+  readonly tone: "off" | "on" | "fail" | "unavailable";
   /** The server's id, which its page is addressed by, or `null` while the server has no record. */
   readonly serverId: string | null;
 }
@@ -52,9 +55,27 @@ export const mapAgentToolsByConnection = (
 };
 
 /**
+ * Returns the note of every Connection that has a server, for when the
+ * servers could not be read: each says "agent tools: not available", with no
+ * server to lead to. `rows` come from a list with no servers, which has one
+ * row for each Connection whose plugin offers one.
+ */
+export const mapUnavailableAgentTools = (
+  rows: readonly McpServerSettingsRow[],
+): ReadonlyMap<string, AgentTools> =>
+  new Map(
+    rows.map((row) => [
+      row.connection.id,
+      { text: "agent tools: not available", tone: "unavailable", serverId: null },
+    ]),
+  );
+
+/**
  * Renders the line of `tools` as a small button that calls `onOpen`. It
  * starts with a mark of the server's state: a ring while it is off, a filled
- * dot while it is on, and the app's red dot while it needs the user.
+ * dot while it is on, and the app's red dot while it needs the user. A note
+ * that says the servers are not available is plain text in the muted ink: there
+ * is no server to open.
  */
 export function AgentToolsButton({
   tools,
@@ -63,6 +84,9 @@ export function AgentToolsButton({
   readonly tools: AgentTools;
   readonly onOpen: () => void;
 }): JSX.Element {
+  if (tools.tone === "unavailable") {
+    return <span className="conn-tools is-unavailable">{tools.text}</span>;
+  }
   return (
     <button
       type="button"

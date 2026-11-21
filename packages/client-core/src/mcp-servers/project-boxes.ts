@@ -4,6 +4,7 @@
  * server (spec 17, Settings > MCP servers).
  */
 import type { Project } from "@hercule/contract";
+import { chooseNamedServer } from "./named-lists";
 import type { McpServerView } from "./views";
 
 /** The list a box edits. */
@@ -29,9 +30,10 @@ export interface ProjectBox {
  * order, then one for the threads without a project, which edits the default
  * list `defaultIds`.
  *
- * A box is a picture of the lists as they are now. The write a tick makes is
- * `chooseNamedServer` on the target's list as it is when the user clicks, so
- * a box drawn from an older read never overwrites a newer list.
+ * A box is a picture of the lists as they are now. The write a click makes is
+ * decided by `decideProjectBoxWrite` on the target's list as it is when the
+ * user clicks, so a box drawn from an older read never overwrites a newer
+ * list.
  */
 export const buildProjectBoxes = (
   view: McpServerView,
@@ -54,6 +56,63 @@ export const buildProjectBoxes = (
     ...projects.map((project) => buildBox({ kind: "project", project }, project.mcpServerIds)),
     buildBox({ kind: "default" }, defaultIds),
   ];
+};
+
+/** What a click on a box asks for, on the page of one server. */
+export type ProjectBoxAction =
+  /** Switches the page's server on. */
+  | "tick"
+  /** Switches the page's server off. */
+  | "untick"
+  /** Replaces `swapFrom`, the other server of the same name the user confirmed, with the page's server. */
+  | { readonly swapFrom: string };
+
+/** What `decideProjectBoxWrite` decided. */
+export type ProjectBoxWrite =
+  | { readonly kind: "write"; readonly mcpServerIds: readonly string[] }
+  | {
+      readonly kind: "refused";
+      /** The other server of the same name that the list holds now. */
+      readonly occupant: McpServerView;
+    };
+
+/**
+ * Returns the write for a click on a box, decided on `currentIds`, the
+ * target's list as it is at the moment of the click:
+ *
+ * - `"tick"` writes the list with `server`, or is refused with the server of
+ *   the same name that the list already names;
+ * - `"untick"` writes the list without `server`, and touches nothing else;
+ * - `{ swapFrom }` writes the swap only while the list's server of that name
+ *   is still `swapFrom`. When the list names another one now, it is refused
+ *   with that one, because the user confirmed a swap for a different server.
+ *   A list with none of that name left is written like a tick.
+ *
+ * The list is never decided from a read made when the box was drawn, so a
+ * list changed meanwhile is neither overwritten nor swapped blindly.
+ */
+export const decideProjectBoxWrite = (
+  currentIds: readonly string[],
+  views: readonly McpServerView[],
+  server: McpServerView,
+  action: ProjectBoxAction,
+): ProjectBoxWrite => {
+  if (action === "untick") {
+    return { kind: "write", mcpServerIds: currentIds.filter((id) => id !== server.server.id) };
+  }
+  const occupant = views.find(
+    (other) =>
+      other.server.name === server.server.name &&
+      other.server.id !== server.server.id &&
+      currentIds.includes(other.server.id),
+  );
+  if (occupant !== undefined && (action === "tick" || occupant.server.id !== action.swapFrom)) {
+    return { kind: "refused", occupant };
+  }
+  return {
+    kind: "write",
+    mcpServerIds: chooseNamedServer(currentIds, views, server.server.name, server.server.id),
+  };
 };
 
 /** A piece of a sentence or of a button label: plain text, or text the app draws as a code span. */

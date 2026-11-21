@@ -8,6 +8,7 @@ import {
   mcpServersQuery,
   pluginsQuery,
   projectsQuery,
+  readOnOpen,
   settingsQuery,
 } from "../../../../../app/queries";
 import {
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/mcp-servers/")
   loader: async ({ context: { controller, queryClient } }) => {
     await Promise.all([
       queryClient.ensureQueryData(mcpServersQuery(controller.client)),
-      queryClient.ensureQueryData(settingsQuery(controller.client)),
+      readOnOpen(queryClient, settingsQuery(controller.client)),
     ]);
   },
   onEnter: () => {
