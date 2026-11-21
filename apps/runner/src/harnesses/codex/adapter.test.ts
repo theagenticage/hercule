@@ -4435,10 +4435,8 @@ describe("the bytes of a generated image", () => {
   });
 });
 
-describe("the images in the result of an MCP tool call", () => {
+describe("an MCP tool call item", () => {
   const IMAGE = PNG_BYTES.toString("base64");
-  const notKeptNotice: unknown = expect.stringContaining("does not keep");
-  const NOT_KEPT = { type: "image", unavailable: notKeptNotice };
 
   const buildCall = (result: unknown, status = "completed") => ({
     type: "mcpToolCall",
@@ -4463,141 +4461,40 @@ describe("the images in the result of an MCP tool call", () => {
     },
   });
 
-  const IMAGE_RESULT = {
-    content: [
-      { type: "text", text: "Snapshot of the issue" },
-      { type: "image", data: IMAGE, mimeType: "image/png" },
-      { type: "text", text: "Taken just now" },
-    ],
-    // The same image again, as MCP servers often repeat it.
-    structuredContent: { screenshot: IMAGE, [IMAGE]: "keyed by the image" },
-    _meta: { preview: `data:image/png;base64,${IMAGE}` },
-  };
-
-  const AUDIO = Buffer.from("not really a sound, but long enough").toString("base64");
-  const BLOB = Buffer.from("not really a document, but long enough").toString("base64");
-  const MEDIA_RESULT = {
-    content: [
-      { type: "text", text: "Recorded it" },
-      { type: "audio", data: AUDIO, mimeType: "audio/wav" },
-      {
-        type: "resource",
-        resource: { uri: "file:///report.pdf", mimeType: "application/pdf", blob: BLOB },
-      },
-    ],
-    structuredContent: { sound: AUDIO },
-    _meta: null,
-  };
-
-  const expectMediaBytesGone = (seen: ReadonlyArray<unknown>): void => {
-    const text = JSON.stringify(seen);
-    expect(text).not.toContain(AUDIO);
-    expect(text).not.toContain(BLOB);
-    // Everything but the bytes stays.
-    expect(text).toContain("audio/wav");
-    expect(text).toContain("file:///report.pdf");
-    expect(text).toContain("Recorded it");
-  };
-
-  it("lose the bytes of audio and of an embedded resource in the item", async () => {
+  it("has the media of its result removed before the item is emitted", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
 
-    run.spawns[0]!.push(completedFrame(MEDIA_RESULT));
-    await waitUntil(
-      "completed the call",
-      () => filterByTag(run.seen, "item.completed").length === 1,
+    run.spawns[0]!.push(
+      completedFrame({
+        content: [
+          { type: "text", text: "Snapshot of the issue" },
+          { type: "image", data: IMAGE, mimeType: "image/png" },
+        ],
+        structuredContent: { screenshot: IMAGE },
+        _meta: null,
+      }),
     );
-
-    expectMediaBytesGone(run.seen);
-  });
-
-  it("lose the bytes of audio and of an embedded resource in the items of a completed turn", async () => {
-    const run = createDriving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-
-    run.spawns[0]!.push({
-      method: "turn/completed",
-      params: {
-        threadId: THREAD,
-        turn: {
-          id: TURN,
-          items: [buildCall(MEDIA_RESULT)],
-          itemsView: "full",
-          status: "completed",
-        },
-      },
-    });
-    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
-
-    expectMediaBytesGone(run.seen);
-  });
-
-  it("become unavailable in the item, and the bytes reach no event", async () => {
-    const run = createDriving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-
-    run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
     await waitUntil(
       "completed the call",
       () => filterByTag(run.seen, "item.completed").length === 1,
     );
 
     expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
-    const completed = filterByTag(run.seen, "item.completed")[0]!;
-    const blocks = [
-      { type: "text", text: "Snapshot of the issue" },
-      NOT_KEPT,
-      { type: "text", text: "Taken just now" },
-    ];
-    expect(completed.raw).toMatchObject({
-      payload: {
-        item: {
-          result: {
-            content: blocks,
-            // Every other copy of the image's bytes is replaced, and the text around it stays.
-            structuredContent: {
-              screenshot: "[bytes not kept]",
-              "[bytes not kept]": "keyed by the image",
-            },
-            _meta: { preview: "data:image/png;base64,[bytes not kept]" },
-          },
-        },
-      },
-    });
     // The expanded step shows the same blocks, as Claude Code's tool result does.
-    expect(completed.detail).toEqual({
+    const notKeptNotice: unknown = expect.stringContaining("does not keep");
+    expect(filterByTag(run.seen, "item.completed")[0]?.detail).toEqual({
       name: "get_snapshot_image",
       server: "sentry",
       kind: "mcp",
-      content: blocks,
+      content: [
+        { type: "text", text: "Snapshot of the issue" },
+        { type: "image", unavailable: notKeptNotice },
+      ],
     });
   });
 
-  it("become unavailable in the items of a completed turn too", async () => {
-    const run = createDriving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-
-    run.spawns[0]!.push({
-      method: "turn/completed",
-      params: {
-        threadId: THREAD,
-        turn: {
-          id: TURN,
-          items: [buildCall(IMAGE_RESULT)],
-          itemsView: "full",
-          status: "completed",
-        },
-      },
-    });
-    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
-
-    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
-    expect(JSON.stringify(run.seen)).toContain("does not keep");
-    expect(JSON.stringify(run.seen)).toContain("[bytes not kept]");
-  });
-
-  it("show the message of a call that failed as the item's content", async () => {
+  it("shows the message of a call that failed as the item's content", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
 
@@ -4619,34 +4516,35 @@ describe("the images in the result of an MCP tool call", () => {
     expect(completed.status).toBe("failed");
     expect(completed.detail).toMatchObject({ content: "Sentry refused the request" });
   });
+});
 
-  it("leave a text-only result as it was", async () => {
-    const run = createDriving();
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-    const textOnly = {
-      content: [{ type: "text", text: "3 issues found" }],
-      structuredContent: null,
-      _meta: null,
-    };
-
-    run.spawns[0]!.push(completedFrame(textOnly));
-    await waitUntil(
-      "completed the call",
-      () => filterByTag(run.seen, "item.completed").length === 1,
-    );
-
-    expect(filterByTag(run.seen, "item.completed")[0]?.raw).toMatchObject({
-      payload: { item: { result: textOnly } },
-    });
-  });
-
+describe("a session whose app-server exits", () => {
   it("emits every call Codex wrote before it exited, and the exit after them", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
 
     for (let index = 0; index < 12; index += 1) {
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, `trailing-${String(index)}`));
+      run.spawns[0]!.push({
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: {
+            type: "mcpToolCall",
+            id: `trailing-${String(index)}`,
+            server: "tools",
+            tool: "sentry__search_issues",
+            status: "completed",
+            arguments: {},
+            appContext: null,
+            result: { content: [{ type: "text", text: "3 issues" }], structuredContent: null },
+            error: null,
+            durationMs: 5,
+          },
+          completedAtMs: 1,
+        },
+      });
     }
     run.spawns[0]!.crash();
     await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);

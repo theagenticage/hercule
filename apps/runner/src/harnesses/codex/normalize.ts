@@ -302,7 +302,7 @@ const truncateResultBlock = (block: unknown): unknown => {
  * A completed item also shows what the call returned in `content`, as Claude
  * Code's tool result does: the blocks of the result, or the error's message
  * for a call that failed. An image block is already `unavailable` by the time
- * it gets here (see `stripImageBytes` in the adapter).
+ * it gets here (see `removeMediaBytes`).
  */
 const buildMcpToolCallDetail = (
   item: Extract<ThreadItem, { type: "mcpToolCall" }>,

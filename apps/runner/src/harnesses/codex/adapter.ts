@@ -140,6 +140,7 @@ import {
   type RpcReply,
   type ServerRequestFrame,
 } from "./rpc";
+import { removeMediaBytes } from "./tool-result-media";
 import type {
   AccountRateLimitsUpdatedNotification,
   ApprovalsReviewer,
@@ -740,114 +741,6 @@ const listRolloutDayFolders = async (sessionsFolder: string): Promise<ReadonlyAr
   return (await Promise.all(months.map(readChildFolders))).flat();
 };
 
-/**
- * Returns every thread item a notification frame holds. A `ThreadItem` sits in
- * the params of only these notifications: `item/started` and `item/completed`
- * hold it in `params.item`, and `turn/started` and `turn/completed` hold a
- * turn's items in `params.turn.items`. `thread/started` holds whole threads,
- * but it is dropped and never attached to an event. The items are returned as
- * they are, mutable, and unchecked: the callers go by an item's `type` alone,
- * so an item whose other fields are malformed is covered too.
- */
-const listFrameItems = (frame: NotificationFrame): ReadonlyArray<Record<string, unknown>> => {
-  const params = frame.params as
-    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
-    | null
-    | undefined;
-  const turnItems = params?.turn?.items;
-  return [
-    params?.item,
-    ...(Array.isArray(turnItems) ? (turnItems as ReadonlyArray<unknown>) : []),
-  ].filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
-};
-
-/**
- * The reason shown for an image of a Codex MCP tool's result: the model has
- * seen it, but Hercule does not keep it.
- */
-const MCP_IMAGE_NOT_KEPT = "Hercule does not keep the images of a Codex MCP tool's result yet.";
-
-/** What replaces the base64 of an MCP result's audio, embedded resource, or copy of an image. */
-const MCP_BYTES_NOT_KEPT = "[bytes not kept]";
-
-/**
- * Returns `value` with every exact copy of the base64 strings in `copies`
- * replaced by `MCP_BYTES_NOT_KEPT`, at any depth. A string that holds a copy, such
- * as a data URL, keeps its other text. `copies` lists longer strings first, so
- * a copy that is part of a longer one cannot break the longer one up. Object
- * keys are scrubbed like strings. When two keys become the same text, the
- * first keeps its value and the later ones are dropped.
- */
-const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknown => {
-  if (typeof value === "string") {
-    return copies.reduce((text, copy) => text.replaceAll(copy, MCP_BYTES_NOT_KEPT), value);
-  }
-  if (Array.isArray(value)) return value.map((item) => scrubImageCopies(item, copies));
-  if (typeof value === "object" && value !== null) {
-    const scrubbed = new Map<string, unknown>();
-    for (const [key, field] of Object.entries(value)) {
-      const scrubbedKey = scrubImageCopies(key, copies) as string;
-      if (!scrubbed.has(scrubbedKey)) scrubbed.set(scrubbedKey, scrubImageCopies(field, copies));
-    }
-    return Object.fromEntries(scrubbed);
-  }
-  return value;
-};
-
-/**
- * Removes the bytes of images from a notification frame, in place, before
- * anything else reads the frame. Left in, they would be copied into every
- * event's `raw` and make each one megabytes long. The frame comes straight
- * from the decoder, so nothing else holds it yet.
- *
- * - An `imageGeneration` item holds the generated image, base64 encoded, in
- *   `result`. The field is removed, because the image reaches nobody through
- *   the stream.
- * - An `mcpToolCall` item holds MCP's media blocks in `result.content`. An
- *   image block is replaced by an `unavailable` image (see `ToolResultImage`).
- *   The base64 of an audio block's `data` and of an embedded resource's `blob`
- *   is replaced by a short placeholder, and its `mimeType` and `uri` stay.
- *   Every other copy of that base64 in the result, such as one in
- *   `structuredContent` or `_meta`, is replaced too. The model already has its
- *   own copy, and the text blocks stay. A result too deeply nested to walk is
- *   dropped whole, so no bytes stay.
- */
-const stripImageBytes = (frame: NotificationFrame): void => {
-  for (const item of listFrameItems(frame)) {
-    if (item["type"] === "imageGeneration") Reflect.deleteProperty(item, "result");
-    if (item["type"] !== "mcpToolCall") continue;
-    const content = (item["result"] as { readonly content?: unknown } | null | undefined)?.content;
-    if (!Array.isArray(content)) continue;
-    const copies = new Set<string>();
-    for (const [index, block] of content.entries()) {
-      const media = block as {
-        type?: unknown;
-        data?: unknown;
-        resource?: { blob?: unknown } | null;
-      } | null;
-      if (media?.type === "image") {
-        if (typeof media.data === "string" && media.data !== "") copies.add(media.data);
-        content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
-      } else if (media?.type === "audio" && typeof media.data === "string") {
-        if (media.data !== "") copies.add(media.data);
-        media.data = MCP_BYTES_NOT_KEPT;
-      } else if (media?.type === "resource" && typeof media.resource?.blob === "string") {
-        if (media.resource.blob !== "") copies.add(media.resource.blob);
-        media.resource.blob = MCP_BYTES_NOT_KEPT;
-      }
-    }
-    if (copies.size === 0) continue;
-    try {
-      item["result"] = scrubImageCopies(
-        item["result"],
-        [...copies].toSorted((a, b) => b.length - a.length),
-      );
-    } catch {
-      Reflect.deleteProperty(item, "result");
-    }
-  }
-};
-
 export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
@@ -1010,7 +903,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
-            stripImageBytes(frame);
+            removeMediaBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
