@@ -321,3 +321,103 @@ export const startAsyncQuestionModel = (title: string, options: ReadonlyArray<st
     stop: () => server.stop(true),
   };
 };
+
+/**
+ * Returns the tool a user message asks the model to call: the message
+ * `call <tool>` asks for that tool of the MCP Gateway entry. Returns
+ * `undefined` when the last input item is not such a message.
+ */
+const readCalledTool = (input: ReadonlyArray<Record<string, unknown>>): string | undefined => {
+  const last = input.at(-1);
+  if (last?.["role"] !== "user") return undefined;
+  const parts = last["content"] as ReadonlyArray<{ readonly text?: string }>;
+  return parts.flatMap((part) => /^call (\S+)$/.exec(part.text ?? "")?.[1] ?? [])[0];
+};
+
+/**
+ * Runs a local Responses API fixture whose model calls an MCP tool when the
+ * user says `call <tool>`, and answers every other request with a short text.
+ * The tool belongs to the MCP Gateway entry, named `tools`, so Codex shows it
+ * to the model in the namespace `mcp__tools`.
+ *
+ * Codex's automatic reviewer asks the model too, with a JSON output schema.
+ * The fixture answers it with `reviewer.outcome`, which a test may change at
+ * any time. `config` is the `config.toml` text that points Codex at the
+ * fixture.
+ */
+export const startMcpCallModel = () => {
+  const reviewer = { outcome: "allow" as "allow" | "deny" };
+  let sequence = 0;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const body = (await request.json()) as {
+        readonly input: ReadonlyArray<Record<string, unknown>>;
+        readonly text?: { readonly format?: { readonly name?: string } };
+      };
+      const id = `response-${++sequence}`;
+      const tool = readCalledTool(body.input);
+      const reply = (text: string) => ({
+        type: "message",
+        role: "assistant",
+        id: `message-${id}`,
+        content: [{ type: "output_text", text }],
+      });
+      const item =
+        body.text?.format?.name === "codex_output_schema"
+          ? reply(
+              JSON.stringify({
+                outcome: reviewer.outcome,
+                risk_level: "low",
+                user_authorization: "high",
+                rationale: "The fixture reviewer decides.",
+              }),
+            )
+          : tool === undefined
+            ? reply("Done.")
+            : {
+                type: "function_call",
+                namespace: "mcp__tools",
+                name: tool,
+                call_id: `call-${id}`,
+                arguments: "{}",
+              };
+      const events = [
+        { type: "response.created", response: { id } },
+        { type: "response.output_item.done", item },
+        {
+          type: "response.completed",
+          response: {
+            id,
+            usage: {
+              input_tokens: 1,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 1,
+              output_tokens_details: null,
+              total_tokens: 2,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    reviewer,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
