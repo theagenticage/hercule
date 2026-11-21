@@ -23,7 +23,7 @@ import { api } from "@hercule/contract";
  * The two stay equal, so a controller that Connect accepts is never one the
  * app then gives up on at launch.
  */
-const REQUEST_TIMEOUT_MS = 5000;
+export const REQUEST_TIMEOUT_MS = 5000;
 
 /**
  * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for
