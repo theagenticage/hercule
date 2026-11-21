@@ -20,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
@@ -48,8 +48,6 @@ import {
   MAX_PENDING_THREADS,
 } from "./threads";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
-import type { AttachmentUploader } from "../../attachments";
-import type { ToolResultImage } from "@hercule/protocol";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -4439,11 +4437,8 @@ describe("the bytes of a generated image", () => {
 
 describe("the images in the result of an MCP tool call", () => {
   const IMAGE = PNG_BYTES.toString("base64");
-  const STORED = {
-    id: "0199e0e7-0000-7000-8000-0000000000a1",
-    mimeType: "image/png" as const,
-    sizeBytes: 70,
-  };
+  const notKeptNotice: unknown = expect.stringContaining("does not keep");
+  const NOT_KEPT = { type: "image", unavailable: notKeptNotice };
 
   const buildCall = (result: unknown, status = "completed") => ({
     type: "mcpToolCall",
@@ -4472,34 +4467,15 @@ describe("the images in the result of an MCP tool call", () => {
     content: [
       { type: "text", text: "Snapshot of the issue" },
       { type: "image", data: IMAGE, mimeType: "image/png" },
+      { type: "text", text: "Taken just now" },
     ],
     structuredContent: null,
     _meta: null,
   };
 
-  /** Starts a session whose uploader is the one given. */
-  const startWithUploader = async (
-    upload: AttachmentUploader["upload"],
-  ): Promise<ReturnType<typeof createDriving>> => {
+  it("become unavailable in the item, and the bytes reach no event", async () => {
     const run = createDriving();
-    await Effect.runPromise(
-      run.adapter.startSession(SESSION, SPEC, {
-        ...run.ctx,
-        attachmentUploader: { upload },
-      }),
-    );
-    return run;
-  };
-
-  it("become a reference in the item, and the bytes reach no event", async () => {
-    const uploaded: Array<string> = [];
-    const run = await startWithUploader((sessionId, bytes) =>
-      Effect.sync(() => {
-        expect(sessionId).toBe(SESSION);
-        uploaded.push(Buffer.from(bytes).toString("base64"));
-        return { type: "image" as const, attachment: STORED };
-      }),
-    );
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
 
     run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
     await waitUntil(
@@ -4507,31 +4483,43 @@ describe("the images in the result of an MCP tool call", () => {
       () => filterByTag(run.seen, "item.completed").length === 1,
     );
 
-    expect(uploaded).toEqual([IMAGE]);
     expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
     const completed = filterByTag(run.seen, "item.completed")[0]!;
-    expect(completed.raw).toMatchObject({
-      payload: {
-        item: {
-          result: {
-            content: [
-              { type: "text", text: "Snapshot of the issue" },
-              { type: "image", attachment: STORED },
-            ],
-          },
-        },
-      },
-    });
+    const blocks = [
+      { type: "text", text: "Snapshot of the issue" },
+      NOT_KEPT,
+      { type: "text", text: "Taken just now" },
+    ];
+    expect(completed.raw).toMatchObject({ payload: { item: { result: { content: blocks } } } });
     // The expanded step shows the same blocks, as Claude Code's tool result does.
     expect(completed.detail).toEqual({
       name: "get_snapshot_image",
       server: "sentry",
       kind: "mcp",
-      content: [
-        { type: "text", text: "Snapshot of the issue" },
-        { type: "image", attachment: STORED },
-      ],
+      content: blocks,
     });
+  });
+
+  it("become unavailable in the items of a completed turn too", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: {
+          id: TURN,
+          items: [buildCall(IMAGE_RESULT)],
+          itemsView: "full",
+          status: "completed",
+        },
+      },
+    });
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+    expect(JSON.stringify(run.seen)).toContain("does not keep");
   });
 
   it("show the message of a call that failed as the item's content", async () => {
@@ -4557,47 +4545,9 @@ describe("the images in the result of an MCP tool call", () => {
     expect(completed.detail).toMatchObject({ content: "Sentry refused the request" });
   });
 
-  it("are replaced in the items of a completed turn too", async () => {
-    const run = await startWithUploader(() =>
-      Effect.succeed({ type: "image" as const, attachment: STORED }),
-    );
-
-    run.spawns[0]!.push({
-      method: "turn/completed",
-      params: {
-        threadId: THREAD,
-        turn: {
-          id: TURN,
-          items: [buildCall(IMAGE_RESULT)],
-          itemsView: "full",
-          status: "completed",
-        },
-      },
-    });
-    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
-
-    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
-  });
-
-  it("are not kept when the upload fails, and the item says why", async () => {
-    // The default test uploader has no controller, like an upload that fails.
+  it("leave a text-only result as it was", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
-
-    run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
-    await waitUntil(
-      "completed the call",
-      () => filterByTag(run.seen, "item.completed").length === 1,
-    );
-
-    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
-    expect(JSON.stringify(filterByTag(run.seen, "item.completed")[0]?.raw)).toContain(
-      '"unavailable":"This test has no controller to keep images."',
-    );
-  });
-
-  it("leave a text-only result as it was, with no upload", async () => {
-    const run = await startWithUploader(() => Effect.die("nothing should be uploaded"));
     const textOnly = {
       content: [{ type: "text", text: "3 issues found" }],
       structuredContent: null,
@@ -4615,260 +4565,26 @@ describe("the images in the result of an MCP tool call", () => {
     });
   });
 
-  it("keep the order of events when an upload holds one frame back", async () => {
-    let finish: () => void = () => undefined;
-    const slow = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const run = await startWithUploader(() =>
-      Effect.promise(() => slow).pipe(Effect.as({ type: "image" as const, attachment: STORED })),
-    );
+  it("emits every call Codex wrote before it exited, and the exit after them", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
 
-    run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "call-slow"));
-    run.spawns[0]!.push(
-      completedFrame(
-        { content: [{ type: "text", text: "fast" }], structuredContent: null, _meta: null },
-        "call-fast",
-      ),
-    );
-    await settle();
-    // The second call completed after the first, so it waits for the first.
-    expect(filterByTag(run.seen, "item.completed")).toEqual([]);
+    for (let index = 0; index < 12; index += 1) {
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, `trailing-${String(index)}`));
+    }
+    run.spawns[0]!.crash();
+    await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
 
-    finish();
-    await waitUntil(
-      "completed both calls",
-      () => filterByTag(run.seen, "item.completed").length === 2,
-    );
-
-    expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
-      "call-slow",
-      "call-fast",
-    ]);
-  });
-
-  describe("while an upload holds the completion of a call", () => {
-    /**
-     * Starts a session whose uploader never finishes by itself, like a slow
-     * controller. An aborted upload ends at once and leaves the image
-     * unavailable, which is what a real uploader does when the session stops.
-     */
-    const startHeld = async () => {
-      let started = false;
-      const run = await startWithUploader((_sessionId, _bytes, signal) =>
-        Effect.callback<ToolResultImage>((resume) => {
-          started = true;
-          signal.addEventListener("abort", () =>
-            resume(Effect.succeed({ type: "image", unavailable: "The session stopped." })),
-          );
-        }),
-      );
-      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
-      await waitUntil("started the upload", () => started);
-      return run;
-    };
-
-    /** The tags of the call's completion and of the exit, in the order they were emitted. */
-    const listCompletionAndExit = (run: ReturnType<typeof createDriving>): ReadonlyArray<string> =>
-      run.seen
-        .filter(
-          (event) =>
-            (event._tag === "item.completed" && event.itemId === "call-1") ||
-            event._tag === "session.exited",
-        )
-        .map((event) => event._tag);
-
-    it("emits the call before the exit when the session is stopped", async () => {
-      const run = await startHeld();
-
-      await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
-      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
-
-      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
-      expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
-      expect(JSON.stringify(filterByTag(run.seen, "item.completed").at(-1)?.raw)).toContain(
-        "The session stopped.",
-      );
-    });
-
-    it("emits the call before the exit when the app-server exits", async () => {
-      const run = await startHeld();
-
-      run.spawns[0]!.crash();
-      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
-
-      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
-    });
-
-    it("emits every call Codex wrote before it exited", async () => {
-      const run = await startWithUploader(() =>
-        Effect.succeed({ type: "image" as const, attachment: STORED }),
-      );
-      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
-
-      for (let index = 0; index < 12; index += 1) {
-        run.spawns[0]!.push(completedFrame(IMAGE_RESULT, `trailing-${String(index)}`));
-      }
-      run.spawns[0]!.crash();
-      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
-
-      // The exit is reported after the output was read to its end.
-      const order = run.seen
-        .filter(
-          (event) =>
-            (event._tag === "item.completed" && event.itemId.startsWith("trailing-")) ||
-            event._tag === "session.exited",
-        )
-        .map((event) => event._tag);
-      expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
-    });
-
-    it("uploads the images of one frame at a time, in the order the frames came", async () => {
-      const releases: Array<() => void> = [];
-      const run = await startWithUploader(() =>
-        Effect.callback<ToolResultImage>((resume) => {
-          releases.push(() => resume(Effect.succeed({ type: "image", attachment: STORED })));
-        }),
-      );
-
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "first"));
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "second"));
-      await waitUntil("started the first upload", () => releases.length === 1);
-      await settle();
-      // The second frame waits for its turn, so its upload has not started.
-      expect(releases).toHaveLength(1);
-
-      releases[0]!();
-      await waitUntil("started the second upload", () => releases.length === 2);
-      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
-        "first",
-      ]);
-      releases[1]!();
-      await waitUntil(
-        "completed both calls",
-        () => filterByTag(run.seen, "item.completed").length === 2,
-      );
-
-      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
-        "first",
-        "second",
-      ]);
-    });
-
-    it("answers a steer at once, and publishes its message behind the held call", async () => {
-      let release: () => void = () => undefined;
-      let started = false;
-      const run = await startWithUploader(() =>
-        Effect.callback<ToolResultImage>((resume) => {
-          started = true;
-          release = () => resume(Effect.succeed({ type: "image", attachment: STORED }));
-        }),
-      );
-      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
-      await waitUntil("started the upload", () => started);
-
-      // The reply to the steer is read at once, so the controller is not kept waiting.
-      const sent = await Effect.runPromise(
-        run.adapter.sendInput(SESSION, { text: "one more instruction" }),
-      );
-      expect(sent).toMatchObject({ delivery: "steered" });
-      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).not.toContain(
-        "call-1",
-      );
-
-      release();
-      await waitUntil(
-        "published the steering message",
-        () =>
-          run.seen.filter(
-            (event) => event._tag === "item.completed" && event.kind === "user_message",
-          ).length === 2,
-      );
-      const order = run.seen
-        .filter(
-          (event) =>
-            event._tag === "item.completed" &&
-            (event.itemId === "call-1" || event.kind === "user_message"),
-        )
-        .map((event) => (event as { readonly kind: string }).kind);
-      expect(order).toEqual(["user_message", "tool_call", "user_message"]);
-    });
-
-    it("drops a result it cannot scan, and goes on with the frames after it", async () => {
-      const run = await startWithUploader(() =>
-        Effect.succeed({ type: "image" as const, attachment: STORED }),
-      );
-      // So deep that finding the images in it overflows the stack.
-      let deep: unknown = "x";
-      for (let level = 0; level < 30_000; level += 1) deep = [deep];
-
-      run.spawns[0]!.push(
-        completedFrame({ content: [deep], structuredContent: null, _meta: null }, "deep"),
-      );
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "after"));
-      await waitUntil(
-        "completed both calls",
-        () => filterByTag(run.seen, "item.completed").length === 2,
-      );
-
-      const completed = filterByTag(run.seen, "item.completed");
-      expect(completed.map((event) => event.itemId)).toEqual(["deep", "after"]);
-      // The result that could not be scanned is dropped, bytes and all.
-      expect(JSON.stringify(completed[0]?.raw)).not.toContain('"result"');
-      expect(JSON.stringify(completed[1]?.raw)).toContain("attachment");
-    });
-
-    it("leaves the images of results unavailable, with one log line, while too many frames wait", async () => {
-      // Effect's default logger writes a warning to the console.
-      const logged: Array<string> = [];
-      for (const method of ["log", "warn", "error"] as const) {
-        const spy = vi.spyOn(console, method).mockImplementation((...parts: Array<unknown>) => {
-          logged.push(parts.map(String).join(" "));
-        });
-        onTestFinished(() => spy.mockRestore());
-      }
-      let releaseFirst: () => void = () => undefined;
-      let uploads = 0;
-      const run = await startWithUploader(() => {
-        uploads += 1;
-        return uploads === 1
-          ? Effect.callback<ToolResultImage>((resume) => {
-              releaseFirst = () => resume(Effect.succeed({ type: "image", attachment: STORED }));
-            })
-          : Effect.succeed({ type: "image" as const, attachment: STORED });
-      });
-      const bigResult = () => ({
-        content: [{ type: "image", data: "A".repeat(8 * 1024 * 1024), mimeType: "image/png" }],
-        structuredContent: null,
-        _meta: null,
-      });
-
-      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "held"));
-      await waitUntil("started the first upload", () => uploads === 1);
-      // Nine frames of 8 MiB wait behind it: 72 MiB, over the 64 MiB kept.
-      for (let index = 0; index < 9; index += 1) {
-        run.spawns[0]!.push(completedFrame(bigResult(), `big-${String(index)}`));
-      }
-      await settle();
-      releaseFirst();
-      await waitUntil(
-        "completed every call",
-        () => filterByTag(run.seen, "item.completed").length === 10,
-        60_000,
-      );
-
-      const raws = filterByTag(run.seen, "item.completed").map((event) =>
-        JSON.stringify(event.raw),
-      );
-      // The first frame to reach the head sees the backlog and keeps nothing.
-      expect(raws[1]).toContain("Too many tool results were waiting to be read");
-      // Once the backlog is down to the bound, images are kept again.
-      expect(raws[9]).toContain("attachment");
-      expect(JSON.stringify(run.seen)).not.toContain("A".repeat(1000));
-      expect(logged.filter((line) => line.includes("bytes behind"))).toHaveLength(1);
-    });
+    // The exit is reported after the output was read to its end.
+    const order = run.seen
+      .filter(
+        (event) =>
+          (event._tag === "item.completed" && event.itemId.startsWith("trailing-")) ||
+          event._tag === "session.exited",
+      )
+      .map((event) => event._tag);
+    expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
   });
 });
 

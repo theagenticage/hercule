@@ -60,8 +60,6 @@ import type {
   UserMaterial,
 } from "../index";
 import type { ResolvedSkillReference } from "../../skills";
-import type { AttachmentUploader } from "../../attachments";
-import { replaceImagesInValues } from "../tool-result-images";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -261,8 +259,6 @@ interface Host extends AppServer {
   readonly textGeneration: TextGenerationWatch | undefined;
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
-  /** Ends the uploads of images in tool results that are still running, leaving those images unavailable. */
-  readonly abortUploads: () => void;
   /**
    * Keeps the notifications with no thread id that arrive before the session
    * is registered, so `startSession` can hand them to the session once it is.
@@ -355,23 +351,6 @@ const ACCESS_MODES: Readonly<
  * session.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
-
-/**
- * The most bytes of frames that may wait behind an image upload before the
- * images of later tool results are no longer kept. The MCP Gateway caps each
- * message at 4 MiB, so 64 MiB is room for sixteen of the largest results
- * waiting at once, far more than a normal burst, while a runner that hosts
- * several sessions still never holds more than this much per session.
- */
-const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
-
-/** The reason shown for an image that was not kept because too many frames were waiting. */
-const IMAGE_BACKLOG = "Too many tool results were waiting to be read, so the image was not kept.";
-
-/** An uploader that keeps nothing: every image it is given becomes unavailable. */
-const REFUSING_UPLOADER: AttachmentUploader = {
-  upload: () => Effect.succeed({ type: "image", unavailable: IMAGE_BACKLOG }),
-};
 
 /** How long a session's exit waits for the app-server's output to end after the process has exited. */
 const OUTPUT_DRAIN_PATIENCE_MS = 2000;
@@ -791,55 +770,37 @@ const listFrameItems = (frame: NotificationFrame): ReadonlyArray<Record<string, 
 };
 
 /**
- * Removes the generated image from a notification frame, in place, before
- * anything else reads the frame. An `imageGeneration` item holds the image
- * itself, base64 encoded, in `result`. Left in, it would be copied into the
- * frames the adapter queues and into every event's `raw`, and make each one
- * megabytes long, while the image reaches nobody through the stream. The frame
- * comes straight from the decoder, so nothing else holds it yet.
+ * The reason shown for an image of a Codex MCP tool's result: the model has
+ * seen it, but Hercule does not keep it.
+ */
+const MCP_IMAGE_NOT_KEPT = "Hercule does not keep the images of a Codex MCP tool's result yet.";
+
+/**
+ * Removes the bytes of images from a notification frame, in place, before
+ * anything else reads the frame. Left in, they would be copied into every
+ * event's `raw` and make each one megabytes long. The frame comes straight
+ * from the decoder, so nothing else holds it yet.
+ *
+ * - An `imageGeneration` item holds the generated image, base64 encoded, in
+ *   `result`. The field is removed, because the image reaches nobody through
+ *   the stream.
+ * - An `mcpToolCall` item holds MCP's image blocks in `result.content`. Each
+ *   is replaced by an `unavailable` image (see `ToolResultImage`). The model
+ *   already has its own copy, and the text blocks stay.
  */
 const stripImageBytes = (frame: NotificationFrame): void => {
   for (const item of listFrameItems(frame)) {
     if (item["type"] === "imageGeneration") Reflect.deleteProperty(item, "result");
+    if (item["type"] !== "mcpToolCall") continue;
+    const content = (item["result"] as { readonly content?: unknown } | null | undefined)?.content;
+    if (!Array.isArray(content)) continue;
+    for (const [index, block] of content.entries()) {
+      if ((block as { readonly type?: unknown } | null)?.type === "image") {
+        content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
+      }
+    }
   }
 };
-
-/**
- * Returns the `mcpToolCall` items of a notification frame that hold a result.
- * An MCP tool's result may hold images (`result.content` has MCP's image
- * blocks), which are megabytes of base64 until `replaceMcpResultImages` takes
- * them out.
- */
-const listMcpResultItems = (frame: NotificationFrame): ReadonlyArray<Record<string, unknown>> =>
-  listFrameItems(frame).filter(
-    (item) => item["type"] === "mcpToolCall" && typeof item["result"] === "object",
-  );
-
-/**
- * Replaces each image in the result of these `mcpToolCall` items with a
- * reference to it, in place, before anything else reads the frame: the image
- * is uploaded to the controller and the item keeps only the reference, so no
- * event's `raw` carries its bytes (spec 06, images in tool results). Never
- * fails: an image that cannot be kept becomes `unavailable`, and its bytes
- * are dropped all the same.
- */
-const replaceMcpResultImages = (
-  uploader: AttachmentUploader,
-  sessionId: string,
-  items: ReadonlyArray<Record<string, unknown>>,
-  signal: AbortSignal,
-): Effect.Effect<void> =>
-  Effect.map(
-    replaceImagesInValues(
-      uploader,
-      sessionId,
-      items.map((item) => item["result"]),
-      signal,
-    ),
-    (results) => {
-      for (const [index, item] of items.entries()) item["result"] = results[index];
-    },
-  );
 
 export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
@@ -906,23 +867,16 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     // server may close the thread or the app-server may die, which already
     // ended this session. A second exit would record the same end twice.
     if (sessions.get(held.binding.sessionId) !== held) return;
-    // Uploads end first, so waiting for the frames Codex already sent never
-    // waits for a slow one. The exit then comes after those frames, so it is
-    // the last event of the session.
-    held.host.abortUploads();
-    held.host.rpc.afterPending(() => {
-      if (sessions.get(held.binding.sessionId) !== held) return;
-      held.threads.close();
-      sessions.delete(held.binding.sessionId);
-      emit({
-        _tag: "session.exited",
-        eventId: crypto.randomUUID(),
-        sessionId: held.binding.sessionId,
-        at: now(),
-        reason,
-      });
-      releaseHost(held.host);
+    held.threads.close();
+    sessions.delete(held.binding.sessionId);
+    emit({
+      _tag: "session.exited",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      reason,
     });
+    releaseHost(held.host);
   };
 
   /** Ends the host's session when its app-server exits on its own. */
@@ -975,7 +929,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     sessionId: string | undefined,
     overrides: ReadonlyArray<string>,
     textGeneration: TextGenerationWatch | undefined,
-    uploader: AttachmentUploader,
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
@@ -1004,12 +957,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // the lines already kept are still worth reporting.
       }
     })();
-    // Aborted when the session stops or the host is killed. An upload then
-    // ends at once and leaves its image unavailable, so stopping never waits
-    // for a slow upload.
-    const uploads = new AbortController();
-    // Whether the log already says the backlog is over `MAX_QUEUED_BYTES`.
-    let backlogReported = false;
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
@@ -1030,68 +977,19 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
+            stripImageBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
-        },
-        // Takes a generated image's bytes out of a frame the moment it
-        // arrives. The images of an MCP result are replaced by references
-        // when the frame reaches the head of the queue, so one frame uploads
-        // at a time. Frames that wait hold their images meanwhile, and the
-        // queue is bounded by `MAX_QUEUED_BYTES`: past it, a frame's images
-        // are not uploaded but marked unavailable. Only a session's host
-        // uploads: a text generation or a probe has no session to keep an
-        // image for.
-        prepareNotification: (frame) => {
-          stripImageBytes(frame);
-          if (sessionId === undefined) return undefined;
-          const results = listMcpResultItems(frame);
-          if (results.length === 0) return undefined;
-          return async () => {
-            const overBound = host.rpc.queuedBytes() > MAX_QUEUED_BYTES;
-            try {
-              await Effect.runPromise(
-                Effect.suspend(() => {
-                  if (!overBound) {
-                    backlogReported = false;
-                    return replaceMcpResultImages(uploader, sessionId, results, uploads.signal);
-                  }
-                  // One line per backlog, not per frame.
-                  const report = backlogReported
-                    ? Effect.void
-                    : Effect.logWarning(
-                        `Codex's output is ${String(host.rpc.queuedBytes())} bytes behind for session ${sessionId}, over the ${String(MAX_QUEUED_BYTES)} bytes kept, so the images of the next tool results are not kept.`,
-                      );
-                  backlogReported = true;
-                  return Effect.andThen(
-                    report,
-                    replaceMcpResultImages(REFUSING_UPLOADER, sessionId, results, uploads.signal),
-                  );
-                }),
-              );
-            } catch {
-              // Finding or uploading the images failed, which the code does
-              // not do on purpose. The bytes are still dropped rather than
-              // passed on, and the queue goes on.
-              for (const item of results) Reflect.deleteProperty(item, "result");
-            }
-          };
         },
         onWarning: (message) => {
           rememberComplaint(message);
           warn(host, message);
         },
       }),
-      abortUploads: () => uploads.abort(),
-      kill: () => {
-        uploads.abort();
-        child.kill();
-      },
-      stop: Effect.andThen(
-        Effect.sync(() => uploads.abort()),
-        stopChild(child),
-      ),
+      kill: child.kill,
+      stop: stopChild(child),
       complaint: () => complaints.join("\n"),
       sessionId,
       textGeneration,
@@ -1099,22 +997,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
     // The process may exit before the session has read everything it wrote.
-    // The uploads end at once, and the exit is reported only after the output
-    // has been read to its end and every frame delivered. A process that
-    // leaves the output open (a child of its own holds it) is waited for only
-    // a short while.
+    // The exit is reported only after the output has been read to its end,
+    // which is when the pump completes. A process that leaves the output open
+    // (a child of its own holds it) is waited for only a short while.
+    const pumped = Effect.runPromise(host.rpc.pump);
     const handleExit = (): void => {
-      uploads.abort();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const patience = new Promise<void>((resolve) => {
         timer = setTimeout(resolve, OUTPUT_DRAIN_PATIENCE_MS);
       });
-      void Promise.race([host.rpc.ended, patience])
+      void Promise.race([pumped, patience])
         .finally(() => clearTimeout(timer))
         .then(() => onHostGone(host));
     };
     void child.exited.then(handleExit, handleExit);
-    Effect.runFork(host.rpc.pump);
     return host;
   };
 
@@ -1152,7 +1048,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             [...buildApiKeyOverrides(ctx), ...overrides],
             textGeneration,
-            ctx.attachmentUploader,
           ),
         catch: (error) =>
           // Codex is spawned with no working directory, so `ENOENT` means the
@@ -1903,22 +1798,19 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             return Effect.fail(failed);
           },
           onSuccess: (sent) =>
-            Effect.sync(() =>
-              // In Codex's order, like the message of a plain input.
-              held.host.rpc.afterPending(() => {
-                if (sessions.get(sessionId) !== held) return;
-                for (const event of buildUserMessage({
-                  sessionId,
-                  turnId: sent.turnId,
-                  text: buildAnswerMessage(question, texts),
-                  steered: sent.delivery === "steered",
-                  harnessRefs: { threadId: held.binding.nativeSessionId },
-                })) {
-                  emit(event);
-                }
-                if (isOpen()) closeAsyncQuestion(held, question, { answers });
-              }),
-            ),
+            Effect.sync(() => {
+              if (sessions.get(sessionId) !== held) return;
+              for (const event of buildUserMessage({
+                sessionId,
+                turnId: sent.turnId,
+                text: buildAnswerMessage(question, texts),
+                steered: sent.delivery === "steered",
+                harnessRefs: { threadId: held.binding.nativeSessionId },
+              })) {
+                emit(event);
+              }
+              if (isOpen()) closeAsyncQuestion(held, question, { answers });
+            }),
         }),
       );
     });
@@ -2261,24 +2153,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
           );
         const sent = yield* deliverInput(held, input, skills);
-        // The reply to the input is answered at once, but the message joins the
-        // events in Codex's order: behind the tool results sent before it that
-        // still wait for their images.
-        held.host.rpc.afterPending(() => {
-          if (sessions.get(sessionId) !== held) return;
-          for (const event of buildUserMessage({
-            sessionId,
-            turnId: sent.turnId,
-            text: input.text,
-            attachments: input.attachments,
-            skillReferences: skills.translated,
-            senderSessionId: input.senderSessionId,
-            steered: sent.delivery === "steered",
-            harnessRefs: { threadId: held.binding.nativeSessionId },
-          })) {
-            emit(event);
-          }
-        });
+        for (const event of sessions.get(sessionId) !== held
+          ? []
+          : buildUserMessage({
+              sessionId,
+              turnId: sent.turnId,
+              text: input.text,
+              attachments: input.attachments,
+              skillReferences: skills.translated,
+              senderSessionId: input.senderSessionId,
+              steered: sent.delivery === "steered",
+              harnessRefs: { threadId: held.binding.nativeSessionId },
+            })) {
+          emit(event);
+        }
         return sent;
       }),
 
@@ -2358,9 +2246,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // twice.
         if (held === undefined) return Effect.void;
         held.threads.beginClosing();
-        // Before the interrupt: its reply is delivered after every frame
-        // Codex sent earlier, and one of those may wait for an upload.
-        held.host.abortUploads();
         // The turn is interrupted before the session exits. Otherwise the
         // app-server would keep working in the workspace until it is killed,
         // and nobody would receive its notifications.

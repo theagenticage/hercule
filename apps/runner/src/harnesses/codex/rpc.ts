@@ -62,16 +62,6 @@ export interface RpcHandlers {
   readonly onServerRequest: (frame: ServerRequestFrame) => void;
   readonly onNotification: (frame: NotificationFrame) => void;
   readonly onWarning: (message: string) => void;
-  /**
-   * Called for each notification as it arrives, before it is delivered.
-   * Returns the work to finish before the notification is delivered, such as
-   * the upload of an image it carries, or `undefined` to deliver it at once.
-   * The work starts only when the notification reaches the head of the queue,
-   * so at most one notification prepares at a time. Everything that arrives
-   * after a notification that waits is delivered after it. The work must not
-   * reject.
-   */
-  readonly prepareNotification?: (frame: NotificationFrame) => (() => Promise<void>) | undefined;
 }
 
 export interface Rpc {
@@ -83,23 +73,13 @@ export interface Rpc {
    * leaves the turn hanging forever, with no error shown anywhere.
    */
   readonly answer: (id: string | number, body: RpcReply) => void;
-  /** Reads stdout until the app-server closes it. No reply is delivered until this runs. */
+  /**
+   * Reads stdout until the app-server closes it, handling each frame as it is
+   * read, then fails the requests still waiting. No reply is delivered until
+   * this runs. Completes only once the output has reached its end, and never
+   * when the output stays open.
+   */
   readonly pump: Effect.Effect<void>;
-  /**
-   * Runs `run` once every frame received so far has been delivered: at once
-   * when none is waiting. Callers that act on something the app-server did,
-   * such as the end of a session, use it so the action comes after the
-   * frames that were sent before it.
-   */
-  readonly afterPending: (run: () => void) => void;
-  /** Returns the total size of the lines of the frames that wait in the delivery queue. */
-  readonly queuedBytes: () => number;
-  /**
-   * Resolves once the app-server's output has reached its end and every frame
-   * it sent has been delivered. Never resolves when the output never ends,
-   * so a caller that must not wait for ever races it with a time limit.
-   */
-  readonly ended: Promise<void>;
 }
 
 /**
@@ -141,64 +121,6 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   let next = 1;
   let gone = false;
   let complained = false;
-  let markEnded: () => void = () => undefined;
-  const ended = new Promise<void>((resolve) => {
-    markEnded = resolve;
-  });
-  let waiting = 0;
-  let queuedBytes = 0;
-  let tail: Promise<void> = Promise.resolve();
-
-  /**
-   * Delivers the notifications and server requests of the app-server in the
-   * order it sent them, and the end of its output after them. This is the one
-   * place that rule lives. A frame is delivered at once while nothing waits.
-   * When a notification has to wait (see `prepareNotification`), every later
-   * notification and request queues behind it.
-   *
-   * A reply is not queued: it resolves its request when it is read, so a
-   * request never waits for a slow notification. Code that publishes events
-   * after a reply, and must keep them behind the notifications sent before
-   * it, publishes through `afterPending`.
-   *
-   * The queue never stalls. A preparation that fails is reported as a warning
-   * and its frame is delivered as it is, so one bad frame cannot hold back
-   * every later one. `bytes` is the size of the frame's line, counted while
-   * the frame waits (see `queuedBytes`).
-   */
-  const deliverInOrder = (
-    prepare: (() => Promise<void>) | undefined,
-    run: () => void,
-    bytes = 0,
-  ): void => {
-    if (prepare === undefined && waiting === 0) {
-      run();
-      return;
-    }
-    waiting += 1;
-    queuedBytes += bytes;
-    tail = tail
-      .then(async () => {
-        try {
-          await prepare?.();
-        } catch (error) {
-          handlers.onWarning(
-            `a frame from the app-server could not be prepared: ${describeError(error)}`,
-          );
-        }
-        try {
-          run();
-        } catch (error) {
-          handlers.onWarning(
-            `a frame from the app-server could not be handled: ${describeError(error)}`,
-          );
-        }
-      })
-      .finally(() => {
-        waiting -= 1;
-        queuedBytes -= bytes;
-      });
-  };
 
   /**
    * Writes one frame. Returns the error message if the write failed, or
@@ -223,11 +145,11 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   };
 
   const settle = (frame: Record<string, unknown>, id: number): void => {
-    const asked = pending.get(id);
-    if (asked === undefined) return;
+    const waiting = pending.get(id);
+    if (waiting === undefined) return;
     pending.delete(id);
     Deferred.doneUnsafe(
-      asked,
+      waiting,
       "error" in frame
         ? Effect.fail(parseRpcError(frame["error"]))
         : Effect.succeed(frame["result"]),
@@ -259,16 +181,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
       return;
     }
     if (typeof id !== "string" && typeof id !== "number") {
-      const notification = { method, params: frame["params"] };
-      deliverInOrder(
-        handlers.prepareNotification?.(notification),
-        () => handlers.onNotification(notification),
-        line.length,
-      );
+      handlers.onNotification({ method, params: frame["params"] });
       return;
     }
-    const request = { id, method, params: frame["params"] };
-    deliverInOrder(undefined, () => handlers.onServerRequest(request), line.length);
+    handlers.onServerRequest({ id, method, params: frame["params"] });
   };
 
   const abandon = (): void => {
@@ -309,12 +225,6 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
     answer: (id, body) => void send({ id, ...body }),
 
-    afterPending: (run) => deliverInOrder(undefined, run),
-
-    queuedBytes: () => queuedBytes,
-
-    ended,
-
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
         try {
@@ -329,10 +239,7 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead
         // of letting each one wait for its timeout.
-        deliverInOrder(undefined, () => {
-          abandon();
-          markEnded();
-        });
+        abandon();
         resume(Effect.void);
       })();
     }),

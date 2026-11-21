@@ -85,13 +85,6 @@ interface SpawnedAppServer {
   readonly exited: Promise<number>;
 }
 
-/** The reference the fake uploader returns for every image it is given. */
-const STORED_IMAGE = {
-  id: "0199e0e7-0000-7000-8000-0000000000a1",
-  mimeType: "image/png" as const,
-  sizeBytes: PNG_BYTES.length,
-};
-
 /** The things one test shares between the sessions it starts. */
 const createFixture = () => {
   const mcp = startFakeMcpServer();
@@ -101,8 +94,6 @@ const createFixture = () => {
   writeFileSync(join(home, "codex", "config.toml"), model.config);
   const userHome = createScratchHome("mcp-user");
   const cwd = createScratchHome("mcp-cwd");
-  /** The bytes of each image the adapter uploaded to the (fake) controller. */
-  const uploaded: Array<Uint8Array> = [];
   const runs: Array<{ readonly stop: () => Promise<void> }> = [];
   onTestFinished(async () => {
     for (const run of runs) await run.stop();
@@ -147,13 +138,6 @@ const createFixture = () => {
         {
           ...context,
           binary: binary!,
-          attachmentUploader: {
-            upload: (_sessionId, bytes) =>
-              Effect.sync(() => {
-                uploaded.push(bytes);
-                return { type: "image" as const, attachment: STORED_IMAGE };
-              }),
-          },
           mcpServers: [{ name: "tools", url: mcp.url }],
           env: {
             PATH: process.env["PATH"] ?? "",
@@ -216,7 +200,7 @@ const createFixture = () => {
     return run;
   };
 
-  return { mcp, model, home, userHome, cwd, uploaded, startRun };
+  return { mcp, model, home, userHome, cwd, startRun };
 };
 
 /** Lists the warnings the runner itself adds. A warning Codex sent has `raw` and is left out. */
@@ -308,36 +292,22 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(mcp.listCalledTools()).toEqual([SEARCH_ISSUES_TOOL, WHOAMI_TOOL]);
   });
 
-  it("keeps an image of a tool result as a reference, and puts no image bytes in an event", async () => {
-    const { startRun, uploaded } = createFixture();
+  it("marks an image of a tool result unavailable, and puts no image bytes in an event", async () => {
+    const { startRun } = createFixture();
     const run = await startRun("full-access");
     await run.callTool(SNAPSHOT_IMAGE_TOOL);
-    expect(uploaded.map((bytes) => Buffer.from(bytes).toString("base64"))).toEqual([
-      PNG_BYTES.toString("base64"),
-    ]);
     expect(JSON.stringify(run.seen)).not.toContain(PNG_BYTES.toString("base64"));
+    const notKeptNotice: unknown = expect.stringContaining("does not keep");
+    const content = [
+      { type: "text", text: `result of ${SNAPSHOT_IMAGE_TOOL}` },
+      { type: "image", unavailable: notKeptNotice },
+    ];
     expect(findCallItems(run.seen).at(-1)).toMatchObject({
       _tag: "item.completed",
       status: "completed",
-      // The expanded step shows the text and the image's reference, and `raw` the same.
-      detail: {
-        content: [
-          { type: "text", text: `result of ${SNAPSHOT_IMAGE_TOOL}` },
-          { type: "image", attachment: STORED_IMAGE },
-        ],
-      },
-      raw: {
-        payload: {
-          item: {
-            result: {
-              content: [
-                { type: "text", text: `result of ${SNAPSHOT_IMAGE_TOOL}` },
-                { type: "image", attachment: STORED_IMAGE },
-              ],
-            },
-          },
-        },
-      },
+      // The expanded step shows the text and the image's notice, and `raw` the same.
+      detail: { content },
+      raw: { payload: { item: { result: { content } } } },
     });
   });
 
