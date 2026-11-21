@@ -28,7 +28,10 @@
  *   to know which statuses it may move back.
  * - `tools` is a JSON array of the tools the server listed, each with its
  *   full definition (name, title, description, input schema, output schema,
- *   annotations). The gateway answers `tools/list` from it.
+ *   annotations). The gateway answers `tools/list` from it. It is the last
+ *   column on purpose: it can be large, and SQLite stores a long value in
+ *   overflow pages, so a read that leaves `tools` out never has to step over it
+ *   to reach a column stored after it.
  * - `checked_at` is the time of the last successful list.
  * - `protocol_version` is the MCP revision the server answered with.
  *
@@ -62,7 +65,6 @@ export default Effect.gen(function* () {
         CHECK (status IN ('checking', 'ready', 'needs-sign-in', 'unreachable', 'error')),
       status_detail TEXT,
       status_cause TEXT,
-      tools TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tools)),
       checked_at TEXT,
       protocol_version TEXT,
       revision INTEGER NOT NULL DEFAULT 0,
@@ -72,6 +74,7 @@ export default Effect.gen(function* () {
       failed_checks INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      tools TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tools)),
       UNIQUE (contribution_id, account_id)
     )
   `;
