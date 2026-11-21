@@ -308,9 +308,9 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Gives a server added by URL the token the user pasted for it, replacing
-    // any sign-in it holds. A server that is on goes to `checking` and its
-    // tools are listed again with the token. A server that is switched off
-    // keeps its status, and is checked with the token when it is switched on.
+    // any sign-in it holds. The server goes to `checking`, on or off. A server
+    // that is on lists its tools again with the token; a server that is
+    // switched off is checked with the token when it is switched on.
     // Answers with the server.
     //
     // - `invalid_state`: the server is a plugin server, which is reached with

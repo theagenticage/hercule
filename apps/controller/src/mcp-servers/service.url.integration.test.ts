@@ -495,7 +495,7 @@ describe("giving a server a token", () => {
     );
   });
 
-  it("stores the token of a switched-off server and leaves its status, checking it with the token once it is switched on", async () => {
+  it("stores the token of a switched-off server and writes checking, without a check until it is switched on", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       fake.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
       const created = await readRecord(
@@ -509,8 +509,8 @@ describe("giving a server a token", () => {
 
       expect(answered).toMatchObject({
         enabled: false,
-        status: "needs-sign-in",
-        statusDetail: refused.status_detail,
+        status: "checking",
+        statusDetail: null,
         source: { kind: "url", signIn: "token" },
       });
       // No check runs for a server that is off, so nothing is sent.

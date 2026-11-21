@@ -513,17 +513,16 @@ const make = Effect.gen(function* () {
      * started with the old sign-in cannot write its result and upstream
      * sessions opened with it end.
      *
-     * A server that is on goes back to `checking` with no detail. A server
-     * that is off keeps its status and detail, because no check runs for it:
-     * switching it on (`writeEnabled`) puts it to `checking` then.
+     * The server goes back to `checking` with no detail, on or off: its old
+     * status describes a sign-in that no longer exists. A server that is off
+     * is not checked until it is switched on, and clients show it as off.
      */
     writeTokenSignIn: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
           SET sign_in = 'token',
-              status = CASE WHEN enabled = 1 THEN 'checking' ELSE status END,
-              status_detail = CASE WHEN enabled = 1 THEN NULL ELSE status_detail END,
+              status = 'checking', status_detail = NULL,
               failed_checks = 0, next_check_at = ${at},
               revision = revision + 1, updated_at = ${at}
           WHERE id = ${uuidFromString(id)}

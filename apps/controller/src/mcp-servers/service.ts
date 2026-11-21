@@ -619,11 +619,12 @@ const make = Effect.gen(function* () {
     /**
      * Gives a server added by URL the token the user pasted, replacing every
      * sign-in secret it holds, and returns the server. The server goes back
-     * to `checking` when it is on, and keeps its status when it is switched
-     * off, because no check runs for a server that is off and switching it on
-     * checks it with the token. Its revision goes up either way, which ends
-     * the upstream sessions and the running checks that used the old sign-in.
-     * A new list of its tools is requested after the commit. The audit entry says the
+     * to `checking`, on or off, because its old status describes a sign-in
+     * that no longer exists. Its revision goes up, which ends the upstream
+     * sessions and the running checks that used the old sign-in. A new list
+     * of its tools is requested after the commit when the server is on; a
+     * server that is switched off is checked with the token when it is
+     * switched on. The audit entry says the
      * sign-in is now a token and never holds the token. Fails with `NotFound`
      * when there is no such server, and with `InvalidState` for a plugin
      * server, whose credential is its Connection's.
@@ -663,7 +664,7 @@ const make = Effect.gen(function* () {
             return yield* readOrFail(id);
           }),
         );
-        yield* checks.wake;
+        if (server.enabled) yield* checks.wake;
         return toRecord(server);
       }),
   };
