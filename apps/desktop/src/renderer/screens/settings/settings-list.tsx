@@ -15,6 +15,7 @@ import { ShieldIcon } from "../../icons/shield";
 import { SkillIcon } from "../../icons/skill";
 import { SystemIcon } from "../../icons/system";
 import { ThreadsIcon } from "../../icons/threads";
+import { ToolsIcon } from "../../icons/tools";
 import { UserIcon } from "../../icons/user";
 import { CONNECTIONS_SECTION, MACHINES_SECTION, SettingsNavRow } from "./settings-nav-row";
 
@@ -50,6 +51,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     rows: [
       { label: "Assistants", Icon: CrewIcon, to: "/settings/assistants" },
       { label: "Skills", Icon: SkillIcon, to: "/settings/skills" },
+      { label: "MCP servers", Icon: ToolsIcon, to: "/settings/mcp-servers" },
       {
         label: "Connections",
         Icon: ConnectionsIcon,

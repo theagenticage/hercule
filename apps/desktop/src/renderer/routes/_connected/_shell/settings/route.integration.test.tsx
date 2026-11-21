@@ -132,6 +132,7 @@ describe("the Settings list", () => {
       "Signals",
       "Assistants",
       "Skills",
+      "MCP servers",
       "Connections",
       "Providers",
       "Machines",

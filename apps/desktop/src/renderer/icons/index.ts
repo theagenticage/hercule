@@ -71,6 +71,7 @@ export { SystemIcon } from "./system";
 export { TasksIcon } from "./tasks";
 export { TerminalIcon } from "./terminal";
 export { ThreadsIcon } from "./threads";
+export { ToolsIcon } from "./tools";
 export { UndoIcon } from "./undo";
 export { UserIcon } from "./user";
 export { WikiIcon } from "./wiki";
