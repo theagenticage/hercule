@@ -4,7 +4,7 @@
  * quiet line, not a card: the mark and words carry the colour (design language
  * §Color doctrine), and nothing is filled.
  */
-import { Fragment, type JSX } from "react";
+import { Fragment, type JSX, type ReactNode } from "react";
 import { MAX_UNBROKEN_CODE_WORD, splitCodeSpans, type RuntimeNote } from "@hercule/client-core";
 import { FailedMark, cn } from "@hercule/ui";
 import { INLINE_CODE } from "../markdown";
@@ -85,8 +85,24 @@ function RuntimeNoteMark({
  * a muted dot and muted words. A notice is quieter still, a neutral note with a
  * hollow ring. The text for a screen reader names the severity, because the mark
  * is decorative.
+ *
+ * `actions` are the buttons a note can end with, such as the Reconnect of a
+ * note about an MCP server. They follow the message and wrap under it when
+ * the line is narrow.
  */
-export function RuntimeNoteLine({ note }: { readonly note: RuntimeNote }): JSX.Element {
+export function RuntimeNoteLine({
+  note,
+  actions,
+}: {
+  readonly note: RuntimeNote;
+  readonly actions?: ReactNode;
+}): JSX.Element {
+  const message = (
+    <p className="min-w-0">
+      <span className="sr-only">{SEVERITY_LABEL[note.severity]}</span>
+      <RuntimeNoteMessage message={note.message} />
+    </p>
+  );
   return (
     <div
       className={cn(
@@ -98,10 +114,14 @@ export function RuntimeNoteLine({ note }: { readonly note: RuntimeNote }): JSX.E
       <span className="flex h-lh w-3 shrink-0 items-center justify-center">
         <RuntimeNoteMark severity={note.severity} />
       </span>
-      <p className="min-w-0">
-        <span className="sr-only">{SEVERITY_LABEL[note.severity]}</span>
-        <RuntimeNoteMessage message={note.message} />
-      </p>
+      {actions === undefined ? (
+        message
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          {message}
+          {actions}
+        </div>
+      )}
     </div>
   );
 }
