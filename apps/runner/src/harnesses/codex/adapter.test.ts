@@ -4701,6 +4701,29 @@ describe("the images in the result of an MCP tool call", () => {
       expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
     });
 
+    it("emits every call Codex wrote before it exited", async () => {
+      const run = await startWithUploader(() =>
+        Effect.succeed({ type: "image" as const, attachment: STORED }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+
+      for (let index = 0; index < 12; index += 1) {
+        run.spawns[0]!.push(completedFrame(IMAGE_RESULT, `trailing-${String(index)}`));
+      }
+      run.spawns[0]!.crash();
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      // The exit is reported after the output was read to its end.
+      const order = run.seen
+        .filter(
+          (event) =>
+            (event._tag === "item.completed" && event.itemId.startsWith("trailing-")) ||
+            event._tag === "session.exited",
+        )
+        .map((event) => event._tag);
+      expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
+    });
+
     it("emits the call before the message that steers the turn afterwards", async () => {
       let release: () => void = () => undefined;
       let started = false;

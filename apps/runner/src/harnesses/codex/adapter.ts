@@ -356,6 +356,9 @@ const ACCESS_MODES: Readonly<
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/** How long a session's exit waits for the app-server's output to end after the process has exited. */
+const OUTPUT_DRAIN_PATIENCE_MS = 2000;
+
 /** The error code for a server too busy to start a turn (spec 06 section 10.2). */
 const OVERLOADED = -32001;
 
@@ -1054,10 +1057,22 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       framesBeforeRegistration:
         sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
-    void child.exited.then(
-      () => onHostGone(host),
-      () => onHostGone(host),
-    );
+    // The process may exit before the session has read everything it wrote.
+    // The uploads end at once, and the exit is reported only after the output
+    // has been read to its end and every frame delivered. A process that
+    // leaves the output open (a child of its own holds it) is waited for only
+    // a short while.
+    const handleExit = (): void => {
+      uploads.abort();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const patience = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, OUTPUT_DRAIN_PATIENCE_MS);
+      });
+      void Promise.race([host.rpc.ended, patience])
+        .finally(() => clearTimeout(timer))
+        .then(() => onHostGone(host));
+    };
+    void child.exited.then(handleExit, handleExit);
     Effect.runFork(host.rpc.pump);
     return host;
   };

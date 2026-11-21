@@ -90,6 +90,12 @@ export interface Rpc {
    * frames that were sent before it.
    */
   readonly afterPending: (run: () => void) => void;
+  /**
+   * Resolves once the app-server's output has reached its end and every frame
+   * it sent has been delivered. Never resolves when the output never ends,
+   * so a caller that must not wait for ever races it with a time limit.
+   */
+  readonly ended: Promise<void>;
 }
 
 /**
@@ -131,6 +137,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   let next = 1;
   let gone = false;
   let complained = false;
+  let markEnded: () => void = () => undefined;
+  const ended = new Promise<void>((resolve) => {
+    markEnded = resolve;
+  });
   let waiting = 0;
   let tail: Promise<void> = Promise.resolve();
 
@@ -273,6 +283,8 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
     afterPending: (run) => deliverInOrder(undefined, run),
 
+    ended,
+
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
         try {
@@ -287,7 +299,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead
         // of letting each one wait for its timeout.
-        deliverInOrder(undefined, abandon);
+        deliverInOrder(undefined, () => {
+          abandon();
+          markEnded();
+        });
         resume(Effect.void);
       })();
     }),
