@@ -96,7 +96,7 @@ const startStandInModel = (
               content_block: {
                 type: "tool_use",
                 id: `toolu_${String(++toolUses)}`,
-                name: tool!,
+                name: tool,
                 input: {},
               },
             },
