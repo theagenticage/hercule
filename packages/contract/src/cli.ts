@@ -180,16 +180,39 @@ export type FieldRow =
        * on the command line. Which keys are required is read from the
        * field's schema.
        *
-       * Every key in `fixed` and `flags` must be a key of the object, and a
-       * key holds one value, never a list. The object is sent as soon as one
-       * of its flags is given.
+       * Every key in `fixed` and `flags` must be a key of the object, every
+       * key the object requires must be in one of them, and a key holds one
+       * value, never a list. The object is sent as soon as one of its flags
+       * is given.
        */
-      readonly object: {
-        /** Keys sent with this text as their value, whatever the command line says. */
-        readonly fixed: Readonly<Record<string, string>>;
-        /** The flag of each key of the object, by the key's name. */
-        readonly flags: Readonly<Record<string, ObjectKeyRow>>;
-      };
+      readonly object: ObjectFlagsRow;
+    }
+  | {
+      /**
+       * Fills a field that holds one of several object shapes, told apart by
+       * a literal key such as `kind`: `--plugin sentry/sentry --connection
+       * 1f3a9c2e` sends `{ kind: "plugin", ... }` and `--url <address>` sends
+       * `{ kind: "url", ... }`. The field's schema must be a union of
+       * objects, with one entry here for each member, and the entry's `fixed`
+       * must be exactly the member's literal keys with their values.
+       *
+       * Each entry is an `object` row with a `help` that leads its flags in
+       * the command's help. The command line picks the entry by the flags it
+       * gives:
+       *
+       * - A flag that only one entry declares picks that entry. Flags of two
+       *   entries together are refused, and so is a command line with no
+       *   flag that picks one.
+       * - Several entries may declare a flag of the same spelling, such as
+       *   `--name`, when it means the same key in each. Such a flag picks
+       *   none of them.
+       * - The keys the picked entry requires are required on the command
+       *   line, and no other entry's keys are.
+       *
+       * At most one flag read from stdin may be declared across the entries,
+       * so the help can say what stdin holds without naming an entry.
+       */
+      readonly oneOf: ReadonlyArray<ObjectFlagsRow & { readonly help: string }>;
     }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
@@ -197,12 +220,30 @@ export type FieldRow =
    */
   | { readonly hidden: true };
 
-/** The flag that fills one key of an object field, as `object` on a `FieldRow` declares it. */
+/**
+ * The flags that fill an object field, one per key, and the keys sent with
+ * fixed values. An `object` row is one of these, and each entry of a `oneOf`
+ * row is one with a lead line.
+ */
+export interface ObjectFlagsRow {
+  /** Keys sent with this text as their value, whatever the command line says. */
+  readonly fixed: Readonly<Record<string, string>>;
+  /** The flag of each key of the object, by the key's name. */
+  readonly flags: Readonly<Record<string, ObjectKeyRow>>;
+}
+
+/** The flag that fills one key of an object field, as `object` or `oneOf` on a `FieldRow` declares it. */
 export interface ObjectKeyRow {
   readonly flag: string;
   readonly help: string;
   /** The list operation that resolves an id tail given for this flag, as on a plain flag. */
   readonly resolves?: OperationId;
+  /**
+   * Makes the command read this key from stdin, as a `stdin` row does for a
+   * whole field: no `--<flag>` takes the value, and `--<flag>-stdin` asks for
+   * the read when the key is optional.
+   */
+  readonly stdin?: true;
 }
 
 /**

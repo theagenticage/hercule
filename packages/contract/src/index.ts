@@ -83,6 +83,8 @@ export {
   type CliRow,
   type FieldRow,
   type NounRow,
+  type ObjectFlagsRow,
+  type ObjectKeyRow,
   type ResolvingQuery,
 } from "./cli";
 

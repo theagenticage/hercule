@@ -18,10 +18,13 @@ interface FieldRow {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
-  readonly object?: {
-    readonly fixed: Record<string, string>;
-    readonly flags: Record<string, FieldRow>;
-  };
+  readonly object?: ObjectRow;
+  readonly oneOf?: ReadonlyArray<ObjectRow & { readonly help?: string }>;
+}
+
+interface ObjectRow {
+  readonly fixed: Record<string, string>;
+  readonly flags: Record<string, FieldRow>;
 }
 
 interface Row {
@@ -46,21 +49,25 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
  * field. Hidden fields are left out, like hidden rows. A field filled from
- * several flags is listed once per flag, named `<field>.<key>`.
+ * several flags is listed once per flag, named `<field>.<key>`, and so is a
+ * field of several shapes, once per flag of each entry.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
-      .flatMap(([name, field]): Array<[string, string, FieldRow]> =>
-        field.object === undefined
+      .flatMap(([name, field]): Array<[string, string, FieldRow]> => {
+        const objects = field.oneOf ?? (field.object === undefined ? [] : [field.object]);
+        return field.oneOf === undefined && field.object === undefined
           ? [[id, name, field]]
-          : Object.entries(field.object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
-              id,
-              `${name}.${key}`,
-              keyRow,
-            ]),
-      ),
+          : objects.flatMap((object) =>
+              Object.entries(object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
+                id,
+                `${name}.${key}`,
+                keyRow,
+              ]),
+            );
+      }),
   );
 
 /** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */

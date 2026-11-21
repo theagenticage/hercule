@@ -220,14 +220,42 @@ const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   return found;
 };
 
+/** Builds the row of one flag in the flags section: its label, its notes and its help. */
+const buildFlagRow = (field: Field): { label: string; notes: string; help: string } => {
+  const notes = [field.optional ? "optional" : "required"];
+  if (field.repeated) notes.push("repeatable");
+  if (field.choices !== undefined) notes.push(`one of: ${[...field.choices.keys()].join(", ")}`);
+  if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
+  if (field.nullable) notes.push("`null` clears it");
+  return {
+    label: `--${field.spelling} ${buildPlaceholder(field)}`,
+    notes: notes.join("; "),
+    help: field.help,
+  };
+};
+
 /** Builds the help of one command: `hercule <noun>... <verb> --help`. */
 export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
-  const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
-  const onStdin = command.payload.filter((field) => field.stdin);
+  // The flags of a `oneOf` field's entries are listed in a group for each
+  // entry, not among the others.
+  const inEntry = new Set(
+    command.choices.flatMap((choice) => choice.entries.flatMap((entry) => entry.fields)),
+  );
+  const flags = [
+    ...command.payload.filter((field) => !field.stdin && !inEntry.has(field)),
+    ...command.query,
+  ];
+  // A flag that several entries declare is read from stdin once, not once for each entry.
+  const onStdin = [
+    ...new Map(
+      command.payload.filter((field) => field.stdin).map((field) => [field.spelling, field]),
+    ).values(),
+  ];
   const shape = command.positionals.map(formatPositionalShape).join(" ");
   const lines: Array<string> = [...wrapParagraph(command.help, "")];
 
-  const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
+  const takesFlags =
+    flags.length > 0 || inEntry.size > 0 || command.paged || command.requires === "setup-token";
   lines.push(
     "",
     ["usage: hercule", command.spelling, shape, takesFlags ? "[flags]" : ""]
@@ -257,19 +285,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   if (takesFlags) {
     // Collect every row before printing any, so the label column is exactly as
     // wide as the widest label shown.
-    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
-      const notes = [field.optional ? "optional" : "required"];
-      if (field.repeated) notes.push("repeatable");
-      if (field.choices !== undefined)
-        notes.push(`one of: ${[...field.choices.keys()].join(", ")}`);
-      if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
-      if (field.nullable) notes.push("`null` clears it");
-      return {
-        label: `--${field.spelling} ${buildPlaceholder(field)}`,
-        notes: notes.join("; "),
-        help: field.help,
-      };
-    });
+    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map(buildFlagRow);
     if (command.requires === "setup-token") {
       rows.push({
         label: "--setup-token <token>",
@@ -305,11 +321,37 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       });
     }
 
-    const width = Math.max(...rows.map((row) => row.label.length));
+    // Each entry of a `oneOf` field has a lead line and its own flags. A
+    // flag read from stdin is listed by its marker only: the stdin section
+    // below says what it holds.
+    const groups = command.choices.flatMap((choice) =>
+      choice.entries.map((entry) => ({
+        lead: entry.help,
+        rows: entry.fields.map((field) =>
+          field.stdin
+            ? {
+                label: `--${field.spelling}-stdin`,
+                notes: `${field.optional ? "optional" : "required"}; read from stdin`,
+              }
+            : buildFlagRow(field),
+        ),
+      })),
+    );
+    const width = Math.max(
+      ...[...rows, ...groups.flatMap((group) => group.rows)].map((row) => row.label.length),
+    );
+    const printRows = (shown: ReadonlyArray<{ label: string; notes: string; help?: string }>) => {
+      for (const row of shown) {
+        lines.push(...formatLabelledText(row.label, width, row.notes));
+        if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
+      }
+    };
     lines.push("", "flags:");
-    for (const row of rows) {
-      lines.push(...formatLabelledText(row.label, width, row.notes));
-      if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
+    printRows(rows);
+    for (const group of groups) {
+      if (lines.at(-1) !== "flags:") lines.push("");
+      lines.push(...wrapParagraph(group.lead, "  "));
+      printRows(group.rows);
     }
   }
 

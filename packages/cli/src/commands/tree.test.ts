@@ -105,7 +105,18 @@ describe("the spelling of a command", () => {
 
   it("spells every flag in kebab-case, unique within the command", () => {
     for (const command of COMMANDS) {
-      const flags = [...command.payload, ...command.query].map((field) => field.spelling);
+      const fields = [...command.payload, ...command.query];
+      // Entries of a `oneOf` field may share a flag, so it counts once.
+      const flags = [
+        ...fields
+          .filter((field) => field.within?.entry === undefined)
+          .map((field) => field.spelling),
+        ...new Set(
+          fields
+            .filter((field) => field.within?.entry !== undefined)
+            .map((field) => field.spelling),
+        ),
+      ];
       for (const flag of flags) {
         expect(flag, `${readSpelling(command)}: --${flag}`).toMatch(KEBAB);
       }

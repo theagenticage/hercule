@@ -22,7 +22,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { listDecodeIssues, type SortKey } from "@hercule/contract";
 import { UsageError } from "../exit";
-import type { Command, Field } from "./tree";
+import { groupFieldsBySpelling, type Command, type Field } from "./tree";
 
 export interface Arguments {
   /** The positional arguments, in order, as written. */
@@ -51,6 +51,13 @@ export const formatFieldName = (field: Field): string =>
     : field.positional
       ? `<${field.spelling}>`
       : `--${field.spelling}`;
+
+/**
+ * Returns a flag as the caller writes it to give the field. A field read from
+ * stdin is given by its marker, `--<flag>-stdin`.
+ */
+export const formatFlagToGive = (field: Field): string =>
+  `--${field.spelling}${field.stdin ? "-stdin" : ""}`;
 
 /**
  * Returns how a positional is shown in usage lines: `<signal-id>`,
@@ -205,6 +212,61 @@ const assignFieldValue = (
 };
 
 /**
+ * Picks the entry of each `oneOf` field that the flags given stand for, and
+ * returns the fields of the entries not picked. Throws a `UsageError` when
+ * the flags of two entries are given, or when no flag picks an entry.
+ *
+ * `touched` holds the fields of the entries that a flag was given for, or
+ * whose `--<flag>-stdin` marker was. A flag that several entries declare
+ * picks none of them, so only the flags one entry alone declares count.
+ */
+const pickEntries = (
+  command: Command,
+  touched: ReadonlySet<Field>,
+  help: string,
+): ReadonlySet<Field> => {
+  const unpicked = new Set<Field>();
+  for (const choice of command.choices) {
+    const owned = choice.entries.map((entry) =>
+      entry.fields.filter((field) =>
+        choice.entries.every(
+          (other) =>
+            other === entry || !other.fields.some((one) => one.spelling === field.spelling),
+        ),
+      ),
+    );
+    const given = owned.map((fields) => fields.filter((field) => touched.has(field)));
+    const picked = given.flatMap((fields, index) => (fields.length > 0 ? [index] : []));
+    // The flags to give for each entry: the ones it requires, or if it
+    // requires none, the ones only it declares.
+    const toGive = choice.entries
+      .map((entry, index) => {
+        const required = entry.fields.filter((field) => !field.optional);
+        return required.length > 0
+          ? required.map(formatFlagToGive).join(" and ")
+          : owned[index]!.map(formatFlagToGive).join(" or ");
+      })
+      .join(", or ");
+    if (picked.length === 0) {
+      throw new UsageError(`no flag says which form to use: give ${toGive}`, help);
+    }
+    if (picked.length > 1) {
+      const earlier = given[picked[0]!]!.map(formatFlagToGive).join(" or ");
+      const later = picked
+        .slice(1)
+        .flatMap((index) => given[index]!)
+        .map(formatFlagToGive)
+        .join(" or ");
+      throw new UsageError(`${later} cannot be given with ${earlier}: give ${toGive}`, help);
+    }
+    for (const [index, entry] of choice.entries.entries()) {
+      if (index !== picked[0]) for (const field of entry.fields) unpicked.add(field);
+    }
+  }
+  return unpicked;
+};
+
+/**
  * Parses one `--sort <field>[:<asc|desc>]` into a sort key. Throws a
  * `UsageError` for a field the command cannot sort on, or an unknown
  * direction.
@@ -341,13 +403,18 @@ export const parseArguments = async (
   stdinIsTerminal = false,
 ): Promise<Arguments> => {
   const help = command.spelling;
-  const payloadFields = new Map(command.payload.map((field) => [field.spelling, field]));
-  const queryFields = new Map(command.query.map((field) => [field.spelling, field]));
+  const payloadFields = groupFieldsBySpelling(command.payload);
+  const queryFields = groupFieldsBySpelling(command.query);
 
   const positionals: Array<string> = [];
   const payload: Record<string, unknown> = {};
   const query: Record<string, unknown> = {};
   const marked = new Set<Field>();
+  // The fields of `oneOf` entries that a flag or a marker was given for, and
+  // the values given. They wait until an entry is picked, because the same
+  // flag may belong to an entry that is not.
+  const touched = new Set<Field>();
+  const entryValues = new Map<Field, unknown>();
   let limit: number | undefined;
   let cursor: string | undefined;
   let sort: Array<SortKey> | undefined;
@@ -396,30 +463,40 @@ export const parseArguments = async (
     }
 
     if (name.endsWith("-stdin")) {
-      const field = payloadFields.get(name.slice(0, -"-stdin".length));
-      if (field === undefined || !field.stdin) throw new UsageError(`unknown flag --${name}`, help);
+      const fields = payloadFields.get(name.slice(0, -"-stdin".length));
+      if (fields === undefined || !fields[0]!.stdin) {
+        throw new UsageError(`unknown flag --${name}`, help);
+      }
       // The marker only asks for the read. It never takes the value, or the
       // value would be back in `argv`, which reading stdin exists to avoid.
       if (inline !== undefined) throw new UsageError(`--${name} takes no value`, help);
-      marked.add(field);
+      for (const field of fields) {
+        marked.add(field);
+        if (field.within?.entry !== undefined) touched.add(field);
+      }
       continue;
     }
 
-    const payloadField = payloadFields.get(name);
-    const field = payloadField ?? queryFields.get(name);
-    if (field === undefined) throw new UsageError(`unknown flag --${name}`, help);
+    const payloadGiven = payloadFields.get(name);
+    const fields = payloadGiven ?? queryFields.get(name);
+    if (fields === undefined) throw new UsageError(`unknown flag --${name}`, help);
+    const field = fields[0]!;
     if (field.stdin) {
       throw new UsageError(
         `--${name} does not exist: ${command.id} reads ${field.name} from stdin, never from argv, where it would show in process lists and in shell history. Pipe it in; --${name}-stdin ${field.optional ? "tells the CLI to read it" : "is accepted but not needed"}.`,
         help,
       );
     }
-    assignFieldValue(
-      payloadField === undefined ? query : payload,
-      field,
-      parseWrittenValue(field, value(), help),
-      help,
-    );
+    const text = value();
+    for (const each of fields) {
+      const parsed = parseWrittenValue(each, text, help);
+      if (each.within?.entry === undefined) {
+        assignFieldValue(payloadGiven === undefined ? query : payload, each, parsed, help);
+      } else {
+        touched.add(each);
+        entryValues.set(each, parsed);
+      }
+    }
   }
 
   // A flag with a default takes it when the command line left the flag out.
@@ -430,11 +507,17 @@ export const parseArguments = async (
     }
   }
 
+  // The flags of an entry that was not picked are ignored from here on: they
+  // are neither required nor read from stdin.
+  const unpicked = pickEntries(command, touched, help);
+  for (const [field, value] of entryValues) {
+    if (!unpicked.has(field)) setGivenValue(payload, field, value);
+  }
+  const given = command.payload.filter((field) => !unpicked.has(field));
+
   // A required content field is always read; an optional one only when its
   // marker was given, so an empty pipe never clears a field nobody named.
-  const reading = command.payload.filter(
-    (field) => field.stdin && (!field.optional || marked.has(field)),
-  );
+  const reading = given.filter((field) => field.stdin && (!field.optional || marked.has(field)));
 
   // Check everything that argv alone can decide before reading the pipe, so a
   // command line that cannot work does not consume stdin first.
@@ -460,12 +543,12 @@ export const parseArguments = async (
 
   checkPaging(command, { limit, cursor, sort }, help);
 
-  const missing = command.payload
+  const missing = given
     .filter(
       (field) =>
         !field.optional && readGivenValue(payload, field) === undefined && !reading.includes(field),
     )
-    .map((field) => `--${field.spelling}${field.stdin ? "-stdin" : ""}`);
+    .map(formatFlagToGive);
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
   }
@@ -476,14 +559,14 @@ export const parseArguments = async (
     (field) => field.standsInForStdin && field.name in payload,
   );
   if (reading.length > 0 && hasOtherInput && stdinIsTerminal) {
-    for (const field of reading) payload[field.name] = coerceFieldValue(field, "", help);
+    for (const field of reading) setGivenValue(payload, field, coerceFieldValue(field, "", help));
   } else if (reading.length > 0) {
     // Strip one trailing newline, because heredocs and editors add one. Files
     // saved on Windows end with `\r\n`, which counts as that newline.
     const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
-      payload[field.name] = coerceFieldValue(field, text, help);
+      setGivenValue(payload, field, coerceFieldValue(field, text, help));
     } else {
       // Split at `\r\n` too, so no line of a Windows file keeps a trailing `\r`.
       const lines = text.split(/\r?\n/);
@@ -496,7 +579,7 @@ export const parseArguments = async (
         );
       }
       reading.forEach((field, index) => {
-        payload[field.name] = coerceFieldValue(field, lines[index]!, help);
+        setGivenValue(payload, field, coerceFieldValue(field, lines[index]!, help));
       });
     }
   }
