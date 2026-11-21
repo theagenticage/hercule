@@ -214,7 +214,8 @@ const assignFieldValue = (
 /**
  * Picks the entry of each `oneOf` field that the flags given stand for, and
  * returns the fields of the entries not picked. Throws a `UsageError` when
- * the flags of two entries are given, or when no flag picks an entry.
+ * the flags of two entries are given, when no flag picks an entry, or when a
+ * flag is given that the picked entry does not declare.
  *
  * `touched` holds the fields of the entries that a flag was given for, or
  * whose `--<flag>-stdin` marker was. A flag that several entries declare
@@ -258,6 +259,22 @@ const pickEntries = (
         .map(formatFlagToGive)
         .join(" or ");
       throw new UsageError(`${later} cannot be given with ${earlier}: give ${toGive}`, help);
+    }
+    const pickedEntry = choice.entries[picked[0]!]!;
+    // A flag that several entries declare picks none of them, so the picked
+    // entry may not declare it. Taking it without a word would drop what the
+    // user typed.
+    const stray = [...touched].find(
+      (field) =>
+        choice.entries.some((entry) => entry.fields.includes(field)) &&
+        !pickedEntry.fields.some((one) => one.spelling === field.spelling),
+    );
+    if (stray !== undefined) {
+      const picking = given[picked[0]!]!.map(formatFlagToGive).join(" or ");
+      throw new UsageError(
+        `${formatFlagToGive(stray)} cannot be given with ${picking}: that form has no ${formatFlagToGive(stray)}. Give ${toGive}`,
+        help,
+      );
     }
     for (const [index, entry] of choice.entries.entries()) {
       if (index !== picked[0]) for (const field of entry.fields) unpicked.add(field);

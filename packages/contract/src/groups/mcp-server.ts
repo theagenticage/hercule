@@ -8,8 +8,9 @@
  * including one a check makes, reaches clients through the live topic
  * `mcpServer`.
  *
- * Only servers a plugin offers exist so far. A server added by its address
- * has its own source kind, built later.
+ * A server comes from a plugin's contribution, reached with one of the
+ * plugin's Connections, or from an address the user gave, reached with a
+ * sign-in the server holds itself.
  */
 import { Schema } from "effect";
 import { McpServerName } from "@hercule/plugin-host";
@@ -107,15 +108,34 @@ const QualifiedContributionId = Schema.String.check(
 );
 
 /**
- * Where an MCP Server is reached from: a server a plugin offers, reached with
- * the credential of one of the plugin's Connections.
+ * Where an MCP Server is reached from:
+ *
+ * - `plugin`: a server a plugin offers, reached with the credential of one of
+ *   the plugin's Connections.
+ * - `url`: a server the user added by its address. `url` is the address as the
+ *   user gave it, and the one requests go to. `signIn` is what the server
+ *   holds now: `none`, a pasted `token`, or `oauth` tokens from signing in.
+ *   `signInOffered` is what the server said it accepts the last time it
+ *   refused a request with HTTP 401: `oauth` when its answer names an
+ *   authorization server, and `token` when only a pasted token can help. It is
+ *   `null` until a request has been refused, and a later success does not
+ *   clear it. A client reads it to show the token field or a sign-in through
+ *   the browser when the status is `needs-sign-in`.
  */
-export const McpServerSource = Schema.Struct({
-  kind: Schema.Literal("plugin"),
-  /** The plugin's MCP server contribution. */
-  contributionId: QualifiedContributionId,
-  connectionId: Id,
-});
+export const McpServerSource = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("plugin"),
+    /** The plugin's MCP server contribution. */
+    contributionId: QualifiedContributionId,
+    connectionId: Id,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("url"),
+    url: Schema.String,
+    signIn: Schema.Literals(["none", "token", "oauth"]),
+    signInOffered: Schema.NullOr(Schema.Literals(["oauth", "token"])),
+  }),
+]);
 
 export type McpServerSource = Schema.Schema.Type<typeof McpServerSource>;
 
@@ -150,15 +170,29 @@ export type McpServer = Schema.Schema.Type<typeof McpServer>;
 
 /**
  * The payload of `mcpServer.create`. `name` is the one a client gives the
- * server; left out, it is the contribution's own word.
+ * server. Left out, it is the contribution's own word for a plugin server,
+ * and the first part of the address's host that is not `mcp`, `www` or `api`
+ * for a server added by URL.
+ *
+ * `url` is any text here: the service checks it and says what is wrong. A
+ * `token` is stored as the server's sign-in before the first check, so the
+ * check already carries it.
  */
 export const McpServerCreateInput = closedStruct({
-  source: closedStruct({
-    kind: Schema.Literal("plugin"),
-    contributionId: QualifiedContributionId,
-    connectionId: Id,
-    name: Schema.optionalKey(McpServerName),
-  }),
+  source: Schema.Union([
+    closedStruct({
+      kind: Schema.Literal("plugin"),
+      contributionId: QualifiedContributionId,
+      connectionId: Id,
+      name: Schema.optionalKey(McpServerName),
+    }),
+    closedStruct({
+      kind: Schema.Literal("url"),
+      url: Schema.String,
+      name: Schema.optionalKey(McpServerName),
+      token: Schema.optionalKey(Schema.NonEmptyString),
+    }),
+  ]),
 });
 
 export type McpServerCreateInput = Schema.Schema.Type<typeof McpServerCreateInput>;
@@ -172,6 +206,11 @@ export const McpServerUpdateInput = closedStruct({
 });
 
 export type McpServerUpdateInput = Schema.Schema.Type<typeof McpServerUpdateInput>;
+
+/** The payload of `mcpServer.setToken`: the token the user pasted for the server. */
+export const McpServerSetTokenInput = closedStruct({ token: Schema.NonEmptyString });
+
+export type McpServerSetTokenInput = Schema.Schema.Type<typeof McpServerSetTokenInput>;
 
 const params = { id: Id };
 
@@ -190,10 +229,17 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     }),
     // Answers at once with the server in status `checking`.
     //
-    // - `conflict`: a server of this contribution and account exists.
-    // - `validation`: the name breaks the rules of `McpServerName`, no plugin
-    //   offers the contribution, or the Connection does not exist or is not
-    //   of the contribution's Connection type.
+    // - `conflict`: details say which. `mcp-server-exists`: a server of this
+    //   contribution and account, or of this address, exists. For an address,
+    //   two spellings of one address are one address: the scheme and host
+    //   case, the default port and one trailing `/` do not count.
+    //   `mcp-server-on-plugin-origin`: the address is one a plugin offers a
+    //   server for, so the server is made from the plugin's Connection.
+    // - `validation`: the name breaks the rules of `McpServerName`, or none
+    //   can be made from the address's host; the address is not http or
+    //   https, holds a user name or password, or ends in a `#fragment`; no
+    //   plugin offers the contribution, or the Connection does not exist or
+    //   is not of the contribution's Connection type.
     HttpApiEndpoint.post("create", "/mcp-servers", {
       payload: McpServerCreateInput,
       success: McpServer,
@@ -218,6 +264,18 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     HttpApiEndpoint.post("check", "/mcp-servers/:id/check", {
       params,
       success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // Gives a server added by URL the token the user pasted for it, replacing
+    // any sign-in it holds. The server goes to `checking` and its tools are
+    // listed again with the token. Answers with the server.
+    //
+    // - `invalid_state`: the server is a plugin server, which is reached with
+    //   its Connection's credential.
+    HttpApiEndpoint.post("setToken", "/mcp-servers/:id/token", {
+      params,
+      payload: McpServerSetTokenInput,
+      success: McpServer,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

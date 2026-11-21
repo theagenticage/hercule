@@ -15,6 +15,7 @@ interface RowField {
   readonly help?: string;
   readonly resolves?: string;
   readonly object?: unknown;
+  readonly oneOf?: unknown;
 }
 
 interface Row {
@@ -363,22 +364,39 @@ describe("a command's fields against the schema", () => {
   });
 });
 
-// A row's `object` form turns one object-valued field into one flag per key.
-describe("an object field filled from several flags", () => {
+// A row's `oneOf` form turns one field that is a union of objects into one flag per key of each member.
+describe("a field of several shapes filled from flags", () => {
   const fields = findCommandByWords(["mcp-server", "create"])!.payload;
 
-  it("becomes one field per flag, each typed by its key of the object", () => {
-    expect(fields.map((field) => [field.spelling, field.name, field.within?.field])).toEqual([
-      ["plugin", "contributionId", "source"],
-      ["connection", "connectionId", "source"],
-      ["name", "name", "source"],
+  it("becomes one field per flag of each entry, each typed by its key of its member", () => {
+    expect(
+      fields.map((field) => [field.spelling, field.name, field.within?.field, field.within?.entry]),
+    ).toEqual([
+      ["plugin", "contributionId", "source", 0],
+      ["connection", "connectionId", "source", 0],
+      ["name", "name", "source", 0],
+      ["url", "url", "source", 1],
+      ["name", "name", "source", 1],
+      ["token", "token", "source", 1],
     ]);
-    expect(fields.map((field) => field.optional)).toEqual([false, false, true]);
-    expect(fields.map((field) => field.holdsAnId)).toEqual([false, true, false]);
+    expect(fields.map((field) => field.optional)).toEqual([false, false, true, false, true, true]);
+    expect(fields.map((field) => field.holdsAnId)).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
     expect(fields.find((field) => field.name === "connectionId")!.resolves).toBe(
       "connection.query",
     );
     expect(fields[0]!.within!.fixed).toEqual({ kind: "plugin" });
+    expect(fields[3]!.within!.fixed).toEqual({ kind: "url" });
+  });
+
+  it("reads only the token from stdin", () => {
+    expect(fields.filter((field) => field.stdin).map((field) => field.name)).toEqual(["token"]);
   });
 });
 

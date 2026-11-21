@@ -927,6 +927,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/mcp-servers/:id/check",
   },
+  "mcpServer.setToken": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/token",
+  },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {

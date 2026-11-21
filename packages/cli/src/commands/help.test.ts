@@ -134,23 +134,33 @@ describe("an example", () => {
   });
 });
 
-describe("a command whose object field is filled from several flags", () => {
+describe("a command whose field of several shapes is filled from flags", () => {
   const command = readCommand("mcpServer.create");
 
-  it("shows each flag in the usage line's flags section like an ordinary flag", () => {
+  it("lists the flags of each form under its lead line", () => {
     const lines = buildCommandHelp(command);
     expect(lines).toContain("usage: hercule mcp-server create [flags]");
-    const flags = readSection(lines, "flags:").filter((line) => line.trimStart().startsWith("--"));
+    const flags = lines
+      .slice(lines.indexOf("flags:"), lines.indexOf("stdin:"))
+      .filter((line) => line.trimStart().startsWith("--") || line.endsWith(":"))
+      .filter((line) => line !== "flags:");
     expect(flags.map((line) => line.trim().replace(/\s+/g, " "))).toEqual([
+      "From a plugin's Connection:",
       "--plugin <text> required",
       "--connection <text> required",
       "--name <text> optional",
+      "By its address:",
+      "--url <text> required",
+      "--name <text> optional",
+      "--token-stdin optional; read from stdin",
     ]);
   });
 
-  it("shows the examples as flags", () => {
-    expect(readSection(buildCommandHelp(command), "examples:")).toContain(
+  it("shows the examples of both forms as flags", () => {
+    const examples = readSection(buildCommandHelp(command), "examples:");
+    expect(examples).toContain(
       "  hercule mcp-server create --plugin sentry/sentry --connection 1f3a9c2e",
     );
+    expect(examples).toContain("  hercule mcp-server create --url https://mcp.notion.com/mcp");
   });
 });

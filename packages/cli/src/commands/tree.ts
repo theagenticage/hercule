@@ -515,6 +515,15 @@ const hasSameEntries = (
   Object.keys(left).length === Object.keys(right).length &&
   Object.entries(left).every(([key, value]) => right[key] === value);
 
+/** Checks whether two fields accept the same closed set of values, or both accept any text. */
+const hasSameChoices = (
+  left: ReadonlyMap<string, string> | undefined,
+  right: ReadonlyMap<string, string> | undefined,
+): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : left.size === right.size && [...left].every(([typed, value]) => right.get(typed) === value);
+
 /**
  * Builds the fields of a `oneOf` row: one field for each flag of each entry,
  * each entry built against the member of the union it stands for. Throws when
@@ -524,8 +533,11 @@ const hasSameEntries = (
  * - a member has no entry, an entry's `fixed` values are not the literal keys
  *   of any member, or two entries stand for one member;
  * - an entry is wrong as an `object` row is (see `buildObjectFields`);
- * - a flag spelled the same in several entries means a different key, type or
- *   stdin read in each, so the one word would mean two things;
+ * - an entry has no flag that no other entry declares, so no command line
+ *   could pick it;
+ * - a flag spelled the same in several entries means a different key, type,
+ *   set of allowed values or stdin read in each, so the one word would mean
+ *   two things;
  * - the entries read different flags from stdin, which the help cannot
  *   describe in one place.
  */
@@ -564,16 +576,37 @@ const buildOneOfFields = (
   );
   for (const field of fields) {
     const first = fields.find((other) => other.spelling === field.spelling)!;
+    // The flag is parsed before the command line has picked an entry, so one
+    // spelling has to parse the same text the same way in every entry.
     const differs =
       field.name !== first.name ||
       field.kind !== first.kind ||
       field.stdin !== first.stdin ||
-      field.resolves !== first.resolves;
+      field.resolves !== first.resolves ||
+      field.nullable !== first.nullable ||
+      !hasSameChoices(field.choices, first.choices);
     if (differs) {
       throw new Error(
-        `${name}: --${field.spelling} means something different in different entries`,
+        `${name}: --${field.spelling} means something different in different entries: it must have the same key, type, allowed values and stdin read in each`,
       );
     }
+  }
+  // An entry is picked by a flag that no other entry declares. Without one,
+  // no command line could ever pick it.
+  const selectorless = row.oneOf.findIndex(
+    (_, index) =>
+      !fields.some(
+        (field) =>
+          field.within?.entry === index &&
+          fields.every(
+            (other) => other.within?.entry === index || other.spelling !== field.spelling,
+          ),
+      ),
+  );
+  if (selectorless !== -1) {
+    throw new Error(
+      `${name}: the entry "${row.oneOf[selectorless]!.help}" has no flag of its own, so no command line could pick it. Give it a flag that no other entry declares.`,
+    );
   }
   if (new Set(fields.filter((field) => field.stdin).map((field) => field.spelling)).size > 1) {
     throw new Error(`${name}: the entries read different flags from stdin`);

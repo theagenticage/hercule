@@ -328,6 +328,7 @@ const COMMANDS: Record<string, string> = {
   "mcpServer.update": "mcp-server update",
   "mcpServer.delete": "mcp-server delete",
   "mcpServer.check": "mcp-server check",
+  "mcpServer.setToken": "mcp-server set-token",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -394,6 +395,8 @@ const STDIN_FIELDS = [
   "session.continue prompt",
   "session.input text",
   "input.update text",
+  "mcpServer.create source.token",
+  "mcpServer.setToken token",
   "plugin.configure config",
   "providerAccount.create credentials",
   "providerAccount.update credentials",
@@ -570,6 +573,7 @@ const RESOLVES: Record<string, string> = {
   "mcpServer.update id": "mcpServer.query",
   "mcpServer.delete id": "mcpServer.query",
   "mcpServer.check id": "mcpServer.query",
+  "mcpServer.setToken id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",

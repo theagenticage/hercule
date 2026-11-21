@@ -123,6 +123,7 @@ export {
   type CapDetails,
   ShrinkDetails,
   InvalidStateDetails,
+  ConflictDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -495,6 +496,7 @@ export {
   McpServerIds,
   McpServerLeftOutReason,
   McpServerName,
+  McpServerSetTokenInput,
   McpServerSource,
   McpServerStatus,
   McpServerTool,

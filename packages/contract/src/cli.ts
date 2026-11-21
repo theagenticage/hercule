@@ -4620,38 +4620,67 @@ export const CLI = {
   },
   "mcpServer.create": {
     command: "mcp-server create",
-    help: "Adds an MCP server from a plugin's Connection. It starts in `checking`; run `hercule mcp-server read` to see the result. A server of the same contribution and account that already exists is refused.",
+    help: "Adds an MCP server, from a plugin's Connection or by its address. It starts in `checking`; run `hercule mcp-server read` to see the result. By address, a server that needs a sign-in ends in `needs-sign-in`, which `hercule mcp-server read` explains; give the token with --token-stdin to skip that step, or later with `hercule mcp-server set-token`. A server that exists already is refused.",
     examples: [
       { args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e"] },
       {
         args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e", "--name", "work_sentry"],
       },
+      { args: ["--url", "https://mcp.notion.com/mcp"] },
+      {
+        args: ["--url", "https://mcp.example.com/mcp", "--name", "example", "--token-stdin"],
+        stdin: "the_token_the_server_expects",
+      },
     ],
     fields: {
       source: {
-        object: {
-          fixed: { kind: "plugin" },
-          flags: {
-            contributionId: {
-              flag: "plugin",
-              help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry.",
-            },
-            connectionId: {
-              flag: "connection",
-              help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
-              resolves: "connection.query",
-            },
-            name: {
-              flag: "name",
-              help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes its contribution's name.",
+        oneOf: [
+          {
+            help: "From a plugin's Connection:",
+            fixed: { kind: "plugin" },
+            flags: {
+              contributionId: {
+                flag: "plugin",
+                help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry.",
+              },
+              connectionId: {
+                flag: "connection",
+                help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
+                resolves: "connection.query",
+              },
+              name: {
+                flag: "name",
+                help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes its contribution's name.",
+              },
             },
           },
-        },
+          {
+            help: "By its address:",
+            fixed: { kind: "url" },
+            flags: {
+              url: {
+                flag: "url",
+                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as written, so keep a trailing slash if the server needs one. Put no secret in it: the token goes in --token-stdin.",
+              },
+              name: {
+                flag: "name",
+                help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes the first part of the address's host that is not mcp, www or api, so mcp.notion.com becomes notion; a host that gives no valid name needs --name.",
+              },
+              token: {
+                flag: "token",
+                stdin: true,
+                help: "The token the server expects, sent to it as a bearer token. Without it, the first check goes with no sign-in.",
+              },
+            },
+          },
+        ],
       },
     },
     errors: {
       conflict:
-        "a server of this contribution and account exists already; the message names it. Switch it on with `hercule mcp-server update`, or read it with `hercule mcp-server read`",
+        "the server exists already, and the message names it: a plugin server of the same contribution and account, or a server of the same address (two spellings of one address count as one). Read it with `hercule mcp-server read`, or delete it first with `hercule mcp-server delete`. Or the address is one a plugin offers a server for: the message says how to add that server from your Connection instead",
+      validation:
+        "the address is not http or https, holds a user name or password or a #fragment, or no name can be made from its host, so give one with --name. Or the name breaks the name rule. Or no plugin offers the contribution, or the Connection is not of its type",
     },
   },
   "mcpServer.update": {
@@ -4695,6 +4724,28 @@ export const CLI = {
     },
     errors: {
       invalid_state: "the server is switched off; switch it on with `hercule mcp-server update`",
+    },
+  },
+  "mcpServer.setToken": {
+    command: "mcp-server set-token",
+    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. The server goes back to `checking` and lists its tools again with the token; run `hercule mcp-server read` later to see the result. The token is read from stdin, so it never shows in your shell history.",
+    examples: [{ args: ["1f3a9c2e"], stdin: "the_token_the_server_expects" }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+      token: {
+        stdin: true,
+        required: true,
+        flag: "token",
+        help: "The token the server expects, sent to it as a bearer token.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the server is a plugin server, which is reached with its Connection: reconnect that Connection with `hercule connection set-credentials` or in Settings > Connections",
     },
   },
   "skill.diff": {

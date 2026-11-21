@@ -255,3 +255,148 @@ describe("a row of several shapes that does not fit its schema", () => {
     );
   });
 });
+
+/**
+ * Three shapes of a thing, where `name` is shared by `b` and `c` only and
+ * `color` takes the same values in both of them.
+ */
+const Three = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("a"), a: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("b"),
+    b: Schema.String,
+    name: Schema.optionalKey(Schema.String),
+    color: Schema.optionalKey(Schema.Literals(["red", "green"])),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("c"),
+    c: Schema.String,
+    name: Schema.optionalKey(Schema.String),
+    color: Schema.optionalKey(Schema.Literals(["red", "green"])),
+  }),
+]);
+
+const ENTRY_A = {
+  help: "Form a:",
+  fixed: { kind: "a" },
+  flags: { a: { flag: "a", help: "The a." } },
+};
+const ENTRY_B = {
+  help: "Form b:",
+  fixed: { kind: "b" },
+  flags: {
+    b: { flag: "b", help: "The b." },
+    name: { flag: "name", help: "The name." },
+    color: { flag: "color", help: "The color." },
+  },
+};
+const ENTRY_C = {
+  help: "Form c:",
+  fixed: { kind: "c" },
+  flags: {
+    c: { flag: "c", help: "The c." },
+    name: { flag: "name", help: "The name." },
+    color: { flag: "color", help: "The color." },
+  },
+};
+
+const buildThreeCommand = (
+  union: Schema.Top,
+  entries: ReadonlyArray<ObjectFlagsRow & { readonly help: string }>,
+) =>
+  buildCommand(
+    "mcpServer.create",
+    {
+      command: "thing create",
+      help: "Creates a thing.",
+      examples: [{ args: ["--a", "x"] }],
+      fields: { source: { oneOf: entries } },
+    },
+    { requires: "mcp.manage", method: "POST", path: "/things" },
+    HttpApiEndpoint.post("create", "/things", {
+      payload: Schema.Struct({ source: union }),
+      success: Schema.Struct({}),
+    }),
+  );
+
+describe("a flag given that the picked entry does not take", () => {
+  const three = buildThreeCommand(Three, [ENTRY_A, ENTRY_B, ENTRY_C]);
+
+  it("is refused, and not dropped, when other entries share it", async () => {
+    const refused = parseArguments(three, ["--a", "x", "--name", "work"], refuseStdinRead);
+    await expect(refused).rejects.toThrow(UsageError);
+    await expect(refused).rejects.toThrow(
+      "--name cannot be given with --a: that form has no --name",
+    );
+  });
+
+  it("is sent when the picked entry declares it", async () => {
+    const args = await parseArguments(
+      three,
+      ["--c", "x", "--name", "work", "--color", "red"],
+      refuseStdinRead,
+    );
+    expect(args.payload).toEqual({ source: { kind: "c", c: "x", name: "work", color: "red" } });
+  });
+});
+
+describe("a row whose entries cannot be told apart or parsed alike", () => {
+  it("is refused when an entry has only flags that other entries declare, so none could pick it", () => {
+    expect(() =>
+      buildThreeCommand(
+        Schema.Union([
+          Schema.Struct({ kind: Schema.Literal("a"), name: Schema.String }),
+          Schema.Struct({ kind: Schema.Literal("b"), name: Schema.String }),
+        ]),
+        [
+          {
+            help: "Form a:",
+            fixed: { kind: "a" },
+            flags: { name: { flag: "name", help: "The name." } },
+          },
+          {
+            help: "Form b:",
+            fixed: { kind: "b" },
+            flags: { name: { flag: "name", help: "The name." } },
+          },
+        ],
+      ),
+    ).toThrow('the entry "Form a:" has no flag of its own');
+  });
+
+  it("is refused when a shared flag allows different values in different entries", () => {
+    const Divergent = Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("b"),
+        b: Schema.String,
+        color: Schema.optionalKey(Schema.Literals(["red", "green"])),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("c"),
+        c: Schema.String,
+        color: Schema.optionalKey(Schema.Literals(["red", "blue"])),
+      }),
+    ]);
+    const entryOf = (entry: typeof ENTRY_B | typeof ENTRY_C) => {
+      const { name: _name, ...flags } = entry.flags;
+      return { ...entry, flags };
+    };
+    expect(() => buildThreeCommand(Divergent, [entryOf(ENTRY_B), entryOf(ENTRY_C)])).toThrow(
+      "--color means something different in different entries",
+    );
+  });
+
+  it("is refused when a shared flag is a different kind in different entries", () => {
+    const Mixed = Schema.Union([
+      Schema.Struct({ kind: Schema.Literal("b"), b: Schema.String, size: Schema.String }),
+      Schema.Struct({ kind: Schema.Literal("c"), c: Schema.String, size: Schema.Number }),
+    ]);
+    const size = { flag: "size", help: "The size." };
+    expect(() =>
+      buildThreeCommand(Mixed, [
+        { help: "Form b:", fixed: { kind: "b" }, flags: { b: ENTRY_B.flags.b, size } },
+        { help: "Form c:", fixed: { kind: "c" }, flags: { c: ENTRY_C.flags.c, size } },
+      ]),
+    ).toThrow("--size means something different in different entries");
+  });
+});

@@ -930,3 +930,77 @@ describe("a flag that fills one key of an object", () => {
     expect(fetch.calls.map((call) => call.method)).toEqual(["GET"]);
   });
 });
+
+// Tests the forms of `mcp-server create` that need no Connection, and `set-token`, through the whole request.
+describe("an MCP server added by its address", () => {
+  const serverId = buildId("aaaaaaa1");
+  const buildServer = () => ({
+    id: serverId,
+    name: "notion",
+    source: {
+      kind: "url",
+      url: "https://mcp.notion.com/mcp",
+      signIn: "token",
+      signInOffered: null,
+    },
+    enabled: true,
+    status: "checking",
+    statusDetail: null,
+    tools: [],
+    checkedAt: null,
+    createdAt: "2026-09-15T10:00:00.000Z",
+    updatedAt: "2026-09-15T10:00:00.000Z",
+  });
+
+  it("is created with the token read from stdin, and looks up no Connection", async () => {
+    const { fetch, client } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--url", "https://mcp.notion.com/mcp", "--token-stdin"],
+      () => Promise.resolve("s3cret\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/mcp-servers",
+      body: { source: { kind: "url", url: "https://mcp.notion.com/mcp", token: "s3cret" } },
+    });
+  });
+
+  it("is refused when the flags of both forms are given, before stdin is read and with nothing sent", async () => {
+    const { fetch } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+
+    await expect(
+      parseArguments(
+        command,
+        ["--url", "https://mcp.notion.com/mcp", "--plugin", "sentry/sentry", "--token-stdin"],
+        refuseStdinRead,
+      ),
+    ).rejects.toThrow(UsageError);
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("gets a token from stdin with set-token, and resolves the id tail", async () => {
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/mcp-servers" && request.method === "GET"
+        ? { items: [buildServer()] }
+        : buildServer(),
+    );
+    const command = lookUpCommand("mcp-server", "set-token");
+    const args = await parseArguments(command, ["aaaaaaa1"], () => Promise.resolve("s3cret\n"));
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/mcp-servers" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/mcp-servers/${serverId}/token`,
+      body: { token: "s3cret" },
+    });
+  });
+});
