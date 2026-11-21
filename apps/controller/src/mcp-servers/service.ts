@@ -102,14 +102,17 @@ const toRecord = (server: StoredMcpServer): McpServer => {
  * Builds the refusal for a plugin server that exists already. The details
  * name the existing server, so a client can point at it.
  */
-const buildPluginServerExists = (contributionId: string, existing: StoredMcpServer): Conflict =>
+const buildPluginServerExistsConflict = (
+  contributionId: string,
+  existing: StoredMcpServer,
+): Conflict =>
   createConflictError(
     `This account already has an MCP server for ${contributionId}: ${existing.name} (${existing.id}). Use that server, or delete it first with \`hercule mcp-server delete ${existing.id}\`.`,
     { reason: "mcp-server-exists", mcpServerId: existing.id },
   );
 
 /** Builds the refusal for an address that was added before. */
-const buildUrlServerExists = (existing: StoredMcpServer): Conflict =>
+const buildUrlServerExistsConflict = (existing: StoredMcpServer): Conflict =>
   createConflictError(
     `You added this server before, as ${existing.name} (${existing.id}). One address is one server: use that one, or delete it first with \`hercule mcp-server delete ${existing.id}\`.`,
     { reason: "mcp-server-exists", mcpServerId: existing.id },
@@ -122,9 +125,9 @@ const buildUrlServerExists = (existing: StoredMcpServer): Conflict =>
  * - the plugin is switched off or failed to start: fix that first;
  * - the plugin runs and the user has a connected Connection of its type: switch
  *   the server on, or create it from that Connection with a command;
- * - the Connection needs to sign in again, or is switched off: fix the
- *   Connection first, and no command is offered because the create would be
- *   refused or go unchecked;
+ * - the Connection needs to sign in again, is in error, or is switched off:
+ *   fix the Connection first, and no command is offered because the create
+ *   would be refused or go unchecked;
  * - the user has no Connection: connect the plugin first.
  */
 const buildPluginOriginAdvice = (facts: {
@@ -154,8 +157,10 @@ const buildPluginOriginAdvice = (facts: {
       return `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contributionId} --connection ${connection.id}\`.`;
     case "disabled":
       return `It is reached with your ${plugin} Connection ${connection.label}, which is switched off: switch it on in Settings > Connections first, then ${switchOn}.`;
-    default:
+    case "needs-reauth":
       return `It is reached with your ${plugin} Connection ${connection.label}, which needs to sign in again: reconnect it in Settings > Connections first, then ${switchOn}.`;
+    case "error":
+      return `It is reached with your ${plugin} Connection ${connection.label}, which is in error: check it in Settings > Connections first, then ${switchOn}.`;
   }
 };
 
@@ -199,7 +204,8 @@ const make = Effect.gen(function* () {
    * nothing is asked of the user twice. The details and the message say what
    * to do, by what the user has:
    *
-   * - an enabled Connection of the contribution's type (or else any one);
+   * - a Connection of the contribution's type: a connected one if there is
+   *   one, else one that is not switched off, else the first;
    * - no Connection, so the user connects the plugin first;
    * - a plugin that is switched off or failed to start, so the user switches
    *   it on first.
@@ -305,10 +311,10 @@ const make = Effect.gen(function* () {
         connection.accountId,
       );
       if (Option.isSome(existing)) {
-        return yield* Effect.fail(buildPluginServerExists(contributionId, existing.value));
+        return yield* Effect.fail(buildPluginServerExistsConflict(contributionId, existing.value));
       }
       const at = yield* nowIso;
-      const server = yield* servers.insert({
+      const server = yield* servers.insertPlugin({
         name: name ?? contributionId.slice(contributionId.lastIndexOf("/") + 1),
         contributionId,
         connectionId,
@@ -375,7 +381,9 @@ const make = Effect.gen(function* () {
         connection.accountId,
       );
       if (Option.isSome(existing)) {
-        return yield* Effect.fail(buildPluginServerExists(target.contributionId, existing.value));
+        return yield* Effect.fail(
+          buildPluginServerExistsConflict(target.contributionId, existing.value),
+        );
       }
       const at = yield* nowIso;
       yield* signIns.deleteAll(current.id);
@@ -418,7 +426,8 @@ const make = Effect.gen(function* () {
       // make this lookup see every committed create, and the UNIQUE
       // constraint on the address is only a backstop.
       const existing = yield* servers.findByNormalizedUrl(address.normalizedUrl);
-      if (Option.isSome(existing)) return yield* Effect.fail(buildUrlServerExists(existing.value));
+      if (Option.isSome(existing))
+        return yield* Effect.fail(buildUrlServerExistsConflict(existing.value));
       const name = source.name ?? (yield* buildDefaultServerName(address));
       const at = yield* nowIso;
       const server = yield* servers.insertUrl({

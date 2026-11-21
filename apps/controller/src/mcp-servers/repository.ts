@@ -98,7 +98,7 @@ export interface McpServerDependencyIds {
 }
 
 /** What a new plugin server row holds. The status starts as `checking` and the switch as on. */
-export interface NewMcpServer {
+export interface NewPluginMcpServer {
   readonly name: string;
   readonly contributionId: string;
   readonly connectionId: string;
@@ -425,7 +425,7 @@ const make = Effect.gen(function* () {
       ),
 
     /** Inserts a plugin server that is on, in status `checking`, with no tools, and returns it. */
-    insert: (server: NewMcpServer): Effect.Effect<StoredMcpServer, SqlError> =>
+    insertPlugin: (server: NewPluginMcpServer): Effect.Effect<StoredMcpServer, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`

@@ -228,7 +228,7 @@ const make = Effect.gen(function* () {
         current.notifiedStatus === null &&
         // A Notification is for trouble the user would not have seen
         // otherwise. A server that has never worked is still being set up: the
-        // person adding it (the Add dialog, `hercule mcp-servers read`) sees
+        // person adding it (the Add dialog, `hercule mcp-server read`) sees
         // its failed first checks for themselves. `checkedAt` is set by the
         // first successful check only, so the first failure after the server
         // has worked is the first one that can raise a Notification. Nothing

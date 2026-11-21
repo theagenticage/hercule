@@ -25,7 +25,7 @@ const arrange = Effect.gen(function* () {
                                  labels, config, created_at, updated_at)
         VALUES (unhex(replace(${CONNECTION_ID}, '-', '')), 'acme', 'acme/desk', 'work', 'Desk',
                 'desk-1', 'connected', '[]', '{}', ${AT}, ${AT})`;
-      yield* servers.insert({
+      yield* servers.insertPlugin({
         name: "desk",
         contributionId: "acme/desk",
         connectionId: CONNECTION_ID,

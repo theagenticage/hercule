@@ -364,7 +364,7 @@ describe("an address on a plugin's origin", () => {
     ],
     [
       "error",
-      "which needs to sign in again: reconnect it in Settings > Connections first, then switch its server on in Settings > MCP servers.",
+      "which is in error: check it in Settings > Connections first, then switch its server on in Settings > MCP servers.",
     ],
     [
       "disabled",
