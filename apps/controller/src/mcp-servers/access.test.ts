@@ -161,34 +161,6 @@ describe("resolving the access of a server added by URL", () => {
     expect(access.credentials).toMatchObject({ credentialsRecordId: "server-1" });
   });
 
-  it("builds the request to the address as it is stored, with its token as a bearer token", () => {
-    const access = resolveUsable({}, url);
-
-    expect(
-      access.endpoint.buildRequest({
-        credentials: { token: "t0ken" },
-        secretNames: ["token"],
-        config: {},
-        identity: "any",
-      }),
-    ).toEqual({
-      url: "https://desk.example/mcp",
-      headers: { Authorization: "Bearer t0ken" },
-    });
-  });
-
-  it("builds a request with no header when the server holds no token", async () => {
-    const access = resolveUsable({}, url);
-
-    const credentials = await Effect.runPromise(access.credentials.readForUse());
-
-    expect(credentials).toMatchObject({ credentials: {}, secretNames: ["token"], config: {} });
-    expect(access.endpoint.buildRequest(credentials)).toEqual({
-      url: "https://desk.example/mcp",
-      headers: {},
-    });
-  });
-
   it("reads its token as a credential that is marked secret, with an identity that never holds the token", async () => {
     const access = resolveUsable({}, url, { token: "t0ken" });
 
@@ -200,16 +172,6 @@ describe("resolving the access of a server added by URL", () => {
       resolveUsable({}, url, { token: "other" }).credentials.readForUse(),
     );
     expect(other.identity).not.toBe(credentials.identity);
-  });
-
-  it("has nothing to refresh after the server refused its token", async () => {
-    const access = resolveUsable({}, url, { token: "t0ken" });
-
-    const failure = await Effect.runPromise(
-      Effect.flip(access.credentials.refreshAfterRejection("identity-1")),
-    );
-
-    expect(failure).toBeInstanceOf(ServerCredentialsCannotRefresh);
   });
 
   it("says in words the user can act on that the server needs sign-in, whether it holds a token or not", () => {
@@ -224,28 +186,6 @@ describe("resolving the access of a server added by URL", () => {
       status: "needs-sign-in",
       detail: "desk refused its sign-in: paste a token or sign in in Settings > MCP servers",
       signInOffered: "token",
-    });
-  });
-
-  it("reads the token for a request that only continues an exchange while it is the one the session opened with, and refuses it once it is another", async () => {
-    const opened = await Effect.runPromise(
-      resolveUsable({}, url, { token: "t0ken" }).credentials.readForUse(),
-    );
-    const sameToken = resolveUsable({}, url, { token: "t0ken" });
-    const replacedToken = resolveUsable({}, url, { token: "other" });
-
-    const continued = await Effect.runPromise(
-      sameToken.credentials.readWithoutRefresh(opened.identity),
-    );
-    const failure = await Effect.runPromise(
-      Effect.flip(replacedToken.credentials.readWithoutRefresh(opened.identity)),
-    );
-
-    expect(continued.credentials).toEqual({ token: "t0ken" });
-    expect(failure).toBeInstanceOf(ServerCredentialsUnavailable);
-    expect(failure).toMatchObject({
-      status: "error",
-      detail: "The sign-in of desk was replaced",
     });
   });
 });

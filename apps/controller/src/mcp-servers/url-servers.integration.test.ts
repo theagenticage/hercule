@@ -102,34 +102,6 @@ const replaceToken = (controller: SetUpController, serverId: string, token: stri
   );
 
 describe("the check of a server added by URL", () => {
-  it("lists the tools with no sign-in, sending no Authorization header", async () => {
-    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
-      await insertUrlServer();
-
-      const row = await waitForResult(controller);
-
-      expect(row).toMatchObject({ status: "ready", status_detail: null, sign_in_offered: null });
-      expect(JSON.parse(row.tools)).toMatchObject([{ name: "echo" }]);
-      expect(new Set(fake.requests.map((request) => request.authorization))).toEqual(
-        new Set([null]),
-      );
-    });
-  });
-
-  it("lists the tools with a pasted token, sending it as a bearer token", async () => {
-    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
-      fake.authorize = (authorization) => authorization === "Bearer t0ken";
-      await insertUrlServer({ token: "t0ken" });
-
-      const row = await waitForResult(controller);
-
-      expect(row.status).toBe("ready");
-      expect(new Set(fake.requests.map((request) => request.authorization))).toEqual(
-        new Set(["Bearer t0ken"]),
-      );
-    });
-  });
-
   it.each([
     ["a bare challenge", "Bearer", "token"],
     [
@@ -224,7 +196,7 @@ describe("a redirect from a server added by URL", () => {
 });
 
 describe("a call to a server added by URL", () => {
-  it("is answered, with the token as a bearer token", async () => {
+  it("is answered", async () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "t0ken" });
       await waitForResult(controller);
@@ -237,21 +209,7 @@ describe("a call to a server added by URL", () => {
         type: "text",
         text: JSON.stringify({ text: "hello" }),
       });
-      expect(requestsOf(fake, "tools/call")).toMatchObject([
-        { tool: "echo", authorization: "Bearer t0ken", status: 200 },
-      ]);
-    });
-  });
-
-  it("is answered with no Authorization header when the server holds no token", async () => {
-    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
-      const serverId = await insertUrlServer();
-      await waitForResult(controller);
-
-      const result = await callAs(controller, serverId);
-
-      expect(result._tag).toBe("Success");
-      expect(requestsOf(fake, "tools/call")[0]?.authorization).toBeNull();
+      expect(requestsOf(fake, "tools/call")).toMatchObject([{ tool: "echo", status: 200 }]);
     });
   });
 

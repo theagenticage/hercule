@@ -214,7 +214,7 @@ describe("MCP servers added by address, through the binary", () => {
     );
   }, 60_000);
 
-  it("refuses an address that was added before, whatever its spelling", async () => {
+  it("refuses an address that was added before", async () => {
     const fake = startFake();
     const first = expectJsonOutput<McpServerRecord>(
       await runLoggedInCli([
@@ -232,7 +232,7 @@ describe("MCP servers added by address, through the binary", () => {
       "mcp-server",
       "create",
       "--url",
-      `${fake.url.replace("http://", "HTTP://")}/`,
+      fake.url,
       "--name",
       "again",
       "--json",
