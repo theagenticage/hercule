@@ -135,7 +135,19 @@ const parseRpcError = (reply: unknown): RpcError => {
 };
 
 export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
-  const pending = new Map<number, Deferred.Deferred<unknown, RpcError>>();
+  /**
+   * A request waits for two things. `arrived` is done when the reply is read
+   * from the output, and the request's deadline runs only until then.
+   * `settled` is done when the reply's turn comes in the delivery order,
+   * which may be later, behind a notification that is still being prepared.
+   */
+  const pending = new Map<
+    number,
+    {
+      readonly arrived: Deferred.Deferred<void>;
+      readonly settled: Deferred.Deferred<unknown, RpcError>;
+    }
+  >();
   let next = 1;
   let gone = false;
   let complained = false;
@@ -199,11 +211,11 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   };
 
   const settle = (frame: Record<string, unknown>, id: number): void => {
-    const waiting = pending.get(id);
-    if (waiting === undefined) return;
+    const asked = pending.get(id);
+    if (asked === undefined) return;
     pending.delete(id);
     Deferred.doneUnsafe(
-      waiting,
+      asked.settled,
       "error" in frame
         ? Effect.fail(parseRpcError(frame["error"]))
         : Effect.succeed(frame["result"]),
@@ -231,7 +243,12 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
     const method = frame["method"];
     const id = frame["id"];
     if (typeof method !== "string") {
-      if (typeof id === "number") deliverInOrder(undefined, () => settle(frame, id));
+      if (typeof id === "number") {
+        // The deadline stops now. Only the reply's effect waits for its turn.
+        const asked = pending.get(id);
+        if (asked !== undefined) Deferred.doneUnsafe(asked.arrived, Effect.void);
+        deliverInOrder(undefined, () => settle(frame, id));
+      }
       return;
     }
     if (typeof id !== "string" && typeof id !== "number") {
@@ -247,9 +264,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
   const abandon = (): void => {
     gone = true;
-    for (const [id, waiting] of pending) {
+    for (const [id, asked] of pending) {
       pending.delete(id);
-      Deferred.doneUnsafe(waiting, Effect.fail({ message: GONE }));
+      Deferred.doneUnsafe(asked.arrived, Effect.void);
+      Deferred.doneUnsafe(asked.settled, Effect.fail({ message: GONE }));
     }
   };
 
@@ -258,16 +276,19 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
       Effect.suspend(() => {
         if (gone) return Effect.fail<RpcError>({ message: GONE });
         const id = next++;
-        const settled = Deferred.makeUnsafe<unknown, RpcError>();
+        const asked = {
+          arrived: Deferred.makeUnsafe<void>(),
+          settled: Deferred.makeUnsafe<unknown, RpcError>(),
+        };
         // Registered before the write, because the reply may be delivered
         // during the write. Removed again if the write itself fails.
-        pending.set(id, settled);
+        pending.set(id, asked);
         const failure = send({ id, method, params });
         if (failure !== undefined) {
           pending.delete(id);
           return Effect.fail<RpcError>({ message: failure });
         }
-        return Deferred.await(settled).pipe(
+        return Deferred.await(asked.arrived).pipe(
           Effect.timeoutOrElse({
             duration: RPC_DEADLINE,
             orElse: () =>
@@ -275,6 +296,7 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
                 message: `the app-server did not reply to ${method} within ${Duration.format(RPC_DEADLINE)}`,
               }),
           }),
+          Effect.andThen(Deferred.await(asked.settled)),
           Effect.ensuring(Effect.sync(() => void pending.delete(id))),
         );
       }),
