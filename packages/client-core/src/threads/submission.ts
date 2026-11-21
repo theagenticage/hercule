@@ -68,6 +68,9 @@ export function buildSubmission(resolved: ResolvedThread, message: MessageDraft)
       ...(config.projectId === null || config.projectId === undefined
         ? {}
         : { projectId: config.projectId }),
+      // An untouched list is left out, so the controller picks the project's
+      // list or the default. A list the user emptied is sent as empty.
+      ...(resolved.mcpServerIds === undefined ? {} : { mcpServerIds: resolved.mcpServerIds }),
       // A thread that works without a checkout leaves `workspace` out: the
       // contract does not accept `{ kind: "none" }` for the field. A main
       // workspace is sent by its repo alone, because it is the one shared

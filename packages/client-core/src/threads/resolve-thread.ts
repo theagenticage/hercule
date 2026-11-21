@@ -16,6 +16,7 @@ import {
   type Runner,
   type Workspace,
 } from "@hercule/contract";
+import { resolveDraftMcpServerIds } from "../mcp-servers/start-list";
 import { findProfileEntry } from "../model-profiles/profile-entries";
 import { findProviderAccountReadiness, resolveThreadHarnessId } from "../provider-accounts";
 import {
@@ -73,6 +74,13 @@ export interface ResolvedDraft {
    * because the menu must not dim entries by a runner nobody chose.
    */
   readonly menuRunnerId: string | null;
+  /**
+   * The list of MCP Servers the draft sends, present only when the user
+   * changed the list in this draft's project (`resolveDraftMcpServerIds`).
+   * Absent for an untouched draft, which sends none, so the controller picks
+   * its project's list or the default.
+   */
+  readonly mcpServerIds?: readonly string[];
 }
 
 /**
@@ -204,6 +212,11 @@ const resolveDraft = (
         : null;
 
   const runner = catalogs.runners.find((each) => each.id === runnerId);
+  const mcpServerIds = resolveDraftMcpServerIds(
+    picks,
+    base.projectId ?? null,
+    catalogs.mcpServerViews,
+  );
   const diagnosticRunner =
     runner === undefined
       ? findReferenceRunner(catalogs.runners, runnerId, catalogs.thisMacRunnerId)
@@ -231,6 +244,7 @@ const resolveDraft = (
     entry,
     description: entry,
     menuRunnerId: joined?.runnerId ?? picks.runnerId ?? null,
+    ...(mcpServerIds === undefined ? {} : { mcpServerIds }),
   };
 };
 
@@ -309,7 +323,9 @@ const resolveActive = (
  * - model: the picked one, else the draft's model for the draft's own account,
  *   else none;
  * - model options: the draft's own options and the picked ones, those the
- *   model's profile entry offers.
+ *   model's profile entry offers;
+ * - MCP Servers: the picked list while the draft is still in the project it
+ *   was picked under, else no list at all (`ResolvedDraft.mcpServerIds`).
  *
  * A thread that has started always runs on the Session's account, runner and
  * workspace, with the Session's access mode. Only the model and its options
