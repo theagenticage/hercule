@@ -328,7 +328,7 @@ const make = Effect.gen(function* () {
   /**
    * Moves a server added by address onto a plugin's Connection (Replace), in
    * a transaction `update` opened. `enabled` is the switch the same call
-   * gives, if any, and is written after the move. Fails with:
+   * gives, if any, and is written with the move. Fails with:
    *
    * - `InvalidState` when the server is a plugin server already;
    * - `Validation` as `readPluginTarget` does, and on `["source",
@@ -383,11 +383,9 @@ const make = Effect.gen(function* () {
         connectionId: target.connectionId,
         accountId: connection.accountId,
         connectionGeneration: connection.credentialsGeneration,
+        enabled: enabled ?? current.enabled,
         at,
       });
-      if (enabled !== undefined && enabled !== current.enabled) {
-        yield* servers.writeEnabled(current.id, enabled, at);
-      }
       yield* audit.append({
         kind: "mcpServer.updated",
         actor: yield* currentStamp,

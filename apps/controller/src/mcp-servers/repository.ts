@@ -538,6 +538,8 @@ const make = Effect.gen(function* () {
      * successful check replaces them. `revision` goes up, so a check that
      * started before cannot write its result and upstream sessions opened
      * before end. `status_cause` is cleared, because a URL server has none.
+     * `enabled` is the switch the server has afterwards, so Replace changes
+     * the source and the switch in one write with one `revision` increment.
      */
     writePluginSource: (
       id: string,
@@ -546,13 +548,15 @@ const make = Effect.gen(function* () {
         readonly connectionId: string;
         readonly accountId: string;
         readonly connectionGeneration: number;
+        readonly enabled: boolean;
         readonly at: string;
       },
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
-          SET source_kind = 'plugin', contribution_id = ${source.contributionId},
+          SET enabled = ${source.enabled ? 1 : 0},
+              source_kind = 'plugin', contribution_id = ${source.contributionId},
               connection_id = ${uuidFromString(source.connectionId)},
               account_id = ${source.accountId},
               url = NULL, normalized_url = NULL, sign_in = NULL, sign_in_offered = NULL,
