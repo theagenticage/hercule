@@ -289,7 +289,8 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
           {
             _tag: "item.completed",
             status: "completed",
-            detail: { name, server, kind: "mcp" },
+            // The expanded step shows what the tool returned.
+            detail: { name, server, kind: "mcp", content: [{ text: `result of ${tool}` }] },
             raw: { payload: { item: { result: { content: [{ text: `result of ${tool}` }] } } } },
           },
         ]);
@@ -318,6 +319,13 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(findCallItems(run.seen).at(-1)).toMatchObject({
       _tag: "item.completed",
       status: "completed",
+      // The expanded step shows the text and the image's reference, and `raw` the same.
+      detail: {
+        content: [
+          { type: "text", text: `result of ${SNAPSHOT_IMAGE_TOOL}` },
+          { type: "image", attachment: STORED_IMAGE },
+        ],
+      },
       raw: {
         payload: {
           item: {
