@@ -5042,10 +5042,6 @@ describe("the MCP servers a Codex session is given", () => {
         expect.objectContaining({
           config: {
             "mcp_servers.tools.url": GATEWAY.url,
-            // A trusted project's config is merged into this table, so the
-            // keys that could switch the gateway off are set explicitly.
-            "mcp_servers.tools.enabled": true,
-            "mcp_servers.tools.disabled_tools": [],
             "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
             "mcp_servers.tools.default_tools_approval_mode": "prompt",
             "features.mcp_tool_list_changed": true,
@@ -5154,6 +5150,92 @@ describe("the MCP servers a Codex session is given", () => {
       threadId: CHILD,
       excludeTurns: false,
       config: (root as { readonly config: unknown }).config,
+    });
+  });
+
+  describe("when Codex's own configuration sets the gateway's server name", () => {
+    /** The `config/read` reply of a repository whose `.codex/config.toml` sets `key`. */
+    const configuredBy = (key: string): Answers => ({
+      "config/read": () => ({
+        config: {},
+        origins: {
+          [key]: {
+            name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
+            version: "sha256:0",
+          },
+        },
+        layers: null,
+      }),
+    });
+
+    it.each(CONTINUATIONS)(
+      "gives %s no gateway keys, and warns with the file and the fix",
+      async (method, spec) => {
+        const run = await startWithServers([GATEWAY], spec, {
+          ...initializeAs("0.171.0"),
+          ...configuredBy("mcp_servers.tools.tools.x.approval_mode"),
+        });
+        await waitUntil(
+          "warned about the name",
+          () => filterByTag(run.seen, "runtime.warning").length === 1,
+        );
+        await settle();
+
+        const [params] = listSentParams(run.requests, method);
+        expect(params).not.toHaveProperty("config");
+        expect(listSentParams(run.requests, "config/read")).toEqual([
+          { cwd: CWD, includeLayers: true },
+        ]);
+        const [warning] = filterByTag(run.seen, "runtime.warning");
+        expect(warning?.message).toContain("/work/repo/.codex");
+        expect(warning?.message).toContain("config.toml");
+        expect(warning?.message).toContain('MCP server named "tools"');
+        expect(warning?.message).toContain("Rename or remove");
+      },
+    );
+
+    it("changes nothing when the configuration sets another server's name", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        ...configuredBy("mcp_servers.docs.command"),
+      });
+      await settle();
+
+      expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
+        config: { "mcp_servers.tools.url": GATEWAY.url },
+      });
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+    });
+
+    it("does not mistake a longer server name for the gateway's", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        ...configuredBy("mcp_servers.tools_extra.url"),
+      });
+
+      expect(listSentParams(run.requests, "thread/start")[0]).toHaveProperty("config");
+    });
+
+    it("gives no gateway keys and warns with Codex's own message when it cannot read its configuration", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        "config/read": () => buildRefusal("invalid transport in `mcp_servers.tools`"),
+      });
+      await waitUntil(
+        "warned about the configuration",
+        () => filterByTag(run.seen, "runtime.warning").length === 1,
+      );
+
+      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
+      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain(
+        "invalid transport in `mcp_servers.tools`",
+      );
+    });
+
+    it("never reads the configuration for a session with no MCP server", async () => {
+      const run = await startWithServers([]);
+
+      expect(listSentParams(run.requests, "config/read")).toEqual([]);
     });
   });
 

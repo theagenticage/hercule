@@ -53,6 +53,7 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  ResolvedMcpServer,
   SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
@@ -119,8 +120,11 @@ import {
   type AppServer,
 } from "./probe";
 import {
+  buildMcpConfigUnreadWarning,
+  buildMcpNameTakenWarning,
   buildMcpServerConfig,
   buildNoToolListChangedWarning,
+  findConfiguredMcpServers,
   supportsToolListChanged,
   type McpToolApprovalMode,
 } from "./mcp";
@@ -161,6 +165,8 @@ import type {
   ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
+  ConfigReadParams,
+  ConfigReadResponse,
   TurnInterruptParams,
   TurnStartParams,
   TurnSteerParams,
@@ -1886,6 +1892,54 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   };
 
   /**
+   * Decides which of the session's MCP servers the thread gets, and returns
+   * them with the warnings to show when the session starts. Asks Codex for its
+   * configuration as seen from the thread's folder, and gives a server only
+   * when no layer of that configuration (the repository's `.codex/config.toml`
+   * is the usual one) already sets its name, because Codex merges all layers
+   * into one table (see `findConfiguredMcpServers`). Makes no request when the
+   * session has no MCP server.
+   *
+   * Never fails. When Codex cannot read its configuration, the thread gets no
+   * server and the warning gives Codex's own message, because Hercule cannot
+   * tell whether the name is taken. Codex then usually refuses to open the
+   * thread on the same configuration, and that failure reports it.
+   */
+  const selectMcpServers = (
+    host: Host,
+    ctx: SessionStartContext,
+  ): Effect.Effect<{
+    readonly servers: ReadonlyArray<ResolvedMcpServer>;
+    readonly warnings: ReadonlyArray<string>;
+  }> =>
+    ctx.mcpServers.length === 0
+      ? Effect.succeed({ servers: [], warnings: [] })
+      : Effect.match(
+          host.rpc.request("config/read", {
+            cwd: ctx.cwd,
+            includeLayers: true,
+          } satisfies ConfigReadParams),
+          {
+            onFailure: (error) => ({
+              servers: [],
+              warnings: [buildMcpConfigUnreadWarning(error.message)],
+            }),
+            onSuccess: (reply) => {
+              const taken = findConfiguredMcpServers(
+                (reply as ConfigReadResponse).origins,
+                ctx.mcpServers.map((server) => server.name),
+              );
+              return {
+                servers: ctx.mcpServers.filter(
+                  (server) => !taken.some((one) => one.name === server.name),
+                ),
+                warnings: taken.map(buildMcpNameTakenWarning),
+              };
+            },
+          },
+        );
+
+  /**
    * Builds the params shared by starting, resuming and forking a thread: the
    * session's directory, model and access mode, and its instructions. The
    * system prompt, the user's own instructions and the skill are sent as
@@ -1911,6 +1965,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     spec: SessionSpec,
     ctx: SessionStartContext,
     userInstructions: string | undefined,
+    mcpServers: ReadonlyArray<ResolvedMcpServer>,
     toolListChanged: boolean,
   ): Pick<
     ThreadStartParams,
@@ -1925,7 +1980,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     const { mcpToolApprovalMode, ...thread } = ACCESS_MODES[spec.accessMode];
-    const config = buildMcpServerConfig(ctx.mcpServers, mcpToolApprovalMode, toolListChanged);
+    const config = buildMcpServerConfig(mcpServers, mcpToolApprovalMode, toolListChanged);
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
@@ -2018,7 +2073,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
-        const threadParams = buildThreadParams(spec, ctx, userInstructions, toolListChanged);
+        const mcp = yield* selectMcpServers(host, ctx);
+        const threadParams = buildThreadParams(
+          spec,
+          ctx,
+          userInstructions,
+          mcp.servers,
+          toolListChanged,
+        );
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
@@ -2099,7 +2161,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
-        if (ctx.mcpServers.length > 0 && !toolListChanged) {
+        for (const warning of mcp.warnings) warn(host, warning);
+        if (mcp.servers.length > 0 && !toolListChanged) {
           warn(host, buildNoToolListChangedWarning(codexVersion));
         }
         const dropped = deliverFramesBeforeRegistration(held);

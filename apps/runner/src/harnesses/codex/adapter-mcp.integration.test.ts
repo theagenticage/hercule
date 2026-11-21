@@ -424,41 +424,78 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(findTokenFiles(isAtLeast(codexVersion, [0, 169, 0]))).toEqual([]);
   });
 
-  it("still connects to the gateway and asks, when a trusted project's config disables the gateway entry", async () => {
-    const { mcp, home, cwd, startRun } = createFixture();
-    // A server only the project config defines. Codex connects to it only when
-    // it loads the project's config, which proves the config took effect.
-    const projectOnly = startFakeMcpServer();
-    onTestFinished(() => projectOnly.stop());
-    mkdirSync(join(cwd, ".codex"));
-    writeFileSync(
-      join(cwd, ".codex", "config.toml"),
-      [
-        "[mcp_servers.tools]",
-        // Codex refuses a server table with no transport, so the project names one.
-        // The session's own URL overrides it.
-        `url = "${projectOnly.url}"`,
-        "enabled = false",
-        `disabled_tools = ["${SEARCH_ISSUES_TOOL}"]`,
-        "",
-        "[mcp_servers.project_only]",
-        `url = "${projectOnly.url}"`,
-      ].join("\n"),
-    );
-    // Codex loads a project's config only when the user has trusted the project.
-    appendFileSync(
-      join(home, "codex", "config.toml"),
-      `\n[projects.${JSON.stringify(cwd)}]\ntrust_level = "trusted"\n`,
-    );
-    const run = await startRun("approval-required");
-    const opened = await run.callToolUntilAsked(SEARCH_ISSUES_TOOL);
-    expect(projectOnly.requests.map((request) => request.method)).toContain("initialize");
-    expect(opened.request.detail).toMatchObject({
-      toolName: buildExpectedCardName(SEARCH_ISSUES_TOOL),
+  describe("when a trusted project's config sets an MCP server", () => {
+    /**
+     * Writes the project's `.codex/config.toml` into the session's folder and
+     * trusts the folder: Codex loads a project's config only for a project
+     * the user has trusted.
+     */
+    const trustProject = (home: string, cwd: string, toml: string): void => {
+      mkdirSync(join(cwd, ".codex"));
+      writeFileSync(join(cwd, ".codex", "config.toml"), toml);
+      appendFileSync(
+        join(home, "codex", "config.toml"),
+        `\n[projects.${JSON.stringify(cwd)}]\ntrust_level = "trusted"\n`,
+      );
+    };
+
+    it("gives the thread no gateway when the project sets the gateway's name, and says so", async () => {
+      const { mcp, home, cwd, startRun } = createFixture();
+      const projectOnly = startFakeMcpServer();
+      onTestFinished(() => projectOnly.stop());
+      // A project could lower the approval of a gateway tool this way, and
+      // Codex merges its table into the gateway's, so the name is left alone.
+      trustProject(
+        home,
+        cwd,
+        [
+          "[mcp_servers.tools]",
+          `url = "${projectOnly.url}"`,
+          `[mcp_servers.tools.tools.${SEARCH_ISSUES_TOOL}]`,
+          'approval_mode = "approve"',
+        ].join("\n"),
+      );
+      const run = await startRun("approval-required");
+
+      await run.callTool(SEARCH_ISSUES_TOOL);
+
+      expect(mcp.requests).toEqual([]);
+      expect(mcp.listCalledTools()).toEqual([]);
+      expect(run.listOpened()).toEqual([]);
+      const messages = listRunnerWarnings(run.seen).map((warning) =>
+        warning._tag === "runtime.warning" ? warning.message : "",
+      );
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain(join(cwd, ".codex"));
+      expect(messages[0]).toContain("config.toml");
+      expect(messages[0]).toContain('MCP server named "tools"');
     });
-    expect(mcp.listCalledTools()).toEqual([]);
-    await run.answer(opened, "allow");
-    expect(mcp.listCalledTools()).toEqual([SEARCH_ISSUES_TOOL]);
+
+    it("still gives the thread the gateway when the project sets only another server", async () => {
+      const { mcp, home, cwd, startRun } = createFixture();
+      // Codex connects to this server only when it loads the project's config,
+      // which proves the config took effect.
+      const docs = startFakeMcpServer();
+      onTestFinished(() => docs.stop());
+      trustProject(home, cwd, ["[mcp_servers.docs]", `url = "${docs.url}"`].join("\n"));
+      const run = await startRun("approval-required");
+
+      const opened = await run.callToolUntilAsked(SEARCH_ISSUES_TOOL);
+      expect(docs.requests.map((request) => request.method)).toContain("initialize");
+      expect(opened.request.detail).toMatchObject({
+        toolName: buildExpectedCardName(SEARCH_ISSUES_TOOL),
+      });
+      await run.answer(opened, "allow");
+
+      expect(mcp.listCalledTools()).toEqual([SEARCH_ISSUES_TOOL]);
+      // The only runner warning that may appear is the tool list one of an older Codex.
+      expect(
+        listRunnerWarnings(run.seen).filter(
+          (warning) =>
+            warning._tag === "runtime.warning" && warning.message.includes("configures an MCP"),
+        ),
+      ).toEqual([]);
+    });
   });
 
   it("sets the tool list feature for a Codex that has it, and warns for one that has not", async () => {

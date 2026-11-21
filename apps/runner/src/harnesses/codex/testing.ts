@@ -198,6 +198,8 @@ const DEFAULT_ANSWERS: Answers = {
   // A session refuses to start without a login, so the default account is logged in.
   "account/read": () => CHATGPT,
   "model/list": () => MODELS,
+  // No layer of Codex's configuration sets anything.
+  "config/read": () => ({ config: {}, origins: {}, layers: null }),
   "thread/start": () => ({ thread: { id: THREAD } }),
   "thread/resume": () => ({ thread: { id: RESUMED } }),
   "thread/fork": () => ({ thread: { id: FORKED } }),
