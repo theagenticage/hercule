@@ -52,6 +52,7 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
+import { splitGatewayToolName } from "./gateway-tool-name";
 import {
   convertAdvisorResult,
   convertBashCodeExecutionResult,
@@ -407,22 +408,18 @@ const isMcp = (name: string): boolean => name.startsWith("mcp__");
 const GATEWAY_TOOL_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
 
 /**
- * Splits the name of a gateway tool into the MCP Server it belongs to and the
- * tool's own name: `mcp__tools__sentry__search_issues` gives the server
- * `sentry` and the tool `search_issues`. The split is at the first `__` after
- * the prefix, so a tool name that holds `__` stays whole. Returns `undefined`
+ * Splits the name Claude Code gives a gateway tool into the MCP Server it
+ * belongs to and the tool's own name: `mcp__tools__sentry__search_issues`
+ * gives the server `sentry` and the tool `search_issues`. Returns `undefined`
  * for any other tool, and for a name with no server part, which the gateway
  * never builds.
  */
-const splitGatewayToolName = (
+const splitPrefixedGatewayToolName = (
   name: string,
-): { readonly server: string; readonly tool: string } | undefined => {
-  if (!name.startsWith(GATEWAY_TOOL_PREFIX)) return undefined;
-  const rest = name.slice(GATEWAY_TOOL_PREFIX.length);
-  const split = rest.indexOf("__");
-  if (split <= 0 || split + 2 >= rest.length) return undefined;
-  return { server: rest.slice(0, split), tool: rest.slice(split + 2) };
-};
+): { readonly server: string; readonly tool: string } | undefined =>
+  name.startsWith(GATEWAY_TOOL_PREFIX)
+    ? splitGatewayToolName(name.slice(GATEWAY_TOOL_PREFIX.length))
+    : undefined;
 
 /**
  * The tools that start a subagent. Recent CLIs name the tool `Agent` in
@@ -1044,7 +1041,7 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
   const subagentIds = listMessagedSubagents(state, block.name, block.input);
   // Built before the tool is recorded: a read above that throws must not leave
   // an open tool whose item never started.
-  const gateway = splitGatewayToolName(block.name);
+  const gateway = splitPrefixedGatewayToolName(block.name);
   const started = buildItemStarted(state, turn, itemId, kind, {
     name: gateway === undefined ? block.name : truncateFact(gateway.tool),
     input: block.input,

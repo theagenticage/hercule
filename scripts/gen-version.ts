@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 
 /** The Codex release that this build's generated types and its installer both use. */
-const CODEX_RELEASE = "0.154.0";
+const CODEX_RELEASE = "0.171.0";
 
 /**
  * The pi release this build's adapter was verified against. pi is pre-1.0 and

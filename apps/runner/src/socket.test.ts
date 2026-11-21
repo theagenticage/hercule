@@ -21,7 +21,6 @@ import {
   ATTACHMENTS_CAPABILITY,
   DISK_USAGE_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
-  MCP_SERVERS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   REPOSITORY_SKILLS_CAPABILITY,
@@ -653,9 +652,17 @@ describe("which controller a runner accepts", () => {
         ATTACHMENTS_CAPABILITY,
         REPOSITORY_SKILLS_CAPABILITY,
         DISK_USAGE_CAPABILITY,
-        MCP_SERVERS_CAPABILITY,
       ]) as unknown,
     });
+    // One MCP Servers capability for each adapter that maps the gateway's
+    // entry, which today is Claude Code and Codex, and the retired plain
+    // `mcpServers` for a controller of the first MCP Gateway build.
+    const hello = stub.received[0] as { readonly capabilities: ReadonlyArray<string> };
+    expect(hello.capabilities.filter((capability) => capability.startsWith("mcpServers"))).toEqual([
+      "mcpServers",
+      "mcpServers:claude-code/claude-code",
+      "mcpServers:codex/codex",
+    ]);
 
     stub.hangUp();
     await pending;

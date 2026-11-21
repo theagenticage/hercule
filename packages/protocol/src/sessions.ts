@@ -201,8 +201,8 @@ export const SessionSpec = Schema.Struct({
   /**
    * The one entry that points the harness at the MCP Gateway (spec 21 section
    * 4.4). The controller adds it to the frame at each start, a resume
-   * included, and only for a runner that negotiated `MCP_SERVERS_CAPABILITY`
-   * and a harness that declares `mcpPassthrough: "native"`. It is never
+   * included, and only for a runner that negotiated `buildMcpServersCapability`
+   * for the session's harness, and a harness that declares `mcpPassthrough: "native"`. It is never
    * stored, so the stored spec has none. A runner that does not know this
    * field ignores it.
    */
@@ -928,8 +928,8 @@ const SessionUsageUpdated = Schema.Union([
  * public API's `Session.mcpServers` uses this type for `leftOut`.
  */
 export const McpServerLeftOutReason = Schema.Literals([
-  "runner-too-old",
   "harness-unsupported",
+  "runner-too-old",
   "missing-grant",
   "switched-off",
   "checking",
@@ -1537,14 +1537,59 @@ export type AccountUsageReported = Schema.Schema.Type<typeof AccountUsageReporte
 export const GITHUB_TOKEN_CAPABILITY = "github-token";
 
 /**
- * The capability for MCP Servers in a start frame (spec 21 section 4.4). The
- * runner lists it at hello when it gives the harness the one entry that points
- * it at the MCP Gateway (`SessionSpec.mcpServers`); the controller sends that
- * entry only to a runner that lists it. A runner without it still gets the
- * start, only without the entry, so every MCP Server in the session's list is
- * left out with the reason `runner-too-old`.
+ * The retired capability for MCP Servers in a start frame. A build that has
+ * only this string (the first MCP Gateway build) says that its runner hands
+ * the entry to Claude Code, the one harness it maps. It cannot say which
+ * harness, so a controller could not tell a runner that ignores the entry for
+ * Codex from one that delivers it. `buildMcpServersCapability` replaces it.
+ *
+ * Both sides still list it, so that a controller and a runner on different
+ * builds keep working while a fleet is upgraded. Only
+ * `readMcpServersHarnessIds` reads it. Delete it, and that function's
+ * fallback, once no runner or controller of the first build remains.
  */
 export const MCP_SERVERS_CAPABILITY = "mcpServers";
+
+const MCP_SERVERS_CAPABILITY_PREFIX = `${MCP_SERVERS_CAPABILITY}:`;
+
+/**
+ * Returns the hello capability that stands for MCP Servers in the start frame
+ * of one harness, such as `mcpServers:claude-code/claude-code` for the
+ * qualified harness id `claude-code/claude-code` (spec 21 section 4.4).
+ *
+ * A runner lists one for each harness whose adapter hands the entry that
+ * points at the MCP Gateway (`SessionSpec.mcpServers`) to its harness. The
+ * controller lists one for each harness it has registered. It sends the entry
+ * only when the negotiated list holds the capability of the session's harness.
+ * A runner without it still gets the start, only without the entry, so every
+ * MCP Server in the session's list is left out with the reason
+ * `runner-too-old`.
+ *
+ * The capability is per harness because a runner build can map the entry for
+ * one harness and not yet for another.
+ */
+export const buildMcpServersCapability = (harnessId: string): string =>
+  `${MCP_SERVERS_CAPABILITY_PREFIX}${harnessId}`;
+
+/**
+ * Returns the qualified ids of the harnesses whose start frame a runner takes
+ * the MCP Gateway entry for, read from the negotiated capabilities.
+ *
+ * A runner of the first MCP Gateway build lists only the retired plain
+ * `MCP_SERVERS_CAPABILITY`, and its one adapter that maps the entry is Claude
+ * Code's. When the list holds that string and no per-harness capability, this
+ * returns Claude Code alone. This is the one place that names the harness id.
+ */
+export const readMcpServersHarnessIds = (
+  negotiatedCapabilities: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const harnessIds = negotiatedCapabilities
+    .filter((capability) => capability.startsWith(MCP_SERVERS_CAPABILITY_PREFIX))
+    .map((capability) => capability.slice(MCP_SERVERS_CAPABILITY_PREFIX.length));
+  return harnessIds.length === 0 && negotiatedCapabilities.includes(MCP_SERVERS_CAPABILITY)
+    ? ["claude-code/claude-code"]
+    : harnessIds;
+};
 
 /**
  * Sent by the runner when a session's `gh` command needs a GitHub token and

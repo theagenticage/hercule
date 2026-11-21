@@ -47,8 +47,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, onTestFailed, onTestFinished } from "vitest";
-import { Duration, Effect, Fiber, Stream } from "effect";
+import { afterAll, describe, expect, it } from "vitest";
+import { Duration, Effect } from "effect";
 import {
   computeSubagentAfter,
   createBareSubagent,
@@ -68,6 +68,7 @@ import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
 import type { SkillsListParams } from "./generated/v2/SkillsListParams";
 import type { SkillsListResponse } from "./generated/v2/SkillsListResponse";
+import { createFixtureWatch } from "./fixture-watch.testing";
 import {
   ASYNC_QUESTION_CATALOG,
   startAsyncQuestionModel,
@@ -75,9 +76,10 @@ import {
 } from "./mock-model.testing";
 import type { SessionStartContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
+import { findCodexTestBinary } from "./codex-binary.testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
-const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
+const binary = findCodexTestBinary();
 
 const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
@@ -475,7 +477,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
       expect(names).not.toContain("user-only");
 
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-      await watch.until("the command's turn", () =>
+      await watch.waitUntil("the command's turn", () =>
         seen.some((event) => event._tag === "turn.completed"),
       );
       expect(readFileSync(join(ctx.cwd!, "seen.txt"), "utf8")).toBe(`${userHome}\nReal User\n`);
@@ -547,7 +549,7 @@ describe.skipIf(binary === undefined)(
         expect(names, "none of the user's skills").not.toContain("user-skill");
 
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-        await watch.until("the command's turn", () =>
+        await watch.waitUntil("the command's turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
@@ -605,25 +607,6 @@ const listWarnings = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<HarnessE
   seen.filter((event) => event._tag === "runtime.warning" && event.raw === undefined);
 
 /**
- * Lists the tags of the events seen so far, with the text of each warning, the
- * subagent each event belongs to, and the state of each completed turn, so a
- * test that hangs shows what Codex reported on the way.
- */
-const describeEvents = (seen: ReadonlyArray<HarnessEvent>): string =>
-  seen
-    .map((event) => {
-      if (event._tag === "runtime.warning") return `runtime.warning (${event.message})`;
-      const subagent = "subagentId" in event ? ` ${event.subagentId ?? "root"}` : "";
-      const state = event._tag === "turn.completed" ? ` ${event.state}` : "";
-      const usage =
-        event._tag === "session.usage.updated"
-          ? ` ${(event.usage ?? event.usageReport.counts).inputTokens} input tokens`
-          : "";
-      return `${event._tag}${subagent}${state}${usage}`;
-    })
-    .join(", ");
-
-/**
  * Returns the token counts of the latest usage report for a subagent, or for
  * the root when `subagentId` is undefined. Returns undefined before the first
  * report. Codex sends a turn's usage in its own notification, which can arrive
@@ -637,86 +620,6 @@ const readLatestUsage = (seen: ReadonlyArray<HarnessEvent>, subagentId: string |
     )
     .at(-1);
   return report && (report.usage ?? report.usageReport.counts);
-};
-
-/** What a test reads from, and waits on, while it drives a real Codex. */
-interface FixtureWatch {
-  /** The events recorded so far, in the order the adapter emitted them. */
-  readonly seen: Array<HarnessEvent>;
-  /** Starts recording an adapter's events. A test records one stream at a time. */
-  readonly record: (events: Stream.Stream<HarnessEvent>) => void;
-  /** Stops recording, and returns once the recording has stopped. */
-  readonly stopRecording: () => Promise<void>;
-  /**
-   * Checks the pending waits again. A fixture whose state a wait reads, such
-   * as the mock model or a wrapped app-server, calls this after each change;
-   * a recorded event checks them on its own.
-   */
-  readonly changed: () => void;
-  /** Returns once `holds` returns true. `what` names the wait if the test fails. */
-  readonly until: (what: string, holds: () => boolean) => Promise<void>;
-}
-
-/**
- * Creates the watch for the current test, which must call it from inside its
- * body. A wait is checked when its condition can have changed: on each
- * recorded event and on each `changed()` call. It never polls and has no
- * deadline of its own, so a slow machine only makes a test slower. A hang is
- * caught by the test's own timeout. The watch then logs what each pending wait
- * was waiting for and every event seen, and fails the waits, so the test's
- * `finally` starts to stop its session and its mock model. Vitest does not
- * wait for that `finally`: after a hang, the next test can start while it
- * still runs. The recording stops when the test finishes.
- */
-const createFixtureWatch = (): FixtureWatch => {
-  const seen: Array<HarnessEvent> = [];
-  const waits = new Set<{
-    readonly what: string;
-    readonly holds: () => boolean;
-    readonly resolve: () => void;
-    readonly reject: (error: Error) => void;
-  }>();
-  let recording: Fiber.Fiber<void> | undefined;
-  const changed = () => {
-    for (const wait of waits) {
-      if (!wait.holds()) continue;
-      waits.delete(wait);
-      wait.resolve();
-    }
-  };
-  const stopRecording = async () => {
-    if (recording === undefined) return;
-    await Effect.runPromise(Fiber.interrupt(recording));
-    recording = undefined;
-  };
-  onTestFailed(() => {
-    for (const wait of waits) {
-      const error = new Error(`still waiting for ${wait.what}; saw ${describeEvents(seen)}`);
-      console.error(error.message);
-      wait.reject(error);
-    }
-    waits.clear();
-  });
-  onTestFinished(stopRecording);
-  return {
-    seen,
-    record: (events) => {
-      recording = Effect.runFork(
-        Stream.runForEach(events, (event) =>
-          Effect.sync(() => {
-            seen.push(event);
-            changed();
-          }),
-        ),
-      );
-    },
-    stopRecording,
-    changed,
-    until: (what, holds) =>
-      holds()
-        ? Promise.resolve()
-        : new Promise((resolve, reject) => void waits.add({ what, holds, resolve, reject })),
-  };
 };
 
 const STRUCTURED = "0199e0e7-0000-7000-8000-00000000ff05";
@@ -741,13 +644,13 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     );
     try {
       await Effect.runPromise(codex.sendInput(sessionId, { text }));
-      await watch.until("the turn's end", () =>
+      await watch.waitUntil("the turn's end", () =>
         seen.some((event) => event._tag === "turn.completed"),
       );
     } finally {
       await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
     }
-    await watch.until("the session's exit", () =>
+    await watch.waitUntil("the session's exit", () =>
       seen.some((event) => event._tag === "session.exited"),
     );
     return seen.find(
@@ -871,11 +774,11 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.sendInput(sessionId, { text: "Establish root history." }),
           );
-          await watch.until("the first root turn", () =>
+          await watch.waitUntil("the first root turn", () =>
             seen.some((event) => event._tag === "turn.completed"),
           );
           await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
-          await watch.until(
+          await watch.waitUntil(
             "both approvals and the second root turn",
             () =>
               approvals().length === 2 &&
@@ -936,7 +839,7 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
           );
-          await watch.until("the second child's turn", () => childCompletions().length === 1);
+          await watch.waitUntil("the second child's turn", () => childCompletions().length === 1);
           expect(childCompletions()[0]!.subagentId).toBe(second!.subagentId);
           expect(
             seen.some(
@@ -947,7 +850,7 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, first!.request.requestId, "allow"),
           );
-          await watch.until(
+          await watch.waitUntil(
             "the first child's turn and every thread's final usage",
             () =>
               childCompletions().length === 2 &&
@@ -1014,13 +917,13 @@ describe.skipIf(binary === undefined)(
           ),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish root history." }));
-        await watch.until("first turn", () =>
+        await watch.waitUntil("first turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
         // Each child's command asks for approval only after the gate's hook
         // ran, so an approval shows that the hook let the command through.
-        await watch.until(
+        await watch.waitUntil(
           "children ask approval",
           () =>
             seen.filter(
@@ -1054,7 +957,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
     const watch = createFixtureWatch();
     const model = startMockModel(version, {
       stopScenario: true,
-      onWaitingChange: watch.changed,
+      onWaitingChange: watch.recheckWaits,
     });
     const home = createScratchDir("native-stop");
     mkdirSync(join(home, "codex"));
@@ -1119,7 +1022,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       thread.parentThreadId !== rootId
                     ) {
                       heldMetadata = { line, id: thread.id, parentId: thread.parentThreadId };
-                      watch.changed();
+                      watch.recheckWaits();
                       continue;
                     }
                     if (
@@ -1127,7 +1030,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       frame.params?.threadId !== undefined
                     ) {
                       approvalThreadIds.add(frame.params.threadId);
-                      watch.changed();
+                      watch.recheckWaits();
                     }
                     delayed.push(line);
                   }
@@ -1165,11 +1068,11 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-      await watch.until("the first root turn", () =>
+      await watch.waitUntil("the first root turn", () =>
         seen.some((event) => event._tag === "turn.completed" && event.subagentId === undefined),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn the tree." }));
-      await watch.until(
+      await watch.waitUntil(
         "the tree's approvals and the held root call",
         () =>
           (target === "discovering-subtree"
@@ -1203,7 +1106,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ),
       );
       if (target === "discovering-subtree") {
-        await watch.until("the branch's interrupted turn", () =>
+        await watch.waitUntil("the branch's interrupted turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1219,7 +1122,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ).toEqual([]);
         delayed.push(heldMetadata!.line);
       }
-      await watch.until("the stopped subagents' interrupted turns", () =>
+      await watch.waitUntil("the stopped subagents' interrupted turns", () =>
         stoppedIds.every((id) =>
           seen.some(
             (event) =>
@@ -1261,7 +1164,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ).toHaveLength(completions);
       }
       if (target === "whole") {
-        await watch.until("the root's interrupted turn", () =>
+        await watch.waitUntil("the root's interrupted turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1286,7 +1189,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         await Effect.runPromise(
           adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
         );
-        await watch.until("the sibling's completed turn", () =>
+        await watch.waitUntil("the sibling's completed turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1338,7 +1241,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
         ),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Ask me something." }));
-      await watch.until("the asking turn", () => completedTurns() === 1);
+      await watch.waitUntil("the asking turn", () => completedTurns() === 1);
 
       const opened = seen.filter((event) => event._tag === "request.opened");
       expect(opened).toHaveLength(1);
@@ -1377,7 +1280,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
           { model: "gpt-5.4", options: {} },
         ),
       );
-      await watch.until("the answering turn", () => completedTurns() === 2);
+      await watch.waitUntil("the answering turn", () => completedTurns() === 2);
 
       expect(seen.filter((event) => event._tag === "request.resolved")).toMatchObject([
         { requestId: request.requestId, answers: { Question: "Beta" } },
@@ -1421,7 +1324,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     ["v2", false],
   ] as const)("%s counts only new calls with saved report=%s", async (version, saveReport) => {
     const watch = createFixtureWatch();
-    const model = startMockModel(version, { onWaitingChange: watch.changed });
+    const model = startMockModel(version, { onWaitingChange: watch.recheckWaits });
     const home = createScratchDir("usage-resume");
     mkdirSync(join(home, "codex"));
     writeFileSync(join(home, "codex", "config.toml"), model.config);
@@ -1458,9 +1361,9 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     try {
       const binding = await Effect.runPromise(adapter.startSession(sessionId, spec, context));
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-      await watch.until("the first root turn", () => rootCompletions().length === 1);
+      await watch.waitUntil("the first root turn", () => rootCompletions().length === 1);
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn children." }));
-      await watch.until(
+      await watch.waitUntil(
         "both children's approvals",
         () => seen.filter((event) => event._tag === "request.opened").length === 2,
       );
@@ -1469,7 +1372,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
           adapter.respondToApprovalRequest(sessionId, event.request.requestId, "allow"),
         );
       }
-      await watch.until(
+      await watch.waitUntil(
         "both children's and the second root turn, and each child's usage",
         () =>
           childCompletions().length === 2 &&
@@ -1520,7 +1423,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
       );
       model.scheduleFollowup(childId, true);
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Continue the known child." }));
-      await watch.until(
+      await watch.waitUntil(
         "the held child call and the root turn",
         () => model.waitingChildren.has(childId) && rootCompletions().length === 1,
       );
@@ -1533,7 +1436,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
             event.subagentId === childId &&
             (event.raw?.payload as { turnId?: string } | undefined)?.turnId === turnId,
         );
-      await watch.until("the child's interrupted turn", () => childCompletions().length === 1);
+      await watch.waitUntil("the child's interrupted turn", () => childCompletions().length === 1);
       expect(childCompletions()[0]!.state).toBe("interrupted");
       // Codex does not always report usage for a turn it interrupted: on a
       // loaded machine the app-server sometimes sends no report at all, and
@@ -1547,7 +1450,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
       );
       // Codex reports a turn's usage in its own notification, which may
       // arrive after the turn's completion, so the test waits for both.
-      await watch.until(
+      await watch.waitUntil(
         "the child's completed turn and its usage",
         () =>
           childCompletions().length === 2 &&

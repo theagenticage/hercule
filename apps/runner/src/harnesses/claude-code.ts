@@ -1713,6 +1713,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     harnessId: CLAUDE_CODE,
     harnessName: CLAUDE_CODE_NAME,
     binaryName: CLAUDE_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.fromPubSub(publishedUsage),

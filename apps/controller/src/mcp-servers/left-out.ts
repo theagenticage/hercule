@@ -7,7 +7,11 @@ import { decideUnavailableReason, type McpServerAvailabilityView } from "./catal
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
-  /** Whether the session's runner negotiated the `mcpServers` capability. */
+  /**
+   * Whether the session's runner negotiated the MCP Servers capability of the
+   * session's harness. Only a harness that declares `native` has one a runner
+   * can lack, so `decideNoGatewayReason` reads it only for such a harness.
+   */
   readonly runnerReachesMcpServers: boolean;
   /** The session's harness's declared `mcpPassthrough`. */
   readonly harnessPassthrough: "native" | "unsupported";
@@ -23,14 +27,17 @@ export type NoGatewayReason = Extract<
 
 /**
  * Returns why a start gives the harness no MCP Gateway entry, or `null` when
- * it gives one. The runner comes first, as in `decideLeftOutReason`.
+ * it gives one. Judges the harness first: a harness that does not declare
+ * `native` is `harness-unsupported` whatever the runner negotiated, because no
+ * runner lists a capability for a harness that cannot take the entry.
+ * `runner-too-old` means the harness is `native` and its runner lacks the
+ * harness's capability.
  */
 export const decideNoGatewayReason = (
   delivery: Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">,
 ): NoGatewayReason | null => {
-  if (!delivery.runnerReachesMcpServers) return "runner-too-old";
   if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";
-  return null;
+  return delivery.runnerReachesMcpServers ? null : "runner-too-old";
 };
 
 /**
@@ -38,8 +45,9 @@ export const decideNoGatewayReason = (
  * When several reasons apply, it returns the first of this order, which is the
  * order of spec 21 section 3.8:
  *
- * 1. `runner-too-old`
- * 2. `harness-unsupported`
+ * 1. `harness-unsupported`: the harness does not declare `native`
+ * 2. `runner-too-old`: the harness is `native` and its runner lacks the
+ *    harness's capability
  * 3. `missing-grant`
  * 4. `switched-off`
  * 5. `checking`: its first list has not ended, before any cause in its

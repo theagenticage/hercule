@@ -53,6 +53,7 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
   UserMaterial,
@@ -114,6 +115,7 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
+import { decideMcpConfig } from "./mcp";
 import {
   buildUsageReadings,
   completeWindowDurations,
@@ -130,6 +132,7 @@ import {
   type TextGenerationWatch,
 } from "./text-generation";
 import {
+  buildAppServerCommand,
   makeRpc,
   type AppServerSpawn,
   type NotificationFrame,
@@ -137,6 +140,7 @@ import {
   type RpcReply,
   type ServerRequestFrame,
 } from "./rpc";
+import { removeMediaBytes } from "./tool-result-media";
 import type {
   AccountRateLimitsUpdatedNotification,
   ApprovalsReviewer,
@@ -322,6 +326,9 @@ const ACCESS_MODES: Readonly<
  * session.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
+/** How long a session's exit waits for the app-server's output to end after the process has exited. */
+const OUTPUT_DRAIN_PATIENCE_MS = 2000;
 
 /** The error code for a server too busy to start a turn (spec 06 section 10.2). */
 const OVERLOADED = -32001;
@@ -716,40 +723,6 @@ const listRolloutDayFolders = async (sessionsFolder: string): Promise<ReadonlyAr
   return (await Promise.all(months.map(readChildFolders))).flat();
 };
 
-/**
- * Removes the generated image from a notification frame, in place, before
- * anything else reads the frame. An `imageGeneration` item holds the image
- * itself, base64 encoded, in `result`. Left in, it would be copied into the
- * frames the adapter queues and into every event's `raw`, and make each one
- * megabytes long, while the image reaches nobody through the stream. The frame
- * comes straight from the decoder, so nothing else holds it yet.
- *
- * A `ThreadItem` sits in the params of only these notifications:
- * `item/started` and `item/completed` hold it in `params.item`, and
- * `turn/started` and `turn/completed` hold a turn's items in
- * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
- * and never attached to an event. The check goes by the item's `type` alone,
- * so an item whose other fields are malformed is covered too.
- */
-const stripImageBytes = (frame: NotificationFrame): void => {
-  const params = frame.params as
-    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
-    | null
-    | undefined;
-  const dropResult = (item: unknown): void => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      (item as { type?: unknown }).type === "imageGeneration"
-    ) {
-      Reflect.deleteProperty(item, "result");
-    }
-  };
-  dropResult(params?.item);
-  const items = params?.turn?.items;
-  if (Array.isArray(items)) items.forEach(dropResult);
-};
-
 export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
@@ -879,20 +852,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     textGeneration: TextGenerationWatch | undefined,
   ): Host => {
     const complaints: Array<string> = [];
-    const child = seam.appServer(
-      // `--strict-config` makes a setting renamed in an upgrade fail the start
-      // instead of being silently ignored. The updater is off because a
-      // harness that updated itself would run a version nobody chose.
-      [
-        binary,
-        "app-server",
-        "--strict-config",
-        "-c",
-        "check_for_update_on_startup=false",
-        ...overrides,
-      ],
-      env,
-    );
+    const child = seam.appServer(buildAppServerCommand(binary, overrides), env);
     const rememberComplaint = (line: string): void => {
       complaints.push(line);
       if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
@@ -925,7 +885,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
-            stripImageBytes(frame);
+            removeMediaBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
@@ -944,11 +904,21 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       framesBeforeRegistration:
         sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
-    void child.exited.then(
-      () => onHostGone(host),
-      () => onHostGone(host),
-    );
-    Effect.runFork(host.rpc.pump);
+    // The process may exit before the session has read everything it wrote.
+    // The exit is reported only after the output has been read to its end,
+    // which is when the pump completes. A process that leaves the output open
+    // (a child of its own holds it) is waited for only a short while.
+    const pumped = Effect.runPromise(host.rpc.pump);
+    const handleExit = (): void => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const patience = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, OUTPUT_DRAIN_PATIENCE_MS);
+      });
+      void Promise.race([pumped, patience])
+        .finally(() => clearTimeout(timer))
+        .then(() => onHostGone(host));
+    };
+    void child.exited.then(handleExit, handleExit);
     return host;
   };
 
@@ -1050,6 +1020,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           : Effect.void,
     );
 
+  /**
+   * Starts the session's app-server and makes it ready: the handshake, the
+   * login check and the skill roots. Returns the host. Fails, and kills the
+   * app-server, when any step fails.
+   */
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
@@ -1073,17 +1048,17 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
           Effect.andThen(
-            Effect.andThen(
-              Effect.mapError(
-                initializeAppServer(host),
-                (error) =>
-                  new HarnessProtocolError({
-                    message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
-                  }),
-              ),
-              requireLogin(host),
+            Effect.mapError(
+              initializeAppServer(host),
+              (error) =>
+                new HarnessProtocolError({
+                  message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
+                }),
             ),
-            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            Effect.andThen(
+              requireLogin(host),
+              setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            ),
           ),
           {
             // Registered only after the handshake, the login check and the
@@ -1164,6 +1139,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           // for the rest of a long turn.
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readApprovalPaths(item));
+        }
+        if (item.type === "mcpToolCall") {
+          // Kept while the call runs, so the question Codex asks before it
+          // runs the call can be filed under the call's item.
+          if (frame.method === "item/completed") thread.runningMcpCalls.delete(item.id);
+          else {
+            const { turnId } = frame.params as ItemStartedNotification;
+            thread.runningMcpCalls.set(item.id, {
+              itemId: item.id,
+              turnId,
+              server: item.server,
+              tool: item.tool,
+            });
+          }
         }
         if (asyncItem !== undefined) {
           openAsyncQuestion(
@@ -1441,6 +1430,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       requestId: crypto.randomUUID(),
       threadId: thread.state.threadId,
       paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+      listRunningMcpCalls: (turnId) =>
+        [...thread.runningMcpCalls.values()].filter((call) => call.turnId === turnId),
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
     thread.parks.set(request.requestId, park);
@@ -1768,14 +1759,19 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * account shares that directory, so a file there would reach assistant
    * sessions and workflow steps too.
    *
+   * The session's MCP servers go in `config`, in all three methods: Codex
+   * does not save them with the thread, so a resumed or forked thread has none
+   * unless they are sent again. Child threads (subagents) inherit them.
+   *
    * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
    * tools, and the Agent record and the Session record both report the field
    * as not enforced, so no behaviour is silently substituted.
    */
   const buildThreadParams = (
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
     userInstructions: string | undefined,
+    mcpConfig: Record<string, JsonValue> | undefined,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -1785,6 +1781,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     | "sandbox"
     | "approvalsReviewer"
     | "developerInstructions"
+    | "config"
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     return {
@@ -1793,6 +1790,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
+      // Left out when the thread gets no MCP server.
+      ...(mcpConfig === undefined ? {} : { config: mcpConfig }),
     };
   };
 
@@ -1848,6 +1847,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     harnessId: CODEX,
     harnessName: CODEX_NAME,
     binaryName: CODEX_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.fromPubSub(publishedUsage),
@@ -1872,16 +1872,23 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
+        const mcp = yield* decideMcpConfig({
+          rpc: host.rpc,
+          cwd: ctx.cwd,
+          servers: ctx.mcpServers,
+          accessMode: spec.accessMode,
+        });
+        const threadParams = buildThreadParams(spec, ctx, userInstructions, mcp.config);
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
               ? host.rpc.request(method, {
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...threadParams,
                   ephemeral: false,
                 } satisfies ThreadStartParams)
               : host.rpc.request(method, {
                   threadId: carried.nativeSessionId,
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...threadParams,
                 } satisfies ThreadResumeParams & ThreadForkParams),
             readThreadOpenedReply(method),
           ),
@@ -1920,6 +1927,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             rootThreadId: opened,
             spec,
+            config: threadParams.config,
             rpc: host.rpc,
             emit,
             dispatch: (thread, frame, cancelled) =>
@@ -1931,6 +1939,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               // still need replies, without duplicate resolution events.
               cancelRequests(held, thread, false);
               thread.fileChanges.clear();
+              thread.runningMcpCalls.clear();
             },
             failSession: () => exitSession(held, "crash"),
             reports,
@@ -1950,6 +1959,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
+        for (const warning of mcp.warnings) warn(host, warning);
         const dropped = deliverFramesBeforeRegistration(held);
         // The dropped ones belong to no thread, so the session is not told;
         // the runner's log is.
