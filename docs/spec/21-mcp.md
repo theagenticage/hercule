@@ -346,7 +346,8 @@ The live run checked that the call after the restart worked. It did not record t
 *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* **Codex 0.169.0 and 0.171.0 are checked on the older path.** Two tests run the real binary with no login and a local stand-in for the Responses API, and are skipped where no `codex` is installed, so CI does not run them:
 
 - `http/mcp-codex.integration.test.ts` starts `codex app-server --strict-config` with the adapter's own `buildMcpServerConfig`, against the real gateway through the recording proxy.
-- `harnesses/codex/adapter-mcp.integration.test.ts` drives the adapter's own `startSession` against a fake MCP server. It covers the approvals per Access Mode, the item, resume and fork, a trusted project's config, image results and the token on disk. Codex 0.154.0 and 0.164.0 to 0.167.0 were also run with it.
+- `harnesses/codex/adapter-mcp.integration.test.ts` drives the adapter's own `startSession` against a fake MCP server. It covers the approvals per Access Mode, the item and its result, the start, resume and fork `config`, a repository that configures the gateway's name (a fresh Harness Home included), images in a result and the token on disk.
+- Neither file runs in CI, because no CI job installs Codex. They pass on Codex 0.154.0, 0.169.0 and 0.171.0 on a developer's machine.
 
 What the tests assert:
 
@@ -354,7 +355,7 @@ What the tests assert:
 - **A server added to a running thread** with its list empty at the start: `list_changed` goes out on the GET stream, Codex lists again before its next model request, and the new tool's call reaches the outside server once.
 - **A server taken away.** With `list_changed` held back by the proxy, so that Codex still holds the old name, a call to the removed tool reaches the gateway, Codex reports it `failed`, and the outside server gets no call.
 - **A 404 for a forgotten MCP session** (`DELETE /mcp`, as for Claude Code): the next `tools/call` gets 404. Codex opens a new MCP session (`initialize`) and sends the same call again on it before any `tools/list`, and the call succeeds.
-- **Resume and fork.** A new app-server process connects and lists when the adapter's `config` is sent again with `thread/resume` or `thread/fork` (06 §10.2: without it, nothing connects).
+- **Resume and fork** are asserted by the adapter's file: each carries the same `config`, and the new app-server process connects (06 §10.2: without it, nothing connects).
 - **300 tools** are offered directly in the `mcp__tools` namespace by 0.169.0 and 0.171.0, and deferred behind tool search by 0.154.0, whose stand-in then searches and calls a returned tool. One reader of the model request covers both shapes. The file passes on 0.154.0, 0.169.0 and 0.171.0; the test of a server added to a running thread is skipped below 0.164.0.
 
 What was observed in probes, and no test asserts:
