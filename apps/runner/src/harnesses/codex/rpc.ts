@@ -35,6 +35,27 @@ export type AppServerSpawn = (
 ) => AppServerChild;
 
 /**
+ * Returns the command that starts an app-server, with `overrides` as more `-c`
+ * arguments for that one process.
+ *
+ * - `--strict-config` makes a setting renamed in an upgrade fail the start
+ *   instead of being silently ignored.
+ * - The updater is off because a harness that updated itself would run a
+ *   version nobody chose.
+ */
+export const buildAppServerCommand = (
+  binary: string,
+  overrides: ReadonlyArray<string> = [],
+): Array<string> => [
+  binary,
+  "app-server",
+  "--strict-config",
+  "-c",
+  "check_for_update_on_startup=false",
+  ...overrides,
+];
+
+/**
  * A failed request. `code` is set only when the app-server sent the error; a
  * request that failed locally, such as a failed write or a timeout, has none.
  */

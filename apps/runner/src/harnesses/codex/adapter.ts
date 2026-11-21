@@ -133,6 +133,7 @@ import {
   type TextGenerationWatch,
 } from "./text-generation";
 import {
+  buildAppServerCommand,
   makeRpc,
   type AppServerSpawn,
   type NotificationFrame,
@@ -923,20 +924,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     textGeneration: TextGenerationWatch | undefined,
   ): Host => {
     const complaints: Array<string> = [];
-    const child = seam.appServer(
-      // `--strict-config` makes a setting renamed in an upgrade fail the start
-      // instead of being silently ignored. The updater is off because a
-      // harness that updated itself would run a version nobody chose.
-      [
-        binary,
-        "app-server",
-        "--strict-config",
-        "-c",
-        "check_for_update_on_startup=false",
-        ...overrides,
-      ],
-      env,
-    );
+    const child = seam.appServer(buildAppServerCommand(binary, overrides), env);
     const rememberComplaint = (line: string): void => {
       complaints.push(line);
       if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();

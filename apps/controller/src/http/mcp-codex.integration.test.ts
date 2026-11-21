@@ -7,7 +7,7 @@
  * `apps/runner/src/harnesses/codex/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. Codex starts the way the Codex
- * adapter starts it: `codex app-server --strict-config`, then `thread/start`
+ * adapter starts it: the adapter's own `buildAppServerCommand`, then `thread/start`
  * with the `config` that the adapter's own `buildMcpServerConfig` builds, the
  * session token in `HERCULE_TOKEN`, and an environment built from nothing (a
  * throwaway `HOME` and `CODEX_HOME`). The model is a local stand-in for the
@@ -52,6 +52,7 @@ import {
   supportsToolListChanged,
 } from "../../../runner/src/harnesses/codex/mcp";
 import { parseVersion } from "../../../runner/src/harnesses/codex/probe";
+import { buildAppServerCommand } from "../../../runner/src/harnesses/codex/rpc";
 import {
   startScriptedModel,
   type ScriptedModelRequest,
@@ -256,27 +257,21 @@ const withCodexHome = async (
     // A Codex installed with npm is a script that runs `node`, so `node`'s folder
     // is on the path too. Nothing else of the developer's environment is.
     const node = Bun.which("node");
-    const child = Bun.spawn(
-      [codex!, "app-server", "--strict-config", "-c", "check_for_update_on_startup=false"],
-      {
-        env: {
-          PATH: [
-            dirname(codex!),
-            ...(node === null ? [] : [dirname(node)]),
-            "/usr/bin",
-            "/bin",
-          ].join(":"),
-          HOME: root,
-          CODEX_HOME: codexHome,
-          HERCULE_TOKEN: options.sessionToken,
-          HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
-        },
-        cwd,
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "ignore",
+    const child = Bun.spawn(buildAppServerCommand(codex!), {
+      env: {
+        PATH: [dirname(codex!), ...(node === null ? [] : [dirname(node)]), "/usr/bin", "/bin"].join(
+          ":",
+        ),
+        HOME: root,
+        CODEX_HOME: codexHome,
+        HERCULE_TOKEN: options.sessionToken,
+        HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
       },
-    );
+      cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
 
     const frames: Array<Frame> = [];
     void (async () => {
