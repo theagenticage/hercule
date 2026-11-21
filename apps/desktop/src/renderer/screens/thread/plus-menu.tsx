@@ -26,20 +26,22 @@ import type { ThreadServers } from "./use-thread-servers";
  * `servers` is the thread's list and how it is written. The dialogs the menu
  * opens, the picker and Reconnect, are drawn outside the menu, because the
  * menu closes first. `serversOff` is the reason the MCP row is off, or
- * `null` when it works. `disabled` leaves the `+` drawn but unable to open
- * the menu, as the composer's other menus are on a thread that takes no
- * message.
+ * `null` when it works. The menu opens on a thread that takes no message too:
+ * its list can be edited, and `attach` says that Attach is off.
+ *
+ * A refusal of a write stays until the user dismisses it, by closing the
+ * menu or the picker that showed it, or until the next write. Opening them
+ * never clears it, so a write refused after they were closed still shows when
+ * they open again.
  */
 export function PlusMenu({
   attach,
   servers,
   serversOff,
-  disabled,
 }: {
   readonly attach: PlusAttach;
   readonly servers: ThreadServers;
   readonly serversOff: string | null;
-  readonly disabled: boolean;
 }): JSX.Element {
   const [picking, setPicking] = useState(false);
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
@@ -50,11 +52,11 @@ export function PlusMenu({
         label="Add"
         align="start"
         width="bare"
-        disabled={disabled}
+        disabled={false}
         triggerClassName="icon-btn plus-button"
         triggerLabel={describePlusLabel(row)}
         trigger={<PlusFace row={row} />}
-        onOpen={servers.clearRefusal}
+        onClosed={servers.clearRefusal}
       >
         {(close) => (
           <PlusMenuPanels
@@ -83,6 +85,7 @@ export function PlusMenu({
           <LazyThreadServerPicker
             servers={servers}
             onClose={() => {
+              servers.clearRefusal();
               setPicking(false);
             }}
           />

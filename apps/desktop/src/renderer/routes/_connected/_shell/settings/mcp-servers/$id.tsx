@@ -143,8 +143,8 @@ function McpServerPage(): JSX.Element {
       <ServerSection
         view={view}
         plugins={plugins}
-        switchBusy={flip.isRunning}
-        switchError={flip.refusal}
+        switchBusy={flip.isBlocked}
+        switchError={flip.problem()}
         checkBusy={check.isPending}
         checkError={check.error === null ? null : readErrorMessage(check.error)}
         onFlipSwitch={() => {

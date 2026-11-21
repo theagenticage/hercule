@@ -78,7 +78,6 @@ export type IconName =
   | "tasks"
   | "terminal"
   | "threads"
-  | "tools"
   | "undo"
   | "user"
   | "wiki"
@@ -174,7 +173,6 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["tasks", [14]],
   ["terminal", [12]],
   ["threads", []],
-  ["tools", []],
   ["undo", [15]],
   ["user", []],
   ["wiki", []],

@@ -35,6 +35,13 @@
   flex: none;
   place-items: center;
 }
+/* A row with a note under the name is two or three lines tall, and its mark
+   belongs to the name, not to the middle of the block: it sits on the name's
+   first line, a box one line tall (the row's top padding is the name's top). */
+.plus-row:has(> .plus-row-name > small) > .plus-row-mark {
+  align-self: flex-start;
+  height: 1lh;
+}
 .plus-row-name {
   flex: 1;
   min-width: 0;

@@ -344,7 +344,6 @@ export function ThreadComposer({
             serversOff={
               answer !== null && !SERVERS_WORK_WHILE_ANSWERING ? SERVERS_OFF_WHILE_ANSWERING : null
             }
-            disabled={readOnly !== null}
           />
         </Suspense>
       )}

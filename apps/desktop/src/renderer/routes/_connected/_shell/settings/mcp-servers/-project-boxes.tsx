@@ -1,7 +1,6 @@
 import { useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { isMutationRunning } from "@hercule/client-core";
 import {
   buildMcpServerViews,
   buildProjectBoxes,
@@ -11,7 +10,7 @@ import {
   type ProjectBoxAction,
 } from "@hercule/client-core/mcp-servers";
 import { readCachedMcpServerViews } from "../../../../../app/mcp-server-views";
-import { mcpWriteKeys, useMcpWrite } from "../../../../../app/mcp-write";
+import { isMcpWriteBlocked, mcpWriteKeys, useMcpWrite } from "../../../../../app/mcp-write";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -34,7 +33,8 @@ import {
 export function ProjectBoxes({ view }: { readonly view: McpServerView }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
-  const settings = useSuspenseQuery(settingsQuery(client)).data;
+  const settingsRead = useSuspenseQuery(settingsQuery(client));
+  const settings = settingsRead.data;
   const servers = useSuspenseQuery(mcpServersQuery(client)).data;
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
@@ -52,6 +52,7 @@ export function ProjectBoxes({ view }: { readonly view: McpServerView }): JSX.El
           key={box.target.kind === "project" ? box.target.project.id : "default"}
           box={box}
           view={view}
+          settingsReading={settingsRead.isFetching}
         />
       ))}
     </ProjectsSection>
@@ -61,7 +62,9 @@ export function ProjectBoxes({ view }: { readonly view: McpServerView }): JSX.El
 /**
  * Renders one box and owns its write. One list write runs at a time for the
  * box's list, wherever it was started from, and counts as running until the
- * list is read again; while it runs the box ignores presses. A refusal shows
+ * list is read again; while it runs the box ignores presses. The default box
+ * also ignores them while the default list is read again as the page opens,
+ * because the list drawn may be older than the controller's. A refusal shows
  * under the box.
  *
  * What a press writes is decided when the user presses, on the list the cache
@@ -73,27 +76,35 @@ export function ProjectBoxes({ view }: { readonly view: McpServerView }): JSX.El
  * - Pressing a box whose list names another server of the same name writes
  *   nothing and shows the refusal; "Use ..." then writes the swap as one
  *   change, and "Keep ..." closes the refusal.
- * - The swap is written only while the list still names the server the
- *   refusal showed. When it names another one by now, nothing is written and
- *   the refusal shows that server instead, so the user confirms again.
+ * - The refusal names the server the box's list names now, and "Use ..."
+ *   swaps that same server, so the words and the button never differ. The
+ *   swap is written only while the list still names it in the cache. When it
+ *   names another one by then, nothing is written and the refusal shows that
+ *   server instead, so the user confirms again.
  */
 function ProjectBoxItem({
   box,
   view,
+  settingsReading,
 }: {
   readonly box: ProjectBox;
   readonly view: McpServerView;
+  /** Whether the default list is being read again, which the default box waits for. */
+  readonly settingsReading: boolean;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const { target } = box;
-  // The id of the server the refusal showed, which "Use" replaces.
-  const [refusedFor, setRefusedFor] = useState<string | null>(null);
+  // Whether the refusal shows, which names the server the box's list names.
+  const [refusing, setRefusing] = useState(false);
   const mutationKey =
     target.kind === "default"
       ? mcpWriteKeys.defaultList()
       : mcpWriteKeys.projectList(target.project.id);
+  const refresh = [
+    target.kind === "default" ? settingsQuery(client).queryKey : projectsQuery(client).queryKey,
+  ];
   // `null` means the project is gone, so there is no list to write. Only a project can be gone.
   const write = useMcpWrite<readonly string[] | null>({
     mutationKey,
@@ -111,12 +122,10 @@ function ProjectBoxItem({
         payload: { mcpServerIds: [...mcpServerIds] },
       });
     },
-    refresh: [
-      target.kind === "default" ? settingsQuery(client).queryKey : projectsQuery(client).queryKey,
-    ],
+    refresh,
   });
   const press = (action: ProjectBoxAction): void => {
-    if (isMutationRunning(queryClient, mutationKey)) return;
+    if (isMcpWriteBlocked(queryClient, mutationKey, refresh)) return;
     const currentIds =
       target.kind === "default"
         ? (queryClient.getQueryData(settingsQuery(client).queryKey)?.user["thread.mcpServerIds"] ??
@@ -132,29 +141,30 @@ function ProjectBoxItem({
     const views = readCachedMcpServerViews(queryClient, client)!;
     const decided = decideProjectBoxWrite(currentIds, views, view, action);
     if (decided.kind === "refused") {
-      setRefusedFor(decided.occupant.server.id);
+      setRefusing(true);
       return;
     }
-    setRefusedFor(null);
+    setRefusing(false);
     write.start(decided.mcpServerIds);
   };
+  const occupantId = box.takenBy?.server.id;
   return (
     <ProjectBoxRow
       box={box}
       view={view}
       allProjects={projects}
-      refusing={refusedFor !== null}
-      busy={write.isRunning}
-      error={write.refusal === null ? null : `Could not save: ${write.refusal}`}
+      refusing={refusing}
+      busy={write.isBlocked || (target.kind === "default" && settingsReading)}
+      error={write.problem("Could not save: ")}
       onTick={(ticked) => {
         press(ticked ? "tick" : "untick");
       }}
       onUse={() => {
-        // A refusal exists only after a press found an occupant, so `refusedFor` is set.
-        press({ swapFrom: refusedFor! });
+        // The button shows only while the box names another server, which the refusal describes.
+        if (occupantId !== undefined) press({ swapFrom: occupantId });
       }}
       onKeep={() => {
-        setRefusedFor(null);
+        setRefusing(false);
       }}
     />
   );

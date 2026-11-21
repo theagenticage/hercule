@@ -539,6 +539,81 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     });
   });
 
+  it("shows a refusal that came after the picker was closed, when the picker opens again", async () => {
+    const held = holdAnswer();
+    await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: { [`PATCH ${SETTINGS_PATH}`]: held.handler },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    await userEvent.click(within(findPickRow("linear")).getByRole("checkbox"));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    held.answer({
+      status: 403,
+      body: {
+        error: {
+          code: "forbidden",
+          message: "This token lacks mcp.manage.",
+          details: { grant: "mcp.manage" },
+        },
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Change…" }).getAttribute("aria-disabled")).toBe(
+        "false",
+      );
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+
+    const alert = await within(await screen.findByRole("dialog")).findByRole("alert");
+    expect(alert.textContent).toBe("Could not save: This token lacks mcp.manage.");
+  });
+
+  it("keeps Change... off until the settings read of this opening has answered", async () => {
+    let gate: Promise<void> = Promise.resolve();
+    let release = (): void => undefined;
+    let defaultIds: string[] = [];
+    const { router } = await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        "GET /api/v1/skills": { body: { items: [] } },
+        [`GET ${SETTINGS_PATH}`]: async () => {
+          await gate;
+          return { body: { controller: {}, user: { "thread.mcpServerIds": defaultIds } } };
+        },
+      },
+    });
+    await act(() => router.navigate({ to: "/settings/skills" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/settings/skills");
+    });
+
+    // The CLI changed the setting while the section was closed, and the answer is on its way.
+    defaultIds = [LINEAR_ID];
+    gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    await act(() => router.navigate({ to: LIST_PATH }));
+    const change = await screen.findByRole("button", { name: "Change…" });
+
+    expect(change.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(change);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    release();
+    await waitFor(() => {
+      expect(change.getAttribute("aria-disabled")).toBe("false");
+    });
+    await userEvent.click(change);
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    expect(within(findPickRow("linear")).getByRole("checkbox", { checked: true })).toBeTruthy();
+  });
+
   it("shows the status word of a server that is not ready, and a filter past eight names", async () => {
     const tools = Array.from({ length: 9 }, (_, at) =>
       buildServer(
@@ -633,7 +708,7 @@ describe("Settings > MCP servers, the section", () => {
     let listed = [LINEAR, SENTRY_WORK];
     let gate: Promise<void> = Promise.resolve();
     let release = (): void => undefined;
-    const { live } = await openList({
+    const { live, calls } = await openList({
       servers: [SENTRY_WORK, LINEAR],
       handlers: {
         [`PATCH ${SERVER_LIST_PATH}/${SENTRY_WORK_ID}`]: held.handler,
@@ -661,8 +736,12 @@ describe("Settings > MCP servers, the section", () => {
     gate = new Promise((resolve) => {
       release = resolve;
     });
+    const readsBeforeAnswer = findCalls(calls, "GET", SERVER_LIST_PATH).length;
     held.answer({ body: { ...SENTRY_WORK, enabled: false } });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // The write has handled its response once it starts its own read of the list.
+    await waitFor(() => {
+      expect(findCalls(calls, "GET", SERVER_LIST_PATH).length).toBeGreaterThan(readsBeforeAnswer);
+    });
 
     expect(readsNoRecord()).toBe(true);
     release();

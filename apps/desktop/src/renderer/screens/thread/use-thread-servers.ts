@@ -42,11 +42,11 @@ export interface ThreadServers {
    * it never writes a list drawn from an older read.
    */
   readonly readStartIds: () => readonly string[];
-  /** Whether a write is running, which draws the switches as off. */
+  /** Whether a write runs or its list could not be read again, which draws the switches as off. */
   readonly busy: boolean;
   /** Why the controller refused the last write, such as a session without `mcp.manage`. `null` when it did not. */
   readonly refusal: string | null;
-  /** Forgets a settled refusal, when the user opens the menu again. */
+  /** Forgets a settled refusal, when the user dismisses the menu or the picker that showed it. */
   readonly clearRefusal: () => void;
 }
 
@@ -137,8 +137,8 @@ export function useStartedThreadServers(session: Session): ThreadServers {
     row,
     change: write.start,
     readStartIds: () => readCachedStartList(queryClient, client, session.projectId),
-    busy: write.isRunning,
-    refusal: write.refusal,
+    busy: write.isBlocked,
+    refusal: write.problem(),
     clearRefusal: write.clearRefusal,
   };
 }

@@ -3,8 +3,8 @@ import { IconFrame, type IconProps } from "./icon-frame";
 
 /**
  * Renders the tools icon: a wrench, for the tools an MCP server gives agents.
- * The Bureau book drew no such icon, so this one was drawn for the MCP
- * servers prototype (#1211).
+ * The Bureau book has no tools icon, so this one is drawn on the same 16-unit
+ * grid as the others.
  */
 export function ToolsIcon(props: IconProps): JSX.Element {
   return (

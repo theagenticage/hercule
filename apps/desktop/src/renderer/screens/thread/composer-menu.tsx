@@ -22,6 +22,9 @@ import "./menus.css";
  * - `disabled` leaves the trigger drawn but unable to open the menu.
  * - `triggerLabel`, when given, is the trigger's accessible name, for a
  *   trigger that is an icon.
+ * - `onOpen`, when given, is called each time the menu opens.
+ * - `onClosed`, when given, is called each time the menu closes, however it
+ *   closes.
  * - `children` draws the menu's content. It is called only while the menu
  *   is open, so a closed menu costs nothing, and anything the content holds,
  *   such as a filter's text, starts afresh each time the menu opens. It
@@ -37,6 +40,7 @@ export function ComposerMenu({
   triggerLabel,
   children,
   onOpen,
+  onClosed,
 }: {
   readonly label: string;
   readonly align: "start" | "end";
@@ -47,6 +51,7 @@ export function ComposerMenu({
   readonly triggerLabel?: string | undefined;
   readonly children: (close: () => void) => ReactNode;
   readonly onOpen?: (() => void) | undefined;
+  readonly onClosed?: (() => void) | undefined;
 }): JSX.Element {
   const id = useId();
   const [menu, setMenu] = useState<HTMLDivElement | null>(null);
@@ -80,6 +85,7 @@ export function ComposerMenu({
         onToggle={(event) => {
           setOpen(event.newState === "open");
           if (event.newState === "open") onOpen?.();
+          else onClosed?.();
         }}
       >
         {open ? children(close) : null}

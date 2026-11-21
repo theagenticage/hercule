@@ -6,7 +6,7 @@
  * target, wherever the control that started it is, and the guard outlives
  * the control, so closing and reopening a menu or dialog never releases it.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
   useIsMutating,
   useMutation,
@@ -43,14 +43,64 @@ export const mcpWriteKeys = {
   ],
 } as const;
 
+/** What a target says when its write ended but the read that follows it failed. */
+const LIST_UNREAD_MESSAGE = "Saved, but the list could not be read again.";
+
+/** How long a write nobody shows any more stays in the mutation cache after it ends. */
+const DETACHED_WRITE_LIFETIME_MS = 5 * 60 * 1000;
+
+/**
+ * The targets whose last write ended while a read of what it changed failed,
+ * by query client and target key. The cache then still holds the list as it
+ * was before the write, and a next write built on it would undo this one.
+ */
+const unreadTargets = new WeakMap<QueryClient, Set<string>>();
+
+/** Returns true when a read of one of the `refresh` queries has failed last. */
+const hasFailedRead = (queryClient: QueryClient, refresh: readonly QueryKey[]): boolean =>
+  refresh.some((queryKey) => queryClient.getQueryState(queryKey)?.status === "error");
+
+/**
+ * Returns true while the last write of the target ended with a failed read of
+ * what it changed. The mark is dropped as soon as no `refresh` read is in
+ * error, so the next successful read of them releases the target.
+ */
+const isTargetUnread = (
+  queryClient: QueryClient,
+  mutationKey: MutationKey,
+  refresh: readonly QueryKey[],
+): boolean => {
+  const marks = unreadTargets.get(queryClient);
+  const mark = JSON.stringify(mutationKey);
+  if (marks?.has(mark) !== true) return false;
+  if (hasFailedRead(queryClient, refresh)) return true;
+  marks.delete(mark);
+  return false;
+};
+
+/** Returns true while a write of the target runs, or its last write left the list unread. */
+export const isMcpWriteBlocked = (
+  queryClient: QueryClient,
+  mutationKey: MutationKey,
+  refresh: readonly QueryKey[],
+): boolean =>
+  isMutationRunning(queryClient, mutationKey) || isTargetUnread(queryClient, mutationKey, refresh);
+
 /** What `useMcpWrite` returns. */
 export interface McpWrite<Variables> {
-  /** Starts the write with `variables`. Does nothing while a write of the same target runs. */
+  /** Starts the write with `variables`. Does nothing while the target `isBlocked`. */
   readonly start: (variables: Variables) => void;
-  /** Whether a write of the target runs, started by any component. */
-  readonly isRunning: boolean;
-  /** Why the controller refused the last write of the target, or `null`. */
-  readonly refusal: string | null;
+  /**
+   * Whether the target takes no new write: one runs, started by any
+   * component, or the last one ended and the read of what it changed failed.
+   */
+  readonly isBlocked: boolean;
+  /**
+   * Returns what to show for the target, or `null`: why the controller
+   * refused the last write, with `prefix` before it, or that the write was
+   * saved but could not be read again. Nothing shows while a write runs.
+   */
+  readonly problem: (prefix?: string) => string | null;
   /** Forgets the last refusal. */
   readonly clearRefusal: () => void;
 }
@@ -76,9 +126,14 @@ const forgetSettledWrites = (queryClient: QueryClient, mutationKey: MutationKey)
  * - The refusal of the last write stays in the mutation cache, so it shows
  *   wherever the target is shown, until `clearRefusal`, the next `start`, or
  *   the unmount of the component that called this hook. That component is the
- *   screen or the composer, never the menu or dialog opened from it.
+ *   screen or the composer, never the menu or dialog opened from it. Opening
+ *   a menu or dialog never clears it; closing one may, through `clearRefusal`.
  * - Each write ends by reading again what it changed, `refresh`, and the
- *   write counts as running until those reads answer. No response of the
+ *   target stays blocked until those reads answer. When one of them fails,
+ *   the target stays blocked after that, with the refusal "Saved, but the
+ *   list could not be read again.", until a read of `refresh` succeeds: the
+ *   cache still holds the old list, and a write built on it would undo this
+ *   one. No response of the
  *   write is put in the cache: only reads fill it, so a late response can
  *   never put back what a newer read removed. When the controller refuses
  *   with `validation`, which a server deleted since the list was read
@@ -100,8 +155,10 @@ export function useMcpWrite<Variables>({
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationKey,
-    // A refusal must outlive the control that made the write.
-    gcTime: Infinity,
+    // The component that called this hook observes the write, which keeps it and its refusal
+    // while that component is mounted. Once it is gone, the record of a write that ended is
+    // removed after this time, and a write that still runs is kept until it ends.
+    gcTime: DETACHED_WRITE_LIFETIME_MS,
     mutationFn,
     onMutate: () => {
       forgetSettledWrites(queryClient, mutationKey);
@@ -113,9 +170,29 @@ export function useMcpWrite<Variables>({
       await Promise.all(
         keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })),
       );
+      // A failed read does not reject the invalidation, so it is looked for in the queries.
+      if (hasFailedRead(queryClient, keys)) {
+        const marks = unreadTargets.get(queryClient) ?? new Set<string>();
+        marks.add(JSON.stringify(mutationKey));
+        unreadTargets.set(queryClient, marks);
+      }
     },
   });
   const isRunning = useIsMutating({ mutationKey }) > 0;
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const stopQueries = queryClient.getQueryCache().subscribe(notify);
+      const stopMutations = queryClient.getMutationCache().subscribe(notify);
+      return () => {
+        stopQueries();
+        stopMutations();
+      };
+    },
+    [queryClient],
+  );
+  const isUnread = useSyncExternalStore(subscribe, () =>
+    isTargetUnread(queryClient, mutationKey, refresh),
+  );
   const keyText = JSON.stringify(mutationKey);
   useEffect(
     () => () => {
@@ -130,11 +207,15 @@ export function useMcpWrite<Variables>({
   const error = errors.at(-1);
   return {
     start: (variables) => {
-      if (isMutationRunning(queryClient, mutationKey)) return;
+      if (isMcpWriteBlocked(queryClient, mutationKey, refresh)) return;
       mutation.mutate(variables);
     },
-    isRunning,
-    refusal: isRunning || error === undefined ? null : readErrorMessage(error),
+    isBlocked: isRunning || isUnread,
+    problem: (prefix = "") => {
+      if (isRunning) return null;
+      if (error !== undefined) return `${prefix}${readErrorMessage(error)}`;
+      return isUnread ? LIST_UNREAD_MESSAGE : null;
+    },
     clearRefusal: () => {
       forgetSettledWrites(queryClient, mutationKey);
     },

@@ -206,14 +206,18 @@ export function ServerRowView({
  * Renders the group "Threads without a project": its line, the servers of
  * the default list as chips with their marks, or "None", and Change…, which
  * calls `onChange`. `chosen` are the servers of `thread.mcpServerIds`.
+ * While `changeOff`, Change… ignores presses: the list drawn may be older than
+ * the controller's, and a change would be built on it.
  */
 export function DefaultServers({
   chosen,
   plugins,
+  changeOff,
   onChange,
 }: {
   readonly chosen: readonly McpServerView[];
   readonly plugins: readonly PluginIdentity[];
+  readonly changeOff: boolean;
   readonly onChange: () => void;
 }): JSX.Element {
   return (
@@ -222,7 +226,14 @@ export function DefaultServers({
         <h2>Threads without a project</h2>
         <span>A thread in no project starts with these servers</span>
         <span className="spacer" />
-        <button type="button" className="btn btn--sm" onClick={onChange}>
+        <button
+          type="button"
+          className="btn btn--sm"
+          aria-disabled={changeOff}
+          onClick={() => {
+            if (!changeOff) onChange();
+          }}
+        >
           Change…
         </button>
       </div>
