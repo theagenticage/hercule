@@ -243,7 +243,7 @@ At every start of a session, the controller records for each server in the sessi
 
 | Reason | When |
 |---|---|
-| `runner-too-old` | the runner lacks the `mcpServers` capability |
+| `runner-too-old` | the runner lacks the `mcpServers` capability *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* for the session's harness ([./03-controller-and-runners.md](./03-controller-and-runners.md)) |
 | `harness-unsupported` | the harness's `mcpPassthrough` is `unsupported` |
 | `missing-grant` | the session's profile lacks `mcp.use` |
 | `switched-off` | `enabled` is false |
@@ -337,6 +337,27 @@ What was observed in the original runs, and the test does not assert:
 
 The live run checked that the call after the restart worked. It did not record the order of the CLI's requests, so the idle stream and the order after a restart above stay observations of the original runs.
 
+*(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* **Codex 0.169.0 and 0.171.0 are checked on the older path.** Two tests run the real binary with no login and a local stand-in for the Responses API, and are skipped where no `codex` is installed, so CI does not run them:
+
+- `http/mcp-codex.integration.test.ts` starts `codex app-server --strict-config` with the adapter's own `buildMcpServerConfig`, against the real gateway through the recording proxy.
+- `harnesses/codex/adapter-mcp.integration.test.ts` drives the adapter's own `startSession` against a fake MCP server. It covers the approvals per Access Mode, the item, resume and fork, a trusted project's config, image results and the token on disk. Codex 0.154.0 and 0.164.0 to 0.167.0 were also run with it.
+
+What the tests assert:
+
+- **The older path.** Codex sends `initialize` at revision `2025-06-18`, then `notifications/initialized`, opens the GET stream and lists with `tools/list`. It never sends `server/discover`. The model sees one namespace tool `mcp__tools` holding `<server>__<tool>`, and a call reaches the outside server once.
+- **A server added to a running thread** with its list empty at the start: `list_changed` goes out on the GET stream, Codex lists again before its next model request, and the new tool's call reaches the outside server once.
+- **A server taken away.** Codex lists again as soon as it hears of the change, so it refuses the removed tool itself, and the call never reaches the gateway. When `list_changed` is held back, the gateway refuses the call (Codex shows it as a failed call whose text is the refusal), and the outside server gets no call.
+- **A 404 for a forgotten MCP session** (`DELETE /mcp`, as for Claude Code): the next `tools/call` gets 404. Codex opens a new MCP session (`initialize`, `initialized`, GET) and sends the same call again before any `tools/list`, and the call succeeds.
+- **Resume and fork.** A new app-server process connects and lists when the adapter's `config` is sent again with `thread/resume` or `thread/fork` (06 §10.2: without it, nothing connects).
+- **300 tools** are offered to the model directly in the `mcp__tools` namespace, not deferred behind tool search. A Codex that defers them fails the test.
+
+What was observed in probes, and no test asserts:
+
+- **A GET stream that gets 404** retries with a growing wait (about 1, 3, 7 and 15 seconds) and never opens a new MCP session by itself. As with Claude Code, an idle Codex thread is told about a changed list after a restart only once it next sends a call.
+- **A graceful stop** sends `DELETE` for the MCP session.
+
+**Not checked by a test: a real cold gateway.** The test controller cannot restart over one database, so the call that follows a restart is not tested. That call is sent before any `tools/list`, so the gateway, which has forgotten the names it sent, refuses it once with "list the tools again" ([section 3.4](#34-tool-names)). It also sends `list_changed`, which reaches Codex's new GET stream, and Codex lists again before its next model request. This is reasoned from the order of requests above, and #1209's live sitting checks it with a real restart.
+
 Facts behind these, from the exploration: [how each harness caches and re-reads a tool list](https://github.com/theagenticage/hercule/blob/9b9b82a25/docs/research/mcp-tool-list-changes.md) and [the protocol and the harnesses](https://github.com/theagenticage/hercule/blob/9b9b82a25/docs/research/mcp-protocol-and-harnesses.md).
 
 ## 4. Which servers a session gets
@@ -384,7 +405,7 @@ Every list write needs the grant `mcp.manage`, checked inside the operation in a
 
 [./06-providers.md](./06-providers.md#4-harnessadapter) owns `SessionSpec.mcpServers` and the adapters. In short:
 
-- Every session on a runner and harness that support it gets one entry, the gateway's, named `tools`: its runner lists the capability `mcpServers` and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
+- Every session on a runner and harness that support it gets one entry, the gateway's, named `tools`: its runner lists the capability `mcpServers` *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* for that harness (`mcpServers:<qualified harness id>`, [./03-controller-and-runners.md](./03-controller-and-runners.md)) and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
 - The cost is one idle connection per session to the controller. Codex also shows the model one line about the server.
 - A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* ~~Codex is `unsupported` until [#1209](https://github.com/theagenticage/hercule/issues/1209) maps the entry in its adapter ([./06-providers.md](./06-providers.md#4-harnessadapter), decided by Rogier, 2026-11-20).~~ *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* Codex is `native`: its adapter puts the entry in the `config` of `thread/start`, `thread/resume` and `thread/fork` ([./06-providers.md](./06-providers.md#102-codex-app-server)).
 - Tool search is the harness's own. The gateway offers no search tool.
