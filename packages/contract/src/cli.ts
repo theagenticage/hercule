@@ -176,21 +176,23 @@ export type FieldRow =
        * 1f3a9c2e` sends `{ kind: "plugin", ... }` and `--url <address>` sends
        * `{ kind: "url", ... }`. The field's schema must be a union of
        * objects, with one entry here for each member, and the entry's `fixed`
-       * must be exactly the member's literal keys with their values.
+       * must be exactly the member's literal keys with their values. A field
+       * with a single shape is a `oneOf` of one entry.
        *
-       * Each entry gives the flags of one object shape (`ObjectFlagsRow`) and
-       * a `help` that leads its flags in the command's help. A field with a
-       * single shape is a `oneOf` of one entry. The command line picks the
-       * entry by the flags it gives:
+       * The command line picks the entry by its `selector` flag:
        *
-       * - A flag that only one entry declares picks that entry. Flags of two
-       *   entries together are refused, and so is a command line with no
-       *   flag that picks one.
-       * - Several entries may declare a flag of the same spelling, such as
-       *   `--name`, when it means the same key in each. Such a flag picks
-       *   none of them.
+       * - Giving the selector of one entry picks it. Selectors of two entries
+       *   together are refused, and so is a flag of another entry's keys.
        * - The keys the picked entry requires are required on the command
        *   line, and no other entry's keys are.
+       * - With no selector given, a required field is refused, and an optional
+       *   field is left out of the request.
+       *
+       * A flag is one flag of the command, however many entries declare it:
+       * entries share a key by naming it in their `flags`, and the key must
+       * have the same schema in every member that has it. Its spelling, its
+       * stdin read and what it resolves come from the first entry that
+       * declares it. Only its `help` is the entry's own.
        *
        * Each flag is an ordinary flag in help and in errors: a missing
        * required key is reported by its flag, and an optional key is optional
@@ -198,11 +200,8 @@ export type FieldRow =
        * schema. Every key in an entry's `fixed` and `flags` must be a key of
        * its object, every key the object requires must be in one of them, and
        * a key holds one value, never a list.
-       *
-       * At most one flag read from stdin may be declared across the entries,
-       * so the help can say what stdin holds without naming an entry.
        */
-      readonly oneOf: ReadonlyArray<ObjectFlagsRow & { readonly help: string }>;
+      readonly oneOf: ReadonlyArray<ObjectFlagsRow>;
     }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
@@ -211,10 +210,14 @@ export type FieldRow =
   | { readonly hidden: true };
 
 /**
- * The flags that fill an object field, one per key, and the keys sent with
- * fixed values. Each entry of a `oneOf` row is one of these, with a lead line.
+ * One entry of a `oneOf` row: the flags that fill one object shape, one per
+ * key, and the keys sent with fixed values.
  */
 export interface ObjectFlagsRow {
+  /** The line that leads this entry's flags in the command's help. */
+  readonly help: string;
+  /** The spelling of the flag that picks this entry, one of the `flag` values in `flags`. */
+  readonly selector: string;
   /** Keys sent with this text as their value, whatever the command line says. */
   readonly fixed: Readonly<Record<string, string>>;
   /** The flag of each key of the object, by the key's name. */
@@ -4626,6 +4629,7 @@ export const CLI = {
         oneOf: [
           {
             help: "From a plugin's Connection:",
+            selector: "plugin",
             fixed: { kind: "plugin" },
             flags: {
               contributionId: {
@@ -4645,6 +4649,7 @@ export const CLI = {
           },
           {
             help: "By its address:",
+            selector: "url",
             fixed: { kind: "url" },
             flags: {
               url: {
@@ -4693,6 +4698,7 @@ export const CLI = {
         oneOf: [
           {
             help: "To move the server onto a plugin's Connection:",
+            selector: "plugin",
             fixed: { kind: "plugin" },
             flags: {
               contributionId: {

@@ -534,7 +534,7 @@ describe("mcp-server create", () => {
     ).rejects.toThrow(new UsageError("missing required --connection", "mcp-server create"));
     await expect(
       parseArguments(mcpServerCreate, ["--token-stdin"], refuseStdinRead),
-    ).rejects.toThrow("missing required --url");
+    ).rejects.toThrow("no flag says which form to use");
     await expect(parseArguments(mcpServerCreate, ["--name", "x"], refuseStdinRead)).rejects.toThrow(
       "no flag says which form to use: give --plugin and --connection, or --url",
     );

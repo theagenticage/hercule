@@ -105,14 +105,7 @@ describe("the spelling of a command", () => {
 
   it("spells every flag in kebab-case, unique within the command", () => {
     for (const command of COMMANDS) {
-      const fields = [...command.payload, ...command.query];
-      // Entries of a `oneOf` field may share a flag, so it counts once.
-      const flags = [
-        ...fields.filter((field) => field.within === undefined).map((field) => field.spelling),
-        ...new Set(
-          fields.filter((field) => field.within !== undefined).map((field) => field.spelling),
-        ),
-      ];
+      const flags = [...command.payload, ...command.query].map((field) => field.spelling);
       for (const flag of flags) {
         expect(flag, `${readSpelling(command)}: --${flag}`).toMatch(KEBAB);
       }
@@ -161,7 +154,7 @@ describe("a command's fields against the schema", () => {
     for (const command of COMMANDS) {
       // A flag that fills one key of an object field stands for that field.
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
-        (field) => field.within?.field ?? field.name,
+        (field) => field.within ?? field.name,
       );
       const shown = Object.entries(readRow(command.id).fields ?? {})
         .filter(([, field]) => field.hidden !== true)
@@ -359,39 +352,31 @@ describe("a command's fields against the schema", () => {
   });
 });
 
-// A row's `oneOf` form turns one field that is a union of objects into one flag per key of each member.
+// A row's `oneOf` form turns one field that is a union of objects into one flag per key of the members.
 describe("a field of several shapes filled from flags", () => {
-  const fields = findCommandByWords(["mcp-server", "create"])!.payload;
+  const command = findCommandByWords(["mcp-server", "create"])!;
+  const fields = command.payload;
 
-  it("becomes one field per flag of each entry, each typed by its key of its member", () => {
-    expect(
-      fields.map((field) => [field.spelling, field.name, field.within?.field, field.within?.entry]),
-    ).toEqual([
-      ["plugin", "contributionId", "source", 0],
-      ["connection", "connectionId", "source", 0],
-      ["name", "name", "source", 0],
-      ["url", "url", "source", 1],
-      ["name", "name", "source", 1],
-      ["token", "token", "source", 1],
+  it("becomes one field per key, a key two members share counting once", () => {
+    expect(fields.map((field) => [field.spelling, field.name, field.within])).toEqual([
+      ["plugin", "contributionId", "source"],
+      ["connection", "connectionId", "source"],
+      ["name", "name", "source"],
+      ["url", "url", "source"],
+      ["token", "token", "source"],
     ]);
-    expect(fields.map((field) => field.optional)).toEqual([false, false, true, false, true, true]);
-    expect(fields.map((field) => field.holdsAnId)).toEqual([
-      false,
-      true,
-      false,
-      false,
-      false,
-      false,
-    ]);
+    expect(fields.map((field) => field.optional)).toEqual([false, false, true, false, true]);
     expect(fields.find((field) => field.name === "connectionId")!.resolves).toBe(
       "connection.query",
     );
-    expect(fields[0]!.within!.fixed).toEqual({ kind: "plugin" });
-    expect(fields[3]!.within!.fixed).toEqual({ kind: "url" });
+    expect(fields.filter((field) => field.stdin).map((field) => field.name)).toEqual(["token"]);
   });
 
-  it("reads only the token from stdin", () => {
-    expect(fields.filter((field) => field.stdin).map((field) => field.name)).toEqual(["token"]);
+  it("names each entry's selector, fixed values and flags", () => {
+    const [plugin, url] = command.choices[0]!.entries;
+    expect([plugin!.selector.spelling, plugin!.fixed]).toEqual(["plugin", { kind: "plugin" }]);
+    expect([url!.selector.spelling, url!.fixed]).toEqual(["url", { kind: "url" }]);
+    expect(url!.flags.map(({ field }) => field.spelling)).toEqual(["url", "name", "token"]);
   });
 });
 

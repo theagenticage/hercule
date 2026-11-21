@@ -71,7 +71,7 @@ const toUsageError = (error: RequestError, command: Command): UsageError => {
   // key, such as `source.connectionId`.
   const named = new Map(
     [...command.positionals, ...command.payload, ...command.query].map((field) => [
-      field.within === undefined ? field.name : `${field.within.field}.${field.name}`,
+      field.within === undefined ? field.name : `${field.within}.${field.name}`,
       formatFieldName(field),
     ]),
   );

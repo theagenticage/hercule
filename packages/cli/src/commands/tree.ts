@@ -32,7 +32,6 @@ import {
   type CliExample,
   type FieldRow,
   type Method,
-  type ObjectFlagsRow,
   type ObjectKeyRow,
   type Operation,
   type OperationId,
@@ -40,6 +39,7 @@ import {
   type ResolvingQuery,
 } from "@hercule/contract";
 import * as Schema from "effect/Schema";
+import type * as SchemaAST from "effect/SchemaAST";
 import * as HttpApi from "effect/http-api/HttpApi";
 
 /**
@@ -136,29 +136,17 @@ export interface Field {
    */
   readonly itemKey: string | undefined;
   /**
-   * Set when the flag fills one key of an object field of the request: the
-   * name of that object field, and the keys sent with fixed values beside
-   * the flags'. Set by the row's `oneOf` form; `undefined` for every other
-   * field. `entry` is the position of the field's entry in the row, and the
-   * field is sent only when that entry is picked. A flag that several entries
-   * declare is one field of each of them. `optional` is true when the object
-   * field may be left out of the request, so a command line with none of its
-   * flags is valid.
+   * The name of the object field of the request that this flag fills one key
+   * of, when it does; `undefined` for every other field. Set by the row's
+   * `oneOf` form. A flag that several entries of the row declare is one field.
    */
-  readonly within:
-    | {
-        readonly field: string;
-        readonly fixed: Readonly<Record<string, string>>;
-        readonly entry: number;
-        readonly optional: boolean;
-      }
-    | undefined;
+  readonly within: string | undefined;
   readonly help: string;
 }
 
 /**
  * A field that holds one of several object shapes, as the row's `oneOf`
- * declares it. The command line picks the entry by the flags it gives.
+ * declares it. The command line picks the entry by its selector flag.
  */
 export interface ObjectChoice {
   /** The name of the object field in the request. */
@@ -168,8 +156,12 @@ export interface ObjectChoice {
   readonly entries: ReadonlyArray<{
     /** The line that leads the entry's flags in the help. */
     readonly help: string;
-    /** The flags of the entry, as fields of the command's payload. */
-    readonly fields: ReadonlyArray<Field>;
+    /** The keys sent with these values, whatever the command line says. */
+    readonly fixed: Readonly<Record<string, string>>;
+    /** The flag that picks the entry. */
+    readonly selector: Field;
+    /** The flags of the entry, each with the help the entry gives it. */
+    readonly flags: ReadonlyArray<{ readonly field: Field; readonly help: string }>;
   }>;
 }
 
@@ -198,7 +190,7 @@ export interface Command {
   readonly positionals: ReadonlyArray<Field>;
   /**
    * The payload fields given as `--<flag>`; payload positionals are not
-   * included. The flags of every entry of a `oneOf` field are included.
+   * included. The keys of a `oneOf` field are included, one field each.
    */
   readonly payload: ReadonlyArray<Field>;
   /** The payload fields that hold one of several object shapes. */
@@ -451,47 +443,13 @@ const buildField = (
 };
 
 /**
- * Builds one field for each flag of an object row, each typed by its key of
- * the object. `entry` is the position of the row in its `oneOf` row, and
- * `optional` says whether the object field may be left out. Throws when the
- * table is wrong: a flag or a fixed value names a key the object does not have, a key the object
- * requires has neither, or a flag's key holds a list.
+ * Returns the type of one key of an object. Throws when the object has no
+ * such key, because the CLI table is wrong.
  */
-const buildObjectFields = (
-  name: string,
-  object: Ast,
-  row: ObjectFlagsRow,
-  carriedIn: FieldCarrier,
-  entry: number,
-  optional: boolean,
-): ReadonlyArray<Field> => {
-  const readKey = (key: string): Ast => {
-    const property = object.propertySignatures?.find((one) => String(one.name) === key);
-    if (property === undefined) throw new Error(`${name}: ${key} is not a key of the object`);
-    return property.type;
-  };
-  for (const key of Object.keys(row.fixed)) readKey(key);
-  const uncovered = (object.propertySignatures ?? []).find(
-    (property) =>
-      property.type.context?.isOptional !== true &&
-      !Object.hasOwn(row.fixed, String(property.name)) &&
-      !Object.hasOwn(row.flags, String(property.name)),
-  );
-  if (uncovered !== undefined) {
-    throw new Error(
-      `${name}: ${String(uncovered.name)} is required by the object, but the row gives it neither a flag nor a fixed value`,
-    );
-  }
-  return Object.entries(row.flags).map(([key, keyRow]) => {
-    const type = readKey(key);
-    if (readElementType(type) !== undefined) {
-      throw new Error(`${name}: ${key} holds a list, and an object flag takes one value`);
-    }
-    return {
-      ...buildField(key, type, keyRow, carriedIn, undefined),
-      within: { field: name, fixed: row.fixed, entry, optional },
-    };
-  });
+const readObjectKey = (name: string, object: Ast, key: string): Ast => {
+  const property = object.propertySignatures?.find((one) => String(one.name) === key);
+  if (property === undefined) throw new Error(`${name}: ${key} is not a key of the object`);
+  return property.type;
 };
 
 /**
@@ -515,31 +473,30 @@ const hasSameEntries = (
   Object.keys(left).length === Object.keys(right).length &&
   Object.entries(left).every(([key, value]) => right[key] === value);
 
-/** Checks whether two fields accept the same closed set of values, or both accept any text. */
-const hasSameChoices = (
-  left: ReadonlyMap<string, string> | undefined,
-  right: ReadonlyMap<string, string> | undefined,
-): boolean =>
-  left === undefined || right === undefined
-    ? left === right
-    : left.size === right.size && [...left].every(([typed, value]) => right.get(typed) === value);
+/** Checks whether two keys of objects accept the same values and are both required or both optional. */
+const hasSameSchema = (left: Ast, right: Ast): boolean => {
+  // `Ast` is a narrow view of the real schema node, which is what the keys of
+  // a member are, so the cast only restores the full type.
+  const describe = (type: Ast): string =>
+    JSON.stringify(Schema.toJsonSchemaDocument(Schema.make(type as SchemaAST.AST)));
+  return (
+    left.context?.isOptional === right.context?.isOptional && describe(left) === describe(right)
+  );
+};
 
 /**
- * Builds the fields of a `oneOf` row: one field for each flag of each entry,
- * each entry built against the member of the union it stands for. Throws when
- * the table is wrong:
+ * Builds the fields of a `oneOf` row: one field for each key that any entry
+ * gives a flag, typed by the member of the union the entry stands for. A key
+ * that several entries give a flag is one field. Throws when the table is
+ * wrong:
  *
  * - the field is neither an object nor a union of objects;
- * - a member has no entry, an entry's `fixed` values are not the literal keys
- *   of any member, or two entries stand for one member;
- * - an entry is wrong as `buildObjectFields` explains;
- * - an entry has no flag that no other entry declares, so no command line
- *   could pick it;
- * - a flag spelled the same in several entries means a different key, type,
- *   set of allowed values or stdin read in each, so the one word would mean
- *   two things;
- * - the entries read different flags from stdin, which the help cannot
- *   describe in one place.
+ * - an entry's `fixed` values are the literal keys of no member, or a member
+ *   has no entry;
+ * - an entry's selector is not one of its flags, a flag or a fixed value
+ *   names a key its member does not have, a key its member requires has
+ *   neither, or a flag's key holds a list;
+ * - a key shared by several entries has a different schema in them.
  */
 const buildOneOfFields = (
   name: string,
@@ -552,73 +509,59 @@ const buildOneOfFields = (
     throw new Error(`${name}: a oneOf row needs a field that is an object or a union of objects`);
   }
   const literals = members.map(readLiteralKeys);
-  const matched = row.oneOf.map((entry) =>
-    literals.findIndex((memberLiterals) => hasSameEntries(memberLiterals, entry.fixed)),
-  );
-  const strayed = row.oneOf.findIndex((_, index) => matched[index] === -1);
-  if (strayed !== -1) {
-    throw new Error(
-      `${name}: the fixed values ${JSON.stringify(row.oneOf[strayed]!.fixed)} are the literal keys of no member of the union`,
-    );
-  }
-  const lonely = literals.findIndex((_, index) => !matched.includes(index));
-  if (lonely !== -1) {
-    throw new Error(
-      `${name}: no entry stands for the member ${JSON.stringify(literals[lonely])} of the union`,
-    );
-  }
-  if (new Set(matched).size !== matched.length) {
-    throw new Error(`${name}: two entries stand for one member of the union`);
-  }
-
-  const fields = row.oneOf.flatMap((entry, index) =>
-    buildObjectFields(
-      name,
-      members[matched[index]!]!,
-      entry,
-      carriedIn,
-      index,
-      union.context?.isOptional === true,
-    ),
-  );
-  for (const field of fields) {
-    const first = fields.find((other) => other.spelling === field.spelling)!;
-    // The flag is parsed before the command line has picked an entry, so one
-    // spelling has to parse the same text the same way in every entry.
-    const differs =
-      field.name !== first.name ||
-      field.kind !== first.kind ||
-      field.stdin !== first.stdin ||
-      field.resolves !== first.resolves ||
-      field.nullable !== first.nullable ||
-      !hasSameChoices(field.choices, first.choices);
-    if (differs) {
+  const memberOf = row.oneOf.map((entry) => {
+    const member = members[literals.findIndex((one) => hasSameEntries(one, entry.fixed))];
+    if (member === undefined) {
       throw new Error(
-        `${name}: --${field.spelling} means something different in different entries: it must have the same key, type, allowed values and stdin read in each`,
+        `${name}: the fixed values ${JSON.stringify(entry.fixed)} are the literal keys of no member of the union`,
       );
     }
-  }
-  // An entry is picked by a flag that no other entry declares. Without one,
-  // no command line could ever pick it.
-  const selectorless = row.oneOf.findIndex(
-    (_, index) =>
-      !fields.some(
-        (field) =>
-          field.within?.entry === index &&
-          fields.every(
-            (other) => other.within?.entry === index || other.spelling !== field.spelling,
-          ),
-      ),
-  );
-  if (selectorless !== -1) {
+    return member;
+  });
+  const unmatched = members.findIndex((member) => !memberOf.includes(member));
+  if (unmatched !== -1) {
     throw new Error(
-      `${name}: the entry "${row.oneOf[selectorless]!.help}" has no flag of its own, so no command line could pick it. Give it a flag that no other entry declares.`,
+      `${name}: no entry stands for the member ${JSON.stringify(literals[unmatched])} of the union`,
     );
   }
-  if (new Set(fields.filter((field) => field.stdin).map((field) => field.spelling)).size > 1) {
-    throw new Error(`${name}: the entries read different flags from stdin`);
+
+  const keys = new Map<string, { readonly type: Ast; readonly field: Field }>();
+  for (const [index, entry] of row.oneOf.entries()) {
+    const member = memberOf[index]!;
+    for (const key of Object.keys(entry.fixed)) readObjectKey(name, member, key);
+    const uncovered = (member.propertySignatures ?? []).find(
+      (property) =>
+        property.type.context?.isOptional !== true &&
+        !Object.hasOwn(entry.fixed, String(property.name)) &&
+        !Object.hasOwn(entry.flags, String(property.name)),
+    );
+    if (uncovered !== undefined) {
+      throw new Error(
+        `${name}: ${String(uncovered.name)} is required by the object, but the row gives it neither a flag nor a fixed value`,
+      );
+    }
+    if (!Object.values(entry.flags).some((flag) => flag.flag === entry.selector)) {
+      throw new Error(`${name}: the selector --${entry.selector} is not a flag of its entry`);
+    }
+    for (const [key, keyRow] of Object.entries(entry.flags)) {
+      const type = readObjectKey(name, member, key);
+      const known = keys.get(key);
+      if (known === undefined) {
+        if (readElementType(type) !== undefined) {
+          throw new Error(`${name}: ${key} holds a list, and an object flag takes one value`);
+        }
+        keys.set(key, {
+          type,
+          field: { ...buildField(key, type, keyRow, carriedIn, undefined), within: name },
+        });
+      } else if (!hasSameSchema(known.type, type)) {
+        throw new Error(
+          `${name}: ${key} has a different schema in different entries, so one flag cannot fill it`,
+        );
+      }
+    }
   }
-  return fields;
+  return [...keys.values()].map((one) => one.field);
 };
 
 /**
@@ -788,48 +731,49 @@ const listPathParams = (path: string): ReadonlyArray<string> =>
 const TABLE: Record<OperationId, CliRow> = CLI;
 
 /**
- * Groups fields by the flag they are given with. A flag that several entries
- * of a `oneOf` field declare is one field in each of them, so a spelling may
- * hold more than one field.
+ * Lists the properties of a struct schema, or of a union of structs, as
+ * `[name, type]`, each name once.
  */
-export const groupFieldsBySpelling = (
-  fields: ReadonlyArray<Field>,
-): ReadonlyMap<string, ReadonlyArray<Field>> => {
-  const grouped = new Map<string, Array<Field>>();
-  for (const field of fields) {
-    const same = grouped.get(field.spelling) ?? [];
-    same.push(field);
-    grouped.set(field.spelling, same);
-  }
-  return grouped;
+const readProperties = (schema: unknown): ReadonlyArray<readonly [string, Ast]> => {
+  const struct = schema as StructSchema | undefined;
+  return mergeProperties(struct?.members ?? (struct === undefined ? [] : [struct]));
 };
 
 /**
- * Returns the payload fields whose rows are `oneOf`, each with its entries'
- * fields. A `oneOf` row for a field the payload lacks gives none.
+ * Returns one choice for each `oneOf` row that has fields in the payload,
+ * with the entries' flags. `payloadSchema` tells whether the request may
+ * leave the field out.
  */
 const buildChoices = (
   rows: Record<string, FieldRow>,
   payload: ReadonlyArray<Field>,
+  payloadSchema: unknown,
 ): ReadonlyArray<ObjectChoice> =>
-  Object.entries(rows).flatMap(([name, row]) =>
-    "oneOf" in row && payload.some((field) => field.within?.field === name)
-      ? [
-          {
-            field: name,
-            optional: payload.some(
-              (field) => field.within?.field === name && field.within.optional,
-            ),
-            entries: row.oneOf.map((entry, index) => ({
-              help: entry.help,
-              fields: payload.filter(
-                (field) => field.within?.field === name && field.within.entry === index,
-              ),
-            })),
-          },
-        ]
-      : [],
-  );
+  Object.entries(rows).flatMap(([name, row]) => {
+    if (!("oneOf" in row) || !payload.some((field) => field.within === name)) return [];
+    const keyField = (key: string): Field =>
+      payload.find((field) => field.within === name && field.name === key)!;
+    return [
+      {
+        field: name,
+        optional:
+          readProperties(payloadSchema).find(([property]) => property === name)?.[1].context
+            ?.isOptional === true,
+        entries: row.oneOf.map((entry) => {
+          const flags = Object.entries(entry.flags).map(([key, keyRow]) => ({
+            field: keyField(key),
+            help: keyRow.help,
+          }));
+          return {
+            help: entry.help,
+            fixed: entry.fixed,
+            selector: flags.find((flag) => flag.field.spelling === entry.selector)!.field,
+            flags,
+          };
+        }),
+      },
+    ];
+  });
 
 /** The schemas of one endpoint of the API, which a command is built from. */
 export interface EndpointSchemas {
@@ -858,12 +802,9 @@ export const buildCommand = (
   // hidden or not. Throw here, as `buildFields` throws for a field with no
   // row, so the CLI table and the schemas always list the same fields.
   const taken = new Set(
-    [each.params, payloadSchema, each.query].flatMap((schema) => {
-      const struct = schema as StructSchema | undefined;
-      return mergeProperties(struct?.members ?? (struct === undefined ? [] : [struct])).map(
-        ([name]) => name,
-      );
-    }),
+    [each.params, payloadSchema, each.query].flatMap((schema) =>
+      readProperties(schema).map(([name]) => name),
+    ),
   );
   const stale = Object.keys(row.fields).find((name) => !taken.has(name));
   if (stale !== undefined) {
@@ -927,7 +868,7 @@ export const buildCommand = (
     path: operation.path,
     positionals,
     payload: payload.filter((field) => !field.positional),
-    choices: buildChoices(row.fields, payload),
+    choices: buildChoices(row.fields, payload, payloadSchema),
     query: query.filter((field) => !field.positional),
     queryFieldNames: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast),
     // `limit` and `cursor` always come together, and `sort` comes with

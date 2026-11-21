@@ -22,7 +22,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { listDecodeIssues, type SortKey } from "@hercule/contract";
 import { UsageError } from "../exit";
-import { groupFieldsBySpelling, type Command, type Field } from "./tree";
+import type { Command, Field } from "./tree";
 
 export interface Arguments {
   /** The positional arguments, in order, as written. */
@@ -56,7 +56,7 @@ export const formatFieldName = (field: Field): string =>
  * Returns a flag as the caller writes it to give the field. A field read from
  * stdin is given by its marker, `--<flag>-stdin`.
  */
-export const formatFlagToGive = (field: Field): string =>
+const formatFlagToGive = (field: Field): string =>
   `--${field.spelling}${field.stdin ? "-stdin" : ""}`;
 
 /**
@@ -161,12 +161,11 @@ const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
 export const readGivenValue = (given: Record<string, unknown>, field: Field): unknown =>
   field.within === undefined
     ? given[field.name]
-    : (given[field.within.field] as Record<string, unknown> | undefined)?.[field.name];
+    : (given[field.within] as Record<string, unknown> | undefined)?.[field.name];
 
 /**
  * Sets the value of a field in the request part `into`. A flag that fills one
- * key of an object field sets that key in a copy of the object, which starts
- * as the object's fixed values when no other flag has made it yet.
+ * key of an object field sets that key in a copy of the object.
  */
 export const setGivenValue = (
   into: Record<string, unknown>,
@@ -177,8 +176,8 @@ export const setGivenValue = (
     into[field.name] = value;
     return;
   }
-  const object = (into[field.within.field] ?? field.within.fixed) as Record<string, unknown>;
-  into[field.within.field] = { ...object, [field.name]: value };
+  const object = (into[field.within] ?? {}) as Record<string, unknown>;
+  into[field.within] = { ...object, [field.name]: value };
 };
 
 /**
@@ -212,84 +211,73 @@ const assignFieldValue = (
 };
 
 /**
- * Picks the entry of each `oneOf` field that the flags given stand for, and
- * returns the fields of the entries not picked. Throws a `UsageError` when
- * the flags of two entries are given, when no flag picks an entry, or when a
- * flag is given that the picked entry does not declare. A field that the
- * request may leave out (`optional`) picks no entry when none of its flags is
- * given, and all its entries count as not picked.
+ * Picks the entry of each `oneOf` field by the selector flag the command line
+ * gave, adds the entry's fixed values to the field in `payload`, and returns
+ * the fields of the entries not picked. Throws a `UsageError` when two
+ * selectors are given, when no selector is given for a field the request
+ * needs, or when a flag is given that the picked entry has no key for.
  *
- * `touched` holds the fields of the entries that a flag was given for, or
- * whose `--<flag>-stdin` marker was. A flag that several entries declare
- * picks none of them, so only the flags one entry alone declares count.
+ * A field the request may leave out (`optional`) picks no entry when none of
+ * its flags is given, and all its flags count as not picked.
  */
 const pickEntries = (
   command: Command,
-  touched: ReadonlySet<Field>,
+  payload: Record<string, unknown>,
+  marked: ReadonlySet<Field>,
   help: string,
 ): ReadonlySet<Field> => {
   const unpicked = new Set<Field>();
+  const wasGiven = (field: Field): boolean =>
+    readGivenValue(payload, field) !== undefined || marked.has(field);
   for (const choice of command.choices) {
-    const owned = choice.entries.map((entry) =>
-      entry.fields.filter((field) =>
-        choice.entries.every(
-          (other) =>
-            other === entry || !other.fields.some((one) => one.spelling === field.spelling),
-        ),
-      ),
-    );
-    const given = owned.map((fields) => fields.filter((field) => touched.has(field)));
-    const picked = given.flatMap((fields, index) => (fields.length > 0 ? [index] : []));
-    // The flags to give for each entry: the ones it requires, or if it
-    // requires none, the ones only it declares.
     const toGive = choice.entries
-      .map((entry, index) => {
-        const required = entry.fields.filter((field) => !field.optional);
-        return required.length > 0
-          ? required.map(formatFlagToGive).join(" and ")
-          : owned[index]!.map(formatFlagToGive).join(" or ");
-      })
+      .map((entry) =>
+        [
+          ...new Set([
+            entry.selector,
+            ...entry.flags.map((flag) => flag.field).filter((field) => !field.optional),
+          ]),
+        ]
+          .map(formatFlagToGive)
+          .join(" and "),
+      )
       .join(", or ");
+    const picked = choice.entries.filter((entry) => wasGiven(entry.selector));
     if (picked.length === 0) {
-      // A flag that several entries declare picks none of them, so it still
-      // asks for a form to be picked.
-      const named = choice.entries.some((entry) =>
-        entry.fields.some((field) => touched.has(field)),
+      const flagGiven = choice.entries.some((entry) =>
+        entry.flags.some((flag) => wasGiven(flag.field)),
       );
-      if (choice.optional && !named) {
-        for (const entry of choice.entries) for (const field of entry.fields) unpicked.add(field);
+      if (choice.optional && !flagGiven) {
+        for (const entry of choice.entries)
+          for (const flag of entry.flags) unpicked.add(flag.field);
         continue;
       }
       throw new UsageError(`no flag says which form to use: give ${toGive}`, help);
     }
     if (picked.length > 1) {
-      const earlier = given[picked[0]!]!.map(formatFlagToGive).join(" or ");
-      const later = picked
-        .slice(1)
-        .flatMap((index) => given[index]!)
-        .map(formatFlagToGive)
-        .join(" or ");
-      throw new UsageError(`${later} cannot be given with ${earlier}: give ${toGive}`, help);
-    }
-    const pickedEntry = choice.entries[picked[0]!]!;
-    // A flag that several entries declare picks none of them, so the picked
-    // entry may not declare it. Taking it without a word would drop what the
-    // user typed.
-    const stray = [...touched].find(
-      (field) =>
-        choice.entries.some((entry) => entry.fields.includes(field)) &&
-        !pickedEntry.fields.some((one) => one.spelling === field.spelling),
-    );
-    if (stray !== undefined) {
-      const picking = given[picked[0]!]!.map(formatFlagToGive).join(" or ");
       throw new UsageError(
-        `${formatFlagToGive(stray)} cannot be given with ${picking}: that form has no ${formatFlagToGive(stray)}. Give ${toGive}`,
+        `${formatFlagToGive(picked[1]!.selector)} cannot be given with ${formatFlagToGive(picked[0]!.selector)}: give ${toGive}`,
         help,
       );
     }
-    for (const [index, entry] of choice.entries.entries()) {
-      if (index !== picked[0]) for (const field of entry.fields) unpicked.add(field);
+    const entry = picked[0]!;
+    const keys = entry.flags.map((flag) => flag.field);
+    const others = choice.entries
+      .flatMap((one) => one.flags.map((flag) => flag.field))
+      .filter((field) => !keys.includes(field));
+    const stray = others.find(wasGiven);
+    if (stray !== undefined) {
+      const owners = choice.entries
+        .filter((one) => one.flags.some((flag) => flag.field === stray))
+        .map((one) => formatFlagToGive(one.selector))
+        .join(" or ");
+      throw new UsageError(
+        `${formatFlagToGive(stray)} is for ${owners}; it cannot be given with ${formatFlagToGive(entry.selector)}`,
+        help,
+      );
     }
+    for (const field of others) unpicked.add(field);
+    payload[choice.field] = { ...entry.fixed, ...(payload[choice.field] as object) };
   }
   return unpicked;
 };
@@ -431,18 +419,13 @@ export const parseArguments = async (
   stdinIsTerminal = false,
 ): Promise<Arguments> => {
   const help = command.spelling;
-  const payloadFields = groupFieldsBySpelling(command.payload);
-  const queryFields = groupFieldsBySpelling(command.query);
+  const payloadFields = new Map(command.payload.map((field) => [field.spelling, field]));
+  const queryFields = new Map(command.query.map((field) => [field.spelling, field]));
 
   const positionals: Array<string> = [];
   const payload: Record<string, unknown> = {};
   const query: Record<string, unknown> = {};
   const marked = new Set<Field>();
-  // The fields of `oneOf` entries that a flag or a marker was given for, and
-  // the values given. They wait until an entry is picked, because the same
-  // flag may belong to an entry that is not.
-  const touched = new Set<Field>();
-  const entryValues = new Map<Field, unknown>();
   let limit: number | undefined;
   let cursor: string | undefined;
   let sort: Array<SortKey> | undefined;
@@ -491,40 +474,30 @@ export const parseArguments = async (
     }
 
     if (name.endsWith("-stdin")) {
-      const fields = payloadFields.get(name.slice(0, -"-stdin".length));
-      if (fields === undefined || !fields[0]!.stdin) {
-        throw new UsageError(`unknown flag --${name}`, help);
-      }
+      const field = payloadFields.get(name.slice(0, -"-stdin".length));
+      if (field === undefined || !field.stdin) throw new UsageError(`unknown flag --${name}`, help);
       // The marker only asks for the read. It never takes the value, or the
       // value would be back in `argv`, which reading stdin exists to avoid.
       if (inline !== undefined) throw new UsageError(`--${name} takes no value`, help);
-      for (const field of fields) {
-        marked.add(field);
-        if (field.within !== undefined) touched.add(field);
-      }
+      marked.add(field);
       continue;
     }
 
-    const payloadGiven = payloadFields.get(name);
-    const fields = payloadGiven ?? queryFields.get(name);
-    if (fields === undefined) throw new UsageError(`unknown flag --${name}`, help);
-    const field = fields[0]!;
+    const payloadField = payloadFields.get(name);
+    const field = payloadField ?? queryFields.get(name);
+    if (field === undefined) throw new UsageError(`unknown flag --${name}`, help);
     if (field.stdin) {
       throw new UsageError(
         `--${name} does not exist: ${command.id} reads ${field.name} from stdin, never from argv, where it would show in process lists and in shell history. Pipe it in; --${name}-stdin ${field.optional ? "tells the CLI to read it" : "is accepted but not needed"}.`,
         help,
       );
     }
-    const text = value();
-    for (const each of fields) {
-      const parsed = parseWrittenValue(each, text, help);
-      if (each.within === undefined) {
-        assignFieldValue(payloadGiven === undefined ? query : payload, each, parsed, help);
-      } else {
-        touched.add(each);
-        entryValues.set(each, parsed);
-      }
-    }
+    assignFieldValue(
+      payloadField === undefined ? query : payload,
+      field,
+      parseWrittenValue(field, value(), help),
+      help,
+    );
   }
 
   // A flag with a default takes it when the command line left the flag out.
@@ -537,10 +510,7 @@ export const parseArguments = async (
 
   // The flags of an entry that was not picked are ignored from here on: they
   // are neither required nor read from stdin.
-  const unpicked = pickEntries(command, touched, help);
-  for (const [field, value] of entryValues) {
-    if (!unpicked.has(field)) setGivenValue(payload, field, value);
-  }
+  const unpicked = pickEntries(command, payload, marked, help);
   const given = command.payload.filter((field) => !unpicked.has(field));
 
   // A required content field is always read; an optional one only when its
