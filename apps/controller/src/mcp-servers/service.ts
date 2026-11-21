@@ -41,27 +41,37 @@ export type UpdateInput = McpServerUpdateInput & { readonly id: string };
 
 const NO_SUCH_SERVER = "no such MCP server; `hercule mcp-server list` shows the servers there are";
 
-/** Returns the public record of a stored server, with each tool cut down to its summary. */
-const toRecord = (server: StoredMcpServer): McpServer => ({
-  id: server.id,
-  name: server.name,
-  source: {
-    kind: "plugin",
-    contributionId: server.contributionId,
-    connectionId: server.connectionId,
-  },
-  enabled: server.enabled,
-  status: server.status,
-  statusDetail: server.statusDetail,
-  tools: server.tools.map((tool) => ({
-    name: tool.name,
-    ...(tool.title === undefined ? {} : { title: tool.title }),
-    description: tool.description,
-  })),
-  checkedAt: server.checkedAt,
-  createdAt: server.createdAt,
-  updatedAt: server.updatedAt,
-});
+/**
+ * Returns the public record of a stored server, with each tool cut down to its
+ * summary. The record has no source for a server added by URL yet, and no such
+ * server can be created yet, so one found here is a defect.
+ */
+const toRecord = (server: StoredMcpServer): McpServer => {
+  const { source } = server;
+  if (source.kind !== "plugin") {
+    throw new Error(`MCP server ${server.id} was added by URL, which cannot be shown yet`);
+  }
+  return {
+    id: server.id,
+    name: server.name,
+    source: {
+      kind: "plugin",
+      contributionId: source.contributionId,
+      connectionId: source.connectionId,
+    },
+    enabled: server.enabled,
+    status: server.status,
+    statusDetail: server.statusDetail,
+    tools: server.tools.map((tool) => ({
+      name: tool.name,
+      ...(tool.title === undefined ? {} : { title: tool.title }),
+      description: tool.description,
+    })),
+    checkedAt: server.checkedAt,
+    createdAt: server.createdAt,
+    updatedAt: server.updatedAt,
+  };
+};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

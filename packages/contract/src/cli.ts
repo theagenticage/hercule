@@ -566,7 +566,7 @@ export const CLI = {
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key. Nor is `mcp-server`: an MCP Server's sign-in is set through the server's own operations.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
@@ -587,7 +587,7 @@ export const CLI = {
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`. Nor is `provider-account`: an account's key goes with the account, with `hercule provider-account delete`, and `hercule provider-account update` replaces it.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`. Nor is `provider-account`: an account's key goes with the account, with `hercule provider-account delete`, and `hercule provider-account update` replaces it. Nor is `mcp-server`: an MCP Server's sign-in goes when the server does, with `hercule mcp-server delete`.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {

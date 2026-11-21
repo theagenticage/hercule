@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
 
       return yield* runWithCredentials({
         connections: connectionTypes,
-        connectionId: server.connectionId,
+        connectionId: connection.id,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(

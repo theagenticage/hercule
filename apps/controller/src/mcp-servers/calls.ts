@@ -291,7 +291,7 @@ const make = Effect.gen(function* () {
       const slot: UpstreamSlot = {
         upstreamScope,
         serverId: server.id,
-        connectionId: server.connectionId,
+        connectionId: connection.id,
         serverRevision: server.revision,
         credentialsGeneration: connection.credentialsGeneration,
         opening: Deferred.makeUnsafe(),
@@ -369,7 +369,9 @@ const make = Effect.gen(function* () {
           view === undefined ||
           !view.server.enabled ||
           view.server.revision !== slot.serverRevision ||
-          view.dependencies.connection?.credentialsGeneration !== slot.credentialsGeneration;
+          (view.dependencies.kind === "plugin"
+            ? view.dependencies.connection?.credentialsGeneration
+            : undefined) !== slot.credentialsGeneration;
         if (!lost) continue;
         forgetSlot(slot);
         yield* closeWhenDone(slot);
@@ -560,9 +562,9 @@ const make = Effect.gen(function* () {
         while (true) {
           // Read before the credentials, so that a refresh that stores new
           // ones in between shows as a different version, never as the same.
-          const version = yield* connectionTypes.readCredentialsVersion(server.connectionId);
+          const version = yield* connectionTypes.readCredentialsVersion(connection.id);
           const credentials = yield* connectionTypes
-            .readCredentialsForUse(server.connectionId, guardRefresh)
+            .readCredentialsForUse(connection.id, guardRefresh)
             .pipe(
               Effect.mapError((error) =>
                 error instanceof McpCallRefused ? error : buildUnavailableRefusal(error),
@@ -573,7 +575,7 @@ const make = Effect.gen(function* () {
           // so a refresh that stored new tokens while the check above ran is
           // found by the version of the stored credentials. Then they are read
           // again, because they are no longer the current ones.
-          const stored = yield* connectionTypes.readCredentialsVersion(server.connectionId);
+          const stored = yield* connectionTypes.readCredentialsVersion(connection.id);
           if (stored !== version) continue;
           yield* refuseUnlessServing;
           return credentials;
@@ -694,7 +696,7 @@ const make = Effect.gen(function* () {
 
       return yield* runWithCredentials({
         connections: connectionTypes,
-        connectionId: server.connectionId,
+        connectionId: connection.id,
         guardRefresh,
         action: sendReplacingExpiredSession,
       }).pipe(

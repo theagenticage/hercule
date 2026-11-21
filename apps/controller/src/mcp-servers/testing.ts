@@ -797,9 +797,12 @@ export const buildMcpServerView = ({
     server: {
       id: "server-1",
       name: "desk",
-      contributionId: "acme/desk",
-      connectionId: "connection-1",
-      accountId: "desk-1",
+      source: {
+        kind: "plugin",
+        contributionId: "acme/desk",
+        connectionId: "connection-1",
+        accountId: "desk-1",
+      },
       enabled,
       status,
       statusDetail: null,
@@ -816,6 +819,7 @@ export const buildMcpServerView = ({
       updatedAt: at,
     },
     dependencies: {
+      kind: "plugin",
       connection:
         connection === "gone"
           ? undefined

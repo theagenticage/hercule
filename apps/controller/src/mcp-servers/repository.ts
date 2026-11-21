@@ -26,17 +26,41 @@ export interface StoredMcpTool {
 }
 
 /**
+ * Where an MCP Server comes from, as its row stores it (spec 21 section 2):
+ *
+ * - `plugin`: a plugin's contribution, reached with one of its Connections.
+ * - `url`: an address the user gave, reached with the server's own sign-in.
+ *   `url` is the address as the user gave it, and the one requests go to.
+ *   `normalizedUrl` is the key that makes two spellings of one address
+ *   count as one server. `signIn` is what the server holds now, and
+ *   `signInOffered` is what the server said it accepts when it refused a
+ *   request without one, or `null` while that has not happened.
+ */
+export type McpServerStoredSource =
+  | {
+      readonly kind: "plugin";
+      /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
+      readonly contributionId: string;
+      readonly connectionId: string;
+      /** The Connection's `accountId` when the server was created. */
+      readonly accountId: string;
+    }
+  | {
+      readonly kind: "url";
+      readonly url: string;
+      readonly normalizedUrl: string;
+      readonly signIn: "none" | "token" | "oauth";
+      readonly signInOffered: "oauth" | "token" | null;
+    };
+
+/**
  * An MCP Server row without its stored tool definitions, which can be several
  * MiB. A reader that only judges whether the server can serve takes this.
  */
 export interface StoredMcpServerAvailability {
   readonly id: string;
   readonly name: string;
-  /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
-  readonly contributionId: string;
-  readonly connectionId: string;
-  /** The Connection's `accountId` when the server was created. */
-  readonly accountId: string;
+  readonly source: McpServerStoredSource;
   readonly enabled: boolean;
   readonly status: McpServerStatus;
   readonly statusDetail: string | null;
@@ -62,7 +86,7 @@ export interface StoredMcpServerAvailability {
   readonly updatedAt: string;
 }
 
-/** What a server depends on outside its own row, by id. */
+/** What a plugin server depends on outside its own row, by id. */
 export interface McpServerDependencyIds {
   readonly id: string;
   readonly connectionId: string;
@@ -80,17 +104,40 @@ export interface NewMcpServer {
   readonly at: string;
 }
 
-interface McpServerRow {
+/**
+ * The columns that hold a row's source. The table's CHECK guarantees that a
+ * row has the columns of its kind and none of the other's, so the two shapes
+ * are the only ones a read can find.
+ */
+type McpServerSourceColumns =
+  | {
+      readonly source_kind: "plugin";
+      readonly contribution_id: string;
+      readonly connection_id: Uint8Array;
+      readonly account_id: string;
+      readonly url: null;
+      readonly normalized_url: null;
+      readonly sign_in: null;
+      readonly sign_in_offered: null;
+    }
+  | {
+      readonly source_kind: "url";
+      readonly contribution_id: null;
+      readonly connection_id: null;
+      readonly account_id: null;
+      readonly url: string;
+      readonly normalized_url: string;
+      readonly sign_in: "none" | "token" | "oauth";
+      readonly sign_in_offered: "oauth" | "token" | null;
+    };
+
+type McpServerRowWithoutTools = McpServerSourceColumns & {
   readonly id: Uint8Array;
   readonly name: string;
-  readonly contribution_id: string;
-  readonly connection_id: Uint8Array;
-  readonly account_id: string;
   readonly enabled: number;
   readonly status: McpServerStatus;
   readonly status_detail: string | null;
   readonly status_cause: string | null;
-  readonly tools: string;
   readonly checked_at: string | null;
   readonly protocol_version: string | null;
   readonly revision: number;
@@ -100,7 +147,9 @@ interface McpServerRow {
   readonly failed_checks: number;
   readonly created_at: string;
   readonly updated_at: string;
-}
+};
+
+type McpServerRow = McpServerRowWithoutTools & { readonly tools: string };
 
 /** An MCP Server row, with its JSON column read. */
 export interface StoredMcpServer extends StoredMcpServerAvailability {
@@ -131,18 +180,34 @@ export interface McpServerEdit {
 }
 
 const COLUMNS_WITHOUT_TOOLS =
-  "id, name, contribution_id, connection_id, account_id, enabled, status, status_detail, " +
+  "id, name, source_kind, contribution_id, connection_id, account_id, url, normalized_url, " +
+  "sign_in, sign_in_offered, enabled, status, status_detail, " +
   "status_cause, checked_at, protocol_version, revision, connection_generation, " +
   "notified_status, next_check_at, failed_checks, created_at, updated_at";
 const COLUMNS = `${COLUMNS_WITHOUT_TOOLS}, tools`;
 
+/** Converts the source columns of a row to its source. */
+const toStoredSource = (row: McpServerSourceColumns): McpServerStoredSource =>
+  row.source_kind === "plugin"
+    ? {
+        kind: "plugin",
+        contributionId: row.contribution_id,
+        connectionId: uuidToString(row.connection_id),
+        accountId: row.account_id,
+      }
+    : {
+        kind: "url",
+        url: row.url,
+        normalizedUrl: row.normalized_url,
+        signIn: row.sign_in,
+        signInOffered: row.sign_in_offered,
+      };
+
 /** Converts a row to a server without its tool definitions. */
-const toServerAvailability = (row: Omit<McpServerRow, "tools">): StoredMcpServerAvailability => ({
+const toServerAvailability = (row: McpServerRowWithoutTools): StoredMcpServerAvailability => ({
   id: uuidToString(row.id),
   name: row.name,
-  contributionId: row.contribution_id,
-  connectionId: uuidToString(row.connection_id),
-  accountId: row.account_id,
+  source: toStoredSource(row),
   enabled: row.enabled === 1,
   status: row.status,
   statusDetail: row.status_detail,
@@ -246,8 +311,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the Connection and the plugin contribution of every server,
-     * without the tool definitions the other reads decode.
+     * Returns the Connection and the plugin contribution of every plugin
+     * server, without the tool definitions the other reads decode. A server
+     * added by URL has neither and is left out.
      */
     listDependencyIds: (): Effect.Effect<ReadonlyArray<McpServerDependencyIds>, SqlError> =>
       Effect.map(
@@ -255,7 +321,8 @@ const make = Effect.gen(function* () {
           readonly id: Uint8Array;
           readonly connection_id: Uint8Array;
           readonly contribution_id: string;
-        }>`SELECT id, connection_id, contribution_id FROM mcp_servers`,
+        }>`SELECT id, connection_id, contribution_id FROM mcp_servers
+           WHERE source_kind = 'plugin'`,
         (rows) =>
           rows.map((row) => ({
             id: uuidToString(row.id),
@@ -304,19 +371,22 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO mcp_servers
-            (id, name, contribution_id, connection_id, account_id, enabled, status,
-             connection_generation, created_at, updated_at)
+            (id, name, source_kind, contribution_id, connection_id, account_id, enabled,
+             status, connection_generation, created_at, updated_at)
           VALUES
-            (${id}, ${server.name}, ${server.contributionId},
+            (${id}, ${server.name}, 'plugin', ${server.contributionId},
              ${uuidFromString(server.connectionId)}, ${server.accountId}, 1, 'checking',
              ${server.connectionGeneration}, ${server.at}, ${server.at})
         `;
         return {
           id: uuidToString(id),
           name: server.name,
-          contributionId: server.contributionId,
-          connectionId: server.connectionId,
-          accountId: server.accountId,
+          source: {
+            kind: "plugin",
+            contributionId: server.contributionId,
+            connectionId: server.connectionId,
+            accountId: server.accountId,
+          },
           enabled: true,
           status: "checking",
           statusDetail: null,

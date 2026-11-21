@@ -44,28 +44,34 @@ export type PluginState =
   | { readonly _tag: "missing" };
 
 /**
- * What a server depends on outside its own row: its Connection and its
- * plugin. A check reads it before it decides, and `writeCheckResult` reads it
- * again before it writes.
+ * What a server depends on outside its own row. A plugin server depends on
+ * its Connection and its plugin. A check reads it before it decides, and
+ * `writeCheckResult` reads it again before it writes. A server added by URL
+ * depends on nothing outside its row.
  */
-export interface McpServerDependencies {
-  /** `undefined` when the Connection no longer exists. */
-  readonly connection: StoredConnection | undefined;
-  readonly plugin: PluginState;
-}
+export type McpServerDependencies =
+  | {
+      readonly kind: "plugin";
+      /** `undefined` when the Connection no longer exists. */
+      readonly connection: StoredConnection | undefined;
+      readonly plugin: PluginState;
+    }
+  | { readonly kind: "url" };
 
 /**
  * Tells whether two readings of the dependencies are the same for a server:
  * the same plugin state, and the same Connection with the same status and
- * credentials generation.
+ * credentials generation. A server added by URL has nothing that can differ.
  */
 export const isSameDependencies = (
   before: McpServerDependencies,
   now: McpServerDependencies,
 ): boolean =>
-  before.plugin._tag === now.plugin._tag &&
-  before.connection?.status === now.connection?.status &&
-  before.connection?.credentialsGeneration === now.connection?.credentialsGeneration;
+  before.kind === "plugin" && now.kind === "plugin"
+    ? before.plugin._tag === now.plugin._tag &&
+      before.connection?.status === now.connection?.status &&
+      before.connection?.credentialsGeneration === now.connection?.credentialsGeneration
+    : before.kind === now.kind;
 
 /** What a server shows when its plugin or its Connection cannot serve it. */
 export interface Unusable {
@@ -89,10 +95,19 @@ export interface Usable {
  * `needs-reauth`. The check and the follower both use it, so they show the
  * same words.
  */
-export const judgeDependencies = ({
-  plugin,
-  connection,
-}: McpServerDependencies): Usable | Unusable => {
+export const judgeDependencies = (dependencies: McpServerDependencies): Usable | Unusable => {
+  // Temporary: no server can be added by URL yet, so no row reaches this
+  // branch. The commit that lets a server be added by URL replaces it with
+  // the verdict for such a server.
+  if (dependencies.kind === "url") {
+    return {
+      _tag: "unusable",
+      status: "error",
+      detail: "This server was added by URL, which this version cannot reach yet",
+      cause: "plugin",
+    };
+  }
+  const { plugin, connection } = dependencies;
   switch (plugin._tag) {
     case "missing":
       return {
@@ -251,8 +266,8 @@ export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal 
   };
 };
 
-/** The fields of a server row that decide what it depends on. */
-type DependencyIds = Pick<StoredMcpServer, "connectionId" | "contributionId">;
+/** The field of a server row that decides what it depends on. */
+type DependencyIds = Pick<StoredMcpServerAvailability, "source">;
 
 const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
@@ -269,7 +284,11 @@ const make = Effect.gen(function* () {
     given: ReadonlyArray<DependencyIds>,
   ): Effect.Effect<(server: DependencyIds) => McpServerDependencies, SqlError> =>
     Effect.gen(function* () {
-      const found = yield* connections.readMany([...new Set(given.map((one) => one.connectionId))]);
+      const found = yield* connections.readMany([
+        ...new Set(
+          given.flatMap(({ source }) => (source.kind === "plugin" ? [source.connectionId] : [])),
+        ),
+      ]);
       const loaded = yield* plugins.loaded();
       const registered = yield* plugins.listMcpServers();
       const readPluginState = (contributionId: string): PluginState => {
@@ -282,10 +301,14 @@ const make = Effect.gen(function* () {
           pluginName: plugin?.displayName ?? contribution.pluginId,
         };
       };
-      return (server) => ({
-        connection: found.get(server.connectionId),
-        plugin: readPluginState(server.contributionId),
-      });
+      return ({ source }) =>
+        source.kind === "plugin"
+          ? {
+              kind: "plugin",
+              connection: found.get(source.connectionId),
+              plugin: readPluginState(source.contributionId),
+            }
+          : { kind: "url" };
     });
 
   /**

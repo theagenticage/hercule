@@ -307,6 +307,7 @@ describe("a command's fields against the schema", () => {
       "runner",
       "core",
       "provider-account",
+      "mcp-server",
     ]);
   });
 
