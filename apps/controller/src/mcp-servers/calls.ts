@@ -479,7 +479,11 @@ const make = Effect.gen(function* () {
         }
         const stored = server.tools.find((tool) => tool.name === input.tool);
         if (stored === undefined) {
-          return yield* refuse("error", server.name, "The server does not list this tool.");
+          return yield* refuse(
+            "error",
+            server.name,
+            `The MCP server "${server.name}" no longer offers this tool.`,
+          );
         }
         const tool = yield* decodeTool(stored).pipe(
           Effect.mapError(

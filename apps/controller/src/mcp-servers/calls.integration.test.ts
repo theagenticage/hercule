@@ -232,7 +232,10 @@ describe("a refused call", () => {
 
       expect(unknownTool).toMatchObject({
         _tag: "Failure",
-        failure: { reason: "error", message: "The server does not list this tool." },
+        failure: {
+          reason: "error",
+          message: expect.stringContaining("no longer offers this tool"),
+        },
       });
       expect(unknownServer).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
       expect(fake.requests).toHaveLength(before);
