@@ -51,7 +51,29 @@ const decide = async (
   return { decision, asked };
 };
 
-const NONE = { reply: { config: {}, origins: {}, layers: [] } };
+/**
+ * What the real Codex 0.171 replies for a fresh, empty `CODEX_HOME` and a
+ * folder with no `.codex`: three layers, none of which sets an MCP server.
+ */
+const NONE = {
+  reply: {
+    config: {},
+    origins: {},
+    layers: [
+      {
+        name: { type: "sessionFlags" },
+        version: "sha256:0",
+        config: { check_for_update_on_startup: false },
+      },
+      {
+        name: { type: "user", file: "/home/me/.codex/config.toml" },
+        version: "sha256:1",
+        config: {},
+      },
+      { name: { type: "system", file: "/etc/codex/config.toml" }, version: "sha256:1", config: {} },
+    ],
+  },
+};
 
 describe("deciding the MCP config of a Codex thread", () => {
   describe("when no layer sets a server's name", () => {
@@ -169,6 +191,7 @@ describe("deciding the MCP config of a Codex thread", () => {
 
     it.each([
       ["no layers", { config: {} }],
+      ["an empty list of layers, which a real reply never has", { config: {}, layers: [] }],
       ["layers that are null", { config: {}, layers: null }],
       ["layers that are not a list", { config: {}, layers: "nothing" }],
       ["a reply that is not an object", "nothing"],

@@ -42,9 +42,14 @@ const MCP_TOOL_APPROVAL_MODES: Readonly<Record<AccessMode, "prompt" | "approve">
  * when Codex was not asked for layers. A layer Codex found but does not use
  * yet, such as a project's `.codex/config.toml` that is not trusted, is
  * listed with its settings all the same.
+ *
+ * `layers` is never empty in a real reply: Codex 0.171 lists at least its
+ * session flags, the user's `config.toml` (with empty settings when the file
+ * does not exist) and the system one. An empty list is therefore not "no layer
+ * sets anything" but a reply Hercule does not understand.
  */
 const ConfigReadReply = Schema.Struct({
-  layers: Schema.Array(
+  layers: Schema.NonEmptyArray(
     Schema.Struct({
       name: Schema.Struct({
         type: Schema.String,
@@ -163,7 +168,7 @@ interface McpConfigDecision {
  *   Each name that is taken gets a warning.
  * - When the reply cannot be read, the thread gets no server, because Hercule
  *   cannot tell whether the name is taken, and the warning says why. A reply is
- *   unread when the request failed, when `layers` is missing or invalid, and
+ *   unread when the request failed, when `layers` is missing, empty or invalid, and
  *   when a layer has no settings object. Codex then usually refuses to open the
  *   thread on the same configuration, and that failure reports it.
  *
