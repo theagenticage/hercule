@@ -181,8 +181,10 @@ const make = Effect.gen(function* () {
   /**
    * Returns each server that exists, by its id, in one query. An id that no
    * server has is left out of the map. With `without-tools` the query does
-   * not fetch the tool definitions, so a server of a list of several MiB
-   * costs no more than one without tools.
+   * not fetch the tool definitions. `tools` is the last column of the table
+   * (migration 0125), and SQLite keeps a long value in overflow pages after
+   * the columns before it, so this query never reads those pages, however long
+   * the stored lists are.
    */
   function readMany(
     ids: ReadonlyArray<string>,

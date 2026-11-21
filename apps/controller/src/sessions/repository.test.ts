@@ -1392,15 +1392,17 @@ describe("a session's list of MCP Servers", () => {
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
-        const names = ["alpha", "bravo", "charlie", "delta"] as const;
-        const [alpha, bravo, charlie, delta] = yield* Effect.forEach(names, insertMcpServer);
+        const alpha = yield* insertMcpServer("alpha");
+        const bravo = yield* insertMcpServer("bravo");
+        const charlie = yield* insertMcpServer("charlie");
+        const delta = yield* insertMcpServer("delta");
         const outsider = yield* insertMcpServer("outsider");
-        yield* sessions.replaceMcpServers(sessionId, [alpha!, bravo!, charlie!, delta!]);
+        yield* sessions.replaceMcpServers(sessionId, [alpha, bravo, charlie, delta]);
         yield* sessions.recordLeftOut(
           sessionId,
           new Map([
-            [alpha!, "needs-sign-in"],
-            [delta!, "checking"],
+            [alpha, "needs-sign-in"],
+            [delta, "checking"],
           ]),
         );
         const first = yield* readLeftOut(sessionId);
@@ -1408,8 +1410,8 @@ describe("a session's list of MCP Servers", () => {
         yield* sessions.recordLeftOut(
           sessionId,
           new Map([
-            [bravo!, "error"],
-            [charlie!, "error"],
+            [bravo, "error"],
+            [charlie, "error"],
             [outsider, "switched-off"],
           ]),
         );
