@@ -30,7 +30,7 @@ export interface StoredMcpTool {
  *
  * - `plugin`: a plugin's contribution, reached with one of its Connections.
  * - `url`: an address the user gave, reached with the server's own sign-in.
- *   `url` is the address as the user gave it, and the one requests go to.
+ *   `url` is the address as the URL parser writes it, and the one requests go to.
  *   `normalizedUrl` is the key that makes two spellings of one address
  *   count as one server. `signIn` is what the server holds now, and
  *   `signInOffered` is what the server said it accepts when it refused a
@@ -508,17 +508,22 @@ const make = Effect.gen(function* () {
     /**
      * Records that a pasted token was stored for a server added by URL, and
      * prepares the server to be checked with it: `signIn` becomes `token`, the
-     * status goes back to `checking` with no detail, the failed checks end, the
-     * next check is due at `at` so it happens even when the request for it is
-     * lost, and `revision` goes up, so a check that started with the old
-     * sign-in cannot write its result and upstream sessions opened with it
-     * end.
+     * failed checks end, the next check is due at `at` so it happens even when
+     * the request for it is lost, and `revision` goes up, so a check that
+     * started with the old sign-in cannot write its result and upstream
+     * sessions opened with it end.
+     *
+     * A server that is on goes back to `checking` with no detail. A server
+     * that is off keeps its status and detail, because no check runs for it:
+     * switching it on (`writeEnabled`) puts it to `checking` then.
      */
     writeTokenSignIn: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
-          SET sign_in = 'token', status = 'checking', status_detail = NULL,
+          SET sign_in = 'token',
+              status = CASE WHEN enabled = 1 THEN 'checking' ELSE status END,
+              status_detail = CASE WHEN enabled = 1 THEN NULL ELSE status_detail END,
               failed_checks = 0, next_check_at = ${at},
               revision = revision + 1, updated_at = ${at}
           WHERE id = ${uuidFromString(id)}

@@ -138,11 +138,13 @@ export class NotFound extends Schema.Error<NotFound>("hercule/NotFound")(
  *   a plugin offers a server for, and a server for it is made from the
  *   plugin's Connection, never by address. `contributionId` is the plugin's
  *   MCP server contribution. `connectionId` is one of the user's Connections
- *   of the type that contribution is reached with (an enabled one when there
- *   is one), whose server to switch on, or `null` when the user has none, so
- *   the user connects the plugin first. `pluginEnabled` is `false` when the
- *   plugin is switched off or failed to start, so the user switches it on
- *   first.
+ *   of the type that contribution is reached with, or `null` when the user
+ *   has none, so the user connects the plugin first. A connected Connection
+ *   is preferred, then one that needs to sign in again, then a switched-off
+ *   one, and only the first can serve the server at once. `pluginState` is
+ *   `active` when the plugin runs, `switched-off` when the user switched it
+ *   off, and `failed-to-start` when it is on but did not start: a client
+ *   offers to switch a plugin on only in the second case.
  */
 export const ConflictDetails = Schema.Union([
   Schema.Struct({ reason: Schema.Literal("mcp-server-exists"), mcpServerId: Id }),
@@ -150,7 +152,7 @@ export const ConflictDetails = Schema.Union([
     reason: Schema.Literal("mcp-server-on-plugin-origin"),
     contributionId: Schema.String,
     connectionId: Schema.NullOr(Id),
-    pluginEnabled: Schema.Boolean,
+    pluginState: Schema.Literals(["active", "switched-off", "failed-to-start"]),
   }),
 ]);
 

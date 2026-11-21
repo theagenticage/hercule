@@ -4649,7 +4649,7 @@ export const CLI = {
             flags: {
               url: {
                 flag: "url",
-                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as written, so keep a trailing slash if the server needs one. Put no secret in it: the token goes in --token-stdin.",
+                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as the URL standard writes it (https:a.com/mcp is https://a.com/mcp), so keep a trailing slash if the server needs one. Put no secret in it: the token goes in --token-stdin.",
               },
               name: {
                 flag: "name",
@@ -4717,7 +4717,7 @@ export const CLI = {
   },
   "mcpServer.setToken": {
     command: "mcp-server set-token",
-    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. The server goes back to `checking` and lists its tools again with the token; run `hercule mcp-server read` later to see the result. The token is read from stdin, so it never shows in your shell history.",
+    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. A server that is on goes back to `checking` and lists its tools again with the token; run `hercule mcp-server read` later to see the result. A server that is switched off keeps its status, and the token is checked when you switch the server on with `hercule mcp-server update`. The token is read from stdin, so it never shows in your shell history.",
     examples: [{ args: ["1f3a9c2e"], stdin: "the_token_the_server_expects" }],
     fields: {
       id: {

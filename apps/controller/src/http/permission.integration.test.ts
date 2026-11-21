@@ -278,9 +278,12 @@ describe("permission.request", () => {
         expect(refused.message).toMatch(/send the request without operation/);
         expect(refused.message).not.toContain("tok-3f9a1c7e5b2d");
         expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
-        const dump = await arranged.harness.sql`SELECT * FROM permission_requests`;
-        expect(JSON.stringify(dump)).not.toContain("tok-3f9a1c7e5b2d");
-        expect(await arranged.harness.audit("permission.requested")).toEqual([]);
+        const requests = await runEffect(arranged.harness.sql`SELECT * FROM permission_requests`);
+        const events = await runEffect(
+          arranged.harness.sql`SELECT * FROM events WHERE kind = 'permission.requested'`,
+        );
+        expect(events).toEqual([]);
+        expect(JSON.stringify(requests)).not.toContain("tok-3f9a1c7e5b2d");
       });
     },
   );

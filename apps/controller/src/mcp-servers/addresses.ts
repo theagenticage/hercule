@@ -15,9 +15,12 @@ import { McpServerName } from "@hercule/plugin-host";
 /** An address a user gave, read and checked. */
 export interface ServerAddress {
   /**
-   * The address as the user gave it, trimmed of surrounding spaces. It is what
-   * requests go to, so nothing in it is rewritten: a server may need its
-   * trailing slash.
+   * The address as the WHATWG URL parser writes it (`href`). It is what
+   * requests go to. The parser only spells the address the way every client
+   * does: `https:example.com/mcp` becomes `https://example.com/mcp`, the scheme
+   * and host are in lower case, the default port is gone and a bare `?` with
+   * nothing after it is gone. The path, its trailing slash and the query are
+   * kept, because a server may need them as they are.
    */
   readonly url: string;
   /**
@@ -42,8 +45,9 @@ const refuseName = (message: string): Effect.Effect<never, Validation> =>
  * (`/a/../b`) are resolved. On top of that, one trailing `/` is removed from
  * the path, so `https://a.com`, `https://a.com/` and `https://a.com/mcp/`
  * match `https://a.com` and `https://a.com/mcp`. The case of the path and the
- * query are kept exactly, because a server may tell them apart. An empty query
- * (`?` alone) is dropped by the parser.
+ * query are kept exactly, because a server may tell them apart. A bare `?`
+ * with nothing after it is the same address as none: `parseServerAddress`
+ * removes it from the address, so the key and the address agree.
  */
 const buildNormalizedAddress = (parsed: URL): string => {
   const path = parsed.pathname.endsWith("/") ? parsed.pathname.slice(0, -1) : parsed.pathname;
@@ -82,7 +86,14 @@ export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, 
         "The address ends in a #fragment, which is never sent to a server. Remove everything from the # on.",
       );
     }
-    return { url, normalizedUrl: buildNormalizedAddress(parsed), origin: parsed.origin };
+    // The parser keeps a bare `?` in `href` and reports its `search` as empty.
+    // Setting `search` to the empty text removes it.
+    if (parsed.search === "") parsed.search = "";
+    return {
+      url: parsed.href,
+      normalizedUrl: buildNormalizedAddress(parsed),
+      origin: parsed.origin,
+    };
   });
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */

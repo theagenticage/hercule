@@ -19,6 +19,7 @@ import {
   createNotFoundError,
   createValidationError,
   type Conflict,
+  type ConflictDetails,
   type Forbidden,
   type InvalidState,
   type McpServer,
@@ -30,6 +31,7 @@ import {
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { connectionRepository } from "../connections";
+import type { ConnectionStatus } from "@hercule/plugin-host";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
@@ -39,11 +41,17 @@ import {
   parseServerAddress,
   type ServerAddress,
 } from "./addresses";
-import { mcpServerCatalogue, type PluginState } from "./catalogue";
+import { mcpServerCatalogue } from "./catalogue";
 import { McpServerChecks } from "./checks";
 import { McpServerListHolders } from "./list-holders";
 import { mcpServerRepository, type StoredMcpServer } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
+
+/** What the plugin that offers an address's server is doing, as the refusal reports it. */
+type PluginOriginState = Extract<
+  ConflictDetails,
+  { readonly reason: "mcp-server-on-plugin-origin" }
+>["pluginState"];
 
 /** What `update` takes: the server and the fields to change. */
 export type UpdateInput = McpServerUpdateInput & { readonly id: string };
@@ -108,29 +116,60 @@ const buildUrlServerExists = (existing: StoredMcpServer): Conflict =>
 
 /**
  * Builds what the user does instead of adding a plugin's server by address,
- * by what the user has: the plugin is switched off or failed to start, or it
- * runs and the user has a Connection of its type or has none.
+ * by what the user has:
+ *
+ * - the plugin is switched off or failed to start: fix that first;
+ * - the plugin runs and the user has a connected Connection of its type: switch
+ *   the server on, or create it from that Connection with a command;
+ * - the Connection needs to sign in again, or is switched off: fix the
+ *   Connection first, and no command is offered because the create would be
+ *   refused or go unchecked;
+ * - the user has no Connection: connect the plugin first.
  */
 const buildPluginOriginAdvice = (facts: {
   readonly plugin: string;
   readonly contributionId: string;
-  readonly state: PluginState["_tag"];
-  readonly connection: { readonly id: string; readonly label: string } | undefined;
+  readonly pluginState: PluginOriginState;
+  readonly connection:
+    | { readonly id: string; readonly label: string; readonly status: ConnectionStatus }
+    | undefined;
 }): string => {
   const { plugin, contributionId, connection } = facts;
   const switchOn = "switch its server on in Settings > MCP servers";
   const connectFirst = connection === undefined ? "connect it, then " : "";
-  switch (facts.state) {
+  switch (facts.pluginState) {
     case "failed-to-start":
       return `The ${plugin} plugin failed to start: see Settings > Plugins. Once it runs, ${connectFirst}${switchOn}.`;
-    case "active":
-      return connection === undefined
-        ? `It is reached with a ${plugin} Connection, with no second sign-in. Connect ${plugin} first in Settings > Connections, then ${switchOn}.`
-        : `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contributionId} --connection ${connection.id}\`.`;
-    default:
+    case "switched-off":
       return `The ${plugin} plugin is switched off: switch it on in Settings > Plugins, ${connection === undefined ? connectFirst : "then "}${switchOn}.`;
+    case "active":
+      break;
+  }
+  if (connection === undefined) {
+    return `It is reached with a ${plugin} Connection, with no second sign-in. Connect ${plugin} first in Settings > Connections, then ${switchOn}.`;
+  }
+  switch (connection.status) {
+    case "connected":
+      return `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contributionId} --connection ${connection.id}\`.`;
+    case "disabled":
+      return `It is reached with your ${plugin} Connection ${connection.label}, which is switched off: switch it on in Settings > Connections first, then ${switchOn}.`;
+    default:
+      return `It is reached with your ${plugin} Connection ${connection.label}, which needs to sign in again: reconnect it in Settings > Connections first, then ${switchOn}.`;
   }
 };
+
+/**
+ * Picks the Connection a refusal points at, among the user's Connections of
+ * the contribution's type: a connected one, else one that needs to sign in
+ * again (or is in error), else a switched-off one. Returns `undefined` when
+ * there is none.
+ */
+const pickConnectionToPointAt = <Candidate extends { readonly status: ConnectionStatus }>(
+  candidates: ReadonlyArray<Candidate>,
+): Candidate | undefined =>
+  candidates.find((one) => one.status === "connected") ??
+  candidates.find((one) => one.status !== "disabled") ??
+  candidates[0];
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -177,14 +216,16 @@ const make = Effect.gen(function* () {
       const ofType = (yield* connections.ofPlugin(contribution.pluginId)).filter(
         (connection) => connection.type === contribution.connectionType,
       );
-      const connection = ofType.find((one) => one.status !== "disabled") ?? ofType[0];
+      const connection = pickConnectionToPointAt(ofType);
+      const pluginState: PluginOriginState =
+        state._tag === "active" || state._tag === "failed-to-start" ? state._tag : "switched-off";
       return yield* Effect.fail(
         createConflictError(
           `${address.origin} is the ${contribution.displayName} MCP server. ${buildPluginOriginAdvice(
             {
               plugin: contribution.displayName,
               contributionId: contribution.id,
-              state: state._tag,
+              pluginState,
               connection,
             },
           )}`,
@@ -192,7 +233,7 @@ const make = Effect.gen(function* () {
             reason: "mcp-server-on-plugin-origin",
             contributionId: contribution.id,
             connectionId: connection?.id ?? null,
-            pluginEnabled: state._tag === "active",
+            pluginState,
           },
         ),
       );
@@ -457,9 +498,11 @@ const make = Effect.gen(function* () {
     /**
      * Gives a server added by URL the token the user pasted, replacing every
      * sign-in secret it holds, and returns the server. The server goes back
-     * to `checking` and its revision goes up, which ends the upstream
-     * sessions and the running checks that used the old sign-in. A new list
-     * of its tools is requested after the commit. The audit entry says the
+     * to `checking` when it is on, and keeps its status when it is switched
+     * off, because no check runs for a server that is off and switching it on
+     * checks it with the token. Its revision goes up either way, which ends
+     * the upstream sessions and the running checks that used the old sign-in.
+     * A new list of its tools is requested after the commit. The audit entry says the
      * sign-in is now a token and never holds the token. Fails with `NotFound`
      * when there is no such server, and with `InvalidState` for a plugin
      * server, whose credential is its Connection's.

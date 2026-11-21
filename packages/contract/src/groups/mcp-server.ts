@@ -133,7 +133,8 @@ export const McpServerToken = Schema.String.check(
  * - `plugin`: a server a plugin offers, reached with the credential of one of
  *   the plugin's Connections.
  * - `url`: a server the user added by its address. `url` is the address as the
- *   user gave it, and the one requests go to. `signIn` is what the server
+ *   URL standard writes it (`https:a.com/mcp` is `https://a.com/mcp`), and the
+ *   one requests go to. `signIn` is what the server
  *   holds now: `none`, a pasted `token`, or `oauth` tokens from signing in.
  *   `signInOffered` is what the server said it accepts the last time it
  *   refused a request with HTTP 401: `oauth` when its answer names an
@@ -287,8 +288,10 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Gives a server added by URL the token the user pasted for it, replacing
-    // any sign-in it holds. The server goes to `checking` and its tools are
-    // listed again with the token. Answers with the server.
+    // any sign-in it holds. A server that is on goes to `checking` and its
+    // tools are listed again with the token. A server that is switched off
+    // keeps its status, and is checked with the token when it is switched on.
+    // Answers with the server.
     //
     // - `invalid_state`: the server is a plugin server, which is reached with
     //   its Connection's credential.

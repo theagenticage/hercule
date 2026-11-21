@@ -19,12 +19,28 @@ const refusalOf = async (effect: Effect.Effect<unknown, { readonly error: unknow
 const read = (input: string) => Effect.runPromise(parseServerAddress(input));
 
 describe("parseServerAddress", () => {
-  it("returns the address as given, trimmed, with its key and its origin", async () => {
+  it("returns the address as the URL parser writes it, with its key and its origin", async () => {
     expect(await read("  https://Mcp.Example.com:443/Mcp/?a=B  ")).toEqual({
-      url: "https://Mcp.Example.com:443/Mcp/?a=B",
+      url: "https://mcp.example.com/Mcp/?a=B",
       normalizedUrl: "https://mcp.example.com/Mcp?a=B",
       origin: "https://mcp.example.com",
     });
+  });
+
+  it.each([
+    ["https:example.com/mcp", "https://example.com/mcp"],
+    ["https://example.com", "https://example.com/"],
+    ["HTTP://Example.com:80/a/../mcp", "http://example.com/mcp"],
+    ["https://example.com/mcp?", "https://example.com/mcp"],
+    ["https://example.com/mcp/?", "https://example.com/mcp/"],
+  ])("writes %s as the address %s, which requests go to", async (input, written) => {
+    expect((await read(input)).url).toBe(written);
+  });
+
+  it("gives an address with a bare ? the key of the same address without it", async () => {
+    expect((await read("https://example.com/mcp?")).normalizedUrl).toBe(
+      (await read("https://example.com/mcp")).normalizedUrl,
+    );
   });
 
   it.each([

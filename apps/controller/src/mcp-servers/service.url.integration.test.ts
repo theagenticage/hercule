@@ -22,13 +22,16 @@ import * as Effect from "effect/Effect";
 import { McpProtocol } from "effect/ai";
 import type { McpServer } from "@hercule/contract";
 import { PluginError } from "@hercule/plugin-host";
+import { uuidFromString } from "../db";
 import { del, get, post } from "../http/testing";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { disablePlugin, withSetUpController, type SetUpController } from "../workflows/testing";
 import {
   countNotifications,
   eventually,
+  insertPastedConnection,
   readRow,
+  requestUpdate,
   runSql,
   startFakeUpstream,
   waitForResult,
@@ -285,7 +288,7 @@ describe("an address on a plugin's origin", () => {
         reason: "mcp-server-on-plugin-origin",
         contributionId: "acme/desk",
         connectionId,
-        pluginEnabled: true,
+        pluginState: "active",
       });
       expect(refusal.message).toBe(
         `${fake.origin} is the Desk MCP server. It is reached with your Desk Connection work, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin acme/desk --connection ${connectionId}\`.`,
@@ -293,6 +296,79 @@ describe("an address on a plugin's origin", () => {
       expect(await countServers(controller)).toBe(0);
     });
   });
+
+  it("points at a connected Connection before one that needs to sign in or is switched off", async () => {
+    await withRig(async ({ controller, fake }) => {
+      const insert = (accountId: string, status: string) =>
+        insertPastedConnection(controller.harness, "acme/desk", "t0ken-abcd", accountId).then(
+          async (id) => {
+            await runSql(
+              controller,
+              controller.harness.sql`UPDATE connections SET status = ${status}
+                                     WHERE id = ${uuidFromString(id)}`,
+            );
+            return id;
+          },
+        );
+      await insert("desk-a", "disabled");
+      await insert("desk-b", "needs-reauth");
+      const connected = await insert("desk-c", "connected");
+
+      const refusal = await readRefusal(
+        await createByAddress(controller, { url: fake.url, name: "remote" }),
+        409,
+      );
+
+      expect(refusal.details).toEqual({
+        reason: "mcp-server-on-plugin-origin",
+        contributionId: "acme/desk",
+        connectionId: connected,
+        pluginState: "active",
+      });
+      expect(refusal.message).toContain(
+        `\`hercule mcp-server create --plugin acme/desk --connection ${connected}\``,
+      );
+    });
+  });
+
+  it.each([
+    [
+      "needs-reauth",
+      "which needs to sign in again: reconnect it in Settings > Connections first, then switch its server on in Settings > MCP servers.",
+    ],
+    [
+      "error",
+      "which needs to sign in again: reconnect it in Settings > Connections first, then switch its server on in Settings > MCP servers.",
+    ],
+    [
+      "disabled",
+      "which is switched off: switch it on in Settings > Connections first, then switch its server on in Settings > MCP servers.",
+    ],
+  ])(
+    "points at the Connection to fix first, with no command to run, when its only Connection is %s",
+    async (status, advice) => {
+      await withRig(async ({ controller, fake, connect }) => {
+        const connectionId = await connect();
+        await runSql(controller, controller.harness.sql`UPDATE connections SET status = ${status}`);
+
+        const refusal = await readRefusal(
+          await createByAddress(controller, { url: fake.url, name: "remote" }),
+          409,
+        );
+
+        expect(refusal.details).toEqual({
+          reason: "mcp-server-on-plugin-origin",
+          contributionId: "acme/desk",
+          connectionId,
+          pluginState: "active",
+        });
+        expect(refusal.message).toBe(
+          `${fake.origin} is the Desk MCP server. It is reached with your Desk Connection work, ${advice}`,
+        );
+        expect(refusal.message).not.toContain("hercule mcp-server create");
+      });
+    },
+  );
 
   it("is refused with a pointer to Settings > Connections, when the user has no Connection", async () => {
     await withRig(async ({ controller, fake }) => {
@@ -305,7 +381,7 @@ describe("an address on a plugin's origin", () => {
         reason: "mcp-server-on-plugin-origin",
         contributionId: "acme/desk",
         connectionId: null,
-        pluginEnabled: true,
+        pluginState: "active",
       });
       expect(refusal.message).toBe(
         `${fake.origin} is the Desk MCP server. It is reached with a Desk Connection, with no second sign-in. Connect Desk first in Settings > Connections, then switch its server on in Settings > MCP servers.`,
@@ -326,7 +402,7 @@ describe("an address on a plugin's origin", () => {
         reason: "mcp-server-on-plugin-origin",
         contributionId: "acme/desk",
         connectionId: null,
-        pluginEnabled: false,
+        pluginState: "switched-off",
       });
       expect(refusal.message).toBe(
         `${fake.origin} is the Desk MCP server. The Desk plugin is switched off: switch it on in Settings > Plugins, connect it, then switch its server on in Settings > MCP servers.`,
@@ -348,7 +424,7 @@ describe("an address on a plugin's origin", () => {
             409,
           );
 
-          expect(refusal.details).toMatchObject({ pluginEnabled: false });
+          expect(refusal.details).toMatchObject({ pluginState: "failed-to-start" });
           expect(refusal.message).toBe(
             `${fake.origin} is the Desk MCP server. The Desk plugin failed to start: see Settings > Plugins. Once it runs, connect it, then switch its server on in Settings > MCP servers.`,
           );
@@ -417,6 +493,35 @@ describe("giving a server a token", () => {
       },
       { fake: { protocols: [McpProtocol.v2025_11_25] } },
     );
+  });
+
+  it("stores the token of a switched-off server and leaves its status, checking it with the token once it is switched on", async () => {
+    await withUrlRig(async ({ controller, fake }) => {
+      fake.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
+      const created = await readRecord(
+        await createByAddress(controller, { url: fake.url, name: "remote" }),
+      );
+      const refused = await waitForStatus(controller, "needs-sign-in");
+      expect((await requestUpdate(controller, created.id, { enabled: false })).status).toBe(200);
+      const requestsBefore = fake.requests.length;
+
+      const answered = await readRecord(await sendToken(controller, created.id, TOKEN));
+
+      expect(answered).toMatchObject({
+        enabled: false,
+        status: "needs-sign-in",
+        statusDetail: refused.status_detail,
+        source: { kind: "url", signIn: "token" },
+      });
+      // No check runs for a server that is off, so nothing is sent.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(fake.requests).toHaveLength(requestsBefore);
+      expect((await readRow(controller)).revision).toBeGreaterThan(refused.revision);
+
+      expect((await requestUpdate(controller, created.id, { enabled: true })).status).toBe(200);
+      await waitForStatus(controller, "ready");
+      expect(fake.requests.at(-1)?.authorization).toBe(`Bearer ${TOKEN}`);
+    });
   });
 
   it("is refused for a plugin server, naming the Connection to reconnect", async () => {
@@ -496,7 +601,7 @@ describe("a pasted token", () => {
           expect(shown).toContain("without `Bearer ` in front of it and without spaces");
           // A token that is not valid is never repeated, so nothing that holds
           // a secret by mistake echoes it back.
-          if (token.length > 7) expect(shown).not.toContain(token);
+          if (token !== "") expect(shown).not.toContain(token);
         }
         expect(await countServers(controller)).toBe(1);
       });
