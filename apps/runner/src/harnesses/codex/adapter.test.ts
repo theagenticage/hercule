@@ -5004,17 +5004,19 @@ describe("the MCP servers a Codex session is given", () => {
   });
 
   describe("when Codex's own configuration sets the gateway's server name", () => {
-    /** The `config/read` reply of a repository whose `.codex/config.toml` sets `key`. */
-    const configuredBy = (key: string): Answers => ({
+    /** The `config/read` reply of a repository whose `.codex/config.toml` holds these `mcp_servers`. */
+    const configuredBy = (servers: Record<string, unknown>): Answers => ({
       "config/read": () => ({
         config: {},
-        origins: {
-          [key]: {
+        origins: {},
+        layers: [
+          {
             name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
             version: "sha256:0",
+            config: { mcp_servers: servers },
+            disabledReason: null,
           },
-        },
-        layers: null,
+        ],
       }),
     });
 
@@ -5023,7 +5025,7 @@ describe("the MCP servers a Codex session is given", () => {
       async (method, spec) => {
         const run = await startWithServers([GATEWAY], spec, {
           ...initializeAs("0.171.0"),
-          ...configuredBy("mcp_servers.tools.tools.x.approval_mode"),
+          ...configuredBy({ tools: { tools: { x: { approval_mode: "approve" } } } }),
         });
         await waitUntil(
           "warned about the name",
@@ -5047,7 +5049,7 @@ describe("the MCP servers a Codex session is given", () => {
     it("changes nothing when the configuration sets another server's name", async () => {
       const run = await startWithServers([GATEWAY], SPEC, {
         ...initializeAs("0.171.0"),
-        ...configuredBy("mcp_servers.docs.command"),
+        ...configuredBy({ docs: { command: "docs-server" } }),
       });
       await settle();
 
@@ -5060,7 +5062,7 @@ describe("the MCP servers a Codex session is given", () => {
     it("does not mistake a longer server name for the gateway's", async () => {
       const run = await startWithServers([GATEWAY], SPEC, {
         ...initializeAs("0.171.0"),
-        ...configuredBy("mcp_servers.tools_extra.url"),
+        ...configuredBy({ tools_extra: { url: "http://example.test/mcp" } }),
       });
 
       expect(listSentParams(run.requests, "thread/start")[0]).toHaveProperty("config");
@@ -5084,13 +5086,12 @@ describe("the MCP servers a Codex session is given", () => {
 
     it("gives no gateway keys for a project layer that sets the name, even one that is not trusted yet", async () => {
       // A project that is not trusted is listed with its settings and a
-      // reason, and none of its keys are in `origins`. The thread's own start
-      // trusts the project and merges its table, so the layer still counts.
+      // reason. The thread's own start trusts the project and merges its
+      // table, so the layer still counts.
       const run = await startWithServers([GATEWAY], SPEC, {
         ...initializeAs("0.171.0"),
         "config/read": () => ({
           config: {},
-          origins: {},
           layers: [
             {
               name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
@@ -5110,10 +5111,29 @@ describe("the MCP servers a Codex session is given", () => {
       expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("/work/repo/.codex");
     });
 
-    it("treats a reply to config/read that is not in the expected shape like a failed read", async () => {
+    it.each([
+      ["no layers", { config: {} }],
+      ["layers that are null", { config: {}, layers: null }],
+      ["layers that are not a list", { config: {}, layers: "nothing" }],
+      [
+        "a layer with no settings",
+        { layers: [{ name: { type: "user", file: "/home/.codex/config.toml" } }] },
+      ],
+      [
+        "a layer whose settings are not an object",
+        {
+          layers: [{ name: { type: "user", file: "/home/.codex/config.toml" }, config: "nothing" }],
+        },
+      ],
+      [
+        "a layer whose settings are a list",
+        { layers: [{ name: { type: "user", file: "/home/.codex/config.toml" }, config: [] }] },
+      ],
+      ["a layer with no source", { layers: [{ config: {} }] }],
+    ])("treats a reply to config/read with %s like a failed read", async (_name, reply) => {
       const run = await startWithServers([GATEWAY], SPEC, {
         ...initializeAs("0.171.0"),
-        "config/read": () => ({ config: {}, origins: "nothing" }),
+        "config/read": () => reply,
       });
       await waitUntil(
         "warned about the configuration",

@@ -6,8 +6,6 @@
 export type { InitializeParams } from "./generated/InitializeParams";
 export type { InitializeResponse } from "./generated/InitializeResponse";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams";
-export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse";
-export type { ConfigLayerSource } from "./generated/v2/ConfigLayerSource";
 export type { GetAccountResponse } from "./generated/v2/GetAccountResponse";
 export type { Model } from "./generated/v2/Model";
 export type { ModelListResponse } from "./generated/v2/ModelListResponse";

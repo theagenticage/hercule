@@ -53,7 +53,6 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
-  ResolvedMcpServer,
   SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
@@ -117,16 +116,7 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
-import {
-  buildMcpConfigUnreadWarning,
-  buildMcpNameTakenWarning,
-  buildMcpServerConfig,
-  buildNoToolListChangedWarning,
-  findConfiguredMcpServers,
-  parseConfigSources,
-  supportsToolListChanged,
-  type McpToolApprovalMode,
-} from "./mcp";
+import { decideMcpConfig, type McpToolApprovalMode } from "./mcp";
 import {
   buildUsageReadings,
   completeWindowDurations,
@@ -164,7 +154,6 @@ import type {
   ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
-  ConfigReadParams,
   TurnInterruptParams,
   TurnStartParams,
   TurnSteerParams,
@@ -296,16 +285,6 @@ interface Held {
  * The Codex thread settings for each access mode (spec 06 section 8.1). Codex
  * supports every access mode natively, so there is no fallback here and
  * nothing is silently substituted.
- *
- * `mcpToolApprovalMode` is not a thread setting. It is how Codex asks about a
- * call to a tool of an MCP server, and it goes in the MCP servers' config:
- *
- * - Every mode but full access is `prompt`, which asks about every call. A
- *   tool's annotations (such as "read only") come from an outside server, so
- *   they must never lower the mode (spec 06 section 10.2). In `auto` mode,
- *   Codex's own reviewer then judges each call, as it does for other actions.
- * - Full access is `approve`: it asks nobody, and Codex never asks under the
- *   approval policy `never` anyway.
  */
 const ACCESS_MODES: Readonly<
   Record<
@@ -314,7 +293,6 @@ const ACCESS_MODES: Readonly<
       readonly approvalPolicy: AskForApproval;
       readonly sandbox: SandboxMode;
       readonly approvalsReviewer: ApprovalsReviewer;
-      readonly mcpToolApprovalMode: McpToolApprovalMode;
     }
   >
 > = {
@@ -322,26 +300,40 @@ const ACCESS_MODES: Readonly<
     approvalPolicy: "untrusted",
     sandbox: "read-only",
     approvalsReviewer: "user",
-    mcpToolApprovalMode: "prompt",
   },
   "auto-accept-edits": {
     approvalPolicy: "on-request",
     sandbox: "workspace-write",
     approvalsReviewer: "user",
-    mcpToolApprovalMode: "prompt",
   },
   auto: {
     approvalPolicy: "on-request",
     sandbox: "workspace-write",
     approvalsReviewer: "auto_review",
-    mcpToolApprovalMode: "prompt",
   },
   "full-access": {
     approvalPolicy: "never",
     sandbox: "danger-full-access",
     approvalsReviewer: "user",
-    mcpToolApprovalMode: "approve",
   },
+};
+
+/**
+ * How Codex asks about a call to a tool of an MCP server, for each access
+ * mode. It is not a thread setting: it goes in the MCP servers' config.
+ *
+ * - Every mode but full access is `prompt`, which asks about every call. A
+ *   tool's annotations (such as "read only") come from an outside server, so
+ *   they must never lower the mode (spec 06 section 10.2). In `auto` mode,
+ *   Codex's own reviewer then judges each call, as it does for other actions.
+ * - Full access is `approve`: it asks nobody, and Codex never asks under the
+ *   approval policy `never` anyway.
+ */
+const MCP_TOOL_APPROVAL_MODES: Readonly<Record<AccessMode, McpToolApprovalMode>> = {
+  "approval-required": "prompt",
+  "auto-accept-edits": "prompt",
+  auto: "prompt",
+  "full-access": "approve",
 };
 
 /**
@@ -1843,65 +1835,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   };
 
   /**
-   * Decides which of the session's MCP servers the thread gets, and returns
-   * them with the warnings to show when the session starts. Asks Codex for its
-   * configuration as seen from the thread's folder, and gives a server only
-   * when no layer of that configuration (the repository's `.codex/config.toml`
-   * is the usual one) already sets its name, because Codex merges all layers
-   * into one table (see `findConfiguredMcpServers`). Makes no request when the
-   * session has no MCP server.
-   *
-   * Never fails. When Codex cannot read its configuration, or its reply is not
-   * in the shape expected, the thread gets no server and the warning says why
-   * (Codex's own message when it sent one), because Hercule cannot tell
-   * whether the name is taken. Codex then usually refuses to open the thread
-   * on the same configuration, and that failure reports it.
-   */
-  const selectMcpServers = (
-    host: Host,
-    ctx: SessionStartContext,
-  ): Effect.Effect<{
-    readonly servers: ReadonlyArray<ResolvedMcpServer>;
-    readonly warnings: ReadonlyArray<string>;
-  }> =>
-    ctx.mcpServers.length === 0
-      ? Effect.succeed({ servers: [], warnings: [] })
-      : Effect.match(
-          host.rpc.request("config/read", {
-            cwd: ctx.cwd,
-            includeLayers: true,
-          } satisfies ConfigReadParams),
-          {
-            onFailure: (error) => ({
-              servers: [],
-              warnings: [buildMcpConfigUnreadWarning(error.message)],
-            }),
-            onSuccess: (reply) => {
-              const sources = parseConfigSources(reply);
-              // A reply that cannot be read is treated like a failed request.
-              if (sources === undefined) {
-                return {
-                  servers: [],
-                  warnings: [
-                    buildMcpConfigUnreadWarning("its reply to config/read was not understood"),
-                  ],
-                };
-              }
-              const taken = findConfiguredMcpServers(
-                sources,
-                ctx.mcpServers.map((server) => server.name),
-              );
-              return {
-                servers: ctx.mcpServers.filter(
-                  (server) => !taken.some((one) => one.name === server.name),
-                ),
-                warnings: taken.map(buildMcpNameTakenWarning),
-              };
-            },
-          },
-        );
-
-  /**
    * Builds the params shared by starting, resuming and forking a thread: the
    * session's directory, model and access mode, and its instructions. The
    * system prompt, the user's own instructions and the skill are sent as
@@ -1927,8 +1860,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     spec: SessionSpec,
     ctx: SessionStartContext,
     userInstructions: string | undefined,
-    mcpServers: ReadonlyArray<ResolvedMcpServer>,
-    toolListChanged: boolean,
+    mcpConfig: Record<string, JsonValue>,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -1941,16 +1873,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     | "config"
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
-    const { mcpToolApprovalMode, ...thread } = ACCESS_MODES[spec.accessMode];
-    const config = buildMcpServerConfig(mcpServers, mcpToolApprovalMode, toolListChanged);
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
       developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
-      ...thread,
+      ...ACCESS_MODES[spec.accessMode],
       // Left out when empty, so a session with no MCP server sends no `config`.
-      ...(Object.keys(config).length === 0 ? {} : { config }),
+      ...(Object.keys(mcpConfig).length === 0 ? {} : { config: mcpConfig }),
     };
   };
 
@@ -2024,10 +1954,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
         const { host, codexVersion } = yield* startSessionHost(sessionId, spec, ctx, binary);
-        // The one place that decides whether this Codex re-reads its tool
-        // list. It is deleted when Hercule's minimum Codex version reaches
-        // 0.164.0.
-        const toolListChanged = supportsToolListChanged(codexVersion);
         const carried = spec.continue;
         const method =
           carried === undefined
@@ -2035,14 +1961,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
-        const mcp = yield* selectMcpServers(host, ctx);
-        const threadParams = buildThreadParams(
-          spec,
-          ctx,
-          userInstructions,
-          mcp.servers,
-          toolListChanged,
-        );
+        const mcp = yield* decideMcpConfig({
+          rpc: host.rpc,
+          cwd: ctx.cwd,
+          servers: ctx.mcpServers,
+          approvalMode: MCP_TOOL_APPROVAL_MODES[spec.accessMode],
+          codexVersion,
+        });
+        const threadParams = buildThreadParams(spec, ctx, userInstructions, mcp.config);
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
@@ -2124,9 +2050,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
         for (const warning of mcp.warnings) warn(host, warning);
-        if (mcp.servers.length > 0 && !toolListChanged) {
-          warn(host, buildNoToolListChangedWarning(codexVersion));
-        }
         const dropped = deliverFramesBeforeRegistration(held);
         // The dropped ones belong to no thread, so the session is not told;
         // the runner's log is.

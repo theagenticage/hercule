@@ -5,9 +5,13 @@
  * must send them again, or nothing connects and the model's call fails with no
  * message.
  */
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import type { ResolvedMcpServer } from "../index";
-import type { ConfigLayerSource, JsonValue } from "./types";
+import type { Rpc } from "./rpc";
+import type { ConfigReadParams, JsonValue } from "./types";
 
 /**
  * How Codex asks about a call to a tool of an MCP server:
@@ -51,101 +55,59 @@ export const buildNoToolListChangedWarning = (version: string | null): string =>
   "so an MCP Server added while the thread runs is usable from its next start. " +
   "Upgrade Codex to 0.164.0 or newer.";
 
-/** An MCP server name that some other Codex configuration already sets, and where it is set. */
-export interface ConfiguredMcpServer {
-  readonly name: string;
-  readonly layer: ConfigLayerSource;
-}
+/**
+ * What Hercule reads of a `config/read` reply: every layer of Codex's
+ * configuration, with its source and its own settings. `layers` is `null`
+ * when Codex was not asked for layers. A layer Codex found but does not use
+ * yet, such as a project's `.codex/config.toml` that is not trusted, is
+ * listed with its settings all the same.
+ */
+const ConfigReadReply = Schema.Struct({
+  layers: Schema.Array(
+    Schema.Struct({
+      name: Schema.Struct({
+        type: Schema.String,
+        file: Schema.optional(Schema.String),
+        dotCodexFolder: Schema.optional(Schema.String),
+      }),
+      config: Schema.Record(Schema.String, Schema.Unknown),
+    }),
+  ),
+});
 
-/** What Hercule reads of a `config/read` reply: where each setting comes from, and each layer's own settings. */
-export interface ConfigSources {
-  /** The layer that sets each effective key, by dotted key. Only layers that are in force. */
-  readonly origins: ReadonlyArray<{ readonly key: string; readonly layer: ConfigLayerSource }>;
-  /** Every layer Codex found, including a project's that is not trusted (yet), with its settings. */
-  readonly layers: ReadonlyArray<{ readonly layer: ConfigLayerSource; readonly config: unknown }>;
-}
+type ConfigLayer = (typeof ConfigReadReply.Type)["layers"][number];
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Checks that a value names a configuration layer with the path Hercule shows for it. */
-const isLayerSource = (value: unknown): value is ConfigLayerSource => {
-  if (!isRecord(value) || typeof value["type"] !== "string") return false;
-  if (value["type"] === "project") return typeof value["dotCodexFolder"] === "string";
-  const needsFile = ["user", "system", "packagedDefaults", "legacyManagedConfigTomlFromFile"];
-  return !needsFile.includes(value["type"]) || typeof value["file"] === "string";
-};
-
 /**
- * Reads the part of a `config/read` reply that `findConfiguredMcpServers`
- * uses. Returns `undefined` when the reply does not have the expected shape,
- * so the caller can treat it like a failed request instead of guessing that
- * no layer sets a server. `layers` may be `null` in the reply, and is then
- * empty.
- */
-export const parseConfigSources = (reply: unknown): ConfigSources | undefined => {
-  if (!isRecord(reply) || !isRecord(reply["origins"])) return undefined;
-  const origins: Array<ConfigSources["origins"][number]> = [];
-  for (const [key, origin] of Object.entries(reply["origins"])) {
-    if (!isRecord(origin) || !isLayerSource(origin["name"])) return undefined;
-    origins.push({ key, layer: origin["name"] });
-  }
-  const rawLayers = reply["layers"] ?? [];
-  if (!Array.isArray(rawLayers)) return undefined;
-  const layers: Array<ConfigSources["layers"][number]> = [];
-  for (const layer of rawLayers as ReadonlyArray<unknown>) {
-    if (!isRecord(layer) || !isLayerSource(layer["name"])) return undefined;
-    layers.push({ layer: layer["name"], config: layer["config"] });
-  }
-  return { origins, layers };
-};
-
-/**
- * Returns the names, of those given, that Codex's own configuration already
- * sets, each with the layer that sets it. A name counts as set when:
- *
- * - a layer's own settings have a `mcp_servers.<name>` table, whatever is in
- *   it. Every layer found counts, including a project's `.codex/config.toml`
- *   that is not trusted yet: `thread/start` with a writable sandbox marks the
- *   project trusted and merges its table on that same call, after the
- *   configuration was read.
- * - or the effective `origins` have a key `mcp_servers.<name>` or starting
- *   with `mcp_servers.<name>.`.
- *
- * Codex merges every layer's table of a server name into one, so a repository
- * that sets any key of the gateway's name changes how the gateway behaves: its
+ * Returns the first layer whose settings have anything under
+ * `mcp_servers.<name>`: the table, a key in it, or a nested key. Codex merges
+ * every layer's table of a server name into one, so a repository that sets any
+ * key of the gateway's name changes how the gateway behaves: its
  * `approval_mode` for one tool would lower the approval, and Codex has no way
- * to clear that key. A name set elsewhere is therefore not given to Codex.
+ * to clear that key. Every layer counts, including a project's that is not
+ * trusted yet: `thread/start` with a writable sandbox marks the project
+ * trusted and merges its table on that same call, after the configuration was
+ * read.
  */
-export const findConfiguredMcpServers = (
-  sources: ConfigSources,
-  names: ReadonlyArray<string>,
-): ReadonlyArray<ConfiguredMcpServer> =>
-  names.flatMap((name) => {
-    const prefix = `mcp_servers.${name}`;
-    const fromLayer = sources.layers.find(({ config }) => {
-      const servers = isRecord(config) ? config["mcp_servers"] : undefined;
-      return isRecord(servers) && Object.hasOwn(servers, name);
-    })?.layer;
-    const layer =
-      fromLayer ??
-      sources.origins.find(({ key }) => key === prefix || key.startsWith(`${prefix}.`))?.layer;
-    return layer === undefined ? [] : [{ name, layer }];
+const findLayerSettingServer = (
+  layers: ReadonlyArray<ConfigLayer>,
+  name: string,
+): ConfigLayer | undefined =>
+  layers.find(({ config }) => {
+    const servers = config["mcp_servers"];
+    return isRecord(servers) && Object.hasOwn(servers, name);
   });
 
 /** Describes the file or folder a configuration layer comes from, for a message. */
-const describeLayer = (layer: ConfigLayerSource): string => {
-  switch (layer.type) {
-    case "project":
-      return `This repository's .codex/config.toml (${layer.dotCodexFolder})`;
-    case "user":
-    case "system":
-    case "packagedDefaults":
-    case "legacyManagedConfigTomlFromFile":
-      return `The Codex configuration file ${layer.file}`;
-    default:
-      return `Codex's ${layer.type} configuration`;
+const describeLayer = ({ name: source }: ConfigLayer): string => {
+  if (source.type === "project" && source.dotCodexFolder !== undefined) {
+    return `This repository's .codex/config.toml (${source.dotCodexFolder})`;
   }
+  return source.file === undefined
+    ? `Codex's ${source.type} configuration`
+    : `The Codex configuration file ${source.file}`;
 };
 
 /**
@@ -153,7 +115,7 @@ const describeLayer = (layer: ConfigLayerSource): string => {
  * own configuration, so the thread gets none of Hercule's MCP Servers. Names
  * the file and what to do about it.
  */
-export const buildMcpNameTakenWarning = ({ name, layer }: ConfiguredMcpServer): string =>
+const buildMcpNameTakenWarning = (name: string, layer: ConfigLayer): string =>
   `${describeLayer(layer)} configures an MCP server named "${name}", the name Hercule gives ` +
   "its MCP Gateway, so this thread gets none of its MCP Servers. " +
   "Rename or remove that server there to use them.";
@@ -162,9 +124,9 @@ export const buildMcpNameTakenWarning = ({ name, layer }: ConfiguredMcpServer): 
  * Returns the warning for a session whose Codex configuration could not be
  * read, so Hercule cannot tell whether its MCP server name is taken. The
  * thread then gets none of Hercule's MCP Servers. `reason` is Codex's own
- * error message.
+ * error message, or says that its reply was not understood.
  */
-export const buildMcpConfigUnreadWarning = (reason: string): string =>
+const buildMcpConfigUnreadWarning = (reason: string): string =>
   `Codex could not read its configuration (${reason}), so this thread gets none of ` +
   "Hercule's MCP Servers. Fix the configuration it names to use them.";
 
@@ -172,7 +134,7 @@ export const buildMcpConfigUnreadWarning = (reason: string): string =>
  * Returns the `config` for the session's MCP servers, to send with
  * `thread/start`, `thread/resume` and `thread/fork`. Returns an empty object
  * when there are no servers, so no key reaches Codex. The caller passes only
- * servers whose name `findConfiguredMcpServers` found free.
+ * servers whose name no layer of Codex's configuration sets.
  *
  * - Each server gets its URL, and the name of the variable that holds the
  *   session's token, never the token: Codex reads the variable itself when it
@@ -181,6 +143,7 @@ export const buildMcpConfigUnreadWarning = (reason: string): string =>
  * - The tool list feature is set only when the running Codex has it.
  *
  * Exported so the real-binary test starts Codex with exactly this config.
+ * `decideMcpConfig` is what a session start calls.
  */
 export const buildMcpServerConfig = (
   servers: ReadonlyArray<ResolvedMcpServer>,
@@ -199,3 +162,74 @@ export const buildMcpServerConfig = (
         ),
         ...(toolListChanged ? { "features.mcp_tool_list_changed": true } : {}),
       };
+
+/** What `decideMcpConfig` decides for a session start. */
+export interface McpConfigDecision {
+  /** The dotted keys to send with `thread/start`, `thread/resume` and `thread/fork`. Empty for none. */
+  readonly config: Record<string, JsonValue>;
+  /** What to tell the user, to show once the session has started. */
+  readonly warnings: ReadonlyArray<string>;
+}
+
+/**
+ * Decides which of the session's MCP servers the Codex thread gets, and
+ * returns the `config` that gives them and the warnings to show. This is the
+ * one place that decides, so all three ways to open a thread send the same.
+ *
+ * - With no server, makes no request and returns no config.
+ * - Asks Codex for its configuration as seen from `cwd`, and gives a server
+ *   only when no layer of it already sets its name (see `findLayerSettingServer`).
+ *   Each name that is taken gets a warning.
+ * - When the reply cannot be read, the thread gets no server, because Hercule
+ *   cannot tell whether the name is taken, and the warning says why. A reply is
+ *   unread when the request failed, when `layers` is missing or invalid, and
+ *   when a layer has no settings object. Codex then usually refuses to open the
+ *   thread on the same configuration, and that failure reports it.
+ * - A Codex that does not re-read its tool list gets one more warning.
+ *
+ * Never fails. `codexVersion` is what `parseVersion` read from the app-server's
+ * user agent, or `null`.
+ */
+export const decideMcpConfig = (input: {
+  readonly rpc: Rpc;
+  readonly cwd: string | null;
+  readonly servers: ReadonlyArray<ResolvedMcpServer>;
+  readonly approvalMode: McpToolApprovalMode;
+  readonly codexVersion: string | null;
+}): Effect.Effect<McpConfigDecision> => {
+  const unread = (reason: string): McpConfigDecision => ({
+    config: {},
+    warnings: [buildMcpConfigUnreadWarning(reason)],
+  });
+  if (input.servers.length === 0) return Effect.succeed({ config: {}, warnings: [] });
+  return Effect.match(
+    input.rpc.request("config/read", {
+      cwd: input.cwd,
+      includeLayers: true,
+    } satisfies ConfigReadParams),
+    {
+      onFailure: (error) => unread(error.message),
+      onSuccess: (reply): McpConfigDecision => {
+        const decoded = Schema.decodeUnknownOption(ConfigReadReply)(reply);
+        if (Option.isNone(decoded)) return unread("its reply to config/read was not understood");
+        const { layers } = decoded.value;
+        const warnings: Array<string> = [];
+        const free: Array<ResolvedMcpServer> = [];
+        for (const server of input.servers) {
+          const taking = findLayerSettingServer(layers, server.name);
+          if (taking === undefined) free.push(server);
+          else warnings.push(buildMcpNameTakenWarning(server.name, taking));
+        }
+        // Deleted when Hercule's minimum Codex version reaches 0.164.0.
+        const toolListChanged = supportsToolListChanged(input.codexVersion);
+        if (free.length > 0 && !toolListChanged) {
+          warnings.push(buildNoToolListChangedWarning(input.codexVersion));
+        }
+        return {
+          config: buildMcpServerConfig(free, input.approvalMode, toolListChanged),
+          warnings,
+        };
+      },
+    },
+  );
+};
