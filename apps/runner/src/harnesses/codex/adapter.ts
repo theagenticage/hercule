@@ -125,6 +125,7 @@ import {
   buildMcpServerConfig,
   buildNoToolListChangedWarning,
   findConfiguredMcpServers,
+  parseConfigSources,
   supportsToolListChanged,
   type McpToolApprovalMode,
 } from "./mcp";
@@ -166,7 +167,6 @@ import type {
   ThreadResumeParams,
   ThreadStartParams,
   ConfigReadParams,
-  ConfigReadResponse,
   TurnInterruptParams,
   TurnStartParams,
   TurnSteerParams,
@@ -1918,10 +1918,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * into one table (see `findConfiguredMcpServers`). Makes no request when the
    * session has no MCP server.
    *
-   * Never fails. When Codex cannot read its configuration, the thread gets no
-   * server and the warning gives Codex's own message, because Hercule cannot
-   * tell whether the name is taken. Codex then usually refuses to open the
-   * thread on the same configuration, and that failure reports it.
+   * Never fails. When Codex cannot read its configuration, or its reply is not
+   * in the shape expected, the thread gets no server and the warning says why
+   * (Codex's own message when it sent one), because Hercule cannot tell
+   * whether the name is taken. Codex then usually refuses to open the thread
+   * on the same configuration, and that failure reports it.
    */
   const selectMcpServers = (
     host: Host,
@@ -1943,8 +1944,18 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               warnings: [buildMcpConfigUnreadWarning(error.message)],
             }),
             onSuccess: (reply) => {
+              const sources = parseConfigSources(reply);
+              // A reply that cannot be read is treated like a failed request.
+              if (sources === undefined) {
+                return {
+                  servers: [],
+                  warnings: [
+                    buildMcpConfigUnreadWarning("its reply to config/read was not understood"),
+                  ],
+                };
+              }
               const taken = findConfiguredMcpServers(
-                (reply as ConfigReadResponse).origins,
+                sources,
                 ctx.mcpServers.map((server) => server.name),
               );
               return {

@@ -471,6 +471,33 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
       expect(messages[0]).toContain('MCP server named "tools"');
     });
 
+    it("gives the thread no gateway for a project that becomes trusted when the thread opens, and says so", async () => {
+      const { mcp, cwd, startRun } = createFixture();
+      const projectOnly = startFakeMcpServer();
+      onTestFinished(() => projectOnly.stop());
+      // The Harness Home has no trust entry for the folder yet. A writable
+      // sandbox makes `thread/start` trust it and merge this table on that same
+      // call, after the configuration was read, and a project that is not
+      // trusted yet is listed with its settings but none of its effective keys.
+      mkdirSync(join(cwd, ".codex"));
+      writeFileSync(
+        join(cwd, ".codex", "config.toml"),
+        ["[mcp_servers.tools]", `url = "${projectOnly.url}"`, "enabled = false"].join("\n"),
+      );
+      const run = await startRun("auto-accept-edits");
+
+      await run.callTool(SEARCH_ISSUES_TOOL);
+
+      expect(mcp.requests).toEqual([]);
+      expect(mcp.listCalledTools()).toEqual([]);
+      const messages = listRunnerWarnings(run.seen).map((warning) =>
+        warning._tag === "runtime.warning" ? warning.message : "",
+      );
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain(join(cwd, ".codex"));
+      expect(messages[0]).toContain('MCP server named "tools"');
+    });
+
     it("still gives the thread the gateway when the project sets only another server", async () => {
       const { mcp, home, cwd, startRun } = createFixture();
       // Codex connects to this server only when it loads the project's config,

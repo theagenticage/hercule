@@ -7,7 +7,7 @@
  */
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import type { ResolvedMcpServer } from "../index";
-import type { ConfigLayerSource, ConfigReadResponse, JsonValue } from "./types";
+import type { ConfigLayerSource, JsonValue } from "./types";
 
 /**
  * How Codex asks about a call to a tool of an MCP server:
@@ -57,12 +57,60 @@ export interface ConfiguredMcpServer {
   readonly layer: ConfigLayerSource;
 }
 
+/** What Hercule reads of a `config/read` reply: where each setting comes from, and each layer's own settings. */
+export interface ConfigSources {
+  /** The layer that sets each effective key, by dotted key. Only layers that are in force. */
+  readonly origins: ReadonlyArray<{ readonly key: string; readonly layer: ConfigLayerSource }>;
+  /** Every layer Codex found, including a project's that is not trusted (yet), with its settings. */
+  readonly layers: ReadonlyArray<{ readonly layer: ConfigLayerSource; readonly config: unknown }>;
+}
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Checks that a value names a configuration layer with the path Hercule shows for it. */
+const isLayerSource = (value: unknown): value is ConfigLayerSource => {
+  if (!isRecord(value) || typeof value["type"] !== "string") return false;
+  if (value["type"] === "project") return typeof value["dotCodexFolder"] === "string";
+  const needsFile = ["user", "system", "packagedDefaults", "legacyManagedConfigTomlFromFile"];
+  return !needsFile.includes(value["type"]) || typeof value["file"] === "string";
+};
+
+/**
+ * Reads the part of a `config/read` reply that `findConfiguredMcpServers`
+ * uses. Returns `undefined` when the reply does not have the expected shape,
+ * so the caller can treat it like a failed request instead of guessing that
+ * no layer sets a server. `layers` may be `null` in the reply, and is then
+ * empty.
+ */
+export const parseConfigSources = (reply: unknown): ConfigSources | undefined => {
+  if (!isRecord(reply) || !isRecord(reply["origins"])) return undefined;
+  const origins: Array<ConfigSources["origins"][number]> = [];
+  for (const [key, origin] of Object.entries(reply["origins"])) {
+    if (!isRecord(origin) || !isLayerSource(origin["name"])) return undefined;
+    origins.push({ key, layer: origin["name"] });
+  }
+  const rawLayers = reply["layers"] ?? [];
+  if (!Array.isArray(rawLayers)) return undefined;
+  const layers: Array<ConfigSources["layers"][number]> = [];
+  for (const layer of rawLayers as ReadonlyArray<unknown>) {
+    if (!isRecord(layer) || !isLayerSource(layer["name"])) return undefined;
+    layers.push({ layer: layer["name"], config: layer["config"] });
+  }
+  return { origins, layers };
+};
+
 /**
  * Returns the names, of those given, that Codex's own configuration already
- * sets, each with the layer that sets it. `origins` is the `origins` of a
- * `config/read` reply: it lists each setting key with its layer. A name counts
- * as set when any key is `mcp_servers.<name>` or starts with
- * `mcp_servers.<name>.`, in any layer.
+ * sets, each with the layer that sets it. A name counts as set when:
+ *
+ * - a layer's own settings have a `mcp_servers.<name>` table, whatever is in
+ *   it. Every layer found counts, including a project's `.codex/config.toml`
+ *   that is not trusted yet: `thread/start` with a writable sandbox marks the
+ *   project trusted and merges its table on that same call, after the
+ *   configuration was read.
+ * - or the effective `origins` have a key `mcp_servers.<name>` or starting
+ *   with `mcp_servers.<name>.`.
  *
  * Codex merges every layer's table of a server name into one, so a repository
  * that sets any key of the gateway's name changes how the gateway behaves: its
@@ -70,13 +118,18 @@ export interface ConfiguredMcpServer {
  * to clear that key. A name set elsewhere is therefore not given to Codex.
  */
 export const findConfiguredMcpServers = (
-  origins: ConfigReadResponse["origins"],
+  sources: ConfigSources,
   names: ReadonlyArray<string>,
 ): ReadonlyArray<ConfiguredMcpServer> =>
   names.flatMap((name) => {
     const prefix = `mcp_servers.${name}`;
-    const key = Object.keys(origins).find((k) => k === prefix || k.startsWith(`${prefix}.`));
-    const layer = key === undefined ? undefined : origins[key]?.name;
+    const fromLayer = sources.layers.find(({ config }) => {
+      const servers = isRecord(config) ? config["mcp_servers"] : undefined;
+      return isRecord(servers) && Object.hasOwn(servers, name);
+    })?.layer;
+    const layer =
+      fromLayer ??
+      sources.origins.find(({ key }) => key === prefix || key.startsWith(`${prefix}.`))?.layer;
     return layer === undefined ? [] : [{ name, layer }];
   });
 

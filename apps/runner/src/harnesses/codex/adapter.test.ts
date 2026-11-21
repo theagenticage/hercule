@@ -5287,6 +5287,48 @@ describe("the MCP servers a Codex session is given", () => {
       );
     });
 
+    it("gives no gateway keys for a project layer that sets the name, even one that is not trusted yet", async () => {
+      // A project that is not trusted is listed with its settings and a
+      // reason, and none of its keys are in `origins`. The thread's own start
+      // trusts the project and merges its table, so the layer still counts.
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        "config/read": () => ({
+          config: {},
+          origins: {},
+          layers: [
+            {
+              name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
+              version: "sha256:0",
+              config: { mcp_servers: { tools: { enabled: false } } },
+              disabledReason: "this project is not trusted",
+            },
+          ],
+        }),
+      });
+      await waitUntil(
+        "warned about the name",
+        () => filterByTag(run.seen, "runtime.warning").length === 1,
+      );
+
+      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
+      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("/work/repo/.codex");
+    });
+
+    it("treats a reply to config/read that is not in the expected shape like a failed read", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        "config/read": () => ({ config: {}, origins: "nothing" }),
+      });
+      await waitUntil(
+        "warned about the configuration",
+        () => filterByTag(run.seen, "runtime.warning").length === 1,
+      );
+
+      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
+      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("not understood");
+    });
+
     it("never reads the configuration for a session with no MCP server", async () => {
       const run = await startWithServers([]);
 
