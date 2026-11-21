@@ -6,23 +6,29 @@
  * holds, as after a controller restart.
  *
  * Nothing here is billed and no login is used. The CLI starts the way the
- * Claude Code adapter starts it: the same `mcpServers` entry with its header
- * value in the environment, `--strict-mcp-config`, a throwaway config
- * directory and `MCP_DISCOVERY_CACHE=0`, and an environment built from
- * nothing. Its input carries no prompt until a test sends one, so it connects
- * to its MCP servers and calls no model; `mcp_status` asks it what it lists.
- * The one test that needs the CLI to send a `tools/call` sends a prompt to a
- * local stand-in for the Messages API, which answers with that tool call.
+ * Claude Code adapter starts it: the adapter's own `mcpServers` entry
+ * (`buildMcpServerEntries`), the session token in `HERCULE_TOKEN`,
+ * `--strict-mcp-config`, a throwaway config directory and
+ * `MCP_DISCOVERY_CACHE=0`, and an environment built from nothing. Two things
+ * differ from production, each with its reason where it is set: an allow rule
+ * for the gateway's tools and `ENABLE_TOOL_SEARCH=false`. Its input carries no
+ * prompt until a test sends one, so it connects to its MCP servers and calls no
+ * model; `mcp_status` asks it what it lists. The one test that needs the CLI to
+ * send a `tools/call` sends a prompt to a local stand-in for the Messages API,
+ * which answers with that tool call.
  *
  * A recording proxy sits between the CLI and the controller and keeps what the
  * gateway receives: methods, revisions, MCP session ids, and the messages the
- * gateway sends on each stream. Skipped when no `claude` binary is found.
+ * gateway sends on each stream. Skipped when no `claude` binary is found, which
+ * includes CI: no CI job installs one, so this file runs on a developer's
+ * machine only.
  */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Plugin } from "@hercule/plugin-host";
+import { buildMcpServerEntries } from "../../../runner/src/harnesses/claude-code";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { createProfile, spawnThreadUnder } from "../sessions/testing";
 import {
@@ -317,15 +323,9 @@ const withClaude = async (
   const cwd = join(root, "cwd");
   mkdirSync(configDir);
   mkdirSync(cwd);
-  // The adapter's launch: the header value stays in the environment, never in the option.
+  // The adapter's own entry: its header names `${HERCULE_TOKEN}`, and the runner puts the token there.
   const mcpConfig = {
-    mcpServers: {
-      tools: {
-        type: "http",
-        url: `${options.gatewayUrl}/mcp`,
-        headers: { Authorization: "${MCP_HEADER_0_0}" },
-      },
-    },
+    mcpServers: buildMcpServerEntries([{ name: "tools", url: `${options.gatewayUrl}/mcp` }]),
   };
   const child = Bun.spawn(
     [
@@ -339,7 +339,9 @@ const withClaude = async (
       "--strict-mcp-config",
       "--mcp-config",
       JSON.stringify(mcpConfig),
-      // The adapter asks the user through `canUseTool`; nobody is here to answer.
+      // Production differs here on purpose. The adapter asks the user through
+      // `canUseTool`; nobody is here to answer, and without this rule the CLI
+      // refuses the call ("requested permissions ... but you haven't granted it").
       "--allowedTools",
       "mcp__tools",
     ],
@@ -353,8 +355,11 @@ const withClaude = async (
         ANTHROPIC_BASE_URL: options.modelUrl,
         DISABLE_AUTOUPDATER: "1",
         MCP_DISCOVERY_CACHE: "0",
+        HERCULE_TOKEN: options.sessionToken,
+        // Production differs here on purpose. With tool search on, the CLI
+        // sends the gateway's tools only as deferred names, and the stand-in
+        // model, which cannot search, never sees one to call.
         ENABLE_TOOL_SEARCH: "false",
-        MCP_HEADER_0_0: `Bearer ${options.sessionToken}`,
       },
       cwd,
       stdin: "pipe",

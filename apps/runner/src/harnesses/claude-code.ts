@@ -142,6 +142,7 @@ import {
   type Parks,
 } from "./claude-code-parks";
 import { buildQuestionRequest } from "./questions";
+import { SESSION_TOKEN_VARIABLE } from "../credentials/helper";
 import { endSentence, now } from "../report";
 import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
@@ -1020,44 +1021,33 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
   "and `hercule session input` sends a message to one that exists.";
 
 /**
- * Returns the `mcpServers` option for the servers a session may use, and the
- * environment variables that hold their header values.
- *
- * A header value, such as the gateway's `Bearer <Session Token>`, never goes
- * into the option itself. The SDK turns the option into the CLI's
- * `--mcp-config` argument, and with `DEBUG_CLAUDE_AGENT_SDK` set it writes that
- * whole command, and the CLI writes its own copy, to a debug file. So each
- * header is `${MCP_HEADER_<n>_<m>}` in the option and the value is in the
- * environment, where the CLI expands it when it connects.
+ * Returns the `mcpServers` option for the servers a session may use. Each
+ * entry sends the session's token as `Authorization: Bearer ${HERCULE_TOKEN}`.
+ * The token itself is never in the option: the SDK turns the option into the
+ * CLI's `--mcp-config` argument, and with `DEBUG_CLAUDE_AGENT_SDK` set it
+ * writes that whole command, and the CLI writes its own copy, to a debug file.
+ * The CLI expands `${HERCULE_TOKEN}` from its own environment when it connects
+ * (`buildEnv` carries the variable, as the runner sets it for every session).
  *
  * The static `Authorization` header also keeps Claude Code from starting an
  * OAuth sign-in of its own.
+ *
+ * Exported so the controller's real-CLI test starts the CLI with exactly this
+ * entry, instead of a copy of it.
  */
-const buildMcpServerLaunch = (
+export const buildMcpServerEntries = (
   servers: ReadonlyArray<ResolvedMcpServer>,
-): {
-  readonly mcpServerEntries: Record<string, McpHttpServerConfig>;
-  readonly mcpHeaderValues: Record<string, string>;
-} => {
-  const mcpHeaderValues: Record<string, string> = {};
-  const mcpServerEntries = Object.fromEntries(
-    servers.map((server, serverIndex) => [
+): Record<string, McpHttpServerConfig> =>
+  Object.fromEntries(
+    servers.map((server) => [
       server.name,
       {
         type: "http",
         url: server.url,
-        headers: Object.fromEntries(
-          Object.entries(server.headers).map(([header, value], headerIndex) => {
-            const variable = `MCP_HEADER_${serverIndex}_${headerIndex}`;
-            mcpHeaderValues[variable] = value;
-            return [header, `\${${variable}}`];
-          }),
-        ),
+        headers: { Authorization: `Bearer \${${SESSION_TOKEN_VARIABLE}}` },
       } satisfies McpHttpServerConfig,
     ]),
   );
-  return { mcpServerEntries, mcpHeaderValues };
-};
 
 /**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
@@ -1114,7 +1104,6 @@ const buildSessionOptions = (
     spec.coordination,
     spec.memory,
   ]);
-  const { mcpServerEntries, mcpHeaderValues } = buildMcpServerLaunch(ctx.mcpServers);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
@@ -1173,7 +1162,7 @@ const buildSessionOptions = (
       ],
     },
     strictMcpConfig: true,
-    ...(ctx.mcpServers.length === 0 ? {} : { mcpServers: mcpServerEntries }),
+    ...(ctx.mcpServers.length === 0 ? {} : { mcpServers: buildMcpServerEntries(ctx.mcpServers) }),
     includePartialMessages: true,
     // Without this, the SDK sends only a subagent's tool calls and results,
     // and none of its text, so a subagent's transcript would have no words in
@@ -1193,7 +1182,6 @@ const buildSessionOptions = (
     ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
     env: {
       ...buildEnv(ctx),
-      ...mcpHeaderValues,
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       // Claude Code keeps the tool list of an MCP server on disk and can start
       // a session from it. The gateway's list depends on the session's token,

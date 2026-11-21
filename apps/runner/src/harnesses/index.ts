@@ -34,12 +34,15 @@ import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
-/** An MCP server entry the runner has resolved for one session: an absolute URL and the headers to send. */
+/**
+ * An MCP server entry the runner has resolved for one session: an absolute URL.
+ * The harness authenticates with the session's own token, which it finds in the
+ * `HERCULE_TOKEN` variable of `HarnessRunnerContext.env`.
+ */
 export interface ResolvedMcpServer {
   /** The name the harness knows the server by; it prefixes the server's tool names. */
   readonly name: string;
   readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
 }
 
 export interface HarnessRunnerContext {

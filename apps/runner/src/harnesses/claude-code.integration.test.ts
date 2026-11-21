@@ -908,13 +908,20 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
 });
 
 /**
- * Checks that the Session Token reaches the MCP Gateway but no file the SDK
- * writes. With `DEBUG_CLAUDE_AGENT_SDK` set in the runner's environment, the
- * SDK appends the CLI's whole launch command, `--mcp-config` included, to a
- * debug file under the config directory, and the CLI writes the same into its
- * own debug log. A token in the config would stay on disk. The SDK is loaded
- * under a fresh URL, because it decides once per process whether to write a
- * debug file.
+ * Checks that the Session Token reaches the MCP Gateway but no file under the
+ * session's folders. With `DEBUG_CLAUDE_AGENT_SDK` set, the SDK appends the
+ * CLI's whole launch command, `--mcp-config` included, to a debug file under
+ * its config directory, and the CLI is started in debug mode. A token in the
+ * config would stay on disk, so the config names `HERCULE_TOKEN` and the CLI
+ * expands it from its environment. The variable is set in the session's
+ * environment and in the test process, because the SDK decides from its own
+ * process whether to write a debug file; the SDK is loaded under a fresh URL,
+ * because it decides once per process. The scan covers the whole temporary
+ * root: the SDK's config directory, the Harness Home, the scratch directory and
+ * the user's home (where the CLI keeps its MCP logs). The SDK passes the CLI
+ * `--debug-file` for the same file, so the CLI's own debug log is in it. (On
+ * 2.1.329 the CLI shows an `Authorization` header there as `[REDACTED]`, but
+ * its launch arguments are written whole.)
  */
 describe.skipIf(binary === undefined)(
   "the MCP Gateway's token in a real Claude Code session",
@@ -928,8 +935,17 @@ describe.skipIf(binary === undefined)(
         return entry.isDirectory() ? readFilesUnder(path) : [path];
       });
 
+    // The CLI removes some of its own files (a pid file, a lock) while it stops.
+    const readIfStillThere = (file: string): string => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    };
+
     it(
-      "sends the token to the gateway and writes it to no debug file",
+      "sends the token to the gateway and writes it to no file",
       async () => {
         const root = createTemporaryHome();
         const debugConfigDir = join(root, "sdk-config");
@@ -970,21 +986,19 @@ describe.skipIf(binary === undefined)(
         const context: SessionStartContext = {
           cwd: scratch,
           attachmentsDir: null,
-          mcpServers: [
-            {
-              name: "tools",
-              url: `http://127.0.0.1:${gateway.port}/mcp`,
-              headers: { Authorization: `Bearer ${SYNTHETIC_TOKEN}` },
-            },
-          ],
+          mcpServers: [{ name: "tools", url: `http://127.0.0.1:${gateway.port}/mcp` }],
           editMarks: null,
           attachmentUploader: NO_CONTROLLER_UPLOADER,
           home,
           binary: binary!,
+          // The session's own environment, as the runner builds it: it holds the
+          // token, and it turns on the CLI's debug output as well.
           env: {
             PATH: process.env["PATH"] ?? "",
             HOME: join(root, "user"),
             ANTHROPIC_API_KEY: "sk-ant-placeholder",
+            HERCULE_TOKEN: SYNTHETIC_TOKEN,
+            DEBUG_CLAUDE_AGENT_SDK: "1",
           },
           modelArgument: "{model}",
           credentialVariables: [],
@@ -1001,10 +1015,11 @@ describe.skipIf(binary === undefined)(
         }
 
         expect(authorizations[0]).toBe(`Bearer ${SYNTHETIC_TOKEN}`);
-        const debugFiles = readFilesUnder(join(debugConfigDir, "debug"));
-        expect(debugFiles.length).toBeGreaterThan(0);
-        for (const file of debugFiles) {
-          expect(readFileSync(file, "utf8"), file).not.toContain(SYNTHETIC_TOKEN);
+        // The SDK's debug file exists, so the scan is not vacuous.
+        const files = readFilesUnder(root);
+        expect(readFilesUnder(join(debugConfigDir, "debug")).length).toBeGreaterThan(0);
+        for (const file of files) {
+          expect(readIfStillThere(file), file).not.toContain(SYNTHETIC_TOKEN);
         }
       },
       Duration.toMillis(PROBE_DEADLINE) * 2,

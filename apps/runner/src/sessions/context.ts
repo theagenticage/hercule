@@ -162,13 +162,13 @@ const buildEnv = (
 /**
  * Resolves the MCP servers a start frame names into what the harness is
  * given: each `url` becomes an absolute URL on the controller the session's
- * `HERCULE_API_URL` points at, and the session's token becomes an
- * `Authorization: Bearer` header. Returns an empty list for a frame without
+ * `HERCULE_API_URL` points at. Returns an empty list for a frame without
  * `SessionSpec.mcpServers`.
  *
  * An entry whose URL leaves the controller's origin is logged and dropped,
- * never sent: the session's token must reach only the controller that issued
- * it.
+ * never sent: the harness sends the session's token (`HERCULE_TOKEN`) to every
+ * server it is given, and that token must reach only the controller that
+ * issued it.
  */
 const resolveMcpServers = (
   machine: Machine,
@@ -184,11 +184,7 @@ const resolveMcpServers = (
         );
         continue;
       }
-      resolved.push({
-        name: entry.name,
-        url: url.href,
-        headers: { Authorization: `Bearer ${frame.token}` },
-      });
+      resolved.push({ name: entry.name, url: url.href });
     }
     return resolved;
   });

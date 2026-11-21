@@ -241,13 +241,9 @@ describe("the MCP servers a session is given", () => {
     return outcome._tag === "Success" ? outcome.success.ctx.mcpServers : [];
   };
 
-  it("resolves the gateway entry to an absolute URL on the controller and the session's token", () => {
+  it("resolves the gateway entry to an absolute URL on the controller", () => {
     expect(readMcpServers(withEntry(GATEWAY))).toEqual([
-      {
-        name: "tools",
-        url: "https://controller.example:4938/mcp",
-        headers: { Authorization: "Bearer a-session-token" },
-      },
+      { name: "tools", url: "https://controller.example:4938/mcp" },
     ]);
   });
 

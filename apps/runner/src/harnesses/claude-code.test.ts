@@ -926,24 +926,28 @@ describe("a Claude Code session", () => {
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
   });
 
-  it("gives the harness the resolved MCP servers, with the bearer header in the environment and no cached tool list", async () => {
+  it("gives the harness the resolved MCP servers, with a bearer header that names the token variable and no cached tool list", async () => {
     const run = createDriving();
-    const gateway = {
-      name: "tools",
-      url: "https://controller.example:4938/mcp",
-      headers: { Authorization: "Bearer a-session-token" },
-    };
+    const gateway = { name: "tools", url: "https://controller.example:4938/mcp" };
     await Effect.runPromise(
-      run.adapter.startSession(SESSION, SPEC, { ...WORKING, mcpServers: [gateway] }),
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        env: { ...WORKING.env, HERCULE_TOKEN: "a-session-token" },
+        mcpServers: [gateway],
+      }),
     );
 
     const [options] = run.options;
     // The token itself is in the environment only; the SDK writes the option,
-    // but never the environment, to its debug file.
+    // but never the environment, to its debug file. The CLI expands the name.
     expect(options?.mcpServers).toEqual({
-      tools: { type: "http", url: gateway.url, headers: { Authorization: "${MCP_HEADER_0_0}" } },
+      tools: {
+        type: "http",
+        url: gateway.url,
+        headers: { Authorization: "Bearer ${HERCULE_TOKEN}" },
+      },
     });
-    expect(options?.env?.["MCP_HEADER_0_0"]).toBe("Bearer a-session-token");
+    expect(options?.env?.["HERCULE_TOKEN"]).toBe("a-session-token");
     // The session's list depends on its token, so a list cached for an older
     // token must never start a session.
     expect(options?.env?.["MCP_DISCOVERY_CACHE"]).toBe("0");
