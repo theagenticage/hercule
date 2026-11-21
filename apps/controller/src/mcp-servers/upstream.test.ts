@@ -74,6 +74,12 @@ describe("describeClientFailure", () => {
         new McpClientError.LimitError({ description: "MCP message exceeds maxMessageBytes" }),
         "too-large",
       ],
+      [
+        new McpClientError.LimitError({
+          description: "MCP tools discovery exceeded its page limit",
+        }),
+        "too-large",
+      ],
       [new McpClientError.ProtocolError({ description: "a body the server wrote" }), "protocol"],
       [
         new McpClientError.HttpError({ status: 400, description: "a body the server wrote" }),

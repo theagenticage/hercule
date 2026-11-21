@@ -777,7 +777,9 @@ describe("the size of a tool list", () => {
       expect((await requestCheck(controller, serverId)).status).toBe(200);
       const row = await waitForStatus(controller, "error");
 
-      expect(row.status_detail).toBe("The server's tool list has more than 100 pages");
+      expect(row.status_detail).toBe(
+        "The server's tool list has more than 100 pages or 10,000 tools",
+      );
       expect(row.tools).toBe(first.tools);
       expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(100);
     });

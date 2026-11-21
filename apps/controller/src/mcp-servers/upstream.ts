@@ -83,8 +83,12 @@ export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
  */
 export const MAX_TOOL_DEFINITIONS_BYTES = 4 * 1024 * 1024;
 
-/** The most pages of `tools/list` one listing may read. */
-const MAX_TOOL_LIST_PAGES = 100;
+/**
+ * What a check says when the client ends a listing at its own limits: 100
+ * pages, 10,000 tools, or a cursor it was given twice.
+ */
+const TOOL_LIST_OVER_CLIENT_LIMITS =
+  "The server's tool list has more than 100 pages or 10,000 tools";
 
 /** What a check says when a server's tool definitions are over `MAX_TOOL_DEFINITIONS_BYTES`. */
 export const TOOL_LIST_TOO_LARGE = "The server's tool list is larger than 4 MiB";
@@ -116,7 +120,6 @@ export const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
  * while none was.
  */
 interface ToolListing {
-  pages: number;
   bytes: number;
   exceeded: UpstreamError | undefined;
 }
@@ -388,21 +391,18 @@ const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean => {
 
 /**
  * Counts one answer to `tools/list` into `listing`, and returns the client
- * failure that ends the listing when it passed a limit, and `undefined`
- * otherwise. A listing ends as soon as:
+ * failure that ends the listing when the tools read so far pass
+ * `MAX_TOOL_DEFINITIONS_BYTES`, and `undefined` otherwise. Each tool is
+ * measured whole, as the client keeps it in memory, `icons` and `_meta`
+ * included, and not only by the fields that are stored.
  *
- * - the tools read so far pass `MAX_TOOL_DEFINITIONS_BYTES`, so a server that
- *   never stops sending pages cannot make the controller hold them all. Each
- *   tool is measured whole, as the client keeps it in memory, `icons` and
- *   `_meta` included, and not only by the fields that are stored;
- * - the page just read is the last page allowed and the server points at one
- *   more.
- *
- * The client pages a listing by itself, up to 100 pages, and only hands the
- * whole list back at the end. This runs on every answer instead, so the limit
- * applies while the list is read. `listing.exceeded` holds the failure with
- * its fixed message for the caller, because the client fails with its own
- * error type.
+ * The client pages a listing by itself and only hands the whole list back at
+ * the end, so a server that never stops sending pages would make the
+ * controller hold them all. This runs on every answer instead, so the limit
+ * applies while the list is read. The client ends a listing by itself at 100
+ * pages, 10,000 tools or a repeated cursor (see `describeClientFailure`).
+ * `listing.exceeded` holds the failure with its fixed message for the caller,
+ * because the client fails with its own error type.
  */
 const limitToolListing = (
   listing: ToolListing,
@@ -411,22 +411,15 @@ const limitToolListing = (
   const page =
     typeof result === "object" && result !== null ? (result as Record<string, unknown>) : {};
   const tools: ReadonlyArray<unknown> = Array.isArray(page["tools"]) ? page["tools"] : [];
-  listing.pages += 1;
   for (const tool of tools) {
     if (typeof tool !== "object" || tool === null) continue;
     // One byte more for the comma between two tools.
     listing.bytes += new TextEncoder().encode(JSON.stringify(tool)).length + 1;
   }
-  const message =
-    listing.bytes > MAX_TOOL_DEFINITIONS_BYTES
-      ? TOOL_LIST_TOO_LARGE
-      : listing.pages >= MAX_TOOL_LIST_PAGES && typeof page["nextCursor"] === "string"
-        ? `The server's tool list has more than ${String(MAX_TOOL_LIST_PAGES)} pages`
-        : undefined;
-  if (message === undefined) return undefined;
-  listing.exceeded = buildFailure("too-large", { message });
+  if (listing.bytes <= MAX_TOOL_DEFINITIONS_BYTES) return undefined;
+  listing.exceeded = buildFailure("too-large", { message: TOOL_LIST_TOO_LARGE });
   return new McpClientError.McpClientError({
-    reason: new McpClientError.LimitError({ description: message }),
+    reason: new McpClientError.LimitError({ description: TOOL_LIST_TOO_LARGE }),
   });
 };
 
@@ -540,7 +533,11 @@ export const describeClientFailure = (
     case "TimeoutError":
       return buildFailure("timeout");
     case "LimitError":
-      return buildFailure("too-large");
+      // The client has one error for its limit on a message and for its limits
+      // on a listing, and only the description tells them apart.
+      return reason.description.includes("discovery")
+        ? buildFailure("too-large", { message: TOOL_LIST_OVER_CLIENT_LIMITS })
+        : buildFailure("too-large");
     case "ClosedError":
       // An ended MCP session is the server's answer. A closed connection is
       // a broken exchange, which may work next time.
@@ -580,8 +577,8 @@ export interface OpenedUpstream {
    * dispatch to another tool or to none. A tool that no longer decodes as
    * `McpSchema.Tool` after the removal is left out and logged too. The log
    * line names the server and never the tool. Fails with an `UpstreamError`, with
-   * reason `too-large` when the list passed 4 MiB of definitions or 100 pages
-   * (`limitToolListing`).
+   * reason `too-large` when the list passed 4 MiB of definitions, 100 pages or
+   * 10,000 tools (`limitToolListing`, `describeClientFailure`).
    */
   readonly listTools: (
     timeout: Duration.Duration,
@@ -684,7 +681,7 @@ export const openUpstream = (
     const outer = yield* Scope.Scope;
 
     const sentValues = target.sentValues ?? new Set<string>();
-    const listing: ToolListing = { pages: 0, bytes: 0, exceeded: undefined };
+    const listing: ToolListing = { bytes: 0, exceeded: undefined };
     // The state of the requests that belong to no call.
     const sessionState: UpstreamCallState = {
       prepareSend: target.prepareSend,
@@ -961,7 +958,6 @@ export const openUpstream = (
       revision,
       listTools: (timeout) =>
         Effect.gen(function* () {
-          listing.pages = 0;
           listing.bytes = 0;
           listing.exceeded = undefined;
           const tools = yield* mcpClient
