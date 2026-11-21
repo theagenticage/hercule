@@ -134,6 +134,7 @@ import connectionCredentialsGeneration from "./0124-connection-credentials-gener
 import mcpServers from "./0125-mcp-servers";
 import mcpGrants from "./0126-mcp-grants";
 import mcpServerLists from "./0127-mcp-server-lists";
+import sessionMcpGateway from "./0128-session-mcp-gateway";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -262,6 +263,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [125, "mcp-servers", Effect.succeed(mcpServers)],
   [126, "mcp-grants", Effect.succeed(mcpGrants)],
   [127, "mcp-server-lists", Effect.succeed(mcpServerLists)],
+  [128, "session-mcp-gateway", Effect.succeed(sessionMcpGateway)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
