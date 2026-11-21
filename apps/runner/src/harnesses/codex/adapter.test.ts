@@ -4557,10 +4557,10 @@ describe("the images in the result of an MCP tool call", () => {
             content: blocks,
             // Every other copy of the image's bytes is replaced, and the text around it stays.
             structuredContent: {
-              screenshot: "[image not kept]",
-              "[image not kept]": "keyed by the image",
+              screenshot: "[bytes not kept]",
+              "[bytes not kept]": "keyed by the image",
             },
-            _meta: { preview: "data:image/png;base64,[image not kept]" },
+            _meta: { preview: "data:image/png;base64,[bytes not kept]" },
           },
         },
       },
@@ -4594,7 +4594,7 @@ describe("the images in the result of an MCP tool call", () => {
 
     expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
     expect(JSON.stringify(run.seen)).toContain("does not keep");
-    expect(JSON.stringify(run.seen)).toContain("[image not kept]");
+    expect(JSON.stringify(run.seen)).toContain("[bytes not kept]");
   });
 
   it("show the message of a call that failed as the item's content", async () => {

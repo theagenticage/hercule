@@ -767,12 +767,12 @@ const listFrameItems = (frame: NotificationFrame): ReadonlyArray<Record<string, 
  */
 const MCP_IMAGE_NOT_KEPT = "Hercule does not keep the images of a Codex MCP tool's result yet.";
 
-/** What replaces a copy of an MCP image's base64 found outside its image block. */
-const MCP_IMAGE_COPY = "[image not kept]";
+/** What replaces the base64 of an MCP result's audio, embedded resource, or copy of an image. */
+const MCP_BYTES_NOT_KEPT = "[bytes not kept]";
 
 /**
  * Returns `value` with every exact copy of the base64 strings in `copies`
- * replaced by `MCP_IMAGE_COPY`, at any depth. A string that holds a copy, such
+ * replaced by `MCP_BYTES_NOT_KEPT`, at any depth. A string that holds a copy, such
  * as a data URL, keeps its other text. `copies` lists longer strings first, so
  * a copy that is part of a longer one cannot break the longer one up. Object
  * keys are scrubbed like strings. When two keys become the same text, the
@@ -780,7 +780,7 @@ const MCP_IMAGE_COPY = "[image not kept]";
  */
 const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknown => {
   if (typeof value === "string") {
-    return copies.reduce((text, copy) => text.replaceAll(copy, MCP_IMAGE_COPY), value);
+    return copies.reduce((text, copy) => text.replaceAll(copy, MCP_BYTES_NOT_KEPT), value);
   }
   if (Array.isArray(value)) return value.map((item) => scrubImageCopies(item, copies));
   if (typeof value === "object" && value !== null) {
@@ -830,10 +830,10 @@ const stripImageBytes = (frame: NotificationFrame): void => {
         content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
       } else if (media?.type === "audio" && typeof media.data === "string") {
         if (media.data !== "") copies.add(media.data);
-        media.data = MCP_IMAGE_COPY;
+        media.data = MCP_BYTES_NOT_KEPT;
       } else if (media?.type === "resource" && typeof media.resource?.blob === "string") {
         if (media.resource.blob !== "") copies.add(media.resource.blob);
-        media.resource.blob = MCP_IMAGE_COPY;
+        media.resource.blob = MCP_BYTES_NOT_KEPT;
       }
     }
     if (copies.size === 0) continue;
