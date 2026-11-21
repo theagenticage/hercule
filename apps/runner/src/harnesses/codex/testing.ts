@@ -11,7 +11,7 @@
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
-import type { HarnessRunnerContext } from "../index";
+import type { SessionStartContext } from "../index";
 import {
   CWD,
   createLines,
@@ -35,9 +35,10 @@ export {
 
 export const createCodexHome = (): string => createScratchHome("codex");
 
-export const buildContext = (home: string, cwd: string | null = null): HarnessRunnerContext => ({
+export const buildContext = (home: string, cwd: string | null = null): SessionStartContext => ({
   cwd,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
@@ -312,7 +313,7 @@ export const createDriving = (
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof makeCodexAdapter>;
-  readonly ctx: HarnessRunnerContext;
+  readonly ctx: SessionStartContext;
   readonly spawns: Array<Spawn>;
   readonly requests: Array<Sent>;
   readonly answered: Array<Answered>;

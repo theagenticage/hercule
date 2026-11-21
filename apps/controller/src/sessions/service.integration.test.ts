@@ -20,6 +20,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   HarnessNotInstalled,
+  MAX_MESSAGE_LENGTH,
   MCP_SERVERS_CAPABILITY,
   SessionSpec,
   SteerRefused,
@@ -1428,6 +1429,140 @@ describe("the MCP servers of a session at a start", () => {
 
     expect(warnings).toEqual([]);
   });
+
+  /** The entry a start gives the harness for the MCP Gateway. */
+  const GATEWAY_ENTRY = { name: "tools", type: "http", url: "/mcp", bearer: "session-token" };
+
+  /** Reads the spec the session's row stores, as written. */
+  const readStoredSpec = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly spec: string }>`
+        SELECT spec FROM sessions WHERE id = ${uuidFromString(sessionId)}`;
+      return JSON.parse(rows[0]!.spec) as Record<string, unknown>;
+    });
+
+  it("puts the gateway entry on the frame of a start and of the next one, only for a runner and a harness that can take it, and never stores it", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        yield* bootMcpHarnesses;
+        const profile = yield* aProfileWith([]);
+        const queue = (runnerId: string, harnessId: string) =>
+          insertQueuedSessionWithServers(runnerId, {
+            harnessId,
+            permissionProfileId: profile,
+            servers: [],
+          });
+        const capable = mintId();
+        const oldRunner = mintId();
+        const bareRunner = mintId();
+        // The list is empty in each of them: the entry does not depend on it.
+        const native = yield* queue(capable, NATIVE_MCP_HARNESS_ID);
+        yield* queue(oldRunner, NATIVE_MCP_HARNESS_ID);
+        yield* queue(bareRunner, BARE_MCP_HARNESS_ID);
+
+        const [first] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+        const [tooOld] = yield* claimStarting(oldRunner, 1);
+        const [bare] = yield* claimStarting(bareRunner, 1, undefined, undefined, withMcp);
+        // A start sent again, which is how a resume reaches the claim.
+        yield* withTransaction(sql, sessions.requeue(first!));
+        const [again] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+
+        return {
+          first: first!.frame.spec,
+          tooOld: tooOld!.frame.spec,
+          bare: bare!.frame.spec,
+          again: again!.frame.spec,
+          stored: yield* readStoredSpec(native),
+        };
+      }),
+    );
+
+    expect(result.first.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.again.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.tooOld.mcpServers).toBeUndefined();
+    expect(result.bare.mcpServers).toBeUndefined();
+    expect(result.stored).not.toHaveProperty("mcpServers");
+  });
+});
+
+describe("MCP servers added to a running session", () => {
+  /** Inserts a runner row, which the warning reads the capabilities of. */
+  const insertRunnerWithCapabilities = (capabilities: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runnerId = mintId();
+      yield* withTransaction(
+        sql,
+        sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, negotiated_capabilities, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  ${`hash-${runnerId}`}, ${JSON.stringify(capabilities)}, ${at}, ${at})`,
+      );
+      return runnerId;
+    });
+
+  /** Starts an idle session with an empty list, adds a server to it, and returns the warnings it wrote. */
+  const addServerToRunningSession = (
+    name: string,
+    harnessId: string,
+    capabilities: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const rows = yield* sessionRepository;
+      const runnerId = yield* insertRunnerWithCapabilities(capabilities);
+      const [sentry] = yield* insertMcpServers([{ name, status: "ready" }]);
+      const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+        harnessId,
+        permissionProfileId: yield* aProfileWith(["mcp.use"]),
+        servers: [],
+      });
+      yield* claimStarting(runnerId, 1, undefined, undefined, capabilities);
+      yield* withTransaction(sql, rows.moved(sessionId, "idle", at));
+      yield* withTransaction(
+        sql,
+        Effect.provideService(sessions.setMcpServers(sessionId, [sentry!]), CurrentActor, USER),
+      );
+      return { sentry: sentry!, warnings: yield* readRuntimeWarnings(sessionId) };
+    });
+
+  it("warns once, naming the server and why, when the runner is too old or the harness cannot take MCP servers", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        return {
+          tooOld: yield* addServerToRunningSession("old", NATIVE_MCP_HARNESS_ID, []),
+          bare: yield* addServerToRunningSession("bare", BARE_MCP_HARNESS_ID, [
+            MCP_SERVERS_CAPABILITY,
+          ]),
+          fine: yield* addServerToRunningSession("fine", NATIVE_MCP_HARNESS_ID, [
+            MCP_SERVERS_CAPABILITY,
+          ]),
+        };
+      }),
+    );
+
+    expect(result.tooOld.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: old (its runner is too old to reach MCP servers)",
+        mcpServers: [{ mcpServerId: result.tooOld.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.bare.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: bare (its harness cannot be given MCP servers)",
+        mcpServers: [{ mcpServerId: result.bare.sentry, reason: "harness-unsupported" }],
+      }),
+    ]);
+    expect(result.fine.warnings).toEqual([]);
+  });
 });
 
 describe("SessionService.inputFrame", () => {
@@ -2448,6 +2583,111 @@ describe("a runner's runtime warning", () => {
 
     expect(warnings).toEqual([expect.objectContaining({ message: "the harness retried" })]);
     expect(warnings[0]).not.toHaveProperty("mcpServers");
+  });
+});
+
+describe("a warning the controller writes while a turn runs", () => {
+  /** Returns the stored rows of the session's stream, in position order, as tag, text and sequence. */
+  const readRows = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly event: string; readonly runner_seq: number }>`
+        SELECT event, runner_seq FROM session_stream
+        WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`;
+      return rows.map((row) => {
+        const event = JSON.parse(row.event) as { _tag: string; delta?: string };
+        return { tag: event._tag, delta: event.delta, seq: row.runner_seq };
+      });
+    });
+
+  const buildEvent = (sessionId: string, event: object) =>
+    ({ eventId: crypto.randomUUID(), sessionId, at, ...event }) as HarnessEvent;
+
+  it("keeps the text held for the open item of the runner", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const report = (seq: number, event: object) =>
+          Effect.gen(function* () {
+            const harnessEvent = buildEvent(sessionId, event);
+            const folded = yield* sessions.foldReport(runnerId, seq, harnessEvent);
+            yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
+          });
+        const delta = (text: string) => ({
+          _tag: "content.delta",
+          turnId: "t1",
+          itemId: "i1",
+          streamKind: "assistant_text",
+          delta: text,
+        });
+
+        yield* report(1, delta("Hel"));
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* report(2, delta("lo"));
+        yield* report(3, {
+          _tag: "item.completed",
+          turnId: "t1",
+          itemId: "i1",
+          kind: "assistant_message",
+          status: "completed",
+        });
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag)).toEqual([
+      "runtime.warning",
+      "content.delta",
+      "item.completed",
+    ]);
+    expect(rows[1]?.delta).toBe("Hello");
+  });
+
+  it("cuts a warning to the protocol's message bound, never inside a character", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        // An emoji is two UTF-16 units, so the cut falls inside one.
+        yield* sessions.writeRuntimeWarning(sessionId, "😀".repeat(MAX_MESSAGE_LENGTH));
+        yield* sessions.writeRuntimeWarning(sessionId, "short");
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    const [cut, short] = warnings.map((warning) => warning.message);
+    expect(cut!.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+    // `encodeURIComponent` throws on a lone surrogate.
+    expect(() => encodeURIComponent(cut!)).not.toThrow();
+    expect(cut!.endsWith("…")).toBe(true);
+    expect(short).toBe("short");
+  });
+
+  it("does not take the sequence number of a report that is folded but not yet written", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const started = buildEvent(sessionId, {
+          _tag: "turn.started",
+          turnId: "t1",
+        });
+
+        const folded = yield* sessions.foldReport(runnerId, 1, started);
+        // The report waits for the database's one writer while a refused call is written.
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* withTransaction(sql, sessions.applyReport(runnerId, started, folded!));
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag).toSorted()).toEqual(["runtime.warning", "turn.started"]);
   });
 });
 

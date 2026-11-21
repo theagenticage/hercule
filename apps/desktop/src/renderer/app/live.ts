@@ -116,7 +116,7 @@ const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
  * read that is already running, because that read may have been answered
  * before the change the push reports.
  */
-const SHARED_READ_WINDOW_MS = 50;
+export const SHARED_READ_WINDOW_MS = 50;
 
 /**
  * What the pushes of one window changed for the Inbox:

@@ -132,14 +132,40 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
+ * The name of the MCP Gateway's entry in `SessionSpec.mcpServers`. A harness
+ * puts it in front of every tool name, so the model sees
+ * `mcp__tools__<server>__<tool>`, and the controller and the runner's adapters
+ * must spell it the same way.
+ */
+export const MCP_GATEWAY_ENTRY_NAME = "tools";
+
+/**
+ * The gateway's entry in `SessionSpec.mcpServers` (spec 06 section 4): the one
+ * MCP server the harness is given, the MCP Gateway in the controller. It holds
+ * a path and a word, never an address or a token: the runner binds `url`
+ * against the controller it is connected to, and `bearer` to the session's own
+ * token, at each start.
+ */
+export const HarnessMcpServer = Schema.Struct({
+  /** The name in front of every tool the model sees: `mcp__tools__<server>__<tool>`. */
+  name: Schema.Literal(MCP_GATEWAY_ENTRY_NAME),
+  type: Schema.Literal("http"),
+  /** A path on the controller, such as `/mcp`, resolved by the runner to an absolute URL. */
+  url: Fact,
+  /** Send the session's own token as `Authorization: Bearer <token>`. */
+  bearer: Schema.Literal("session-token"),
+});
+
+export type HarnessMcpServer = Schema.Schema.Type<typeof HarnessMcpServer>;
+
+/**
  * What the controller sends for one session: ids, never paths. A workspace's
  * path on disk belongs to the runner, and the controller never stores it. The
  * runner resolves the spec to a `HarnessRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, apart from `coordination`,
  * which is never stored. A field is added here only when something sends it.
- * `mcpServers`, the one field of spec 06 section 4 that is not here yet,
- * arrives with the feature that needs it.
+ * `mcpServers` is not stored either: it is added to the frame at each start.
  */
 export const SessionSpec = Schema.Struct({
   providerAccountId: ProviderAccountId,
@@ -172,6 +198,15 @@ export const SessionSpec = Schema.Struct({
    * runner that does not know this field ignores it.
    */
   coordination: Schema.optionalKey(Schema.String),
+  /**
+   * The one entry that points the harness at the MCP Gateway (spec 21 section
+   * 4.4). The controller adds it to the frame at each start, a resume
+   * included, and only for a runner that negotiated `MCP_SERVERS_CAPABILITY`
+   * and a harness that declares `mcpPassthrough: "native"`. It is never
+   * stored, so the stored spec has none. A runner that does not know this
+   * field ignores it.
+   */
+  mcpServers: Schema.optionalKey(Schema.Array(HarnessMcpServer)),
   /**
    * `false` turns off the harness's own automatic compaction. An assistant's
    * session sets it, because the controller rotates that session to a fresh

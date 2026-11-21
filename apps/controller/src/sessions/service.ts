@@ -38,6 +38,7 @@ import {
   type ModelDeclaration,
   type HarnessEvent,
   type McpServerLeftOutReason,
+  type McpServerWarningReason,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -48,8 +49,11 @@ import {
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  MAX_MESSAGE_LENGTH,
+  MCP_GATEWAY_ENTRY_NAME,
   MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
+  type HarnessMcpServer,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -104,6 +108,7 @@ import {
   decideLeftOutReason,
   mcpServerCatalogue,
   type LeftOutServer,
+  type StartDelivery,
 } from "../mcp-servers";
 import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
@@ -129,7 +134,7 @@ import {
   permissionRequestRepository,
   SessionTokens,
 } from "../permissions";
-import type { SendOutcome } from "../runners";
+import { runnerRepository, type SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
 import { TaskService } from "../tasks";
@@ -182,6 +187,7 @@ import {
 } from "./stream";
 import { subagentRepository } from "./subagent-repository";
 import { sessionTaint } from "../taint";
+import { cutText } from "../text";
 import {
   collectSubagentTree,
   computeSubagentsAfter,
@@ -375,6 +381,21 @@ export interface StartRequest {
   /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
   readonly input: StoredInput;
 }
+
+/** The two facts of a start that decide whether the harness can be given the MCP Gateway's entry. */
+type GatewayDelivery = Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">;
+
+/**
+ * The one entry a start gives the harness: the MCP Gateway, which the runner
+ * resolves against the controller's address and the session's token
+ * (`SessionSpec.mcpServers`, spec 06 section 4).
+ */
+const MCP_GATEWAY_ENTRY: HarnessMcpServer = {
+  name: MCP_GATEWAY_ENTRY_NAME,
+  type: "http",
+  url: "/mcp",
+  bearer: "session-token",
+};
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
@@ -935,6 +956,7 @@ const make = Effect.gen(function* () {
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
   const catalogue = yield* mcpServerCatalogue;
+  const runners = yield* runnerRepository;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
@@ -1036,56 +1058,74 @@ const make = Effect.gen(function* () {
 
   /**
    * Writes a `runtime.warning` event stamped `at` to the session's stream, in the caller's
-   * transaction, and announces the session's transcript. The write moves the
-   * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
-   * cached ingest state is dropped once the transaction commits, and ingest
-   * reads the new offset. `mcpServers` is given when the warning is about
-   * MCP Servers.
+   * transaction, and announces the session's transcript. The row takes a
+   * sequence number of its own (`sessions.appendRuntimeWarning`), so it is safe
+   * while a runner's turn runs: it moves neither the runner's sequence nor the
+   * text held for the session's open items. `mcpServers` is given when the
+   * warning is about MCP Servers.
    */
   const appendRuntimeWarning = (
     sessionId: string,
     message: string,
     at: string,
-    mcpServersLeftOut?: ReadonlyArray<Pick<LeftOutServer, "mcpServerId" | "reason">>,
+    mcpServersWarned?: ReadonlyArray<{
+      readonly mcpServerId: string;
+      readonly reason: McpServerWarningReason;
+    }>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersLeftOut);
-      yield* afterCommit(() => {
-        tracking.delete(sessionId);
-      });
+      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
       yield* announce({ _tag: "transcript", sessionId });
     });
 
   /**
-   * Records which MCP Servers of the session's list can be called at this
-   * start, and why each other one cannot (`decideLeftOutReason`), and writes
-   * one `runtime.warning` naming the servers left out. Does nothing for a
-   * session whose list is empty. Joins the caller's transaction, and the
-   * caller announces the session. It reads the harness, the profile grants and
-   * the servers' status from the database, never from outside. A server's
-   * status is judged against its Connection and plugin as they are now, so a
-   * change the follower has not yet written is not missed.
+   * Reads the two facts that decide whether a start can give the harness the
+   * MCP Gateway's entry: whether the runner negotiated
+   * `MCP_SERVERS_CAPABILITY`, and whether the harness declares
+   * `mcpPassthrough: "native"`. The entry on the start frame and the servers
+   * a start leaves out (`recordMcpServersLeftOut`) both follow from these
+   * two, so they are read once per start and used for both.
    */
-  const recordMcpServersLeftOut = (
-    sessionId: string,
+  const readMcpGatewayDelivery = (
     harnessId: string,
     runner: StartNeeds["runner"],
-    at: string,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<GatewayDelivery> =>
     Effect.gen(function* () {
-      const listedIds = yield* sessions.readMcpServerIds(sessionId);
-      if (listedIds.length === 0) return;
       const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
-      const delivery = {
+      return {
         runnerReachesMcpServers: (runner.negotiatedCapabilities ?? []).includes(
           MCP_SERVERS_CAPABILITY,
         ),
         // A harness this build no longer carries cannot be given the entry.
         harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
+      };
+    });
+
+  /**
+   * Records which MCP Servers of the session's list can be called at this
+   * start, and why each other one cannot (`decideLeftOutReason`), and writes
+   * one `runtime.warning` naming the servers left out. `gateway` is what
+   * `readMcpGatewayDelivery` returned for this start. Does nothing for a
+   * session whose list is empty. Joins the caller's transaction, and the
+   * caller announces the session. It reads the profile grants and the
+   * servers' status from the database, never from outside. A server's status
+   * is judged against its Connection and plugin as they are now, so a change
+   * the follower has not yet written is not missed.
+   */
+  const recordMcpServersLeftOut = (
+    sessionId: string,
+    gateway: GatewayDelivery,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const listedIds = yield* sessions.readMcpServerIds(sessionId);
+      if (listedIds.length === 0) return;
+      const delivery: StartDelivery = {
+        ...gateway,
         profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
           "mcp.use",
         ),
-      } as const;
+      };
       const views = yield* catalogue.readViews(listedIds, "without-tools");
       const reasons = new Map<string, McpServerLeftOutReason>();
       const leftOut: Array<LeftOutServer> = [];
@@ -1106,6 +1146,41 @@ const make = Effect.gen(function* () {
       if (leftOut.length === 0) return;
       const warning = buildLeftOutWarning(leftOut);
       yield* appendRuntimeWarning(sessionId, warning.message, at, warning.mcpServers);
+    });
+
+  /**
+   * Writes one `runtime.warning` for the MCP Servers that were just added to
+   * the list of a session that is running, when the session was started with
+   * no gateway: its runner is too old for MCP servers, or its harness cannot
+   * be given any. Nothing reaches such a session before its next start, so
+   * the warning names each added server with the reason, as a start does for
+   * the servers it leaves out. Writes nothing when the session has a gateway.
+   * Joins the caller's transaction.
+   */
+  const warnWhenAddedServersAreUnreachable = (
+    session: StoredSession,
+    addedIds: ReadonlyArray<string>,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const runner = Option.getOrThrow(yield* runners.read(session.runnerId));
+      const gateway = yield* readMcpGatewayDelivery(session.harnessId, runner);
+      const reason: McpServerLeftOutReason | undefined = !gateway.runnerReachesMcpServers
+        ? "runner-too-old"
+        : gateway.harnessPassthrough === "unsupported"
+          ? "harness-unsupported"
+          : undefined;
+      if (reason === undefined) return;
+      const views = yield* catalogue.readViews(addedIds, "without-tools");
+      const unreachable: Array<LeftOutServer> = [];
+      for (const mcpServerId of addedIds) {
+        const view = views.get(mcpServerId);
+        // The caller checked the list, so every added id is a server.
+        if (view === undefined) return yield* Effect.die(`MCP server ${mcpServerId} is missing`);
+        unreachable.push({ mcpServerId, name: view.server.name, reason });
+      }
+      const warning = buildLeftOutWarning(unreachable);
+      yield* appendRuntimeWarning(session.id, warning.message, at, warning.mcpServers);
     });
 
   /**
@@ -2843,7 +2918,8 @@ const make = Effect.gen(function* () {
             }
             // Decided at every start, like the skills, so a resume records the
             // servers again.
-            yield* recordMcpServersLeftOut(row.id, row.harnessId, needs.runner, at);
+            const gateway = yield* readMcpGatewayDelivery(row.harnessId, needs.runner);
+            yield* recordMcpServersLeftOut(row.id, gateway, at);
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
             if (!modelDeclarationsByPair.has(pair)) {
@@ -2872,7 +2948,18 @@ const make = Effect.gen(function* () {
                 input: buildTurnInput(row, input),
                 harnessId: row.harnessId,
                 harnessAccount,
-                spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
+                // The coordination paragraph and the gateway entry are added
+                // to the frame only, never to the stored spec. The entry goes
+                // to every session whose runner and harness can take it, also
+                // one with an empty list, so a server added later works
+                // without a restart (spec 21 section 4.4).
+                spec: {
+                  ...spec.value,
+                  ...(coordination === undefined ? {} : { coordination }),
+                  ...(gateway.runnerReachesMcpServers && gateway.harnessPassthrough === "native"
+                    ? { mcpServers: [MCP_GATEWAY_ENTRY] }
+                    : {}),
+                },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
                 ...(gitIdentity === undefined ? {} : { gitIdentity }),
@@ -3243,6 +3330,10 @@ const make = Effect.gen(function* () {
      * removed. A list the session had, in another order, is not a change of
      * what the session can reach, so it writes no entry. The session is
      * announced either way, by the entry's record or directly.
+     *
+     * When servers are added to a running session that has no gateway (its
+     * runner is too old or its harness cannot take MCP servers), it also
+     * writes one `runtime.warning` that names them and why they do not work.
      */
     setMcpServers: (
       sessionId: string,
@@ -3257,14 +3348,61 @@ const make = Effect.gen(function* () {
         if (added.length === 0 && removed.length === 0) {
           return yield* announceSessionChange(session);
         }
+        const at = yield* nowIso;
         yield* audit.append({
           kind: "session.mcpServersChanged",
           actor: yield* currentStamp,
           record: { topic: "session", id: sessionId, conversationId: session.conversationId },
           payload: { sessionId, added, removed },
-          at: yield* nowIso,
+          at,
         });
+        // A queued session is judged when it is claimed, and an
+        // exited one at its resume.
+        if (
+          added.length > 0 &&
+          (session.status === "starting" || session.status === "idle" || session.status === "busy")
+        ) {
+          yield* warnWhenAddedServersAreUnreachable(session, added, at);
+        }
       }),
+
+    /**
+     * Returns the id of the session's own open turn: the turn of its newest
+     * `turn.started` row when no `turn.completed` comes after it. Returns
+     * `undefined` between turns. A subagent's turn is never meant.
+     */
+    readOpenTurnId: (sessionId: string): Effect.Effect<string | undefined, SqlError> =>
+      readOpenTurnId(sql, sessionId, undefined),
+
+    /**
+     * Writes a `runtime.warning` to the session's stream at the current time,
+     * in a transaction of its own, and announces the session's transcript.
+     * `mcpServers` is given when the warning is about MCP Servers, so a client
+     * can draw a button for each. For a write made by the controller itself
+     * while a request runs, such as the MCP Gateway's refused call. The
+     * message is cut to `MAX_MESSAGE_LENGTH`, because a caller composes it
+     * from names it does not control, and a longer one cannot be sent to
+     * clients.
+     */
+    writeRuntimeWarning: (
+      sessionId: string,
+      message: string,
+      mcpServersRefused?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerWarningReason;
+      }>,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) =>
+          appendRuntimeWarning(
+            sessionId,
+            cutText(message, MAX_MESSAGE_LENGTH),
+            at,
+            mcpServersRefused,
+          ),
+        ),
+      ),
 
     /**
      * Stores what the title generation answered for a Thread's first message:

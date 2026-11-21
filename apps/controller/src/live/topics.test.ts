@@ -245,6 +245,33 @@ describe("the pace of a change to a workflow", () => {
   });
 });
 
+describe("the messages of one window", () => {
+  it("are one per kind, and name each id once, however often it changed", async () => {
+    const messages = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        yield* topics.publish([
+          { _tag: "record", topic: "task", id: "t1", kind: "created" },
+          { _tag: "record", topic: "task", id: "t2", kind: "created" },
+        ]);
+        yield* topics.publish([
+          { _tag: "record", topic: "task", id: "t3", kind: "created" },
+          { _tag: "record", topic: "task", id: "t2", kind: "created" },
+          { _tag: "record", topic: "task", id: "t1", kind: "deleted" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        return yield* Queue.clear(queue);
+      }),
+    );
+
+    expect(messages).toEqual([
+      { _tag: "invalidate", ids: ["t1", "t2", "t3"], kind: "created" },
+      { _tag: "invalidate", ids: ["t1"], kind: "deleted" },
+    ]);
+  });
+});
+
 describe("the conversation of a session change", () => {
   it("is sent with each session id, through a batch of several changes, and only on the session topic", async () => {
     const [sessionMessages, taskMessages] = await run(

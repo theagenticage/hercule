@@ -547,7 +547,7 @@ describe("what a task subscription receives", () => {
     });
   });
 
-  it("coalesces a burst into one message per kind, naming each id once", async () => {
+  it("names every created and deleted task of a burst, and no message names an id twice", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -568,26 +568,30 @@ describe("what a task subscription receives", () => {
           const doomed = expectPresent(created[0]);
           yield* Effect.promise(() => deleteTask(base, token, doomed.id));
 
-          // Two messages and no more: the window holds three creates and a
-          // delete, and each kind is sent once.
+          // How many messages carry the ids depends on how many of the four
+          // commits land inside one 50 ms window, which a loaded machine does
+          // not keep. So wait for the ids, not for a message count. How a
+          // window groups changes is checked on a test clock in `topics.test.ts`.
+          const namedIds = (kind: "created" | "deleted"): ReadonlyArray<string> =>
+            tasks.received.flatMap((message) =>
+              message._tag === "invalidate" && message.kind === kind ? message.ids : [],
+            );
           expect(
-            yield* Effect.promise(() => waitWithin(1000, () => tasks.received.length >= 2)),
+            yield* Effect.promise(() =>
+              waitWithin(
+                2000,
+                () =>
+                  namedIds("created").length >= created.length && namedIds("deleted").length >= 1,
+              ),
+            ),
           ).toBe(true);
-          yield* Effect.promise(() => waitWithin(200, () => tasks.received.length >= 3));
-          expect(tasks.received).toHaveLength(2);
+          // Let any further message arrive, so a repeated id would show.
+          yield* Effect.promise(() => waitForLiveToSettle());
 
-          const creates = tasks.received.filter(
-            (message) => message._tag === "invalidate" && message.kind === "created",
+          expect([...namedIds("created")].sort()).toEqual(
+            [...created.map((task) => task.id)].sort(),
           );
-          const deletes = tasks.received.filter(
-            (message) => message._tag === "invalidate" && message.kind === "deleted",
-          );
-          expect(creates).toHaveLength(1);
-          expect(deletes).toHaveLength(1);
-
-          const createdIds = (creates[0] as { ids: ReadonlyArray<string> }).ids;
-          expect([...createdIds].sort()).toEqual([...created.map((task) => task.id)].sort());
-          expect((deletes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([doomed.id]);
+          expect(namedIds("deleted")).toEqual([doomed.id]);
 
           // No message repeats an id, whatever the window collected.
           for (const message of tasks.received) {

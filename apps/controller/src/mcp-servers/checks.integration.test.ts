@@ -16,7 +16,8 @@
  * - no answer makes the server `unreachable`, and the scheduler follows the
  *   backoff, which Check now ends;
  * - a redirect is not followed, and a URL off the plugin's origin is refused
- *   without any request;
+ *   without any request; a credential a server echoes in a tool definition is
+ *   removed before it is stored;
  * - the revision whose handshake worked is stored even when the listing then
  *   fails, and the retry after a refresh starts with it;
  * - a result is dropped when the server, its Connection or its plugin changed
@@ -29,10 +30,10 @@
  * - a request that comes during a check makes it run once more.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect } from "effect";
+import { Effect } from "effect";
 import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
-import { createDeviceProvider, buildJsonResponse, readConnection } from "../connections/testing";
+import { buildJsonResponse, readConnection } from "../connections/testing";
 import {
   collectPushes,
   fetchTicket,
@@ -41,8 +42,7 @@ import {
   waitForLiveToSettle,
   waitWithin,
 } from "../http/testing";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
+import type { SetUpController } from "../workflows/testing";
 import {
   countNotifications,
   createServer,
@@ -50,90 +50,21 @@ import {
   insertOauthConnection,
   readRow,
   readServer,
+  refreshedToken,
   requestCheck,
   requestUpdate,
+  readRunningWork,
   runSql,
   startFakeUpstream,
+  storeOauthTokens,
   waitForResult,
-  type FakeUpstream,
-  type FakeUpstreamSettings,
+  withRig,
   type McpServerRow,
 } from "./testing";
 
 const MINUTE = 60 * 1000;
 
 const LONG_AGO = "2020-01-01T00:00:00.000Z";
-
-interface RigOptions {
-  readonly fake?: Partial<FakeUpstreamSettings>;
-  readonly oauth?: boolean;
-  readonly buildUpstreamRequest?: (credentials: Record<string, string>) => {
-    readonly url: string;
-    readonly headers: Record<string, string>;
-  };
-  /** How often, in milliseconds, the scheduler looks for checks that are due. Without it, it looks once a minute. */
-  readonly checkInterval?: number;
-}
-
-/** What `withRig` hands the test. */
-interface Rig {
-  readonly controller: SetUpController;
-  readonly fake: FakeUpstream;
-  readonly provider: ReturnType<typeof createDeviceProvider>;
-  /** Makes a Connection of the plugin's type: pasted `t0ken`, or OAuth tokens `stored-token`. */
-  readonly connect: () => Promise<string>;
-}
-
-/**
- * Starts the fake outside server, and a controller with a plugin that offers
- * it. With `oauth`, the Connection holds OAuth tokens and the refresh goes to
- * a fake provider.
- */
-const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOptions = {}) => {
-  const fake = await startFakeUpstream(options.fake);
-  const provider = createDeviceProvider();
-  const { buildUpstreamRequest } = options;
-  try {
-    await withSetUpController(
-      async (controller) => {
-        const connect = () =>
-          options.oauth === true
-            ? insertOauthConnection(controller.harness, {
-                accessToken: "stored-token",
-                refreshToken: "refresh-1",
-              })
-            : createConnection(controller.base, controller.token, "acme/desk", { token: "t0ken" });
-        await body({ controller, fake, provider, connect });
-      },
-      [
-        buildMcpServerPlugin("acme", {
-          server:
-            buildUpstreamRequest === undefined
-              ? buildDeskMcpServer("acme", fake)
-              : {
-                  ...buildDeskMcpServer("acme", fake),
-                  buildUpstreamRequest: ({ credentials }) => buildUpstreamRequest(credentials),
-                },
-          ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
-        }),
-      ],
-      options.checkInterval === undefined
-        ? {}
-        : { mcpServerCheckInterval: Duration.millis(options.checkInterval) },
-    );
-  } finally {
-    await fake.stop();
-    await provider.stop();
-  }
-};
-
-const refreshedToken = () =>
-  buildJsonResponse({
-    access_token: "refreshed-token",
-    refresh_token: "refresh-2",
-    token_type: "bearer",
-    expires_in: 8 * 60 * 60,
-  });
 
 /** Returns how many minutes from now the server's next check is planned, rounded. */
 const readMinutesToNextCheck = (row: McpServerRow): number =>
@@ -589,6 +520,32 @@ describe("what a check never does", () => {
     }
   });
 
+  it("stores no credential the server echoes in a tool definition, and leaves out a tool whose name holds one", async () => {
+    await withRig(
+      async ({ controller, connect }) => {
+        await createServer(controller, { connectionId: await connect() });
+
+        const row = await waitForResult(controller);
+
+        expect(row.status).toBe("ready");
+        expect(row.tools).not.toContain("t0ken");
+        // A rewritten name would be sent back to the server as the name of
+        // another tool, so that tool is not stored at all.
+        expect(JSON.parse(row.tools)).toMatchObject([
+          { name: "plain", description: "sent Bearer [removed] to this tool" },
+        ]);
+      },
+      {
+        fake: {
+          tools: [
+            { name: "Bearer t0ken", description: "named after the credential" },
+            { name: "plain", description: "sent Bearer t0ken to this tool" },
+          ],
+        },
+      },
+    );
+  });
+
   it("sends nothing when the plugin builds a URL off its origin", async () => {
     const elsewhere = await startFakeUpstream();
     try {
@@ -800,6 +757,71 @@ describe("a result that is out of date", () => {
           "connected",
         );
         expect(await countNotifications(controller, "core.connection-error")).toBe(0);
+      },
+      { oauth: true },
+    );
+  });
+
+  it("never refreshes a stale token for a check that was superseded while it waited for the refresh permit", async () => {
+    await withRig(
+      async ({ controller, provider, connect }) => {
+        const { promotion, mcpServerCalls } = controller.harness;
+        const connectionId = await connect();
+        const server = await createServer(controller, { connectionId });
+        await eventually(
+          () => readRow(controller),
+          (found) => found.status === "ready",
+        );
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        // A call takes the permit, and its request to the provider waits. It
+        // fails, so the token is still stale when the permit goes on.
+        let letRefreshAnswer: () => void = () => undefined;
+        const refreshAnswers = new Promise<void>((resolve) => {
+          letRefreshAnswer = resolve;
+        });
+        provider.answers.token = async () => {
+          await refreshAnswers;
+          return buildJsonResponse({}, 500);
+        };
+        const holder = Effect.runPromise(
+          Effect.result(
+            mcpServerCalls.callTool({
+              upstreamScope: "scope",
+              serverId: server.id,
+              tool: "echo",
+              arguments: undefined,
+              authorize: Effect.void,
+            }),
+          ),
+        );
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        const runningBefore = await readRunningWork(promotion);
+        await requestCheck(controller, server.id);
+        await eventually(
+          () => readRunningWork(promotion),
+          (running) => running > runningBefore,
+        );
+        // The check reads the server and its Connection and then waits for the
+        // permit. Nothing shows that it got that far, so give it the time.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await requestUpdate(controller, server.id, { enabled: false });
+        letRefreshAnswer();
+
+        await holder;
+        await eventually(
+          () => readRunningWork(promotion),
+          (running) => running === 0,
+        );
+
+        expect(provider.tokenRequests).toHaveLength(1);
       },
       { oauth: true },
     );

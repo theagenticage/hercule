@@ -59,7 +59,7 @@ import type {
   AdapterTurnInput,
   EditMarks,
   HarnessAdapter,
-  HarnessRunnerContext,
+  SessionStartContext,
   ProbeOptions,
   SessionUsageReport,
 } from "./index";
@@ -79,9 +79,10 @@ const HERCULE_TOOL = {
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
-const CONTEXT: HarnessRunnerContext = {
+const CONTEXT: SessionStartContext = {
   cwd: null,
   attachmentsDir: null,
+  mcpServers: [],
   editMarks: null,
   home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
@@ -584,14 +585,14 @@ const SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-const WORKING: HarnessRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
+const WORKING: SessionStartContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
 /**
  * The context of a Thread that sees User Material. For Claude the paths are
  * empty: the runner links the material into the Harness Home instead, and
  * the field being present is what marks the session.
  */
-const THREAD: HarnessRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
+const THREAD: SessionStartContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
 
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
@@ -925,6 +926,43 @@ describe("a Claude Code session", () => {
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
   });
 
+  it("gives the harness the resolved MCP servers, with a bearer header that names the token variable and no cached tool list", async () => {
+    const run = createDriving();
+    const gateway = { name: "tools", url: "https://controller.example:4938/mcp" };
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        env: { ...WORKING.env, HERCULE_TOKEN: "a-session-token" },
+        mcpServers: [gateway],
+      }),
+    );
+
+    const [options] = run.options;
+    // The token itself is in the environment only; the SDK writes the option,
+    // but never the environment, to its debug file. The CLI expands the name.
+    expect(options?.mcpServers).toEqual({
+      tools: {
+        type: "http",
+        url: gateway.url,
+        headers: { Authorization: "Bearer ${HERCULE_TOKEN}" },
+      },
+    });
+    expect(options?.env?.["HERCULE_TOKEN"]).toBe("a-session-token");
+    // The session's list depends on its token, so a list cached for an older
+    // token must never start a session.
+    expect(options?.env?.["MCP_DISCOVERY_CACHE"]).toBe("0");
+    expect(options?.strictMcpConfig).toBe(true);
+    // The Access Mode decides about an MCP tool, so no rule allows one unasked.
+    expect(options?.allowedTools).toBeUndefined();
+  });
+
+  it("gives the harness no MCP server when the runner resolved none", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    expect(run.options[0]?.mcpServers).toBeUndefined();
+  });
+
   it("loads the workspace's own CLAUDE.md and .claude/ when the session has a workspace", async () => {
     const run = createDriving();
     const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
@@ -1048,7 +1086,7 @@ describe("a Claude Code session", () => {
     readonly skillOverrides: Record<string, string>;
   }
 
-  const startAndReadSettings = async (spec: SessionSpec, ctx: HarnessRunnerContext) => {
+  const startAndReadSettings = async (spec: SessionSpec, ctx: SessionStartContext) => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
     const [options] = run.options;
@@ -4142,7 +4180,7 @@ describe("a text generation", () => {
 
   const generate = (
     adapter: HarnessAdapter,
-    context: HarnessRunnerContext = CONTEXT,
+    context: SessionStartContext = CONTEXT,
   ): Promise<TextGenerationOutcome> =>
     Effect.runPromise(
       Effect.catch(

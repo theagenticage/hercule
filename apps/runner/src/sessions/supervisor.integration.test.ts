@@ -56,7 +56,7 @@ import {
   type GithubTokenAnswer,
 } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
-import type { HarnessAdapter, HarnessRunnerContext, SessionUsageReport } from "../harnesses";
+import type { HarnessAdapter, SessionStartContext, SessionUsageReport } from "../harnesses";
 import type { Machine } from "./context";
 
 import { makeWorkspaceSteps } from "../workspace-steps";
@@ -160,7 +160,7 @@ const MARKER: HarnessEvent = {
 interface Fake {
   readonly adapter: HarnessAdapter;
   /** The context the supervisor resolved for the one session it started. */
-  readonly contexts: Array<HarnessRunnerContext>;
+  readonly contexts: Array<SessionStartContext>;
   /** How many markers have reached the watch. A count above zero proves the watch is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
@@ -203,7 +203,7 @@ const createFake = (): Fake => {
   let heard = 0;
   let usageReportsRead = 0;
   let inputsBegun = 0;
-  const contexts: Array<HarnessRunnerContext> = [];
+  const contexts: Array<SessionStartContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<{ readonly sessionId: string; readonly subagentId?: string }> = [];
   const answered: Array<readonly [string, string, RequestResolution]> = [];
@@ -984,7 +984,7 @@ describe("a start interrupted while its harness is starting", () => {
     });
     const original = fake.adapter.startSession;
     Object.assign(fake.adapter, {
-      startSession: (sessionId: string, spec: SessionSpec, ctx: HarnessRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         gateEntered = true;
         return Effect.andThen(
           Effect.promise(() => gate),
@@ -1171,7 +1171,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
           originalListSessions,
         );
       }),
-      startSession: (sessionId: string, spec: SessionSpec, ctx: HarnessRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         startCalls += 1;
         if (startCalls === 2) {
           staleExitSentBeforeFreshStart = listSessionEvents(sent).length === 2;
@@ -3122,7 +3122,7 @@ describe("a stop that arrives while a session is still starting", () => {
     });
     const original = fake.adapter.startSession;
     Object.assign(fake.adapter, {
-      startSession: (sessionId: string, spec: SessionSpec, ctx: HarnessRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         gateEntered = true;
         return Effect.andThen(
           Effect.promise(() => gate),
@@ -3331,7 +3331,7 @@ describe("a start that follows a stop of the same id", () => {
           dropped ? bindings.filter((binding) => binding.sessionId !== SESSION) : bindings,
         );
       }),
-      startSession: (sessionId: string, spec: SessionSpec, ctx: HarnessRunnerContext) =>
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) =>
         !dropped
           ? originalStart(sessionId, spec, ctx)
           : Effect.andThen(

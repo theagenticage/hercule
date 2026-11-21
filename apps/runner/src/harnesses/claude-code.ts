@@ -23,6 +23,7 @@ import {
   type CanUseTool,
   type EffortLevel,
   type HookCallback,
+  type McpHttpServerConfig,
   type Options,
   type PermissionMode,
   type PermissionUpdate,
@@ -107,6 +108,8 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  ResolvedMcpServer,
+  SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
 } from "./index";
@@ -139,6 +142,7 @@ import {
   type Parks,
 } from "./claude-code-parks";
 import { buildQuestionRequest } from "./questions";
+import { SESSION_TOKEN_VARIABLE } from "../credentials/helper";
 import { endSentence, now } from "../report";
 import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
@@ -1017,6 +1021,35 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
   "and `hercule session input` sends a message to one that exists.";
 
 /**
+ * Returns the `mcpServers` option for the servers a session may use. Each
+ * entry sends the session's token as `Authorization: Bearer ${HERCULE_TOKEN}`.
+ * The token itself is never in the option: the SDK turns the option into the
+ * CLI's `--mcp-config` argument, and with `DEBUG_CLAUDE_AGENT_SDK` set it
+ * writes that whole command, and the CLI writes its own copy, to a debug file.
+ * The CLI expands `${HERCULE_TOKEN}` from its own environment when it connects
+ * (`buildEnv` carries the variable, as the runner sets it for every session).
+ *
+ * The static `Authorization` header also keeps Claude Code from starting an
+ * OAuth sign-in of its own.
+ *
+ * Exported so the controller's real-CLI test starts the CLI with exactly this
+ * entry, instead of a copy of it.
+ */
+export const buildMcpServerEntries = (
+  servers: ReadonlyArray<ResolvedMcpServer>,
+): Record<string, McpHttpServerConfig> =>
+  Object.fromEntries(
+    servers.map((server) => [
+      server.name,
+      {
+        type: "http",
+        url: server.url,
+        headers: { Authorization: `Bearer \${${SESSION_TOKEN_VARIABLE}}` },
+      } satisfies McpHttpServerConfig,
+    ]),
+  );
+
+/**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory. Its config
  * directory is always the Harness Home, which every session of the
@@ -1040,13 +1073,16 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
  *   and loads no setting source at all, so no stray file on this runner can
  *   reach it.
  *
- * MCP servers come only from the options, and auto memory is off, for every
- * session. So is every way of messaging another Claude session: a session
+ * MCP servers come only from the options (the resolved entries of
+ * `ctx.mcpServers`: today the MCP Gateway, named `tools`), and auto memory is
+ * off, for every session. The Access Mode decides what an MCP tool may do:
+ * its calls reach `canUseTool` like any tool, so no allow rule is added for
+ * them. So is every way of messaging another Claude session: a session
  * reaches other sessions through Hercule only. Its own subagents stay
  * reachable (spec 06 section 9.1).
  */
 const buildSessionOptions = (
-  ctx: HarnessRunnerContext,
+  ctx: SessionStartContext,
   spec: SessionSpec,
   binary: string,
   native: Options,
@@ -1126,6 +1162,7 @@ const buildSessionOptions = (
       ],
     },
     strictMcpConfig: true,
+    ...(ctx.mcpServers.length === 0 ? {} : { mcpServers: buildMcpServerEntries(ctx.mcpServers) }),
     includePartialMessages: true,
     // Without this, the SDK sends only a subagent's tool calls and results,
     // and none of its text, so a subagent's transcript would have no words in
@@ -1146,6 +1183,11 @@ const buildSessionOptions = (
     env: {
       ...buildEnv(ctx),
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      // Claude Code keeps the tool list of an MCP server on disk and can start
+      // a session from it. The gateway's list depends on the session's token,
+      // so a list cached for an older token would offer tools the new one may
+      // not call, or miss tools it may.
+      MCP_DISCOVERY_CACHE: "0",
       // An assistant's session is rotated by the controller instead of being
       // compacted by the CLI (spec 06 section 9.2). `DISABLE_AUTO_COMPACT`
       // turns off only the automatic compaction. `DISABLE_COMPACT` would also
@@ -1678,7 +1720,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     startSession: (
       sessionId: string,
       spec: SessionSpec,
-      ctx: HarnessRunnerContext,
+      ctx: SessionStartContext,
     ): Effect.Effect<SessionBinding, AdapterError> =>
       Effect.gen(function* () {
         const binary = ctx.binary;

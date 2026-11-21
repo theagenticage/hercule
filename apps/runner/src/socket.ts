@@ -48,6 +48,7 @@ import {
   DISK_USAGE_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -121,6 +122,8 @@ const NONCE_BYTES = 16;
  * - `DISK_USAGE_CAPABILITY`: this runner measures the disk usage of its
  *   workspaces, repository caches and Harness Homes, and sends it in a
  *   `DiskUsageReport`.
+ * - `MCP_SERVERS_CAPABILITY`: this runner gives the harness the MCP Gateway
+ *   entry a start frame carries in `SessionSpec.mcpServers`.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -134,6 +137,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
   DISK_USAGE_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;

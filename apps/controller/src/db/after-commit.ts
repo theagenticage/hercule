@@ -90,6 +90,12 @@ export type Change =
       readonly countsOnly?: true;
     }
   | { readonly _tag: "event" }
+  /**
+   * The grants of a permission profile changed. No live topic carries it:
+   * only in-process followers of `RecordChanges` hear it, such as the MCP
+   * Gateway, whose answer depends on the profile's `mcp.use`.
+   */
+  | { readonly _tag: "profileGrants"; readonly profileId: string }
   | { readonly _tag: "transcript"; readonly sessionId: string; readonly subagentId?: SubagentId }
   | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 

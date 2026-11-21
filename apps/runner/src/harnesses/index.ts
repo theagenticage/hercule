@@ -34,6 +34,17 @@ import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
+/**
+ * An MCP server entry the runner has resolved for one session: an absolute URL.
+ * The harness authenticates with the session's own token, which it finds in the
+ * `HERCULE_TOKEN` variable of `HarnessRunnerContext.env`.
+ */
+export interface ResolvedMcpServer {
+  /** The name the harness knows the server by; it prefixes the server's tool names. */
+  readonly name: string;
+  readonly url: string;
+}
+
 export interface HarnessRunnerContext {
   /**
    * Where a session runs: the workspace path, or the scratch directory the
@@ -202,6 +213,19 @@ export interface EditMarks {
    */
   readonly recordRequestOnRunningItem: (requestId: string) => void;
 }
+
+/**
+ * The context of a session start: the runner's context plus the MCP servers
+ * the harness is given, with the controller's address and the session's token
+ * already filled in (spec 06 section 4). Today the one entry is the MCP
+ * Gateway. The runner builds the list from the start frame's
+ * `SessionSpec.mcpServers`, so the adapter never reads the token from
+ * anywhere else. Empty when the frame has none. A probe, an install, a login
+ * and a text generation run no session and carry no list.
+ */
+export type SessionStartContext = HarnessRunnerContext & {
+  readonly mcpServers: ReadonlyArray<ResolvedMcpServer>;
+};
 
 /**
  * The context of a text generation. The runner has already found the harness
@@ -375,7 +399,7 @@ export interface HarnessAdapter {
   readonly startSession: (
     sessionId: string,
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
   ) => Effect.Effect<SessionBinding, AdapterError>;
 
   /**

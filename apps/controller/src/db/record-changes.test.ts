@@ -14,11 +14,11 @@ const run = <A>(effect: Effect.Effect<A, never, RecordChanges | Scope.Scope>) =>
   Effect.runPromise(Effect.scoped(effect.pipe(Effect.provide(RecordChangesLayer))));
 
 describe("RecordChanges", () => {
-  it("keeps the record changes of the subscribed topics, without counts-only session changes and other kinds", async () => {
+  it("keeps the record changes and profile grant changes of the subscribed topics, without counts-only session changes and other kinds", async () => {
     const received = await run(
       Effect.gen(function* () {
         const changes = yield* RecordChanges;
-        const subscription = yield* changes.subscribe(["mcpServer", "session"]);
+        const subscription = yield* changes.subscribe(["mcpServer", "session", "profileGrants"]);
         yield* changes.publish([
           { _tag: "record", topic: "mcpServer", id: "a", kind: "updated" },
           { _tag: "record", topic: "connection", id: "c", kind: "updated" },
@@ -37,6 +37,7 @@ describe("RecordChanges", () => {
             conversationId: null,
             kind: "updated",
           },
+          { _tag: "profileGrants", profileId: "p1" },
           { _tag: "event" },
           { _tag: "transcript", sessionId: "s2" },
         ]);
@@ -47,6 +48,7 @@ describe("RecordChanges", () => {
     expect([...received]).toEqual([
       { topic: "mcpServer", id: "a" },
       { topic: "session", id: "s2" },
+      { topic: "profileGrants", id: "p1" },
     ]);
   });
 

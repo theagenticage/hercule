@@ -115,6 +115,9 @@ export const AUDIT_KINDS = [
   "mcpServer.created",
   "mcpServer.updated",
   "mcpServer.deleted",
+  // One per tool call a session sends through the MCP Gateway. It names no
+  // record, so it announces no live topic.
+  "mcpTool.called",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",

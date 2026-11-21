@@ -28,6 +28,7 @@ import {
   type DisallowedTool,
   type ModelSelection,
   type HarnessEvent,
+  type McpServerWarningReason,
   type SubagentId,
 } from "@hercule/protocol";
 import {
@@ -1103,7 +1104,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly last: number | null; readonly base: number }>`
           SELECT (SELECT MAX(runner_seq) FROM session_stream
-                  WHERE session_id = sessions.id) AS last,
+                  WHERE session_id = sessions.id AND runner_seq > 0) AS last,
                  stream_base AS base
           FROM sessions WHERE id = ${uuidFromString(sessionId)}
         `,
@@ -1144,19 +1145,15 @@ const make = Effect.gen(function* () {
     /**
      * Appends a `runtime.warning` event stamped `at`, which the controller
      * writes itself rather than a runner reporting it, at the next position
-     * of the session's stream, and
-     * moves the session's sequence offset (`stream_base`) past it. Both
-     * writes join the caller's transaction. The event's sequence number is
-     * one past the highest the session has used, and the offset becomes that
-     * same number.
+     * of the session's stream, and joins the caller's transaction.
      *
-     * Moving the offset is what keeps the runner's next event: the runner
-     * numbers a process's events from 1, and each is stored at the offset
-     * plus its number, so the first lands one past this row. Without the
-     * move, the runner's event would take this row's sequence number and be
-     * dropped as a replay by `append`. The session's cached ingest state
-     * still holds the old offset, so the caller must drop it once the
-     * transaction commits.
+     * The event takes a negative `runner_seq`: the first warning gets -1, the
+     * next -2, and so on. A runner numbers its events upward from 1, so the two
+     * number spaces never meet. This is what lets the controller write a
+     * warning at any moment, even while a runner's turn is running: the write
+     * cannot take the sequence number of a runner event that is folded but not
+     * yet written, and it leaves the session's sequence offset and its cached
+     * ingest state (the text held for open items) untouched.
      *
      * `mcpServers` is given when the warning is about MCP Servers: it names
      * each server and why (spec 21 section 3.8).
@@ -1167,7 +1164,7 @@ const make = Effect.gen(function* () {
       at: string,
       mcpServers?: ReadonlyArray<{
         readonly mcpServerId: string;
-        readonly reason: McpServerLeftOutReason;
+        readonly reason: McpServerWarningReason;
       }>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -1180,24 +1177,15 @@ const make = Effect.gen(function* () {
           message,
           ...(mcpServers === undefined ? {} : { mcpServers }),
         };
-        // Two scalar subqueries rather than one SELECT with both maxima:
-        // SQLite answers a lone MAX from the end of an index, and each
-        // subquery has its own, while a SELECT with two MAX columns scans
-        // every row of the session's stream.
         yield* sql`
           INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
           VALUES (
             ${id},
             COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
-            COALESCE((SELECT MAX(runner_seq) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+            COALESCE((SELECT MIN(runner_seq) FROM session_stream
+                      WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
             ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
           )
-        `;
-        yield* sql`
-          UPDATE sessions SET
-            stream_base = (SELECT MAX(runner_seq) FROM session_stream
-                           WHERE session_id = sessions.id)
-          WHERE id = ${id}
         `;
       }),
 
@@ -1340,7 +1328,7 @@ const make = Effect.gen(function* () {
             spec = ${spec},
             open_requests = '[]',
             stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                           WHERE session_id = sessions.id)
+                           WHERE session_id = sessions.id AND runner_seq > 0)
           WHERE id = ${uuidFromString(sessionId)}
           RETURNING task_id
         `,

@@ -4,11 +4,13 @@
  * server records and the `mcpServer` operations. It knows nothing about
  * Projects or Sessions.
  */
+export { McpCallRefused, McpServerCalls, McpServerCallsLayer, type McpToolCall } from "./calls";
 export {
   decideCallRefusal,
   isServable,
   mcpServerCatalogue,
   type CallRefusal,
+  type McpServerAvailabilityView,
   type McpServerView,
 } from "./catalogue";
 export { McpServerChecks, McpServerChecksLayer } from "./checks";
@@ -23,3 +25,4 @@ export { McpServerListHolders } from "./list-holders";
 export { mcpServerListRule, requireMcpManage } from "./list-rule";
 export { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from "./repository";
 export { McpServerService, McpServerServiceLayer, type UpdateInput } from "./service";
+export { buildErrorResult } from "./upstream";

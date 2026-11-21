@@ -699,6 +699,29 @@ describe("item details", () => {
     });
   });
 
+  it("shows a call to the MCP Gateway as the MCP Server and its tool, split at the first double underscore", () => {
+    const buildToolUse = (name: string) => ({
+      ...ASSISTANT_TOOL_USE,
+      message: {
+        ...ASSISTANT_TOOL_USE.message,
+        content: [{ type: "tool_use", id: TOOL, name, input: { query: "x" } }],
+      },
+    });
+    expect(
+      readItemDetail([buildToolUse("mcp__tools__sentry__search_issues")], TOOL, "item.started"),
+    ).toEqual({ name: "search_issues", server: "sentry", input: { query: "x" }, kind: "mcp" });
+    // The tool's own name may hold a double underscore.
+    expect(
+      readItemDetail([buildToolUse("mcp__tools__sentry__find__issues")], TOOL, "item.started"),
+    ).toMatchObject({ name: "find__issues", server: "sentry" });
+    // Another MCP server keeps the whole name.
+    expect(readItemDetail([buildToolUse("mcp__linear__issues")], TOOL, "item.started")).toEqual({
+      name: "mcp__linear__issues",
+      input: { query: "x" },
+      kind: "mcp",
+    });
+  });
+
   /** Builds one assistant message that calls each tool in turn, ids `toolu_0`, `toolu_1`, ... */
   const buildToolCalls = (calls: ReadonlyArray<readonly [name: string, input: unknown]>) => ({
     ...ASSISTANT_TOOL_USE,

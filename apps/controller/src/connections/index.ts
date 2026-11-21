@@ -23,6 +23,7 @@ export {
   ConnectionTypes,
   ConnectionTypesLayer,
   type ConnectionCredentialsForUse,
+  type RefreshGuard,
   type RegisteredConnectionType,
 } from "./runtime";
 export {

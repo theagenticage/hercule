@@ -37,6 +37,7 @@ import {
   DISK_USAGE_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
@@ -130,6 +131,11 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   removal without the list, and the workspace gets a warning saying so.
  * - `DISK_USAGE_CAPABILITY`: this controller reads the `diskUsageReport` frame.
  *   A runner sends it only to a controller that lists this.
+ * - `MCP_SERVERS_CAPABILITY`: this controller adds the MCP Gateway entry to a
+ *   start frame's `SessionSpec.mcpServers`, and only for a runner that
+ *   negotiated it. A runner that did not gets the start without the entry,
+ *   and every MCP Server in the session's list is left out with the reason
+ *   `runner-too-old`.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -144,6 +150,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
   DISK_USAGE_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";

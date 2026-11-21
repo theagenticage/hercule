@@ -662,6 +662,8 @@ const make = Effect.gen(function* () {
             taps.push(change);
             continue;
           }
+          // No live topic carries a profile's grants.
+          if (change._tag === "profileGrants") continue;
           const collect = isSlowPaced(change) ? collectSlowChange : collectChange;
           yield* collect(change);
         }

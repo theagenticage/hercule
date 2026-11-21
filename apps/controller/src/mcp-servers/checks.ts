@@ -34,8 +34,7 @@ import { absorbFailures } from "../absorbing";
 import {
   ConnectionTypes,
   type ConnectionCredentialsForUse,
-  type ConnectionCredentialsUnavailable,
-  type StoredConnection,
+  type RefreshGuard,
 } from "../connections";
 import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
@@ -44,9 +43,10 @@ import { PromotionState } from "../promotion";
 import { judgeDependencies, type McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
-import { computeBackoffMillis, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
+import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
+  buildStatusFromUnavailable,
   MAX_UPSTREAM_MESSAGE_BYTES,
   openUpstream,
   runWithCredentials,
@@ -133,51 +133,27 @@ const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
 
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
- * and resets the schedule to a day. A server that cannot be reached backs off
- * (spec 21 section 5.3). Any other failure waits a day. A failure also stores
- * the revision whose handshake worked, when one did.
+ * and resets the schedule to a day. A failure is stored as `buildFailureEdit`
+ * builds it, with the revision whose handshake worked, when one did.
  */
 const buildEdit = (
   server: StoredMcpServer,
   result: Exclude<CheckResult, { readonly _tag: "discarded" }>,
   at: string,
   worked: WorkedRevision,
-): McpServerEdit => {
-  const atMillis = Date.parse(at);
-  const revisionEdit = worked.current === null ? {} : { protocolVersion: worked.current };
-  const planAfter = (millis: number): string => new Date(atMillis + millis).toISOString();
-  if (result._tag === "ready") {
-    return {
-      status: "ready",
-      statusDetail: null,
-      statusCause: null,
-      tools: result.tools,
-      checkedAt: at,
-      protocolVersion: result.revision,
-      failedChecks: 0,
-      nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
-    };
-  }
-  if (result.status === "unreachable") {
-    const failedChecks = server.failedChecks + 1;
-    return {
-      status: "unreachable",
-      statusDetail: result.detail,
-      statusCause: null,
-      failedChecks,
-      nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
-      ...revisionEdit,
-    };
-  }
-  return {
-    status: result.status,
-    statusDetail: result.detail,
-    statusCause: result.cause,
-    failedChecks: 0,
-    nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
-    ...revisionEdit,
-  };
-};
+): McpServerEdit =>
+  result._tag === "ready"
+    ? {
+        status: "ready",
+        statusDetail: null,
+        statusCause: null,
+        tools: result.tools,
+        checkedAt: at,
+        protocolVersion: result.revision,
+        failedChecks: 0,
+        nextCheckAt: new Date(Date.parse(at) + DAILY_CHECK_MILLIS).toISOString(),
+      }
+    : buildFailureEdit(server, result, at, worked.current ?? undefined);
 
 const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
@@ -185,56 +161,6 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
-
-  /**
-   * Turns a Connection's failure to give credentials into a failed outcome.
-   * The text is fixed here and never the Connection's own message, which may
-   * hold what the provider sent.
-   */
-  const describeUnavailable = (
-    error: ConnectionCredentialsUnavailable,
-    contribution: RegisteredMcpServer,
-    connection: StoredConnection,
-  ): CheckResult => {
-    switch (error.reason) {
-      case "needs-sign-in":
-        return buildFailedResult(
-          "needs-sign-in",
-          `Reconnect ${connection.label} in Settings > Connections`,
-          "connection",
-        );
-      case "switched-off":
-        return buildFailedResult(
-          "error",
-          `The Connection ${connection.label} is switched off`,
-          "connection",
-        );
-      case "unreachable":
-        return buildFailedResult(
-          "unreachable",
-          `${contribution.displayName} could not be reached to refresh the sign-in`,
-        );
-      case "credentials-replaced":
-        // The Connection is fine: the user reconnected twice while the
-        // sign-in was refreshed. The backoff checks again soon.
-        return buildFailedResult(
-          "unreachable",
-          `The sign-in of ${connection.label} was replaced while it was being refreshed`,
-        );
-      case "no-credentials":
-        return buildFailedResult(
-          "error",
-          `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
-        );
-      case "missing":
-        return buildFailedResult("error", "The Connection of this server is missing");
-      case "invalid-config":
-        return buildFailedResult(
-          "error",
-          `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
-        );
-    }
-  };
 
   /**
    * Lists the tools once, on a short-lived client of its own. Records the
@@ -254,10 +180,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const opened = yield* openUpstream({ contribution, credentials, firstRevision });
         worked.current = opened.revision;
-        const tools = yield* opened.client
-          .listTools({ timeout: LIST_DEADLINE })
-          .pipe(Effect.mapError(opened.describeFailure));
-        return { tools, revision: opened.revision };
+        return { tools: yield* opened.listTools(LIST_DEADLINE), revision: opened.revision };
       }),
     ).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -272,8 +195,11 @@ const make = Effect.gen(function* () {
    * When the server refuses the credentials, they are refreshed and the
    * listing is tried once more (`runWithCredentials`). A refresh changes the
    * Connection, so it starts only if the server, its revision and its
-   * Connection are still as the check found them. Otherwise the outcome is
-   * `discarded`, and the Connection is left alone.
+   * Connection are still as the check found them. That is checked before the
+   * refresh after a rejection, and again under the Connection's refresh
+   * permit, right before every request to the provider, because the check may
+   * wait a long time for the permit. Otherwise the outcome is `discarded`, and
+   * the Connection is left alone.
    */
   const evaluate = (
     server: StoredMcpServer,
@@ -294,16 +220,22 @@ const make = Effect.gen(function* () {
         );
       }
 
+      const checkBasisHolds = Effect.flatMap(
+        state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
+        Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
+      );
+      const guardRefresh: RefreshGuard<typeof CHECK_SUPERSEDED> = checkBasisHolds.pipe(
+        Effect.catchTag("SqlError", Effect.die),
+      );
+
       return yield* runWithCredentials({
         connections: connectionTypes,
         connectionId: server.connectionId,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(contribution, credentials, worked, worked.current ?? server.protocolVersion),
-        checkRefreshAllowed: Effect.flatMap(
-          state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
-          Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
-        ),
+        checkRefreshAllowed: checkBasisHolds,
+        guardRefresh,
       }).pipe(
         Effect.map(({ tools, revision }): CheckResult => {
           const stored = tools.map(toStoredTool);
@@ -317,8 +249,14 @@ const make = Effect.gen(function* () {
             const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
             return Effect.succeed(buildFailedResult(status, detail));
           },
-          ConnectionCredentialsUnavailable: (error) =>
-            Effect.succeed(describeUnavailable(error, contribution, connection)),
+          ConnectionCredentialsUnavailable: (error) => {
+            const { status, detail, cause } = buildStatusFromUnavailable(
+              error,
+              connection,
+              contribution.displayName,
+            );
+            return Effect.succeed(buildFailedResult(status, detail, cause));
+          },
           CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),
         }),
       );
