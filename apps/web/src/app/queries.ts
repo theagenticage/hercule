@@ -308,6 +308,29 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads every MCP Server. A user has few, so the contract does not page them.
+ * The record carries no joined data: the screens join it with the Connections
+ * and the plugins where they draw it.
+ */
+export const mcpServersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServers(),
+    queryFn: () => client.mcpServer.query(),
+  });
+
+/**
+ * Reads one MCP Server, for its page. An error is not retried, because a
+ * server that returns 404 once, such as one deleted from another window,
+ * will keep returning 404.
+ */
+export const mcpServerQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServer(id),
+    queryFn: () => client.mcpServer.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
  * Reads every secret reference in a single page. A read returns references,
  * never secret values. There is about one per connection and plugin, so there
  * are few.

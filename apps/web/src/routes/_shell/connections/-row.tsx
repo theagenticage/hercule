@@ -12,6 +12,7 @@ import {
 import type { Connection, ConnectionStatus } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus } from "../../../screens/save-status";
+import { AgentToolsNote } from "./-agent-tools";
 import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
 
@@ -34,19 +35,25 @@ type Panel = "none" | "reconnect" | "configure" | "delete";
  * The row for one connection: its account, its status, and the actions
  * Reconnect, Configure and Delete. The row owns those mutations, because each
  * one changes only this connection and nothing above the row needs to know.
+ *
+ * `reconnecting` opens the Reconnect panel when the row first appears, whatever
+ * the Connection's status. A thread's line or a server's page sends the user
+ * here for it, even while the Connection reads as working.
  */
 export function ConnectionRow({
   client,
   connection,
   type,
+  reconnecting,
 }: {
   readonly client: HerculeClient;
   readonly connection: Connection;
   /** Absent when the plugin that declared the type is no longer in the binary. */
   readonly type: ConnectionType | undefined;
+  readonly reconnecting: boolean;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const [panel, setPanel] = useState<Panel>("none");
+  const [panel, setPanel] = useState<Panel>(reconnecting ? "reconnect" : "none");
 
   /**
    * The parts of the secondary line: the plugin that declares the type, the
@@ -132,6 +139,8 @@ export function ConnectionRow({
           ))}
         </div>
       )}
+
+      <AgentToolsNote client={client} connection={connection} />
 
       {connection.statusDetail === undefined ? null : (
         <p className="text-fine text-muted">{connection.statusDetail}</p>
