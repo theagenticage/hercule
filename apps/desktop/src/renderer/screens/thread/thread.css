@@ -386,6 +386,16 @@ button.work-row:hover > .ic {
 .error-note .code-word {
   white-space: nowrap;
 }
+/* The buttons after a note's sentence, such as "Reconnect Sentry · work". They
+   sit on the sentence's baseline. The negative margins keep the note's line as
+   tall as its text, so the note's dot stays level with its words. */
+.note-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -6px 0 -6px 8px;
+  vertical-align: baseline;
+}
 .warning-note .time,
 .runtime-notice-note .time,
 .error-note .time {

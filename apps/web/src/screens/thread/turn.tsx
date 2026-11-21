@@ -26,7 +26,7 @@ import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 import { AgentSentMessage } from "./agent-sent-message";
 import { WithMessageContext } from "./message-context";
-import { RuntimeNoteLine } from "./runtime-note-line";
+import { NoteLine } from "./note-line";
 
 export function Turn({
   turn,
@@ -72,7 +72,7 @@ export function Turn({
         </div>
       )}
       {turn.runtimeNotes.map((note) => (
-        <RuntimeNoteLine key={note.key} note={note} />
+        <NoteLine key={note.key} note={note} />
       ))}
       {showsTurnDivider(turn, live) ? <TurnDivider turn={turn} live={live} /> : null}
     </div>

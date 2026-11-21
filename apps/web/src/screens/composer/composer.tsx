@@ -36,9 +36,11 @@ import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { ProviderMark } from "../provider-mark";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
-import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
+import { useKnownMcpServerIds } from "../use-mcp-server-views";
+import { PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
+import { ThreadPlusMenu } from "./thread-plus-menu";
 import { buildSignInSlot } from "./sign-in-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
@@ -48,10 +50,21 @@ import { useComposerModel } from "./use-composer-model";
 import { useNewModelSave } from "./use-new-model-save";
 import { useTypingGuard } from "./use-typing-guard";
 
-type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
+type SelectorKey = "plus" | "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
 /** Checks whether a drag carries files, rather than text or a link. */
 const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.includes("Files");
+
+/**
+ * Whether the `+` menu's MCP servers row works while the composer answers an
+ * agent's question. It edits the thread's list, not the answer, so it does.
+ * Set it to `false` to draw the row off, as the attach row is while
+ * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
+ * one place that decides it. Built so; Rogier to confirm (spec 17, the `+`
+ * menu, answer mode).
+ */
+const SERVERS_WORK_WHILE_ANSWERING = true;
+const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
 
 /**
  * The composer: the thread's settings, and the message about to be sent to it.
@@ -67,6 +80,13 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * option picks are not touched, and the message comes back when answer mode
  * ends. A question that arrives while the user is typing a message waits for
  * the user to pause (`useTypingGuard`).
+ *
+ * The `+` opens a menu: Attach, and the thread's MCP servers (`ThreadPlusMenu`).
+ * Answer mode turns Attach off but leaves the MCP servers row working,
+ * because that row edits the thread's list and not the answer being written
+ * (`SERVERS_WORK_WHILE_ANSWERING`; built so, Rogier to confirm: spec 17, the
+ * `+` menu, answer mode). The servers are read only when the thread has
+ * some, or when the MCP row or the picker opens.
  */
 export function Composer({
   thread,
@@ -76,7 +96,7 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
@@ -84,9 +104,8 @@ export function Composer({
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   // The zone in which a New row says when its model arrived.
-  const timezone = resolveDisplayTimezone(
-    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
-  );
+  const settings = useSuspenseQuery(settingsQuery(client)).data.user;
+  const timezone = resolveDisplayTimezone(settings.timezone);
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
@@ -95,6 +114,7 @@ export function Composer({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const knownMcpServerIds = useKnownMcpServerIds(client);
   const catalogs = {
     accounts,
     providers,
@@ -106,6 +126,8 @@ export function Composer({
     resources,
     workspaces,
     sessions,
+    // A draft's pick of MCP servers is checked against these when it is sent.
+    ...(knownMcpServerIds === undefined ? {} : { knownMcpServerIds }),
   };
   const [open, setOpen] = useState<SelectorKey | null>(null);
   // The model pill's element. The lip's branch menu measures it to stay clear of the pill.
@@ -292,9 +314,27 @@ export function Composer({
               is measured in JavaScript. */}
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
             <div className="flex min-w-0 flex-[1_1_304px] items-center gap-1.5">
-              <AttachButton
-                disabledReason={
+              <ThreadPlusMenu
+                client={client}
+                live={live}
+                thread={thread}
+                projectId={projectId}
+                projects={projects}
+                defaultIds={settings["thread.mcpServerIds"] ?? []}
+                picks={model.picks}
+                recordThreadChoice={model.recordThreadChoice}
+                plugins={plugins}
+                open={open === "plus"}
+                onOpenChange={(next) => {
+                  handleOpenChange("plus", next);
+                }}
+                attachDisabledReason={
                   answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
+                }
+                serversOffReason={
+                  answer !== null && !SERVERS_WORK_WHILE_ANSWERING
+                    ? SERVERS_OFF_WHILE_ANSWERING
+                    : null
                 }
                 // The picker can come back after a question took the composer
                 // over, so the mode is read when the files arrive, as for paste.

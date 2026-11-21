@@ -239,6 +239,36 @@ describe("buildSubmission: a draft thread", () => {
   });
 });
 
+describe("buildSubmission: the draft's list of MCP Servers", () => {
+  const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks =>
+    applyThreadChoice({}, { kind: "mcpServers", projectId, mcpServerIds });
+  const send = (picks: ThreadPicks, projectId: string | null = null) =>
+    buildDraftSubmission(
+      { ...NO_CATALOGS, knownMcpServerIds: new Set(["s-linear"]) },
+      { ...CONFIG, projectId },
+      picks,
+      MESSAGE,
+    );
+
+  it("sends no list for an untouched draft, so the controller picks the project's or the default", () => {
+    const sent = send({});
+    expect(sent.input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("sends the picked list, an empty one included", () => {
+    expect(send(pick(null, ["s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(send(pick(null, [])).input.mcpServerIds).toEqual([]);
+  });
+
+  it("sends no list once the draft moved to another project than the pick was made under", () => {
+    expect(send(pick("p-shop", ["s-linear"]), "p-blog").input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("drops a server deleted since the pick", () => {
+    expect(send(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+  });
+});
+
 describe("buildSubmission: an active thread", () => {
   const session: Session = { ...SESSION, providerAccountId: CLAUDE.id, runnerId: LOCAL.id };
 

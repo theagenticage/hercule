@@ -76,11 +76,13 @@
 
 /* The book's grid without its 124px Default Topic column. The Health column
    is the book's 176px, room for a short status detail. A longer one wraps
-   onto more lines (see `.health--fail`). */
+   onto more lines (see `.health--fail`). The bars column is 118px, narrower
+   than the book's 144px, so the name column has room for the account and the
+   "agent tools" line at 1440px: 24 bars of 3px with a 2px gap fill it exactly. */
 .connection-list .tbl-h,
 .connection-list .conn {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 144px 52px 176px 28px;
+  grid-template-columns: 34px minmax(0, 1fr) 118px 52px 176px 28px;
   align-items: center;
   gap: 14px;
 }
@@ -238,6 +240,72 @@
     overflow-wrap: anywhere;
     white-space: normal;
   }
+}
+
+/* ---------- Agent tools ---------- */
+/* Under a Connection's name, the account, then a quiet line that leads to
+   Settings > MCP servers (#1211). It is no switch. The line has a column of
+   its own at the right edge of the name column, 190px wide, room for the
+   longest line ("agent tools: needs sign-in"). So the line starts at one x
+   position on every row, whatever its words and whatever the width of the
+   window. The account takes the rest of the row, and a longer account ends in
+   an ellipsis, by the table's own rule. At 1440px the rest is wider than the
+   longest account of the Bureau book. */
+.connection-list .nm .conn-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  align-items: center;
+  column-gap: 10px;
+  overflow: hidden;
+}
+.connection-list .nm .conn-line > .conn-tools {
+  grid-column: 2;
+}
+@container (width < 640px) {
+  /* The name column is 144px wide here: the account and the line stack. */
+  .connection-list .nm .conn-line {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .connection-list .nm .conn-line > .conn-tools {
+    grid-column: 1;
+  }
+}
+/* The line is text with a state mark before it and a chevron after it, so it
+   reads as a link and not as a chip. The mark says on, off or failing at a
+   glance: a dot in the text's colour, a ring, or the app's red dot. */
+.conn-tools {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.conn-tools > .dot:not(.dot--fail) {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.conn-tools.is-on > .dot {
+  background: currentColor;
+  box-shadow: none;
+}
+.conn-tools > .ic {
+  margin-left: -2px;
+}
+.conn-tools.is-on {
+  color: var(--muted);
+}
+.conn-tools.is-fail {
+  color: var(--fail-ink);
+}
+.conn-tools.is-unavailable {
+  color: var(--muted);
+}
+button.conn-tools:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ---------- Menus ---------- */

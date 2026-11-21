@@ -263,6 +263,8 @@ export const buildSidebarHandlers = (
   "GET /api/v1/ignore-rules": { body: [] },
   // Settings > Connections reads the event counts each time it opens.
   "GET /api/v1/events/counts": { body: { connections: [] } },
+  // Settings > Connections and Settings > MCP servers read the MCP servers.
+  "GET /api/v1/mcp-servers": { body: { items: [] } },
   // Intake reads the workflows, whose names label the signals their runs raised.
   "GET /api/v1/workflows": { body: { items: [] } },
   // The Office reads the runs that are running and those that are pending,

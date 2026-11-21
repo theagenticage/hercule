@@ -67,4 +67,18 @@ describe("applyThreadChoice", () => {
       accessMode: "full-access",
     });
   });
+
+  it("records the MCP Servers list with the project it was made under, replacing an earlier one", () => {
+    const first = applyThreadChoice(
+      { runnerId: "r-remote" },
+      { kind: "mcpServers", projectId: "p-shop", mcpServerIds: ["s-work"] },
+    );
+    expect(first).toEqual({
+      runnerId: "r-remote",
+      mcpServers: { projectId: "p-shop", mcpServerIds: ["s-work"] },
+    });
+    expect(
+      applyThreadChoice(first, { kind: "mcpServers", projectId: null, mcpServerIds: [] }),
+    ).toEqual({ runnerId: "r-remote", mcpServers: { projectId: null, mcpServerIds: [] } });
+  });
 });

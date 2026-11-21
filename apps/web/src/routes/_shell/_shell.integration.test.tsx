@@ -15,7 +15,7 @@ const api: Readonly<Record<string, Handler>> = {
     },
   },
   // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins,
-  // Secrets, Bounds, Assistants and Notifications load data of their own.
+  // Secrets, Bounds, Assistants, MCP servers and Notifications load data of their own.
   // The sidebar reads the notifications too, to count the new ones.
   "GET /api/v1/tasks": { body: { items: [] } },
   "GET /api/v1/assistants": { body: { items: [] } },
@@ -29,6 +29,7 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/secrets": { body: { items: [] } },
   "GET /api/v1/triggers": { body: { items: [] } },
   "GET /api/v1/connections": { body: { items: [] } },
+  "GET /api/v1/mcp-servers": { body: { items: [] } },
   "GET /api/v1/notifications": { body: { items: [] } },
   "GET /api/v1/controller": {
     body: {
@@ -55,6 +56,7 @@ const screens: readonly [path: string, title: string, headline: string][] = [
   ["/settings/profile", "Profile", "Timezone"],
   ["/settings/threads", "Threads", "Sidebar rows"],
   ["/settings/assistants", "Assistants", "No assistants."],
+  ["/settings/mcp-servers", "MCP servers", "From your Connections"],
   ["/settings/identities", "Identities", "No platform identity is paired."],
   [
     "/settings/permission-profiles",

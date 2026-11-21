@@ -26,7 +26,17 @@ export type ThreadChoice =
   | { readonly kind: "runner"; readonly runnerId: string }
   | { readonly kind: "workspace"; readonly workspace: WorkspacePick }
   | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
-  | { readonly kind: "accessMode"; readonly value: AccessMode };
+  | { readonly kind: "accessMode"; readonly value: AccessMode }
+  /**
+   * The draft's own list of MCP Servers, made while the draft was in
+   * `projectId` (`null` for no project). The whole list is the choice, so the
+   * caller applies a switch to the latest list before it emits this.
+   */
+  | {
+      readonly kind: "mcpServers";
+      readonly projectId: string | null;
+      readonly mcpServerIds: readonly string[];
+    };
 
 /**
  * Returns `picks` with `choice` recorded. It reads no catalog, so it never
@@ -35,6 +45,7 @@ export type ThreadChoice =
  * - A model choice sets the account, the harness and the model together.
  * - An option choice merges into the picked options. A `false` is a choice
  *   too, so it is kept.
+ * - The MCP Servers choice replaces the whole list and the project it was made under.
  * - The other choices set their field.
  */
 export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): ThreadPicks => {
@@ -54,5 +65,10 @@ export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): Thr
       return { ...picks, options: { ...picks.options, [choice.id]: choice.value } };
     case "accessMode":
       return { ...picks, accessMode: choice.value };
+    case "mcpServers":
+      return {
+        ...picks,
+        mcpServers: { projectId: choice.projectId, mcpServerIds: choice.mcpServerIds },
+      };
   }
 };

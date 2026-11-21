@@ -20,6 +20,7 @@ import {
 } from "@hercule/contract";
 import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import { buildWorkRows } from "./work-rows";
 
 type HarnessEvent = TranscriptRow["event"];
@@ -182,12 +183,14 @@ const buildWarning = (
   seconds: number,
   turnId: string | undefined,
   message: string,
+  mcpServers?: McpServerWarningEntry[],
 ): TranscriptRow =>
   buildRow({
     _tag: "runtime.warning",
     ...buildEnvelope(seconds),
     ...(turnId === undefined ? {} : { turnId }),
     message,
+    ...(mcpServers === undefined ? {} : { mcpServers }),
   });
 
 /** Returns a `runtime.notice` row, in turn `turnId` or, when it is undefined, between turns. */
@@ -895,6 +898,25 @@ describe("buildThreadBlocks", () => {
     expect(blocks.find((block) => block.kind === "warning")).toMatchObject({
       at: buildInstant(3),
     });
+  });
+
+  it("keeps the MCP Servers a warning names, and gives a warning about nothing else none", () => {
+    const entries: McpServerWarningEntry[] = [
+      { mcpServerId: "s-work", reason: "needs-sign-in" },
+      { mcpServerId: "s-hobby", reason: "missing-grant" },
+    ];
+    const rows = [
+      buildTurnStarted("t1", 0),
+      buildWarning(1, "t1", "Sentry (work) needs sign-in", entries),
+      buildWarning(2, "t1", "retrying after a 529"),
+    ];
+
+    const warnings = buildThreadBlocks(rows, buildSessionAgentState(BUSY)).filter(
+      (block) => block.kind === "warning",
+    );
+
+    expect(warnings[0]?.mcpServers).toEqual(entries);
+    expect(warnings[1]).not.toHaveProperty("mcpServers");
   });
 
   it("places each runtime notice where its row sits, without splitting the work stretch", () => {

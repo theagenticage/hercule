@@ -5,12 +5,14 @@
  * subagents. A subagent takes no messages, so its page has no composer, and
  * neither has an archived Thread's page.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { Suspense, useRef, useState, type JSX, type ReactNode } from "react";
 import { Navigate, notFound, useLocation } from "@tanstack/react-router";
 import type { Session, Subagent } from "@hercule/contract";
 import { isOpenedAtLaunch } from "../../app/last-screen";
+import { useHasMcpServerLine } from "../../app/has-mcp-server-line";
 import { ArchivedNotice } from "./archived-notice";
 import { ThreadComposer } from "./composer";
+import { LazyHoldMcpServers } from "./lazy-thread-servers";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
@@ -118,6 +120,11 @@ export function AgentPage({
   // stack is held as state, not a ref, because the composer mounts after the
   // transcript: its element exists only once the transcript's effects ran,
   // and the state change runs them again with it.
+  // The servers are read once, and the topic held, while the thread has a server or a line about
+  // one. A thread with neither reads nothing. The composer's row and the lines draw from the cache.
+  const hasMcpServerLine = useHasMcpServerLine(sessionId, blocks);
+  const holdsServers =
+    subagentId === undefined && (session.mcpServers.length > 0 || hasMcpServerLine);
   const [composerStack, setComposerStack] = useState<HTMLDivElement | null>(null);
   const transcriptRef = useRef<TranscriptHandle>(null);
   // The composer shrinks while the reader is away from the bottom of the
@@ -148,6 +155,11 @@ export function AgentPage({
 
   return (
     <>
+      {holdsServers && (
+        <Suspense fallback={null}>
+          <LazyHoldMcpServers />
+        </Suspense>
+      )}
       {subagentParts === undefined ? <ThreadHeader session={session} /> : subagentParts.header}
       <Transcript
         sessionId={sessionId}
