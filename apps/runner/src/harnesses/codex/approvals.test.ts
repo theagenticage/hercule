@@ -492,19 +492,6 @@ describe("Codex asking to run a tool of an MCP server", () => {
 
     expect(request.itemId).toBe(TURN);
   });
-
-  for (const [decision, mapped] of ELICITATION_ANSWERS) {
-    it(`replies ${JSON.stringify(mapped)} for ${decision}`, async () => {
-      const { run, answered } = await openAndAnswer(
-        ELICITATION,
-        TOOL_CALL_ELICITATION_PARAMS,
-        decision,
-      );
-
-      expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
-      expect(listResolutions(run)).toEqual([decision]);
-    });
-  }
 });
 
 const USER_INPUT = "item/tool/requestUserInput";

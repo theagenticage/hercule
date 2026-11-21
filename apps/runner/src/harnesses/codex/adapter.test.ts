@@ -4783,7 +4783,7 @@ describe("the MCP servers a Codex session is given", () => {
   });
 
   it.each(["0.164.0", "0.171.0", "1.0.0"])(
-    "re-reads the tool list on a change, with no warning, at Codex %s",
+    "sends the tool list feature and no warning at Codex %s",
     async (version) => {
       const run = await startWithServers([GATEWAY], SPEC, initializeAs(version));
       await settle();
