@@ -353,6 +353,18 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
+  it("shows a tool of another server as server/tool, not as a gateway tool", async () => {
+    // A repository's own server `tools__sentry` must not look like the gateway's Sentry tool.
+    const run = await pushServerRequest(ELICITATION, {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      serverName: "tools__sentry",
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "whoami" },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({ toolName: "tools__sentry/whoami" });
+  });
+
   it("shows a tool name that is too long cut to the protocol's limit", async () => {
     const run = await pushServerRequest(ELICITATION, {
       ...TOOL_CALL_ELICITATION_PARAMS,

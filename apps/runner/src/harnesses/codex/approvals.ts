@@ -15,11 +15,12 @@
  * - A question's reply has no way to decline, so the cancel an interrupt
  *   sends is a JSON-RPC error reply.
  */
-import type {
-  ApprovalDecision,
-  ApprovalRequest,
-  OpenRequest,
-  QuestionAnswers,
+import {
+  MCP_GATEWAY_ENTRY_NAME,
+  type ApprovalDecision,
+  type ApprovalRequest,
+  type OpenRequest,
+  type QuestionAnswers,
 } from "@hercule/protocol";
 import { ensureId } from "../events";
 import { buildQuestionRequest, keyAnswersForVendor } from "../questions";
@@ -151,14 +152,25 @@ const readToolCallMeta = (
 
 /**
  * Returns the name an MCP elicitation is shown under. A question about a tool
- * call is shown as the tool the model sees, `mcp__<server>__<tool>`, the same
- * name Claude Code's approval shows for an MCP tool. Any other elicitation,
- * and a tool call whose tool Codex does not name, is shown as its server, and
- * a server with an empty name as the request method.
+ * call through the MCP Gateway is shown as the tool the model sees,
+ * `mcp__<server>__<tool>`, the same name Claude Code's approval shows for an
+ * MCP tool. The gateway is the one server for which that joined name is
+ * unambiguous: the tool's name already holds the MCP Server behind it, and a
+ * repository's own server named `tools__sentry` with a tool `whoami` would
+ * otherwise look the same. A call to any other server is shown as
+ * `<server>/<tool>`, as its item is. Any other elicitation, and a tool call
+ * whose tool Codex does not name, is shown as its server, and a server with
+ * an empty name as the request method.
  */
 const buildElicitationToolName = (params: McpServerElicitationRequestParams): string => {
   const toolName = readToolCallMeta(params)?.toolName;
-  if (toolName !== undefined) return truncateFact(`mcp__${params.serverName}__${toolName}`);
+  if (toolName !== undefined) {
+    return truncateFact(
+      params.serverName === MCP_GATEWAY_ENTRY_NAME
+        ? `mcp__${params.serverName}__${toolName}`
+        : `${params.serverName}/${toolName}`,
+    );
+  }
   return params.serverName === "" ? ELICITATION : truncateFact(params.serverName);
 };
 

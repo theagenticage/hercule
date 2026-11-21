@@ -300,9 +300,9 @@ const truncateResultBlock = (block: unknown): unknown => {
  * name has no server part.
  *
  * A completed item also shows what the call returned in `content`, as Claude
- * Code's tool result does: the blocks of the result, text and image
- * references, or the error's message for a call that failed. Images are
- * references by the time they get here (see `replaceMcpResultImages`).
+ * Code's tool result does: the blocks of the result, or the error's message
+ * for a call that failed. An image block is already `unavailable` by the time
+ * it gets here (see `stripImageBytes` in the adapter).
  */
 const buildMcpToolCallDetail = (
   item: Extract<ThreadItem, { type: "mcpToolCall" }>,
