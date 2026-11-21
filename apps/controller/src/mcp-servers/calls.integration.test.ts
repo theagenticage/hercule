@@ -392,6 +392,85 @@ describe("a call", () => {
     });
   });
 
+  it.each<
+    readonly [
+      string,
+      (rig: ReadyRig) => Partial<McpToolCall> | Promise<Partial<McpToolCall>>,
+      string,
+    ]
+  >([
+    [
+      "an answer that asks for more input",
+      ({ fake }: ReadyRig) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? Response.json({
+                jsonrpc: "2.0",
+                id,
+                result: { resultType: "input_required", inputRequests: {} },
+              })
+            : undefined;
+        return {};
+      },
+      "this call needs something Hercule does not support",
+    ],
+    [
+      "an argument that does not fit the header its tool declares",
+      async ({ controller }: ReadyRig) => {
+        await runSql(
+          controller,
+          controller.harness.sql`UPDATE mcp_servers SET tools = ${JSON.stringify([
+            {
+              name: "echo",
+              description: "",
+              inputSchema: {
+                type: "object",
+                properties: { region: { type: "string", "x-mcp-header": "Region" } },
+              },
+            },
+          ])}`,
+        );
+        return { arguments: { region: 5 } };
+      },
+      "did not fit what the tool declares",
+    ],
+    [
+      "a result that does not decode",
+      ({ fake }: ReadyRig) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? Response.json({ jsonrpc: "2.0", id, result: { content: "not a list" } })
+            : undefined;
+        return {};
+      },
+      "did not fit what the tool declares",
+    ],
+    ...[400, 413, 422].map(
+      (status) =>
+        [
+          `HTTP ${String(status)} to the tool's request`,
+          ({ fake }: ReadyRig) => {
+            fake.intercept = ({ method }) =>
+              method === "tools/call" ? new Response(null, { status }) : undefined;
+            return {};
+          },
+          `the server refused this call (HTTP ${String(status)})`,
+        ] as const,
+    ),
+  ])("returns %s as this call's answer, and changes no status", async (_name, prepare, text) => {
+    await withReadyServer(async (rig) => {
+      const overrides = await prepare(rig);
+
+      const result = await rig.call(overrides);
+
+      expect(result).toMatchObject({ _tag: "Success", success: { isError: true } });
+      if (result._tag !== "Success") return;
+      expect(textOf(result.success)).toContain(text);
+      expect((await readRow(rig.controller)).status).toBe("ready");
+      expect(await countNotifications(rig.controller)).toBe(0);
+    });
+  });
+
   it("refuses an answer over the size cap as an error, and changes no status", async () => {
     await withReadyServer(async ({ controller, call }) => {
       const result = await call({ tool: "big" });
@@ -415,10 +494,10 @@ describe("a call", () => {
   it.each([
     ["no answer (HTTP 503)", 503, "unreachable", "The server answered with HTTP status 503"],
     [
-      "an HTTP status that is no MCP answer (400)",
-      400,
+      "an HTTP status that is no MCP answer (410)",
+      410,
       "error",
-      "The server answered with HTTP status 400",
+      "The server answered with HTTP status 410",
     ],
   ] as const)(
     "writes the status of the server when it gives %s",

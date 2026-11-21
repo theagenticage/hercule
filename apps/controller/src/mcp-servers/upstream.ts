@@ -181,8 +181,25 @@ const CurrentUpstreamCall = Context.Reference<UpstreamCallState<unknown> | undef
   { defaultValue: () => undefined },
 );
 
-/** The answer to the agent when the server answers a call with HTTP 403. */
-const FORBIDDEN_ANSWER = "the server refused this call (HTTP 403)";
+/**
+ * The HTTP statuses besides 403 with which a server answers the tool's own
+ * request when it refuses that call: a request it cannot read (400), a request
+ * that is too large (413) and arguments it rejects (422). They are about this
+ * call, not about the server.
+ */
+const CALL_REFUSAL_STATUSES: ReadonlyArray<number> = [400, 413, 422];
+
+/** The answer to the agent when the server answers the tool's own request with HTTP `status`. */
+const describeRefusedCall = (status: number): string =>
+  `the server refused this call (HTTP ${String(status)})`;
+
+/** The answer to the agent when the server asks for something a call cannot give, such as more input. */
+const UNSUPPORTED_ANSWER =
+  "this call needs something Hercule does not support, such as a request for more input, so it was not completed";
+
+/** The answer to the agent when the arguments or the server's answer do not fit the tool's description. */
+const MALFORMED_CALL_ANSWER =
+  "the call's arguments or the server's answer did not fit what the tool declares, so it was not completed. Check the arguments";
 
 /** Builds the tool result of a call that failed: `text` tells the agent what happened. */
 export const buildErrorResult = (text: string): McpSchema.CallToolResult =>
@@ -420,8 +437,11 @@ export interface OpenedUpstream {
   ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, UpstreamError>;
   /**
    * Calls a tool and returns the server's answer with every credential value
-   * the session and the call sent removed. The tool's own errors are answers:
-   * a JSON-RPC error or HTTP 403 comes back as a result with `isError`.
+   * the session and the call sent removed. A failure of this call alone is its answer, not
+   * a failure of the server, and comes back as a result with `isError`: a
+   * JSON-RPC error, HTTP 403, an answer that asks for input the client cannot
+   * give, a request the client refused to send, a result that does not decode,
+   * and HTTP 400, 413 or 422 to the tool's own request.
    *
    * Fails with:
    *
@@ -755,7 +775,24 @@ export const openUpstream = (
         );
       }
       if (reason._tag === "HttpError" && reason.status === 403) {
-        return Effect.succeed(buildErrorResult(FORBIDDEN_ANSWER));
+        return Effect.succeed(buildErrorResult(describeRefusedCall(403)));
+      }
+      // A failure of the call's own request, and a refusal by the client
+      // before anything was sent, say nothing about the server as a whole, so
+      // they are this call's answer and the server's status stays.
+      if (reason._tag === "UnsupportedError") {
+        return Effect.succeed(buildErrorResult(UNSUPPORTED_ANSWER));
+      }
+      if (reason._tag === "ValidationError") {
+        return Effect.succeed(buildErrorResult(MALFORMED_CALL_ANSWER));
+      }
+      if (
+        reason._tag === "HttpError" &&
+        reason.status === call.toolPostStatus &&
+        CALL_REFUSAL_STATUSES.includes(reason.status) &&
+        reason.code !== McpSchema.UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+      ) {
+        return Effect.succeed(buildErrorResult(describeRefusedCall(reason.status)));
       }
       // The tool went out, and then a request that continues its exchange was
       // refused before it was sent, so the call may have run.
