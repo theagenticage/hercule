@@ -27,6 +27,7 @@ import {
   type Live,
   type RuntimeNote,
 } from "@hercule/client-core";
+import { hasMcpServerLine } from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
@@ -96,9 +97,7 @@ export function AgentPage({
   // A line about MCP servers draws its buttons from the servers as they are
   // now. So a page that holds one reads the servers (each line does) and keeps
   // the live topic, and a page without one does neither.
-  const hasMcpNote = [...turns.flatMap((turn) => turn.runtimeNotes), ...outsideRuntimeNotes].some(
-    (note) => note.mcpServers !== undefined,
-  );
+  const hasMcpNote = hasMcpServerLine({ turns, outsideRuntimeNotes });
   useLiveInvalidation(live, queryClient, "mcpServer", hasMcpNote);
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.

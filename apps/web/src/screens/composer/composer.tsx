@@ -56,6 +56,17 @@ type SelectorKey = "plus" | "accessMode" | "options" | "model" | "workspace" | "
 const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.includes("Files");
 
 /**
+ * Whether the `+` menu's MCP servers row works while the composer answers an
+ * agent's question. It edits the thread's list, not the answer, so it does.
+ * Set it to `false` to draw the row off, as the attach row is while
+ * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
+ * one place that decides it. Built so; Rogier to confirm (spec 17, the `+`
+ * menu, answer mode).
+ */
+const SERVERS_WORK_WHILE_ANSWERING = true;
+const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
+
+/**
  * The composer: the thread's settings, and the message about to be sent to it.
  * The same component serves a draft and an active thread. `useComposerModel`
  * handles the difference, and every lock, dimmed row and blocker comes from
@@ -73,7 +84,8 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * The `+` opens a menu: Attach, and the thread's MCP servers (`ThreadPlusMenu`).
  * Answer mode turns Attach off but leaves the MCP servers row working,
  * because that row edits the thread's list and not the answer being written
- * (decided by Rogier, #1211). The servers are read only when the thread has
+ * (`SERVERS_WORK_WHILE_ANSWERING`; built so, Rogier to confirm: spec 17, the
+ * `+` menu, answer mode). The servers are read only when the thread has
  * some, or when the MCP row or the picker opens.
  */
 export function Composer({
@@ -318,6 +330,11 @@ export function Composer({
                 }}
                 attachDisabledReason={
                   answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
+                }
+                serversOffReason={
+                  answer !== null && !SERVERS_WORK_WHILE_ANSWERING
+                    ? SERVERS_OFF_WHILE_ANSWERING
+                    : null
                 }
                 // The picker can come back after a question took the composer
                 // over, so the mode is read when the files arrive, as for paste.

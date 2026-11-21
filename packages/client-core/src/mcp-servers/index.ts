@@ -5,11 +5,16 @@
  * purpose: only lazily loaded screens use them, and the app's first paint has
  * no room for them.
  */
-export { describeAgentToolsNote, type AgentToolsNote } from "./agent-tools-note";
+export {
+  describeAgentToolsNote,
+  describeUnavailableAgentToolsNote,
+  type AgentToolsNote,
+} from "./agent-tools-note";
 export {
   buildMcpWarningLine,
   decideStatusBand,
-  decideWarningFix,
+  hasMcpServerBlock,
+  hasMcpServerLine,
   type McpServerWarningEntry,
   type McpWarningLine,
   type StatusBand,
@@ -17,17 +22,14 @@ export {
   type WarningFix,
 } from "./fix";
 export { type McpServerDisplayStatus } from "./display-status";
-export { chooseNamedServer, groupServersByName, type ServerNameGroup } from "./named-lists";
-export { describeOfferAddress, readMcpServerOffers, type McpServerOffer } from "./offers";
+export { chooseNamedServer } from "./named-lists";
+export { describeOfferAddress, readMcpServerOffers } from "./offers";
 export {
   buildProjectBoxes,
   decideProjectBoxWrite,
   describeProjectRefusal,
   type ProjectBox,
   type ProjectBoxAction,
-  type ProjectBoxWrite,
-  type ProjectBoxTarget,
-  type ProjectRefusal,
   type TextPart,
 } from "./project-boxes";
 export {
@@ -36,31 +38,21 @@ export {
   type McpServerSettingsRow,
   type NamingProjects,
 } from "./settings-list";
-export {
-  decideThreadStartList,
-  describeStartLine,
-  resolveDraftMcpServerIds,
-  type ThreadStartList,
-  type ThreadStartSource,
-} from "./start-list";
+export { resolveDraftMcpServerIds } from "./draft-pick";
+export { decideThreadStartList, type ThreadStartList } from "./start-list";
 export {
   buildServerPicker,
   buildThreadServerMenu,
   orderMenuNames,
   type RememberedAccounts,
   type ServerMenuRow,
-  type ServerPicker,
   type ServerPickerRow,
   type ThreadServerMenu,
 } from "./thread-menu";
-export {
-  countServersNeedingSignIn,
-  describeThreadServersRow,
-  type ThreadServersRow,
-} from "./thread-servers-row";
+export { describeThreadServersRow, type ThreadServersRow } from "./thread-servers-row";
 export {
   buildMcpServerViews,
-  describeReconnect,
+  describeConnectionRowProblem,
+  isCheckDisabled,
   type McpServerView,
-  type ReconnectTarget,
 } from "./views";

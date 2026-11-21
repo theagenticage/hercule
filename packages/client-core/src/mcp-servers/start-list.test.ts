@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadPicks } from "../threads/config";
 import { buildProject } from "../threads/workspaces.testing";
-import { decideThreadStartList, describeStartLine, resolveDraftMcpServerIds } from "./start-list";
+import { decideThreadStartList, describeStartLine } from "./start-list";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
@@ -19,13 +18,23 @@ describe("decideThreadStartList", () => {
     expect(decideThreadStartList("p-shop", [WEBSHOP], ["s-linear"], VIEWS)).toEqual({
       mcpServerIds: ["s-work"],
       source: { kind: "project", projectName: "webshop" },
+      complete: true,
     });
+  });
+
+  it("is incomplete while the source holds an id no view knows, in a project or in the default list", () => {
+    const shop = { ...WEBSHOP, mcpServerIds: ["s-gone", "s-work"] };
+
+    expect(decideThreadStartList("p-shop", [shop], [], VIEWS).complete).toBe(false);
+    expect(decideThreadStartList(null, [], ["s-gone", "s-linear"], VIEWS).complete).toBe(false);
+    expect(decideThreadStartList(null, [], ["s-linear"], VIEWS).complete).toBe(true);
   });
 
   it("starts from the project's list even when it is empty, and not from the default", () => {
     expect(decideThreadStartList("p-empty", [EMPTY], ["s-linear"], VIEWS)).toEqual({
       mcpServerIds: [],
       source: { kind: "project", projectName: "empty" },
+      complete: true,
     });
   });
 
@@ -33,6 +42,7 @@ describe("decideThreadStartList", () => {
     expect(decideThreadStartList(null, [WEBSHOP], ["s-gone", "s-linear"], VIEWS)).toEqual({
       mcpServerIds: ["s-linear"],
       source: { kind: "default" },
+      complete: false,
     });
   });
 
@@ -40,6 +50,7 @@ describe("decideThreadStartList", () => {
     expect(decideThreadStartList(null, [WEBSHOP], [], VIEWS)).toEqual({
       mcpServerIds: [],
       source: { kind: "none" },
+      complete: true,
     });
     expect(decideThreadStartList(null, [], ["s-gone"], VIEWS).source).toEqual({ kind: "none" });
   });
@@ -48,7 +59,7 @@ describe("decideThreadStartList", () => {
 describe("describeStartLine", () => {
   it("words the foot line and the reset button for each source", () => {
     const line = (source: Parameters<typeof describeStartLine>[0]["source"]) =>
-      describeStartLine({ mcpServerIds: [], source });
+      describeStartLine({ mcpServerIds: [], source, complete: true });
 
     expect(line({ kind: "project", projectName: "webshop" })).toEqual({
       line: "Starts from webshop's list. Changes are for this thread only.",
@@ -62,42 +73,5 @@ describe("describeStartLine", () => {
       line: "A thread in no project starts with no servers. Switch on what this one needs.",
       resetLabel: "Switch all off",
     });
-  });
-});
-
-describe("resolveDraftMcpServerIds", () => {
-  const KNOWN = new Set(["s-linear", "s-hobby", "s-work"]);
-  const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks => ({
-    mcpServers: { projectId, mcpServerIds },
-  });
-
-  it("is undefined for an untouched draft, so it sends no list", () => {
-    expect(resolveDraftMcpServerIds({}, "p-shop", KNOWN)).toBeUndefined();
-  });
-
-  it("returns the picked list while the draft is in the project it was picked under", () => {
-    expect(resolveDraftMcpServerIds(pick("p-shop", ["s-hobby"]), "p-shop", KNOWN)).toEqual([
-      "s-hobby",
-    ]);
-    expect(resolveDraftMcpServerIds(pick(null, ["s-hobby"]), null, KNOWN)).toEqual(["s-hobby"]);
-  });
-
-  it("ignores a pick made under another project, so the draft is untouched again", () => {
-    expect(resolveDraftMcpServerIds(pick("p-shop", ["s-hobby"]), "p-blog", KNOWN)).toBeUndefined();
-    expect(resolveDraftMcpServerIds(pick("p-shop", ["s-hobby"]), null, KNOWN)).toBeUndefined();
-  });
-
-  it("keeps an explicit empty list empty", () => {
-    expect(resolveDraftMcpServerIds(pick(null, []), null, KNOWN)).toEqual([]);
-  });
-
-  it("drops ids that are not known servers, but nothing while the servers are unread", () => {
-    expect(resolveDraftMcpServerIds(pick(null, ["s-gone", "s-linear"]), null, KNOWN)).toEqual([
-      "s-linear",
-    ]);
-    expect(resolveDraftMcpServerIds(pick(null, ["s-gone", "s-linear"]), null, undefined)).toEqual([
-      "s-gone",
-      "s-linear",
-    ]);
   });
 });

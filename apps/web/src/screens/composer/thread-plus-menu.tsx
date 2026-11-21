@@ -36,6 +36,7 @@ export function ThreadPlusMenu({
   open,
   onOpenChange,
   attachDisabledReason,
+  serversOffReason,
   onFiles,
 }: {
   readonly client: HerculeClient;
@@ -53,6 +54,8 @@ export function ThreadPlusMenu({
   readonly onOpenChange: (open: boolean) => void;
   /** Why no image can be attached, or `null` when one can. */
   readonly attachDisabledReason: string | null;
+  /** Why the MCP servers row is off, or `null` when it works. */
+  readonly serversOffReason: string | null;
   readonly onFiles: (files: readonly File[]) => void;
 }): JSX.Element {
   // Whether the picker is open. It opens from the `+` menu, which closes.
@@ -89,17 +92,19 @@ export function ThreadPlusMenu({
         open={open}
         onOpenChange={handleOpenChange}
         attachDisabledReason={attachDisabledReason}
+        serversOffReason={serversOffReason}
         onFiles={onFiles}
         serversRow={servers.row}
         serversOpen={showsServers}
         onServersOpenChange={setShowsServers}
         submenu={
-          servers.views !== undefined && servers.start !== undefined ? (
+          servers.views !== undefined ? (
             <ThreadServersMenu
               views={servers.views}
               plugins={plugins}
               mcpServerIds={servers.mcpServerIds}
               start={servers.start}
+              startFailure={servers.startFailure}
               writing={servers.writing}
               refusal={servers.refusal}
               onChoose={servers.chooseServer}
@@ -121,12 +126,13 @@ export function ThreadPlusMenu({
           )
         }
       />
-      {picking && servers.views !== undefined && servers.start !== undefined ? (
+      {picking && servers.views !== undefined ? (
         <ThreadServerPicker
           views={servers.views}
           plugins={plugins}
           mcpServerIds={servers.mcpServerIds}
           start={servers.start}
+          startFailure={servers.startFailure}
           writing={servers.writing}
           refusal={servers.refusal}
           onChange={servers.changeList}

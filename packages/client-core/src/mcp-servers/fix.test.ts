@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildMcpWarningLine, decideStatusBand, decideWarningFix } from "./fix";
+import type { ThreadBlock } from "../threads/blocks";
+import type { RuntimeNote } from "../threads/turns";
+import {
+  buildMcpWarningLine,
+  decideStatusBand,
+  decideWarningFix,
+  hasMcpServerBlock,
+  hasMcpServerLine,
+} from "./fix";
 import type { McpServerWarningEntry } from "./fix";
 import { SENTRY_WORK, buildServer, buildViews } from "./testing";
 import { buildMcpServerViews } from "./views";
@@ -77,15 +85,15 @@ describe("buildMcpWarningLine", () => {
 });
 
 describe("decideStatusBand", () => {
-  const bandOf = (overrides: Parameters<typeof buildServer>[3]) =>
+  const decideBandWithOverrides = (overrides: Parameters<typeof buildServer>[3]) =>
     decideStatusBand(buildViews([buildServer("s-work", "sentry", "c-work", overrides)])[0]!);
 
   it("draws no band for a ready server", () => {
-    expect(bandOf({})).toBeNull();
+    expect(decideBandWithOverrides({})).toBeNull();
   });
 
   it("explains a server that is checking, with no button", () => {
-    expect(bandOf({ status: "checking" })).toEqual({
+    expect(decideBandWithOverrides({ status: "checking" })).toEqual({
       tone: "quiet",
       heading: null,
       text: "Checking: asking the server for its tools.",
@@ -95,7 +103,7 @@ describe("decideStatusBand", () => {
   });
 
   it("explains a switched-off server whatever its status, with no button", () => {
-    expect(bandOf({ enabled: false, status: "needs-sign-in" })).toMatchObject({
+    expect(decideBandWithOverrides({ enabled: false, status: "needs-sign-in" })).toMatchObject({
       tone: "quiet",
       heading: "Off.",
       text: "No thread gets this server. Its name, its sign-in and the projects that name it are kept.",
@@ -104,7 +112,9 @@ describe("decideStatusBand", () => {
   });
 
   it("offers the Connection's Reconnect for a server that needs sign-in, with the server's reason", () => {
-    expect(bandOf({ status: "needs-sign-in", statusDetail: "revoked 09:12" })).toMatchObject({
+    expect(
+      decideBandWithOverrides({ status: "needs-sign-in", statusDetail: "revoked 09:12" }),
+    ).toMatchObject({
       tone: "fail",
       detail: "revoked 09:12",
       action: { kind: "reconnect", connectionId: "c-work", label: "Reconnect Sentry · work" },
@@ -112,12 +122,14 @@ describe("decideStatusBand", () => {
   });
 
   it("offers Check now for an unreachable server and for one in error", () => {
-    expect(bandOf({ status: "unreachable" })).toMatchObject({
+    expect(decideBandWithOverrides({ status: "unreachable" })).toMatchObject({
       tone: "fail",
       text: "Hercule asks again, with a longer wait each time. A thread that starts meanwhile says the server was left out, and gets it once it is ready.",
       action: { kind: "check", label: "Check now" },
     });
-    expect(bandOf({ status: "error", statusDetail: "refused the token" })).toMatchObject({
+    expect(
+      decideBandWithOverrides({ status: "error", statusDetail: "refused the token" }),
+    ).toMatchObject({
       tone: "fail",
       detail: "refused the token",
       action: { kind: "check", label: "Check now" },
@@ -132,5 +144,56 @@ describe("decideStatusBand", () => {
     )[0]!;
 
     expect(decideStatusBand(view)).toBeNull();
+  });
+});
+
+describe("hasMcpServerLine", () => {
+  const note = (mcpServers?: RuntimeNote["mcpServers"]): RuntimeNote => ({
+    key: "1:warning",
+    severity: "warning",
+    message: "left out",
+    at: "2026-11-20T09:00:00.000Z",
+    ...(mcpServers === undefined ? {} : { mcpServers }),
+  });
+
+  it("is false for a transcript with no note, or notes that name no server", () => {
+    expect(hasMcpServerLine({ turns: [], outsideRuntimeNotes: [] })).toBe(false);
+    expect(
+      hasMcpServerLine({ turns: [{ runtimeNotes: [note()] }], outsideRuntimeNotes: [note()] }),
+    ).toBe(false);
+  });
+
+  it("is true for a note in a turn that names servers", () => {
+    expect(
+      hasMcpServerLine({
+        turns: [{ runtimeNotes: [note([warn("unreachable")])] }],
+        outsideRuntimeNotes: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("is true for a note outside every turn that names servers", () => {
+    expect(
+      hasMcpServerLine({ turns: [], outsideRuntimeNotes: [note([warn("needs-sign-in")])] }),
+    ).toBe(true);
+  });
+});
+
+describe("hasMcpServerBlock", () => {
+  const warning = (mcpServers?: McpServerWarningEntry[]): ThreadBlock => ({
+    kind: "warning",
+    key: "1:warning",
+    message: "left out",
+    at: "2026-11-20T09:00:00.000Z",
+    ...(mcpServers === undefined ? {} : { mcpServers }),
+  });
+
+  it("is false for no blocks, or a warning that names no server", () => {
+    expect(hasMcpServerBlock([])).toBe(false);
+    expect(hasMcpServerBlock([warning()])).toBe(false);
+  });
+
+  it("is true for a warning that names servers", () => {
+    expect(hasMcpServerBlock([warning(), warning([warn("unreachable")])])).toBe(true);
   });
 });

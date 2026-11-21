@@ -135,14 +135,14 @@ export interface ProjectRefusal {
   readonly keep: readonly TextPart[];
 }
 
-const text = (value: string): TextPart => ({ text: value, code: false });
-const code = (value: string): TextPart => ({ text: value, code: true });
+const buildTextPart = (value: string): TextPart => ({ text: value, code: false });
+const buildCodePart = (value: string): TextPart => ({ text: value, code: true });
 
 /** Returns a server as the code spans of a sentence: its name, then its account when it has one. */
 const describeServerParts = (view: McpServerView): TextPart[] =>
   view.account === undefined
-    ? [code(view.server.name)]
-    : [code(view.server.name), text(" "), code(view.account)];
+    ? [buildCodePart(view.server.name)]
+    : [buildCodePart(view.server.name), buildTextPart(" "), buildCodePart(view.account)];
 
 /**
  * Returns the refusal for ticking `box` on the page of `view`, or `null` when
@@ -160,19 +160,19 @@ export const describeProjectRefusal = (
   const sentence =
     box.target.kind === "project"
       ? [
-          code(box.target.project.name),
-          text(" already uses "),
+          buildCodePart(box.target.project.name),
+          buildTextPart(" already uses "),
           ...takenParts,
-          text(". One project cannot name both: their tools would get the same names."),
+          buildTextPart(". One project cannot name both: their tools would get the same names."),
         ]
       : [
-          text("Threads without a project already use "),
+          buildTextPart("Threads without a project already use "),
           ...takenParts,
-          text(". One list cannot name both: their tools would get the same names."),
+          buildTextPart(". One list cannot name both: their tools would get the same names."),
         ];
   return {
     sentence,
-    use: [text("Use "), ...describeServerParts(view)],
-    keep: [text("Keep "), ...takenParts],
+    use: [buildTextPart("Use "), ...describeServerParts(view)],
+    keep: [buildTextPart("Keep "), ...takenParts],
   };
 };

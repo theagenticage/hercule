@@ -72,7 +72,7 @@ import {
   S_STRIPE,
   buildMcpServerRoutes,
   buildSessionServers,
-  findConnectionOf,
+  findServerConnection,
   openPlusMenu,
   openServersSubmenu,
   readSubmenuSwitches,
@@ -5835,6 +5835,90 @@ describe("Thread: the MCP servers of the + menu", () => {
     },
   );
 
+  it("keeps the switches disabled after a saved write whose list could not be read again, until a read succeeds", async () => {
+    const user = userEvent.setup();
+    const reads = { fail: false };
+    const state = {
+      session: buildSession({ status: "idle", mcpServers: buildSessionServers([S_NOTION]) }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () =>
+        reads.fail
+          ? { status: 500, body: buildErrorBody("internal", "The session could not be read.") }
+          : { body: state.session },
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: (call) => {
+        const { mcpServerIds } = call.body as { mcpServerIds: string[] };
+        state.session = {
+          ...state.session,
+          mcpServers: buildSessionServers(
+            mcpServerIds.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+          ),
+        };
+        return { body: state.session };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    reads.fail = true;
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+    expect((await within(submenu).findByRole("alert")).textContent).toBe(
+      "Saved, but the list could not be read again.",
+    );
+    // The cache still holds the list from before the write, so a second change would undo the first.
+    const stripe = within(submenu).getByRole("switch", { name: "stripe in this thread" });
+    expect(stripe.getAttribute("aria-disabled")).toBe("true");
+    await user.click(stripe);
+    expect(readUpdates(api)).toHaveLength(1);
+
+    reads.fail = false;
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await waitFor(() => {
+      expect(stripe.getAttribute("aria-disabled")).not.toBe("true");
+    });
+    expect(within(submenu).queryByRole("alert")).toBeNull();
+    await user.click(stripe);
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(2);
+    });
+    expect(readUpdates(api)[1]!.body).toEqual({
+      mcpServerIds: [S_NOTION.id, S_GITHUB.id, S_STRIPE.id],
+    });
+  });
+
+  it("lets the thread's own switches work when its project cannot be read, and offers no reset", async () => {
+    const user = userEvent.setup();
+    const session = buildSession({
+      status: "idle",
+      projectId: WEBSHOP.id,
+      mcpServers: buildSessionServers([S_NOTION]),
+    });
+    const { api } = await openApp(session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "The project does not exist."),
+      },
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: { body: session },
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The project does not exist.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to / })).toBeNull();
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    expect(readUpdates(api)[0]!.body).toEqual({ mcpServerIds: [S_NOTION.id, S_GITHUB.id] });
+  });
+
   it("reads a project that is not on the first page by its id, and starts from its list", async () => {
     const user = userEvent.setup();
     const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
@@ -5893,7 +5977,7 @@ describe("Thread: the MCP servers of the + menu", () => {
     expect(readPageText(submenu)).toContain("on, joins once you sign in");
     const reconnect = within(submenu).getByRole("link", { name: "Reconnect Linear · acme" });
     expect(reconnect.getAttribute("href")).toBe(
-      `/connections?reconnect=${findConnectionOf(S_LINEAR).id}`,
+      `/connections?reconnect=${findServerConnection(S_LINEAR).id}`,
     );
     expect(
       within(submenu).getByRole("link", { name: "Open MCP settings" }).getAttribute("href"),
@@ -5952,7 +6036,7 @@ describe("Thread: the lines about MCP servers", () => {
     // The button comes with the servers, and the line is drawn again around it.
     const reconnect = await screen.findByRole("link", { name: "Reconnect Linear · acme" });
     expect(reconnect.getAttribute("href")).toBe(
-      `/connections?reconnect=${findConnectionOf(S_LINEAR).id}`,
+      `/connections?reconnect=${findServerConnection(S_LINEAR).id}`,
     );
     // A line the user must act on is drawn in the failure colours, and a screen
     // reader still hears a warning, as for a line with nothing to do.

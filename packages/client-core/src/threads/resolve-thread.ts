@@ -16,7 +16,7 @@ import {
   type Runner,
   type Workspace,
 } from "@hercule/contract";
-import { resolveDraftMcpServerIds } from "../mcp-servers/start-list";
+import { resolveDraftMcpServerIds } from "../mcp-servers/draft-pick";
 import { findProfileEntry } from "../model-profiles/profile-entries";
 import { findProviderAccountReadiness, resolveThreadHarnessId } from "../provider-accounts";
 import {

@@ -44,6 +44,10 @@ const readCurrentList = (
  * sends back a list a control drew a while ago. A function that throws refuses
  * the write before anything is sent.
  *
+ * If the write succeeds but reading the list again fails, `writing` stays
+ * true and `refusal` says so until a read succeeds, so no change is built from
+ * a list that lacks the one just saved.
+ *
  * A refusal (such as two servers of one name) is `refusal`; it stays with the
  * target until the next write or `clearRefusal`, and the list stays as the
  * controller holds it. A refusal as invalid also reads the servers again,
@@ -56,6 +60,10 @@ export const useWriteServerList = (client: HerculeClient, target: ServerListTarg
       target.kind === "project"
         ? ["mcp-list", "project", target.projectId]
         : ["mcp-list", "default"],
+    reads:
+      target.kind === "project"
+        ? [queryKeys.projects(), queryKeys.project(target.projectId)]
+        : [queryKeys.settings()],
     mutationFn: async (update) => {
       const mcpServerIds = update(readCurrentList(queryClient, client, target));
       if (target.kind === "project") {

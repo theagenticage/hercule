@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpServer } from "@hercule/contract";
-import { describeAgentToolsNote } from "./agent-tools-note";
+import { describeAgentToolsNote, describeUnavailableAgentToolsNote } from "./agent-tools-note";
 import { SENTRY_WORK, buildViews } from "./testing";
 
 const noteOf = (overrides: Partial<McpServer>) =>
@@ -35,5 +35,14 @@ describe("describeAgentToolsNote", () => {
     ["error", "agent tools: error"],
   ] as const)("says the status of a server that is %s, and marks it failing", (status, words) => {
     expect(noteOf({ status })).toEqual({ words, failing: true });
+  });
+});
+
+describe("describeUnavailableAgentToolsNote", () => {
+  it("says the tools are not available, and does not mark it failing", () => {
+    expect(describeUnavailableAgentToolsNote()).toEqual({
+      words: "agent tools: not available",
+      failing: false,
+    });
   });
 });

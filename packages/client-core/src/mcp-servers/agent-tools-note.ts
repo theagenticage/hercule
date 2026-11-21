@@ -14,6 +14,16 @@ export interface AgentToolsNote {
 }
 
 /**
+ * Returns the note a Connection shows when the servers could not be read and
+ * none are cached: "agent tools: not available", muted, not failing. It
+ * leads nowhere, because there is no server to open.
+ */
+export const describeUnavailableAgentToolsNote = (): AgentToolsNote => ({
+  words: "agent tools: not available",
+  failing: false,
+});
+
+/**
  * Returns the note for the server `view` of a Connection, or for `null`
  * while the Connection's server has no record:
  *

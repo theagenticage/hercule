@@ -1,12 +1,9 @@
 import type { JSX } from "react";
 import { createPortal } from "react-dom";
 import type { PluginDetail } from "@hercule/contract";
-import {
-  buildThreadServerMenu,
-  type McpServerView,
-  type ThreadStartList,
-} from "@hercule/client-core/mcp-servers";
+import type { McpServerView, ThreadStartList } from "@hercule/client-core/mcp-servers";
 import { McpServerPicker, type ListUpdate } from "../mcp-server-picker";
+import { buildThreadMenuModel } from "./thread-menu-model";
 
 /**
  * The picker of the thread's MCP Servers, titled "MCP servers of this
@@ -23,6 +20,7 @@ export function ThreadServerPicker({
   plugins,
   mcpServerIds,
   start,
+  startFailure,
   writing,
   refusal,
   onChange,
@@ -33,7 +31,10 @@ export function ThreadServerPicker({
   readonly plugins: readonly PluginDetail[];
   /** The thread's list. */
   readonly mcpServerIds: readonly string[];
-  readonly start: ThreadStartList;
+  /** Where the list started, or `undefined` while that is not known. The checkboxes work without it. */
+  readonly start: ThreadStartList | undefined;
+  /** Why `start` could not be read, or `null`. */
+  readonly startFailure: string | null;
   readonly writing: boolean;
   /** Why the last write was refused, or `null`. */
   readonly refusal: string | null;
@@ -44,12 +45,13 @@ export function ThreadServerPicker({
 }): JSX.Element {
   // The submenu's model gives the foot and the reset button. Its rows are not
   // used here, so it is built with no order and offers none.
-  const { foot, reset } = buildThreadServerMenu({
+  const { foot, reset } = buildThreadMenuModel({
     views,
     mcpServerIds,
     order: [],
     rememberedAccounts: {},
     start,
+    startFailure,
   });
   return createPortal(
     <McpServerPicker

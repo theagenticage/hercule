@@ -2,7 +2,6 @@ import { useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { PluginDetail } from "@hercule/contract";
 import {
-  buildThreadServerMenu,
   orderMenuNames,
   type McpServerView,
   type RememberedAccounts,
@@ -11,6 +10,7 @@ import {
 import { Button, buildButtonClassName, Select, Switch } from "@hercule/ui";
 import { ProviderMark } from "../provider-mark";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
+import { buildThreadMenuModel } from "./thread-menu-model";
 
 /**
  * The submenu "Servers of this thread" of the composer's `+` menu: one row for
@@ -37,6 +37,7 @@ export function ThreadServersMenu({
   plugins,
   mcpServerIds,
   start,
+  startFailure,
   writing,
   refusal,
   onChoose,
@@ -47,7 +48,10 @@ export function ThreadServersMenu({
   readonly plugins: readonly PluginDetail[];
   /** The thread's list. */
   readonly mcpServerIds: readonly string[];
-  readonly start: ThreadStartList;
+  /** Where the list started, or `undefined` while that is not known. The switches work without it. */
+  readonly start: ThreadStartList | undefined;
+  /** Why `start` could not be read, or `null`. */
+  readonly startFailure: string | null;
   readonly writing: boolean;
   /** Why the last write was refused, or `null`. */
   readonly refusal: string | null;
@@ -60,12 +64,13 @@ export function ThreadServersMenu({
   const [order] = useState(() => orderMenuNames(views, mcpServerIds));
   // The account each name last showed, so a name switched off offers the account the user chose.
   const [remembered, setRemembered] = useState<RememberedAccounts>({});
-  const menu = buildThreadServerMenu({
+  const menu = buildThreadMenuModel({
     views,
     mcpServerIds,
     order,
     rememberedAccounts: remembered,
     start,
+    startFailure,
   });
 
   const choose = (name: string, serverId: string | null, shownId: string): void => {

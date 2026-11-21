@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildMcpServerViews, describeReconnect } from "./views";
+import {
+  buildMcpServerViews,
+  describeConnectionRowProblem,
+  describeReconnect,
+  isCheckDisabled,
+} from "./views";
 import {
   CONNECTIONS,
   LINEAR,
@@ -93,5 +98,37 @@ describe("describeReconnect", () => {
     const [view] = buildMcpServerViews([SENTRY_WORK], [], OFFERING_PLUGINS);
 
     expect(describeReconnect(view!)).toBeNull();
+  });
+});
+
+describe("isCheckDisabled", () => {
+  it.each([
+    ["checking", true],
+    ["off", true],
+    ["ready", false],
+    ["needs-sign-in", false],
+    ["unreachable", false],
+    ["error", false],
+  ] as const)("for a server that is %s is %s", (displayStatus, disabled) => {
+    const status = displayStatus === "off" ? "ready" : displayStatus;
+    const [view] = buildViews([{ ...SENTRY_WORK, status, enabled: displayStatus !== "off" }]);
+
+    expect(isCheckDisabled(view!)).toBe(disabled);
+  });
+});
+
+describe("describeConnectionRowProblem", () => {
+  it("returns the short word, not the sentence, for a server that needs sign-in", () => {
+    const [view] = buildViews([
+      { ...SENTRY_WORK, status: "needs-sign-in", statusDetail: "revoked 09:12" },
+    ]);
+
+    expect(describeConnectionRowProblem(view!)).toBe("needs sign-in");
+  });
+
+  it("returns null for a server that does not need sign-in", () => {
+    const [view] = buildViews([{ ...SENTRY_WORK, status: "unreachable" }]);
+
+    expect(describeConnectionRowProblem(view!)).toBeNull();
   });
 });

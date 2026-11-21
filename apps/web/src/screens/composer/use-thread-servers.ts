@@ -37,11 +37,13 @@ import { useKnownMcpServerIds, useMcpServerViews } from "../use-mcp-server-views
 export interface ThreadServers {
   /** Every MCP Server, or `undefined` while the servers are not read yet. A thread with no server reads them only when its MCP row or the picker opens. */
   readonly views: readonly McpServerView[] | undefined;
-  /** Why the servers or the thread's project could not be read, or `null`. */
+  /** Why the servers could not be read, or `null`. */
   readonly readFailure: string | null;
+  /** Why the thread's project, which its start list needs, could not be read, or `null`. A thread's own list can be changed without it. */
+  readonly startFailure: string | null;
   /** The thread's list: a draft's pick or its start list, a started thread's `Session.mcpServers`. */
   readonly mcpServerIds: readonly string[];
-  /** Where the list started. `undefined` while the servers or the thread's project are not read yet. */
+  /** Where the list started. `undefined` while the servers or the thread's project are not read yet, or the project could not be read. */
   readonly start: ThreadStartList | undefined;
   /** The words for the menu's "MCP servers" row. Until `views` is read they show the count alone. */
   readonly row: ThreadServersRow;
@@ -106,7 +108,8 @@ const readStartListNow = (
  *   starts, so two quick changes never overwrite each other. One write runs
  *   at a time for the session, whichever menu or picker started it, and the
  *   guard survives closing and opening them: `writing` stays true until the
- *   session has been read again. A refusal is `refusal`, and the list stays
+ *   session has been read again, and, when that read fails, until a read
+ *   succeeds. A refusal is `refusal`, and the list stays
  *   as the controller holds it. A refusal as invalid also reads the servers
  *   again, because it can mean a server was deleted.
  *
@@ -187,6 +190,7 @@ export const useThreadServers = ({
   const sessionId = session?.id ?? "";
   const write = useKeyedWrite<ListUpdate>({
     mutationKey: ["mcp-list", "session", sessionId],
+    reads: [sessionQuery(client, sessionId).queryKey],
     mutationFn: async (update) => {
       const cached = queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
       if (cached === undefined)
@@ -219,12 +223,8 @@ export const useThreadServers = ({
 
   return {
     views,
-    readFailure:
-      failure !== null
-        ? readErrorMessage(failure)
-        : addressed.error === null
-          ? null
-          : readErrorMessage(addressed.error),
+    readFailure: failure === null ? null : readErrorMessage(failure),
+    startFailure: addressed.error === null ? null : readErrorMessage(addressed.error),
     mcpServerIds,
     start,
     row: describeThreadServersRow(views?.map((view) => view.server) ?? [], mcpServerIds),
@@ -240,6 +240,12 @@ export const useThreadServers = ({
         const startNow = readStartListNow(queryClient, client, projectId);
         if (startNow === undefined) {
           throw new Error("The list this thread started from is not read yet. Try again.");
+        }
+        // A list with ids the servers do not know yet would be written without them.
+        if (!startNow.complete) {
+          throw new Error(
+            "The servers are not fully read yet, so the list cannot be reset. Try again.",
+          );
         }
         return startNow.mcpServerIds;
       });
