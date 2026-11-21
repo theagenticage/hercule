@@ -51,7 +51,7 @@ import {
   type WorkspaceStepKey,
   MAX_MESSAGE_LENGTH,
   MCP_GATEWAY_ENTRY_NAME,
-  MCP_SERVERS_CAPABILITY,
+  readMcpServersHarnessIds,
   SKILLS_CAPABILITY,
   type HarnessMcpServer,
 } from "@hercule/protocol";
@@ -1080,8 +1080,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads the two facts that decide whether a start can give the harness the
-   * MCP Gateway's entry: whether the runner negotiated
-   * `MCP_SERVERS_CAPABILITY`, and whether the harness declares
+   * MCP Gateway's entry: whether the runner negotiated the MCP Servers
+   * capability of this harness (`readMcpServersHarnessIds`), and whether the harness declares
    * `mcpPassthrough: "native"`. The entry on the start frame and the servers
    * a start leaves out (`recordMcpServersLeftOut`) both follow from these
    * two, so they are read once per start and used for both.
@@ -1093,9 +1093,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
       return {
-        runnerReachesMcpServers: (runner.negotiatedCapabilities ?? []).includes(
-          MCP_SERVERS_CAPABILITY,
-        ),
+        runnerReachesMcpServers: readMcpServersHarnessIds(
+          runner.negotiatedCapabilities ?? [],
+        ).includes(harnessId),
         // A harness this build no longer carries cannot be given the entry.
         harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
       };

@@ -49,6 +49,7 @@ import {
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   MCP_SERVERS_CAPABILITY,
+  buildMcpServersCapability,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -74,6 +75,7 @@ import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
 import {
+  adapters,
   findAdapter,
   describeMissingAdapter,
   buildFailedProbe,
@@ -122,8 +124,10 @@ const NONCE_BYTES = 16;
  * - `DISK_USAGE_CAPABILITY`: this runner measures the disk usage of its
  *   workspaces, repository caches and Harness Homes, and sends it in a
  *   `DiskUsageReport`.
- * - `MCP_SERVERS_CAPABILITY`: this runner gives the harness the MCP Gateway
- *   entry a start frame carries in `SessionSpec.mcpServers`.
+ * - one for each harness whose adapter hands the MCP Gateway entry of a start
+ *   frame (`SessionSpec.mcpServers`) to its harness.
+ * - `MCP_SERVERS_CAPABILITY`, the retired plain form, so a controller of the
+ *   first MCP Gateway build still gives Claude Code the entry.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -138,6 +142,9 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ARCHIVED_SESSION_FILES_CAPABILITY,
   DISK_USAGE_CAPABILITY,
   MCP_SERVERS_CAPABILITY,
+  ...adapters
+    .filter((adapter) => adapter.mapsMcpServers === true)
+    .map((adapter) => buildMcpServersCapability(adapter.harnessId)),
 ];
 
 const ED25519 = { name: "Ed25519" } as const;

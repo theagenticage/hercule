@@ -313,6 +313,15 @@ export interface HarnessAdapter {
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
   /**
+   * Whether `startSession` hands `SessionStartContext.mcpServers` to the
+   * harness. The runner lists the MCP Servers capability of this harness at
+   * hello only when it is `true`, and the controller then adds the MCP
+   * Gateway entry to this harness's start frames. An adapter that ignores the
+   * list leaves it out, so the controller never records servers as callable
+   * that the harness cannot reach.
+   */
+  readonly mapsMcpServers?: true;
+  /**
    * Side-effect free: writes nothing outside `ctx.home`, and makes no API call
    * except the usage read that `options.readUsage` asks for.
    */
