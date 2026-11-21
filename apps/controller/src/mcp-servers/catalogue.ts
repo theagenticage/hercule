@@ -21,7 +21,12 @@ import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { connectionRepository, type StoredConnection } from "../connections";
 import { PluginHost, type RegisteredMcpServer } from "../plugins";
-import { mcpServerRepository, type StoredMcpServer } from "./repository";
+import {
+  mcpServerRepository,
+  type McpServerColumns,
+  type StoredMcpServer,
+  type StoredMcpServerAvailability,
+} from "./repository";
 
 /**
  * Whether the plugin that offers a server's contribution can serve it. A
@@ -138,10 +143,17 @@ export const judgeDependencies = ({
 };
 
 /** One MCP Server and what it depends on, read at one moment. */
-export interface McpServerView {
-  readonly server: StoredMcpServer;
+export interface McpServerView<Server extends StoredMcpServerAvailability = StoredMcpServer> {
+  readonly server: Server;
   readonly dependencies: McpServerDependencies;
 }
+
+/**
+ * A view without the server's tool definitions. Every verdict below needs no
+ * more, and a read that fetches no more stays cheap however long the stored
+ * lists are.
+ */
+export type McpServerAvailabilityView = McpServerView<StoredMcpServerAvailability>;
 
 /** The reasons the state of a server alone gives for refusing a call or leaving it out of a start. */
 export type ServerUnavailableReason = Extract<
@@ -164,7 +176,10 @@ interface Unavailable {
  *    or `needs-sign-in` when only the Connection needs a new sign-in;
  * 3. its stored status is not `ready`.
  */
-const findUnavailable = ({ server, dependencies }: McpServerView): Unavailable | null => {
+const findUnavailable = ({
+  server,
+  dependencies,
+}: McpServerAvailabilityView): Unavailable | null => {
   if (!server.enabled) return { reason: "switched-off" };
   const judged = judgeDependencies(dependencies);
   if (judged._tag === "unusable") return { reason: judged.status, detail: judged.detail };
@@ -172,8 +187,9 @@ const findUnavailable = ({ server, dependencies }: McpServerView): Unavailable |
 };
 
 /** Returns the reason `findUnavailable` finds, or `null` when the server can serve. */
-export const decideUnavailableReason = (view: McpServerView): ServerUnavailableReason | null =>
-  findUnavailable(view)?.reason ?? null;
+export const decideUnavailableReason = (
+  view: McpServerAvailabilityView,
+): ServerUnavailableReason | null => findUnavailable(view)?.reason ?? null;
 
 /**
  * Returns whether `tools/list` shows the server: it is switched on, it has a
@@ -182,7 +198,7 @@ export const decideUnavailableReason = (view: McpServerView): ServerUnavailableR
  * call to it is refused with that reason. A server that is not `ready` is
  * shown too.
  */
-export const isServable = ({ server, dependencies }: McpServerView): boolean => {
+export const isServable = ({ server, dependencies }: McpServerAvailabilityView): boolean => {
   if (!server.enabled || server.checkedAt === null) return false;
   const judged = judgeDependencies(dependencies);
   return judged._tag === "usable" || judged.status === "needs-sign-in";
@@ -217,7 +233,7 @@ export const describeRefusal = (reason: ServerUnavailableReason, name: string): 
  * needs is refused as `error` too, because its credentials would go to the
  * wrong origin. The caller checks that the server lists the tool.
  */
-export const decideCallRefusal = (view: McpServerView): CallRefusal | null => {
+export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal | null => {
   const { name } = view.server;
   const unavailable = findUnavailable(view);
   if (unavailable !== null) {
@@ -275,27 +291,41 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * Returns the view of each server that exists, by its id, as it is now. An
+   * id that no server has is left out of the map. It costs one query for the
+   * servers, one for their Connections and one read of the plugin host,
+   * however many ids there are. A reader that only judges the servers asks for
+   * `without-tools`, and the query then leaves the stored tool definitions
+   * unread.
+   */
+  function readViews(
+    ids: ReadonlyArray<string>,
+    columns?: "with-tools",
+  ): Effect.Effect<ReadonlyMap<string, McpServerView>, SqlError>;
+  function readViews(
+    ids: ReadonlyArray<string>,
+    columns: "without-tools",
+  ): Effect.Effect<ReadonlyMap<string, McpServerAvailabilityView>, SqlError>;
+  function readViews(
+    ids: ReadonlyArray<string>,
+    columns: McpServerColumns = "with-tools",
+  ): Effect.Effect<ReadonlyMap<string, McpServerAvailabilityView>, SqlError> {
+    return Effect.gen(function* () {
+      const found = yield* servers.readMany(ids, columns);
+      const dependenciesOf = yield* readDependenciesOfMany([...found.values()]);
+      return new Map(
+        [...found].map(([id, server]) => [id, { server, dependencies: dependenciesOf(server) }]),
+      );
+    });
+  }
+
   return {
     /** Reads the Connection and the plugin of a server as they are now. */
     readDependencies: (server: DependencyIds): Effect.Effect<McpServerDependencies, SqlError> =>
       Effect.map(readDependenciesOfMany([server]), (dependenciesOf) => dependenciesOf(server)),
 
-    /**
-     * Returns the view of each server that exists, by its id, as it is now. An
-     * id that no server has is left out of the map. It costs one query for the
-     * servers, one for their Connections and one read of the plugin host,
-     * however many ids there are.
-     */
-    readViews: (
-      ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, McpServerView>, SqlError> =>
-      Effect.gen(function* () {
-        const found = yield* servers.readMany(ids);
-        const dependenciesOf = yield* readDependenciesOfMany([...found.values()]);
-        return new Map(
-          [...found].map(([id, server]) => [id, { server, dependencies: dependenciesOf(server) }]),
-        );
-      }),
+    readViews,
   };
 });
 
