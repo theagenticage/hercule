@@ -1510,6 +1510,10 @@ describe("MCP servers added to a running session", () => {
     name: string,
     harnessId: string,
     capabilities: ReadonlyArray<string>,
+    afterStart: (
+      runnerId: string,
+      sessionId: string,
+    ) => Effect.Effect<unknown, unknown, SqlClient.SqlClient> = () => Effect.void,
   ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -1524,6 +1528,7 @@ describe("MCP servers added to a running session", () => {
       });
       yield* claimStarting(runnerId, 1, undefined, undefined, capabilities);
       yield* withTransaction(sql, rows.moved(sessionId, "idle", at));
+      yield* withTransaction(sql, afterStart(runnerId, sessionId));
       yield* withTransaction(
         sql,
         Effect.provideService(sessions.setMcpServers(sessionId, [sentry!]), CurrentActor, USER),
@@ -1562,6 +1567,66 @@ describe("MCP servers added to a running session", () => {
       }),
     ]);
     expect(result.fine.warnings).toEqual([]);
+  });
+
+  it("follows what the start decided, not what the runner offers when the server is added", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* bootMcpHarnesses;
+        // A controller upgrade makes a runner's negotiated capabilities differ
+        // from the ones the start used. The runner row stands for that here.
+        const setCapabilities = (capabilities: ReadonlyArray<string>) => (runnerId: string) =>
+          sql`UPDATE runners SET negotiated_capabilities = ${JSON.stringify(capabilities)}
+              WHERE id = ${uuidFromString(runnerId)}`;
+        return {
+          gainedLater: yield* addServerToRunningSession(
+            "gained",
+            NATIVE_MCP_HARNESS_ID,
+            [],
+            setCapabilities([MCP_SERVERS_CAPABILITY]),
+          ),
+          lostLater: yield* addServerToRunningSession(
+            "lost",
+            NATIVE_MCP_HARNESS_ID,
+            [MCP_SERVERS_CAPABILITY],
+            setCapabilities([]),
+          ),
+        };
+      }),
+    );
+
+    expect(result.gainedLater.warnings).toEqual([
+      expect.objectContaining({
+        mcpServers: [{ mcpServerId: result.gainedLater.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.lostLater.warnings).toEqual([]);
+  });
+
+  it("counts a session as having no gateway when its start was never recorded and its runner is gone", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* bootMcpHarnesses;
+        return yield* addServerToRunningSession(
+          "orphan",
+          NATIVE_MCP_HARNESS_ID,
+          [MCP_SERVERS_CAPABILITY],
+          (runnerId, sessionId) =>
+            Effect.gen(function* () {
+              yield* sql`UPDATE sessions SET mcp_gateway = NULL WHERE id = ${uuidFromString(sessionId)}`;
+              yield* sql`DELETE FROM runners WHERE id = ${uuidFromString(runnerId)}`;
+            }),
+        );
+      }),
+    );
+
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        mcpServers: [{ mcpServerId: result.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
   });
 });
 

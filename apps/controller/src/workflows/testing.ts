@@ -145,6 +145,7 @@ export const withSetUpController = (
     | "schedulerInterval"
     | "ingestReconcileInterval"
     | "mcpServerCheckInterval"
+    | "mcpServerCheckDeadline"
   > = {},
 ): Promise<void> =>
   withServer(

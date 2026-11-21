@@ -15,6 +15,24 @@ export interface StartDelivery {
   readonly profileGrantsMcpUse: boolean;
 }
 
+/** Why a start gives the harness no MCP Gateway entry. */
+export type NoGatewayReason = Extract<
+  McpServerLeftOutReason,
+  "runner-too-old" | "harness-unsupported"
+>;
+
+/**
+ * Returns why a start gives the harness no MCP Gateway entry, or `null` when
+ * it gives one. The runner comes first, as in `decideLeftOutReason`.
+ */
+export const decideNoGatewayReason = (
+  delivery: Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">,
+): NoGatewayReason | null => {
+  if (!delivery.runnerReachesMcpServers) return "runner-too-old";
+  if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";
+  return null;
+};
+
 /**
  * Returns why the server cannot be called at a start, or `null` when it can.
  * When several reasons apply, it returns the first of this order, which is the
@@ -38,8 +56,8 @@ export const decideLeftOutReason = (
   delivery: StartDelivery,
   view: McpServerAvailabilityView,
 ): McpServerLeftOutReason | null => {
-  if (!delivery.runnerReachesMcpServers) return "runner-too-old";
-  if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";
+  const noGateway = decideNoGatewayReason(delivery);
+  if (noGateway !== null) return noGateway;
   if (!delivery.profileGrantsMcpUse) return "missing-grant";
   if (!view.server.enabled) return "switched-off";
   if (view.server.status === "checking") return "checking";

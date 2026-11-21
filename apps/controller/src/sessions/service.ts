@@ -106,7 +106,9 @@ import { excludeDigest, claimAttachments, readClaimableAttachments } from "../at
 import {
   buildLeftOutWarning,
   decideLeftOutReason,
+  decideNoGatewayReason,
   mcpServerCatalogue,
+  type NoGatewayReason,
   type LeftOutServer,
   type StartDelivery,
 } from "../mcp-servers";
@@ -1156,6 +1158,18 @@ const make = Effect.gen(function* () {
    * the warning names each added server with the reason, as a start does for
    * the servers it leaves out. Writes nothing when the session has a gateway.
    * Joins the caller's transaction.
+   *
+   * It follows what the session's last start decided (`recordMcpGateway`),
+   * not what the runner and harness offer now. A session keeps running when
+   * the controller restarts, and a new controller build can offer a runner
+   * capability or declare a harness differently, so the capabilities read now
+   * can differ from the ones the start used. The runner's own capabilities
+   * change only with its binary, and a runner restart ends its sessions.
+   *
+   * A session whose start was never recorded (it started before the record
+   * existed) is judged by the runner's capabilities now. A runner whose row is
+   * gone cannot reach MCP servers, so such a session counts as having no
+   * gateway.
    */
   const warnWhenAddedServersAreUnreachable = (
     session: StoredSession,
@@ -1163,14 +1177,17 @@ const make = Effect.gen(function* () {
     at: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      const runner = Option.getOrThrow(yield* runners.read(session.runnerId));
-      const gateway = yield* readMcpGatewayDelivery(session.harnessId, runner);
-      const reason: McpServerLeftOutReason | undefined = !gateway.runnerReachesMcpServers
-        ? "runner-too-old"
-        : gateway.harnessPassthrough === "unsupported"
-          ? "harness-unsupported"
-          : undefined;
-      if (reason === undefined) return;
+      const recorded = yield* sessions.readMcpGateway(session.id);
+      let reason: NoGatewayReason | null;
+      if (Option.isSome(recorded)) {
+        reason = recorded.value;
+      } else {
+        const runner = yield* runners.read(session.runnerId);
+        reason = Option.isNone(runner)
+          ? "runner-too-old"
+          : decideNoGatewayReason(yield* readMcpGatewayDelivery(session.harnessId, runner.value));
+      }
+      if (reason === null) return;
       const views = yield* catalogue.readViews(addedIds, "without-tools");
       const unreachable: Array<LeftOutServer> = [];
       for (const mcpServerId of addedIds) {
@@ -2919,6 +2936,7 @@ const make = Effect.gen(function* () {
             // Decided at every start, like the skills, so a resume records the
             // servers again.
             const gateway = yield* readMcpGatewayDelivery(row.harnessId, needs.runner);
+            yield* sessions.recordMcpGateway(row.id, decideNoGatewayReason(gateway));
             yield* recordMcpServersLeftOut(row.id, gateway, at);
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.

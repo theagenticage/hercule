@@ -31,6 +31,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import * as Duration from "effect/Duration";
 import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
@@ -42,7 +43,9 @@ import {
   waitForLiveToSettle,
   waitWithin,
 } from "../http/testing";
+import { DRAIN_TIMEOUT } from "../promotion";
 import type { SetUpController } from "../workflows/testing";
+import { McpServerCheckDeadline } from "./checks";
 import {
   countNotifications,
   createServer,
@@ -212,6 +215,33 @@ describe("checking a server", () => {
       },
       { fake: { tools: [{ name: "big", description: "x".repeat(5 * 1024 * 1024) }] } },
     );
+  });
+
+  it("goes to unreachable when the server holds its answer past the deadline of a check", async () => {
+    await withRig(
+      async ({ controller, fake, connect }) => {
+        const release = fake.hold();
+        try {
+          await createServer(controller, { connectionId: await connect() });
+
+          const row = await waitForResult(controller);
+
+          expect(row).toMatchObject({
+            status: "unreachable",
+            status_detail: "The server did not answer in time",
+          });
+        } finally {
+          release();
+        }
+      },
+      { checkDeadline: 300 },
+    );
+  });
+
+  it("ends a check before a freeze gives up waiting for running work", () => {
+    const deadline = Effect.runSync(McpServerCheckDeadline);
+
+    expect(Duration.toMillis(deadline)).toBeLessThan(Duration.toMillis(DRAIN_TIMEOUT));
   });
 });
 
