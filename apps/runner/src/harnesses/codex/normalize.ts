@@ -1289,6 +1289,8 @@ const NOTIFICATION_DECISIONS = {
   "account/updated": "account state belongs in the capability snapshot, not in a session",
   "account/login/completed":
     "signing in is done by the runner's login flow, never during a session",
+  "account/gatewayOAuth/changed":
+    "signing in to a gateway provider is done by the runner's login flow, never during a session",
   "thread/started":
     "a thread is introduced by the first frame that names it, which the runner then reads with thread/read",
   "thread/status/changed": "the session's status comes from its turns",
@@ -1322,6 +1324,11 @@ const NOTIFICATION_DECISIONS = {
     "only marks where a new summary part starts; its text arrives as summary deltas",
   "model/verification": "tells Codex's own interface about a verification it asks of the user",
   "model/safetyBuffering/updated": "state for Codex's own interface, not session output",
+  "thread/attachment/updated": "Hercule does not use Codex thread attachments",
+  "thread/prediction/updated": "a suggested next prompt, for Codex's own interface",
+  "thread/readState/changed": "the unread marker of Codex's own interface, not session output",
+  "thread/search/partial": "answers a thread/search/stream request, which Hercule never makes",
+  "thread/section/changed": "Hercule does not use Codex thread sections",
   ...dropAll("Hercule never archives a Codex thread", ["thread/archived", "thread/unarchived"]),
   ...dropAll("Hercule does not use Codex thread goals", [
     "thread/goal/updated",
