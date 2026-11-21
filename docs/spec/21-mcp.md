@@ -243,14 +243,16 @@ At every start of a session, the controller records for each server in the sessi
 
 | Reason | When |
 |---|---|
-| `runner-too-old` | the runner lacks the `mcpServers` capability *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* for the session's harness ([./03-controller-and-runners.md](./03-controller-and-runners.md)) |
-| `harness-unsupported` | the harness's `mcpPassthrough` is `unsupported` |
+| `harness-unsupported` | the harness's `mcpPassthrough` is `unsupported` *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* whatever the runner lists |
+| `runner-too-old` | the runner lacks the `mcpServers` capability *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* for the session's harness, whose `mcpPassthrough` is `native` ([./03-controller-and-runners.md](./03-controller-and-runners.md)) |
 | `missing-grant` | the session's profile lacks `mcp.use` |
 | `switched-off` | `enabled` is false |
 | `checking` | its first list has not ended |
 | `needs-sign-in`, `unreachable`, `error` | its status at the start |
 
-The rows are in the order of precedence. When several reasons apply to one server, the first one in this table is the one recorded.
+The rows are in the order of precedence. When several reasons apply to one server, the first one in this table is the one recorded. *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* `harness-unsupported` now comes before `runner-too-old`. The runner capability is per harness ([./03-controller-and-runners.md](./03-controller-and-runners.md)), so no runner lists one for a harness that is not `native`. With the old order, pi on a current runner read `runner-too-old`. The same rule decides the warning for a server added to a running session.
+
+*(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* **A known gap of the mixed upgrade.** The warning for a server added to a running session is decided from the runner's capabilities now, not from what the session's start was given. Take a runner of the new build that was connected to a #1208 controller when a Codex Thread started: that Thread got no gateway. If the controller is then upgraded while the runner keeps its process, a server added to that Thread is not warned about. Fixing that would need a stored fact per start for a window that closes with the controller's upgrade, so it is accepted.
 
 The controller writes one `runtime.warning` for the servers left out, with the field `mcpServers` naming each server and its reason ([section 3.6](#36-a-refused-call)).
 
@@ -346,14 +348,15 @@ What the tests assert:
 
 - **The older path.** Codex sends `initialize` at revision `2025-06-18`, then `notifications/initialized`, opens the GET stream and lists with `tools/list`. It never sends `server/discover`. The model sees one namespace tool `mcp__tools` holding `<server>__<tool>`, and a call reaches the outside server once.
 - **A server added to a running thread** with its list empty at the start: `list_changed` goes out on the GET stream, Codex lists again before its next model request, and the new tool's call reaches the outside server once.
-- **A server taken away.** Codex lists again as soon as it hears of the change, so it refuses the removed tool itself, and the call never reaches the gateway. When `list_changed` is held back, the gateway refuses the call (Codex shows it as a failed call whose text is the refusal), and the outside server gets no call.
-- **A 404 for a forgotten MCP session** (`DELETE /mcp`, as for Claude Code): the next `tools/call` gets 404. Codex opens a new MCP session (`initialize`, `initialized`, GET) and sends the same call again before any `tools/list`, and the call succeeds.
+- **A server taken away.** With `list_changed` held back by the proxy, so that Codex still holds the old name, a call to the removed tool reaches the gateway, Codex reports it `failed`, and the outside server gets no call.
+- **A 404 for a forgotten MCP session** (`DELETE /mcp`, as for Claude Code): the next `tools/call` gets 404. Codex opens a new MCP session (`initialize`) and sends the same call again on it before any `tools/list`, and the call succeeds.
 - **Resume and fork.** A new app-server process connects and lists when the adapter's `config` is sent again with `thread/resume` or `thread/fork` (06 §10.2: without it, nothing connects).
-- **300 tools** are offered to the model directly in the `mcp__tools` namespace, not deferred behind tool search. A Codex that defers them fails the test.
+- **300 tools** are offered directly in the `mcp__tools` namespace by 0.169.0 and 0.171.0, and deferred behind tool search by 0.154.0, whose stand-in then searches and calls a returned tool. One reader of the model request covers both shapes. The file passes on 0.154.0, 0.169.0 and 0.171.0; the test of a server added to a running thread is skipped below 0.164.0.
 
 What was observed in probes, and no test asserts:
 
 - **A GET stream that gets 404** retries with a growing wait (about 1, 3, 7 and 15 seconds) and never opens a new MCP session by itself. As with Claude Code, an idle Codex thread is told about a changed list after a restart only once it next sends a call.
+- **A server taken away, with `list_changed` delivered:** Codex lists again at once and refuses the removed tool itself, so the call never reaches the gateway.
 - **A graceful stop** sends `DELETE` for the MCP session.
 
 **Not checked by a test: a real cold gateway.** The test controller cannot restart over one database, so the call that follows a restart is not tested. That call is sent before any `tools/list`, so the gateway, which has forgotten the names it sent, refuses it once with "list the tools again" ([section 3.4](#34-tool-names)). It also sends `list_changed`, which reaches Codex's new GET stream, and Codex lists again before its next model request. This is reasoned from the order of requests above, and #1209's live sitting checks it with a real restart.
