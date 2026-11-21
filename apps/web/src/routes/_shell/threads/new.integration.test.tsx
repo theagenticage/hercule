@@ -53,7 +53,7 @@ import {
   S_SENTRY_HOBBY,
   S_SENTRY_WORK,
   buildMcpServerRoutes,
-  findConnectionOf,
+  findServerConnection,
   openPlusMenu,
   openServersSubmenu,
   readSubmenuSwitches,
@@ -3259,7 +3259,7 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     // The server stays on and offers the Connection's Reconnect.
     expect(
       within(submenu).getByRole("link", { name: "Reconnect Linear · acme" }).getAttribute("href"),
-    ).toBe(`/connections?reconnect=${findConnectionOf(S_LINEAR).id}`);
+    ).toBe(`/connections?reconnect=${findServerConnection(S_LINEAR).id}`);
   });
 
   it("sends no list for an untouched draft", async () => {

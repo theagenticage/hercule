@@ -95,7 +95,7 @@ export const MCP_SERVERS: readonly McpServer[] = [
 ];
 
 /** The Connection `server` is reached with. */
-export const findConnectionOf = (server: McpServer): Connection =>
+export const findServerConnection = (server: McpServer): Connection =>
   MCP_CONNECTIONS.find((connection) => connection.id === server.source.connectionId)!;
 
 /** Returns the list of a Session: each server of `servers`, none left out. */

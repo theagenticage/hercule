@@ -6,6 +6,7 @@ import type { Connection } from "@hercule/contract";
 import {
   buildMcpServerSettingsRows,
   describeAgentToolsNote,
+  describeUnavailableAgentToolsNote,
 } from "@hercule/client-core/mcp-servers";
 import { cn } from "@hercule/ui";
 import { mcpServersQuery, pluginsQuery } from "../../../app/queries";
@@ -48,7 +49,11 @@ export function AgentToolsNote({
   });
   if (rows.length === 0 || (read.data === undefined && read.error === null)) return null;
   if (read.data === undefined) {
-    return <span className="self-start text-fine text-muted">agent tools: not available</span>;
+    return (
+      <span className="self-start text-fine text-muted">
+        {describeUnavailableAgentToolsNote().words}
+      </span>
+    );
   }
 
   return (

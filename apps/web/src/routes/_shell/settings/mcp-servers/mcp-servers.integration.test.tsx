@@ -688,8 +688,10 @@ describe("Settings > MCP servers > one server's page", () => {
     expect(readPageText(band)).toContain("Linear revoked the token");
     const reconnect = within(band).getByRole("link", { name: "Reconnect Linear · acme" });
     expect(reconnect.getAttribute("href")).toBe(`/connections?reconnect=${C_LINEAR}`);
-    // The Connection row says what is wrong and has no second button.
-    expect(screen.getAllByText("Linear revoked the token").length).toBeGreaterThan(1);
+    // The Connection row says the short word, not the band's sentence again,
+    // and has no second button.
+    expect(screen.getAllByText("Linear revoked the token")).toHaveLength(1);
+    expect(screen.getByText("needs sign-in")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Open" })).toBeNull();
 
     await user.click(reconnect);
@@ -921,6 +923,39 @@ describe("Settings > MCP servers > one server's page > Projects", () => {
     });
   });
 
+  it("keeps a box still when a saved write could not be read again", async () => {
+    const user = userEvent.setup();
+    const reads = { fail: false };
+    const world = buildWorld();
+    const { api } = await openPage(S_WORK, {
+      world,
+      extra: {
+        [`PATCH /api/v1/projects/${P_PAYMENTS}`]: () => {
+          world.projects = world.projects.map((each) =>
+            each.id === P_PAYMENTS ? buildProject(P_PAYMENTS, "payments", [S_WORK.id]) : each,
+          );
+          reads.fail = true;
+          return { body: world.projects.find((each) => each.id === P_PAYMENTS) };
+        },
+        "GET /api/v1/projects": () =>
+          reads.fail
+            ? { status: 500, body: buildErrorBody("internal", "The projects could not be read.") }
+            : { body: { items: world.projects } },
+      },
+    });
+
+    const box = await findBox("payments");
+    const checkbox = within(box).getByRole("checkbox");
+    await user.click(checkbox);
+
+    expect((await within(box).findByRole("alert")).textContent).toBe(
+      "Saved, but the list could not be read again.",
+    );
+    expect(checkbox.getAttribute("aria-disabled")).toBe("true");
+    await user.click(checkbox);
+    expect(listWrites(api)).toHaveLength(1);
+  });
+
   it("shows a refusal from the controller under its box", async () => {
     const user = userEvent.setup();
     await openPage(S_WORK, {
@@ -1111,6 +1146,41 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
         return { body: readSettings(world) };
       },
     }) satisfies Record<string, Handler>;
+
+  it("keeps the default list's picker disabled when a saved write could not be read again", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld();
+    const reads = { fail: false };
+    const { api } = await openList({
+      world,
+      extra: {
+        "PATCH /api/v1/settings": (call) => {
+          world.defaultIds = (call.body as { user: { "thread.mcpServerIds": string[] } }).user[
+            "thread.mcpServerIds"
+          ];
+          reads.fail = true;
+          return { body: readSettings(world) };
+        },
+        "GET /api/v1/settings": () =>
+          reads.fail
+            ? { status: 500, body: buildErrorBody("internal", "The settings could not be read.") }
+            : { body: readSettings(world) },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Change…" }));
+    const picker = await screen.findByRole("dialog");
+    await user.click(within(picker).getByRole("checkbox", { name: "linear" }));
+
+    expect((await within(picker).findByRole("alert")).textContent).toBe(
+      "Saved, but the list could not be read again.",
+    );
+    // The cache still holds the list from before the write, so another choice would undo this one.
+    const notion = within(picker).getByRole("checkbox", { name: "notion" });
+    expect(notion.getAttribute("aria-disabled")).toBe("true");
+    await user.click(notion);
+    expect(listWrites(api)).toHaveLength(1);
+  });
 
   it("keeps the default list's guard when its picker is closed and opened again while the write runs", async () => {
     const user = userEvent.setup();

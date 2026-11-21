@@ -35,7 +35,7 @@ export function ServerRow({
   const queryClient = useQueryClient();
   const { view } = row;
 
-  const offer = useKeyedWrite<boolean>({
+  const switchServer = useKeyedWrite<boolean>({
     // A server with no record yet is told apart by the Connection and the contribution it would be made for.
     mutationKey: [
       "mcp-server-switch",
@@ -116,17 +116,17 @@ export function ServerRow({
         <span className="shrink-0 px-2.5">
           <Switch
             aria-label={`Offer ${row.name} ${row.connection.label} to threads`}
-            aria-disabled={offer.writing}
+            aria-disabled={switchServer.writing}
             checked={view?.server.enabled ?? false}
             onCheckedChange={(enabled) => {
-              offer.write(enabled);
+              switchServer.write(enabled);
             }}
           />
         </span>
       </div>
-      {offer.refusal === null ? null : (
+      {switchServer.refusal === null ? null : (
         <p className="px-2.5 pb-1.5 text-fine text-fail" role="alert">
-          {readErrorMessage(offer.refusal)}
+          {readErrorMessage(switchServer.refusal)}
         </p>
       )}
     </li>

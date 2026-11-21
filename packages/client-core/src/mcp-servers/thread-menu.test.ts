@@ -206,6 +206,34 @@ describe("buildThreadServerMenu", () => {
   });
 });
 
+describe("buildThreadServerMenu reset", () => {
+  const VIEWS = buildViews([LINEAR, SENTRY_WORK]);
+  const startOf = (projectIds: string[]) =>
+    decideThreadStartList(
+      "p-shop",
+      [{ id: "p-shop", name: "webshop", mcpServerIds: projectIds, createdAt: "", updatedAt: "" }],
+      [],
+      VIEWS,
+    );
+  const resetOf = (projectIds: string[]) =>
+    buildThreadServerMenu({
+      views: VIEWS,
+      mcpServerIds: [],
+      order: [],
+      rememberedAccounts: {},
+      start: startOf(projectIds),
+    }).reset;
+
+  it("offers no reset while the project's list holds a server the views do not know yet", () => {
+    expect(resetOf(["s-linear", "s-new"])).toBeNull();
+  });
+
+  it("filters a deleted server out of the start list, and offers the reset for what is left", () => {
+    expect(startOf(["s-linear", "s-gone"]).mcpServerIds).toEqual(["s-linear"]);
+    expect(resetOf(["s-linear"])?.mcpServerIds).toEqual(["s-linear"]);
+  });
+});
+
 describe("buildServerPicker", () => {
   const VIEWS = buildViews([
     LINEAR,

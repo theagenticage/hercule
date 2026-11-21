@@ -74,7 +74,7 @@ export interface ThreadServerMenu {
   readonly moreCount: number;
   /** The line at the foot: where the list started, and that a change is for this Thread only. */
   readonly foot: string;
-  /** The button that goes back to the start list, or `null` while the list equals it. */
+  /** The button that goes back to the start list, or `null` while the list equals it or the start list is not `complete`. */
   readonly reset: {
     readonly label: string;
     /** The list the button writes. */
@@ -160,9 +160,10 @@ export const buildThreadServerMenu = ({
     rows,
     moreCount: groups.length - rows.length,
     foot: line,
-    reset: holdSameIds(mcpServerIds, start.mcpServerIds)
-      ? null
-      : { label: resetLabel, mcpServerIds: start.mcpServerIds },
+    reset:
+      !start.complete || holdSameIds(mcpServerIds, start.mcpServerIds)
+        ? null
+        : { label: resetLabel, mcpServerIds: start.mcpServerIds },
   };
 };
 

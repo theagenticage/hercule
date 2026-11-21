@@ -3,7 +3,6 @@
  * the composer's menu and picker (spec 17, the composer's `+` menu).
  */
 import type { Project } from "@hercule/contract";
-import type { ThreadPicks } from "../threads/config";
 import type { McpServerView } from "./views";
 
 /** Where a Thread's list started. */
@@ -16,13 +15,19 @@ export type ThreadStartSource =
 export interface ThreadStartList {
   readonly mcpServerIds: readonly string[];
   readonly source: ThreadStartSource;
+  /**
+   * False while the source list holds an id that no view knows. Either the
+   * server was deleted, or the list of servers has not caught up with a server
+   * just added. The unknown ids are left out of `mcpServerIds` either way.
+   */
+  readonly complete: boolean;
 }
 
 /**
  * Returns the list a Thread starts with: its project's list, even when that
  * list is empty, and for a Thread in no project the default list. A list is
  * not always rewritten when a server is deleted, so ids no view knows are
- * dropped from either list. The source is `none` when a Thread in no project
+ * dropped from either list, and `complete` is then false. The source is `none` when a Thread in no project
  * starts with an empty list.
  *
  * A `projectId` that is not in `projects` is read as no project.
@@ -36,15 +41,18 @@ export const decideThreadStartList = (
   const isKnown = (id: string): boolean => views.some((view) => view.server.id === id);
   const project = projects.find((each) => each.id === projectId);
   if (project !== undefined) {
+    const known = project.mcpServerIds.filter(isKnown);
     return {
-      mcpServerIds: project.mcpServerIds.filter(isKnown),
+      mcpServerIds: known,
       source: { kind: "project", projectName: project.name },
+      complete: known.length === project.mcpServerIds.length,
     };
   }
   const known = defaultIds.filter(isKnown);
   return {
     mcpServerIds: known,
     source: known.length === 0 ? { kind: "none" } : { kind: "default" },
+    complete: known.length === defaultIds.length,
   };
 };
 
@@ -73,31 +81,4 @@ export const describeStartLine = (
         resetLabel: "Switch all off",
       };
   }
-};
-
-/**
- * Returns the list a Draft Thread sends as `mcpServerIds`, or `undefined`
- * when the user has not changed the list, so the draft sends none and a
- * default changed meanwhile still applies.
- *
- * The pick holds the project it was made under, and applies only while the
- * draft is in that project. A list chosen for one project must not decide the
- * servers of a thread started in another. An explicit empty list stays
- * empty: it is the user's choice of no servers.
- *
- * Ids not in `knownServerIds` (a server deleted since the pick) are dropped,
- * as the controller drops them from every list it stores. `knownServerIds`
- * is `undefined` while the list of servers has not been read, and then
- * nothing is dropped.
- */
-export const resolveDraftMcpServerIds = (
-  picks: ThreadPicks,
-  projectId: string | null,
-  knownServerIds: ReadonlySet<string> | undefined,
-): readonly string[] | undefined => {
-  const pick = picks.mcpServers;
-  if (pick === undefined || pick.projectId !== projectId) return undefined;
-  return knownServerIds === undefined
-    ? pick.mcpServerIds
-    : pick.mcpServerIds.filter((id) => knownServerIds.has(id));
 };

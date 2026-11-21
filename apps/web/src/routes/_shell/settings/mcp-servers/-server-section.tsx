@@ -9,7 +9,11 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
-import type { McpServerView } from "@hercule/client-core/mcp-servers";
+import {
+  describeConnectionRowProblem,
+  isCheckDisabled,
+  type McpServerView,
+} from "@hercule/client-core/mcp-servers";
 import { Button, FormCard, Row, Switch, useMinuteClock } from "@hercule/ui";
 import { useKeyedWrite } from "../../../../app/use-keyed-write";
 import { ProviderMark } from "../../../../screens/provider-mark";
@@ -41,7 +45,7 @@ export function ServerSection({
   const { server, connection } = view;
 
   // The same key as the switch of this server in the list, so the two share one guard.
-  const offer = useKeyedWrite<boolean>({
+  const switchServer = useKeyedWrite<boolean>({
     mutationKey: ["mcp-server-switch", server.id],
     mutationFn: (enabled) =>
       client.mcpServer.update({ params: { id: server.id }, payload: { enabled } }),
@@ -52,8 +56,8 @@ export function ServerSection({
       ]),
   });
 
-  const cannotCheck =
-    checkPending || view.displayStatus === "checking" || view.displayStatus === "off";
+  const cannotCheck = checkPending || isCheckDisabled(view);
+  const connectionProblem = describeConnectionRowProblem(view);
 
   return (
     <FormCard label="Server">
@@ -61,18 +65,18 @@ export function ServerSection({
         <div className="flex flex-col gap-1">
           <Switch
             id="mcp-server-offered"
-            aria-disabled={offer.writing}
+            aria-disabled={switchServer.writing}
             checked={server.enabled}
             onCheckedChange={(enabled) => {
-              offer.write(enabled);
+              switchServer.write(enabled);
             }}
           />
           <p className="text-fine text-faint">
             Off keeps the name, the sign-in and the projects that name it.
           </p>
-          {offer.refusal === null ? null : (
+          {switchServer.refusal === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {readErrorMessage(offer.refusal)}
+              {readErrorMessage(switchServer.refusal)}
             </p>
           )}
         </div>
@@ -102,10 +106,8 @@ export function ServerSection({
             ) : null}
             {/* While the server needs sign-in the band holds the page's one
                 button, so this row says only what is wrong. */}
-            {view.displayStatus === "needs-sign-in" ? (
-              <span className="ml-auto text-fine text-fail">
-                {server.statusDetail ?? "needs sign-in"}
-              </span>
+            {connectionProblem !== null ? (
+              <span className="ml-auto text-fine text-fail">{connectionProblem}</span>
             ) : (
               <Link
                 to="/connections"

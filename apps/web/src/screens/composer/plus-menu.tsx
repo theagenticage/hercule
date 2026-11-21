@@ -19,6 +19,8 @@ const holdFocus = (event: Event): void => {
  *   on hover or on a press. While a server needs sign-in the button carries a
  *   red dot, so the problem shows with the menu closed.
  *
+ * While `serversOffReason` is set the MCP servers row is dimmed and shows it.
+ *
  * The component holds no domain: the caller builds the `submenu` and decides
  * the numbers and the reason. The caller also owns whether the submenu is
  * open (`serversOpen`), because it reads the servers only once the submenu
@@ -29,6 +31,7 @@ export function PlusMenu({
   open,
   onOpenChange,
   attachDisabledReason,
+  serversOffReason,
   onFiles,
   serversRow,
   serversOpen,
@@ -39,6 +42,8 @@ export function PlusMenu({
   readonly onOpenChange: (open: boolean) => void;
   /** Why no image can be attached, or `null` when one can. */
   readonly attachDisabledReason: string | null;
+  /** Why the MCP servers row is off, or `null` when it works. */
+  readonly serversOffReason: string | null;
   readonly onFiles: (files: readonly File[]) => void;
   readonly serversRow: ThreadServersRow;
   /** Whether the submenu "Servers of this thread" is open. */
@@ -83,6 +88,7 @@ export function PlusMenu({
         >
           <PlusMenuRows
             attachDisabledReason={attachDisabledReason}
+            serversOffReason={serversOffReason}
             serversRow={serversRow}
             serversOpen={serversOpen}
             onServersOpenChange={onServersOpenChange}
@@ -118,6 +124,7 @@ export function PlusMenu({
  */
 function PlusMenuRows({
   attachDisabledReason,
+  serversOffReason,
   serversRow,
   serversOpen: showsServers,
   onServersOpenChange: setShowsServers,
@@ -125,6 +132,7 @@ function PlusMenuRows({
   onAttach,
 }: {
   readonly attachDisabledReason: string | null;
+  readonly serversOffReason: string | null;
   readonly serversRow: ThreadServersRow;
   readonly serversOpen: boolean;
   readonly onServersOpenChange: (open: boolean) => void;
@@ -149,6 +157,12 @@ function PlusMenuRows({
           <div ref={row}>
             <MenuRow
               name="MCP servers"
+              inert={serversOffReason !== null}
+              sub={
+                serversOffReason === null ? undefined : (
+                  <span className="block whitespace-normal">{serversOffReason}</span>
+                )
+              }
               note={
                 <>
                   <span className={cn(serversRow.failing && "text-fail")}>{serversRow.words}</span>

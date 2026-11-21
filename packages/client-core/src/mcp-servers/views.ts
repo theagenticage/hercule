@@ -113,3 +113,20 @@ export const describeReconnect = (view: McpServerView): ReconnectTarget | null =
         connectionId: view.connection.id,
         label: `Reconnect ${view.typeName} · ${view.connection.label}`,
       };
+
+/**
+ * Checks whether "Check now" on the server's page is off: the server is being
+ * checked already, or is switched off and so is not checked at all.
+ */
+export const isCheckDisabled = (view: McpServerView): boolean =>
+  view.displayStatus === "checking" || view.displayStatus === "off";
+
+/**
+ * Returns the short word the Connection row of a server's page shows in the
+ * failure colour while the server needs sign-in ("needs sign-in"), or `null`
+ * when the server does not. It is the status word, not `statusDetail`: the
+ * status band over the page already shows that sentence, and the server has no
+ * time of the refusal to show instead.
+ */
+export const describeConnectionRowProblem = (view: McpServerView): string | null =>
+  view.displayStatus === "needs-sign-in" ? view.statusWord : null;
