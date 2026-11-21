@@ -114,6 +114,14 @@ const isAuthenticationError = (error: GraphQLError): boolean =>
   error.extensions?.code === "AUTHENTICATION_ERROR";
 
 /**
+ * Returns a Linear Connection's token: the `accessToken` of the redirect
+ * flow, else the pasted `apiKey`. Returns undefined when the credentials hold
+ * neither.
+ */
+export const readToken = (credentials: Readonly<Record<string, string>>): string | undefined =>
+  credentials["accessToken"] ?? credentials["apiKey"];
+
+/**
  * Returns the `Authorization` header for a Linear Connection's credentials:
  * `Bearer <token>` for the `accessToken` of the redirect flow, or the pasted
  * `apiKey` as it is, because Linear refuses a personal API key sent with
@@ -122,9 +130,8 @@ const isAuthenticationError = (error: GraphQLError): boolean =>
 export const buildAuthorization = (
   credentials: Readonly<Record<string, string>>,
 ): string | undefined => {
-  const accessToken = credentials["accessToken"];
-  if (accessToken !== undefined) return `Bearer ${accessToken}`;
-  return credentials["apiKey"];
+  const token = readToken(credentials);
+  return credentials["accessToken"] === undefined ? token : `Bearer ${token}`;
 };
 
 /**

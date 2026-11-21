@@ -208,6 +208,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "resources",
       "entities",
       "workflow-actions",
+      "mcp-servers",
     ]);
     expect(findCapabilities("sentry")).toEqual([
       "connections",
@@ -222,6 +223,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "event-sources",
       "events",
       "entities",
+      "mcp-servers",
     ]);
   }, 30_000);
 
