@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import type { McpServerStatus } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
@@ -98,6 +99,31 @@ export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));
 
 /**
+ * Returns whether a server of this kind entering `status` raises a Notification
+ * (spec 21 section 5.5). Every server does for `unreachable` and `error`. A
+ * server added by URL also does for `needs-sign-in`, because only the user can
+ * sign it in again. A plugin server never does: its status follows its
+ * Connection, which raises a Notification of its own.
+ */
+const raisesNotification = (
+  kind: StoredMcpServer["source"]["kind"],
+  status: McpServerStatus,
+): boolean =>
+  status === "unreachable" || status === "error" || (kind === "url" && status === "needs-sign-in");
+
+/** Returns the title of the Notification for a server entering a status that raises one. */
+const describeFailure = (name: string, status: McpServerStatus): string => {
+  switch (status) {
+    case "unreachable":
+      return `MCP server ${name} is unreachable`;
+    case "needs-sign-in":
+      return `MCP server ${name} needs a sign-in`;
+    default:
+      return `MCP server ${name} has an error`;
+  }
+};
+
+/**
  * What a state write was based on: the server's `revision` and the
  * dependencies the writer read before it decided. The write happens only if
  * the server still has this revision and its Connection and plugin are still
@@ -121,11 +147,12 @@ const make = Effect.gen(function* () {
    * Writes an edit to a server that is still as `current`, and keeps the
    * Notification episode (`notified_status`) in the same transaction:
    *
-   * - entering `unreachable` or `error` with no episode open raises one
-   *   `core.mcp-server-failed` Notification and opens the episode;
+   * - entering a status that `raisesNotification` for this kind of server,
+   *   with no episode open, raises one `core.mcp-server-failed` Notification
+   *   and opens the episode;
    * - going to `ready` ends the episode;
    * - every other status leaves it as it is, so one episode raises one
-   *   Notification however its status moves between `unreachable` and `error`.
+   *   Notification however its status moves between the statuses that raise.
    *
    * `updated_at` moves, and the write is announced on the `mcpServer` live
    * topic, only when it changes what the record shows: its status, detail,
@@ -144,16 +171,14 @@ const make = Effect.gen(function* () {
       if (status === "ready") {
         notifiedStatus = null;
       } else if (
-        (status === "unreachable" || status === "error") &&
+        status !== undefined &&
+        raisesNotification(current.source.kind, status) &&
         current.notifiedStatus === null
       ) {
         notifiedStatus = status;
         yield* notifier.createCoreNotification({
           kind: "core.mcp-server-failed",
-          title:
-            status === "unreachable"
-              ? `MCP server ${current.name} is unreachable`
-              : `MCP server ${current.name} has an error`,
+          title: describeFailure(current.name, status),
           ...(edit.statusDetail === undefined || edit.statusDetail === null
             ? {}
             : { body: edit.statusDetail }),

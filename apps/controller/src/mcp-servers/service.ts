@@ -1,6 +1,6 @@
 /**
  * The MCP Server operations: `mcpServer.query`, `read`, `create`, `update`,
- * `delete` and `check` (spec 11 section 2, spec 21 section 2).
+ * `delete`, `check` and `setToken` (spec 11 section 2, spec 21 section 2).
  *
  * Every write runs in one transaction with its audit entry, stamps the
  * caller as the actor, and announces the server on the `mcpServer` live topic
@@ -23,6 +23,7 @@ import {
   type InvalidState,
   type McpServer,
   type McpServerCreateInput,
+  type McpServerSetTokenInput,
   type McpServerUpdateInput,
   type NotFound,
   type Validation,
@@ -32,33 +33,48 @@ import { connectionRepository } from "../connections";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
+import {
+  buildDefaultServerName,
+  findPluginOnOrigin,
+  parseServerAddress,
+  type ServerAddress,
+} from "./addresses";
+import { mcpServerCatalogue } from "./catalogue";
 import { McpServerChecks } from "./checks";
 import { McpServerListHolders } from "./list-holders";
-import { mcpServerRepository, type StoredMcpServer } from "./repository";
+import { isUniqueViolation, mcpServerRepository, type StoredMcpServer } from "./repository";
+import { mcpServerSignIns } from "./sign-ins";
 
 /** What `update` takes: the server and the fields to change. */
 export type UpdateInput = McpServerUpdateInput & { readonly id: string };
 
+/** What `setToken` takes: the server and the token. */
+export type SetTokenInput = McpServerSetTokenInput & { readonly id: string };
+
+/** The source a `create` is given, of either kind. */
+type CreateSource = McpServerCreateInput["source"];
+
 const NO_SUCH_SERVER = "no such MCP server; `hercule mcp-server list` shows the servers there are";
 
-/**
- * Returns the public record of a stored server, with each tool cut down to its
- * summary. The record has no source for a server added by URL yet, and no such
- * server can be created yet, so one found here is a defect.
- */
+/** Returns the public record of a stored server, with each tool cut down to its summary. */
 const toRecord = (server: StoredMcpServer): McpServer => {
   const { source } = server;
-  if (source.kind !== "plugin") {
-    throw new Error(`MCP server ${server.id} was added by URL, which cannot be shown yet`);
-  }
   return {
     id: server.id,
     name: server.name,
-    source: {
-      kind: "plugin",
-      contributionId: source.contributionId,
-      connectionId: source.connectionId,
-    },
+    source:
+      source.kind === "plugin"
+        ? {
+            kind: "plugin",
+            contributionId: source.contributionId,
+            connectionId: source.connectionId,
+          }
+        : {
+            kind: "url",
+            url: source.url,
+            signIn: source.signIn,
+            signInOffered: source.signInOffered,
+          },
     enabled: server.enabled,
     status: server.status,
     statusDetail: server.statusDetail,
@@ -73,6 +89,23 @@ const toRecord = (server: StoredMcpServer): McpServer => {
   };
 };
 
+/**
+ * Builds the refusal for a plugin server that exists already. The details
+ * name the existing server, so a client can point at it.
+ */
+const buildPluginServerExists = (contributionId: string, existing: StoredMcpServer): Conflict =>
+  createConflictError(
+    `This account already has an MCP server for ${contributionId}: ${existing.name} (${existing.id}). Use that server, or delete it first with \`hercule mcp-server delete ${existing.id}\`.`,
+    { reason: "mcp-server-exists", mcpServerId: existing.id },
+  );
+
+/** Builds the refusal for an address that was added before. */
+const buildUrlServerExists = (existing: StoredMcpServer): Conflict =>
+  createConflictError(
+    `You added this server before, as ${existing.name} (${existing.id}). One address is one server: use that one, or delete it first with \`hercule mcp-server delete ${existing.id}\`.`,
+    { reason: "mcp-server-exists", mcpServerId: existing.id },
+  );
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
@@ -81,6 +114,8 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const checks = yield* McpServerChecks;
   const listHolders = yield* McpServerListHolders;
+  const signIns = yield* mcpServerSignIns;
+  const { readPluginState } = yield* mcpServerCatalogue;
 
   const readOrFail = (id: string): Effect.Effect<StoredMcpServer, NotFound | SqlError> =>
     Effect.flatMap(
@@ -90,6 +125,189 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
+
+  /**
+   * Fails with a `Conflict` when a plugin offers an MCP server on the origin
+   * of the address, whatever the state of that plugin: the server is made
+   * from the plugin's Connection, so it has the Connection's sign-in and
+   * nothing is asked of the user twice. The details and the message say what
+   * to do, by what the user has:
+   *
+   * - an enabled Connection of the contribution's type (or else any one);
+   * - no Connection, so the user connects the plugin first;
+   * - a plugin that is switched off or failed to start, so the user switches
+   *   it on first.
+   *
+   * Only contributions the plugin host knows reserve an origin. One whose
+   * registration failed is not known, so its origin is free to add by address.
+   */
+  const refuseAddressOnPluginOrigin = (
+    address: ServerAddress,
+  ): Effect.Effect<void, Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const contribution = findPluginOnOrigin(address.origin, yield* plugins.listMcpServers());
+      if (contribution === undefined) return;
+      const state = yield* readPluginState(contribution.id);
+      const ofType = (yield* connections.ofPlugin(contribution.pluginId)).filter(
+        (connection) => connection.type === contribution.connectionType,
+      );
+      const connection = ofType.find((one) => one.status !== "disabled") ?? ofType[0];
+      const { displayName: plugin } = contribution;
+      const pluginEnabled = state._tag === "active";
+      const lead = `${address.origin} is the ${plugin} MCP server.`;
+      const switchOn = "switch its server on in Settings > MCP servers";
+      let advice: string;
+      if (!pluginEnabled) {
+        const why =
+          state._tag === "failed-to-start"
+            ? `The ${plugin} plugin failed to start: see Settings > Plugins.`
+            : `The ${plugin} plugin is switched off: switch it on in Settings > Plugins,`;
+        advice =
+          state._tag === "failed-to-start"
+            ? `${why} Once it runs, ${connection === undefined ? "connect it, then " : ""}${switchOn}.`
+            : `${why} ${connection === undefined ? "connect it, then " : "then "}${switchOn}.`;
+      } else if (connection === undefined) {
+        advice = `It is reached with a ${plugin} Connection, with no second sign-in. Connect ${plugin} first in Settings > Connections, then ${switchOn}.`;
+      } else {
+        advice = `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contribution.id} --connection ${connection.id}\`.`;
+      }
+      return yield* Effect.fail(
+        createConflictError(`${lead} ${advice}`, {
+          reason: "mcp-server-on-plugin-origin",
+          contributionId: contribution.id,
+          connectionId: connection?.id ?? null,
+          pluginEnabled,
+        }),
+      );
+    });
+
+  /** Inserts a server of a plugin's contribution, in a transaction `create` opened. */
+  const insertPluginServer = (
+    source: Extract<CreateSource, { readonly kind: "plugin" }>,
+  ): Effect.Effect<StoredMcpServer, Validation | Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const { contributionId, connectionId, name } = source;
+      const contribution = yield* plugins.findMcpServer(contributionId);
+      if (Option.isNone(contribution)) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["source", "contributionId"],
+              message: "no plugin offers an MCP server with this id",
+            },
+          ]),
+        );
+      }
+      const connection = yield* connections.one(connectionId);
+      if (Option.isNone(connection)) {
+        return yield* Effect.fail(
+          createValidationError([
+            { path: ["source", "connectionId"], message: "no such connection" },
+          ]),
+        );
+      }
+      if (connection.value.type !== contribution.value.connectionType) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["source", "connectionId"],
+              message: `this server is reached with a ${contribution.value.connectionType} connection, and this connection is a ${connection.value.type} connection`,
+            },
+          ]),
+        );
+      }
+      const existing = yield* servers.findByContributionAndAccount(
+        contributionId,
+        connection.value.accountId,
+      );
+      if (Option.isSome(existing)) {
+        return yield* Effect.fail(buildPluginServerExists(contributionId, existing.value));
+      }
+      const at = yield* nowIso;
+      const server = yield* servers.insert({
+        name: name ?? contributionId.slice(contributionId.lastIndexOf("/") + 1),
+        contributionId,
+        connectionId,
+        accountId: connection.value.accountId,
+        connectionGeneration: connection.value.credentialsGeneration,
+        at,
+      });
+      yield* audit.append({
+        kind: "mcpServer.created",
+        actor: yield* currentStamp,
+        record: { topic: "mcpServer", id: server.id },
+        payload: { mcpServerId: server.id, contributionId, connectionId },
+        at,
+      });
+      return server;
+    });
+
+  /**
+   * Inserts a server added by address, with its token when one is given, in a
+   * transaction `create` opened. The audit entry names the server by id and
+   * says only that it was added by address: the address may hold a secret in
+   * its query, and the token is never written anywhere but its secret.
+   */
+  const insertUrlServer = (
+    source: Extract<CreateSource, { readonly kind: "url" }>,
+  ): Effect.Effect<StoredMcpServer, Validation | Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const address = yield* parseServerAddress(source.url);
+      yield* refuseAddressOnPluginOrigin(address);
+      const existing = yield* servers.findByNormalizedUrl(address.normalizedUrl);
+      if (Option.isSome(existing)) return yield* Effect.fail(buildUrlServerExists(existing.value));
+      const name = source.name ?? (yield* buildDefaultServerName(address));
+      const at = yield* nowIso;
+      const server = yield* servers.insertUrl({
+        name,
+        url: address.url,
+        normalizedUrl: address.normalizedUrl,
+        signIn: source.token === undefined ? "none" : "token",
+        at,
+      });
+      if (source.token !== undefined) yield* signIns.storeToken(server.id, source.token);
+      yield* audit.append({
+        kind: "mcpServer.created",
+        actor: yield* currentStamp,
+        record: { topic: "mcpServer", id: server.id },
+        payload: { mcpServerId: server.id, sourceKind: "url" },
+        at,
+      });
+      return server;
+    });
+
+  /**
+   * Turns the failure of a create that lost a race into the refusal the
+   * loser would have got had it come second: another create committed the
+   * same address, or the same contribution and account, between this one's
+   * look for it and its insert. The failure is the database's UNIQUE
+   * constraint, and the existing server is read again, outside the rolled
+   * back transaction. Returns the failure unchanged when no server is found.
+   */
+  const refuseLostRace = (
+    source: CreateSource,
+    failure: SqlError,
+  ): Effect.Effect<never, Validation | Conflict | SqlError> =>
+    Effect.gen(function* () {
+      if (source.kind === "url") {
+        const address = yield* parseServerAddress(source.url);
+        const existing = yield* servers.findByNormalizedUrl(address.normalizedUrl);
+        if (Option.isSome(existing))
+          return yield* Effect.fail(buildUrlServerExists(existing.value));
+      } else {
+        const connection = yield* connections.one(source.connectionId);
+        const existing = Option.isSome(connection)
+          ? yield* servers.findByContributionAndAccount(
+              source.contributionId,
+              connection.value.accountId,
+            )
+          : Option.none();
+        if (Option.isSome(existing)) {
+          return yield* Effect.fail(buildPluginServerExists(source.contributionId, existing.value));
+        }
+      }
+      return yield* Effect.fail(failure);
+    });
 
   return {
     /** Returns every MCP Server, sorted by name. */
@@ -107,85 +325,45 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a server from a plugin's contribution and one of the plugin's
-     * Connections, switched on and in status `checking`, and returns it. The
-     * first list of its tools is requested after the commit. Fails with:
+     * Creates a server, switched on and in status `checking`, and returns it.
+     * The first list of its tools is requested after the commit. The source
+     * is one of two kinds:
      *
-     * - `Validation` when no plugin offers the contribution, or the
-     *   Connection does not exist or is not of the contribution's Connection
-     *   type;
-     * - `Conflict`, naming the existing server, when the contribution already
-     *   has a server for the Connection's external account.
+     * - `plugin`: a plugin's contribution and one of the plugin's Connections.
+     *   The name is the one given, or else the contribution's own word.
+     * - `url`: an address, with an optional token that is stored as the
+     *   server's sign-in before the first check. The name is the one given, or
+     *   else the host's first label that is not `mcp`, `www` or `api`.
      *
-     * The name is the one given, or else the contribution's own word.
+     * Fails with:
+     *
+     * - `Validation` when no plugin offers the contribution, the Connection
+     *   does not exist or is not of the contribution's Connection type, or the
+     *   address is not an http or https address, holds a user name, a password
+     *   or a `#fragment`, or gives no usable name;
+     * - `Conflict` with `mcp-server-exists`, naming the existing server, when
+     *   the contribution already has a server for the Connection's external
+     *   account, or the address is one already added (two spellings of one
+     *   address are one address);
+     * - `Conflict` with `mcp-server-on-plugin-origin` when the address is one
+     *   a plugin offers a server for.
+     *
+     * Two creates of one server that run at once get one server and one
+     * `mcp-server-exists` refusal, never an internal error.
      */
     create: (
       input: McpServerCreateInput,
     ): Effect.Effect<McpServer, Forbidden | Validation | Conflict | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("mcpServer.create");
-        const { contributionId, connectionId, name } = input.source;
+        const { source } = input;
         const created = yield* withTransaction(
           sql,
-          Effect.gen(function* () {
-            const contribution = yield* plugins.findMcpServer(contributionId);
-            if (Option.isNone(contribution)) {
-              return yield* Effect.fail(
-                createValidationError([
-                  {
-                    path: ["source", "contributionId"],
-                    message: "no plugin offers an MCP server with this id",
-                  },
-                ]),
-              );
-            }
-            const connection = yield* connections.one(connectionId);
-            if (Option.isNone(connection)) {
-              return yield* Effect.fail(
-                createValidationError([
-                  { path: ["source", "connectionId"], message: "no such connection" },
-                ]),
-              );
-            }
-            if (connection.value.type !== contribution.value.connectionType) {
-              return yield* Effect.fail(
-                createValidationError([
-                  {
-                    path: ["source", "connectionId"],
-                    message: `this server is reached with a ${contribution.value.connectionType} connection, and this connection is a ${connection.value.type} connection`,
-                  },
-                ]),
-              );
-            }
-            const existing = yield* servers.findByContributionAndAccount(
-              contributionId,
-              connection.value.accountId,
-            );
-            if (Option.isSome(existing)) {
-              return yield* Effect.fail(
-                createConflictError(
-                  `This account already has an MCP server for ${contributionId}: ${existing.value.name} (${existing.value.id}). Use that server, or delete it first with \`hercule mcp-server delete ${existing.value.id}\`.`,
-                ),
-              );
-            }
-            const at = yield* nowIso;
-            const server = yield* servers.insert({
-              name: name ?? contributionId.slice(contributionId.lastIndexOf("/") + 1),
-              contributionId,
-              connectionId,
-              accountId: connection.value.accountId,
-              connectionGeneration: connection.value.credentialsGeneration,
-              at,
-            });
-            yield* audit.append({
-              kind: "mcpServer.created",
-              actor: yield* currentStamp,
-              record: { topic: "mcpServer", id: server.id },
-              payload: { mcpServerId: server.id, contributionId, connectionId },
-              at,
-            });
-            return server;
-          }),
+          source.kind === "plugin" ? insertPluginServer(source) : insertUrlServer(source),
+        ).pipe(
+          Effect.catchTag("SqlError", (failure) =>
+            isUniqueViolation(failure) ? refuseLostRace(source, failure) : Effect.fail(failure),
+          ),
         );
         yield* checks.wake;
         return toRecord(created);
@@ -232,8 +410,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes a server and removes it from every Project's and Session's list,
-     * in one transaction. Fails with `NotFound` when there is no such server.
+     * Deletes a server, its sign-in secrets, and its place in every Project's
+     * and Session's list, in one transaction. Fails with `NotFound` when there is no such server.
      */
     delete: (id: string): Effect.Effect<Record<string, never>, Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
@@ -243,6 +421,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* readOrFail(id);
             yield* listHolders.removeServer(id);
+            yield* signIns.deleteAll(id);
             yield* servers.remove(id);
             yield* audit.append({
               kind: "mcpServer.deleted",
@@ -286,6 +465,55 @@ const make = Effect.gen(function* () {
         );
         yield* checks.wake;
         return {};
+      }),
+
+    /**
+     * Gives a server added by URL the token the user pasted, replacing every
+     * sign-in secret it holds, and returns the server. The server goes back
+     * to `checking` and its revision goes up, which ends the upstream
+     * sessions and the running checks that used the old sign-in. A new list
+     * of its tools is requested after the commit. The audit entry says the
+     * sign-in is now a token and never holds the token. Fails with `NotFound`
+     * when there is no such server, and with `InvalidState` for a plugin
+     * server, whose credential is its Connection's.
+     */
+    setToken: (
+      input: SetTokenInput,
+    ): Effect.Effect<McpServer, Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("mcpServer.setToken");
+        const { id, token } = input;
+        const server = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const current = yield* readOrFail(id);
+            if (current.source.kind === "plugin") {
+              const connection = yield* connections.one(current.source.connectionId);
+              const reached = Option.isSome(connection)
+                ? `the Connection ${connection.value.label}`
+                : "a Connection of its plugin";
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `this server is reached with ${reached}; reconnect that Connection in Settings > Connections instead`,
+                ),
+              );
+            }
+            const at = yield* nowIso;
+            yield* signIns.deleteAll(id);
+            yield* signIns.storeToken(id, token);
+            yield* servers.writeTokenSignIn(id, at);
+            yield* audit.append({
+              kind: "mcpServer.updated",
+              actor: yield* currentStamp,
+              record: { topic: "mcpServer", id },
+              payload: { mcpServerId: id, signIn: "token" },
+              at,
+            });
+            return yield* readOrFail(id);
+          }),
+        );
+        yield* checks.wake;
+        return toRecord(server);
       }),
   };
 });

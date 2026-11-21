@@ -119,6 +119,15 @@ export interface NewUrlMcpServer {
 }
 
 /**
+ * Checks whether a failed write broke a UNIQUE constraint of the table: a
+ * second server for one plugin contribution and account, or for one
+ * normalized address. A writer that looked for the existing server first and
+ * found none can still meet this when another write committed in between.
+ */
+export const isUniqueViolation = (error: SqlError): boolean =>
+  error.reason._tag === "UniqueViolation";
+
+/**
  * The columns that hold a row's source. The table's CHECK guarantees that a
  * row has the columns of its kind and none of the other's, so the two shapes
  * are the only ones a read can find.
@@ -411,6 +420,16 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toServer),
       ),
 
+    /** Returns the server added by URL whose normalized address is this one, if there is one. */
+    findByNormalizedUrl: (
+      normalizedUrl: string,
+    ): Effect.Effect<Option.Option<StoredMcpServer>, SqlError> =>
+      Effect.map(
+        sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
+                          WHERE normalized_url = ${normalizedUrl}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toServer),
+      ),
+
     /** Inserts a plugin server that is on, in status `checking`, with no tools, and returns it. */
     insert: (server: NewMcpServer): Effect.Effect<StoredMcpServer, SqlError> =>
       Effect.gen(function* () {
@@ -493,6 +512,26 @@ const make = Effect.gen(function* () {
             SET enabled = 0, revision = revision + 1, updated_at = ${at}
             WHERE id = ${uuidFromString(id)}
           `,
+      ),
+
+    /**
+     * Records that a pasted token was stored for a server added by URL, and
+     * prepares the server to be checked with it: `signIn` becomes `token`, the
+     * status goes back to `checking` with no detail, the failed checks end, the
+     * next check is due at `at` so it happens even when the request for it is
+     * lost, and `revision` goes up, so a check that started with the old
+     * sign-in cannot write its result and upstream sessions opened with it
+     * end.
+     */
+    writeTokenSignIn: (id: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`
+          UPDATE mcp_servers
+          SET sign_in = 'token', status = 'checking', status_detail = NULL,
+              failed_checks = 0, next_check_at = ${at},
+              revision = revision + 1, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)}
+        `,
       ),
 
     /**

@@ -535,7 +535,10 @@ const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
         withApiErrors(mcpServers.update({ ...params, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(mcpServers.delete(params.id)))
-      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)));
+      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)))
+      .handle("setToken", ({ params, payload }) =>
+        withApiErrors(mcpServers.setToken({ ...params, ...payload })),
+      );
   }),
 );
 

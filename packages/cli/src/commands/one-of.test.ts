@@ -377,13 +377,13 @@ describe("a row whose entries cannot be told apart or parsed alike", () => {
         color: Schema.optionalKey(Schema.Literals(["red", "blue"])),
       }),
     ]);
-    const entryOf = (entry: typeof ENTRY_B | typeof ENTRY_C) => {
-      const { name: _name, ...flags } = entry.flags;
-      return { ...entry, flags };
-    };
-    expect(() => buildThreeCommand(Divergent, [entryOf(ENTRY_B), entryOf(ENTRY_C)])).toThrow(
-      "--color means something different in different entries",
-    );
+    const color = ENTRY_B.flags.color;
+    expect(() =>
+      buildThreeCommand(Divergent, [
+        { ...ENTRY_B, flags: { b: ENTRY_B.flags.b, color } },
+        { ...ENTRY_C, flags: { c: ENTRY_C.flags.c, color } },
+      ]),
+    ).toThrow("--color means something different in different entries");
   });
 
   it("is refused when a shared flag is a different kind in different entries", () => {

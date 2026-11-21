@@ -4,7 +4,7 @@
  * plugin.
  */
 export { EventKindCatalogLayer } from "./event-kinds";
-export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
+export { PluginConfigsLayer, PluginHost, PluginHostLayer, type LoadedPlugin } from "./host";
 export {
   computeIngestFingerprint,
   IngestLoops,

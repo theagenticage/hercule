@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { mcpServerRepository } from "./repository";
+import { isUniqueViolation, mcpServerRepository } from "./repository";
 
 const AT = "2026-11-01T00:00:00.000Z";
 const CONNECTION_ID = "0199e0e7-7b21-7000-8000-000000000001";
@@ -97,5 +97,37 @@ describe("the MCP Server repository", () => {
     expect(found.byConnection).toEqual(["desk"]);
     expect(found.dependencies).toEqual(["acme/desk"]);
     expect(Option.map(found.urlServer, (server) => server.id)).toEqual(Option.some(URL_SERVER_ID));
+  });
+
+  it("finds a server by its normalized address, and recognises a second insert of one as a UNIQUE violation", async () => {
+    const found = await Effect.runPromise(
+      Effect.gen(function* () {
+        const servers = yield* arrange;
+        const sql = yield* SqlClient.SqlClient;
+        const byAddress = yield* servers.findByNormalizedUrl("https://mcp.linear.app/mcp");
+        const unknown = yield* servers.findByNormalizedUrl("https://mcp.other.app/mcp");
+        const second = yield* Effect.flip(
+          inTransaction(
+            servers.insertUrl({
+              name: "linear2",
+              url: "https://MCP.linear.app/mcp",
+              normalizedUrl: "https://mcp.linear.app/mcp",
+              signIn: "none",
+              at: AT,
+            }),
+          ),
+        );
+        // Another kind of failure is not mistaken for it.
+        const other = yield* Effect.flip(
+          inTransaction(sql`INSERT INTO mcp_servers (id) VALUES (NULL)`),
+        );
+        return { byAddress, unknown, second, other };
+      }).pipe(Effect.provide(TestDatabase), Effect.scoped, Effect.orDie),
+    );
+
+    expect(Option.map(found.byAddress, (server) => server.id)).toEqual(Option.some(URL_SERVER_ID));
+    expect(Option.isNone(found.unknown)).toBe(true);
+    expect(isUniqueViolation(found.second)).toBe(true);
+    expect(isUniqueViolation(found.other)).toBe(false);
   });
 });
