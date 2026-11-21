@@ -31,7 +31,7 @@ import {
   type McpServerAvailabilityView,
   type UsablePlugin,
 } from "./catalogue";
-import type { McpServerStoredSource, StoredMcpServerAvailability } from "./repository";
+import type { McpServerUrlSource, StoredMcpServerAvailability } from "./repository";
 import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
 /**
@@ -368,9 +368,6 @@ const resolvePluginAccess = (
   };
 };
 
-/** The source of a server added by URL. */
-type UrlSource = Extract<McpServerStoredSource, { readonly kind: "url" }>;
-
 /**
  * Builds the access of a server added by URL: requests go to its own address,
  * with its pasted token as a bearer token when it holds one. There is nothing
@@ -383,7 +380,7 @@ type UrlSource = Extract<McpServerStoredSource, { readonly kind: "url" }>;
  */
 const resolveUrlAccess = (
   { name, id }: StoredMcpServerAvailability,
-  { url, signIn }: UrlSource,
+  { url, signIn }: McpServerUrlSource,
   signIns: McpServerSignIns,
 ): UsableAccess => {
   const toUpstream = (token: string | undefined): UpstreamCredentials => {
@@ -454,12 +451,7 @@ export const resolveServerAccess = (
 ): ServerAccess => {
   const judged = judgeDependencies(view.dependencies);
   if (judged._tag === "unusable") return judged;
-  if (judged.kind === "plugin") return resolvePluginAccess(judged, connectionTypes);
-  const { source } = view.server;
-  if (source.kind !== "url") {
-    // The dependencies of a view are read from its server's source, so a view
-    // with URL dependencies has a server added by URL.
-    throw new Error(`MCP server ${view.server.id} has no URL to reach it at`);
-  }
-  return resolveUrlAccess(view.server, source, signIns);
+  return judged.kind === "plugin"
+    ? resolvePluginAccess(judged, connectionTypes)
+    : resolveUrlAccess(view.server, judged.source, signIns);
 };

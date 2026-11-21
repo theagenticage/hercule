@@ -53,6 +53,9 @@ export type McpServerStoredSource =
       readonly signInOffered: "oauth" | "token" | null;
     };
 
+/** The source of a server added by URL. */
+export type McpServerUrlSource = Extract<McpServerStoredSource, { readonly kind: "url" }>;
+
 /**
  * An MCP Server row without its stored tool definitions, which can be several
  * MiB. A reader that only judges whether the server can serve takes this.

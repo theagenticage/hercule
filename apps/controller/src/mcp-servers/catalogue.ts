@@ -28,6 +28,7 @@ import {
   mcpServerRepository,
   type McpServerColumns,
   type McpServerStoredSource,
+  type McpServerUrlSource,
   type StoredMcpServer,
   type StoredMcpServerAvailability,
 } from "./repository";
@@ -48,7 +49,8 @@ export type PluginState =
  * What a server depends on outside its own row. A plugin server depends on
  * its Connection and its plugin. A check reads it before it decides, and
  * `writeCheckResult` reads it again before it writes. A server added by URL
- * depends on nothing outside its row.
+ * depends on nothing outside its row, so its entry only carries the row's
+ * `source`, narrowed to the URL kind, for whoever resolves how to reach it.
  */
 export type McpServerDependencies =
   | {
@@ -57,7 +59,7 @@ export type McpServerDependencies =
       readonly connection: StoredConnection | undefined;
       readonly plugin: PluginState;
     }
-  | { readonly kind: "url" };
+  | { readonly kind: "url"; readonly source: McpServerUrlSource };
 
 /**
  * Tells whether two readings of the dependencies are the same for a server:
@@ -94,6 +96,7 @@ export interface UsablePlugin {
 export interface UsableUrl {
   readonly _tag: "usable";
   readonly kind: "url";
+  readonly source: McpServerUrlSource;
 }
 
 /** A server that can be reached, whichever way it was added. */
@@ -108,7 +111,9 @@ export type Usable = UsablePlugin | UsableUrl;
  * same words.
  */
 export const judgeDependencies = (dependencies: McpServerDependencies): Usable | Unusable => {
-  if (dependencies.kind === "url") return { _tag: "usable", kind: "url" };
+  if (dependencies.kind === "url") {
+    return { _tag: "usable", kind: "url", source: dependencies.source };
+  }
   const { plugin, connection } = dependencies;
   switch (plugin._tag) {
     case "missing":
@@ -342,7 +347,7 @@ const make = Effect.gen(function* () {
               connection: found.get(source.connectionId),
               plugin: readPluginState(source.contributionId),
             }
-          : { kind: "url" };
+          : { kind: "url", source };
     });
 
   /**

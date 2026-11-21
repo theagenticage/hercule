@@ -58,7 +58,7 @@ import {
 import { withFleet } from "../workspaces/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 import type { McpServerView, PluginState } from "./catalogue";
-import { mcpServerRepository } from "./repository";
+import { mcpServerRepository, type McpServerUrlSource } from "./repository";
 
 /**
  * One tool the fake lists. A call answers as `answer` says:
@@ -883,25 +883,26 @@ export const buildMcpServerView = ({
   url,
 }: ViewFacts = {}): McpServerView => {
   const at = "2026-01-01T00:00:00.000Z";
+  const urlSource: McpServerUrlSource | undefined =
+    url === undefined
+      ? undefined
+      : {
+          kind: "url",
+          url: "https://desk.example/mcp",
+          normalizedUrl: "https://desk.example/mcp",
+          signIn: url.signIn,
+          signInOffered: null,
+        };
   return {
     server: {
       id: "server-1",
       name: "desk",
-      source:
-        url === undefined
-          ? {
-              kind: "plugin",
-              contributionId: "acme/desk",
-              connectionId: "connection-1",
-              accountId: "desk-1",
-            }
-          : {
-              kind: "url",
-              url: "https://desk.example/mcp",
-              normalizedUrl: "https://desk.example/mcp",
-              signIn: url.signIn,
-              signInOffered: null,
-            },
+      source: urlSource ?? {
+        kind: "plugin",
+        contributionId: "acme/desk",
+        connectionId: "connection-1",
+        accountId: "desk-1",
+      },
       enabled,
       status,
       statusDetail: null,
@@ -918,8 +919,8 @@ export const buildMcpServerView = ({
       updatedAt: at,
     },
     dependencies:
-      url !== undefined
-        ? { kind: "url" }
+      urlSource !== undefined
+        ? { kind: "url", source: urlSource }
         : {
             kind: "plugin",
             connection:
