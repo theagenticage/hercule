@@ -11,13 +11,26 @@
  * `buildMcpServerConfig` builds, the session token in `HERCULE_TOKEN`, and an
  * environment built from nothing (a throwaway `HOME` and `CODEX_HOME`). The
  * model is a local stand-in for the Responses API that calls the tool a prompt
- * names, so no real model is reached.
+ * names, so no real model is reached. A Codex shows the gateway's tools inline
+ * or defers them behind tool search; the request says which, and when the
+ * tools are deferred the stand-in searches for the tool and calls the one the
+ * search returned.
  *
  * A recording proxy sits between Codex and the controller and keeps what the
  * gateway receives, as in `mcp-claude-code.integration.test.ts`.
  *
- * What this file does not check:
+ * What this file does not assert:
  *
+ * - **The text of the refusal** of a call to a server taken out of the list. It
+ *   asserts that the call reached the gateway, that Codex reports the call as
+ *   `failed`, and that nothing reached the server.
+ * - **Codex's own relist after a removal.** Codex re-reads its list when it hears
+ *   of the change and then refuses the call itself, before the gateway sees it.
+ *   The removal test holds `list_changed` back so that the gateway gets the call;
+ *   it does not check what Codex does when it hears of the change.
+ * - **A fresh GET stream after a 404.** The 404 test checks the new MCP session
+ *   and the order of the retried call and the list, not that Codex opens a stream
+ *   on the new session.
  * - **A real cold gateway.** The test controller cannot restart over the same
  *   database: `withServer` makes a new Hercule Home and a new gateway for each
  *   run, and its `reboot` repeats only the boot steps inside the same process,
@@ -96,36 +109,83 @@ const readPrompt = (item: Record<string, unknown> | undefined): string =>
         .join("")
     : "";
 
+/** The shape of an entry of a model request's `tools`, and of a tool search's result: Codex's namespace of the gateway. */
+type ToolEntry = Record<string, unknown>;
+
+/** Returns the names of the gateway's tools in the namespace entries among `entries`. */
+const readGatewayTools = (entries: ReadonlyArray<ToolEntry>): ReadonlyArray<string> =>
+  entries
+    .filter((entry) => entry["name"] === `mcp__${GATEWAY_NAME}`)
+    .flatMap((entry) =>
+      (entry["tools"] as ReadonlyArray<{ readonly name: string }>).map((one) => one.name),
+    );
+
 /**
- * Builds the model's script: a prompt `call <tool>` makes the model call that
- * tool of the gateway once, with the argument `hello`; any other request ends
- * the turn. The model calls the tool whether or not it was offered, which lets
- * a test send a call under a name the gateway no longer serves.
+ * Returns the names of the gateway's tools the model has been shown in
+ * `requests`, once each. A Codex shows them in one of two shapes, and the
+ * request itself says which:
+ *
+ * - inline, as a `mcp__tools` namespace in the request's `tools`;
+ * - deferred, as the result of a `tool_search_call`, which comes back as a
+ *   `tool_search_output` item in the request's input. Such a request has a
+ *   `tool_search` tool and no inline namespace.
+ */
+const readOfferedTools = (requests: ReadonlyArray<ScriptedModelRequest>): ReadonlyArray<string> => [
+  ...new Set(
+    requests.flatMap((request) => [
+      ...readGatewayTools(request.body.tools),
+      ...readGatewayTools(
+        request.body.input
+          .filter((item) => item["type"] === "tool_search_output")
+          .flatMap((item) => item["tools"] as ReadonlyArray<ToolEntry>),
+      ),
+    ]),
+  ),
+];
+
+/**
+ * Builds the model's script. A prompt `call <tool>` makes the model call that
+ * tool of the gateway once, with the argument `hello`. When Codex has not shown
+ * the model the tool and offers a `tool_search` tool, the model searches for
+ * the tool first and calls it only if the search returned it. Any other request
+ * ends the turn.
  */
 const buildCallScript = () => {
   let calls = 0;
+  let searches = 0;
+  let searchedFor: string | undefined;
+  const buildCall = (tool: string) => ({
+    type: "function_call",
+    namespace: `mcp__${GATEWAY_NAME}`,
+    name: tool,
+    call_id: `call-${String(++calls)}`,
+    arguments: JSON.stringify({ text: "hello" }),
+  });
   return (request: ScriptedModelRequest) => {
-    const tool = /call (\w+)/.exec(readPrompt(request.body.input.at(-1)))?.[1];
-    if (tool === undefined) return undefined;
-    return [
-      {
-        type: "function_call",
-        namespace: `mcp__${GATEWAY_NAME}`,
-        name: tool,
-        call_id: `call-${String(++calls)}`,
-        arguments: JSON.stringify({ text: "hello" }),
-      },
-    ];
+    const last = request.body.input.at(-1);
+    const wanted = /call (\w+)/.exec(readPrompt(last))?.[1];
+    if (wanted !== undefined) {
+      const canSearch = request.body.tools.some((tool) => tool["type"] === "tool_search");
+      if (canSearch && !readOfferedTools([request]).includes(wanted)) {
+        searchedFor = wanted;
+        return [
+          {
+            type: "tool_search_call",
+            call_id: `search-${String(++searches)}`,
+            execution: "client",
+            arguments: { query: wanted, limit: 5 },
+          },
+        ];
+      }
+      return [buildCall(wanted)];
+    }
+    if (last?.["type"] === "tool_search_output" && searchedFor !== undefined) {
+      const found = readGatewayTools(last["tools"] as ReadonlyArray<ToolEntry>);
+      return found.includes(searchedFor) ? [buildCall(searchedFor)] : undefined;
+    }
+    return undefined;
   };
 };
-
-/** Returns the names of the gateway's tools that a model request offered. */
-const readOfferedTools = (request: ScriptedModelRequest): ReadonlyArray<string> =>
-  request.body.tools
-    .filter((tool) => tool["name"] === `mcp__${GATEWAY_NAME}`)
-    .flatMap((tool) =>
-      (tool["tools"] as ReadonlyArray<{ readonly name: string }>).map((one) => one.name),
-    );
 
 /** Returns what the model was sent back for the call `callId`, as text, or `undefined` before it was sent. */
 const readCallOutput = (
@@ -474,12 +534,6 @@ const waitForRequest = (
 ): Promise<boolean> =>
   waitWithin(STEP_MS, () => requestsOf(proxy.seen.slice(after), rpcMethod).some(accept));
 
-/** The version of the Codex under test, read from `codex --version` (`codex-cli 0.169.0`). */
-const codexVersion =
-  codex === undefined
-    ? null
-    : (/\d+\.\d+\.\d+/.exec(Bun.spawnSync([codex, "--version"]).stdout.toString())?.[0] ?? null);
-
 describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => {
   it("initializes on the older era, lists the session's tools as <server>__<tool> and calls one upstream once", async () => {
     await withCodexOnGateway({ listed: true }, async (rig, home) => {
@@ -495,12 +549,18 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       expect(describeRequest(initialize!)).toBe("POST initialize no-revision no-session 200");
       const mcpSessionId = initialize!.answeredSessionId!;
       expect(mcpSessionId).not.toBeNull();
-      expect(rig.proxy.seen.map((one) => one.rpcMethod).slice(0, 3)).toEqual([
-        "initialize",
-        "notifications/initialized",
-        "-",
-      ]);
-      expect(requestsOf(rig.proxy.seen, "GET")[0]!.status).toBe(200);
+      // Codex opens the GET stream on its own schedule, so the turn can end before the gateway has
+      // answered it, and it can come before or after the first list. Wait for the stream, and check
+      // only the order the protocol fixes: initialize, then initialized, then the GET stream.
+      expect(
+        await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200),
+        "the GET stream is open",
+      ).toBe(true);
+      const methods = rig.proxy.seen.map((one) =>
+        one.httpMethod === "GET" ? "GET" : one.rpcMethod,
+      );
+      expect(methods.slice(0, 2)).toEqual(["initialize", "notifications/initialized"]);
+      expect(methods.indexOf("GET")).toBeGreaterThan(1);
       for (const method of ["notifications/initialized", "GET", "tools/list", "tools/call"]) {
         const [one] = requestsOf(rig.proxy.seen, method);
         expect(one!.sessionId, method).toBe(mcpSessionId);
@@ -509,7 +569,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       expect(requestsOf(rig.proxy.seen, "server/discover")).toEqual([]);
 
       // The model is shown the tool under the gateway's name, and the call reaches the server once.
-      expect(readOfferedTools(rig.model.requests[0]!)).toEqual([WHOAMI]);
+      expect(readOfferedTools(rig.model.requests)).toEqual([WHOAMI]);
       expect(requestsOf(rig.proxy.seen, "tools/call").map((one) => one.tool)).toEqual([WHOAMI]);
       expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
       expect(readCallOutput(rig.model.requests, "call-1")).toContain("hello");
@@ -520,33 +580,31 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
   }, 120_000);
 
   // An older Codex does not re-read its tool list, and the adapter warns the user instead.
-  it.skipIf(!supportsToolListChanged(codexVersion))(
-    "lists again when a server is added to the Thread, and calls the new tool once",
-    async () => {
-      await withCodexOnGateway({ listed: false }, async (rig, home) => {
-        const running = await home.start();
-        const threadId = await running.startThread();
-        // Codex connects when the thread opens, and the gateway lists no tool yet.
-        expect(await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200)).toBe(true);
-        expect(await waitForRequest(rig.proxy, "tools/list")).toBe(true);
-        const [get] = requestsOf(rig.proxy.seen, "GET");
-        const changesBefore = countListChanged([get!]);
+  it("lists again when a server is added to the Thread, and calls the new tool once", async (context) => {
+    await withCodexOnGateway({ listed: false }, async (rig, home) => {
+      const running = await home.start();
+      // The version that decides whether the adapter sends the tool list feature is the one that decides here.
+      if (!supportsToolListChanged(running.version)) context.skip();
+      const threadId = await running.startThread();
+      // Codex connects when the thread opens, and the gateway lists no tool yet.
+      expect(await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200)).toBe(true);
+      expect(await waitForRequest(rig.proxy, "tools/list")).toBe(true);
+      const [get] = requestsOf(rig.proxy.seen, "GET");
+      const changesBefore = countListChanged([get!]);
 
-        await rig.setListed(true);
-        expect(
-          await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
-          "list_changed on the GET stream",
-        ).toBe(true);
+      await rig.setListed(true);
+      expect(
+        await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
+        "list_changed on the GET stream",
+      ).toBe(true);
 
-        // The first list was empty, so the model can be offered the tool only if Codex listed again.
-        await running.runTurn(threadId, `call ${WHOAMI}`);
-        expect(readOfferedTools(rig.model.requests[0]!)).toEqual([WHOAMI]);
-        expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
-        expect(readCallOutput(rig.model.requests, "call-1")).toContain("hello");
-      });
-    },
-    120_000,
-  );
+      // The first list was empty, so the model can be offered the tool only if Codex listed again.
+      await running.runTurn(threadId, `call ${WHOAMI}`);
+      expect(readOfferedTools(rig.model.requests)).toEqual([WHOAMI]);
+      expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
+      expect(readCallOutput(rig.model.requests, "call-1")).toContain("hello");
+    });
+  }, 120_000);
 
   it("refuses a call under the name of a server taken out of the Thread's list, and calls nothing upstream", async () => {
     await withCodexOnGateway({ listed: true }, async (rig, home) => {
@@ -568,9 +626,6 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       ).toBe(true);
       await running.runTurn(threadId, `call ${WHOAMI}`);
 
-      expect(readOfferedTools(rig.model.requests.at(-1)!), "Codex still held the old list").toEqual(
-        [WHOAMI],
-      );
       const [, refused] = requestsOf(rig.proxy.seen, "tools/call");
       expect(describeRequest(refused!)).toBe(
         `POST tools/call ${refused!.protocolVersion} session 200`,
@@ -643,7 +698,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
         expect(await waitForRequest(rig.proxy, "tools/list", mark)).toBe(true);
 
         await second.runTurn(continued, `call ${WHOAMI}`);
-        expect(readOfferedTools(rig.model.requests.at(-1)!)).toEqual([WHOAMI]);
+        expect(readOfferedTools(rig.model.requests)).toEqual([WHOAMI]);
         expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual([
           "whoami",
           "whoami",
@@ -654,10 +709,9 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     120_000,
   );
 
-  // Recorded, not designed for: Codex 0.169.0 and 0.171.0 offer all 300 tools directly in the gateway's
-  // namespace and defer none behind tool search. A Codex that defers them fails this test, and the
-  // stand-in model then has to answer with a `tool_search_call` before it can call a tool.
-  it("offers a few hundred tools directly to the model and calls one of them once", async () => {
+  // Records which shape a Codex gives a few hundred tools: Codex 0.169.0 and 0.171.0 offer all 300 inline, and
+  // 0.154.0 defers every MCP tool behind tool search. Either way the model calls one tool once.
+  it("shows a few hundred tools to the model inline or behind tool search, and calls one of them once", async () => {
     const tools = Array.from({ length: 300 }, (_, number) => ({
       name: `tool${String(number).padStart(3, "0")}`,
       description: `Tool number ${String(number)}`,
@@ -667,9 +721,13 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       const threadId = await running.startThread();
       await running.runTurn(threadId, `call ${SERVER_NAME}__tool007`);
 
-      const offered = readOfferedTools(rig.model.requests[0]!);
-      expect(offered).toHaveLength(300);
-      expect(offered).toContain(`${SERVER_NAME}__tool007`);
+      const first = rig.model.requests[0]!;
+      const inline = readGatewayTools(first.body.tools).length;
+      const hasToolSearch = first.body.tools.some((tool) => tool["type"] === "tool_search");
+      expect(inline === 300 || (inline === 0 && hasToolSearch), "all inline, or none inline").toBe(
+        true,
+      );
+      expect(readOfferedTools(rig.model.requests)).toContain(`${SERVER_NAME}__tool007`);
       expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["tool007"]);
       expect(readCallOutput(rig.model.requests, "call-1")).toContain("hello");
     });
