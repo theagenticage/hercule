@@ -5,9 +5,10 @@
  * which names were sent and what each stands for.
  */
 import { createHash } from "node:crypto";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 
 /** What a harness puts in front of the gateway's tool names: `mcp__tools__`. */
-const HARNESS_PREFIX_LENGTH = "mcp__tools__".length;
+const HARNESS_PREFIX_LENGTH = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`.length;
 
 /** The longest tool name a harness accepts (pi's limit), prefix included. */
 const MAX_HARNESS_NAME_LENGTH = 64;

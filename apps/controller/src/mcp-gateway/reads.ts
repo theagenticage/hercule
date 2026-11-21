@@ -12,7 +12,6 @@ import {
   mcpServerCatalogue,
   type McpServerAvailabilityView,
   type McpServerView,
-  type StoredMcpTool,
 } from "../mcp-servers";
 import { SessionTokens } from "../permissions";
 import { sessionRepository } from "../sessions";
@@ -64,13 +63,6 @@ export const makeFreshReads = Effect.gen(function* () {
 
     readListedServerIds,
     readListedAvailability,
-
-    /** Reads the stored tools of one server now. Returns an empty list for a server that no longer exists. */
-    readServerTools: (serverId: string): Effect.Effect<ReadonlyArray<StoredMcpTool>> =>
-      Effect.map(
-        Effect.orDie(catalogue.readViews([serverId])),
-        (views) => views.get(serverId)?.server.tools ?? [],
-      ),
 
     /** Reads the servers the session is served now, with their tools: none without `mcp.use`. */
     readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<McpServerView>> =>

@@ -21,6 +21,7 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpSchema } from "effect/ai";
 import type { SessionActor } from "../actor";
+import { buildErrorResult } from "../mcp-servers";
 import { makeCallPolicy } from "./call-policy";
 import {
   buildDiscoverResult,
@@ -56,6 +57,9 @@ import { buildServedInstructions, buildToolDefinition, projectTools } from "./se
 import { buildServerSentBody } from "./streams";
 import {
   cancelCall,
+  hasRoomForListenStream,
+  MAX_LISTEN_STREAMS_PER_TOKEN,
+  MAX_RUNNING_CALLS_PER_TOKEN,
   makeTokenStates,
   type McpCaller,
   type McpSession,
@@ -226,9 +230,11 @@ const make = Effect.gen(function* () {
       // Nothing waits between naming the tools and recording the names, so two
       // lists at once cannot give one name to two tools.
       state.names.record(tools);
-      for (const { serverName, tool } of leftOut) {
+      // One line per list, with a count and no tool name: the names come from
+      // outside servers and one list can leave out many tools.
+      if (leftOut.length > 0) {
         yield* Effect.logWarning(
-          `MCP gateway: the tool ${tool} of server ${serverName} got no unique name and is not offered`,
+          `MCP gateway: ${leftOut.length} tool(s) got no unique name and are not offered to session ${actor.sessionId}`,
         );
       }
       return respondJson(
@@ -259,12 +265,27 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      const exit = yield* tokenStates.runCall(
+      const ran = yield* tokenStates.runCall(
         state,
         session,
         id,
         callPolicy.runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
       );
+      if (Option.isNone(ran)) {
+        return respondJson(
+          buildRpcResult(
+            id,
+            buildToolCallResult(
+              era,
+              buildErrorResult(
+                `This session already has ${MAX_RUNNING_CALLS_PER_TOKEN} MCP tool calls running, which is the most it may run at once. ` +
+                  "Wait for some of them to finish and then call again.",
+              ),
+            ),
+          ),
+        );
+      }
+      const exit = ran.value;
       if (Exit.isSuccess(exit)) {
         return respondJson(buildRpcResult(id, buildToolCallResult(era, exit.value)));
       }
@@ -294,6 +315,17 @@ const make = Effect.gen(function* () {
         );
       }
       if (!(yield* tokenStates.isServing)) return respondNotServing();
+      // Checked again when the stream opens, which is what enforces the bound.
+      // This check is there to tell the client why.
+      if (!hasRoomForListenStream(state)) {
+        return respondRpcError(
+          429,
+          McpSchema.INTERNAL_ERROR_CODE,
+          `This session already has ${MAX_LISTEN_STREAMS_PER_TOKEN} subscriptions/listen streams open, which is the most it may have. ` +
+            "Close one of them, or reuse an open one, and then listen again.",
+          id,
+        );
+      }
       return toServerSentResponse(
         buildServerSentBody({
           mcpSessionId: undefined,

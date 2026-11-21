@@ -84,7 +84,15 @@ export const closeMcpStreams: Effect.Effect<void, never, McpGateway> = Effect.fl
   (gateway) => gateway.closeStreams,
 );
 
-/** Wraps `app` so that a request for `/mcp` goes to the gateway and every other request to `app`. */
+/**
+ * Wraps `app` so that a request for `/mcp` goes to the gateway and every other
+ * request to `app`.
+ *
+ * The server runs a request uninterruptibly, and the router makes only the
+ * handlers it owns interruptible. This route sits outside the router, so it
+ * makes itself interruptible. Without that, a client that hangs up, which is
+ * how a `2026-07-28` client cancels a call, would not stop the call.
+ */
 export const withMcpRoute = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<
@@ -94,5 +102,5 @@ export const withMcpRoute = <E, R>(
 > =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
-    return yield* isMcpRequest(request) ? answerMcpRequest : app;
+    return yield* isMcpRequest(request) ? Effect.interruptible(answerMcpRequest) : app;
   });

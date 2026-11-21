@@ -50,6 +50,7 @@ import {
   type SessionStop,
   type WorkspaceStepKey,
   MAX_MESSAGE_LENGTH,
+  MCP_GATEWAY_ENTRY_NAME,
   MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
   type HarnessMcpServer,
@@ -133,7 +134,7 @@ import {
   permissionRequestRepository,
   SessionTokens,
 } from "../permissions";
-import type { SendOutcome } from "../runners";
+import { runnerRepository, type SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
 import { TaskService } from "../tasks";
@@ -186,6 +187,7 @@ import {
 } from "./stream";
 import { subagentRepository } from "./subagent-repository";
 import { sessionTaint } from "../taint";
+import { cutText } from "../text";
 import {
   collectSubagentTree,
   computeSubagentsAfter,
@@ -389,7 +391,7 @@ type GatewayDelivery = Pick<StartDelivery, "runnerReachesMcpServers" | "harnessP
  * (`SessionSpec.mcpServers`, spec 06 section 4).
  */
 const MCP_GATEWAY_ENTRY: HarnessMcpServer = {
-  name: "tools",
+  name: MCP_GATEWAY_ENTRY_NAME,
   type: "http",
   url: "/mcp",
   bearer: "session-token",
@@ -815,20 +817,6 @@ const cutTitle = (title: string): string =>
   Array.from(title.trim()).slice(0, MAX_TITLE_LENGTH).join("").trimEnd();
 
 /**
- * Cuts a warning to the `MAX_MESSAGE_LENGTH` characters a `runtime.warning`
- * may hold and ends a cut one with `...`. Never cuts inside a character that
- * takes two UTF-16 units, which would store text that is not valid Unicode.
- */
-const boundWarningMessage = (message: string): string => {
-  if (message.length <= MAX_MESSAGE_LENGTH) return message;
-  const ellipsis = "...";
-  const kept = message.slice(0, MAX_MESSAGE_LENGTH - ellipsis.length);
-  const lastUnit = kept.charCodeAt(kept.length - 1);
-  const splitsPair = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
-  return `${splitsPair ? kept.slice(0, -1) : kept}${ellipsis}`;
-};
-
-/**
  * Cleans text a model generated: line breaks and repeated spaces become
  * single spaces, and control and format characters are removed. It does not
  * trim or cut. A model can emit zero-width or direction-changing characters,
@@ -968,6 +956,7 @@ const make = Effect.gen(function* () {
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
   const catalogue = yield* mcpServerCatalogue;
+  const runners = yield* runnerRepository;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
@@ -1157,6 +1146,41 @@ const make = Effect.gen(function* () {
       if (leftOut.length === 0) return;
       const warning = buildLeftOutWarning(leftOut);
       yield* appendRuntimeWarning(sessionId, warning.message, at, warning.mcpServers);
+    });
+
+  /**
+   * Writes one `runtime.warning` for the MCP Servers that were just added to
+   * the list of a session that is running, when the session was started with
+   * no gateway: its runner is too old for MCP servers, or its harness cannot
+   * be given any. Nothing reaches such a session before its next start, so
+   * the warning names each added server with the reason, as a start does for
+   * the servers it leaves out. Writes nothing when the session has a gateway.
+   * Joins the caller's transaction.
+   */
+  const warnWhenAddedServersAreUnreachable = (
+    session: StoredSession,
+    addedIds: ReadonlyArray<string>,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const runner = Option.getOrThrow(yield* runners.read(session.runnerId));
+      const gateway = yield* readMcpGatewayDelivery(session.harnessId, runner);
+      const reason: McpServerLeftOutReason | undefined = !gateway.runnerReachesMcpServers
+        ? "runner-too-old"
+        : gateway.harnessPassthrough === "unsupported"
+          ? "harness-unsupported"
+          : undefined;
+      if (reason === undefined) return;
+      const views = yield* catalogue.readViews(addedIds, "without-tools");
+      const unreachable: Array<LeftOutServer> = [];
+      for (const mcpServerId of addedIds) {
+        const view = views.get(mcpServerId);
+        // The caller checked the list, so every added id is a server.
+        if (view === undefined) return yield* Effect.die(`MCP server ${mcpServerId} is missing`);
+        unreachable.push({ mcpServerId, name: view.server.name, reason });
+      }
+      const warning = buildLeftOutWarning(unreachable);
+      yield* appendRuntimeWarning(session.id, warning.message, at, warning.mcpServers);
     });
 
   /**
@@ -3306,6 +3330,10 @@ const make = Effect.gen(function* () {
      * removed. A list the session had, in another order, is not a change of
      * what the session can reach, so it writes no entry. The session is
      * announced either way, by the entry's record or directly.
+     *
+     * When servers are added to a running session that has no gateway (its
+     * runner is too old or its harness cannot take MCP servers), it also
+     * writes one `runtime.warning` that names them and why they do not work.
      */
     setMcpServers: (
       sessionId: string,
@@ -3320,13 +3348,22 @@ const make = Effect.gen(function* () {
         if (added.length === 0 && removed.length === 0) {
           return yield* announceSessionChange(session);
         }
+        const at = yield* nowIso;
         yield* audit.append({
           kind: "session.mcpServersChanged",
           actor: yield* currentStamp,
           record: { topic: "session", id: sessionId, conversationId: session.conversationId },
           payload: { sessionId, added, removed },
-          at: yield* nowIso,
+          at,
         });
+        // A queued session is judged when it is claimed, and an
+        // exited one at its resume.
+        if (
+          added.length > 0 &&
+          (session.status === "starting" || session.status === "idle" || session.status === "busy")
+        ) {
+          yield* warnWhenAddedServersAreUnreachable(session, added, at);
+        }
       }),
 
     /**
@@ -3358,7 +3395,12 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.flatMap(nowIso, (at) =>
-          appendRuntimeWarning(sessionId, boundWarningMessage(message), at, mcpServersRefused),
+          appendRuntimeWarning(
+            sessionId,
+            cutText(message, MAX_MESSAGE_LENGTH),
+            at,
+            mcpServersRefused,
+          ),
         ),
       ),
 

@@ -21,11 +21,13 @@
  * call the controller finds frozen after the gateway admitted it cannot be
  * arranged over the wire, so that one test replaces `callTool`.
  */
+import { connect } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { MAX_LISTEN_STREAMS_PER_TOKEN, MAX_RUNNING_CALLS_PER_TOKEN } from "../mcp-gateway";
 import { McpCallRefused } from "../mcp-servers";
 import type { Profile } from "@hercule/contract";
 import { McpProtocol } from "effect/ai";
@@ -475,6 +477,31 @@ const readCallAudit = async (sessionId: string) =>
   (await arranged.harness.audit("mcpTool.called")).filter(
     (entry) => entry.payload["sessionId"] === sessionId,
   );
+
+/**
+ * Sends one POST to `/mcp` over a socket of the test's own and returns the
+ * function that closes the socket. `fetch` cannot be trusted to close the
+ * connection when its signal aborts.
+ */
+const postOnOwnSocket = (token: string, message: unknown): Promise<() => void> =>
+  new Promise((resolve, reject) => {
+    const url = new URL(base());
+    const body = JSON.stringify(message);
+    const headers = {
+      host: url.host,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "content-length": String(Buffer.byteLength(body)),
+      ...buildWireHeaders(message, undefined),
+    };
+    const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
+      const lines = Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`);
+      socket.write(`POST /mcp HTTP/1.1\r\n${lines.join("")}\r\n${body}`);
+      resolve(() => socket.destroy());
+    });
+    socket.on("error", reject);
+  });
 
 // -- The tests ----------------------------------------------------------------
 
@@ -1468,6 +1495,191 @@ describe("subscriptions/listen", () => {
     });
     expect(invalid.status).toBe(400);
     expect(invalid.body.error.code).toBe(-32602);
+  });
+});
+
+describe("what one Session Token may hold at once", () => {
+  it("refuses a ninth subscriptions/listen stream with a message the agent can act on, and takes another once one closes", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const open: Array<OpenStream> = [];
+    try {
+      for (let index = 0; index < MAX_LISTEN_STREAMS_PER_TOKEN; index += 1) {
+        const listen = await openListen(thread.token, 1_000 + index);
+        open.push(listen);
+        await waitForListChanges(listen, 1);
+      }
+
+      const refused = await openListen(thread.token, 1_100);
+      expect(refused.response.status).toBe(429);
+      const body = JSON.parse(await refused.response.text()) as RpcBody;
+      expect(body.error.message).toContain(String(MAX_LISTEN_STREAMS_PER_TOKEN));
+      expect(body.error.message).toContain("Close one");
+
+      open[0]!.close();
+      const reopened = await eventually(
+        async () => openListen(thread.token, 1_101),
+        (listen) => listen.response.status === 200,
+      );
+      open.push(reopened);
+    } finally {
+      for (const listen of open) listen.close();
+    }
+  });
+
+  it("refuses a call over the bound of running calls with a message the agent can act on, and runs the others", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await sendMcp(thread.token, request("tools/list", STATELESS_META));
+    const mark = countUpstreamRequests();
+    const release = upstream.hold("tools/call");
+    try {
+      const running = Array.from({ length: MAX_RUNNING_CALLS_PER_TOKEN }, () =>
+        callEcho(thread.token, "alpha__echo", undefined),
+      );
+      expect(
+        await waitWithin(
+          10_000,
+          () => listToolPostsSince(mark).length >= MAX_RUNNING_CALLS_PER_TOKEN,
+        ),
+      ).toBe(true);
+
+      const over = await callEcho(thread.token, "alpha__echo", undefined);
+      expect(over.body.result.isError).toBe(true);
+      expect(textOf(over)).toContain(String(MAX_RUNNING_CALLS_PER_TOKEN));
+      expect(textOf(over)).toContain("Wait for some of them to finish");
+      expect(listToolPostsSince(mark)).toHaveLength(MAX_RUNNING_CALLS_PER_TOKEN);
+
+      release();
+      for (const answer of await Promise.all(running)) {
+        expect(answer.body.result.isError).toBeUndefined();
+      }
+    } finally {
+      release();
+    }
+  });
+});
+
+describe("cancelling and giving up", () => {
+  it("stops a stateless call whose client hangs up while the upstream server holds it, and audits the call as failed", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await sendMcp(thread.token, request("tools/list", STATELESS_META));
+    const mark = countUpstreamRequests();
+    const release = upstream.hold("tools/call");
+    try {
+      const hangUp = await postOnOwnSocket(
+        thread.token,
+        request("tools/call", { name: "alpha__echo", arguments: {}, ...STATELESS_META }),
+      );
+      expect(await waitWithin(5_000, () => listToolPostsSince(mark).length === 1)).toBe(true);
+      hangUp();
+
+      // The fake upstream server still holds its answer, so only the
+      // gateway's own stop can end the call.
+      const entries = await eventually(
+        () => readCallAudit(thread.session.id),
+        (found) => found.length > 0,
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.payload).toMatchObject({ outcome: "failed", tool: "echo" });
+    } finally {
+      release();
+    }
+  });
+
+  it("cancels every running call that has the id a notifications/cancelled names, even after another call with that id ended", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+    const sameId = 777;
+    const callWithSameId = (name: string) =>
+      sendMcp(
+        thread.token,
+        { jsonrpc: "2.0", id: sameId, method: "tools/call", params: { name } },
+        { "mcp-session-id": sessionId },
+      );
+    const mark = countUpstreamRequests();
+    const release = upstream.hold("tools/call");
+    try {
+      const running = callWithSameId("alpha__echo");
+      expect(await waitWithin(5_000, () => listToolPostsSince(mark).length === 1)).toBe(true);
+      // Ends at once, because the gateway refuses the name, and it must not
+      // take the running call's place in the gateway's record.
+      expect((await callWithSameId("alpha__nothing")).body.result.isError).toBe(true);
+
+      await sendMcp(
+        thread.token,
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: sameId },
+        },
+        { "mcp-session-id": sessionId },
+      );
+
+      expect((await running).body.error.message).toBe("The request was cancelled");
+    } finally {
+      release();
+    }
+  });
+
+  it("audits a call as failed when the gateway cannot even decide it", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await sendMcp(thread.token, request("tools/list", STATELESS_META));
+    const mark = countUpstreamRequests();
+    const sql = arranged.harness.sql;
+    const renameListTable = (from: string, to: string) =>
+      Effect.runPromise(
+        Effect.orDie(withTransaction(sql, sql.unsafe(`ALTER TABLE ${from} RENAME TO ${to}`))),
+      );
+
+    // The decision reads the session's list of servers first. With that table
+    // gone the read fails, which the gateway treats as a defect.
+    await renameListTable("session_mcp_servers", "session_mcp_servers_hidden");
+    let answer: Answer;
+    try {
+      answer = await callEcho(thread.token, "alpha__echo", undefined);
+    } finally {
+      await renameListTable("session_mcp_servers_hidden", "session_mcp_servers");
+    }
+
+    expect(answer.status).toBe(500);
+    const entries = await readCallAudit(thread.session.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.payload).toMatchObject({ outcome: "failed", mcpServerId: null, tool: null });
+    expect(listToolPostsSince(mark)).toEqual([]);
+  });
+});
+
+describe("a slow upstream server", () => {
+  it("never holds up the list_changed of the next change while the gateway closes an upstream session", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await sendMcp(thread.token, request("tools/list", STATELESS_META));
+    const mark = countUpstreamRequests();
+    expect(
+      (await callEcho(thread.token, "alpha__echo", undefined)).body.result.isError,
+    ).toBeUndefined();
+    const upstreamSession = listToolPostsSince(mark)[0]?.sessionId;
+    expect(upstreamSession).toBeTruthy();
+
+    const listen = await openListen(thread.token, 1_200);
+    const release = upstream.hold("?");
+    try {
+      await waitForListChanges(listen, 1);
+      // The server leaves the list, so the gateway closes its upstream
+      // session by a DELETE that the fake upstream server does not answer.
+      expect((await updateList(thread.session.id, [])).status).toBe(200);
+      await waitForListChanges(listen, 2);
+      expect(
+        await waitWithin(5_000, () => listEndedSessionsSince(mark).includes(upstreamSession!)),
+      ).toBe(true);
+
+      expect((await updateList(thread.session.id, [servers[1].id])).status).toBe(200);
+
+      // The gateway waits for the DELETE's answer for much longer than this.
+      expect(await waitWithin(2_000, () => listChanges(listen).length >= 3)).toBe(true);
+    } finally {
+      release();
+      listen.close();
+    }
   });
 });
 

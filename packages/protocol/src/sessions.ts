@@ -132,9 +132,10 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
- * The name of the MCP Gateway's entry in `SessionSpec.mcpServers`. The harness
- * puts it in front of every tool name the model sees, so the controller and the
- * runner's adapters must spell it the same way.
+ * The name of the MCP Gateway's entry in `SessionSpec.mcpServers`. A harness
+ * puts it in front of every tool name, so the model sees
+ * `mcp__tools__<server>__<tool>`, and the controller and the runner's adapters
+ * must spell it the same way.
  */
 export const MCP_GATEWAY_ENTRY_NAME = "tools";
 

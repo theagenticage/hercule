@@ -4,7 +4,6 @@ import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
   buildRefusalWarning,
-  buildToolGoneRefusal,
   buildUnknownToolRefusal,
   claimWarning,
   type SeenWarning,
@@ -50,16 +49,6 @@ describe("buildUnknownToolRefusal", () => {
     expect(refusal.message).toContain('"search?xxxxxxxx');
     expect(refusal.message).not.toContain("\n");
     // The Thread's line must stay under the protocol's 4,096 character bound.
-    expect(buildRefusalWarning(refusal).length).toBeLessThan(4_096);
-  });
-});
-
-describe("buildToolGoneRefusal", () => {
-  it("names the removed tool by a display name cut to 64 characters, so the Thread's line stays bounded", () => {
-    const refusal = buildToolGoneRefusal(sentry, `search\n${"x".repeat(900_000)}`);
-
-    expect(refusal.message).toContain('a tool named "search?xxxxxxxx');
-    expect(refusal.message).not.toContain("\n");
     expect(buildRefusalWarning(refusal).length).toBeLessThan(4_096);
   });
 });
