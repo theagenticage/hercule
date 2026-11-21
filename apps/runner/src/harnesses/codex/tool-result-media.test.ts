@@ -132,6 +132,28 @@ describe("removing the media bytes of a notification frame", () => {
       expect(JSON.stringify(frame)).not.toContain(IMAGE);
     });
 
+    it("replaces a second copy of the bytes of audio and of an embedded resource", () => {
+      const frame = buildFrame({
+        content: [
+          { type: "audio", data: AUDIO, mimeType: "audio/wav" },
+          { type: "resource", resource: { uri: "file:///report.pdf", blob: BLOB } },
+        ],
+        structuredContent: { recording: AUDIO, report: [BLOB] },
+        _meta: { preview: `data:audio/wav;base64,${AUDIO}` },
+      });
+
+      removeMediaBytes(frame);
+
+      expect(readResults(frame)).toMatchObject([
+        {
+          structuredContent: { recording: NOT_KEPT, report: [NOT_KEPT] },
+          _meta: { preview: `data:audio/wav;base64,${NOT_KEPT}` },
+        },
+      ]);
+      expect(JSON.stringify(frame)).not.toContain(AUDIO);
+      expect(JSON.stringify(frame)).not.toContain(BLOB);
+    });
+
     it.each([
       ["a short word", "Completed"],
       ["text that is long but not base64", "Snapshot of the issue, taken just now by the tool"],
