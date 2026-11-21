@@ -49,6 +49,7 @@ import {
 } from "./threads";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import type { AttachmentUploader } from "../../attachments";
+import type { ToolResultImage } from "@hercule/protocol";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -4521,6 +4522,39 @@ describe("the images in the result of an MCP tool call", () => {
         },
       },
     });
+    // The expanded step shows the same blocks, as Claude Code's tool result does.
+    expect(completed.detail).toEqual({
+      name: "get_snapshot_image",
+      server: "sentry",
+      kind: "mcp",
+      content: [
+        { type: "text", text: "Snapshot of the issue" },
+        { type: "image", attachment: STORED },
+      ],
+    });
+  });
+
+  it("show the message of a call that failed as the item's content", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: { ...buildCall(null, "failed"), error: { message: "Sentry refused the request" } },
+        completedAtMs: 1,
+      },
+    });
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    const completed = filterByTag(run.seen, "item.completed")[0]!;
+    expect(completed.status).toBe("failed");
+    expect(completed.detail).toMatchObject({ content: "Sentry refused the request" });
   });
 
   it("are replaced in the items of a completed turn too", async () => {
@@ -4611,6 +4645,151 @@ describe("the images in the result of an MCP tool call", () => {
       "call-slow",
       "call-fast",
     ]);
+  });
+
+  describe("while an upload holds the completion of a call", () => {
+    /**
+     * Starts a session whose uploader never finishes by itself, like a slow
+     * controller. An aborted upload ends at once and leaves the image
+     * unavailable, which is what a real uploader does when the session stops.
+     */
+    const startHeld = async () => {
+      let started = false;
+      const run = await startWithUploader((_sessionId, _bytes, signal) =>
+        Effect.callback<ToolResultImage>((resume) => {
+          started = true;
+          signal.addEventListener("abort", () =>
+            resume(Effect.succeed({ type: "image", unavailable: "The session stopped." })),
+          );
+        }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+      await waitUntil("started the upload", () => started);
+      return run;
+    };
+
+    /** The tags of the call's completion and of the exit, in the order they were emitted. */
+    const listCompletionAndExit = (run: ReturnType<typeof createDriving>): ReadonlyArray<string> =>
+      run.seen
+        .filter(
+          (event) =>
+            (event._tag === "item.completed" && event.itemId === "call-1") ||
+            event._tag === "session.exited",
+        )
+        .map((event) => event._tag);
+
+    it("emits the call before the exit when the session is stopped", async () => {
+      const run = await startHeld();
+
+      await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
+      expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+      expect(JSON.stringify(filterByTag(run.seen, "item.completed").at(-1)?.raw)).toContain(
+        "The session stopped.",
+      );
+    });
+
+    it("emits the call before the exit when the app-server exits", async () => {
+      const run = await startHeld();
+
+      run.spawns[0]!.crash();
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
+    });
+
+    it("emits every call Codex wrote before it exited", async () => {
+      const run = await startWithUploader(() =>
+        Effect.succeed({ type: "image" as const, attachment: STORED }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+
+      for (let index = 0; index < 12; index += 1) {
+        run.spawns[0]!.push(completedFrame(IMAGE_RESULT, `trailing-${String(index)}`));
+      }
+      run.spawns[0]!.crash();
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      // The exit is reported after the output was read to its end.
+      const order = run.seen
+        .filter(
+          (event) =>
+            (event._tag === "item.completed" && event.itemId.startsWith("trailing-")) ||
+            event._tag === "session.exited",
+        )
+        .map((event) => event._tag);
+      expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
+    });
+
+    it("uploads the images of one frame at a time, in the order the frames came", async () => {
+      const releases: Array<() => void> = [];
+      const run = await startWithUploader(() =>
+        Effect.callback<ToolResultImage>((resume) => {
+          releases.push(() => resume(Effect.succeed({ type: "image", attachment: STORED })));
+        }),
+      );
+
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "first"));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "second"));
+      await waitUntil("started the first upload", () => releases.length === 1);
+      await settle();
+      // The second frame waits for its turn, so its upload has not started.
+      expect(releases).toHaveLength(1);
+
+      releases[0]!();
+      await waitUntil("started the second upload", () => releases.length === 2);
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
+        "first",
+      ]);
+      releases[1]!();
+      await waitUntil(
+        "completed both calls",
+        () => filterByTag(run.seen, "item.completed").length === 2,
+      );
+
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
+        "first",
+        "second",
+      ]);
+    });
+
+    it("emits the call before the message that steers the turn afterwards", async () => {
+      let release: () => void = () => undefined;
+      let started = false;
+      const run = await startWithUploader(() =>
+        Effect.callback<ToolResultImage>((resume) => {
+          started = true;
+          release = () => resume(Effect.succeed({ type: "image", attachment: STORED }));
+        }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+      await waitUntil("started the upload", () => started);
+
+      // The reply to the steer arrives behind the held completion, so the
+      // input is reported only after the completion.
+      const steering = Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "one more instruction" }),
+      );
+      await settle();
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).not.toContain(
+        "call-1",
+      );
+      release();
+      expect(await steering).toMatchObject({ delivery: "steered" });
+
+      const order = run.seen
+        .filter(
+          (event) =>
+            event._tag === "item.completed" &&
+            (event.itemId === "call-1" || event.kind === "user_message"),
+        )
+        .map((event) => (event as { readonly kind: string }).kind);
+      expect(order).toEqual(["user_message", "tool_call", "user_message"]);
+    });
   });
 });
 
@@ -4918,10 +5097,6 @@ describe("the MCP servers a Codex session is given", () => {
         expect.objectContaining({
           config: {
             "mcp_servers.tools.url": GATEWAY.url,
-            // A trusted project's config is merged into this table, so the
-            // keys that could switch the gateway off are set explicitly.
-            "mcp_servers.tools.enabled": true,
-            "mcp_servers.tools.disabled_tools": [],
             "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
             "mcp_servers.tools.default_tools_approval_mode": "prompt",
             "features.mcp_tool_list_changed": true,
@@ -5005,6 +5180,118 @@ describe("the MCP servers a Codex session is given", () => {
     expect(filterByTag(run.seen, "runtime.warning").map((event) => event.message)).toEqual([
       `This Codex (${shown}) does not re-read its tool list, so an MCP Server added while the thread runs is usable from its next start. Upgrade Codex to 0.164.0 or newer.`,
     ]);
+  });
+
+  it("gives a subagent thread resumed on its own the same config as the root", async () => {
+    const spec: SessionSpec = {
+      ...SPEC,
+      continue: {
+        nativeSessionId: PRIOR,
+        mode: "resume",
+        subagents: [{ subagentId: CHILD, itemId: "original-spawn" }],
+      },
+    };
+    const run = createDriving(initializeAs("0.171.0"));
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: [GATEWAY] }),
+    );
+
+    // Codex does not keep the MCP servers with a thread, so the child has none
+    // unless the resume sends them again.
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+
+    const [root, child] = listSentParams(run.requests, "thread/resume");
+    expect(child).toEqual({
+      threadId: CHILD,
+      excludeTurns: false,
+      config: (root as { readonly config: unknown }).config,
+    });
+  });
+
+  describe("when Codex's own configuration sets the gateway's server name", () => {
+    /** The `config/read` reply of a repository whose `.codex/config.toml` sets `key`. */
+    const configuredBy = (key: string): Answers => ({
+      "config/read": () => ({
+        config: {},
+        origins: {
+          [key]: {
+            name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
+            version: "sha256:0",
+          },
+        },
+        layers: null,
+      }),
+    });
+
+    it.each(CONTINUATIONS)(
+      "gives %s no gateway keys, and warns with the file and the fix",
+      async (method, spec) => {
+        const run = await startWithServers([GATEWAY], spec, {
+          ...initializeAs("0.171.0"),
+          ...configuredBy("mcp_servers.tools.tools.x.approval_mode"),
+        });
+        await waitUntil(
+          "warned about the name",
+          () => filterByTag(run.seen, "runtime.warning").length === 1,
+        );
+        await settle();
+
+        const [params] = listSentParams(run.requests, method);
+        expect(params).not.toHaveProperty("config");
+        expect(listSentParams(run.requests, "config/read")).toEqual([
+          { cwd: CWD, includeLayers: true },
+        ]);
+        const [warning] = filterByTag(run.seen, "runtime.warning");
+        expect(warning?.message).toContain("/work/repo/.codex");
+        expect(warning?.message).toContain("config.toml");
+        expect(warning?.message).toContain('MCP server named "tools"');
+        expect(warning?.message).toContain("Rename or remove");
+      },
+    );
+
+    it("changes nothing when the configuration sets another server's name", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        ...configuredBy("mcp_servers.docs.command"),
+      });
+      await settle();
+
+      expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
+        config: { "mcp_servers.tools.url": GATEWAY.url },
+      });
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+    });
+
+    it("does not mistake a longer server name for the gateway's", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        ...configuredBy("mcp_servers.tools_extra.url"),
+      });
+
+      expect(listSentParams(run.requests, "thread/start")[0]).toHaveProperty("config");
+    });
+
+    it("gives no gateway keys and warns with Codex's own message when it cannot read its configuration", async () => {
+      const run = await startWithServers([GATEWAY], SPEC, {
+        ...initializeAs("0.171.0"),
+        "config/read": () => buildRefusal("invalid transport in `mcp_servers.tools`"),
+      });
+      await waitUntil(
+        "warned about the configuration",
+        () => filterByTag(run.seen, "runtime.warning").length === 1,
+      );
+
+      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
+      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain(
+        "invalid transport in `mcp_servers.tools`",
+      );
+    });
+
+    it("never reads the configuration for a session with no MCP server", async () => {
+      const run = await startWithServers([]);
+
+      expect(listSentParams(run.requests, "config/read")).toEqual([]);
+    });
   });
 
   it("does not warn about the tool list when the session has no MCP server", async () => {

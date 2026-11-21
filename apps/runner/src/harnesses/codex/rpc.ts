@@ -62,6 +62,16 @@ export interface RpcHandlers {
   readonly onServerRequest: (frame: ServerRequestFrame) => void;
   readonly onNotification: (frame: NotificationFrame) => void;
   readonly onWarning: (message: string) => void;
+  /**
+   * Called for each notification as it arrives, before it is delivered.
+   * Returns the work to finish before the notification is delivered, such as
+   * the upload of an image it carries, or `undefined` to deliver it at once.
+   * The work starts only when the notification reaches the head of the queue,
+   * so at most one notification prepares at a time. Everything that arrives
+   * after a notification that waits is delivered after it. The work must not
+   * reject.
+   */
+  readonly prepareNotification?: (frame: NotificationFrame) => (() => Promise<void>) | undefined;
 }
 
 export interface Rpc {
@@ -75,6 +85,19 @@ export interface Rpc {
   readonly answer: (id: string | number, body: RpcReply) => void;
   /** Reads stdout until the app-server closes it. No reply is delivered until this runs. */
   readonly pump: Effect.Effect<void>;
+  /**
+   * Runs `run` once every frame received so far has been delivered: at once
+   * when none is waiting. Callers that act on something the app-server did,
+   * such as the end of a session, use it so the action comes after the
+   * frames that were sent before it.
+   */
+  readonly afterPending: (run: () => void) => void;
+  /**
+   * Resolves once the app-server's output has reached its end and every frame
+   * it sent has been delivered. Never resolves when the output never ends,
+   * so a caller that must not wait for ever races it with a time limit.
+   */
+  readonly ended: Promise<void>;
 }
 
 /**
@@ -112,10 +135,58 @@ const parseRpcError = (reply: unknown): RpcError => {
 };
 
 export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
-  const pending = new Map<number, Deferred.Deferred<unknown, RpcError>>();
+  /**
+   * A request waits for two things. `arrived` is done when the reply is read
+   * from the output, and the request's deadline runs only until then.
+   * `settled` is done when the reply's turn comes in the delivery order,
+   * which may be later, behind a notification that is still being prepared.
+   */
+  const pending = new Map<
+    number,
+    {
+      readonly arrived: Deferred.Deferred<void>;
+      readonly settled: Deferred.Deferred<unknown, RpcError>;
+    }
+  >();
   let next = 1;
   let gone = false;
   let complained = false;
+  let markEnded: () => void = () => undefined;
+  const ended = new Promise<void>((resolve) => {
+    markEnded = resolve;
+  });
+  let waiting = 0;
+  let tail: Promise<void> = Promise.resolve();
+
+  /**
+   * Delivers everything the app-server sends in the order it sent it: replies,
+   * notifications, server requests and the end of its output. This is the one
+   * place that rule lives. A frame is delivered at once while nothing waits.
+   * When a notification has to wait (see `prepareNotification`), every later
+   * frame queues behind it, so a reply can never overtake the notification
+   * the app-server sent before it.
+   */
+  const deliverInOrder = (prepare: (() => Promise<void>) | undefined, run: () => void): void => {
+    if (prepare === undefined && waiting === 0) {
+      run();
+      return;
+    }
+    waiting += 1;
+    tail = tail
+      .then(() => prepare?.())
+      .then(() => {
+        try {
+          run();
+        } catch (error) {
+          handlers.onWarning(
+            `a frame from the app-server could not be handled: ${describeError(error)}`,
+          );
+        }
+      })
+      .finally(() => {
+        waiting -= 1;
+      });
+  };
 
   /**
    * Writes one frame. Returns the error message if the write failed, or
@@ -140,11 +211,11 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   };
 
   const settle = (frame: Record<string, unknown>, id: number): void => {
-    const waiting = pending.get(id);
-    if (waiting === undefined) return;
+    const asked = pending.get(id);
+    if (asked === undefined) return;
     pending.delete(id);
     Deferred.doneUnsafe(
-      waiting,
+      asked.settled,
       "error" in frame
         ? Effect.fail(parseRpcError(frame["error"]))
         : Effect.succeed(frame["result"]),
@@ -172,21 +243,31 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
     const method = frame["method"];
     const id = frame["id"];
     if (typeof method !== "string") {
-      if (typeof id === "number") settle(frame, id);
+      if (typeof id === "number") {
+        // The deadline stops now. Only the reply's effect waits for its turn.
+        const asked = pending.get(id);
+        if (asked !== undefined) Deferred.doneUnsafe(asked.arrived, Effect.void);
+        deliverInOrder(undefined, () => settle(frame, id));
+      }
       return;
     }
     if (typeof id !== "string" && typeof id !== "number") {
-      handlers.onNotification({ method, params: frame["params"] });
+      const notification = { method, params: frame["params"] };
+      deliverInOrder(handlers.prepareNotification?.(notification), () =>
+        handlers.onNotification(notification),
+      );
       return;
     }
-    handlers.onServerRequest({ id, method, params: frame["params"] });
+    const request = { id, method, params: frame["params"] };
+    deliverInOrder(undefined, () => handlers.onServerRequest(request));
   };
 
   const abandon = (): void => {
     gone = true;
-    for (const [id, waiting] of pending) {
+    for (const [id, asked] of pending) {
       pending.delete(id);
-      Deferred.doneUnsafe(waiting, Effect.fail({ message: GONE }));
+      Deferred.doneUnsafe(asked.arrived, Effect.void);
+      Deferred.doneUnsafe(asked.settled, Effect.fail({ message: GONE }));
     }
   };
 
@@ -195,16 +276,19 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
       Effect.suspend(() => {
         if (gone) return Effect.fail<RpcError>({ message: GONE });
         const id = next++;
-        const settled = Deferred.makeUnsafe<unknown, RpcError>();
+        const asked = {
+          arrived: Deferred.makeUnsafe<void>(),
+          settled: Deferred.makeUnsafe<unknown, RpcError>(),
+        };
         // Registered before the write, because the reply may be delivered
         // during the write. Removed again if the write itself fails.
-        pending.set(id, settled);
+        pending.set(id, asked);
         const failure = send({ id, method, params });
         if (failure !== undefined) {
           pending.delete(id);
           return Effect.fail<RpcError>({ message: failure });
         }
-        return Deferred.await(settled).pipe(
+        return Deferred.await(asked.arrived).pipe(
           Effect.timeoutOrElse({
             duration: RPC_DEADLINE,
             orElse: () =>
@@ -212,6 +296,7 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
                 message: `the app-server did not reply to ${method} within ${Duration.format(RPC_DEADLINE)}`,
               }),
           }),
+          Effect.andThen(Deferred.await(asked.settled)),
           Effect.ensuring(Effect.sync(() => void pending.delete(id))),
         );
       }),
@@ -219,6 +304,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
     notify: (method) => void send({ method }),
 
     answer: (id, body) => void send({ id, ...body }),
+
+    afterPending: (run) => deliverInOrder(undefined, run),
+
+    ended,
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
@@ -234,7 +323,10 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead
         // of letting each one wait for its timeout.
-        abandon();
+        deliverInOrder(undefined, () => {
+          abandon();
+          markEnded();
+        });
         resume(Effect.void);
       })();
     }),

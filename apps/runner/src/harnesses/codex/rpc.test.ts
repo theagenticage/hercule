@@ -19,7 +19,9 @@ interface Peer {
   readonly notifications: Array<{ readonly method: string; readonly params: unknown }>;
 }
 
-const createPeer = (): Peer => {
+const createPeer = (
+  prepareNotification?: (frame: { readonly method: string }) => (() => Promise<void>) | undefined,
+): Peer => {
   const stdout = createLines();
   const writes: Array<string> = [];
   const warnings: Array<string> = [];
@@ -34,6 +36,7 @@ const createPeer = (): Peer => {
       onServerRequest: (frame) => void serverRequests.push(frame),
       onNotification: (frame) => void notifications.push(frame),
       onWarning: (message) => void warnings.push(message),
+      ...(prepareNotification === undefined ? {} : { prepareNotification }),
     },
   );
   return { rpc, writes, answer: stdout.push, warnings, serverRequests, notifications };
@@ -284,5 +287,39 @@ describe("a peer that sends bad lines or never replies", () => {
     );
 
     expect(String(JSON.stringify(failure))).toContain("nope/nothing");
+  });
+
+  it("counts the deadline of a request until its reply is read, not until the reply's turn comes", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const peer = createPeer((frame) => (frame.method === "slow" ? () => held : undefined));
+    const pause = Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    const answered = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const pumping = yield* Effect.forkChild(peer.rpc.pump);
+          // A notification that waits (an upload, say) holds back what follows it.
+          peer.answer(JSON.stringify({ method: "slow", params: {} }));
+          const asked = yield* Effect.forkChild(peer.rpc.request("turn/steer", {}));
+          while (peer.writes.length === 0) yield* pause;
+          peer.answer(
+            JSON.stringify({ id: parseFrame(peer.writes[0]!)["id"], result: { turnId: "t" } }),
+          );
+          yield* pause;
+          // The reply was read in time, and then waits longer than the deadline.
+          yield* TestClock.adjust(Duration.sum(RPC_DEADLINE, Duration.seconds(10)));
+          release();
+          const result = yield* Fiber.join(asked);
+          yield* Fiber.interrupt(pumping);
+          return result;
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(answered).toEqual({ turnId: "t" });
   });
 });

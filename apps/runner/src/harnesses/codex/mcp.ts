@@ -7,7 +7,7 @@
  */
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import type { ResolvedMcpServer } from "../index";
-import type { JsonValue } from "./types";
+import type { ConfigLayerSource, ConfigReadResponse, JsonValue } from "./types";
 
 /**
  * How Codex asks about a call to a tool of an MCP server:
@@ -51,22 +51,80 @@ export const buildNoToolListChangedWarning = (version: string | null): string =>
   "so an MCP Server added while the thread runs is usable from its next start. " +
   "Upgrade Codex to 0.164.0 or newer.";
 
+/** An MCP server name that some other Codex configuration already sets, and where it is set. */
+export interface ConfiguredMcpServer {
+  readonly name: string;
+  readonly layer: ConfigLayerSource;
+}
+
+/**
+ * Returns the names, of those given, that Codex's own configuration already
+ * sets, each with the layer that sets it. `origins` is the `origins` of a
+ * `config/read` reply: it lists each setting key with its layer. A name counts
+ * as set when any key is `mcp_servers.<name>` or starts with
+ * `mcp_servers.<name>.`, in any layer.
+ *
+ * Codex merges every layer's table of a server name into one, so a repository
+ * that sets any key of the gateway's name changes how the gateway behaves: its
+ * `approval_mode` for one tool would lower the approval, and Codex has no way
+ * to clear that key. A name set elsewhere is therefore not given to Codex.
+ */
+export const findConfiguredMcpServers = (
+  origins: ConfigReadResponse["origins"],
+  names: ReadonlyArray<string>,
+): ReadonlyArray<ConfiguredMcpServer> =>
+  names.flatMap((name) => {
+    const prefix = `mcp_servers.${name}`;
+    const key = Object.keys(origins).find((k) => k === prefix || k.startsWith(`${prefix}.`));
+    const layer = key === undefined ? undefined : origins[key]?.name;
+    return layer === undefined ? [] : [{ name, layer }];
+  });
+
+/** Describes the file or folder a configuration layer comes from, for a message. */
+const describeLayer = (layer: ConfigLayerSource): string => {
+  switch (layer.type) {
+    case "project":
+      return `This repository's .codex/config.toml (${layer.dotCodexFolder})`;
+    case "user":
+    case "system":
+    case "packagedDefaults":
+    case "legacyManagedConfigTomlFromFile":
+      return `The Codex configuration file ${layer.file}`;
+    default:
+      return `Codex's ${layer.type} configuration`;
+  }
+};
+
+/**
+ * Returns the warning for a session whose MCP server name is set in Codex's
+ * own configuration, so the thread gets none of Hercule's MCP Servers. Names
+ * the file and what to do about it.
+ */
+export const buildMcpNameTakenWarning = ({ name, layer }: ConfiguredMcpServer): string =>
+  `${describeLayer(layer)} configures an MCP server named "${name}", the name Hercule gives ` +
+  "its MCP Gateway, so this thread gets none of its MCP Servers. " +
+  "Rename or remove that server there to use them.";
+
+/**
+ * Returns the warning for a session whose Codex configuration could not be
+ * read, so Hercule cannot tell whether its MCP server name is taken. The
+ * thread then gets none of Hercule's MCP Servers. `reason` is Codex's own
+ * error message.
+ */
+export const buildMcpConfigUnreadWarning = (reason: string): string =>
+  `Codex could not read its configuration (${reason}), so this thread gets none of ` +
+  "Hercule's MCP Servers. Fix the configuration it names to use them.";
+
 /**
  * Returns the `config` for the session's MCP servers, to send with
  * `thread/start`, `thread/resume` and `thread/fork`. Returns an empty object
- * when there are no servers, so no key reaches Codex.
+ * when there are no servers, so no key reaches Codex. The caller passes only
+ * servers whose name `findConfiguredMcpServers` found free.
  *
  * - Each server gets its URL, and the name of the variable that holds the
  *   session's token, never the token: Codex reads the variable itself when it
  *   connects and sends the token as a bearer token.
  * - Each server gets the approval mode of the session's Access Mode.
- * - Each server is also set `enabled = true` and `disabled_tools = []`. A
- *   trusted workspace's `.codex/config.toml` is merged into the same table, so
- *   a project that defines a server of this name with `enabled = false` or a
- *   list of disabled tools would silently switch the gateway off. These two
- *   keys undo that. They cannot undo a project's `enabled_tools`, or a per-tool
- *   `approval_mode` under `[mcp_servers.<name>.tools.<tool>]`: Codex has no way
- *   to clear those for tool names that are not known in advance.
  * - The tool list feature is set only when the running Codex has it.
  *
  * Exported so the real-binary test starts Codex with exactly this config.
@@ -82,8 +140,6 @@ export const buildMcpServerConfig = (
         ...Object.fromEntries(
           servers.flatMap((server): Array<[string, JsonValue]> => [
             [`mcp_servers.${server.name}.url`, server.url],
-            [`mcp_servers.${server.name}.enabled`, true],
-            [`mcp_servers.${server.name}.disabled_tools`, []],
             [`mcp_servers.${server.name}.bearer_token_env_var`, SESSION_TOKEN_VARIABLE],
             [`mcp_servers.${server.name}.default_tools_approval_mode`, approvalMode],
           ]),

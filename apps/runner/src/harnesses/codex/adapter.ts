@@ -53,6 +53,7 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  ResolvedMcpServer,
   SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
@@ -119,8 +120,11 @@ import {
   type AppServer,
 } from "./probe";
 import {
+  buildMcpConfigUnreadWarning,
+  buildMcpNameTakenWarning,
   buildMcpServerConfig,
   buildNoToolListChangedWarning,
+  findConfiguredMcpServers,
   supportsToolListChanged,
   type McpToolApprovalMode,
 } from "./mcp";
@@ -161,6 +165,8 @@ import type {
   ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
+  ConfigReadParams,
+  ConfigReadResponse,
   TurnInterruptParams,
   TurnStartParams,
   TurnSteerParams,
@@ -255,6 +261,8 @@ interface Host extends AppServer {
   readonly textGeneration: TextGenerationWatch | undefined;
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
+  /** Ends the uploads of images in tool results that are still running, leaving those images unavailable. */
+  readonly abortUploads: () => void;
   /**
    * Keeps the notifications with no thread id that arrive before the session
    * is registered, so `startSession` can hand them to the session once it is.
@@ -347,6 +355,9 @@ const ACCESS_MODES: Readonly<
  * session.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
+/** How long a session's exit waits for the app-server's output to end after the process has exited. */
+const OUTPUT_DRAIN_PATIENCE_MS = 2000;
 
 /** The error code for a server too busy to start a turn (spec 06 section 10.2). */
 const OVERLOADED = -32001;
@@ -878,16 +889,23 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     // server may close the thread or the app-server may die, which already
     // ended this session. A second exit would record the same end twice.
     if (sessions.get(held.binding.sessionId) !== held) return;
-    held.threads.close();
-    sessions.delete(held.binding.sessionId);
-    emit({
-      _tag: "session.exited",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      reason,
+    // Uploads end first, so waiting for the frames Codex already sent never
+    // waits for a slow one. The exit then comes after those frames, so it is
+    // the last event of the session.
+    held.host.abortUploads();
+    held.host.rpc.afterPending(() => {
+      if (sessions.get(held.binding.sessionId) !== held) return;
+      held.threads.close();
+      sessions.delete(held.binding.sessionId);
+      emit({
+        _tag: "session.exited",
+        eventId: crypto.randomUUID(),
+        sessionId: held.binding.sessionId,
+        at: now(),
+        reason,
+      });
+      releaseHost(held.host);
     });
-    releaseHost(held.host);
   };
 
   /** Ends the host's session when its app-server exits on its own. */
@@ -969,80 +987,57 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // the lines already kept are still worth reporting.
       }
     })();
-    // Aborted when the host is killed or stopped, which ends the uploads of
-    // images in tool results that are still running.
+    // Aborted when the session stops or the host is killed. An upload then
+    // ends at once and leaves its image unavailable, so stopping never waits
+    // for a slow upload.
     const uploads = new AbortController();
-    // Frames must reach the session in the order Codex sent them, even when
-    // one waits for an image upload. While any frame waits, every later frame
-    // queues behind it. With none waiting, a frame is handled at once.
-    let queued = 0;
-    let tail: Promise<void> = Promise.resolve();
-    const handleInOrder = (
-      handle: () => void,
-      upload?: ReadonlyArray<Record<string, unknown>>,
-    ): void => {
-      if (upload === undefined && queued === 0) {
-        handle();
-        return;
-      }
-      queued += 1;
-      tail = tail
-        .then(async () => {
-          if (upload !== undefined && sessionId !== undefined) {
-            await Effect.runPromise(
-              replaceMcpResultImages(uploader, sessionId, upload, uploads.signal),
-            ).catch(() => {
-              // The upload code never fails, so this is a defect. The bytes
-              // are still dropped rather than passed on.
-              for (const item of upload) Reflect.deleteProperty(item, "result");
-            });
-          }
-          handle();
-        })
-        .finally(() => {
-          queued -= 1;
-        });
-    };
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
         // threw still needs a reply: without one, the turn and the connection
         // would both hang.
-        onServerRequest: (frame) =>
-          handleInOrder(() => {
-            try {
-              onServerRequest(host, frame);
-            } catch {
-              refuseRequest(host, frame, {
-                code: INVALID_REQUEST,
-                message: `Hercule could not read this ${frame.method} request`,
-              });
-              warn(host, `the app-server sent a ${frame.method} that this build could not read`);
-            }
-          }),
+        onServerRequest: (frame) => {
+          try {
+            onServerRequest(host, frame);
+          } catch {
+            refuseRequest(host, frame, {
+              code: INVALID_REQUEST,
+              message: `Hercule could not read this ${frame.method} request`,
+            });
+            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+          }
+        },
         // Nothing Codex sends may crash the reader: a throw here would fail
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
-            stripImageBytes(frame);
-            // Only a session's host uploads: a text generation or a probe
-            // has no session to keep an image for.
-            const upload = sessionId === undefined ? [] : listMcpResultItems(frame);
-            handleInOrder(
-              () => {
-                try {
-                  onNotification(host, frame);
-                } catch {
-                  warn(
-                    host,
-                    `the app-server sent a ${frame.method} that this build could not read`,
-                  );
-                }
-              },
-              upload.length === 0 ? undefined : upload,
-            );
+            onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+          }
+        },
+        // Takes the generated image's bytes out of a frame the moment it
+        // arrives. The images of an MCP result are replaced by references
+        // when the frame reaches the head of the queue, so one frame uploads
+        // at a time. A waiting frame holds its images meanwhile, which is
+        // bounded: the MCP Gateway caps each message at 4 MiB and each token
+        // at 32 running calls. Only a session's host uploads: a text
+        // generation or a probe has no session to keep an image for.
+        prepareNotification: (frame) => {
+          try {
+            stripImageBytes(frame);
+            const results = sessionId === undefined ? [] : listMcpResultItems(frame);
+            if (sessionId === undefined || results.length === 0) return undefined;
+            return () =>
+              Effect.runPromise(
+                replaceMcpResultImages(uploader, sessionId, results, uploads.signal),
+              ).catch(() => {
+                // The upload code never fails, so this is a defect. The bytes
+                // are still dropped rather than passed on.
+                for (const item of results) Reflect.deleteProperty(item, "result");
+              });
+          } catch {
+            return undefined;
           }
         },
         onWarning: (message) => {
@@ -1050,6 +1045,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           warn(host, message);
         },
       }),
+      abortUploads: () => uploads.abort(),
       kill: () => {
         uploads.abort();
         child.kill();
@@ -1064,10 +1060,22 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       framesBeforeRegistration:
         sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
-    void child.exited.then(
-      () => onHostGone(host),
-      () => onHostGone(host),
-    );
+    // The process may exit before the session has read everything it wrote.
+    // The uploads end at once, and the exit is reported only after the output
+    // has been read to its end and every frame delivered. A process that
+    // leaves the output open (a child of its own holds it) is waited for only
+    // a short while.
+    const handleExit = (): void => {
+      uploads.abort();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const patience = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, OUTPUT_DRAIN_PATIENCE_MS);
+      });
+      void Promise.race([host.rpc.ended, patience])
+        .finally(() => clearTimeout(timer))
+        .then(() => onHostGone(host));
+    };
+    void child.exited.then(handleExit, handleExit);
     Effect.runFork(host.rpc.pump);
     return host;
   };
@@ -1902,6 +1910,54 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   };
 
   /**
+   * Decides which of the session's MCP servers the thread gets, and returns
+   * them with the warnings to show when the session starts. Asks Codex for its
+   * configuration as seen from the thread's folder, and gives a server only
+   * when no layer of that configuration (the repository's `.codex/config.toml`
+   * is the usual one) already sets its name, because Codex merges all layers
+   * into one table (see `findConfiguredMcpServers`). Makes no request when the
+   * session has no MCP server.
+   *
+   * Never fails. When Codex cannot read its configuration, the thread gets no
+   * server and the warning gives Codex's own message, because Hercule cannot
+   * tell whether the name is taken. Codex then usually refuses to open the
+   * thread on the same configuration, and that failure reports it.
+   */
+  const selectMcpServers = (
+    host: Host,
+    ctx: SessionStartContext,
+  ): Effect.Effect<{
+    readonly servers: ReadonlyArray<ResolvedMcpServer>;
+    readonly warnings: ReadonlyArray<string>;
+  }> =>
+    ctx.mcpServers.length === 0
+      ? Effect.succeed({ servers: [], warnings: [] })
+      : Effect.match(
+          host.rpc.request("config/read", {
+            cwd: ctx.cwd,
+            includeLayers: true,
+          } satisfies ConfigReadParams),
+          {
+            onFailure: (error) => ({
+              servers: [],
+              warnings: [buildMcpConfigUnreadWarning(error.message)],
+            }),
+            onSuccess: (reply) => {
+              const taken = findConfiguredMcpServers(
+                (reply as ConfigReadResponse).origins,
+                ctx.mcpServers.map((server) => server.name),
+              );
+              return {
+                servers: ctx.mcpServers.filter(
+                  (server) => !taken.some((one) => one.name === server.name),
+                ),
+                warnings: taken.map(buildMcpNameTakenWarning),
+              };
+            },
+          },
+        );
+
+  /**
    * Builds the params shared by starting, resuming and forking a thread: the
    * session's directory, model and access mode, and its instructions. The
    * system prompt, the user's own instructions and the skill are sent as
@@ -1927,6 +1983,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     spec: SessionSpec,
     ctx: SessionStartContext,
     userInstructions: string | undefined,
+    mcpServers: ReadonlyArray<ResolvedMcpServer>,
     toolListChanged: boolean,
   ): Pick<
     ThreadStartParams,
@@ -1941,7 +1998,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     const { mcpToolApprovalMode, ...thread } = ACCESS_MODES[spec.accessMode];
-    const config = buildMcpServerConfig(ctx.mcpServers, mcpToolApprovalMode, toolListChanged);
+    const config = buildMcpServerConfig(mcpServers, mcpToolApprovalMode, toolListChanged);
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
@@ -2005,6 +2062,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     harnessId: CODEX,
     harnessName: CODEX_NAME,
     binaryName: CODEX_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.fromPubSub(publishedUsage),
@@ -2033,16 +2091,24 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
+        const mcp = yield* selectMcpServers(host, ctx);
+        const threadParams = buildThreadParams(
+          spec,
+          ctx,
+          userInstructions,
+          mcp.servers,
+          toolListChanged,
+        );
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
               ? host.rpc.request(method, {
-                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
+                  ...threadParams,
                   ephemeral: false,
                 } satisfies ThreadStartParams)
               : host.rpc.request(method, {
                   threadId: carried.nativeSessionId,
-                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
+                  ...threadParams,
                 } satisfies ThreadResumeParams & ThreadForkParams),
             readThreadOpenedReply(method),
           ),
@@ -2081,6 +2147,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             rootThreadId: opened,
             spec,
+            config: threadParams.config,
             rpc: host.rpc,
             emit,
             dispatch: (thread, frame, cancelled) =>
@@ -2112,7 +2179,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
-        if (ctx.mcpServers.length > 0 && !toolListChanged) {
+        for (const warning of mcp.warnings) warn(host, warning);
+        if (mcp.servers.length > 0 && !toolListChanged) {
           warn(host, buildNoToolListChangedWarning(codexVersion));
         }
         const dropped = deliverFramesBeforeRegistration(held);
@@ -2234,6 +2302,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // twice.
         if (held === undefined) return Effect.void;
         held.threads.beginClosing();
+        // Before the interrupt: its reply is delivered after every frame
+        // Codex sent earlier, and one of those may wait for an upload.
+        held.host.abortUploads();
         // The turn is interrupted before the session exits. Otherwise the
         // app-server would keep working in the workspace until it is killed,
         // and nobody would receive its notifications.

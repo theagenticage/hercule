@@ -279,21 +279,50 @@ const readEditedPaths = (
   });
 
 /**
+ * Cuts the text of a text block of an MCP result to the protocol's bound,
+ * because a tool may return a whole file. Any other block, such as an image
+ * reference, is passed on as it is. `raw` keeps the whole text.
+ */
+const truncateResultBlock = (block: unknown): unknown => {
+  if (typeof block !== "object" || block === null) return block;
+  const { type, text } = block as { readonly type?: unknown; readonly text?: unknown };
+  return type === "text" && typeof text === "string"
+    ? { ...block, text: truncateMessage(text) }
+    : block;
+};
+
+/**
  * Builds the detail of an MCP tool call item. For a call through the MCP
  * Gateway, Codex reports the gateway's entry as the server and
  * `<server>__<tool>` as the tool. The detail shows the MCP Server behind the
  * tool and the tool's own name instead, like Claude Code's item does. A call to
  * any other MCP server is named `<server>/<tool>`, as is a gateway tool whose
  * name has no server part.
+ *
+ * A completed item also shows what the call returned in `content`, as Claude
+ * Code's tool result does: the blocks of the result, text and image
+ * references, or the error's message for a call that failed. Images are
+ * references by the time they get here (see `replaceMcpResultImages`).
  */
 const buildMcpToolCallDetail = (
-  server: string,
-  tool: string,
-): { readonly name: string; readonly kind: "mcp"; readonly server?: string } => {
-  const gateway = server === MCP_GATEWAY_ENTRY_NAME ? splitGatewayToolName(tool) : undefined;
-  return gateway === undefined
-    ? { name: truncateFact(`${server}/${tool}`), kind: "mcp" }
-    : { name: truncateFact(gateway.tool), server: truncateFact(gateway.server), kind: "mcp" };
+  item: Extract<ThreadItem, { type: "mcpToolCall" }>,
+  phase: "started" | "completed",
+): Schema.Json => {
+  const gateway =
+    item.server === MCP_GATEWAY_ENTRY_NAME ? splitGatewayToolName(item.tool) : undefined;
+  const content =
+    phase === "started"
+      ? undefined
+      : item.error != null
+        ? truncateMessage(item.error.message)
+        : item.result?.content.map(truncateResultBlock);
+  return {
+    ...(gateway === undefined
+      ? { name: truncateFact(`${item.server}/${item.tool}`) }
+      : { name: truncateFact(gateway.tool), server: truncateFact(gateway.server) }),
+    kind: "mcp",
+    ...(content === undefined ? {} : { content: toJson(content) }),
+  };
 };
 
 /**
@@ -324,7 +353,7 @@ const buildDetail = (
       return fields === undefined ? {} : { detail: fields };
     }
     case "mcpToolCall":
-      return { detail: buildMcpToolCallDetail(item.server, item.tool) };
+      return { detail: buildMcpToolCallDetail(item, phase) };
     case "dynamicToolCall":
       return { detail: { name: truncateFact(item.tool), kind: "native" } };
     case "functionCallOutput":
