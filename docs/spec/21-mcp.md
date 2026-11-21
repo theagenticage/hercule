@@ -133,7 +133,7 @@ The route is `POST /mcp`, `GET /mcp` and `DELETE /mcp` on the controller. It is 
 
 **A direct call is like the CLI.** The harness is given the Session Token, and so is the agent's shell. An agent can send a call to the gateway with `curl`, and then the harness's approval card is not shown. That command is itself under the Access Mode. So the controller's guard on a call is `mcp.use` plus the session's list. The Access Mode guards the harness's tool calls as for every other tool. The gateway has no approval mechanism of its own.
 
-**Risk:** a call sent directly with the Session Token skips the harness's approval card, as the CLI does.
+**Risk:** a call sent directly with the Session Token skips the harness's approval card, as the CLI does. *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* The same holds for code a trusted repository runs through the harness, such as a Codex hook: it inherits the session's environment, so it holds the token. A repository's harness configuration is therefore trusted code, and no check on it is a security boundary ([./06-providers.md](./06-providers.md#102-codex-app-server)).
 
 **Risk:** every tool call passes the controller. A controller that is down takes MCP tools with it, as it does the CLI.
 
