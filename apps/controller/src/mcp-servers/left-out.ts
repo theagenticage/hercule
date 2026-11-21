@@ -10,7 +10,7 @@ export interface StartDelivery {
   /**
    * Whether the session's runner negotiated the MCP Servers capability of the
    * session's harness. Only a harness that declares `native` has one a runner
-   * can lack, so `decideUndeliveredReason` reads it only for such a harness.
+   * can lack, so `decideNoGatewayReason` reads it only for such a harness.
    */
   readonly runnerReachesMcpServers: boolean;
   /** The session's harness's declared `mcpPassthrough`. */
@@ -19,17 +19,23 @@ export interface StartDelivery {
   readonly profileGrantsMcpUse: boolean;
 }
 
+/** Why a start gives the harness no MCP Gateway entry. */
+export type NoGatewayReason = Extract<
+  McpServerLeftOutReason,
+  "runner-too-old" | "harness-unsupported"
+>;
+
 /**
- * Returns why a start cannot give the harness the MCP Gateway's entry, or
- * `null` when it can. Judges the harness first: a harness that does not
- * declare `native` is `harness-unsupported` whatever the runner negotiated,
- * because no runner lists a capability for a harness that cannot take the
- * entry. `runner-too-old` means the harness is `native` and its runner lacks
- * the harness's capability.
+ * Returns why a start gives the harness no MCP Gateway entry, or `null` when
+ * it gives one. Judges the harness first: a harness that does not declare
+ * `native` is `harness-unsupported` whatever the runner negotiated, because no
+ * runner lists a capability for a harness that cannot take the entry.
+ * `runner-too-old` means the harness is `native` and its runner lacks the
+ * harness's capability.
  */
-export const decideUndeliveredReason = (
+export const decideNoGatewayReason = (
   delivery: Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">,
-): "harness-unsupported" | "runner-too-old" | null => {
+): NoGatewayReason | null => {
   if (delivery.harnessPassthrough === "unsupported") return "harness-unsupported";
   return delivery.runnerReachesMcpServers ? null : "runner-too-old";
 };
@@ -58,8 +64,8 @@ export const decideLeftOutReason = (
   delivery: StartDelivery,
   view: McpServerAvailabilityView,
 ): McpServerLeftOutReason | null => {
-  const undelivered = decideUndeliveredReason(delivery);
-  if (undelivered !== null) return undelivered;
+  const noGateway = decideNoGatewayReason(delivery);
+  if (noGateway !== null) return noGateway;
   if (!delivery.profileGrantsMcpUse) return "missing-grant";
   if (!view.server.enabled) return "switched-off";
   if (view.server.status === "checking") return "checking";
