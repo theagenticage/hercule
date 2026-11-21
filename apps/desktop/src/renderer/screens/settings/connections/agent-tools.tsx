@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import {
   describeAgentToolsNote,
+  describeUnavailableAgentToolsNote,
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
 import { ChevronRightIcon } from "../../../icons/chevron-right";
@@ -66,7 +67,7 @@ export const mapUnavailableAgentTools = (
   new Map(
     rows.map((row) => [
       row.connection.id,
-      { text: "agent tools: not available", tone: "unavailable", serverId: null },
+      { text: describeUnavailableAgentToolsNote().words, tone: "unavailable", serverId: null },
     ]),
   );
 

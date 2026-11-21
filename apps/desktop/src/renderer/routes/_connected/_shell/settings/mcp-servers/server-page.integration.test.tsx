@@ -16,8 +16,11 @@ import {
 } from "../../../../../app/last-settings-section";
 import { holdAnswer } from "../../../../../app/testing";
 import {
+  buildConnection,
+  buildServer,
   LINEAR,
   LINEAR_ID,
+  OFFERING_CONNECTIONS,
   SENTRY_HOBBY,
   SENTRY_HOBBY_ID,
   SENTRY_WORK,
@@ -49,6 +52,14 @@ const findProjectRow = (name: string): HTMLElement =>
   [...findSection("Projects").querySelectorAll<HTMLElement>(".mcp-proj-row")].find(
     (row) => row.querySelector(".proj-name")?.textContent === name,
   )!;
+
+/** Waits for the Projects row of the project named `name` to draw, and returns it. */
+const waitForProjectRow = async (name: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(findProjectRow(name)).toBeTruthy();
+  });
+  return findProjectRow(name);
+};
 
 const named = (project: Project, ...ids: string[]): Project => ({ ...project, mcpServerIds: ids });
 
@@ -154,17 +165,18 @@ describe("a server's status band", () => {
     ).toBe("false");
   });
 
-  it("offers Reconnect for a server that needs sign-in, shows the reason, and keeps the Connection row to the reason", async () => {
+  it("offers Reconnect for a server that needs sign-in, shows the reason in the band, and keeps the Connection row to the short word", async () => {
     await openPage({ ...SENTRY_WORK, status: "needs-sign-in", statusDetail: "revoked 09:12" });
 
     const band = document.querySelector<HTMLElement>(".mcp-band--fail")!;
     expect(band.textContent).toContain("Needs sign-in.");
     expect(band.querySelector("small")?.textContent).toBe("revoked 09:12");
     expect(within(band).getByRole("button", { name: "Reconnect Sentry · work" })).toBeTruthy();
-    // The band holds the page's one button: the Connection row has none, and says what is wrong.
+    // The band holds the page's one button and the reason: the Connection row has no button, and
+    // says only the short word.
     const server = findSection("Server");
     expect(within(server).queryByRole("link", { name: "Open" })).toBeNull();
-    expect(server.querySelector(".mcp-value-fail")?.textContent).toBe("revoked 09:12");
+    expect(server.querySelector(".mcp-value-fail")?.textContent).toBe("needs sign-in");
   });
 
   it("opens the Connection's own Reconnect dialog from the band's button", async () => {
@@ -404,6 +416,76 @@ describe("a server's page, Projects", () => {
       expect(within(findProjectRow("webshop")).queryByRole("alert")).toBeNull();
     });
     expect(within(findProjectRow("webshop")).getByRole("checkbox", { checked: true })).toBeTruthy();
+  });
+
+  it("swaps the server the refusal names now, when a push changed the occupant after the refusal showed", async () => {
+    const sideConnection = buildConnection(
+      "01a06d02-8100-7000-8000-000000000004",
+      "sentry/sentry",
+      "side",
+    );
+    const side = buildServer("01a06d02-8200-7000-8000-000000000004", "sentry", sideConnection);
+    const { world, calls, context } = await openPage(SENTRY_WORK, {
+      servers: [SENTRY_WORK, SENTRY_HOBBY, side],
+      connections: [...OFFERING_CONNECTIONS, sideConnection],
+      projects: [named(WEBSHOP, SENTRY_HOBBY_ID), OPS],
+    });
+    const row = findProjectRow("webshop");
+    await userEvent.click(within(row).getByRole("checkbox"));
+    expect(within(row).getByRole("alert").textContent).toContain(
+      "webshop already uses sentry hobby",
+    );
+
+    // A read puts another account of the name in the list, and the refusal now describes it.
+    context.queryClient.setQueryData(queryKeys.projects(), [named(WEBSHOP, side.id), OPS]);
+    await waitFor(() => {
+      expect(within(findProjectRow("webshop")).getByRole("alert").textContent).toContain(
+        "webshop already uses sentry side",
+      );
+    });
+    world.projects = [named(WEBSHOP, side.id), OPS];
+    await userEvent.click(
+      within(findProjectRow("webshop")).getByRole("button", { name: "Use sentry work" }),
+    );
+
+    await waitFor(() => {
+      expect(world.projects[0]!.mcpServerIds).toEqual([SENTRY_WORK_ID]);
+    });
+    expect(
+      findCalls(calls, "PATCH", `/api/v1/projects/${WEBSHOP.id}`).map((call) => call.body),
+    ).toEqual([{ mcpServerIds: [SENTRY_WORK_ID] }]);
+  });
+
+  it("keeps the box of the threads without a project off until the settings read of this opening has answered", async () => {
+    let gate: Promise<void> = Promise.resolve();
+    let release = (): void => undefined;
+    let defaultIds: string[] = [];
+    const { router } = await openAt(LIST_PATH, {
+      servers: [SENTRY_WORK],
+      handlers: {
+        "GET /api/v1/settings": async () => {
+          await gate;
+          return { body: { controller: {}, user: { "thread.mcpServerIds": defaultIds } } };
+        },
+      },
+    });
+    defaultIds = [LINEAR_ID];
+    gate = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    await act(() =>
+      router.navigate({ to: "/settings/mcp-servers/$id", params: { id: SENTRY_WORK_ID } }),
+    );
+    const box = await within(await waitForProjectRow("Threads without a project")).findByRole(
+      "checkbox",
+    );
+
+    expect(box.getAttribute("aria-disabled")).toBe("true");
+    release();
+    await waitFor(() => {
+      expect(box.getAttribute("aria-disabled")).toBe("false");
+    });
   });
 
   it("refuses the swap for the threads without a project in its own words", async () => {

@@ -36,8 +36,8 @@ export function ServerRow({ row }: { readonly row: McpServerSettingsRow }): JSX.
       row={row}
       plugins={plugins}
       allProjects={projects}
-      busy={flip.isRunning}
-      refusal={flip.refusal}
+      busy={flip.isBlocked}
+      refusal={flip.problem()}
       onFlip={() => {
         flip.start(!(view?.server.enabled ?? false));
       }}

@@ -11,8 +11,11 @@
  * they are needed, so the tests wait for them.
  */
 import { describe, expect, it } from "vitest";
+import type { Session } from "@hercule/contract";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { queryKeys } from "@hercule/client-core";
+import { buildErrorBody } from "@hercule/client-core/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { holdAnswer, THREAD_FIXTURES, type ThreadRecords } from "../../app/testing";
 import {
@@ -574,6 +577,32 @@ describe("the + menu on a started thread", () => {
     expect(await screen.findByRole("dialog", { name: "Reconnect Sentry · work" })).toBeTruthy();
   });
 
+  it("says why Reconnect cannot go on when its Connection is deleted while the dialog is open, and closes with Close", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    const { context } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_SIGNED_OUT],
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(
+      within(popover).getByRole("button", { name: "Reconnect Sentry · work", hidden: true }),
+    );
+    await screen.findByRole("dialog", { name: "Reconnect Sentry · work" });
+
+    act(() => {
+      context.queryClient.setQueryData(queryKeys.connections(), []);
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "Reconnect" });
+    expect(within(dialog).getByRole("alert").textContent).toBe(
+      "This Connection was deleted elsewhere, so it cannot be reconnected.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Reconnect" })).toBeNull();
+    });
+  });
+
   it("keeps the attach row off and the MCP servers row usable while the composer answers a question", async () => {
     const asking: ThreadRecords = withServers(
       {
@@ -612,5 +641,164 @@ describe("the + menu on a started thread", () => {
     expect(servers.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(servers);
     await within(popover).findByRole("group", { name: "Servers of this thread", hidden: true });
+  });
+});
+
+/** Returns the body of a 403 that names the missing grant, which the client decodes. */
+const buildForbiddenBody = (message: string) => ({
+  error: { code: "forbidden", message, details: { grant: "mcp.manage" } },
+});
+
+describe("the + menu's writes that end badly", () => {
+  const REFUSAL = "This session needs the grant mcp.manage.";
+
+  it("keeps the switches off and says so while a write's list could not be read again, until a read answers", async () => {
+    const thread = threadWith([LINEAR]);
+    const sessionPath = `GET /api/v1/sessions/${thread.session.id}`;
+    let failing = false;
+    let readSession: () => Session = () => thread.session;
+    const { calls, context, ...rest } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [sessionPath]: () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The controller fell over.") }
+            : { body: readSession() },
+      },
+    });
+    readSession = rest.readSession;
+    const popover = await openServersSubmenu();
+
+    failing = true;
+    fireEvent.click(findSwitch("sentry"));
+
+    const note = await within(popover).findByRole("alert", { hidden: true });
+    expect(note.textContent).toBe("Saved, but the list could not be read again.");
+    expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    // The cache still holds the old list, so a write now would undo the one that was saved.
+    fireEvent.click(findSwitch("linear"));
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+
+    failing = false;
+    await act(() =>
+      context.queryClient.invalidateQueries({ queryKey: queryKeys.session(thread.session.id) }),
+    );
+
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("true");
+    expect(within(popover).queryByRole("alert", { hidden: true })).toBeNull();
+  });
+
+  it("shows a refusal that came after the menu was closed, when the menu opens again", async () => {
+    const thread = threadWith([LINEAR]);
+    const held = holdAnswer();
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: { [`PATCH /api/v1/sessions/${thread.session.id}`]: held.handler },
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    });
+    toggleMenu(popover, "closed");
+
+    held.answer({ status: 403, body: buildForbiddenBody(REFUSAL) });
+    await waitFor(() => {
+      expect(document.querySelector(".plus-error")).toBeNull();
+    });
+    await openServersSubmenu();
+
+    expect((await within(popover).findByRole("alert", { hidden: true })).textContent).toBe(REFUSAL);
+  });
+
+  it("forgets a refusal once the menu it was shown in closes", async () => {
+    const thread = threadWith([LINEAR]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [`PATCH /api/v1/sessions/${thread.session.id}`]: {
+          status: 403,
+          body: buildForbiddenBody(REFUSAL),
+        },
+      },
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+    await within(popover).findByRole("alert", { hidden: true });
+
+    toggleMenu(popover, "closed");
+    await openServersSubmenu();
+
+    expect(within(popover).queryByRole("alert", { hidden: true })).toBeNull();
+  });
+});
+
+describe("the + menu's write once the thread is left", () => {
+  it("keeps the record of a write that still runs, and gives it a lifetime that ends", async () => {
+    const thread = threadWith([LINEAR]);
+    const held = holdAnswer();
+    const { context, router } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: { [`PATCH /api/v1/sessions/${thread.session.id}`]: held.handler },
+    });
+    await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    });
+    const mutations = context.queryClient.getMutationCache();
+    const findWrite = () =>
+      mutations.find({ mutationKey: ["mcp-write", "thread-list", thread.session.id] });
+
+    await act(() => router.navigate({ to: "/" }));
+
+    // The guard stays while the write runs, though nothing shows it any more.
+    expect(findWrite()?.state.status).toBe("pending");
+    // Nothing is left to remove the record once the write ends, so it must expire by itself.
+    expect(findWrite()?.gcTime).toBeLessThan(Infinity);
+    held.answer({ body: {} });
+  });
+});
+
+describe("the + menu on a thread that cannot be resumed", () => {
+  it("turns Attach off and keeps the MCP servers row working, so the list can still be edited", async () => {
+    const exited = withServers(
+      {
+        ...THREAD_FIXTURES.finished,
+        session: {
+          ...THREAD_FIXTURES.finished.session,
+          status: "exited",
+          resumable: false,
+          nativeSessionId: null,
+          exitedAt: "2026-09-10T09:04:00.000Z",
+        },
+      },
+      [LINEAR],
+    );
+    const { calls } = await openComposerApp(`/threads/${exited.session.id}`, {
+      thread: exited,
+      servers: [SENTRY_WORK, LINEAR],
+    });
+    const popover = await findPlusPopover();
+    toggleMenu(popover, "open");
+    expect(
+      within(popover)
+        .getByRole("menuitem", { name: "Attach an image", hidden: true })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+
+    await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+
+    await waitFor(() => {
+      expect(readListWrites(calls, exited.session.id)).toHaveLength(1);
+    });
   });
 });

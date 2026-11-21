@@ -29,7 +29,8 @@ import { LazyServerPickerDialog } from "../../../../../screens/settings/mcp-serv
 export function DefaultList(): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
-  const settings = useSuspenseQuery(settingsQuery(client)).data;
+  const settingsRead = useSuspenseQuery(settingsQuery(client));
+  const settings = settingsRead.data;
   const servers = useSuspenseQuery(mcpServersQuery(client)).data;
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
@@ -53,8 +54,8 @@ export function DefaultList(): JSX.Element {
       <DefaultServers
         chosen={chosen}
         plugins={plugins}
+        changeOff={settingsRead.isFetching}
         onChange={() => {
-          write.clearRefusal();
           setPicking(true);
         }}
       />
@@ -67,10 +68,14 @@ export function DefaultList(): JSX.Element {
             title="MCP servers of threads without a project"
             foot="A thread in no project starts with this list. Each change is saved as you make it."
             reset={null}
-            busy={write.isRunning}
-            error={write.refusal === null ? null : `Could not save: ${write.refusal}`}
+            busy={write.isBlocked}
+            error={write.problem("Could not save: ")}
             onChange={write.start}
-            onClose={() => setPicking(false)}
+            onClose={() => {
+              // Closing the picker dismisses what it showed. A refusal that came after it closed stays.
+              write.clearRefusal();
+              setPicking(false);
+            }}
           />
         </Suspense>
       )}

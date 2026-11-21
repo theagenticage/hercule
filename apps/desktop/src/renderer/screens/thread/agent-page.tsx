@@ -122,7 +122,7 @@ export function AgentPage({
   // and the state change runs them again with it.
   // The servers are read once, and the topic held, while the thread has a server or a line about
   // one. A thread with neither reads nothing. The composer's row and the lines draw from the cache.
-  const hasMcpServerLine = useHasMcpServerLine(sessionId);
+  const hasMcpServerLine = useHasMcpServerLine(sessionId, blocks);
   const holdsServers =
     subagentId === undefined && (session.mcpServers.length > 0 || hasMcpServerLine);
   const [composerStack, setComposerStack] = useState<HTMLDivElement | null>(null);

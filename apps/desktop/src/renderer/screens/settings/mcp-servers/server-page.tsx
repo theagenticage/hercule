@@ -7,7 +7,13 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { showsAccountBesideLabel, type PluginIdentity } from "@hercule/client-core";
-import type { McpServerView, StatusBand, StatusBandAction } from "@hercule/client-core/mcp-servers";
+import {
+  describeConnectionRowProblem,
+  isCheckDisabled,
+  type McpServerView,
+  type StatusBand,
+  type StatusBandAction,
+} from "@hercule/client-core/mcp-servers";
 import { useAgeWords } from "../../../app/age-clock";
 import { PluginMark } from "../../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "./server-parts";
@@ -123,8 +129,8 @@ export function ServerSection({
   readonly onCheck: () => void;
 }): JSX.Element {
   const { connection, server } = view;
-  const cannotCheck =
-    checkBusy || view.displayStatus === "checking" || view.displayStatus === "off";
+  const cannotCheck = checkBusy || isCheckDisabled(view);
+  const connectionProblem = describeConnectionRowProblem(view);
   return (
     <section className="set-sec">
       <h2>Server</h2>
@@ -163,8 +169,8 @@ export function ServerSection({
           <span className="mcp-value">
             <PluginMark pluginId={view.pluginId} plugins={plugins} size={14} />
             <span className="mcp-connection">
-              {view.displayStatus === "needs-sign-in" ? (
-                <span className="mcp-value-fail">{view.statusDetail ?? view.statusWord}</span>
+              {connectionProblem !== null ? (
+                <span className="mcp-value-fail">{connectionProblem}</span>
               ) : (
                 <span>{`${view.typeName} · ${connection.label}`}</span>
               )}
@@ -173,7 +179,7 @@ export function ServerSection({
               )}
             </span>
           </span>
-          {view.displayStatus !== "needs-sign-in" && (
+          {connectionProblem === null && (
             <Link to="/settings/connections" className="btn btn--sm">
               Open
             </Link>

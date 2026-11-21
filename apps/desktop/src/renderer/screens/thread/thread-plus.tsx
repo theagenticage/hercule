@@ -16,15 +16,13 @@ export function StartedThreadPlus({
   session,
   attach,
   serversOff,
-  disabled,
 }: {
   readonly session: Session;
   readonly attach: PlusAttach;
   readonly serversOff: string | null;
-  readonly disabled: boolean;
 }): JSX.Element {
   const servers = useStartedThreadServers(session);
-  return <PlusMenu attach={attach} servers={servers} serversOff={serversOff} disabled={disabled} />;
+  return <PlusMenu attach={attach} servers={servers} serversOff={serversOff} />;
 }
 
 /** Renders the `+` menu of the Draft Thread `view`; a change goes to `onChoose`, see `PlusMenu`. */
@@ -38,5 +36,5 @@ export function DraftPlus({
   readonly attach: PlusAttach;
 }): JSX.Element {
   const servers = useDraftServers({ view, onChoose });
-  return <PlusMenu attach={attach} servers={servers} serversOff={null} disabled={false} />;
+  return <PlusMenu attach={attach} servers={servers} serversOff={null} />;
 }

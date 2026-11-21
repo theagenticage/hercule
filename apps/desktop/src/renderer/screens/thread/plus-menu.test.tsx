@@ -37,7 +37,6 @@ describe("the + menu's rows", () => {
         attach={{ off: false, title: "Attach images", onAttach }}
         servers={SERVERS}
         serversOff={null}
-        disabled={false}
       />,
     );
     openMenu();
@@ -50,7 +49,6 @@ describe("the + menu's rows", () => {
         attach={{ off: true, title: "An answer takes text only", onAttach }}
         servers={SERVERS}
         serversOff={null}
-        disabled={false}
       />,
     );
     const off = screen.getByRole("menuitem", { name: "Attach an image", hidden: true });
@@ -67,7 +65,6 @@ describe("the + menu's rows", () => {
         attach={{ off: false, title: "Attach images", onAttach: () => undefined }}
         servers={SERVERS}
         serversOff="Not while answering a question"
-        disabled={false}
       />,
     );
     openMenu();
