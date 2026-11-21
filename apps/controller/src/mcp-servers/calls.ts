@@ -135,8 +135,8 @@ interface UpstreamSlot {
   readonly credentialsRecordId: string;
   /** The server's `revision` when the slot was made. */
   readonly serverRevision: number;
-  /** The credentials' `generation` when the slot was made. */
-  readonly credentialsGeneration: number;
+  /** The server's credentials generation when the slot was made (`readCredentialsGeneration`). */
+  readonly credentialsGeneration: number | undefined;
   /** Ends with the open session, or the reason it could not be opened. */
   readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError>;
   /** Completing it cancels an opening that has not ended. */
@@ -278,11 +278,12 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<UpstreamSlot> =>
     Effect.gen(function* () {
       const { server, access } = destination;
+      const credentialsGeneration = readCredentialsGeneration(destination);
       const existing = slots.get(upstreamScope)?.get(server.id);
       const usable =
         existing !== undefined &&
         existing.serverRevision === server.revision &&
-        existing.credentialsGeneration === access.credentials.generation;
+        existing.credentialsGeneration === credentialsGeneration;
       if (usable) {
         existing.users += 1;
         return existing;
@@ -295,7 +296,7 @@ const make = Effect.gen(function* () {
         serverId: server.id,
         credentialsRecordId: access.credentials.credentialsRecordId,
         serverRevision: server.revision,
-        credentialsGeneration: access.credentials.generation,
+        credentialsGeneration,
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),

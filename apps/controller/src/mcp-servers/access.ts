@@ -108,12 +108,6 @@ export class ServerCredentialsCannotRefresh extends Schema.TaggedError<ServerCre
  */
 export interface ServerCredentials {
   /**
-   * Goes up when the user replaces what the server signs in with. An upstream
-   * session opened under an older one is replaced. A refresh that only
-   * renews the same sign-in does not change it.
-   */
-  readonly generation: number;
-  /**
    * The id of the record that holds the credentials, whose change can change
    * them: the Connection's id for a plugin server. A committed change to that
    * record makes the calls look at the sessions that were opened with them.
@@ -255,10 +249,11 @@ const URL_SERVER_CREDENTIALS_GENERATION = 0;
 
 /**
  * Returns the credentials generation a server is at now, or `undefined` when
- * a plugin server's Connection is gone. A caller compares it with the
- * `generation` an upstream session was opened with, without resolving an
- * access, because it only looks at a session and sends nothing. It returns
- * the same generation the server's access holds.
+ * a plugin server's Connection is gone. It goes up when the user replaces
+ * what the server signs in with, and an upstream session opened under an
+ * older one is replaced. A refresh that only renews the same sign-in does not
+ * change it. It needs no access, so a caller that only looks at a session and
+ * sends nothing can compare it with the generation the session opened with.
  */
 export const readCredentialsGeneration = (
   view: Pick<McpServerAvailabilityView, "dependencies">,
@@ -301,7 +296,6 @@ const resolvePluginAccess = (
         contribution.buildUpstreamRequest({ credentials, config }),
     },
     credentials: {
-      generation: connection.credentialsGeneration,
       credentialsRecordId: connection.id,
       readForUse: (guard) =>
         Effect.mapError(
@@ -373,7 +367,6 @@ const resolveUrlAccess = (
       },
     },
     credentials: {
-      generation: URL_SERVER_CREDENTIALS_GENERATION,
       credentialsRecordId: id,
       // The guard protects a refresh, and this access never refreshes.
       readForUse: () => Effect.map(signIns.readToken(id, signIn), toUpstream),

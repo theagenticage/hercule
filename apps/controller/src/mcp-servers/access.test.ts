@@ -105,7 +105,6 @@ describe("resolving the access of a plugin server", () => {
 
     expect(access.endpoint).toMatchObject({ origin: "https://desk.example", displayName: "Desk" });
     expect(access.credentials).toMatchObject({
-      generation: 0,
       credentialsRecordId: "connection-1",
     });
     expect(access.credentials.describeRejected(true)).toEqual({
@@ -164,7 +163,7 @@ describe("resolving the access of a server added by URL", () => {
     const access = resolveUsable({}, url);
 
     expect(access.endpoint).toMatchObject({ origin: "https://desk.example", displayName: "desk" });
-    expect(access.credentials).toMatchObject({ generation: 0, credentialsRecordId: "server-1" });
+    expect(access.credentials).toMatchObject({ credentialsRecordId: "server-1" });
   });
 
   it("builds the request to the address as it is stored, with its token as a bearer token", () => {
