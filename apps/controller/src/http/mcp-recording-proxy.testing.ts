@@ -6,7 +6,7 @@
  */
 
 /** One request the gateway received through the proxy, and how it answered. */
-export interface Observed {
+export interface ObservedRequest {
   readonly httpMethod: string;
   /** The JSON-RPC method of a POST, and `-` for a request with no body. */
   readonly rpcMethod: string;
@@ -28,7 +28,7 @@ export interface Observed {
 
 export interface RecordingProxy {
   readonly url: string;
-  readonly seen: ReadonlyArray<Observed>;
+  readonly seen: ReadonlyArray<ObservedRequest>;
   /**
    * Starts or ends holding back `notifications/tools/list_changed` from the
    * harness. The gateway still sends it and the proxy still records it, but the
@@ -108,7 +108,7 @@ export const startRecordingProxy = (
   target: string,
   options: { readonly answerDiscoverLikeOlderServer: boolean },
 ): RecordingProxy => {
-  const seen: Array<Observed> = [];
+  const seen: Array<ObservedRequest> = [];
   let withholding = false;
   const server = Bun.serve({
     port: 0,
@@ -125,7 +125,7 @@ export const startRecordingProxy = (
               method?: string;
               params?: { name?: string; protocolVersion?: string };
             });
-      const observed: Observed = {
+      const observed: ObservedRequest = {
         httpMethod: request.method,
         rpcMethod: message === undefined ? "-" : (message.method ?? "?"),
         tool: message?.method === "tools/call" ? (message.params?.name ?? null) : null,
@@ -184,7 +184,7 @@ export const startRecordingProxy = (
 };
 
 /** Describes one observed request as `METHOD rpc-method revision session status`, for a readable assertion. */
-export const describeRequest = (one: Observed): string =>
+export const describeRequest = (one: ObservedRequest): string =>
   [
     one.httpMethod,
     one.rpcMethod,
@@ -195,15 +195,15 @@ export const describeRequest = (one: Observed): string =>
 
 /** Returns the observed requests with this JSON-RPC method, or the GET streams for `GET`. */
 export const requestsOf = (
-  seen: ReadonlyArray<Observed>,
+  seen: ReadonlyArray<ObservedRequest>,
   rpcMethod: string,
-): ReadonlyArray<Observed> =>
+): ReadonlyArray<ObservedRequest> =>
   seen.filter((one) =>
     rpcMethod === "GET" ? one.httpMethod === "GET" : one.rpcMethod === rpcMethod,
   );
 
 /** Counts the `notifications/tools/list_changed` messages the gateway sent on the streams of `requests`. */
-export const countListChanged = (requests: ReadonlyArray<Observed>): number =>
+export const countListChanged = (requests: ReadonlyArray<ObservedRequest>): number =>
   requests.reduce(
     (count, one) =>
       count + one.streamed.filter((method) => method === "notifications/tools/list_changed").length,

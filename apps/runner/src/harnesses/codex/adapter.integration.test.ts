@@ -476,7 +476,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
       expect(names).not.toContain("user-only");
 
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-      await watch.until("the command's turn", () =>
+      await watch.waitUntil("the command's turn", () =>
         seen.some((event) => event._tag === "turn.completed"),
       );
       expect(readFileSync(join(ctx.cwd!, "seen.txt"), "utf8")).toBe(`${userHome}\nReal User\n`);
@@ -548,7 +548,7 @@ describe.skipIf(binary === undefined)(
         expect(names, "none of the user's skills").not.toContain("user-skill");
 
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
-        await watch.until("the command's turn", () =>
+        await watch.waitUntil("the command's turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
@@ -643,13 +643,13 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     );
     try {
       await Effect.runPromise(codex.sendInput(sessionId, { text }));
-      await watch.until("the turn's end", () =>
+      await watch.waitUntil("the turn's end", () =>
         seen.some((event) => event._tag === "turn.completed"),
       );
     } finally {
       await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
     }
-    await watch.until("the session's exit", () =>
+    await watch.waitUntil("the session's exit", () =>
       seen.some((event) => event._tag === "session.exited"),
     );
     return seen.find(
@@ -773,11 +773,11 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.sendInput(sessionId, { text: "Establish root history." }),
           );
-          await watch.until("the first root turn", () =>
+          await watch.waitUntil("the first root turn", () =>
             seen.some((event) => event._tag === "turn.completed"),
           );
           await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
-          await watch.until(
+          await watch.waitUntil(
             "both approvals and the second root turn",
             () =>
               approvals().length === 2 &&
@@ -838,7 +838,7 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
           );
-          await watch.until("the second child's turn", () => childCompletions().length === 1);
+          await watch.waitUntil("the second child's turn", () => childCompletions().length === 1);
           expect(childCompletions()[0]!.subagentId).toBe(second!.subagentId);
           expect(
             seen.some(
@@ -849,7 +849,7 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, first!.request.requestId, "allow"),
           );
-          await watch.until(
+          await watch.waitUntil(
             "the first child's turn and every thread's final usage",
             () =>
               childCompletions().length === 2 &&
@@ -916,13 +916,13 @@ describe.skipIf(binary === undefined)(
           ),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish root history." }));
-        await watch.until("first turn", () =>
+        await watch.waitUntil("first turn", () =>
           seen.some((event) => event._tag === "turn.completed"),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
         // Each child's command asks for approval only after the gate's hook
         // ran, so an approval shows that the hook let the command through.
-        await watch.until(
+        await watch.waitUntil(
           "children ask approval",
           () =>
             seen.filter(
@@ -956,7 +956,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
     const watch = createFixtureWatch();
     const model = startMockModel(version, {
       stopScenario: true,
-      onWaitingChange: watch.changed,
+      onWaitingChange: watch.recheckWaits,
     });
     const home = createScratchDir("native-stop");
     mkdirSync(join(home, "codex"));
@@ -1021,7 +1021,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       thread.parentThreadId !== rootId
                     ) {
                       heldMetadata = { line, id: thread.id, parentId: thread.parentThreadId };
-                      watch.changed();
+                      watch.recheckWaits();
                       continue;
                     }
                     if (
@@ -1029,7 +1029,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       frame.params?.threadId !== undefined
                     ) {
                       approvalThreadIds.add(frame.params.threadId);
-                      watch.changed();
+                      watch.recheckWaits();
                     }
                     delayed.push(line);
                   }
@@ -1067,11 +1067,11 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-      await watch.until("the first root turn", () =>
+      await watch.waitUntil("the first root turn", () =>
         seen.some((event) => event._tag === "turn.completed" && event.subagentId === undefined),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn the tree." }));
-      await watch.until(
+      await watch.waitUntil(
         "the tree's approvals and the held root call",
         () =>
           (target === "discovering-subtree"
@@ -1105,7 +1105,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ),
       );
       if (target === "discovering-subtree") {
-        await watch.until("the branch's interrupted turn", () =>
+        await watch.waitUntil("the branch's interrupted turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1121,7 +1121,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ).toEqual([]);
         delayed.push(heldMetadata!.line);
       }
-      await watch.until("the stopped subagents' interrupted turns", () =>
+      await watch.waitUntil("the stopped subagents' interrupted turns", () =>
         stoppedIds.every((id) =>
           seen.some(
             (event) =>
@@ -1163,7 +1163,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         ).toHaveLength(completions);
       }
       if (target === "whole") {
-        await watch.until("the root's interrupted turn", () =>
+        await watch.waitUntil("the root's interrupted turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1188,7 +1188,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         await Effect.runPromise(
           adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
         );
-        await watch.until("the sibling's completed turn", () =>
+        await watch.waitUntil("the sibling's completed turn", () =>
           seen.some(
             (event) =>
               event._tag === "turn.completed" &&
@@ -1240,7 +1240,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
         ),
       );
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Ask me something." }));
-      await watch.until("the asking turn", () => completedTurns() === 1);
+      await watch.waitUntil("the asking turn", () => completedTurns() === 1);
 
       const opened = seen.filter((event) => event._tag === "request.opened");
       expect(opened).toHaveLength(1);
@@ -1279,7 +1279,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
           { model: "gpt-5.4", options: {} },
         ),
       );
-      await watch.until("the answering turn", () => completedTurns() === 2);
+      await watch.waitUntil("the answering turn", () => completedTurns() === 2);
 
       expect(seen.filter((event) => event._tag === "request.resolved")).toMatchObject([
         { requestId: request.requestId, answers: { Question: "Beta" } },
@@ -1323,7 +1323,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     ["v2", false],
   ] as const)("%s counts only new calls with saved report=%s", async (version, saveReport) => {
     const watch = createFixtureWatch();
-    const model = startMockModel(version, { onWaitingChange: watch.changed });
+    const model = startMockModel(version, { onWaitingChange: watch.recheckWaits });
     const home = createScratchDir("usage-resume");
     mkdirSync(join(home, "codex"));
     writeFileSync(join(home, "codex", "config.toml"), model.config);
@@ -1360,9 +1360,9 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
     try {
       const binding = await Effect.runPromise(adapter.startSession(sessionId, spec, context));
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
-      await watch.until("the first root turn", () => rootCompletions().length === 1);
+      await watch.waitUntil("the first root turn", () => rootCompletions().length === 1);
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn children." }));
-      await watch.until(
+      await watch.waitUntil(
         "both children's approvals",
         () => seen.filter((event) => event._tag === "request.opened").length === 2,
       );
@@ -1371,7 +1371,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
           adapter.respondToApprovalRequest(sessionId, event.request.requestId, "allow"),
         );
       }
-      await watch.until(
+      await watch.waitUntil(
         "both children's and the second root turn, and each child's usage",
         () =>
           childCompletions().length === 2 &&
@@ -1422,7 +1422,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
       );
       model.scheduleFollowup(childId, true);
       await Effect.runPromise(adapter.sendInput(sessionId, { text: "Continue the known child." }));
-      await watch.until(
+      await watch.waitUntil(
         "the held child call and the root turn",
         () => model.waitingChildren.has(childId) && rootCompletions().length === 1,
       );
@@ -1435,7 +1435,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
             event.subagentId === childId &&
             (event.raw?.payload as { turnId?: string } | undefined)?.turnId === turnId,
         );
-      await watch.until("the child's interrupted turn", () => childCompletions().length === 1);
+      await watch.waitUntil("the child's interrupted turn", () => childCompletions().length === 1);
       expect(childCompletions()[0]!.state).toBe("interrupted");
       // Codex does not always report usage for a turn it interrupted: on a
       // loaded machine the app-server sometimes sends no report at all, and
@@ -1449,7 +1449,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
       );
       // Codex reports a turn's usage in its own notification, which may
       // arrive after the turn's completion, so the test waits for both.
-      await watch.until(
+      await watch.waitUntil(
         "the child's completed turn and its usage",
         () =>
           childCompletions().length === 2 &&

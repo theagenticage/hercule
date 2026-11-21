@@ -8,7 +8,7 @@
  * records every request it receives, so a test can check what the harness
  * sent and that a call reached the server (or did not).
  */
-import { PNG_BYTES } from "./testing";
+import { PNG_BYTES } from "../testing";
 
 /** The tool the fake offers with no annotations. */
 export const SEARCH_ISSUES_TOOL = "sentry__search_issues";

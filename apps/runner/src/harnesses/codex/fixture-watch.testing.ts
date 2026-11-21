@@ -38,15 +38,15 @@ export interface FixtureWatch {
    * as the mock model or a wrapped app-server, calls this after each change;
    * a recorded event checks them on its own.
    */
-  readonly changed: () => void;
+  readonly recheckWaits: () => void;
   /** Returns once `holds` returns true. `what` names the wait if the test fails. */
-  readonly until: (what: string, holds: () => boolean) => Promise<void>;
+  readonly waitUntil: (what: string, holds: () => boolean) => Promise<void>;
 }
 
 /**
  * Creates the watch for the current test, which must call it from inside its
  * body. A wait is checked when its condition can have changed: on each
- * recorded event and on each `changed()` call. It never polls and has no
+ * recorded event and on each `recheckWaits()` call. It never polls and has no
  * deadline of its own, so a slow machine only makes a test slower. A hang is
  * caught by the test's own timeout. The watch then logs what each pending wait
  * was waiting for and every event seen, and fails the waits, so the test's
@@ -63,7 +63,7 @@ export const createFixtureWatch = (): FixtureWatch => {
     readonly reject: (error: Error) => void;
   }>();
   let recording: Fiber.Fiber<void> | undefined;
-  const changed = () => {
+  const recheckWaits = () => {
     for (const wait of waits) {
       if (!wait.holds()) continue;
       waits.delete(wait);
@@ -91,14 +91,14 @@ export const createFixtureWatch = (): FixtureWatch => {
         Stream.runForEach(events, (event) =>
           Effect.sync(() => {
             seen.push(event);
-            changed();
+            recheckWaits();
           }),
         ),
       );
     },
     stopRecording,
-    changed,
-    until: (what, holds) =>
+    recheckWaits,
+    waitUntil: (what, holds) =>
       holds()
         ? Promise.resolve()
         : new Promise((resolve, reject) => void waits.add({ what, holds, resolve, reject })),

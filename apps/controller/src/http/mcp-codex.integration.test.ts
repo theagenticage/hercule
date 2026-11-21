@@ -2,16 +2,16 @@
  * Runs the real Codex against the real MCP Gateway, to check what the spec
  * could only assume (spec 21 section 3.11): that Codex works on the older wire
  * era, sees `notifications/tools/list_changed` and lists again, opens a new MCP
- * session when the gateway answers 404 for the one it holds, and connects again
- * when a thread is resumed or forked.
+ * session when the gateway answers 404 for the one it holds. Resuming and
+ * forking a thread is checked beside the adapter, in
+ * `apps/runner/src/harnesses/codex/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. Codex starts the way the Codex
- * adapter starts it: `codex app-server --strict-config`, then `thread/start`,
- * `thread/resume` or `thread/fork` with the `config` that the adapter's own
- * `buildMcpServerConfig` builds, the session token in `HERCULE_TOKEN`, and an
- * environment built from nothing (a throwaway `HOME` and `CODEX_HOME`). The
- * model is a local stand-in for the Responses API that calls the tool a prompt
- * names, so no real model is reached. A Codex shows the gateway's tools inline
+ * adapter starts it: `codex app-server --strict-config`, then `thread/start`
+ * with the `config` that the adapter's own `buildMcpServerConfig` builds, the
+ * session token in `HERCULE_TOKEN`, and an environment built from nothing (a
+ * throwaway `HOME` and `CODEX_HOME`). The model is a local stand-in for the
+ * Responses API that calls the tool a prompt names, so no real model is reached. A Codex shows the gateway's tools inline
  * or defers them behind tool search; the request says which, and when the
  * tools are deferred the stand-in searches for the tool and calls the one the
  * search returned.
@@ -56,12 +56,7 @@ import {
   startScriptedModel,
   type ScriptedModelRequest,
 } from "../../../runner/src/harnesses/codex/mock-model.testing";
-import type {
-  ThreadForkParams,
-  ThreadResumeParams,
-  ThreadStartParams,
-  TurnStartParams,
-} from "../../../runner/src/harnesses/codex/types";
+import type { ThreadStartParams, TurnStartParams } from "../../../runner/src/harnesses/codex/types";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { createProfile, spawnThreadUnder } from "../sessions/testing";
 import {
@@ -223,8 +218,6 @@ interface RunningCodex {
   readonly version: string | null;
   /** Opens a thread the way the adapter does and returns its id. */
   readonly startThread: () => Promise<string>;
-  /** Resumes or forks a thread of an earlier process and returns the id of the thread that is open now. */
-  readonly continueThread: (mode: "resume" | "fork", threadId: string) => Promise<string>;
   /** Sends a prompt and waits until the turn ends. */
   readonly runTurn: (threadId: string, prompt: string) => Promise<void>;
   /** Returns every MCP tool call item that has finished, oldest first. */
@@ -242,7 +235,6 @@ interface CodexHome {
  * Prepares a throwaway `HOME` and `CODEX_HOME` that point Codex at the stand-in
  * model, calls `body` with a way to start `codex app-server` processes on it,
  * then stops every process it started, by process id, and removes the folders.
- * A second process on the same home can resume a thread of the first.
  */
 const withCodexHome = async (
   options: {
@@ -357,13 +349,6 @@ const withCodexHome = async (
             ...buildThreadParams(),
             ephemeral: false,
           } satisfies ThreadStartParams),
-        ),
-      continueThread: async (mode, threadId) =>
-        readThreadId(
-          await request(mode === "resume" ? "thread/resume" : "thread/fork", {
-            threadId,
-            ...buildThreadParams(),
-          } satisfies ThreadResumeParams & ThreadForkParams),
         ),
       runTurn: async (threadId, prompt) => {
         const before = countEndedTurns(threadId);
@@ -679,35 +664,6 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       ]);
     });
   }, 120_000);
-
-  it.each(["resume", "fork"] as const)(
-    "connects, lists and calls again after a new process did thread/%s with the config sent again",
-    async (mode) => {
-      await withCodexOnGateway({ listed: true }, async (rig, home) => {
-        const first = await home.start();
-        const threadId = await first.startThread();
-        await first.runTurn(threadId, `call ${WHOAMI}`);
-        await first.stop();
-        const mark = rig.proxy.seen.length;
-
-        // Codex saves no MCP server with a thread, so it connects only because the config is sent again.
-        const second = await home.start();
-        const continued = await second.continueThread(mode, threadId);
-        expect(continued === threadId, "a fork is a new thread").toBe(mode === "resume");
-        expect(await waitForRequest(rig.proxy, "initialize", mark)).toBe(true);
-        expect(await waitForRequest(rig.proxy, "tools/list", mark)).toBe(true);
-
-        await second.runTurn(continued, `call ${WHOAMI}`);
-        expect(readOfferedTools(rig.model.requests)).toEqual([WHOAMI]);
-        expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual([
-          "whoami",
-          "whoami",
-        ]);
-        expect(second.readFinishedCalls().map((one) => one.status)).toEqual(["completed"]);
-      });
-    },
-    120_000,
-  );
 
   // Records which shape a Codex gives a few hundred tools: Codex 0.169.0 and 0.171.0 offer all 300 inline, and
   // 0.154.0 defers every MCP tool behind tool search. Either way the model calls one tool once.

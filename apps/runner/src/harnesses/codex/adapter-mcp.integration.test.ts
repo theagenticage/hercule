@@ -29,7 +29,7 @@ import {
   SNAPSHOT_IMAGE_TOOL,
   startFakeMcpServer,
   WHOAMI_TOOL,
-} from "../fake-mcp-server.testing";
+} from "./fake-mcp-server.testing";
 import { cleanupHomes, createScratchHome, PNG_BYTES } from "../testing";
 import { buildContext, SESSION, SPEC } from "./testing";
 
@@ -43,33 +43,27 @@ const TOKEN = "tok-synthetic-7f3a9c";
 /** The name of the environment variable the adapter gives Codex for the token. */
 const TOKEN_VARIABLE = "HERCULE_TOKEN";
 
-/** Reads the version of the Codex binary as `[major, minor, patch]`. */
-const readCodexVersion = (): ReadonlyArray<number> => {
+/** Reads the version of the Codex binary, such as `0.169.0`. */
+const readCodexVersion = (): string => {
   const output = Bun.spawnSync([binary!, "--version"], {
     env: { PATH: process.env["PATH"] ?? "" },
   }).stdout.toString();
-  return /(\d+)\.(\d+)\.(\d+)/.exec(output)!.slice(1).map(Number);
+  return /\d+\.\d+\.\d+/.exec(output)![0];
 };
 
-/** Checks whether `version` is `minimum` or newer, comparing major, minor and patch in turn. */
-const isAtLeast = (version: ReadonlyArray<number>, minimum: ReadonlyArray<number>): boolean => {
-  const differing = minimum.findIndex((part, index) => version[index] !== part);
-  return differing === -1 || version[differing]! > minimum[differing]!;
-};
-
-const codexVersion = binary === undefined ? [] : readCodexVersion();
+const codexVersion = binary === undefined ? "0.0.0" : readCodexVersion();
 
 /**
  * Codex re-reads a server's tool list only from 0.164.0, and only then does
  * the adapter set the feature instead of warning.
  */
-const hasToolListFeature = isAtLeast(codexVersion, [0, 164, 0]);
+const hasToolListFeature = Bun.semver.satisfies(codexVersion, ">=0.164.0");
 
 /**
  * Codex names the tool in the approval of an MCP tool call from 0.167.0 on (0.166.0 and older send none).
  * Without a tool name, the card shows the server instead.
  */
-const namesToolInApproval = isAtLeast(codexVersion, [0, 167, 0]);
+const namesToolInApproval = Bun.semver.satisfies(codexVersion, ">=0.167.0");
 
 /** Returns the name the approval card shows for a call of `tool`. */
 const buildExpectedCardName = (tool: string): string =>
@@ -167,7 +161,7 @@ const createFixture = () => {
       callTool: async (tool: string) => {
         const before = completedTurns();
         await Effect.runPromise(adapter.sendInput(SESSION, { text: `call ${tool}` }));
-        await watch.until(`the turn that calls ${tool}`, () => completedTurns() > before);
+        await watch.waitUntil(`the turn that calls ${tool}`, () => completedTurns() > before);
       },
       /**
        * Sends `call <tool>` and returns the approval it opens, while the turn
@@ -178,7 +172,7 @@ const createFixture = () => {
         const askedBefore = listOpened().length;
         const turnsBefore = completedTurns();
         await Effect.runPromise(adapter.sendInput(SESSION, { text: `call ${tool}` }));
-        await watch.until(
+        await watch.waitUntil(
           `the approval of ${tool}`,
           () => listOpened().length > askedBefore || completedTurns() > turnsBefore,
         );
@@ -193,7 +187,7 @@ const createFixture = () => {
         await Effect.runPromise(
           adapter.respondToApprovalRequest(SESSION, opened.request.requestId, decision),
         );
-        await watch.until(`the turn after ${decision}`, () => completedTurns() > before);
+        await watch.waitUntil(`the turn after ${decision}`, () => completedTurns() > before);
       },
     };
     runs.push(run);
@@ -391,7 +385,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(scanFolders.flatMap(listFiles).length).toBeGreaterThan(0);
     expect(findTokenFiles(false)).toEqual([]);
     await run.stop();
-    expect(findTokenFiles(isAtLeast(codexVersion, [0, 169, 0]))).toEqual([]);
+    expect(findTokenFiles(Bun.semver.satisfies(codexVersion, ">=0.169.0"))).toEqual([]);
   });
 
   describe("when a trusted project's config sets an MCP server", () => {
@@ -509,7 +503,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
       expect(started?.params?.config).not.toHaveProperty(["features.mcp_tool_list_changed"]);
       expect(
         warnings.map((warning) => (warning._tag === "runtime.warning" ? warning.message : "")),
-      ).toEqual([buildNoToolListChangedWarning(codexVersion.join("."))]);
+      ).toEqual([buildNoToolListChangedWarning(codexVersion)]);
     }
   });
 });
