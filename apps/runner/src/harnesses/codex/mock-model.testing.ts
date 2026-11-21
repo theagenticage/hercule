@@ -321,3 +321,84 @@ export const startAsyncQuestionModel = (title: string, options: ReadonlyArray<st
     stop: () => server.stop(true),
   };
 };
+
+/** One request Codex made to the scripted model, as `startScriptedModel` records it. */
+export interface ScriptedModelRequest {
+  /** The `thread-id` header: the Codex thread that made the request. */
+  readonly threadId: string;
+  readonly body: {
+    readonly input: ReadonlyArray<Record<string, unknown>>;
+    readonly tools: ReadonlyArray<Record<string, unknown>>;
+  };
+}
+
+/**
+ * Runs a local Responses API fixture that answers each request with the items
+ * `script` returns for it, or with one assistant message ("done") when the
+ * script returns `undefined`. `requests` holds every request Codex made, in
+ * order, so a test can read what the model was shown and what it was sent
+ * back. `config` is the `config.toml` text that points Codex at the fixture.
+ */
+export const startScriptedModel = (
+  script: (request: ScriptedModelRequest) => ReadonlyArray<Record<string, unknown>> | undefined,
+) => {
+  const requests: Array<ScriptedModelRequest> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    // Bun cuts a connection after ten idle seconds by default, which would make
+    // Codex reconnect in the middle of a test.
+    idleTimeout: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const asked: ScriptedModelRequest = {
+        threadId: request.headers.get("thread-id") ?? "",
+        body: (await request.json()) as ScriptedModelRequest["body"],
+      };
+      requests.push(asked);
+      const call = requests.length;
+      const items = script(asked) ?? [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-${call}`,
+          content: [{ type: "output_text", text: "done" }],
+        },
+      ];
+      const events = [
+        { type: "response.created", response: { id: `response-${call}` } },
+        ...items.map((item) => ({ type: "response.output_item.done", item })),
+        {
+          type: "response.completed",
+          response: {
+            id: `response-${call}`,
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: 110,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    requests,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};

@@ -38,6 +38,14 @@ import {
   startFakeUpstream,
   type FakeUpstream,
 } from "../mcp-servers/testing";
+import {
+  countListChanged,
+  describeRequest,
+  requestsOf,
+  startRecordingProxy,
+  waitUntilQuiet,
+  type RecordingProxy,
+} from "./mcp-recording-proxy.testing";
 import { send, waitWithin } from "./testing";
 import { withFleet } from "../workspaces/testing";
 
@@ -47,154 +55,6 @@ const claude = Bun.which("claude") ?? undefined;
 const STEP_MS = 20_000;
 
 let PLUGINS: ReadonlyArray<Plugin>;
-
-// -- The recording proxy ------------------------------------------------------
-
-/** One request the gateway received through the proxy, and how it answered. */
-interface Observed {
-  readonly httpMethod: string;
-  /** The JSON-RPC method of a POST, and `-` for a request with no body. */
-  readonly rpcMethod: string;
-  readonly protocolVersion: string | null;
-  /** The `Mcp-Method` header of the 2026-07-28 era. */
-  readonly mcpMethod: string | null;
-  /** The `Mcp-Session-Id` the request carried. */
-  readonly sessionId: string | null;
-  status: number | undefined;
-  /** The `Mcp-Session-Id` the gateway answered with: set by an `initialize` only. */
-  answeredSessionId: string | null;
-  /** The JSON-RPC methods of the messages the gateway sent on this response's event stream, in order. */
-  readonly streamed: Array<string>;
-}
-
-interface RecordingProxy {
-  readonly url: string;
-  readonly seen: ReadonlyArray<Observed>;
-  readonly stop: () => Promise<void>;
-}
-
-/** Reads the `data:` lines of an event stream and calls `onMessage` with each JSON-RPC message. */
-const readEventStream = async (
-  body: ReadableStream<Uint8Array>,
-  onMessage: (message: { readonly method?: string }) => void,
-): Promise<void> => {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) return;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      for (let end = buffer.indexOf("\n\n"); end !== -1; end = buffer.indexOf("\n\n")) {
-        const block = buffer.slice(0, end);
-        buffer = buffer.slice(end + 2);
-        for (const line of block.split("\n")) {
-          if (line.startsWith("data: ")) {
-            onMessage(JSON.parse(line.slice("data: ".length)) as { readonly method?: string });
-          }
-        }
-      }
-    }
-  } catch {
-    // The connection ended, which is how every stream ends.
-  }
-};
-
-/**
- * Starts a proxy in front of the controller that forwards every request
- * unchanged and records it. With `answerDiscoverLikeOlderServer`, it answers
- * `server/discover` itself the way a server built on the official TypeScript
- * SDK does (HTTP 400, JSON-RPC -32000), so the CLI falls back to `initialize`.
- * The gateway serves both eras, so this is the only way to see the CLI on the
- * older one.
- */
-const startRecordingProxy = (
-  target: string,
-  options: { readonly answerDiscoverLikeOlderServer: boolean },
-): RecordingProxy => {
-  const seen: Array<Observed> = [];
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    // A stream that stays quiet is normal here; the default would cut it after ten seconds.
-    idleTimeout: 0,
-    async fetch(request) {
-      const address = new URL(request.url);
-      const text = request.method === "POST" ? await request.text() : undefined;
-      const observed: Observed = {
-        httpMethod: request.method,
-        rpcMethod:
-          text === undefined ? "-" : ((JSON.parse(text) as { method?: string }).method ?? "?"),
-        protocolVersion: request.headers.get("mcp-protocol-version"),
-        mcpMethod: request.headers.get("mcp-method"),
-        sessionId: request.headers.get("mcp-session-id"),
-        status: undefined,
-        answeredSessionId: null,
-        streamed: [],
-      };
-      seen.push(observed);
-      if (options.answerDiscoverLikeOlderServer && observed.rpcMethod === "server/discover") {
-        observed.status = 400;
-        return Response.json(
-          { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Bad Request" } },
-          { status: 400 },
-        );
-      }
-      const headers = new Headers(request.headers);
-      headers.delete("host");
-      headers.delete("content-length");
-      const answer = await fetch(`${target}${address.pathname}${address.search}`, {
-        method: request.method,
-        headers,
-        ...(text === undefined ? {} : { body: text }),
-        signal: request.signal,
-      });
-      observed.status = answer.status;
-      observed.answeredSessionId = answer.headers.get("mcp-session-id");
-      const isStream = (answer.headers.get("content-type") ?? "").includes("text/event-stream");
-      if (!isStream || answer.body === null) {
-        return new Response(answer.body, { status: answer.status, headers: answer.headers });
-      }
-      const [toClient, toRecord] = answer.body.tee();
-      void readEventStream(toRecord, (message) => {
-        observed.streamed.push(message.method ?? "(response)");
-      });
-      return new Response(toClient, { status: answer.status, headers: answer.headers });
-    },
-  });
-  return {
-    url: `http://127.0.0.1:${String(server.port)}`,
-    seen,
-    stop: async () => {
-      await server.stop(true);
-    },
-  };
-};
-
-/** Describes one observed request as `METHOD rpc-method revision session status`, for a readable assertion. */
-const describeRequest = (one: Observed): string =>
-  [
-    one.httpMethod,
-    one.rpcMethod,
-    one.protocolVersion ?? "no-revision",
-    one.sessionId === null ? "no-session" : "session",
-    String(one.status),
-  ].join(" ");
-
-/** Returns the observed requests with this JSON-RPC method, or the GET streams for `GET`. */
-const requestsOf = (seen: ReadonlyArray<Observed>, rpcMethod: string): ReadonlyArray<Observed> =>
-  seen.filter((one) =>
-    rpcMethod === "GET" ? one.httpMethod === "GET" : one.rpcMethod === rpcMethod,
-  );
-
-/** Counts the `notifications/tools/list_changed` messages the gateway sent on the streams of `requests`. */
-const countListChanged = (requests: ReadonlyArray<Observed>): number =>
-  requests.reduce(
-    (count, one) =>
-      count + one.streamed.filter((method) => method === "notifications/tools/list_changed").length,
-    0,
-  );
 
 // -- A stand-in for the Messages API -------------------------------------------
 
@@ -517,19 +377,6 @@ const withGateway = (
     },
     { plugins: PLUGINS },
   );
-
-/** Waits until the gateway has received nothing from the CLI for `quietMs`. */
-const waitUntilQuiet = async (proxy: RecordingProxy, quietMs = 2_000): Promise<void> => {
-  let count = -1;
-  let since = Date.now();
-  while (Date.now() - since < quietMs) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    if (proxy.seen.length !== count) {
-      count = proxy.seen.length;
-      since = Date.now();
-    }
-  }
-};
 
 const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details"];
 const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details"];
