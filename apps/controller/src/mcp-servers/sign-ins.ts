@@ -81,13 +81,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns a string that changes whenever the server's sign-in secrets
-     * change: the name and rotation time of each, without decrypting any.
+     * Returns a string that changes whenever the server's sign-in changes:
+     * its `revision` and the name and rotation time of each secret, without
+     * decrypting any. The `revision` is in it because every new sign-in
+     * raises it, while deleting and storing a secret again within the same
+     * clock tick can leave its rotation time unchanged.
      */
     readVersion: (serverId: string): Effect.Effect<string> =>
-      Effect.map(Effect.orDie(secrets.refs("mcp-server", [serverId])), (refs) =>
-        JSON.stringify(refs.get(serverId) ?? []),
-      ),
+      Effect.gen(function* () {
+        const found = yield* Effect.orDie(servers.readMany([serverId], "without-tools"));
+        const refs = yield* Effect.orDie(secrets.refs("mcp-server", [serverId]));
+        return JSON.stringify([found.get(serverId)?.revision, refs.get(serverId) ?? []]);
+      }),
 
     /**
      * Stores a pasted token for the server, replacing the one it holds. The

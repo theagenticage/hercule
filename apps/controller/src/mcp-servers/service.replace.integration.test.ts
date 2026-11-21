@@ -26,6 +26,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import type { SetUpController } from "../workflows/testing";
 import {
+  countNotifications,
   createProject,
   createServer,
   eventually,
@@ -172,7 +173,7 @@ describe("Replace", () => {
     });
   });
 
-  it("does not use an upstream session that was opened before it", async () => {
+  it("sends nothing more on the upstream session opened before it, and replaces that session at the next call", async () => {
     await withRig(
       async ({ controller, fake, connect }) => {
         const connectionId = await connect();
@@ -180,12 +181,30 @@ describe("Replace", () => {
         expect((await requestCheck(controller, id)).status).toBe(200);
         await waitForResult(controller);
         expect((await callEcho(controller, id))._tag).toBe("Success");
+        const oldSessionId = fake.requests.find(
+          (request) => request.method === "tools/call",
+        )?.sessionId;
+        expect(oldSessionId).not.toBeNull();
+        const requestsOfOldSession = fake.requests.filter(
+          (request) => request.sessionId === oldSessionId,
+        ).length;
 
         await readRecord(await requestUpdate(controller, id, replaceSource(connectionId)));
         await eventually(
           () => readRow(controller),
           (row) => row.status === "ready" && row.protocol_version !== null,
         );
+
+        // The controller closes the old session when the Replace commits. It
+        // sends no DELETE for it, because the revision that session was opened
+        // with is gone and a request of it may carry its token only until
+        // then (spec 21 section 5.2). Nothing reaches the old session, and no
+        // call has asked for a new one yet.
+        expect(fake.requests.filter((request) => request.sessionId === oldSessionId)).toHaveLength(
+          requestsOfOldSession,
+        );
+        expect(fake.requests.filter((request) => request.method === "tools/call")).toHaveLength(1);
+
         expect((await callEcho(controller, id))._tag).toBe("Success");
 
         const calls = fake.requests.filter((request) => request.method === "tools/call");
@@ -222,6 +241,48 @@ describe("Replace", () => {
       const refusal = await readRefusal(await requestUpdate(controller, id, {}), 400);
 
       expect(refusal.code).toBe("validation");
+    });
+  });
+});
+
+describe("a Replace of a server whose Notification is open", () => {
+  it("raises no second Notification while the server fails, and a new one after it was ready", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const connectionId = await connect();
+      fake.authorize = () => false;
+      const id = await insertUrlServerAt(controller, fake.url);
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "needs-sign-in",
+      );
+      expect(await countNotifications(controller)).toBe(1);
+
+      // The Connection's endpoint fails: the episode that began on the address goes on.
+      fake.authorize = () => true;
+      fake.refuseWithStatus = 503;
+      await readRecord(await requestUpdate(controller, id, replaceSource(connectionId)));
+      const failing = await eventually(
+        () => readRow(controller),
+        (row) => row.status !== "checking" && row.status !== "needs-sign-in",
+      );
+      expect(failing.status).toBe("unreachable");
+      expect(await countNotifications(controller)).toBe(1);
+
+      // Ready ends the episode, so the next failure raises a new Notification.
+      fake.refuseWithStatus = undefined;
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "ready",
+      );
+      fake.refuseWithStatus = 503;
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "unreachable",
+      );
+      expect(await countNotifications(controller)).toBe(2);
     });
   });
 });

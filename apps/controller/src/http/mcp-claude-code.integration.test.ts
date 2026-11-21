@@ -18,8 +18,8 @@
  * which answers with that tool call.
  *
  * A second group runs the CLI against servers added by address, one with no
- * sign-in and one with a token, and checks that the token reaches no output
- * of the CLI and no file under its folders.
+ * sign-in and one with a token, and checks that the token is in neither the
+ * messages the CLI wrote to its stdout nor any file under its config folders.
  *
  * A recording proxy sits between the CLI and the controller and keeps what the
  * gateway receives: methods, revisions, MCP session ids, and the messages the
@@ -617,7 +617,7 @@ describe.skipIf(claude === undefined)("the real Claude Code on servers added by 
     await tokened.stop();
   });
 
-  it("calls a tool of a server with no sign-in and of one with a token, and the token reaches nothing the CLI holds", async () => {
+  it("calls a tool of a server with no sign-in and of one with a token, and the token is in neither the CLI's stdout messages nor its config folder", async () => {
     await withFleet(async (arranged) => {
       const controller = {
         harness: arranged.harness,
@@ -690,6 +690,8 @@ describe.skipIf(claude === undefined)("the real Claude Code on servers added by 
               ),
               "the CLI's record of its tool use",
             ).toBe(true);
+            // Only these two surfaces are searched for the token: the messages
+            // the CLI wrote to its stdout, and the files under its config folders.
             const traces = running.readTraces();
             expect(traces.output).not.toContain(TOKEN);
             expect(traces.files).not.toContain(TOKEN);

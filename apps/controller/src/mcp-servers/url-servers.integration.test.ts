@@ -120,6 +120,15 @@ const replaceToken = (controller: SetUpController, serverId: string, token: stri
     }),
   );
 
+/** Gives the server a token through the public `setToken` operation, which raises its revision. */
+const setTokenThroughApi = async (controller: SetUpController, serverId: string, token: string) => {
+  const response = await send("POST", controller.base, `/api/v1/mcp-servers/${serverId}/token`, {
+    body: { token },
+    token: controller.token,
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
 describe("the check of a server added by URL", () => {
   it("lists the tools with no sign-in, sending no Authorization header", async () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
@@ -427,7 +436,7 @@ describe("the sign-in a request carries", () => {
     });
   });
 
-  it("is not the one a request that continues an exchange carries, when the token was replaced after the exchange began", async () => {
+  it("has a revision-bound read that refuses a request continuing an exchange begun before the token was replaced, and gives the new token to one that begins after", async () => {
     await withUrlRig(async ({ controller, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "old-token" });
       const signIns = await readSignIns(controller);
@@ -458,6 +467,21 @@ describe("the sign-in a request carries", () => {
     });
   });
 
+  it("changes its version on every new sign-in through setToken, even to the same token", async () => {
+    await withUrlRig(async ({ controller, insertUrlServer }) => {
+      const serverId = await insertUrlServer({ token: "old-token" });
+      const signIns = await readSignIns(controller);
+      const first = await Effect.runPromise(signIns.readVersion(serverId));
+
+      await setTokenThroughApi(controller, serverId, "old-token");
+      const second = await Effect.runPromise(signIns.readVersion(serverId));
+      await setTokenThroughApi(controller, serverId, "old-token");
+      const third = await Effect.runPromise(signIns.readVersion(serverId));
+
+      expect(new Set([first, second, third]).size).toBe(3);
+    });
+  });
+
   it("changes its version when the token changes, and is removed with every secret of the server", async () => {
     await withUrlRig(async ({ controller, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "old-token" });
@@ -479,6 +503,35 @@ describe("the sign-in a request carries", () => {
 
       expect(await Effect.runPromise(signIns.readToken(serverId, "token"))).toBeUndefined();
     });
+  });
+});
+
+describe("a call that a new sign-in overtakes", () => {
+  it("sends no request with the old token once setToken committed, while the call waited for the server's answer", async () => {
+    await withUrlRig(
+      async ({ controller, fake, insertUrlServer }) => {
+        const serverId = await insertUrlServer({ token: "old-token" });
+        await waitForResult(controller);
+        const requestsBefore = fake.requests.length;
+        const release = fake.hold("initialize");
+
+        const call = callAs(controller, serverId);
+        await fake.waitForRequests(requestsBefore + 1);
+        const heldIndex = fake.requests.length;
+        await setTokenThroughApi(controller, serverId, "new-token");
+        release();
+        const result = await call;
+
+        expect(result._tag).toBe("Failure");
+        expect(requestsOf(fake, "tools/call")).toEqual([]);
+        expect(
+          fake.requests
+            .slice(heldIndex)
+            .filter((request) => request.authorization === "Bearer old-token"),
+        ).toEqual([]);
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
   });
 });
 
@@ -578,6 +631,38 @@ describe("a credential the server echoes", () => {
       },
       { fake: { tools: [{ name: "echo", description: "Echoes its text" }] } },
     );
+  });
+
+  it("is replaced by an error result when removing the credential breaks the result's shape", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      // The shortest token that is accepted is 8 characters, and this one is
+      // the name of the key `mimeType`, which an image result requires.
+      const serverId = await insertUrlServer({ token: "mimeType" });
+      await waitForResult(controller);
+      fake.intercept = ({ method, id }) =>
+        method === "tools/call"
+          ? Response.json({
+              jsonrpc: "2.0",
+              id,
+              result: { content: [{ type: "image", data: "aGk=", mimeType: "image/png" }] },
+            })
+          : undefined;
+
+      const result = await callAs(controller, serverId);
+
+      expect(result).toMatchObject({
+        _tag: "Success",
+        success: {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "The server's answer held the credential and could not be cleaned.",
+            },
+          ],
+        },
+      });
+    });
   });
 
   it("is removed from the error a tool answers with", async () => {

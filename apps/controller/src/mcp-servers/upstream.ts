@@ -91,6 +91,7 @@ export const TOOL_LIST_TOO_LARGE = "The server's tool list is larger than 4 MiB"
 
 /** Returns the tool as a decoded `McpSchema.Tool`, or `None` when it does not fit that schema. */
 const decodeTool = Schema.decodeUnknownOption(McpSchema.Tool);
+const decodeCallResult = Schema.decodeUnknownOption(McpSchema.CallToolResult);
 
 /**
  * Copies a tool as plain JSON, keeping the whole definition so the gateway can
@@ -266,6 +267,9 @@ const UNSUPPORTED_ANSWER =
 /** The answer to the agent when the arguments or the server's answer do not fit the tool's description. */
 const MALFORMED_CALL_ANSWER =
   "the call's arguments or the server's answer did not fit what the tool declares, so it was not completed. Check the arguments";
+
+/** The answer to the agent when removing credential values broke the server's answer to a call. */
+const UNCLEANABLE_ANSWER = "The server's answer held the credential and could not be cleaned.";
 
 /** Builds the tool result of a call that failed: `text` tells the agent what happened. */
 export const buildErrorResult = (text: string): McpSchema.CallToolResult =>
@@ -1014,7 +1018,16 @@ export const openUpstream = (
           })
           .pipe(
             Effect.provideService(CurrentUpstreamCall, state),
-            Effect.map((result) => removeSentValues(result, state)),
+            Effect.map((result) => {
+              const scrubbed = removeSentValues(result, state);
+              // Removing a value from a key can break the result: a key the
+              // schema requires, such as `mimeType`, may be a short token. A
+              // result that no longer decodes is replaced, like a stored tool
+              // that no longer decodes is left out.
+              return scrubbed === result || Option.isSome(decodeCallResult(scrubbed))
+                ? scrubbed
+                : buildErrorResult(UNCLEANABLE_ANSWER);
+            }),
             Effect.catch((error) => decideCallFailure(error, state)),
           );
       },

@@ -533,7 +533,7 @@ const make = Effect.gen(function* () {
      * Moves a server added by address onto a plugin's Connection: the source
      * columns become the plugin's, the address and the sign-in columns are
      * cleared, and the server goes back to `checking`, with no protocol
-     * revision, no failed checks, an open Notification episode closed, and
+     * revision, no failed checks, the Notification episode kept, and
      * the next check due at `at`. The stored tools stay until the next
      * successful check replaces them. `revision` goes up, so a check that
      * started before cannot write its result and upstream sessions opened
@@ -558,7 +558,7 @@ const make = Effect.gen(function* () {
               url = NULL, normalized_url = NULL, sign_in = NULL, sign_in_offered = NULL,
               connection_generation = ${source.connectionGeneration},
               status = 'checking', status_detail = NULL, status_cause = NULL,
-              protocol_version = NULL, failed_checks = 0, notified_status = NULL,
+              protocol_version = NULL, failed_checks = 0,
               next_check_at = ${source.at}, revision = revision + 1, updated_at = ${source.at}
           WHERE id = ${uuidFromString(id)}
         `,
