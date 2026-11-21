@@ -35,6 +35,7 @@ import type {
   UnknownItemDetail,
   Usage,
 } from "@hercule/protocol";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import {
   buildSubagentRegistry,
   cleanSubagentId,
@@ -403,7 +404,7 @@ export const classifyTool = (name: string): ItemKind =>
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
 
 /** What Claude Code puts in front of the name of every tool of the MCP Gateway's entry, `tools`. */
-const GATEWAY_TOOL_PREFIX = "mcp__tools__";
+const GATEWAY_TOOL_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
 
 /**
  * Splits the name of a gateway tool into the MCP Server it belongs to and the
