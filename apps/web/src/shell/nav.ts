@@ -31,11 +31,16 @@ export const ORCHESTRATION_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
   { to: "/settings/profile", label: "Settings", section: true },
 ];
 
-/** The nine Settings screens, in the order the screen lists them. */
+/**
+ * The ten Settings screens, in the order the screen lists them. MCP servers
+ * follows Assistants, where the desktop app puts it after Skills: both are
+ * controller state the crew works with, and the web app has no Skills screen.
+ */
 export const SETTINGS_NAV: readonly { readonly to: string; readonly label: string }[] = [
   { to: "/settings/profile", label: "Profile" },
   { to: "/settings/threads", label: "Threads" },
   { to: "/settings/assistants", label: "Assistants" },
+  { to: "/settings/mcp-servers", label: "MCP servers" },
   { to: "/settings/identities", label: "Identities" },
   { to: "/settings/permission-profiles", label: "Permission profiles" },
   { to: "/settings/secrets", label: "Secrets" },

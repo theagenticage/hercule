@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { SETTINGS_NAV } from "../../shell";
 
-/** The layout of the nine settings screens: one sub-navigation above the current screen. */
+/** The layout of the ten settings screens: one sub-navigation above the current screen. */
 export const Route = createFileRoute("/_shell/settings")({
   component: SettingsLayout,
 });
