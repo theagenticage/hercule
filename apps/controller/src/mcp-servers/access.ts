@@ -4,10 +4,11 @@
  *
  * A server can be reached in more than one way. A plugin server is reached
  * at the origin its plugin's contribution names, with the credential of a
- * Connection. `ServerAccess` hides which way it is, so `checks.ts`, `calls.ts`
- * and `upstream.ts` never name a contribution or a Connection to send a
- * request. Each way is one adapter in this file, and `resolveServerAccess`
- * picks it.
+ * Connection. A server added by URL is reached at its own address, with its
+ * own sign-in. `ServerAccess` hides which way it is, so `checks.ts`,
+ * `calls.ts` and `upstream.ts` never name a contribution, a Connection or a
+ * sign-in to send a request. Each way is one adapter in this file, and
+ * `resolveServerAccess` picks it.
  *
  * Only a check or a call resolves an access, at the point it is about to send.
  * The verdicts of the catalogue (`isServable`, `decideCallRefusal`,
@@ -17,13 +18,16 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  computeCredentialsIdentity,
   ConnectionCannotRefresh,
   ConnectionCredentialsUnavailable,
   type ConnectionTypes,
   type RefreshGuard,
   type StoredConnection,
 } from "../connections";
-import { judgeDependencies, type McpServerAvailabilityView } from "./catalogue";
+import { judgeDependencies, type McpServerAvailabilityView, type UsablePlugin } from "./catalogue";
+import type { StoredMcpServerAvailability } from "./repository";
+import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
 /**
  * What one request to an MCP Server carries.
@@ -233,37 +237,37 @@ const buildUnavailableFromConnection = (
 };
 
 /**
- * Returns the credentials generation a server's Connection is at now, or
- * `undefined` when the server has none. A caller compares it with the
+ * The credentials generation of a server added by URL. Every change of such a
+ * server's sign-in raises the server's `revision`, which replaces the upstream
+ * sessions opened before it, so the generation never needs to move.
+ */
+const URL_SERVER_CREDENTIALS_GENERATION = 0;
+
+/**
+ * Returns the credentials generation a server is at now, or `undefined` when
+ * a plugin server's Connection is gone. A caller compares it with the
  * `generation` an upstream session was opened with, without resolving an
- * access, because it only looks at a session and sends nothing.
+ * access, because it only looks at a session and sends nothing. It returns
+ * the same generation the server's access holds.
  */
 export const readCredentialsGeneration = (
   view: Pick<McpServerAvailabilityView, "dependencies">,
 ): number | undefined =>
   view.dependencies.kind === "plugin"
     ? view.dependencies.connection?.credentialsGeneration
-    : undefined;
+    : URL_SERVER_CREDENTIALS_GENERATION;
 
 /**
- * Resolves how to reach a server from the view of it. Returns `unusable`, with
- * what the server shows, when its plugin or its Connection cannot serve it
- * (`judgeDependencies`), or when its Connection is not of the type its
- * contribution needs: that check stays here, before any send, because the
- * credentials of a Connection of another type would go to this server's
- * origin. Otherwise returns the contribution's endpoint and the Connection's
- * credentials.
- *
- * It reads nothing: the view holds what it needs, and the returned
- * credentials read the Connection when they are asked.
+ * Builds the access of a plugin server: the contribution's endpoint and the
+ * Connection's credentials. Returns `unusable` when its Connection is not of
+ * the type its contribution needs. That check stays here, before any send,
+ * because the credentials of a Connection of another type would go to this
+ * server's origin.
  */
-export const resolveServerAccess = (
-  view: McpServerAvailabilityView,
+const resolvePluginAccess = (
+  { contribution, connection }: UsablePlugin,
   connectionTypes: ConnectionTypes["Service"],
 ): ServerAccess => {
-  const judged = judgeDependencies(view.dependencies);
-  if (judged._tag === "unusable") return judged;
-  const { contribution, connection } = judged;
   if (connection.type !== contribution.connectionType) {
     return {
       _tag: "unusable",
@@ -313,4 +317,102 @@ export const resolveServerAccess = (
       }),
     },
   };
+};
+
+/**
+ * Builds the access of a server added by URL: requests go to its own address,
+ * with its pasted token as a bearer token when it holds one. There is nothing
+ * to refresh, so a token the server refuses stays refused until the user
+ * replaces it, and the server then needs sign-in.
+ *
+ * The access is made for the `revision` the server had when it was resolved.
+ * Every change of a URL server's sign-in raises the revision, so a request
+ * that only continues an exchange, or ends an upstream session, never carries
+ * a token that replaced the one the session was opened with
+ * (`readWithoutRefresh`).
+ */
+const resolveUrlAccess = (
+  server: StoredMcpServerAvailability,
+  signIns: McpServerSignIns,
+): UsableAccess => {
+  const { source, name, id, revision } = server;
+  if (source.kind !== "url") {
+    // The dependencies of a view are read from its server's source, so a URL
+    // access is only asked for a server added by URL.
+    throw new Error(`MCP server ${id} has no URL to reach it at`);
+  }
+  const { url, signIn } = source;
+  const toUpstream = (token: string | undefined): UpstreamCredentials => {
+    const credentials = token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token };
+    return {
+      credentials,
+      secretNames: [SIGN_IN_TOKEN_SECRET],
+      config: {},
+      identity: computeCredentialsIdentity(credentials),
+    };
+  };
+  return {
+    _tag: "usable",
+    endpoint: {
+      origin: new URL(url).origin,
+      displayName: name,
+      buildRequest: ({ credentials }) => {
+        const token = credentials[SIGN_IN_TOKEN_SECRET];
+        return { url, headers: token === undefined ? {} : { Authorization: `Bearer ${token}` } };
+      },
+    },
+    credentials: {
+      generation: URL_SERVER_CREDENTIALS_GENERATION,
+      credentialsRecordId: id,
+      // The guard protects a refresh, and this access never refreshes.
+      readForUse: () => Effect.map(signIns.readToken(id, signIn), toUpstream),
+      refreshAfterRejection: () =>
+        Effect.fail(
+          new ServerCredentialsCannotRefresh({
+            message: `${name} holds a sign-in that cannot be renewed`,
+          }),
+        ),
+      readWithoutRefresh: signIns.readTokenWhileRevisionIs(id, signIn, revision).pipe(
+        Effect.map(toUpstream),
+        Effect.mapError(
+          () =>
+            new ServerCredentialsUnavailable({
+              status: "error",
+              detail: `The sign-in of ${name} was replaced`,
+            }),
+        ),
+      ),
+      readVersion: signIns.readVersion(id),
+      describeRejected: () => ({
+        status: "needs-sign-in",
+        detail:
+          signIn === "none"
+            ? `${name} asks for sign-in: paste a token or sign in in Settings > MCP servers`
+            : `${name} refused its sign-in: paste a new token or sign in again in Settings > MCP servers`,
+      }),
+    },
+  };
+};
+
+/**
+ * Resolves how to reach a server from the view of it. Returns `unusable`, with
+ * what the server shows, when a plugin server's plugin or Connection cannot
+ * serve it (`judgeDependencies`), or when its Connection is not of the type
+ * its contribution needs. Otherwise returns the server's endpoint and
+ * credentials: a plugin server's from its contribution and Connection, and a
+ * server added by URL's from its address and its own sign-in.
+ *
+ * It reads nothing: the view holds what it needs, and the returned
+ * credentials read the sign-in when they are asked.
+ */
+export const resolveServerAccess = (
+  view: McpServerAvailabilityView,
+  connectionTypes: ConnectionTypes["Service"],
+  signIns: McpServerSignIns,
+): ServerAccess => {
+  const judged = judgeDependencies(view.dependencies);
+  if (judged._tag === "unusable") return judged;
+  return judged.kind === "plugin"
+    ? resolvePluginAccess(judged, connectionTypes)
+    : resolveUrlAccess(view.server, signIns);
 };

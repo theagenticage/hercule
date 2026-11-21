@@ -36,16 +36,20 @@ import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
+import type { Secrets } from "../secrets";
 import { resolveServerAccess, type UpstreamCredentials, type UpstreamEndpoint } from "./access";
 import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
+import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
-  MAX_UPSTREAM_MESSAGE_BYTES,
+  MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
   runWithCredentials,
+  toStoredTool,
+  TOOL_LIST_TOO_LARGE,
   UPSTREAM_WORK_DEADLINE,
   type UpstreamError,
 } from "./upstream";
@@ -112,6 +116,8 @@ type CheckResult =
       readonly detail: string;
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
+      /** What a server added by URL said it accepts when it refused the request, when it did. */
+      readonly signInOffered?: "oauth" | "token";
     };
 
 /** What a check fails with when the server changed after the check started, so its outcome is dropped. */
@@ -121,20 +127,14 @@ const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
   detail: string,
   cause: "plugin" | "connection" | null = null,
-): CheckResult => ({ _tag: "failed", status, detail, cause });
-
-/** Copies a tool as plain JSON, keeping the whole definition so the gateway can serve it. */
-const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
-  JSON.parse(
-    JSON.stringify({
-      name: tool.name,
-      title: tool.title,
-      description: tool.description ?? "",
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    }),
-  ) as StoredMcpTool;
+  signInOffered?: "oauth" | "token",
+): CheckResult => ({
+  _tag: "failed",
+  status,
+  detail,
+  cause,
+  ...(signInOffered === undefined ? {} : { signInOffered }),
+});
 
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
@@ -164,6 +164,7 @@ const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
+  const signIns = yield* mcpServerSignIns;
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
 
@@ -219,7 +220,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
       // Resolved here, at use, because the check is about to send.
-      const access = resolveServerAccess({ server, dependencies }, connectionTypes);
+      const access = resolveServerAccess({ server, dependencies }, connectionTypes, signIns);
       if (access._tag === "unusable") {
         return buildFailedResult(access.status, access.detail, access.cause);
       }
@@ -254,9 +255,13 @@ const make = Effect.gen(function* () {
               buildFailedResult("unreachable", "The server did not answer in time"),
             onSome: ({ tools, revision }): CheckResult => {
               const stored = tools.map(toStoredTool);
+              // The listing stops early when the server's definitions pass the
+              // limit (`limitToolListing`). The list is measured again here,
+              // as it is stored, because removing credentials from it can make
+              // it longer.
               return new TextEncoder().encode(JSON.stringify(stored)).length >
-                MAX_UPSTREAM_MESSAGE_BYTES
-                ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
+                MAX_TOOL_DEFINITIONS_BYTES
+                ? buildFailedResult("error", TOOL_LIST_TOO_LARGE)
                 : { _tag: "ready", tools: stored, revision };
             },
           }),
@@ -264,7 +269,14 @@ const make = Effect.gen(function* () {
         Effect.catchTags({
           UpstreamError: (failure) => {
             const { status, detail } = buildStatusFromFailure(failure, access.credentials);
-            return Effect.succeed(buildFailedResult(status, detail));
+            // Only a server added by URL has a sign-in to offer.
+            const signInOffered =
+              failure.reason === "unauthorized" && server.source.kind === "url"
+                ? failure.offersOAuth === true
+                  ? "oauth"
+                  : "token"
+                : undefined;
+            return Effect.succeed(buildFailedResult(status, detail, null, signInOffered));
           },
           ServerCredentialsUnavailable: ({ status, detail, cause }) =>
             Effect.succeed(buildFailedResult(status, detail, cause)),
@@ -357,5 +369,5 @@ const make = Effect.gen(function* () {
 export const McpServerChecksLayer: Layer.Layer<
   McpServerChecks,
   never,
-  SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier
+  SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier | Secrets
 > = Layer.effect(McpServerChecks)(make).pipe(Layer.provide(FetchHttpClient.layer));

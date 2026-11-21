@@ -58,6 +58,7 @@ import {
 import { withFleet } from "../workspaces/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 import type { McpServerView, PluginState } from "./catalogue";
+import { mcpServerRepository } from "./repository";
 
 /**
  * One tool the fake lists. A call answers as `answer` says:
@@ -151,6 +152,8 @@ export interface FakeUpstream {
    * default lets every request in.
    */
   authorize: (authorization: string | null, method: string) => boolean;
+  /** The `WWW-Authenticate` header of the HTTP 401 that `authorize` makes. The default is a bare `Bearer`. */
+  challenge: string;
   /** When set, every request gets a 302 to this address instead of an answer. */
   redirectTo: string | undefined;
   /** When set, every request gets this HTTP status and an empty body instead of an answer. */
@@ -314,7 +317,7 @@ export const startFakeUpstream = (
             : !fake.authorize(recorded.authorization, method)
               ? new Response("unauthorized", {
                   status: 401,
-                  headers: { "www-authenticate": "Bearer" },
+                  headers: { "www-authenticate": fake.challenge },
                 })
               : (fake.intercept({
                   method,
@@ -344,6 +347,7 @@ export const startFakeUpstream = (
     origin: `http://127.0.0.1:${String(server.port)}`,
     requests,
     authorize: () => true,
+    challenge: "Bearer",
     redirectTo: undefined,
     refuseWithStatus: undefined,
     intercept: () => undefined,
@@ -476,6 +480,7 @@ export interface McpServerRow {
   readonly next_check_at: string | null;
   readonly updated_at: string;
   readonly notified_status: string | null;
+  readonly sign_in_offered: string | null;
 }
 
 /** Runs a statement on the controller's database in its own transaction, for state no operation reaches. */
@@ -514,7 +519,7 @@ export const readRow = async (controller: SetUpController): Promise<McpServerRow
     controller,
     sql<McpServerRow>`SELECT status, status_detail, status_cause, tools, checked_at,
                              protocol_version, revision, connection_generation, failed_checks,
-                             next_check_at, updated_at, notified_status
+                             next_check_at, updated_at, notified_status, sign_in_offered
                       FROM mcp_servers`,
   );
   return rows[0]!;
@@ -762,6 +767,75 @@ export const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOpt
   }
 };
 
+/** What `insertUrlServer` stores: a pasted token makes the server's sign-in `token`, and none leaves it `none`. */
+export interface UrlServerFacts {
+  readonly token?: string;
+  readonly name?: string;
+}
+
+/** What `withUrlRig` hands the test. */
+export interface UrlRig {
+  readonly controller: SetUpController;
+  readonly fake: FakeUpstream;
+  /**
+   * Stores a server added by URL, at the fake's address, with its token if
+   * there is one, and returns its id. The server's first check starts at the
+   * scheduler's next look. No operation creates such a server yet, so the test
+   * writes the rows one would.
+   */
+  readonly insertUrlServer: (facts?: UrlServerFacts) => Promise<string>;
+}
+
+/**
+ * Starts the fake outside server and a controller with no plugin for it, whose
+ * scheduler looks for due checks every 25 milliseconds.
+ */
+export const withUrlRig = async (
+  body: (rig: UrlRig) => Promise<void>,
+  options: Pick<RigOptions, "fake" | "checkDeadline"> = {},
+) => {
+  const fake = await startFakeUpstream(options.fake);
+  try {
+    await withSetUpController(
+      async (controller) => {
+        const insertUrlServer = ({ token, name = "remote" }: UrlServerFacts = {}) =>
+          runSql(
+            controller,
+            Effect.gen(function* () {
+              const servers = yield* mcpServerRepository;
+              const at = yield* nowIso;
+              const server = yield* servers.insertUrl({
+                name,
+                url: fake.url,
+                normalizedUrl: fake.url,
+                signIn: token === undefined ? "none" : "token",
+                at,
+              });
+              if (token !== undefined) {
+                yield* controller.harness.secrets.set(
+                  { kind: "mcp-server", id: server.id },
+                  "token",
+                  Redacted.make(token),
+                );
+              }
+              return server.id;
+            }).pipe(Effect.provideService(SqlClient.SqlClient, controller.harness.sql)),
+          );
+        await body({ controller, fake, insertUrlServer });
+      },
+      [],
+      {
+        mcpServerCheckInterval: Duration.millis(25),
+        ...(options.checkDeadline === undefined
+          ? {}
+          : { mcpServerCheckDeadline: Duration.millis(options.checkDeadline) }),
+      },
+    );
+  } finally {
+    await fake.stop();
+  }
+};
+
 export const refreshedToken = () =>
   buildJsonResponse({
     access_token: "refreshed-token",
@@ -781,6 +855,8 @@ export interface ViewFacts {
   readonly connection?: ConnectionStatus | "gone";
   /** The type of the Connection. The plugin of the view needs `acme/desk`. */
   readonly connectionType?: string;
+  /** Makes the server one added by URL, with this sign-in. It has no plugin or Connection. */
+  readonly url?: { readonly signIn: "none" | "token" | "oauth" };
 }
 
 /** Builds the view of one MCP Server from the facts given, without a database. */
@@ -791,18 +867,28 @@ export const buildMcpServerView = ({
   plugin = "active",
   connection = "connected",
   connectionType = "acme/desk",
+  url,
 }: ViewFacts = {}): McpServerView => {
   const at = "2026-01-01T00:00:00.000Z";
   return {
     server: {
       id: "server-1",
       name: "desk",
-      source: {
-        kind: "plugin",
-        contributionId: "acme/desk",
-        connectionId: "connection-1",
-        accountId: "desk-1",
-      },
+      source:
+        url === undefined
+          ? {
+              kind: "plugin",
+              contributionId: "acme/desk",
+              connectionId: "connection-1",
+              accountId: "desk-1",
+            }
+          : {
+              kind: "url",
+              url: "https://desk.example/mcp",
+              normalizedUrl: "https://desk.example/mcp",
+              signIn: url.signIn,
+              signInOffered: null,
+            },
       enabled,
       status,
       statusDetail: null,
@@ -818,49 +904,52 @@ export const buildMcpServerView = ({
       createdAt: at,
       updatedAt: at,
     },
-    dependencies: {
-      kind: "plugin",
-      connection:
-        connection === "gone"
-          ? undefined
-          : {
-              id: "connection-1",
-              pluginId: "acme",
-              type: connectionType,
-              label: "work",
-              displayName: "Desk",
-              accountId: "desk-1",
-              status: connection,
-              statusDetail: undefined,
-              warning: undefined,
-              labels: [],
-              config: {},
-              feedIntervals: {},
-              intake: NO_INTAKE_OVERRIDES,
-              credentialsGeneration: 0,
-              createdAt: at,
-              updatedAt: at,
-            },
-      plugin:
-        plugin === "active"
-          ? {
-              _tag: "active",
-              contribution: {
-                id: "acme/desk",
-                pluginId: "acme",
-                displayName: "Desk",
-                description: "",
-                connectionType: "acme/desk",
-                origin: "https://desk.example",
-                buildUpstreamRequest: () => {
-                  throw new Error("a test of a view never builds a request");
-                },
-              },
-            }
-          : plugin === "missing"
-            ? { _tag: "missing" }
-            : { _tag: plugin, pluginName: "Desk" },
-    },
+    dependencies:
+      url !== undefined
+        ? { kind: "url" }
+        : {
+            kind: "plugin",
+            connection:
+              connection === "gone"
+                ? undefined
+                : {
+                    id: "connection-1",
+                    pluginId: "acme",
+                    type: connectionType,
+                    label: "work",
+                    displayName: "Desk",
+                    accountId: "desk-1",
+                    status: connection,
+                    statusDetail: undefined,
+                    warning: undefined,
+                    labels: [],
+                    config: {},
+                    feedIntervals: {},
+                    intake: NO_INTAKE_OVERRIDES,
+                    credentialsGeneration: 0,
+                    createdAt: at,
+                    updatedAt: at,
+                  },
+            plugin:
+              plugin === "active"
+                ? {
+                    _tag: "active",
+                    contribution: {
+                      id: "acme/desk",
+                      pluginId: "acme",
+                      displayName: "Desk",
+                      description: "",
+                      connectionType: "acme/desk",
+                      origin: "https://desk.example",
+                      buildUpstreamRequest: () => {
+                        throw new Error("a test of a view never builds a request");
+                      },
+                    },
+                  }
+                : plugin === "missing"
+                  ? { _tag: "missing" }
+                  : { _tag: plugin, pluginName: "Desk" },
+          },
   };
 };
 

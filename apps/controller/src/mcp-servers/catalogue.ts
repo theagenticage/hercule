@@ -27,6 +27,7 @@ import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import {
   mcpServerRepository,
   type McpServerColumns,
+  type McpServerStoredSource,
   type StoredMcpServer,
   type StoredMcpServerAvailability,
 } from "./repository";
@@ -81,32 +82,33 @@ export interface Unusable {
   readonly cause: "plugin" | "connection";
 }
 
-/** A server whose plugin is active and whose Connection exists and is not `needs-reauth` or `disabled`. */
-export interface Usable {
+/** A plugin server whose plugin is active and whose Connection exists and is not `needs-reauth` or `disabled`. */
+export interface UsablePlugin {
   readonly _tag: "usable";
+  readonly kind: "plugin";
   readonly contribution: RegisteredMcpServer;
   readonly connection: StoredConnection;
 }
 
+/** A server added by URL. It depends on nothing outside its row, so nothing can make it unusable. */
+export interface UsableUrl {
+  readonly _tag: "usable";
+  readonly kind: "url";
+}
+
+/** A server that can be reached, whichever way it was added. */
+export type Usable = UsablePlugin | UsableUrl;
+
 /**
- * Judges whether a server's plugin and Connection can serve it. When they
- * cannot, returns what the server shows: its plugin is missing or switched
- * off or failed to start, or its Connection is gone, `disabled` or
+ * Judges whether the things a server depends on can serve it. A server added
+ * by URL has none, so it is always usable. For a plugin server, returns what
+ * the server shows when it cannot be served: its plugin is missing or
+ * switched off or failed to start, or its Connection is gone, `disabled` or
  * `needs-reauth`. The check and the follower both use it, so they show the
  * same words.
  */
 export const judgeDependencies = (dependencies: McpServerDependencies): Usable | Unusable => {
-  // Temporary: no server can be added by URL yet, so no row reaches this
-  // branch. The commit that lets a server be added by URL replaces it with
-  // the verdict for such a server.
-  if (dependencies.kind === "url") {
-    return {
-      _tag: "unusable",
-      status: "error",
-      detail: "This server was added by URL, which this version cannot reach yet",
-      cause: "plugin",
-    };
-  }
+  if (dependencies.kind === "url") return { _tag: "usable", kind: "url" };
   const { plugin, connection } = dependencies;
   switch (plugin._tag) {
     case "missing":
@@ -157,7 +159,7 @@ export const judgeDependencies = (dependencies: McpServerDependencies): Usable |
       cause: "connection",
     };
   }
-  return { _tag: "usable", contribution: plugin.contribution, connection };
+  return { _tag: "usable", kind: "plugin", contribution: plugin.contribution, connection };
 };
 
 /** One MCP Server and what it depends on, read at one moment. */
@@ -195,6 +197,9 @@ interface Unavailable {
  * 3. its Connection is not of the type its plugin's contribution needs:
  *    `error`, because the credentials would go to the wrong origin;
  * 4. its stored status is not `ready`.
+ *
+ * A server added by URL has no plugin or Connection, so only the first and the
+ * last apply to it.
  */
 const findUnavailable = ({
   server,
@@ -203,7 +208,9 @@ const findUnavailable = ({
   if (!server.enabled) return { reason: "switched-off" };
   const judged = judgeDependencies(dependencies);
   if (judged._tag === "unusable") return { reason: judged.status, detail: judged.detail };
-  if (judged.connection.type !== judged.contribution.connectionType) return { reason: "error" };
+  if (judged.kind === "plugin" && judged.connection.type !== judged.contribution.connectionType) {
+    return { reason: "error" };
+  }
   return server.status === "ready" ? null : { reason: server.status };
 };
 
@@ -231,15 +238,29 @@ export interface CallRefusal {
   readonly message: string;
 }
 
-/** Returns the line the agent reads when a call to the server named `name` is refused for `reason`. */
-export const describeRefusal = (reason: ServerUnavailableReason, name: string): string => {
+/**
+ * Returns what the user does to sign in to a server, as the end of a
+ * sentence: a plugin server is signed in to through its Connection, and a
+ * server added by URL through its own settings.
+ */
+export const describeSignInFix = (sourceKind: McpServerStoredSource["kind"]): string =>
+  sourceKind === "plugin"
+    ? "reconnect it in Settings > Connections"
+    : "sign in to it in Settings > MCP servers";
+
+/** Returns the line the agent reads when a call to `server` is refused for `reason`. */
+export const describeRefusal = (
+  reason: ServerUnavailableReason,
+  server: Pick<StoredMcpServerAvailability, "name" | "source">,
+): string => {
+  const { name } = server;
   switch (reason) {
     case "switched-off":
       return `${name} is switched off. Ask the user to switch it on in Settings.`;
     case "checking":
       return `${name} is still being checked. Try again in a minute.`;
     case "needs-sign-in":
-      return `${name} needs sign-in. Ask the user to reconnect it in Settings > Connections.`;
+      return `${name} needs sign-in. Ask the user to ${describeSignInFix(server.source.kind)}.`;
     case "unreachable":
       return `${name} could not be reached. Try again later.`;
     case "error":
@@ -262,7 +283,7 @@ export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal 
     message:
       detail !== undefined && reason === "error"
         ? `${name} is not available: ${detail}.`
-        : describeRefusal(reason, name),
+        : describeRefusal(reason, view.server),
   };
 };
 

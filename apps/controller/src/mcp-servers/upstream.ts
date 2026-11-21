@@ -49,7 +49,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import { McpClient, type McpClientError, McpProtocol, McpSchema } from "effect/ai";
+import { McpClient, McpClientError, McpProtocol, McpSchema } from "effect/ai";
 import { VERSION } from "@hercule/home/version";
 import type { RefreshGuard } from "../connections";
 import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
@@ -61,6 +61,7 @@ import {
   type UpstreamEndpoint,
 } from "./access";
 import { removeCredentialValues } from "./credential-values";
+import type { StoredMcpTool } from "./repository";
 
 /**
  * How long one whole piece of work against an outside server may take: a
@@ -74,6 +75,50 @@ export const UPSTREAM_WORK_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.
 /** The largest message a server may send, or the controller may send: one JSON answer or one SSE event. */
 export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
 
+/** The most the stored definitions of one server's tools may take, as JSON. */
+export const MAX_TOOL_DEFINITIONS_BYTES = 4 * 1024 * 1024;
+
+/** The most pages of `tools/list` one listing may read. */
+const MAX_TOOL_LIST_PAGES = 100;
+
+/** What a check says when a server's tool definitions are over `MAX_TOOL_DEFINITIONS_BYTES`. */
+export const TOOL_LIST_TOO_LARGE = "The server's tool list is larger than 4 MiB";
+
+/** The fields of a tool the controller stores. */
+type StorableTool = Pick<
+  McpSchema.Tool,
+  "name" | "title" | "description" | "inputSchema" | "outputSchema" | "annotations"
+>;
+
+/**
+ * Returns the JSON a tool is stored as: the whole definition, so the gateway
+ * can serve it. `description` is `""` when the server gave none.
+ */
+const serializeStoredTool = (tool: StorableTool): string =>
+  JSON.stringify({
+    name: tool.name,
+    title: tool.title,
+    description: tool.description ?? "",
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema,
+    annotations: tool.annotations,
+  });
+
+/** Copies a tool as plain JSON, keeping the whole definition so the gateway can serve it. */
+export const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
+  JSON.parse(serializeStoredTool(tool)) as StoredMcpTool;
+
+/**
+ * What one listing of a server's tools has read so far. `exceeded` is the
+ * failure that ended the listing when a limit was passed, and `undefined`
+ * while none was.
+ */
+interface ToolListing {
+  pages: number;
+  bytes: number;
+  exceeded: UpstreamError | undefined;
+}
+
 /**
  * Why an upstream call failed:
  *
@@ -83,7 +128,8 @@ export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
  *   429;
  * - `timeout`: the server did not answer in time;
  * - `unsupported-revision`: the server speaks none of the MCP revisions we do;
- * - `too-large`: a message was over `MAX_UPSTREAM_MESSAGE_BYTES`;
+ * - `too-large`: a message was over `MAX_UPSTREAM_MESSAGE_BYTES`, or a tool
+ *   list was over its limits (`limitToolListing`);
  * - `not-on-origin`: the plugin built a URL outside its server's origin, so
  *   nothing was sent;
  * - `not-serving`: the controller is frozen or sealed, so nothing was sent;
@@ -109,14 +155,21 @@ type UpstreamFailureReason = (typeof UPSTREAM_FAILURE_REASONS)[number];
 
 /**
  * An upstream call failed. `message` is one fixed line a person can read; it
- * never holds the server's answer, headers or the credentials. `sentIdentity`
- * is set for `unauthorized`: the identity of the credentials the rejected
- * request carried, which `refreshAfterRejection` needs.
+ * never holds the server's answer, headers or the credentials. For
+ * `unauthorized`:
+ *
+ * - `sentIdentity` is the identity of the credentials the rejected request
+ *   carried, which `refreshAfterRejection` needs;
+ * - `offersOAuth` is whether the server's challenge points at OAuth metadata
+ *   (a `resource_metadata` parameter in `WWW-Authenticate`), which tells the
+ *   user whether signing in with OAuth is possible. The header's text itself
+ *   is outside input and is never kept.
  */
 export class UpstreamError extends Schema.TaggedError<UpstreamError>()("UpstreamError", {
   reason: Schema.Literals(UPSTREAM_FAILURE_REASONS),
   message: Schema.String,
   sentIdentity: Schema.optionalKey(Schema.String),
+  offersOAuth: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /**
@@ -290,13 +343,71 @@ const FIXED_MESSAGES: Record<UpstreamFailureReason, string> = {
 
 const buildFailure = (
   reason: UpstreamFailureReason,
-  extra: { readonly message?: string; readonly sentIdentity?: string } = {},
+  extra: {
+    readonly message?: string;
+    readonly sentIdentity?: string;
+    readonly offersOAuth?: boolean;
+  } = {},
 ): UpstreamError =>
   new UpstreamError({
     reason,
     message: extra.message ?? FIXED_MESSAGES[reason],
     ...(extra.sentIdentity === undefined ? {} : { sentIdentity: extra.sentIdentity }),
+    ...(extra.offersOAuth === undefined ? {} : { offersOAuth: extra.offersOAuth }),
   });
+
+/**
+ * Tells whether a `WWW-Authenticate` header carries a `resource_metadata`
+ * parameter, which is how a server points at the OAuth metadata of its
+ * resource (RFC 9728). Quoted values are skipped, so a parameter named inside
+ * another parameter's text does not count.
+ */
+const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean =>
+  wwwAuthenticate !== undefined &&
+  /(?:^|[\s,])resource_metadata\s*=/i.test(wwwAuthenticate.replace(/"(?:[^"\\]|\\.)*"/g, '""'));
+
+/**
+ * Counts one answer to `tools/list` into `listing`, and returns the client
+ * failure that ends the listing when it passed a limit, and `undefined`
+ * otherwise. A listing ends as soon as:
+ *
+ * - the definitions read so far, measured as they are stored, pass
+ *   `MAX_TOOL_DEFINITIONS_BYTES`, so a server that never stops sending pages
+ *   cannot make the controller hold them all;
+ * - the page just read is the last page allowed and the server points at one
+ *   more.
+ *
+ * The client pages a listing by itself, up to 100 pages, and only hands the
+ * whole list back at the end. This runs on every answer instead, so the limit
+ * applies while the list is read. `listing.exceeded` holds the failure with
+ * its fixed message for the caller, because the client fails with its own
+ * error type.
+ */
+const limitToolListing = (
+  listing: ToolListing,
+  result: unknown,
+): McpClientError.McpClientError | undefined => {
+  const page =
+    typeof result === "object" && result !== null ? (result as Record<string, unknown>) : {};
+  const tools: ReadonlyArray<unknown> = Array.isArray(page["tools"]) ? page["tools"] : [];
+  listing.pages += 1;
+  for (const tool of tools) {
+    if (typeof tool !== "object" || tool === null) continue;
+    // One byte more for the comma between two tools.
+    listing.bytes += new TextEncoder().encode(serializeStoredTool(tool as StorableTool)).length + 1;
+  }
+  const message =
+    listing.bytes > MAX_TOOL_DEFINITIONS_BYTES
+      ? TOOL_LIST_TOO_LARGE
+      : listing.pages >= MAX_TOOL_LIST_PAGES && typeof page["nextCursor"] === "string"
+        ? `The server's tool list has more than ${String(MAX_TOOL_LIST_PAGES)} pages`
+        : undefined;
+  if (message === undefined) return undefined;
+  listing.exceeded = buildFailure("too-large", { message });
+  return new McpClientError.McpClientError({
+    reason: new McpClientError.LimitError({ description: message }),
+  });
+};
 
 /**
  * Checks that a URL an endpoint built may carry credentials: `http` or `https`,
@@ -383,6 +494,7 @@ export const describeClientFailure = (
       if (reason.status === 401) {
         return buildFailure("unauthorized", {
           ...(rejectedIdentity === undefined ? {} : { sentIdentity: rejectedIdentity }),
+          offersOAuth: offersOAuthMetadata(reason.wwwAuthenticate),
         });
       }
       if (
@@ -444,7 +556,9 @@ export interface OpenedUpstream {
    * Lists the server's tools. Removes from them every credential value the
    * session sent. A tool whose name holds one is left out and logged,
    * because the name is what a call sends back, so rewriting it would
-   * dispatch to another tool or to none. Fails with an `UpstreamError`.
+   * dispatch to another tool or to none. Fails with an `UpstreamError`, with
+   * reason `too-large` when the list passed 4 MiB of definitions or 100 pages
+   * (`limitToolListing`).
    */
   readonly listTools: (
     timeout: Duration.Duration,
@@ -547,6 +661,7 @@ export const openUpstream = (
     const outer = yield* Scope.Scope;
 
     const sentValues = target.sentValues ?? new Set<string>();
+    const listing: ToolListing = { pages: 0, bytes: 0, exceeded: undefined };
     // The state of the requests that belong to no call.
     const sessionState: UpstreamCallState = {
       prepareSend: target.prepareSend,
@@ -823,9 +938,12 @@ export const openUpstream = (
       revision,
       listTools: (timeout) =>
         Effect.gen(function* () {
+          listing.pages = 0;
+          listing.bytes = 0;
+          listing.exceeded = undefined;
           const tools = yield* mcpClient
             .listTools({ timeout })
-            .pipe(Effect.mapError((error) => describeFailure(error)));
+            .pipe(Effect.mapError((error) => listing.exceeded ?? describeFailure(error)));
           const kept = tools.filter(
             (tool) => removeCredentialValues(tool.name, sentValues) === tool.name,
           );
@@ -874,8 +992,19 @@ export const openUpstream = (
             protocol,
             maxMessageBytes: MAX_UPSTREAM_MESSAGE_BYTES,
           });
+          const limitedTransport = {
+            ...transport,
+            request: (message: McpSchema.JsonRpcRequest, tool?: McpSchema.Tool) =>
+              Effect.flatMap(transport.request(message, tool), (response) => {
+                const exceeded =
+                  message.method === "tools/list" && "result" in response
+                    ? limitToolListing(listing, response.result)
+                    : undefined;
+                return exceeded === undefined ? Effect.succeed(response) : Effect.fail(exceeded);
+              }),
+          };
           return yield* McpClient.make({ name: "hercule", version: VERSION }).pipe(
-            Effect.provideService(McpClient.Transport, transport),
+            Effect.provideService(McpClient.Transport, limitedTransport),
           );
         }).pipe(
           Effect.provideService(HttpClient.HttpClient, client),

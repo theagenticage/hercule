@@ -3,7 +3,12 @@
  * last start (spec 21 section 3.8), and the words the Thread says it in.
  */
 import { MAX_FACT_ITEMS, type McpServerLeftOutReason } from "@hercule/protocol";
-import { decideUnavailableReason, type McpServerAvailabilityView } from "./catalogue";
+import {
+  decideUnavailableReason,
+  describeSignInFix,
+  type McpServerAvailabilityView,
+} from "./catalogue";
+import type { McpServerStoredSource } from "./repository";
 
 /** What one start decides for every server of the session's list alike. */
 export interface StartDelivery {
@@ -91,10 +96,24 @@ const REASON_WORDS: Readonly<Record<McpServerLeftOutReason, string>> = {
  */
 const MAX_NAMED_LEFT_OUT = 20;
 
-/** One server a start left out: which one, its name in the list, and why. */
+/**
+ * Returns the words a warning uses for a reason. A server added by URL has no
+ * Connection to reconnect, so for `needs-sign-in` its words say where the
+ * user signs in.
+ */
+const describeLeftOutReason = (
+  reason: McpServerLeftOutReason,
+  sourceKind: McpServerStoredSource["kind"],
+): string =>
+  reason === "needs-sign-in" && sourceKind === "url"
+    ? `needs sign-in: ${describeSignInFix(sourceKind)}`
+    : REASON_WORDS[reason];
+
+/** One server a start left out: which one, its name in the list, how it was added, and why. */
 export interface LeftOutServer {
   readonly mcpServerId: string;
   readonly name: string;
+  readonly sourceKind: McpServerStoredSource["kind"];
   readonly reason: McpServerLeftOutReason;
 }
 
@@ -121,7 +140,9 @@ export const buildLeftOutWarning = (
   const forClient = leftOut.slice(0, MAX_FACT_ITEMS);
   const omitted = leftOut.length - named.length;
   const withoutEntry = leftOut.length - forClient.length;
-  const words = named.map(({ name, reason }) => `${name} (${REASON_WORDS[reason]})`);
+  const words = named.map(
+    ({ name, sourceKind, reason }) => `${name} (${describeLeftOutReason(reason, sourceKind)})`,
+  );
   const rest =
     omitted === 0
       ? ""

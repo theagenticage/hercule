@@ -185,7 +185,7 @@ export class ConnectionCannotRefresh extends Schema.TaggedError<ConnectionCannot
  * names and values as JSON, in name order, as hex. The order the fields were
  * stored in does not change it.
  */
-const computeCredentialsIdentity = (credentials: Record<string, string>): string =>
+export const computeCredentialsIdentity = (credentials: Record<string, string>): string =>
   createHash("sha256")
     .update(
       JSON.stringify(Object.entries(credentials).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),

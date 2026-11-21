@@ -54,16 +54,18 @@ describe("decideLeftOutReason", () => {
 describe("buildLeftOutWarning", () => {
   it("names each server and its reason in words, and each server for a client", () => {
     const warning = buildLeftOutWarning([
-      { mcpServerId: "id-sentry", name: "sentry", reason: "runner-too-old" },
-      { mcpServerId: "id-linear", name: "linear", reason: "needs-sign-in" },
+      { mcpServerId: "id-sentry", name: "sentry", sourceKind: "plugin", reason: "runner-too-old" },
+      { mcpServerId: "id-linear", name: "linear", sourceKind: "plugin", reason: "needs-sign-in" },
+      { mcpServerId: "id-docs", name: "docs", sourceKind: "url", reason: "needs-sign-in" },
     ]);
 
     expect(warning).toEqual({
       message:
-        "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers), linear (needs sign-in)",
+        "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers), linear (needs sign-in), docs (needs sign-in: sign in to it in Settings > MCP servers)",
       mcpServers: [
         { mcpServerId: "id-sentry", reason: "runner-too-old" },
         { mcpServerId: "id-linear", reason: "needs-sign-in" },
+        { mcpServerId: "id-docs", reason: "needs-sign-in" },
       ],
     });
   });
@@ -72,6 +74,7 @@ describe("buildLeftOutWarning", () => {
     Array.from({ length: count }, (_, index) => ({
       mcpServerId: `id-${String(index)}`,
       name: `server-${String(index)}`,
+      sourceKind: "plugin" as const,
       reason: "unreachable" as const,
     }));
 

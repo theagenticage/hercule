@@ -47,6 +47,7 @@ import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
+import type { Secrets } from "../secrets";
 import {
   readCredentialsGeneration,
   resolveServerAccess,
@@ -64,6 +65,7 @@ import {
   type ServerUnavailableReason,
 } from "./catalogue";
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
+import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
   buildStatusFromFailure,
@@ -173,6 +175,7 @@ const make = Effect.gen(function* () {
   const catalogue = yield* mcpServerCatalogue;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
+  const signIns = yield* mcpServerSignIns;
   const promotion = yield* PromotionState;
   const recordChanges = yield* RecordChanges;
   const httpClient = yield* HttpClient.HttpClient;
@@ -197,7 +200,7 @@ const make = Effect.gen(function* () {
       () =>
         new UpstreamError({
           reason: "refused",
-          message: "The Connection's credentials could not be read",
+          message: "The server's credentials could not be read",
         }),
     );
 
@@ -428,21 +431,8 @@ const make = Effect.gen(function* () {
     progress: ToolCallProgress,
   ): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
     Effect.gen(function* () {
-      const refuse = (
-        reason: ServerUnavailableReason | "timed-out",
-        name: string,
-        message?: string,
-      ) =>
-        Effect.fail(
-          new McpCallRefused({
-            reason,
-            message:
-              message ??
-              (reason === "timed-out"
-                ? `${name} did not answer in time. Try again later.`
-                : describeRefusal(reason, name)),
-          }),
-        );
+      const refuse = (reason: ServerUnavailableReason | "timed-out", message: string) =>
+        Effect.fail(new McpCallRefused({ reason, message }));
 
       /**
        * Reads the server and what it depends on as they are now, and refuses
@@ -460,12 +450,12 @@ const make = Effect.gen(function* () {
           );
         const view = views.get(input.serverId);
         if (view === undefined) {
-          return yield* refuse("error", "This server", "This MCP server no longer exists.");
+          return yield* refuse("error", "This MCP server no longer exists.");
         }
         const { server, dependencies } = view;
         const refusal = decideCallRefusal(view);
         if (refusal !== null) return yield* new McpCallRefused(refusal);
-        const access = resolveServerAccess(view, connectionTypes);
+        const access = resolveServerAccess(view, connectionTypes, signIns);
         if (access._tag !== "usable") {
           return yield* Effect.die(
             `MCP server ${server.id} passed the call verdict but is unusable`,
@@ -475,7 +465,6 @@ const make = Effect.gen(function* () {
         if (stored === undefined) {
           return yield* refuse(
             "error",
-            server.name,
             `The MCP server "${server.name}" no longer offers this tool.`,
           );
         }
@@ -484,7 +473,7 @@ const make = Effect.gen(function* () {
             () =>
               new McpCallRefused({
                 reason: "error",
-                message: describeRefusal("error", server.name),
+                message: describeRefusal("error", server),
               }),
           ),
         );
@@ -511,7 +500,7 @@ const make = Effect.gen(function* () {
             (now.server.revision !== expected.server.revision ||
               !isSameDependencies(expected.dependencies, now.dependencies))
           ) {
-            return yield* refuse("error", expected.server.name, buildChangedMessage(expected));
+            return yield* refuse("error", buildChangedMessage(expected));
           }
           return now;
         });
@@ -543,7 +532,7 @@ const make = Effect.gen(function* () {
       const buildUnavailableRefusal = (error: ServerCredentialsUnavailable): McpCallRefused =>
         new McpCallRefused({
           reason: error.status,
-          message: describeRefusal(error.status, name),
+          message: describeRefusal(error.status, server),
         });
 
       /**
@@ -664,28 +653,24 @@ const make = Effect.gen(function* () {
           switch (failure.reason) {
             case "timeout":
               return yield* progress.toolPostSent
-                ? refuse(
-                    "timed-out",
-                    name,
-                    describeMayHaveRun(name, `${name} did not answer in time`),
-                  )
-                : refuse("timed-out", name);
+                ? refuse("timed-out", describeMayHaveRun(name, `${name} did not answer in time`))
+                : refuse("timed-out", `${name} did not answer in time. Try again later.`);
             case "too-large":
-              return yield* refuse("error", name, `${name}: ${TOO_LARGE_ANSWER}.`);
+              return yield* refuse("error", `${name}: ${TOO_LARGE_ANSWER}.`);
             case "not-serving":
               return yield* Effect.fail(buildNotServingRefusal(failure.message));
             case "refused": {
               // The checks refused the opening this call started or waited
               // for. This call's own checks give its reason.
               yield* checkBeforeSend(first);
-              return yield* refuse("error", name, buildChangedMessage(first));
+              return yield* refuse("error", buildChangedMessage(first));
             }
             default: {
               const { status, detail } = buildStatusFromFailure(failure, serverCredentials);
               yield* writeFailure(server, basis, status, detail);
               return yield* progress.toolPostSent && status === "unreachable"
-                ? refuse(status, name, describeMayHaveRun(name, `${name} could not be reached`))
-                : refuse(status, name);
+                ? refuse(status, describeMayHaveRun(name, `${name} could not be reached`))
+                : refuse(status, describeRefusal(status, server));
             }
           }
         });
@@ -699,7 +684,7 @@ const make = Effect.gen(function* () {
           UpstreamError: refuseUpstreamFailure,
           ServerCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
           ExchangeBroken: () =>
-            refuse("error", name, describeMayHaveRun(name, "the exchange with it broke")),
+            refuse("error", describeMayHaveRun(name, "the exchange with it broke")),
         }),
       );
     });
@@ -736,5 +721,11 @@ export class McpServerCalls extends Context.Service<McpServerCalls, Effect.Succe
 export const McpServerCallsLayer: Layer.Layer<
   McpServerCalls,
   never,
-  SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier | RecordChanges
+  | SqlClient.SqlClient
+  | ConnectionTypes
+  | PluginHost
+  | PromotionState
+  | Notifier
+  | RecordChanges
+  | Secrets
 > = Layer.effect(McpServerCalls)(make).pipe(Layer.provide(FetchHttpClient.layer));

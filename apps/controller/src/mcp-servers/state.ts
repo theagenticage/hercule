@@ -52,7 +52,9 @@ const computeBackoffMillis = (failedChecks: number): number =>
  * server that cannot be reached backs off: the failures in a row are counted
  * and the next check is planned by `computeBackoffMillis`. Any other failure
  * waits a day. The tools are left as they were. `protocolVersion` is the MCP
- * revision whose handshake worked, when one did.
+ * revision whose handshake worked, when one did. `signInOffered` is stored
+ * with the failure, under the same write, so it is never newer than the
+ * status it explains.
  */
 export const buildFailureEdit = (
   server: Pick<StoredMcpServer, "failedChecks">,
@@ -60,12 +62,16 @@ export const buildFailureEdit = (
     readonly status: "unreachable" | "error" | "needs-sign-in";
     readonly detail: string;
     readonly cause?: "plugin" | "connection" | null;
+    readonly signInOffered?: "oauth" | "token";
   },
   at: string,
   protocolVersion?: string,
 ): McpServerEdit => {
   const planAfter = (millis: number): string => new Date(Date.parse(at) + millis).toISOString();
-  const revisionEdit = protocolVersion === undefined ? {} : { protocolVersion };
+  const observed = {
+    ...(protocolVersion === undefined ? {} : { protocolVersion }),
+    ...(failure.signInOffered === undefined ? {} : { signInOffered: failure.signInOffered }),
+  };
   if (failure.status === "unreachable") {
     const failedChecks = server.failedChecks + 1;
     return {
@@ -74,7 +80,7 @@ export const buildFailureEdit = (
       statusCause: null,
       failedChecks,
       nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
-      ...revisionEdit,
+      ...observed,
     };
   }
   return {
@@ -83,7 +89,7 @@ export const buildFailureEdit = (
     statusCause: failure.cause ?? null,
     failedChecks: 0,
     nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
-    ...revisionEdit,
+    ...observed,
   };
 };
 
@@ -285,6 +291,9 @@ const make = Effect.gen(function* () {
               }
               return false;
             }
+            // The follower follows Connections and plugins, which a server added
+            // by URL has none of.
+            if (judged.kind === "url") return false;
             const reconnected =
               judged.connection.credentialsGeneration !== server.connectionGeneration;
             if (!reconnected && server.statusCause === null) return false;

@@ -94,13 +94,27 @@ export interface McpServerDependencyIds {
   readonly contributionId: string;
 }
 
-/** What a new server row holds. The status starts as `checking` and the switch as on. */
+/** What a new plugin server row holds. The status starts as `checking` and the switch as on. */
 export interface NewMcpServer {
   readonly name: string;
   readonly contributionId: string;
   readonly connectionId: string;
   readonly accountId: string;
   readonly connectionGeneration: number;
+  readonly at: string;
+}
+
+/**
+ * What a new server row added by URL holds. The status starts as `checking`
+ * and the switch as on. `signIn` is `token` when the caller stores a pasted
+ * token with the row, and `none` otherwise. A server only gets `oauth` by
+ * signing in.
+ */
+export interface NewUrlMcpServer {
+  readonly name: string;
+  readonly url: string;
+  readonly normalizedUrl: string;
+  readonly signIn: "none" | "token";
   readonly at: string;
 }
 
@@ -172,6 +186,11 @@ export interface McpServerEdit {
   readonly checkedAt?: string;
   readonly protocolVersion?: string;
   readonly connectionGeneration?: number;
+  /**
+   * What a server added by URL said it accepts when it refused a request
+   * without a sign-in. Only a server added by URL has the column set.
+   */
+  readonly signInOffered?: "oauth" | "token";
   readonly notifiedStatus?: McpServerStatus | null;
   readonly nextCheckAt?: string | null;
   readonly failedChecks?: number;
@@ -185,6 +204,33 @@ const COLUMNS_WITHOUT_TOOLS =
   "status_cause, checked_at, protocol_version, revision, connection_generation, " +
   "notified_status, next_check_at, failed_checks, created_at, updated_at";
 const COLUMNS = `${COLUMNS_WITHOUT_TOOLS}, tools`;
+
+/** Builds the server a new row holds: on, `checking`, with no tools and no check yet. */
+const buildNewServer = (
+  id: Uint8Array,
+  name: string,
+  source: McpServerStoredSource,
+  connectionGeneration: number,
+  at: string,
+): StoredMcpServer => ({
+  id: uuidToString(id),
+  name,
+  source,
+  enabled: true,
+  status: "checking",
+  statusDetail: null,
+  statusCause: null,
+  tools: [],
+  checkedAt: null,
+  protocolVersion: null,
+  revision: 0,
+  connectionGeneration,
+  notifiedStatus: null,
+  nextCheckAt: null,
+  failedChecks: 0,
+  createdAt: at,
+  updatedAt: at,
+});
 
 /** Converts the source columns of a row to its source. */
 const toStoredSource = (row: McpServerSourceColumns): McpServerStoredSource =>
@@ -365,7 +411,7 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toServer),
       ),
 
-    /** Inserts a server that is on, in status `checking`, with no tools, and returns it. */
+    /** Inserts a plugin server that is on, in status `checking`, with no tools, and returns it. */
     insert: (server: NewMcpServer): Effect.Effect<StoredMcpServer, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
@@ -378,30 +424,49 @@ const make = Effect.gen(function* () {
              ${uuidFromString(server.connectionId)}, ${server.accountId}, 1, 'checking',
              ${server.connectionGeneration}, ${server.at}, ${server.at})
         `;
-        return {
-          id: uuidToString(id),
-          name: server.name,
-          source: {
+        return buildNewServer(
+          id,
+          server.name,
+          {
             kind: "plugin",
             contributionId: server.contributionId,
             connectionId: server.connectionId,
             accountId: server.accountId,
           },
-          enabled: true,
-          status: "checking",
-          statusDetail: null,
-          statusCause: null,
-          tools: [],
-          checkedAt: null,
-          protocolVersion: null,
-          revision: 0,
-          connectionGeneration: server.connectionGeneration,
-          notifiedStatus: null,
-          nextCheckAt: null,
-          failedChecks: 0,
-          createdAt: server.at,
-          updatedAt: server.at,
-        };
+          server.connectionGeneration,
+          server.at,
+        );
+      }),
+
+    /**
+     * Inserts a server added by URL that is on, in status `checking`, with no
+     * tools, and returns it. Fails with a `SqlError` when another server has
+     * the same `normalizedUrl`. The caller stores the server's sign-in.
+     */
+    insertUrl: (server: NewUrlMcpServer): Effect.Effect<StoredMcpServer, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        yield* sql`
+          INSERT INTO mcp_servers
+            (id, name, source_kind, url, normalized_url, sign_in, enabled, status,
+             created_at, updated_at)
+          VALUES
+            (${id}, ${server.name}, 'url', ${server.url}, ${server.normalizedUrl},
+             ${server.signIn}, 1, 'checking', ${server.at}, ${server.at})
+        `;
+        return buildNewServer(
+          id,
+          server.name,
+          {
+            kind: "url",
+            url: server.url,
+            normalizedUrl: server.normalizedUrl,
+            signIn: server.signIn,
+            signInOffered: null,
+          },
+          0,
+          server.at,
+        );
       }),
 
     /**
@@ -467,6 +532,9 @@ const make = Effect.gen(function* () {
       }
       if (edit.connectionGeneration !== undefined) {
         sets.push(sql`connection_generation = ${edit.connectionGeneration}`);
+      }
+      if (edit.signInOffered !== undefined) {
+        sets.push(sql`sign_in_offered = ${edit.signInOffered}`);
       }
       if (edit.notifiedStatus !== undefined)
         sets.push(sql`notified_status = ${edit.notifiedStatus}`);
