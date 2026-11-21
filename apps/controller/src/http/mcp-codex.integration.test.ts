@@ -318,7 +318,7 @@ const withCodexHome = async (
         approvalsReviewer: "user",
         config: buildMcpServerConfig(
           [{ name: GATEWAY_NAME, url: `${options.gatewayUrl}/mcp` }],
-          "approve",
+          "full-access",
         ),
       }) satisfies Partial<ThreadStartParams>;
     const readThreadId = (result: Record<string, unknown>): string =>

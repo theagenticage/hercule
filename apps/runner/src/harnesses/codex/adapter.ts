@@ -115,7 +115,7 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
-import { decideMcpConfig, type McpToolApprovalMode } from "./mcp";
+import { decideMcpConfig } from "./mcp";
 import {
   buildUsageReadings,
   completeWindowDurations,
@@ -317,24 +317,6 @@ const ACCESS_MODES: Readonly<
     sandbox: "danger-full-access",
     approvalsReviewer: "user",
   },
-};
-
-/**
- * How Codex asks about a call to a tool of an MCP server, for each access
- * mode. It is not a thread setting: it goes in the MCP servers' config.
- *
- * - Every mode but full access is `prompt`, which asks about every call. A
- *   tool's annotations (such as "read only") come from an outside server, so
- *   they must never lower the mode (spec 06 section 10.2). In `auto` mode,
- *   Codex's own reviewer then judges each call, as it does for other actions.
- * - Full access is `approve`: it asks nobody, and Codex never asks under the
- *   approval policy `never` anyway.
- */
-const MCP_TOOL_APPROVAL_MODES: Readonly<Record<AccessMode, McpToolApprovalMode>> = {
-  "approval-required": "prompt",
-  "auto-accept-edits": "prompt",
-  auto: "prompt",
-  "full-access": "approve",
 };
 
 /**
@@ -1789,7 +1771,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     spec: SessionSpec,
     ctx: SessionStartContext,
     userInstructions: string | undefined,
-    mcpConfig: Record<string, JsonValue>,
+    mcpConfig: Record<string, JsonValue> | undefined,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -1808,8 +1790,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
-      // Left out when empty, so a session with no MCP server sends no `config`.
-      ...(Object.keys(mcpConfig).length === 0 ? {} : { config: mcpConfig }),
+      // Left out when the thread gets no MCP server.
+      ...(mcpConfig === undefined ? {} : { config: mcpConfig }),
     };
   };
 
@@ -1894,7 +1876,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           rpc: host.rpc,
           cwd: ctx.cwd,
           servers: ctx.mcpServers,
-          approvalMode: MCP_TOOL_APPROVAL_MODES[spec.accessMode],
+          accessMode: spec.accessMode,
         });
         const threadParams = buildThreadParams(spec, ctx, userInstructions, mcp.config);
         const opened = yield* Effect.matchEffect(

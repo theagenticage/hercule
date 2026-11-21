@@ -8,22 +8,33 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import type { AccessMode } from "@hercule/protocol";
 import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import type { ResolvedMcpServer } from "../index";
 import type { Rpc } from "./rpc";
 import type { ConfigReadParams, JsonValue } from "./types";
 
 /**
- * How Codex asks about a call to a tool of an MCP server:
+ * How Codex asks about a call to a tool of an MCP server, for each Access
+ * Mode. It is not a thread setting: it goes in the MCP servers' config.
  *
- * - `prompt` asks about every call, whatever the tool's annotations.
- * - `approve` never asks.
+ * - `prompt` asks about every call, whatever the tool's annotations. A tool's
+ *   annotations (such as "read only") come from an outside server, so they
+ *   must never lower the mode (spec 06 section 10.2). Every Access Mode but
+ *   full access uses it. In `auto` mode, Codex's own reviewer then judges each
+ *   call, as it does for other actions.
+ * - `approve` asks nobody. Full access uses it, and Codex never asks under the
+ *   approval policy `never` anyway.
  *
  * Codex also has `auto` and `writes`, which let the server's own annotations
- * decide. Those annotations come from an outside server, so they must never
- * lower what the Access Mode asks for.
+ * decide. Hercule never uses them.
  */
-export type McpToolApprovalMode = "prompt" | "approve";
+const MCP_TOOL_APPROVAL_MODES: Readonly<Record<AccessMode, "prompt" | "approve">> = {
+  "approval-required": "prompt",
+  "auto-accept-edits": "prompt",
+  auto: "prompt",
+  "full-access": "approve",
+};
 
 /**
  * What Hercule reads of a `config/read` reply: every layer of Codex's
@@ -101,15 +112,14 @@ const buildMcpConfigUnreadWarning = (reason: string): string =>
   "Hercule's MCP Servers. Fix the configuration it names to use them.";
 
 /**
- * Returns the `config` for the session's MCP servers, to send with
- * `thread/start`, `thread/resume` and `thread/fork`. Returns an empty object
- * when there are no servers, so no key reaches Codex. The caller passes only
- * servers whose name no layer of Codex's configuration sets.
+ * Returns the `config` for these MCP servers, to send with `thread/start`,
+ * `thread/resume` and `thread/fork`. The caller passes at least one server,
+ * and only servers whose name no layer of Codex's configuration sets.
  *
  * - Each server gets its URL, and the name of the variable that holds the
  *   session's token, never the token: Codex reads the variable itself when it
  *   connects and sends the token as a bearer token.
- * - Each server gets the approval mode of the session's Access Mode.
+ * - Each server gets the approval mode of `accessMode`.
  * - Codex is told to re-read a server's tool list when the server says it
  *   changed (`features.mcp_tool_list_changed`).
  *
@@ -118,25 +128,25 @@ const buildMcpConfigUnreadWarning = (reason: string): string =>
  */
 export const buildMcpServerConfig = (
   servers: ReadonlyArray<ResolvedMcpServer>,
-  approvalMode: McpToolApprovalMode,
-): Record<string, JsonValue> =>
-  servers.length === 0
-    ? {}
-    : {
-        ...Object.fromEntries(
-          servers.flatMap((server): Array<[string, JsonValue]> => [
-            [`mcp_servers.${server.name}.url`, server.url],
-            [`mcp_servers.${server.name}.bearer_token_env_var`, SESSION_TOKEN_VARIABLE],
-            [`mcp_servers.${server.name}.default_tools_approval_mode`, approvalMode],
-          ]),
-        ),
-        "features.mcp_tool_list_changed": true,
-      };
+  accessMode: AccessMode,
+): Record<string, JsonValue> => ({
+  ...Object.fromEntries(
+    servers.flatMap((server): Array<[string, JsonValue]> => [
+      [`mcp_servers.${server.name}.url`, server.url],
+      [`mcp_servers.${server.name}.bearer_token_env_var`, SESSION_TOKEN_VARIABLE],
+      [
+        `mcp_servers.${server.name}.default_tools_approval_mode`,
+        MCP_TOOL_APPROVAL_MODES[accessMode],
+      ],
+    ]),
+  ),
+  "features.mcp_tool_list_changed": true,
+});
 
 /** What `decideMcpConfig` decides for a session start. */
-export interface McpConfigDecision {
-  /** The dotted keys to send with `thread/start`, `thread/resume` and `thread/fork`. Empty for none. */
-  readonly config: Record<string, JsonValue>;
+interface McpConfigDecision {
+  /** The dotted keys to send with `thread/start`, `thread/resume` and `thread/fork`, or `undefined` to send no `config`. */
+  readonly config: Record<string, JsonValue> | undefined;
   /** What to tell the user, to show once the session has started. */
   readonly warnings: ReadonlyArray<string>;
 }
@@ -146,7 +156,8 @@ export interface McpConfigDecision {
  * returns the `config` that gives them and the warnings to show. This is the
  * one place that decides, so all three ways to open a thread send the same.
  *
- * - With no server, makes no request and returns no config.
+ * - With no server, makes no request and returns no config. Neither does a
+ *   session whose servers all have a taken name.
  * - Asks Codex for its configuration as seen from `cwd`, and gives a server
  *   only when no layer of it already sets its name (see `findLayerSettingServer`).
  *   Each name that is taken gets a warning.
@@ -162,13 +173,13 @@ export const decideMcpConfig = (input: {
   readonly rpc: Rpc;
   readonly cwd: string | null;
   readonly servers: ReadonlyArray<ResolvedMcpServer>;
-  readonly approvalMode: McpToolApprovalMode;
+  readonly accessMode: AccessMode;
 }): Effect.Effect<McpConfigDecision> => {
   const unread = (reason: string): McpConfigDecision => ({
-    config: {},
+    config: undefined,
     warnings: [buildMcpConfigUnreadWarning(reason)],
   });
-  if (input.servers.length === 0) return Effect.succeed({ config: {}, warnings: [] });
+  if (input.servers.length === 0) return Effect.succeed({ config: undefined, warnings: [] });
   return Effect.match(
     input.rpc.request("config/read", {
       cwd: input.cwd,
@@ -187,7 +198,10 @@ export const decideMcpConfig = (input: {
           if (taking === undefined) free.push(server);
           else warnings.push(buildMcpNameTakenWarning(server.name, taking));
         }
-        return { config: buildMcpServerConfig(free, input.approvalMode), warnings };
+        return {
+          config: free.length === 0 ? undefined : buildMcpServerConfig(free, input.accessMode),
+          warnings,
+        };
       },
     },
   );
