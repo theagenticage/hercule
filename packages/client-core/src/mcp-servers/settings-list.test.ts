@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import { buildProject } from "../threads/workspaces.testing";
+import { buildMcpServerSettingsRows, describeNamingProjects } from "./settings-list";
+import {
+  CONNECTIONS,
+  LINEAR,
+  PLUGINS,
+  SENTRY_HOBBY,
+  SENTRY_PLUGIN,
+  buildConnection,
+} from "./testing";
+
+const WEBSHOP = { ...buildProject("p-shop", "webshop"), mcpServerIds: ["s-hobby", "s-linear"] };
+const BLOG = { ...buildProject("p-blog", "blog"), mcpServerIds: ["s-linear"] };
+
+describe("buildMcpServerSettingsRows", () => {
+  it("gives one row for each Connection whose type a plugin offers, ordered by type name then label", () => {
+    const rows = buildMcpServerSettingsRows({
+      servers: [],
+      // Listed out of order on purpose.
+      connections: [...CONNECTIONS].reverse(),
+      plugins: PLUGINS,
+      projects: [],
+    });
+
+    expect(rows.map((row) => [row.typeName, row.connection.label])).toEqual([
+      ["Linear", "acme"],
+      ["Sentry", "hobby"],
+      ["Sentry", "work"],
+    ]);
+  });
+
+  it("shows a Connection whose server is not switched on under the name it will get, off, with no page", () => {
+    const [linear] = buildMcpServerSettingsRows({
+      servers: [],
+      connections: CONNECTIONS,
+      plugins: PLUGINS,
+      projects: [WEBSHOP],
+    });
+
+    expect(linear).toMatchObject({
+      view: null,
+      name: "linear",
+      secondLine: "Linear Connection · switch it on to see its tools",
+      statusWord: "off",
+      projects: [],
+    });
+  });
+
+  it("joins a server to the row of its Connection, with the projects that name it", () => {
+    const rows = buildMcpServerSettingsRows({
+      servers: [SENTRY_HOBBY, LINEAR],
+      connections: CONNECTIONS,
+      plugins: PLUGINS,
+      projects: [WEBSHOP, BLOG],
+    });
+
+    const hobby = rows.find((row) => row.connection.label === "hobby");
+    const work = rows.find((row) => row.connection.label === "work");
+    const linear = rows.find((row) => row.typeName === "Linear");
+    expect(hobby?.view?.server.id).toBe("s-hobby");
+    expect(hobby?.projects.map((project) => project.name)).toEqual(["webshop"]);
+    expect(hobby?.secondLine).toBe("Sentry Connection · 2 tools");
+    expect(work?.view).toBeNull();
+    expect(linear?.projects.map((project) => project.name)).toEqual(["webshop", "blog"]);
+  });
+
+  it("gives no row to a Connection of a type no plugin offers a server for", () => {
+    const rows = buildMcpServerSettingsRows({
+      servers: [],
+      connections: [buildConnection("c-gh", "github/github", "octocat")],
+      plugins: [SENTRY_PLUGIN],
+      projects: [],
+    });
+
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("describeNamingProjects", () => {
+  const names = ["a", "b", "c"].map((name) => buildProject(`p-${name}`, name));
+
+  it("says None for no project", () => {
+    expect(describeNamingProjects([])).toEqual({ kind: "none", text: "None" });
+  });
+
+  it("returns the projects as tiles for one or two", () => {
+    expect(describeNamingProjects(names.slice(0, 2))).toEqual({
+      kind: "tiles",
+      projects: names.slice(0, 2),
+    });
+  });
+
+  it("counts three or more, with their names for the tooltip", () => {
+    expect(describeNamingProjects(names)).toEqual({
+      kind: "count",
+      text: "3 projects",
+      tooltip: "a, b and c",
+    });
+  });
+});

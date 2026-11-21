@@ -1270,6 +1270,29 @@ describe("buildTurns runtime notes", () => {
       ["error", "HarnessNotInstalled"],
     ]);
   });
+
+  it("keeps the MCP Servers a warning names on its note, and gives other warnings none", () => {
+    const mcpServers = [{ mcpServerId: "s-work", reason: "needs-sign-in" as const }];
+    const at = "2026-09-08T10:00:01.000Z";
+
+    const { turns } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, {
+          _tag: "runtime.warning",
+          ...base(2, at),
+          turnId: "t1",
+          message: "Sentry (work) needs sign-in",
+          mcpServers,
+        }),
+        row(3, { _tag: "runtime.warning", ...base(3, at), turnId: "t1", message: "Retrying." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]?.runtimeNotes[0]?.mcpServers).toEqual(mcpServers);
+    expect(turns[0]?.runtimeNotes[1]).not.toHaveProperty("mcpServers");
+  });
 });
 
 describe("buildTurns: compaction and unknown items", () => {
