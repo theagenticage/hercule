@@ -119,6 +119,12 @@ export const makeCodexThreads = (options: {
   readonly sessionId: string;
   readonly rootThreadId: string;
   readonly spec: SessionSpec;
+  /**
+   * The `config` the root thread was opened with. Codex does not save it with
+   * a thread, so a subagent thread resumed on its own needs it again, or it
+   * has no MCP server. Absent when the session has none.
+   */
+  readonly config: ThreadResumeParams["config"];
   readonly rpc: Rpc;
   readonly emit: (event: HarnessEvent) => void;
   readonly dispatch: (
@@ -656,6 +662,7 @@ export const makeCodexThreads = (options: {
             const resumed = yield* options.rpc.request("thread/resume", {
               threadId,
               excludeTurns: false,
+              ...(options.config === undefined ? {} : { config: options.config }),
             } satisfies ThreadResumeParams);
             if (preparation !== work || phase !== "live") return;
             if ((resumed as ThreadReadResponse | undefined)?.thread?.id !== threadId) return;

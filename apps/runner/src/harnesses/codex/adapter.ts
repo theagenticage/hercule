@@ -2017,16 +2017,17 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
+        const threadParams = buildThreadParams(spec, ctx, userInstructions, toolListChanged);
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
               ? host.rpc.request(method, {
-                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
+                  ...threadParams,
                   ephemeral: false,
                 } satisfies ThreadStartParams)
               : host.rpc.request(method, {
                   threadId: carried.nativeSessionId,
-                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
+                  ...threadParams,
                 } satisfies ThreadResumeParams & ThreadForkParams),
             readThreadOpenedReply(method),
           ),
@@ -2065,6 +2066,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             rootThreadId: opened,
             spec,
+            config: threadParams.config,
             rpc: host.rpc,
             emit,
             dispatch: (thread, frame, cancelled) =>

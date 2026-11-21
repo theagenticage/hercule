@@ -5131,6 +5131,32 @@ describe("the MCP servers a Codex session is given", () => {
     ]);
   });
 
+  it("gives a subagent thread resumed on its own the same config as the root", async () => {
+    const spec: SessionSpec = {
+      ...SPEC,
+      continue: {
+        nativeSessionId: PRIOR,
+        mode: "resume",
+        subagents: [{ subagentId: CHILD, itemId: "original-spawn" }],
+      },
+    };
+    const run = createDriving(initializeAs("0.171.0"));
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: [GATEWAY] }),
+    );
+
+    // Codex does not keep the MCP servers with a thread, so the child has none
+    // unless the resume sends them again.
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+
+    const [root, child] = listSentParams(run.requests, "thread/resume");
+    expect(child).toEqual({
+      threadId: CHILD,
+      excludeTurns: false,
+      config: (root as { readonly config: unknown }).config,
+    });
+  });
+
   it("does not warn about the tool list when the session has no MCP server", async () => {
     const run = await startWithServers([], SPEC, initializeAs("0.154.0"));
     await settle();
