@@ -136,6 +136,8 @@ export interface InterceptedRequest {
   readonly id: unknown;
   /** The JSON-RPC request's `params`. */
   readonly params: Record<string, unknown> | undefined;
+  /** The path and query of the address the request went to. */
+  readonly url: string;
   readonly authorization: string | null;
   readonly sessionId: string | null;
 }
@@ -323,6 +325,7 @@ export const startFakeUpstream = (
                   method,
                   id,
                   params,
+                  url: recorded.url,
                   authorization: recorded.authorization,
                   sessionId: recorded.sessionId,
                 }) ??

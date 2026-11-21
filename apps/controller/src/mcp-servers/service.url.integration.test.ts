@@ -147,6 +147,32 @@ describe("creating a server by its address", () => {
     });
   });
 
+  it("shows the address with the value of every query parameter hidden, and calls the server at the full one", async () => {
+    await withUrlRig(async ({ controller, fake }) => {
+      const created = await readRecord(
+        await createByAddress(controller, {
+          url: `${fake.url}?api_key=k3y-9f2a7c&org=acme`,
+          name: "remote",
+        }),
+      );
+      await waitForResult(controller);
+
+      const read = await readRecord(
+        await get(controller.base, `/api/v1/mcp-servers/${created.id}`, controller.token),
+      );
+      const listed = (await (
+        await get(controller.base, "/api/v1/mcp-servers", controller.token)
+      ).json()) as { items: ReadonlyArray<McpServer> };
+
+      for (const server of [created, read, listed.items[0]!]) {
+        expect(server.source).toMatchObject({ url: `${fake.url}?api_key=…&org=…` });
+      }
+      expect(fake.requests.map((request) => request.url)).toContain(
+        "/mcp?api_key=k3y-9f2a7c&org=acme",
+      );
+    });
+  });
+
   it("names the server after the first label of the host that is not mcp, www or api", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       // The fake listens on 127.0.0.1, whose first label passes the name rule.

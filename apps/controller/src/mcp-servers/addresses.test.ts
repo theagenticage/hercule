@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { buildDefaultServerName, findPluginOnOrigin, parseServerAddress } from "./addresses";
+import {
+  buildDefaultServerName,
+  findPluginOnOrigin,
+  hideQueryValues,
+  listQueryValues,
+  parseServerAddress,
+} from "./addresses";
 
 interface Refusal {
   readonly code: string;
@@ -192,5 +198,27 @@ describe("findPluginOnOrigin", () => {
     ]) {
       expect(findPluginOnOrigin(origin, contributions), origin).toBeUndefined();
     }
+  });
+});
+
+describe("hideQueryValues", () => {
+  it("keeps every query parameter's name and hides its value", () => {
+    expect(hideQueryValues("https://mcp.x.com/mcp?api_key=K&org=o&flag")).toBe(
+      "https://mcp.x.com/mcp?api_key=…&org=…&flag",
+    );
+  });
+
+  it("returns an address with no query as it is", () => {
+    expect(hideQueryValues("https://mcp.x.com/mcp")).toBe("https://mcp.x.com/mcp");
+  });
+});
+
+describe("listQueryValues", () => {
+  it("lists each value as written and decoded, and leaves out empty ones", () => {
+    expect(listQueryValues("https://x.com/mcp?a=p%40ss&b=&c=plain")).toEqual([
+      "p%40ss",
+      "p@ss",
+      "plain",
+    ]);
   });
 });

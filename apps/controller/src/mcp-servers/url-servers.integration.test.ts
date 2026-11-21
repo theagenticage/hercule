@@ -43,6 +43,7 @@ import {
   waitForResult,
   withRig,
   withUrlRig,
+  insertUrlServerAt,
   createServer,
   type FakeUpstream,
   type McpServerRow,
@@ -700,6 +701,31 @@ describe("a credential the server echoes", () => {
         },
       },
     );
+  });
+
+  it("is removed when it is a value in the address's query", async () => {
+    await withUrlRig(async ({ controller, fake }) => {
+      fake.intercept = ({ method, id, url }) =>
+        method === "tools/call"
+          ? Response.json({
+              jsonrpc: "2.0",
+              id,
+              result: { content: [{ type: "text", text: `you called ${url}` }] },
+            })
+          : undefined;
+      const serverId = await insertUrlServerAt(
+        controller,
+        `${fake.url}?api_key=k3y-9f2a7c&org=acme`,
+      );
+      await waitForResult(controller);
+
+      const result = await callAs(controller, serverId);
+
+      expect(result).toMatchObject({
+        _tag: "Success",
+        success: { content: [{ text: "you called /mcp?api_key=[removed]&org=[removed]" }] },
+      });
+    });
   });
 
   it("leaves out a tool that no longer fits the tool schema once the credential is removed from one of its keys", async () => {

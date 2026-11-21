@@ -38,6 +38,7 @@ import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import {
   buildDefaultServerName,
   findPluginOnOrigin,
+  hideQueryValues,
   parseServerAddress,
   type ServerAddress,
 } from "./addresses";
@@ -79,7 +80,7 @@ const toRecord = (server: StoredMcpServer): McpServer => {
           }
         : {
             kind: "url",
-            url: source.url,
+            url: hideQueryValues(source.url),
             signIn: source.signIn,
             signInOffered: source.signInOffered,
           },

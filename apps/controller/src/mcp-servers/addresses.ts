@@ -132,6 +132,53 @@ export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, 
     };
   });
 
+/** What replaces the value of each query parameter in an address shown to clients. */
+const HIDDEN_QUERY_VALUE = "…";
+
+/**
+ * Returns the address as clients see it: every query parameter keeps its name
+ * and loses its value, so `https://mcp.x.com/mcp?api_key=K&org=o` is
+ * `https://mcp.x.com/mcp?api_key=…&org=…`. An address with no query is returned
+ * as it is. Many servers take an API key in the query, so no value of it may be
+ * shown; the stored address keeps the full query, because requests go there.
+ */
+export const hideQueryValues = (address: string): string => {
+  const { search } = new URL(address);
+  if (search === "") return address;
+  const hidden = search
+    .slice(1)
+    .split("&")
+    .map((parameter) => {
+      const equals = parameter.indexOf("=");
+      return equals === -1 ? parameter : `${parameter.slice(0, equals)}=${HIDDEN_QUERY_VALUE}`;
+    })
+    .join("&");
+  return `${address.slice(0, address.indexOf("?"))}?${hidden}`;
+};
+
+/**
+ * Lists the value of every query parameter of the address, in the form it is
+ * written in the address and, when it differs, decoded. A server that echoes
+ * its request URL may use either form. Empty values are left out.
+ */
+export const listQueryValues = (address: string): ReadonlyArray<string> => {
+  const { search } = new URL(address);
+  const values = new Set<string>();
+  for (const parameter of search.slice(1).split("&")) {
+    const equals = parameter.indexOf("=");
+    if (equals === -1) continue;
+    const written = parameter.slice(equals + 1);
+    values.add(written);
+    try {
+      values.add(decodeURIComponent(written.replaceAll("+", " ")));
+    } catch {
+      // A malformed escape has no decoded form; the written form is still listed.
+    }
+  }
+  values.delete("");
+  return [...values];
+};
+
 /** The host labels that say what a server is and not whose it is, so they never name a server. */
 const GENERIC_HOST_LABELS: ReadonlyArray<string> = ["mcp", "www", "api"];
 
