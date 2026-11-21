@@ -1,7 +1,8 @@
 /**
- * Tests that the strip and each row show the Connections' event counts, and
- * that the items of a Connection row's ⋯ menu call the table's callbacks
- * with that row's Connection, and its type for Reconnect.
+ * Tests that the strip and each row show the Connections' event counts, that
+ * the items of a Connection row's ⋯ menu call the table's callbacks with that
+ * row's Connection, and its type for Reconnect, and that a Connection whose
+ * plugin offers an MCP server says what the server is doing.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -12,6 +13,7 @@ import {
   type Connection,
   type EventCountsByConnection,
 } from "@hercule/contract";
+import type { AgentTools } from "./agent-tools";
 import { ConnectionTable } from "./connection-table";
 
 const GITHUB: ConnectionType = {
@@ -58,14 +60,23 @@ const COUNTS: EventCountsByConnection = {
  * the menu is left out of the accessibility tree and is found by the button's
  * `popovertarget`.
  */
-const chooseRowItem = async (item: string) => {
-  const callbacks = { onReconnect: vi.fn(), onConfigure: vi.fn(), onDelete: vi.fn() };
+const chooseRowItem = async (
+  item: string,
+  agentTools: ReadonlyMap<string, AgentTools> | undefined = undefined,
+) => {
+  const callbacks = {
+    onReconnect: vi.fn(),
+    onConfigure: vi.fn(),
+    onOpenAgentTools: vi.fn(),
+    onDelete: vi.fn(),
+  };
   render(
     <ConnectionTable
       connections={[CONNECTION]}
       counts={COUNTS}
       types={[GITHUB]}
       plugins={[]}
+      agentTools={agentTools}
       {...callbacks}
     />,
   );
@@ -87,8 +98,10 @@ describe("ConnectionTable", () => {
         counts={COUNTS}
         types={[GITHUB]}
         plugins={[]}
+        agentTools={undefined}
         onReconnect={noop}
         onConfigure={noop}
+        onOpenAgentTools={noop}
         onDelete={noop}
       />,
     );
@@ -124,5 +137,119 @@ describe("ConnectionTable", () => {
     expect(onDelete).toHaveBeenCalledExactlyOnceWith(CONNECTION);
     expect(onReconnect).not.toHaveBeenCalled();
     expect(onConfigure).not.toHaveBeenCalled();
+  });
+
+  describe("agent tools", () => {
+    const TOOLS: ReadonlyMap<string, AgentTools> = new Map([
+      [CONNECTION.id, { text: "agent tools on", tone: "on", serverId: "s-1" }],
+      [FAILED.id, { text: "agent tools: needs sign-in", tone: "fail", serverId: null }],
+    ]);
+
+    it("shows each note on its row, in the fail colour with a red dot for a failing server", () => {
+      render(
+        <ConnectionTable
+          connections={[CONNECTION, FAILED]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={TOOLS}
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      const on = screen.getByRole("button", { name: "agent tools on" });
+      expect(on.closest(".conn")?.textContent).toContain("GitHub · rogier");
+      expect(on.className).toContain("is-on");
+      expect(on.title).toBe("Agent tools are switched on and off in Settings > MCP servers");
+      const failing = screen.getByRole("button", { name: "agent tools: needs sign-in" });
+      expect(failing.className).toContain("is-fail");
+      expect(failing.querySelector(".dot--fail")).not.toBeNull();
+    });
+
+    it("shows no note for a Connection with no entry, or while the servers are unread", () => {
+      const { rerender } = render(
+        <ConnectionTable
+          connections={[CONNECTION, FAILED]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={new Map([[FAILED.id, TOOLS.get(FAILED.id)!]])}
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+      expect(screen.getAllByRole("button", { name: /^agent tools/ })).toHaveLength(1);
+
+      rerender(
+        <ConnectionTable
+          connections={[CONNECTION, FAILED]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={undefined}
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: /^agent tools/ })).toBeNull();
+    });
+
+    it("calls onOpenAgentTools with the note from the note's button", async () => {
+      const onOpenAgentTools = vi.fn();
+      render(
+        <ConnectionTable
+          connections={[CONNECTION]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={TOOLS}
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={onOpenAgentTools}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: "agent tools on" }));
+
+      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id));
+    });
+
+    it("calls onOpenAgentTools from the row's menu item Agent tools…", async () => {
+      const { onOpenAgentTools, onDelete } = await chooseRowItem("Agent tools…", TOOLS);
+
+      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id));
+      expect(onDelete).not.toHaveBeenCalled();
+    });
+
+    it("leaves the menu item out for a Connection with no note", async () => {
+      render(
+        <ConnectionTable
+          connections={[CONNECTION]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={undefined}
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+      const more = screen.getByRole("button", { name: "More for GitHub · rogier" });
+      await userEvent.click(more);
+      const menu = document.getElementById(more.getAttribute("popovertarget")!)!;
+
+      expect(
+        within(menu).queryByRole("menuitem", { name: "Agent tools…", hidden: true }),
+      ).toBeNull();
+    });
   });
 });

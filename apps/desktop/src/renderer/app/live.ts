@@ -390,6 +390,12 @@ export const INITIATIVE_TOPICS: readonly MutableLiveTopic[] = ["initiative"];
 export const SKILL_TOPICS: readonly MutableLiveTopic[] = ["skill"];
 
 /**
+ * The topic Settings > MCP servers holds, on its list and on a server's page,
+ * and Settings > Connections holds for its "agent tools" note.
+ */
+export const MCP_SERVER_TOPICS: readonly MutableLiveTopic[] = ["mcpServer"];
+
+/**
  * Keeps a screen's reads current while the calling component is mounted and
  * the window is visible, by subscribing to each of `topics`. A push on a
  * topic reads again every query it names.

@@ -5,6 +5,7 @@
  * purpose: only lazily loaded screens use them, and the app's first paint has
  * no room for them.
  */
+export { describeAgentToolsNote, type AgentToolsNote } from "./agent-tools-note";
 export {
   decideStatusBand,
   decideWarningFix,

@@ -1,24 +1,28 @@
 import { useState, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   describeConnectionTypeName,
   listConnectionTypes,
   readErrorMessage,
   type ConnectionType,
 } from "@hercule/client-core";
+import { buildMcpServerSettingsRows } from "@hercule/client-core/mcp-servers";
 import type { Connection } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
+import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "../../../../app/live";
 import {
   connectionsQuery,
   eventCountsQuery,
+  mcpServersQuery,
   pluginsQuery,
   readOnOpen,
 } from "../../../../app/queries";
 import { AddConnectionMenu, ConnectionTable } from "../../../../screens/settings/connections";
+import { mapAgentToolsByConnection } from "../../../../screens/settings/connections/agent-tools";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
 import { ConfigureConnectionDialog } from "./-configure-connection-dialog";
-import { ConnectionSetupDialog } from "./-connection-setup-dialog";
+import { ConnectionSetupDialog } from "../../../../screens/settings/connections/connection-setup-dialog";
 import { DeleteConnectionDialog } from "./-delete-connection-dialog";
 
 /**
@@ -50,13 +54,18 @@ type ConnectionsDialog =
 /**
  * Settings > Connections: a strip of counts, then one table of every
  * Connection, with its type, its account, its events of the last 24 hours
- * and its health, and a ⋯ menu to reconnect, configure or delete it. The
+ * and its health, and a ⋯ menu to reconnect, configure or delete it. A
+ * Connection whose plugin offers an MCP server also says what that server
+ * is doing, with a button that leads to it in Settings > MCP servers. The
  * header's Add a Connection button lists the Connection types the plugins
  * declare and opens the chosen type's setup (spec 17 §Settings, Connections).
  *
  * The Connections and the plugins are the shell's reads, which the live
  * connection keeps current on the `connection` and `plugin` topics, so a
  * Connection added, changed or removed anywhere shows here at once. The
+ * MCP servers are read when the section opens, and the section holds the
+ * `mcpServer` topic while it is open, so the notes stay current. A failed
+ * read of the servers leaves the notes out and the table usable. The
  * event counts are read each time the section opens and are not kept
  * current while it is open. A failed read of the counts leaves the table
  * usable, without them, also without the counts an earlier opening read,
@@ -74,6 +83,9 @@ export const Route = createFileRoute("/_connected/_shell/settings/connections")(
       // A failure shows in the section, which reads the counts again
       // itself, so it must not fail the route.
       readOnOpen(queryClient, eventCountsQuery(controller.client)).catch(() => undefined),
+      // The same: a Connection's "agent tools" note is a summary, and a
+      // refused read leaves the notes out rather than the section.
+      queryClient.ensureQueryData(mcpServersQuery(controller.client)).catch(() => undefined),
     ]);
   },
   onEnter: () => {
@@ -83,10 +95,20 @@ export const Route = createFileRoute("/_connected/_shell/settings/connections")(
 });
 
 function Connections(): JSX.Element {
-  const { client } = Route.useRouteContext().controller;
+  const { controller, queryClient } = Route.useRouteContext();
+  const { client } = controller;
+  useScreenTopicsLive(controller.live, queryClient, MCP_SERVER_TOPICS);
+  const navigate = useNavigate();
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const countsRead = useQuery(eventCountsQuery(client));
+  const servers = useQuery(mcpServersQuery(client)).data;
+  const agentTools =
+    servers === undefined
+      ? undefined
+      : mapAgentToolsByConnection(
+          buildMcpServerSettingsRows({ servers, connections, plugins, projects: [] }),
+        );
   const types = listConnectionTypes(plugins);
   const [dialog, setDialog] = useState<ConnectionsDialog | null>(null);
   // A dialog closes only itself: a reply that lands after the user closed a
@@ -133,6 +155,12 @@ function Connections(): JSX.Element {
         counts={countsRead.isError ? undefined : countsRead.data}
         types={types}
         plugins={plugins}
+        agentTools={agentTools}
+        onOpenAgentTools={(tools) => {
+          void (tools.serverId === null
+            ? navigate({ to: "/settings/mcp-servers" })
+            : navigate({ to: "/settings/mcp-servers/$id", params: { id: tools.serverId } }));
+        }}
         onReconnect={(picked, type) => {
           setDialog({
             kind: "setup",
