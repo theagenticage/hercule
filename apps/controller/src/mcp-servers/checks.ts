@@ -45,7 +45,6 @@ import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
-  decideSignInOffered,
   MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
   runWithCredentials,
@@ -118,7 +117,7 @@ type CheckResult =
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
       /** What a server added by URL said it accepts when it refused the request, when it did. */
-      readonly signInOffered?: "oauth" | "token";
+      readonly signInOffered: "oauth" | "token" | null;
     };
 
 /** What a check fails with when the server changed after the check started, so its outcome is dropped. */
@@ -128,14 +127,8 @@ const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
   detail: string,
   cause: "plugin" | "connection" | null = null,
-  signInOffered?: "oauth" | "token",
-): CheckResult => ({
-  _tag: "failed",
-  status,
-  detail,
-  cause,
-  ...(signInOffered === undefined ? {} : { signInOffered }),
-});
+  signInOffered: "oauth" | "token" | null = null,
+): CheckResult => ({ _tag: "failed", status, detail, cause, signInOffered });
 
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
@@ -269,8 +262,10 @@ const make = Effect.gen(function* () {
         ),
         Effect.catchTags({
           UpstreamError: (failure) => {
-            const { status, detail } = buildStatusFromFailure(failure, access.credentials);
-            const signInOffered = decideSignInOffered(failure, server.source.kind);
+            const { status, detail, signInOffered } = buildStatusFromFailure(
+              failure,
+              access.credentials,
+            );
             return Effect.succeed(buildFailedResult(status, detail, null, signInOffered));
           },
           ServerCredentialsUnavailable: ({ status, detail, cause }) =>

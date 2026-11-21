@@ -69,7 +69,6 @@ import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
   buildStatusFromFailure,
-  decideSignInOffered,
   openUpstream,
   runWithCredentials,
   UPSTREAM_WORK_DEADLINE,
@@ -412,7 +411,7 @@ const make = Effect.gen(function* () {
     basis: StateBasis,
     status: "unreachable" | "error" | "needs-sign-in",
     detail: string,
-    signInOffered: "oauth" | "token" | undefined,
+    signInOffered: "oauth" | "token" | null,
   ): Effect.Effect<void> =>
     absorbFailures(
       `Writing the status of MCP server ${server.id} after a call failed`,
@@ -421,11 +420,7 @@ const make = Effect.gen(function* () {
         yield* state.writeCheckResult(
           server.id,
           basis,
-          buildFailureEdit(
-            server,
-            { status, detail, ...(signInOffered === undefined ? {} : { signInOffered }) },
-            at,
-          ),
+          buildFailureEdit(server, { status, detail, signInOffered }, at),
           at,
         );
       }),
@@ -676,14 +671,11 @@ const make = Effect.gen(function* () {
               return yield* refuse("error", buildChangedMessage(first));
             }
             default: {
-              const { status, detail } = buildStatusFromFailure(failure, serverCredentials);
-              yield* writeFailure(
-                server,
-                basis,
-                status,
-                detail,
-                decideSignInOffered(failure, server.source.kind),
+              const { status, detail, signInOffered } = buildStatusFromFailure(
+                failure,
+                serverCredentials,
               );
+              yield* writeFailure(server, basis, status, detail, signInOffered);
               return yield* progress.toolPostSent && status === "unreachable"
                 ? refuse(status, describeMayHaveRun(name, `${name} could not be reached`))
                 : refuse(status, describeRefusal(status, server));

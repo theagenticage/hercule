@@ -63,7 +63,7 @@ export const buildFailureEdit = (
     readonly status: "unreachable" | "error" | "needs-sign-in";
     readonly detail: string;
     readonly cause?: "plugin" | "connection" | null;
-    readonly signInOffered?: "oauth" | "token";
+    readonly signInOffered?: "oauth" | "token" | null;
   },
   at: string,
   protocolVersion?: string,
@@ -71,7 +71,7 @@ export const buildFailureEdit = (
   const planAfter = (millis: number): string => new Date(Date.parse(at) + millis).toISOString();
   const observed = {
     ...(protocolVersion === undefined ? {} : { protocolVersion }),
-    ...(failure.signInOffered === undefined ? {} : { signInOffered: failure.signInOffered }),
+    ...(failure.signInOffered == null ? {} : { signInOffered: failure.signInOffered }),
   };
   if (failure.status === "unreachable") {
     const failedChecks = server.failedChecks + 1;

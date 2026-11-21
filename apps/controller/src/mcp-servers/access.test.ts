@@ -108,9 +108,10 @@ describe("resolving the access of a plugin server", () => {
       generation: 0,
       credentialsRecordId: "connection-1",
     });
-    expect(access.credentials.describeRejected()).toEqual({
+    expect(access.credentials.describeRejected(true)).toEqual({
       status: "error",
       detail: "Desk's MCP server refused the Connection's token",
+      signInOffered: null,
     });
   });
 
@@ -218,13 +219,17 @@ describe("resolving the access of a server added by URL", () => {
   });
 
   it("says in words the user can act on that the server needs sign-in, whether it holds a token or not", () => {
-    expect(resolveUsable({}, { url: { signIn: "none" } }).credentials.describeRejected()).toEqual({
+    expect(
+      resolveUsable({}, { url: { signIn: "none" } }).credentials.describeRejected(true),
+    ).toEqual({
       status: "needs-sign-in",
       detail: "desk asks for sign-in: paste a token or sign in in Settings > MCP servers",
+      signInOffered: "oauth",
     });
-    expect(resolveUsable({}, url).credentials.describeRejected()).toEqual({
+    expect(resolveUsable({}, url).credentials.describeRejected(false)).toEqual({
       status: "needs-sign-in",
       detail: "desk refused its sign-in: paste a token or sign in in Settings > MCP servers",
+      signInOffered: "token",
     });
   });
 

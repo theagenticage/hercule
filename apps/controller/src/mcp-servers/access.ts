@@ -161,10 +161,15 @@ export interface ServerCredentials {
    * Returns the status and the words the server shows when it refused the
    * credentials and nothing better is known: the credentials cannot be
    * renewed, or a renewal worked and the server still refused them.
+   * `offersOAuth` is whether the server's refusal pointed at OAuth metadata.
+   * `signInOffered` is what the server offers the user as a sign-in, which a
+   * server added by URL records. It is `null` for a plugin server, which is
+   * signed in to through its Connection.
    */
-  readonly describeRejected: () => {
+  readonly describeRejected: (offersOAuth: boolean) => {
     readonly status: "error" | "needs-sign-in";
     readonly detail: string;
+    readonly signInOffered: "oauth" | "token" | null;
   };
 }
 
@@ -319,6 +324,7 @@ const resolvePluginAccess = (
       describeRejected: () => ({
         status: "error",
         detail: `${displayName}'s MCP server refused the Connection's token`,
+        signInOffered: null,
       }),
     },
   };
@@ -388,9 +394,10 @@ const resolveUrlAccess = (
         ),
       ),
       readVersion: signIns.readVersion(id),
-      describeRejected: () => ({
+      describeRejected: (offersOAuth) => ({
         status: "needs-sign-in",
         detail: `${name} ${signIn === "none" ? "asks for sign-in" : "refused its sign-in"}: ${describeSignInFix("url")}`,
+        signInOffered: offersOAuth ? "oauth" : "token",
       }),
     },
   };

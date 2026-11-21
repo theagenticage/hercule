@@ -387,20 +387,6 @@ const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean => {
 };
 
 /**
- * Returns what a server added by URL offers as a sign-in after it refused a
- * request with HTTP 401, or `undefined` for any other failure and for a plugin
- * server, which has no sign-in to offer. A check and a failed call both record
- * it, so the two cannot read one answer differently.
- */
-export const decideSignInOffered = (
-  failure: UpstreamError,
-  sourceKind: "plugin" | "url",
-): "oauth" | "token" | undefined => {
-  if (failure.reason !== "unauthorized" || sourceKind !== "url") return undefined;
-  return failure.offersOAuth === true ? "oauth" : "token";
-};
-
-/**
  * Counts one answer to `tools/list` into `listing`, and returns the client
  * failure that ends the listing when it passed a limit, and `undefined`
  * otherwise. A listing ends as soon as:
@@ -1083,9 +1069,12 @@ export const openUpstream = (
  * Converts a failure of an upstream call into the status an MCP Server shows
  * for it, with a detail a person can read. A server that cannot be reached or
  * does not answer in time is `unreachable`, because trying again later may
- * work. A server that refused the credentials has the status and the words
- * its credentials give (`ServerCredentials.describeRejected`). Every other
- * failure is `error`: the server answered with something Hercule cannot use.
+ * work. A server that refused the credentials has the status, the words and
+ * the sign-in offer that its credentials give
+ * (`ServerCredentials.describeRejected`). Every other failure is `error`, with
+ * no sign-in offer: the server answered with something Hercule cannot use.
+ * A check and a failed call both use this, so the two cannot read one answer
+ * differently.
  */
 export const buildStatusFromFailure = (
   failure: UpstreamError,
@@ -1093,15 +1082,16 @@ export const buildStatusFromFailure = (
 ): {
   readonly status: "unreachable" | "error" | "needs-sign-in";
   readonly detail: string;
+  readonly signInOffered: "oauth" | "token" | null;
 } => {
   switch (failure.reason) {
     case "unreachable":
     case "timeout":
-      return { status: "unreachable", detail: failure.message };
+      return { status: "unreachable", detail: failure.message, signInOffered: null };
     case "unauthorized":
-      return credentials.describeRejected();
+      return credentials.describeRejected(failure.offersOAuth === true);
     default:
-      return { status: "error", detail: failure.message };
+      return { status: "error", detail: failure.message, signInOffered: null };
   }
 };
 
