@@ -46,9 +46,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { buildMcpServerConfig } from "../../../runner/src/harnesses/codex/mcp";
-import { buildAppServerCommand } from "../../../runner/src/harnesses/codex/rpc";
+import {
+  buildAppServerCommand,
+  makeRpc,
+  type AppServerChild,
+  type NotificationFrame,
+} from "../../../runner/src/harnesses/codex/rpc";
+import { spawnAppServer, stopChild } from "../../../runner/src/harnesses/process";
 import {
   startScriptedModel,
   type ScriptedModelRequest,
@@ -192,15 +199,6 @@ const readCallOutput = (
 
 // -- The real Codex -----------------------------------------------------------
 
-/** One JSON-RPC message from `codex app-server`: a response, a notification or a request of its own. */
-interface Frame {
-  readonly id?: number;
-  readonly method?: string;
-  readonly params?: Record<string, unknown>;
-  readonly result?: Record<string, unknown>;
-  readonly error?: { readonly message: string };
-}
-
 /** What a finished `mcpToolCall` item says about the call. */
 interface ReportedCall {
   readonly server: string;
@@ -217,19 +215,24 @@ interface RunningCodex {
   readonly runTurn: (threadId: string, prompt: string) => Promise<void>;
   /** Returns every MCP tool call item that has finished, oldest first. */
   readonly readFinishedCalls: () => ReadonlyArray<ReportedCall>;
-  /** Stops the process by its id and waits until it has exited. */
-  readonly stop: () => Promise<void>;
 }
 
-/** What `withCodexHome` makes: starts one `codex app-server` after another on the same `CODEX_HOME`. */
+/** What `withCodexHome` makes: starts one `codex app-server` on the home. */
 interface CodexHome {
   readonly start: () => Promise<RunningCodex>;
 }
 
 /**
  * Prepares a throwaway `HOME` and `CODEX_HOME` that point Codex at the stand-in
- * model, calls `body` with a way to start `codex app-server` processes on it,
- * then stops every process it started, by process id, and removes the folders.
+ * model, calls `body` with a way to start a `codex app-server` process on it,
+ * then stops every process it started and removes the folders. The process is
+ * registered for the stop when it is spawned, so one that fails to start up is
+ * stopped too.
+ *
+ * The app-server is started and spoken to with the runner's own parts: the
+ * adapter's launch command, `spawnAppServer` and the JSON-RPC codec `makeRpc`.
+ * The adapter's `startSession` is not used, because this file checks the
+ * gateway against the real Codex without the adapter in between.
  */
 const withCodexHome = async (
   options: {
@@ -245,66 +248,49 @@ const withCodexHome = async (
   mkdirSync(codexHome);
   mkdirSync(cwd);
   writeFileSync(join(codexHome, "config.toml"), options.modelConfig);
-  const running: Array<RunningCodex> = [];
+  const spawned: Array<AppServerChild> = [];
 
   const start = async (): Promise<RunningCodex> => {
     // A Codex installed with npm is a script that runs `node`, so `node`'s folder
     // is on the path too. Nothing else of the developer's environment is.
     const node = Bun.which("node");
-    const child = Bun.spawn(buildAppServerCommand(codex!), {
-      env: {
-        PATH: [dirname(codex!), ...(node === null ? [] : [dirname(node)]), "/usr/bin", "/bin"].join(
-          ":",
-        ),
-        HOME: root,
-        CODEX_HOME: codexHome,
-        HERCULE_TOKEN: options.sessionToken,
-        HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
-      },
-      cwd,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "ignore",
+    const child = spawnAppServer(buildAppServerCommand(codex!), {
+      PATH: [dirname(codex!), ...(node === null ? [] : [dirname(node)]), "/usr/bin", "/bin"].join(
+        ":",
+      ),
+      HOME: root,
+      CODEX_HOME: codexHome,
+      HERCULE_TOKEN: options.sessionToken,
+      HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
     });
+    spawned.push(child);
+    // Read to the end, so a full pipe never holds Codex up.
+    void Array.fromAsync(child.stderr);
 
-    const frames: Array<Frame> = [];
-    void (async () => {
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for await (const chunk of child.stdout) {
-        buffer += decoder.decode(chunk, { stream: true });
-        for (let end = buffer.indexOf("\n"); end !== -1; end = buffer.indexOf("\n")) {
-          const line = buffer.slice(0, end);
-          buffer = buffer.slice(end + 1);
-          if (line.trim() !== "") frames.push(JSON.parse(line) as Frame);
-        }
-      }
-    })();
-    const write = async (message: unknown): Promise<void> => {
-      await child.stdin.write(`${JSON.stringify(message)}\n`);
-      await child.stdin.flush();
-    };
-    let nextId = 1;
+    const notifications: Array<NotificationFrame> = [];
+    const rpc = makeRpc(child, {
+      onServerRequest: (frame) =>
+        rpc.answer(frame.id, {
+          error: { message: `this test does not handle ${frame.method}` },
+        }),
+      onNotification: (frame) => void notifications.push(frame),
+      onWarning: () => undefined,
+    });
+    Effect.runFork(rpc.pump);
     /** Sends a request and returns its result, or fails the test with Codex's error. */
-    const request = async (method: string, params: unknown): Promise<Record<string, unknown>> => {
-      const id = nextId++;
-      await write({ id, method, params });
-      expect(
-        await waitWithin(STEP_MS, () =>
-          frames.some((frame) => frame.id === id && frame.method === undefined),
+    const request = (method: string, params: unknown): Promise<Record<string, unknown>> =>
+      Effect.runPromise(
+        Effect.mapError(
+          rpc.request(method, params),
+          (error) => new Error(`${method} failed: ${error.message}`),
         ),
-        `an answer to ${method}`,
-      ).toBe(true);
-      const answer = frames.find((frame) => frame.id === id && frame.method === undefined)!;
-      if (answer.error !== undefined) throw new Error(`${method} failed: ${answer.error.message}`);
-      return answer.result!;
-    };
+      ) as Promise<Record<string, unknown>>;
 
     await request("initialize", {
       clientInfo: { name: "hercule-test", title: null, version: "0.0.0" },
       capabilities: { experimentalApi: false },
     });
-    await write({ method: "initialized" });
+    rpc.notify("initialized");
 
     // The thread's parameters as the adapter builds them for full access, with
     // its own MCP config. The gateway entry is given whether or not the
@@ -324,11 +310,13 @@ const withCodexHome = async (
     const readThreadId = (result: Record<string, unknown>): string =>
       (result["thread"] as { readonly id: string }).id;
     const countEndedTurns = (threadId: string): number =>
-      frames.filter(
-        (frame) => frame.method === "turn/completed" && frame.params?.["threadId"] === threadId,
+      notifications.filter(
+        (frame) =>
+          frame.method === "turn/completed" &&
+          (frame.params as { readonly threadId?: string }).threadId === threadId,
       ).length;
 
-    const started: RunningCodex = {
+    return {
       startThread: async () =>
         readThreadId(
           await request("thread/start", {
@@ -348,28 +336,21 @@ const withCodexHome = async (
         ).toBe(true);
       },
       readFinishedCalls: () =>
-        frames
+        notifications
           .filter(
             (frame) =>
               frame.method === "item/completed" &&
-              (frame.params?.["item"] as { readonly type?: string } | undefined)?.type ===
+              (frame.params as { readonly item?: { readonly type?: string } }).item?.type ===
                 "mcpToolCall",
           )
-          .map((frame) => frame.params!["item"] as ReportedCall),
-      stop: async () => {
-        if (child.exitCode !== null) return;
-        child.kill();
-        await child.exited;
-      },
+          .map((frame) => (frame.params as { readonly item: ReportedCall }).item),
     };
-    running.push(started);
-    return started;
   };
 
   try {
     await body({ start });
   } finally {
-    for (const one of running) await one.stop();
+    for (const child of spawned) await Effect.runPromise(stopChild(child));
     rmSync(root, { recursive: true, force: true });
   }
 };
