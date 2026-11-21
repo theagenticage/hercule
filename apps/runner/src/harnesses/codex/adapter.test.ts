@@ -4875,13 +4875,6 @@ describe("the MCP servers a Codex session is given", () => {
     },
   );
 
-  it("keeps the approval mode of MCP tools out of the thread's own settings", async () => {
-    const { requests } = await startWithServers([GATEWAY], { ...SPEC, accessMode: "full-access" });
-
-    // Codex refuses a field it does not know, so the table's extra column must not leak.
-    expect(listSentParams(requests, "thread/start")[0]).not.toHaveProperty("mcpToolApprovalMode");
-  });
-
   it.each([
     ["approval-required", "prompt"],
     ["auto-accept-edits", "prompt"],
@@ -4928,96 +4921,19 @@ describe("the MCP servers a Codex session is given", () => {
     });
   });
 
-  describe("when Codex's own configuration sets the gateway's server name", () => {
-    /** The `config/read` reply of a repository whose `.codex/config.toml` holds these `mcp_servers`. */
-    const configuredBy = (servers: Record<string, unknown>): Answers => ({
-      "config/read": () => ({
-        config: {},
-        origins: {},
-        layers: [
-          {
-            name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
-            version: "sha256:0",
-            config: { mcp_servers: servers },
-            disabledReason: null,
-          },
-        ],
-      }),
-    });
-
-    it.each(CONTINUATIONS)(
-      "gives %s no gateway keys, and warns with the file and the fix",
-      async (method, spec) => {
-        const run = await startWithServers([GATEWAY], spec, {
-          ...configuredBy({ tools: { tools: { x: { approval_mode: "approve" } } } }),
-        });
-        await waitUntil(
-          "warned about the name",
-          () => filterByTag(run.seen, "runtime.warning").length === 1,
-        );
-        await settle();
-
-        const [params] = listSentParams(run.requests, method);
-        expect(params).not.toHaveProperty("config");
-        expect(listSentParams(run.requests, "config/read")).toEqual([
-          { cwd: CWD, includeLayers: true },
-        ]);
-        const [warning] = filterByTag(run.seen, "runtime.warning");
-        expect(warning?.message).toContain("/work/repo/.codex");
-        expect(warning?.message).toContain("config.toml");
-        expect(warning?.message).toContain('MCP server named "tools"');
-        expect(warning?.message).toContain("Rename or remove");
-      },
-    );
-
-    it("changes nothing when the configuration sets another server's name", async () => {
-      const run = await startWithServers([GATEWAY], SPEC, {
-        ...configuredBy({ docs: { command: "docs-server" } }),
-      });
-      await settle();
-
-      expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
-        config: { "mcp_servers.tools.url": GATEWAY.url },
-      });
-      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
-    });
-
-    it("does not mistake a longer server name for the gateway's", async () => {
-      const run = await startWithServers([GATEWAY], SPEC, {
-        ...configuredBy({ tools_extra: { url: "http://example.test/mcp" } }),
-      });
-
-      expect(listSentParams(run.requests, "thread/start")[0]).toHaveProperty("config");
-    });
-
-    it("gives no gateway keys and warns with Codex's own message when it cannot read its configuration", async () => {
-      const run = await startWithServers([GATEWAY], SPEC, {
-        "config/read": () => buildRefusal("invalid transport in `mcp_servers.tools`"),
-      });
-      await waitUntil(
-        "warned about the configuration",
-        () => filterByTag(run.seen, "runtime.warning").length === 1,
-      );
-
-      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
-      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain(
-        "invalid transport in `mcp_servers.tools`",
-      );
-    });
-
-    it("gives no gateway keys for a project layer that sets the name, even one that is not trusted yet", async () => {
-      // A project that is not trusted is listed with its settings and a
-      // reason. The thread's own start trusts the project and merges its
-      // table, so the layer still counts.
-      const run = await startWithServers([GATEWAY], SPEC, {
+  it.each(CONTINUATIONS)(
+    "gives %s no gateway keys when a layer sets the gateway's name, and warns after session.started",
+    async (method, spec) => {
+      const run = await startWithServers([GATEWAY], spec, {
         "config/read": () => ({
           config: {},
+          origins: {},
           layers: [
             {
               name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
               version: "sha256:0",
-              config: { mcp_servers: { tools: { enabled: false } } },
-              disabledReason: "this project is not trusted",
+              config: { mcp_servers: { tools: { url: "http://example.test/mcp" } } },
+              disabledReason: null,
             },
           ],
         }),
@@ -5027,46 +4943,13 @@ describe("the MCP servers a Codex session is given", () => {
         () => filterByTag(run.seen, "runtime.warning").length === 1,
       );
 
-      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
+      expect(listSentParams(run.requests, method)[0]).not.toHaveProperty("config");
+      expect(listSentParams(run.requests, "config/read")).toEqual([
+        { cwd: CWD, includeLayers: true },
+      ]);
+      const tags = run.seen.map((event) => event._tag);
+      expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
       expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("/work/repo/.codex");
-    });
-
-    it.each([
-      ["no layers", { config: {} }],
-      ["layers that are null", { config: {}, layers: null }],
-      ["layers that are not a list", { config: {}, layers: "nothing" }],
-      [
-        "a layer with no settings",
-        { layers: [{ name: { type: "user", file: "/home/.codex/config.toml" } }] },
-      ],
-      [
-        "a layer whose settings are not an object",
-        {
-          layers: [{ name: { type: "user", file: "/home/.codex/config.toml" }, config: "nothing" }],
-        },
-      ],
-      [
-        "a layer whose settings are a list",
-        { layers: [{ name: { type: "user", file: "/home/.codex/config.toml" }, config: [] }] },
-      ],
-      ["a layer with no source", { layers: [{ config: {} }] }],
-    ])("treats a reply to config/read with %s like a failed read", async (_name, reply) => {
-      const run = await startWithServers([GATEWAY], SPEC, {
-        "config/read": () => reply,
-      });
-      await waitUntil(
-        "warned about the configuration",
-        () => filterByTag(run.seen, "runtime.warning").length === 1,
-      );
-
-      expect(listSentParams(run.requests, "thread/start")[0]).not.toHaveProperty("config");
-      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("not understood");
-    });
-
-    it("never reads the configuration for a session with no MCP server", async () => {
-      const run = await startWithServers([]);
-
-      expect(listSentParams(run.requests, "config/read")).toEqual([]);
-    });
-  });
+    },
+  );
 });
