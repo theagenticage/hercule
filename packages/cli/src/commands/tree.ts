@@ -141,13 +141,16 @@ export interface Field {
    * the flags'. Set by the row's `oneOf` form; `undefined` for every other
    * field. `entry` is the position of the field's entry in the row, and the
    * field is sent only when that entry is picked. A flag that several entries
-   * declare is one field of each of them.
+   * declare is one field of each of them. `optional` is true when the object
+   * field may be left out of the request, so a command line with none of its
+   * flags is valid.
    */
   readonly within:
     | {
         readonly field: string;
         readonly fixed: Readonly<Record<string, string>>;
         readonly entry: number;
+        readonly optional: boolean;
       }
     | undefined;
   readonly help: string;
@@ -160,6 +163,8 @@ export interface Field {
 export interface ObjectChoice {
   /** The name of the object field in the request. */
   readonly field: string;
+  /** The request may leave the field out, so no entry has to be picked. */
+  readonly optional: boolean;
   readonly entries: ReadonlyArray<{
     /** The line that leads the entry's flags in the help. */
     readonly help: string;
@@ -447,8 +452,9 @@ const buildField = (
 
 /**
  * Builds one field for each flag of an object row, each typed by its key of
- * the object. `entry` is the position of the row in its `oneOf` row. Throws when the table is wrong: a flag or
- * a fixed value names a key the object does not have, a key the object
+ * the object. `entry` is the position of the row in its `oneOf` row, and
+ * `optional` says whether the object field may be left out. Throws when the
+ * table is wrong: a flag or a fixed value names a key the object does not have, a key the object
  * requires has neither, or a flag's key holds a list.
  */
 const buildObjectFields = (
@@ -457,6 +463,7 @@ const buildObjectFields = (
   row: ObjectFlagsRow,
   carriedIn: FieldCarrier,
   entry: number,
+  optional: boolean,
 ): ReadonlyArray<Field> => {
   const readKey = (key: string): Ast => {
     const property = object.propertySignatures?.find((one) => String(one.name) === key);
@@ -482,7 +489,7 @@ const buildObjectFields = (
     }
     return {
       ...buildField(key, type, keyRow, carriedIn, undefined),
-      within: { field: name, fixed: row.fixed, entry },
+      within: { field: name, fixed: row.fixed, entry, optional },
     };
   });
 };
@@ -522,7 +529,7 @@ const hasSameChoices = (
  * each entry built against the member of the union it stands for. Throws when
  * the table is wrong:
  *
- * - the field is not a union of objects;
+ * - the field is neither an object nor a union of objects;
  * - a member has no entry, an entry's `fixed` values are not the literal keys
  *   of any member, or two entries stand for one member;
  * - an entry is wrong as `buildObjectFields` explains;
@@ -540,9 +547,9 @@ const buildOneOfFields = (
   row: Extract<FieldRow, { readonly oneOf: unknown }>,
   carriedIn: FieldCarrier,
 ): ReadonlyArray<Field> => {
-  const members = union._tag === "Union" ? (union.types ?? []) : [];
-  if (members.length === 0 || members.some((member) => member._tag !== "Objects")) {
-    throw new Error(`${name}: a oneOf row needs a field that is a union of objects`);
+  const members = union._tag === "Union" ? (union.types ?? []) : [union];
+  if (members.some((member) => member._tag !== "Objects")) {
+    throw new Error(`${name}: a oneOf row needs a field that is an object or a union of objects`);
   }
   const literals = members.map(readLiteralKeys);
   const matched = row.oneOf.map((entry) =>
@@ -565,7 +572,14 @@ const buildOneOfFields = (
   }
 
   const fields = row.oneOf.flatMap((entry, index) =>
-    buildObjectFields(name, members[matched[index]!]!, entry, carriedIn, index),
+    buildObjectFields(
+      name,
+      members[matched[index]!]!,
+      entry,
+      carriedIn,
+      index,
+      union.context?.isOptional === true,
+    ),
   );
   for (const field of fields) {
     const first = fields.find((other) => other.spelling === field.spelling)!;
@@ -803,6 +817,9 @@ const buildChoices = (
       ? [
           {
             field: name,
+            optional: payload.some(
+              (field) => field.within?.field === name && field.within.optional,
+            ),
             entries: row.oneOf.map((entry, index) => ({
               help: entry.help,
               fields: payload.filter(

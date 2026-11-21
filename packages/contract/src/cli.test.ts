@@ -569,6 +569,7 @@ const RESOLVES: Record<string, string> = {
   "mcpServer.create source.connectionId": "connection.query",
   "mcpServer.read id": "mcpServer.query",
   "mcpServer.update id": "mcpServer.query",
+  "mcpServer.update source.connectionId": "connection.query",
   "mcpServer.delete id": "mcpServer.query",
   "mcpServer.check id": "mcpServer.query",
   "mcpServer.setToken id": "mcpServer.query",

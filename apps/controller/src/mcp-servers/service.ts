@@ -30,11 +30,11 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { connectionRepository } from "../connections";
+import { connectionRepository, type StoredConnection } from "../connections";
 import type { ConnectionStatus } from "@hercule/plugin-host";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost } from "../plugins";
+import { PluginHost, type RegisteredMcpServer } from "../plugins";
 import {
   buildDefaultServerName,
   findPluginOnOrigin,
@@ -239,12 +239,23 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** Inserts a server of a plugin's contribution, in a transaction `create` opened. */
-  const insertPluginServer = (
-    source: Extract<CreateSource, { readonly kind: "plugin" }>,
-  ): Effect.Effect<StoredMcpServer, Validation | Conflict | SqlError> =>
+  /**
+   * Reads the contribution and the Connection a plugin server is made of, for
+   * `create` and for Replace. Fails with `Validation` when no plugin offers
+   * the contribution, when the Connection does not exist, or when it is not of
+   * the type the contribution is reached with.
+   */
+  const readPluginTarget = (
+    contributionId: string,
+    connectionId: string,
+  ): Effect.Effect<
+    {
+      readonly contribution: RegisteredMcpServer;
+      readonly connection: StoredConnection;
+    },
+    Validation | SqlError
+  > =>
     Effect.gen(function* () {
-      const { contributionId, connectionId, name } = source;
       const contribution = yield* plugins.findMcpServer(contributionId);
       if (Option.isNone(contribution)) {
         return yield* Effect.fail(
@@ -274,13 +285,23 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
+      return { contribution: contribution.value, connection: connection.value };
+    });
+
+  /** Inserts a server of a plugin's contribution, in a transaction `create` opened. */
+  const insertPluginServer = (
+    source: Extract<CreateSource, { readonly kind: "plugin" }>,
+  ): Effect.Effect<StoredMcpServer, Validation | Conflict | SqlError> =>
+    Effect.gen(function* () {
+      const { contributionId, connectionId, name } = source;
+      const { connection } = yield* readPluginTarget(contributionId, connectionId);
       // The lookup and the insert run in one transaction, and SQLite lets one
       // writer at a time through, so a create that committed first is always
       // seen here. The table's UNIQUE constraint on the contribution and the
       // account is only a backstop.
       const existing = yield* servers.findByContributionAndAccount(
         contributionId,
-        connection.value.accountId,
+        connection.accountId,
       );
       if (Option.isSome(existing)) {
         return yield* Effect.fail(buildPluginServerExists(contributionId, existing.value));
@@ -290,8 +311,8 @@ const make = Effect.gen(function* () {
         name: name ?? contributionId.slice(contributionId.lastIndexOf("/") + 1),
         contributionId,
         connectionId,
-        accountId: connection.value.accountId,
-        connectionGeneration: connection.value.credentialsGeneration,
+        accountId: connection.accountId,
+        connectionGeneration: connection.credentialsGeneration,
         at,
       });
       yield* audit.append({
@@ -302,6 +323,84 @@ const make = Effect.gen(function* () {
         at,
       });
       return server;
+    });
+
+  /**
+   * Moves a server added by address onto a plugin's Connection (Replace), in
+   * a transaction `update` opened. `enabled` is the switch the same call
+   * gives, if any, and is written after the move. Fails with:
+   *
+   * - `InvalidState` when the server is a plugin server already;
+   * - `Validation` as `readPluginTarget` does, and on `["source",
+   *   "contributionId"]` when the server's address is not on the origin the
+   *   contribution is reached at;
+   * - `Conflict` with `mcp-server-exists` when the contribution already has a
+   *   server for the Connection's account.
+   *
+   * The server's id, name, stored tools and every list that names it stay.
+   * Its sign-in secrets are deleted, and its revision goes up, which ends its
+   * upstream sessions and the checks that started before.
+   */
+  const replaceWithPluginSource = (
+    current: StoredMcpServer,
+    target: { readonly contributionId: string; readonly connectionId: string },
+    enabled: boolean | undefined,
+  ): Effect.Effect<void, Validation | Conflict | InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      if (current.source.kind === "plugin") {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "this server is already reached with a Connection; Replace moves a server added by address",
+          ),
+        );
+      }
+      const { contribution, connection } = yield* readPluginTarget(
+        target.contributionId,
+        target.connectionId,
+      );
+      if (new URL(current.source.url).origin !== contribution.origin) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["source", "contributionId"],
+              message: `this server's address is not on ${contribution.origin}, the address the ${contribution.displayName} server is reached at`,
+            },
+          ]),
+        );
+      }
+      // One transaction and one writer at a time, as in `insertPluginServer`.
+      const existing = yield* servers.findByContributionAndAccount(
+        target.contributionId,
+        connection.accountId,
+      );
+      if (Option.isSome(existing)) {
+        return yield* Effect.fail(buildPluginServerExists(target.contributionId, existing.value));
+      }
+      const at = yield* nowIso;
+      yield* signIns.deleteAll(current.id);
+      yield* servers.writePluginSource(current.id, {
+        contributionId: target.contributionId,
+        connectionId: target.connectionId,
+        accountId: connection.accountId,
+        connectionGeneration: connection.credentialsGeneration,
+        at,
+      });
+      if (enabled !== undefined && enabled !== current.enabled) {
+        yield* servers.writeEnabled(current.id, enabled, at);
+      }
+      yield* audit.append({
+        kind: "mcpServer.updated",
+        actor: yield* currentStamp,
+        record: { topic: "mcpServer", id: current.id },
+        payload: {
+          mcpServerId: current.id,
+          sourceKind: "plugin",
+          contributionId: target.contributionId,
+          connectionId: target.connectionId,
+          ...(enabled === undefined ? {} : { enabled }),
+        },
+        at,
+      });
     });
 
   /**
@@ -398,29 +497,51 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Switches a server on or off and returns it. Switching on puts the status
-     * back to `checking` and requests a new list after the commit. Switching
-     * off leaves the status, because a client shows Off from `enabled`. Giving
-     * the value the server already has writes nothing. Fails with `Validation`
-     * when `enabled` is not given, and with `NotFound` when there is no such
+     * Switches a server on or off, moves a server added by address onto a
+     * plugin's Connection (Replace), or both in one call, and returns the
      * server.
+     *
+     * - `enabled`: switching on puts the status back to `checking` and
+     *   requests a new list after the commit. Switching off leaves the status,
+     *   because a client shows Off from `enabled`. Giving the value the server
+     *   already has writes nothing.
+     * - `source`: the server becomes a plugin server, keeping its id, name,
+     *   stored tools and every list that names it. Its status goes to
+     *   `checking` and a new list through the Connection is requested after
+     *   the commit; its sign-in secrets are deleted and its upstream sessions
+     *   end. The audit entry names the contribution and the Connection.
+     *
+     * Fails with `Validation` when neither field is given, and for `source`
+     * as `replaceWithPluginSource` says; with `NotFound` when there is no such
+     * server; with `Conflict` and `InvalidState` as `replaceWithPluginSource`
+     * says.
      */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<McpServer, Forbidden | Validation | NotFound | SqlError> =>
+    ): Effect.Effect<
+      McpServer,
+      Forbidden | Validation | NotFound | Conflict | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("mcpServer.update");
-        const { id, enabled } = input;
-        if (enabled === undefined) {
+        const { id, enabled, source } = input;
+        if (enabled === undefined && source === undefined) {
           return yield* Effect.fail(
-            createValidationError([{ path: ["enabled"], message: "give enabled" }]),
+            createValidationError([{ path: ["enabled"], message: "give enabled or source" }]),
           );
         }
-        const { server, changed } = yield* withTransaction(
+        const { server, needsCheck } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const current = yield* readOrFail(id);
-            if (current.enabled === enabled) return { server: current, changed: false };
+            if (source !== undefined) {
+              yield* replaceWithPluginSource(current, source, enabled);
+              return { server: yield* readOrFail(id), needsCheck: enabled !== false };
+            }
+            // `enabled` is given here, because `source` was not.
+            if (enabled === undefined || current.enabled === enabled) {
+              return { server: current, needsCheck: false };
+            }
             const at = yield* nowIso;
             yield* servers.writeEnabled(id, enabled, at);
             yield* audit.append({
@@ -430,10 +551,10 @@ const make = Effect.gen(function* () {
               payload: { mcpServerId: id, enabled },
               at,
             });
-            return { server: yield* readOrFail(id), changed: true };
+            return { server: yield* readOrFail(id), needsCheck: enabled === true };
           }),
         );
-        if (changed && enabled) yield* checks.wake;
+        if (needsCheck) yield* checks.wake;
         return toRecord(server);
       }),
 

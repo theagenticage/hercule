@@ -531,6 +531,41 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Moves a server added by address onto a plugin's Connection: the source
+     * columns become the plugin's, the address and the sign-in columns are
+     * cleared, and the server goes back to `checking`, with no protocol
+     * revision, no failed checks, an open Notification episode closed, and
+     * the next check due at `at`. The stored tools stay until the next
+     * successful check replaces them. `revision` goes up, so a check that
+     * started before cannot write its result and upstream sessions opened
+     * before end. `status_cause` is cleared, because a URL server has none.
+     */
+    writePluginSource: (
+      id: string,
+      source: {
+        readonly contributionId: string;
+        readonly connectionId: string;
+        readonly accountId: string;
+        readonly connectionGeneration: number;
+        readonly at: string;
+      },
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`
+          UPDATE mcp_servers
+          SET source_kind = 'plugin', contribution_id = ${source.contributionId},
+              connection_id = ${uuidFromString(source.connectionId)},
+              account_id = ${source.accountId},
+              url = NULL, normalized_url = NULL, sign_in = NULL, sign_in_offered = NULL,
+              connection_generation = ${source.connectionGeneration},
+              status = 'checking', status_detail = NULL, status_cause = NULL,
+              protocol_version = NULL, failed_checks = 0, notified_status = NULL,
+              next_check_at = ${source.at}, revision = revision + 1, updated_at = ${source.at}
+          WHERE id = ${uuidFromString(id)}
+        `,
+      ),
+
+    /**
      * Prepares a server whose user asked for a check now: resets its failed
      * checks, marks its next check as due at `at`, so the check happens even
      * when the request for it is lost, and raises `revision`, so a check that

@@ -400,3 +400,84 @@ describe("a row whose entries cannot be told apart or parsed alike", () => {
     ).toThrow("--size means something different in different entries");
   });
 });
+
+describe("a field of one shape that the request may leave out", () => {
+  const Moved = Schema.Struct({
+    kind: Schema.Literal("plugin"),
+    contributionId: Schema.String,
+    connectionId: Schema.String,
+  });
+  const MOVE_ENTRY = {
+    help: "To move the server onto a plugin's Connection:",
+    fixed: { kind: "plugin" },
+    flags: {
+      contributionId: { flag: "plugin", help: "The plugin's contribution." },
+      connectionId: { flag: "connection", help: "The Connection to act as." },
+    },
+  } satisfies ObjectFlagsRow & { help: string };
+
+  const buildUpdateCommand = (source: Schema.Top) =>
+    buildCommand(
+      "mcpServer.update",
+      {
+        command: "thing update",
+        help: "Updates a thing.",
+        examples: [{ args: ["--enabled", "true"] }],
+        fields: {
+          enabled: { flag: "enabled", help: "On or off." },
+          source: { oneOf: [MOVE_ENTRY] },
+        },
+      },
+      { requires: "mcp.manage", method: "PATCH", path: "/things" },
+      HttpApiEndpoint.patch("update", "/things", {
+        payload: Schema.Struct({
+          enabled: Schema.optionalKey(Schema.Boolean),
+          source,
+        }),
+        success: Schema.Struct({}),
+      }),
+    );
+
+  const optional = buildUpdateCommand(Schema.optionalKey(Moved));
+
+  it("leaves the field out when none of its flags is given", async () => {
+    const parsed = await parseArguments(optional, ["--enabled", "true"], refuseStdinRead);
+
+    expect(parsed.payload).toEqual({ enabled: true });
+  });
+
+  it("sends the field with its fixed values when its flags are given, with or without the others", async () => {
+    const both = await parseArguments(
+      optional,
+      ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e", "--enabled", "false"],
+      refuseStdinRead,
+    );
+    expect(both.payload).toEqual({
+      enabled: false,
+      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "1f3a9c2e" },
+    });
+
+    const alone = await parseArguments(
+      optional,
+      ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e"],
+      refuseStdinRead,
+    );
+    expect(alone.payload).toEqual({
+      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: "1f3a9c2e" },
+    });
+  });
+
+  it("still requires the other keys once one flag of the field is given", async () => {
+    await expect(
+      parseArguments(optional, ["--plugin", "sentry/sentry"], refuseStdinRead),
+    ).rejects.toThrow("missing required --connection");
+  });
+
+  it("requires the field when its schema does", async () => {
+    const required = buildUpdateCommand(Moved);
+
+    await expect(parseArguments(required, ["--enabled", "true"], refuseStdinRead)).rejects.toThrow(
+      "no flag says which form to use",
+    );
+  });
+});

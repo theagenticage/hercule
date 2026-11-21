@@ -215,7 +215,9 @@ const assignFieldValue = (
  * Picks the entry of each `oneOf` field that the flags given stand for, and
  * returns the fields of the entries not picked. Throws a `UsageError` when
  * the flags of two entries are given, when no flag picks an entry, or when a
- * flag is given that the picked entry does not declare.
+ * flag is given that the picked entry does not declare. A field that the
+ * request may leave out (`optional`) picks no entry when none of its flags is
+ * given, and all its entries count as not picked.
  *
  * `touched` holds the fields of the entries that a flag was given for, or
  * whose `--<flag>-stdin` marker was. A flag that several entries declare
@@ -249,6 +251,15 @@ const pickEntries = (
       })
       .join(", or ");
     if (picked.length === 0) {
+      // A flag that several entries declare picks none of them, so it still
+      // asks for a form to be picked.
+      const named = choice.entries.some((entry) =>
+        entry.fields.some((field) => touched.has(field)),
+      );
+      if (choice.optional && !named) {
+        for (const entry of choice.entries) for (const field of entry.fields) unpicked.add(field);
+        continue;
+      }
       throw new UsageError(`no flag says which form to use: give ${toGive}`, help);
     }
     if (picked.length > 1) {

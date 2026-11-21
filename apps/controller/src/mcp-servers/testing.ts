@@ -484,8 +484,10 @@ export interface McpServerRow {
 }
 
 /** Runs a statement on the controller's database in its own transaction, for state no operation reaches. */
-export const runSql = <A>(controller: SetUpController, statement: Effect.Effect<A, unknown>) =>
-  Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
+export const runSql = <A>(
+  controller: Pick<SetUpController, "harness">,
+  statement: Effect.Effect<A, unknown>,
+) => Effect.runPromise(Effect.orDie(withTransaction(controller.harness.sql, statement)));
 
 /**
  * Replaces the OAuth tokens a Connection holds, as another refresh would, and
@@ -767,11 +769,45 @@ export const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOpt
   }
 };
 
-/** What `insertUrlServer` stores: a pasted token makes the server's sign-in `token`, and none leaves it `none`. */
+/** What `insertUrlServerAt` stores: a pasted token makes the server's sign-in `token`, and none leaves it `none`. */
 export interface UrlServerFacts {
   readonly token?: string;
   readonly name?: string;
 }
+
+/**
+ * Stores a server added by URL at `url`, with its token if there is one, and
+ * returns its id. The server's first check starts at the scheduler's next
+ * look. It writes the rows directly, so a test can put such a server on the
+ * origin of a plugin, which `create` refuses.
+ */
+export const insertUrlServerAt = (
+  controller: Pick<SetUpController, "harness">,
+  url: string,
+  { token, name = "remote" }: UrlServerFacts = {},
+): Promise<string> =>
+  runSql(
+    controller,
+    Effect.gen(function* () {
+      const servers = yield* mcpServerRepository;
+      const at = yield* nowIso;
+      const server = yield* servers.insertUrl({
+        name,
+        url,
+        normalizedUrl: url,
+        signIn: token === undefined ? "none" : "token",
+        at,
+      });
+      if (token !== undefined) {
+        yield* controller.harness.secrets.set(
+          { kind: "mcp-server", id: server.id },
+          "token",
+          Redacted.make(token),
+        );
+      }
+      return server.id;
+    }).pipe(Effect.provideService(SqlClient.SqlClient, controller.harness.sql)),
+  );
 
 /** What `withUrlRig` hands the test. */
 export interface UrlRig {
@@ -779,9 +815,7 @@ export interface UrlRig {
   readonly fake: FakeUpstream;
   /**
    * Stores a server added by URL, at the fake's address, with its token if
-   * there is one, and returns its id. The server's first check starts at the
-   * scheduler's next look. No operation creates such a server yet, so the test
-   * writes the rows one would.
+   * there is one, and returns its id (`insertUrlServerAt`).
    */
   readonly insertUrlServer: (facts?: UrlServerFacts) => Promise<string>;
 }
@@ -798,29 +832,8 @@ export const withUrlRig = async (
   try {
     await withSetUpController(
       async (controller) => {
-        const insertUrlServer = ({ token, name = "remote" }: UrlServerFacts = {}) =>
-          runSql(
-            controller,
-            Effect.gen(function* () {
-              const servers = yield* mcpServerRepository;
-              const at = yield* nowIso;
-              const server = yield* servers.insertUrl({
-                name,
-                url: fake.url,
-                normalizedUrl: fake.url,
-                signIn: token === undefined ? "none" : "token",
-                at,
-              });
-              if (token !== undefined) {
-                yield* controller.harness.secrets.set(
-                  { kind: "mcp-server", id: server.id },
-                  "token",
-                  Redacted.make(token),
-                );
-              }
-              return server.id;
-            }).pipe(Effect.provideService(SqlClient.SqlClient, controller.harness.sql)),
-          );
+        const insertUrlServer = (facts: UrlServerFacts = {}) =>
+          insertUrlServerAt(controller, fake.url, facts);
         await body({ controller, fake, insertUrlServer });
       },
       [],

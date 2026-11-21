@@ -4674,8 +4674,11 @@ export const CLI = {
   },
   "mcpServer.update": {
     command: "mcp-server update",
-    help: "Switches an MCP server on or off. A server that is off gives its tools to no session, and stays on every list that names it.",
-    examples: [{ args: ["1f3a9c2e", "--enabled", "false"] }],
+    help: "Switches an MCP server on or off, or moves a server added by address onto a plugin's Connection. A server that is off gives its tools to no session, and stays on every list that names it. Moving is for a server whose address is the plugin's own: the server keeps its id, its name and every list that names it, its own sign-in is deleted, and it lists its tools again through the Connection, with the old list kept until then. Give --enabled, or --plugin with --connection, or both.",
+    examples: [
+      { args: ["1f3a9c2e", "--enabled", "false"] },
+      { args: ["1f3a9c2e", "--plugin", "sentry/sentry", "--connection", "7d2b4e90"] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -4684,8 +4687,35 @@ export const CLI = {
       },
       enabled: {
         flag: "enabled",
-        help: "true to switch the server on, false to switch it off. Without it the call is refused.",
+        help: "true to switch the server on, false to switch it off.",
       },
+      source: {
+        oneOf: [
+          {
+            help: "To move the server onto a plugin's Connection:",
+            fixed: { kind: "plugin" },
+            flags: {
+              contributionId: {
+                flag: "plugin",
+                help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry. The server's address must be the one the plugin's server is reached at.",
+              },
+              connectionId: {
+                flag: "connection",
+                help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
+                resolves: "connection.query",
+              },
+            },
+          },
+        ],
+      },
+    },
+    errors: {
+      validation:
+        "you gave neither --enabled nor --plugin. Or no plugin offers the contribution, or the Connection is not of its type, or the server's address is not the one the plugin's server is reached at",
+      conflict:
+        "the plugin already has a server for the Connection's account, and the message names it: use that one, or delete it first with `hercule mcp-server delete`",
+      invalid_state:
+        "you gave --plugin and the server is reached with a Connection already: moving is for a server added by address",
     },
   },
   "mcpServer.delete": {

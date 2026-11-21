@@ -221,9 +221,20 @@ export type McpServerCreateInput = Schema.Schema.Type<typeof McpServerCreateInpu
 /**
  * The payload of `mcpServer.update`. A payload with no field is refused as
  * `validation` by the service, not by this schema.
+ *
+ * `source` is Replace: it moves a server added by address onto a plugin's
+ * Connection, and only that move exists, so it has the plugin shape alone. It
+ * keeps the server's id, name and every list that names it.
  */
 export const McpServerUpdateInput = closedStruct({
   enabled: Schema.optionalKey(Schema.Boolean),
+  source: Schema.optionalKey(
+    closedStruct({
+      kind: Schema.Literal("plugin"),
+      contributionId: QualifiedContributionId,
+      connectionId: Id,
+    }),
+  ),
 });
 
 export type McpServerUpdateInput = Schema.Schema.Type<typeof McpServerUpdateInput>;
@@ -266,12 +277,21 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
       success: McpServer,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
     }),
-    // `validation`: the payload gives no field.
+    // Switches the server on or off, or moves a server added by address onto
+    // a plugin's Connection (Replace), or both in one call.
+    //
+    // - `validation`: the payload gives no field; or, for `source`, no plugin
+    //   offers the contribution, the Connection does not exist or is not of
+    //   its type, or the server's address is not on the contribution's origin.
+    // - `conflict`: details say `mcp-server-exists`, naming the plugin server
+    //   the contribution already has for the Connection's account.
+    // - `invalid_state`: `source` is given and the server is a plugin server
+    //   already.
     HttpApiEndpoint.patch("update", "/mcp-servers/:id", {
       params,
       payload: McpServerUpdateInput,
       success: McpServer,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/mcp-servers/:id", {
       params,
