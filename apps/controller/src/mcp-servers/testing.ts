@@ -700,6 +700,8 @@ export interface RigOptions {
   };
   /** How often, in milliseconds, the scheduler looks for checks that are due. Without it, it looks once a minute. */
   readonly checkInterval?: number;
+  /** How long, in milliseconds, a whole check may take. Without it, a check may take 45 seconds. */
+  readonly checkDeadline?: number;
 }
 
 /** What `withRig` hands the test. */
@@ -745,9 +747,14 @@ export const withRig = async (body: (rig: Rig) => Promise<void>, options: RigOpt
           ...(options.oauth === true ? { deviceProviderUrl: provider.base } : {}),
         }),
       ],
-      options.checkInterval === undefined
-        ? {}
-        : { mcpServerCheckInterval: Duration.millis(options.checkInterval) },
+      {
+        ...(options.checkInterval === undefined
+          ? {}
+          : { mcpServerCheckInterval: Duration.millis(options.checkInterval) }),
+        ...(options.checkDeadline === undefined
+          ? {}
+          : { mcpServerCheckDeadline: Duration.millis(options.checkDeadline) }),
+      },
     );
   } finally {
     await fake.stop();

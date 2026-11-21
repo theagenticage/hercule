@@ -30,7 +30,6 @@
  */
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -53,7 +52,7 @@ import {
 import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
-import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
+import { PromotionState } from "../promotion";
 import {
   decideCallRefusal,
   describeRefusal,
@@ -70,6 +69,7 @@ import {
   buildStatusFromUnavailable,
   openUpstream,
   runWithCredentials,
+  UPSTREAM_WORK_DEADLINE,
   UpstreamError,
   type ExchangeBroken,
   type OpenedUpstream,
@@ -105,14 +105,6 @@ export interface McpToolCall {
    */
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
-
-/**
- * How long a whole call may take: opening the upstream session, the refresh,
- * the retry and the tool. It ends 15 seconds before a freeze gives up waiting
- * for running work (`DRAIN_TIMEOUT`), so a call that was admitted just before
- * a freeze never fails the freeze.
- */
-const CALL_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(15));
 
 /** What the agent reads when a call could not read the database. */
 const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
@@ -719,7 +711,7 @@ const make = Effect.gen(function* () {
     Effect.suspend(() => {
       const progress: ToolCallProgress = { toolPostSent: false };
       return Effect.flatMap(
-        Effect.timeoutOption(runCall(input, progress), CALL_DEADLINE),
+        Effect.timeoutOption(runCall(input, progress), UPSTREAM_WORK_DEADLINE),
         Option.match({
           onNone: () =>
             Effect.fail(

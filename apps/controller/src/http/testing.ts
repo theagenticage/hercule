@@ -147,7 +147,7 @@ import {
   type RunnerPings,
 } from "../runners";
 import { McpGateway } from "../mcp-gateway";
-import { McpServerCalls } from "../mcp-servers";
+import { McpServerCalls, McpServerCheckDeadline } from "../mcp-servers";
 import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
@@ -584,6 +584,8 @@ export interface ServerOptions {
   readonly schedulerInterval?: Duration.Duration;
   /** How often the scheduler looks for MCP Server checks that are due. The default is a minute. */
   readonly mcpServerCheckInterval?: Duration.Duration;
+  /** How long a whole MCP Server check may take. The default is under a freeze's wait for running work. */
+  readonly mcpServerCheckDeadline?: Duration.Duration;
   /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
   readonly ingestReconcileInterval?: Duration.Duration;
   /** How long a text generation may wait for a slot and an answer. The default is over a minute. */
@@ -817,6 +819,7 @@ const provideTimings =
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
     provideIfSet(McpServerCheckInterval, options.mcpServerCheckInterval);
+    provideIfSet(McpServerCheckDeadline, options.mcpServerCheckDeadline);
     provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
     provideIfSet(ExpressionBudget, options.expressionBudget ?? Duration.infinity);
     return provided;

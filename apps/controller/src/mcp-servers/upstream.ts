@@ -40,7 +40,7 @@
  * status a failure gives the server.
  */
 import * as Context from "effect/Context";
-import type * as Duration from "effect/Duration";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
@@ -60,8 +60,17 @@ import {
   type StoredConnection,
 } from "../connections";
 import type { RegisteredMcpServer } from "../plugins";
-import { PromotionState } from "../promotion";
+import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
 import { removeCredentialValues } from "./credential-values";
+
+/**
+ * How long one whole piece of work against an outside server may take: a
+ * call or a check, with the opening of the upstream MCP session, the refresh
+ * and the retry. It ends 15 seconds before a freeze gives up waiting for
+ * running work (`DRAIN_TIMEOUT`), so work admitted just before a freeze never
+ * fails the freeze.
+ */
+export const UPSTREAM_WORK_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(15));
 
 /** The largest message a server may send, or the controller may send: one JSON answer or one SSE event. */
 export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
