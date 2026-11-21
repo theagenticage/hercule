@@ -42,16 +42,16 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import { McpSchema } from "effect/ai";
 import { McpServerWarningReason } from "@hercule/protocol";
 import { absorbFailures } from "../absorbing";
-import { ConnectionTypes, type RefreshGuard } from "../connections";
+import { ConnectionTypes } from "../connections";
 import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import type { Secrets } from "../secrets";
 import {
+  prepareRequest,
   readCredentialsGeneration,
   resolveServerAccess,
-  type ServerCredentials,
   type ServerCredentialsUnavailable,
   type UpstreamCredentials,
   type UsableAccess,
@@ -68,6 +68,7 @@ import type { StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
+  buildCurrentCredentialsReader,
   buildStatusFromFailure,
   openUpstream,
   runWithCredentials,
@@ -186,24 +187,6 @@ const make = Effect.gen(function* () {
     Effect.mapError((error) => buildNotServingRefusal(error.error.message)),
   );
 
-  /**
-   * Reads a server's credentials as they are stored now, for a request that
-   * only continues an exchange that already went out, and for the DELETE that
-   * ends an upstream session. It never refreshes them, because neither
-   * request belongs to a call that may still ask the provider for anything,
-   * and it runs no check of a caller. Fails with an `UpstreamError` that has
-   * reason `refused` when the credentials cannot be read.
-   */
-  const readCurrentCredentials = (credentials: ServerCredentials): PrepareSend =>
-    Effect.mapError(
-      credentials.readWithoutRefresh,
-      () =>
-        new UpstreamError({
-          reason: "refused",
-          message: "The server's credentials could not be read",
-        }),
-    );
-
   // The upstream MCP sessions: Session Token hash, then server id.
   const slots = new Map<string, Map<string, UpstreamSlot>>();
 
@@ -242,7 +225,7 @@ const make = Effect.gen(function* () {
       credentials,
       firstRevision,
       prepareSend,
-      readCurrentCredentials: readCurrentCredentials(access.credentials),
+      readCurrentCredentials: buildCurrentCredentialsReader(access.credentials),
       sentValues: slot.sentValues,
     }).pipe(
       Effect.provideService(Scope.Scope, slot.scope),
@@ -529,10 +512,12 @@ const make = Effect.gen(function* () {
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
 
       /**
-       * Runs right before a refresh calls the provider, under the refresh
-       * permit of a Connection: the rule of `checkBeforeSend`.
+       * The rule of `checkBeforeSend` as the access prepares requests with it
+       * (`prepareRequest`): it runs after the credentials a request carries
+       * were read, and under the refresh permit of a Connection right before a
+       * refresh calls the provider.
        */
-      const guardRefresh: RefreshGuard<McpCallRefused> = Effect.asVoid(checkBeforeSend(first));
+      const admit = Effect.asVoid(checkBeforeSend(first));
 
       /** Returns the refusal that a failure to give credentials means for this call. */
       const buildUnavailableRefusal = (error: ServerCredentialsUnavailable): McpCallRefused =>
@@ -542,36 +527,15 @@ const make = Effect.gen(function* () {
         });
 
       /**
-       * Prepares a request that starts an exchange: reads the server's
-       * credentials as they are now, and only then runs the rule of
-       * `checkBeforeSend`, so a wait for credentials never lets an older check
-       * stand. The request carries the credentials it returns, which are read
-       * again when a refresh stored new ones meanwhile. When the rule refuses,
-       * the request is not sent and the call fails with the refusal.
+       * Prepares a request that starts an exchange (`prepareRequest`): the
+       * request carries the credentials read after the call's checks ran, and
+       * when a check refuses, the request is not sent and the call fails with
+       * the refusal.
        */
-      const prepareSend: PrepareSend<McpCallRefused> = Effect.gen(function* () {
-        while (true) {
-          // Read before the credentials, so that a refresh that stores new
-          // ones in between shows as a different version, never as the same.
-          const version = yield* serverCredentials.readVersion;
-          const credentials = yield* serverCredentials
-            .readForUse(guardRefresh)
-            .pipe(
-              Effect.mapError((error) =>
-                error instanceof McpCallRefused ? error : buildUnavailableRefusal(error),
-              ),
-            );
-          yield* checkDestination(first);
-          // A refresh does not move the credentials' `generation`, so a refresh
-          // that stored new tokens while the check above ran is found by the
-          // version of the stored credentials. Then they are read again,
-          // because they are no longer the current ones.
-          const stored = yield* serverCredentials.readVersion;
-          if (stored !== version) continue;
-          yield* refuseUnlessServing;
-          return credentials;
-        }
-      });
+      const prepareSend: PrepareSend<McpCallRefused> = Effect.mapError(
+        prepareRequest(serverCredentials, admit),
+        (error) => (error instanceof McpCallRefused ? error : buildUnavailableRefusal(error)),
+      );
 
       /**
        * The same preparation for the requests that open a session, which
@@ -686,7 +650,7 @@ const make = Effect.gen(function* () {
 
       return yield* runWithCredentials({
         credentials: serverCredentials,
-        guardRefresh,
+        guardRefresh: admit,
         action: sendReplacingExpiredSession,
       }).pipe(
         Effect.catchTags({

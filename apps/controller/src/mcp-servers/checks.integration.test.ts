@@ -660,6 +660,31 @@ describe("a result that is out of date", () => {
     });
   });
 
+  it("sends no further request with the old token once the Connection was reconnected while the check waited for an answer", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const release = fake.hold();
+      const connectionId = await connect();
+      await createServer(controller, { connectionId });
+      await fake.waitForRequests(1);
+      const heldIndex = fake.requests.length;
+
+      const reconnected = await post(
+        controller.base,
+        `/api/v1/connections/${connectionId}/credentials`,
+        { credentials: { token: "new-token" } },
+        controller.token,
+      );
+      expect(reconnected.status, await reconnected.clone().text()).toBe(200);
+      release();
+
+      // The check that follows lists the tools with the new token.
+      await waitForResult(controller);
+      const sent = fake.requests.slice(heldIndex);
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent.filter((request) => request.authorization === "Bearer t0ken")).toEqual([]);
+    });
+  });
+
   it.each([
     ["is switched off", "disabled", "error", "The Connection work is switched off"],
     [
@@ -720,9 +745,10 @@ describe("a result that is out of date", () => {
       release();
 
       // A dropped check of a server that can still be served marks it due.
-      // The first check listed the tools, and the second one lists them again.
+      // The first check stops before it lists, because the server changed
+      // while it waited for the answer, so only the second one lists the tools.
       await waitForResult(controller);
-      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(2);
+      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(1);
     });
   });
 
@@ -1074,13 +1100,11 @@ describe("the scheduler", () => {
       await requestCheck(controller, server.id);
       release();
 
-      await eventually(
-        () => Promise.resolve(fake.requests.filter((one) => one.method === "tools/list").length),
-        (lists) => lists >= 2,
-      );
+      // The check that was running stops before it lists, because each request
+      // changed the server. The one check that follows lists the tools once.
       await waitForResult(controller);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(2);
+      expect(fake.requests.filter((one) => one.method === "tools/list")).toHaveLength(1);
     });
   });
 });

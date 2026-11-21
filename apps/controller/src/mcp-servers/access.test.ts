@@ -18,7 +18,7 @@ import {
   type ServerAccess,
   type UsableAccess,
 } from "./access";
-import { McpServerSignInReplaced, type McpServerSignIns } from "./sign-ins";
+import type { McpServerSignIns } from "./sign-ins";
 import { buildMcpServerView, type ViewFacts } from "./testing";
 
 /** What the Connection's runtime does for the one Connection the view names. */
@@ -30,7 +30,6 @@ interface FakeConnections {
 /** What the sign-ins of a server added by URL do for the one server the view names. */
 interface FakeSignIns {
   readonly token?: string;
-  readonly replaced?: boolean;
 }
 
 const resolve = (
@@ -53,10 +52,6 @@ const resolve = (
     } as unknown as ConnectionTypes["Service"],
     {
       readToken: () => Effect.succeed(signIns.token),
-      readTokenWhileRevisionIs: () =>
-        signIns.replaced === true
-          ? Effect.fail(new McpServerSignInReplaced())
-          : Effect.succeed(signIns.token),
       readVersion: () => Effect.succeed("version"),
     } as unknown as McpServerSignIns,
   );
@@ -232,11 +227,21 @@ describe("resolving the access of a server added by URL", () => {
     });
   });
 
-  it("refuses to read the sign-in for a request that only continues an exchange once the sign-in was replaced", async () => {
-    const access = resolveUsable({}, url, { token: "t0ken", replaced: true });
+  it("reads the token for a request that only continues an exchange while it is the one the session opened with, and refuses it once it is another", async () => {
+    const opened = await Effect.runPromise(
+      resolveUsable({}, url, { token: "t0ken" }).credentials.readForUse(),
+    );
+    const sameToken = resolveUsable({}, url, { token: "t0ken" });
+    const replacedToken = resolveUsable({}, url, { token: "other" });
 
-    const failure = await Effect.runPromise(Effect.flip(access.credentials.readWithoutRefresh));
+    const continued = await Effect.runPromise(
+      sameToken.credentials.readWithoutRefresh(opened.identity),
+    );
+    const failure = await Effect.runPromise(
+      Effect.flip(replacedToken.credentials.readWithoutRefresh(opened.identity)),
+    );
 
+    expect(continued.credentials).toEqual({ token: "t0ken" });
     expect(failure).toBeInstanceOf(ServerCredentialsUnavailable);
     expect(failure).toMatchObject({
       status: "error",

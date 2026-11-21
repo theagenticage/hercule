@@ -566,8 +566,11 @@ export interface ToolCall<Refusal = never> {
   readonly sentValues: Set<string>;
 }
 
-/** An open upstream session, and what a caller does with it. */
-export interface OpenedUpstream {
+/**
+ * An open upstream session, and what a caller does with it. `Refusal` is what
+ * the `prepareSend` of the opening can fail with besides an `UpstreamError`.
+ */
+export interface OpenedUpstream<Refusal = never> {
   /** The MCP revision that worked. Store it and pass it as `firstRevision` next time. */
   readonly revision: string;
   /**
@@ -578,11 +581,12 @@ export interface OpenedUpstream {
    * `McpSchema.Tool` after the removal is left out and logged too. The log
    * line names the server and never the tool. Fails with an `UpstreamError`, with
    * reason `too-large` when the list passed 4 MiB of definitions, 100 pages or
-   * 10,000 tools (`limitToolListing`, `describeClientFailure`).
+   * 10,000 tools (`limitToolListing`, `describeClientFailure`), and with the
+   * `Refusal` of the opening's `prepareSend`.
    */
   readonly listTools: (
     timeout: Duration.Duration,
-  ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, UpstreamError>;
+  ) => Effect.Effect<ReadonlyArray<McpSchema.Tool>, UpstreamError | Refusal>;
   /**
    * Calls a tool and returns the server's answer with every credential value
    * the session and the call sent removed. A failure of this call alone is its answer, not
@@ -612,7 +616,7 @@ export interface OpenedUpstream {
 }
 
 /** What `openUpstream` needs. */
-export interface UpstreamTarget {
+export interface UpstreamTarget<Refusal = never> {
   readonly endpoint: UpstreamEndpoint;
   /**
    * The credentials the transport's address is built from, and that the
@@ -631,16 +635,18 @@ export interface UpstreamTarget {
    * the freeze is waiting for. Without it, such a request waits for the
    * thaw, as a check does.
    */
-  readonly prepareSend?: PrepareSend;
+  readonly prepareSend?: PrepareSend<Refusal>;
   /**
    * Reads the credentials as they are stored now, for a request that only
    * continues an exchange that already went out (such as the reply to a
    * request of the server) and for the request that ends the upstream
-   * session. It runs no check of a caller, and must never start a refresh.
-   * Without it, those requests carry what the client sent last. When it
-   * fails, the request is not sent.
+   * session. It is given the identity of `credentials`, the credentials the
+   * session opened with, so a session never carries a different sign-in. It
+   * runs no check of a caller, and must never start a refresh. Without it,
+   * those requests carry what the client sent last. When it fails, the
+   * request is not sent.
    */
-  readonly readCurrentCredentials?: PrepareSend;
+  readonly readCurrentCredentials?: (openedWithIdentity: string) => PrepareSend;
   /**
    * Collects every secret credential value (`secretNames`) that a request of
    * this session sent. The caller keeps the set, so it still has
@@ -667,11 +673,11 @@ export interface UpstreamTarget {
  * `describeClientFailure` converts the client's failure. Needs an
  * `HttpClient`, and sends only while the controller is serving.
  */
-export const openUpstream = (
-  target: UpstreamTarget,
+export const openUpstream = <Refusal = never>(
+  target: UpstreamTarget<Refusal>,
 ): Effect.Effect<
-  OpenedUpstream,
-  UpstreamError,
+  OpenedUpstream<Refusal>,
+  UpstreamError | Refusal,
   HttpClient.HttpClient | PromotionState | Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -683,7 +689,7 @@ export const openUpstream = (
     const sentValues = target.sentValues ?? new Set<string>();
     const listing: ToolListing = { bytes: 0, exceeded: undefined };
     // The state of the requests that belong to no call.
-    const sessionState: UpstreamCallState = {
+    const sessionState: UpstreamCallState<Refusal> = {
       prepareSend: target.prepareSend,
       sentCredentials: undefined,
       refusal: undefined,
@@ -701,7 +707,7 @@ export const openUpstream = (
       });
 
     const readCurrentCredentials: PrepareSend =
-      target.readCurrentCredentials ??
+      target.readCurrentCredentials?.(target.credentials.identity) ??
       Effect.sync(() => sessionState.sentCredentials ?? target.credentials);
 
     const first = yield* buildRequest(target.credentials);
@@ -878,12 +884,15 @@ export const openUpstream = (
       Effect.succeed,
     );
 
-    const describeFailure = <Refusal = never>(
+    const describeFailure = <StateRefusal>(
       error: McpClientError.McpClientError,
-      state: UpstreamCallState<Refusal> = sessionState,
-    ): UpstreamError | Refusal =>
+      state: UpstreamCallState<StateRefusal>,
+    ): UpstreamError | StateRefusal =>
       state.refusal ??
       describeClientFailure(error, (state.sentCredentials ?? target.credentials).identity);
+
+    const describeSessionFailure = (error: McpClientError.McpClientError) =>
+      describeFailure(error, sessionState);
 
     /** Removes the credential values the session sent, and those of `state`, from `value`. */
     const removeSentValues = <A>(value: A, state: UpstreamCallState<unknown> = sessionState): A =>
@@ -954,7 +963,10 @@ export const openUpstream = (
         : Effect.fail(failure);
     };
 
-    const buildOpened = (mcpClient: McpClient.McpClient, revision: string): OpenedUpstream => ({
+    const buildOpened = (
+      mcpClient: McpClient.McpClient,
+      revision: string,
+    ): OpenedUpstream<Refusal> => ({
       revision,
       listTools: (timeout) =>
         Effect.gen(function* () {
@@ -962,7 +974,7 @@ export const openUpstream = (
           listing.exceeded = undefined;
           const tools = yield* mcpClient
             .listTools({ timeout })
-            .pipe(Effect.mapError((error) => listing.exceeded ?? describeFailure(error)));
+            .pipe(Effect.mapError((error) => listing.exceeded ?? describeSessionFailure(error)));
           const kept = tools.filter(
             (tool) => removeCredentialValues(tool.name, sentValues) === tool.name,
           );
@@ -1054,7 +1066,7 @@ export const openUpstream = (
       }
       yield* Scope.close(attemptScope, Exit.fail(outcome.failure));
       if (!isVersionRefusal(outcome.failure, revision)) {
-        return yield* Effect.fail(describeFailure(outcome.failure));
+        return yield* Effect.fail(describeSessionFailure(outcome.failure));
       }
     }
     // Every revision was refused.
@@ -1090,6 +1102,27 @@ export const buildStatusFromFailure = (
       return { status: "error", detail: failure.message, signInOffered: null };
   }
 };
+
+/**
+ * Builds the `readCurrentCredentials` of an upstream target from a server's
+ * credentials: it reads them as stored now, never renews them, and fails with
+ * an `UpstreamError` that has reason `refused` when they cannot be read or are
+ * not the ones the session opened with (`ServerCredentials.readWithoutRefresh`).
+ * Neither the request that continues an exchange nor the DELETE that ends a
+ * session belongs to a caller that may still ask the provider for anything, so
+ * neither runs the caller's checks.
+ */
+export const buildCurrentCredentialsReader =
+  (credentials: ServerCredentials) =>
+  (openedWithIdentity: string): PrepareSend =>
+    Effect.mapError(
+      credentials.readWithoutRefresh(openedWithIdentity),
+      () =>
+        new UpstreamError({
+          reason: "refused",
+          message: "The server's credentials could not be read",
+        }),
+    );
 
 /**
  * Runs `action` with the credentials of a server, and when the server refuses

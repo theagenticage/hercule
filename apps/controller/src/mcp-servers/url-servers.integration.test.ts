@@ -32,12 +32,13 @@ import {
 import type { SetUpController } from "../workflows/testing";
 import { resolveServerAccess, ServerCredentialsUnavailable } from "./access";
 import { McpCallRefused, type McpToolCall } from "./calls";
-import { McpServerSignInReplaced, mcpServerSignIns } from "./sign-ins";
+import { mcpServerSignIns } from "./sign-ins";
 import {
   eventually,
   buildMcpServerView,
   readRow,
   requestCheck,
+  requestUpdate,
   runSql,
   waitForResult,
   withRig,
@@ -417,54 +418,35 @@ describe("the sign-in a request carries", () => {
     );
   });
 
-  it("is read together with the revision it belongs to: once the revision moved, the old one is refused", async () => {
+  it("has a read for a request that continues an exchange that refuses it once the token is another than the session opened with, and gives the new token to a session that opens after", async () => {
     await withUrlRig(async ({ controller, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "old-token" });
       const signIns = await readSignIns(controller);
-
-      expect(await Effect.runPromise(signIns.readTokenWhileRevisionIs(serverId, "token", 0))).toBe(
-        "old-token",
+      const view = buildMcpServerView({ url: { signIn: "token" } });
+      const access = resolveServerAccess(
+        { ...view, server: { ...view.server, id: serverId } },
+        {} as never,
+        signIns,
       );
+      if (access._tag !== "usable") throw new Error("a server added by URL is always usable");
+      const { credentials } = access;
+      const openedBefore = await Effect.runPromise(credentials.readForUse());
+      expect(
+        (await Effect.runPromise(credentials.readWithoutRefresh(openedBefore.identity)))
+          .credentials["token"],
+      ).toBe("old-token");
 
       await replaceToken(controller, serverId, "new-token");
 
       const failure = await Effect.runPromise(
-        Effect.flip(signIns.readTokenWhileRevisionIs(serverId, "token", 0)),
+        Effect.flip(credentials.readWithoutRefresh(openedBefore.identity)),
       );
-      expect(failure).toBeInstanceOf(McpServerSignInReplaced);
-      expect(await Effect.runPromise(signIns.readTokenWhileRevisionIs(serverId, "token", 1))).toBe(
-        "new-token",
-      );
-    });
-  });
-
-  it("has a revision-bound read that refuses a request continuing an exchange begun before the token was replaced, and gives the new token to one that begins after", async () => {
-    await withUrlRig(async ({ controller, insertUrlServer }) => {
-      const serverId = await insertUrlServer({ token: "old-token" });
-      const signIns = await readSignIns(controller);
-      // The view an exchange began with, at revision 0.
-      const began = buildMcpServerView({ url: { signIn: "token" } });
-      const accessWhenBegun = (revision: number) => {
-        const access = resolveServerAccess(
-          { ...began, server: { ...began.server, id: serverId, revision } },
-          {} as never,
-          signIns,
-        );
-        if (access._tag !== "usable") throw new Error("a server added by URL is always usable");
-        return access.credentials;
-      };
-      const continued = accessWhenBegun(0);
-      expect((await Effect.runPromise(continued.readWithoutRefresh)).credentials["token"]).toBe(
-        "old-token",
-      );
-
-      await replaceToken(controller, serverId, "new-token");
-
-      const failure = await Effect.runPromise(Effect.flip(continued.readWithoutRefresh));
       expect(failure).toBeInstanceOf(ServerCredentialsUnavailable);
-      // An exchange that begins after the change carries the new token.
+      const openedAfter = await Effect.runPromise(credentials.readForUse());
       expect(
-        (await Effect.runPromise(accessWhenBegun(1).readWithoutRefresh)).credentials["token"],
+        (await Effect.runPromise(credentials.readWithoutRefresh(openedAfter.identity))).credentials[
+          "token"
+        ],
       ).toBe("new-token");
     });
   });
@@ -531,6 +513,80 @@ describe("a call that a new sign-in overtakes", () => {
             .slice(heldIndex)
             .filter((request) => request.authorization === "Bearer old-token"),
         ).toEqual([]);
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
+  });
+});
+
+describe("a check that a new sign-in overtakes", () => {
+  it("sends no further request with the old token once setToken committed, while the check waited for the server's answer", async () => {
+    await withUrlRig(
+      async ({ controller, fake, insertUrlServer }) => {
+        const serverId = await insertUrlServer({ token: "old-token" });
+        await waitForResult(controller);
+        const requestsBefore = fake.requests.length;
+        const release = fake.hold("initialize");
+
+        expect((await requestCheck(controller, serverId)).status).toBe(200);
+        await fake.waitForRequests(requestsBefore + 1);
+        const heldIndex = fake.requests.length;
+        await setTokenThroughApi(controller, serverId, "new-token");
+        release();
+
+        // The check that the new sign-in asks for lists the tools with the new token.
+        await eventually(
+          () => Promise.resolve(fake.requests.slice(heldIndex)),
+          (sent) => sent.some((request) => request.method === "tools/list"),
+        );
+        expect(
+          fake.requests
+            .slice(heldIndex)
+            .filter((request) => request.authorization === "Bearer old-token"),
+        ).toEqual([]);
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
+  });
+});
+
+describe("the request that ends an upstream session of a server added by URL", () => {
+  it("carries the server's token when the server is switched off, which does not change the token", async () => {
+    await withUrlRig(
+      async ({ controller, fake, insertUrlServer }) => {
+        const serverId = await insertUrlServer({ token: "old-token" });
+        await waitForResult(controller);
+        expect((await callAs(controller, serverId))._tag).toBe("Success");
+        const endsBefore = requestsOf(fake, "?").length;
+
+        expect((await requestUpdate(controller, serverId, { enabled: false })).status).toBe(200);
+
+        const ends = await eventually(
+          () => Promise.resolve(requestsOf(fake, "?")),
+          (found) => found.length === endsBefore + 1,
+        );
+        expect(ends.at(-1)?.authorization).toBe("Bearer old-token");
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
+  });
+
+  it("is not sent with the new token once setToken replaced the token the session opened with", async () => {
+    await withUrlRig(
+      async ({ controller, fake, insertUrlServer }) => {
+        const serverId = await insertUrlServer({ token: "old-token" });
+        await waitForResult(controller);
+        expect((await callAs(controller, serverId))._tag).toBe("Success");
+        const oldSession = requestsOf(fake, "tools/call").at(-1)?.sessionId;
+        expect(oldSession).toBeTruthy();
+
+        await setTokenThroughApi(controller, serverId, "new-token");
+        await waitForResult(controller);
+        await sleep(200);
+
+        // The check the new token asks for ends its own session, which is not this one.
+        const ends = requestsOf(fake, "?").filter((request) => request.sessionId === oldSession);
+        expect(ends.map((request) => request.authorization)).not.toContain("Bearer new-token");
       },
       { fake: { protocols: [McpProtocol.v2025_11_25] } },
     );

@@ -37,13 +37,20 @@ import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import type { Secrets } from "../secrets";
-import { resolveServerAccess, type UpstreamCredentials, type UpstreamEndpoint } from "./access";
+import {
+  prepareRequest,
+  resolveServerAccess,
+  type ServerCredentialsUnavailable,
+  type UpstreamCredentials,
+  type UsableAccess,
+} from "./access";
 import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
+  buildCurrentCredentialsReader,
   buildStatusFromFailure,
   MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
@@ -167,20 +174,32 @@ const make = Effect.gen(function* () {
    * an `UpstreamError` when the listing takes longer than `deadline`. Records
    * the revision whose handshake worked in `worked`, before it lists, so the
    * revision is known when the listing fails.
+   *
+   * Every request prepares itself with `prepareRequest`: it carries the
+   * credentials stored when it is sent, and `admit` fails when the check no
+   * longer applies, which stops the listing with that failure. `credentials`
+   * only build the address of the session.
    */
-  const listTools = (
-    endpoint: UpstreamEndpoint,
+  const listTools = <Refusal>(
+    access: UsableAccess,
     credentials: UpstreamCredentials,
+    admit: Effect.Effect<void, Refusal>,
     worked: WorkedRevision,
     firstRevision: string | null,
     deadline: Duration.Duration,
   ): Effect.Effect<
     { readonly tools: ReadonlyArray<McpSchema.Tool>; readonly revision: string },
-    UpstreamError
+    UpstreamError | Refusal | ServerCredentialsUnavailable
   > =>
     Effect.scoped(
       Effect.gen(function* () {
-        const opened = yield* openUpstream({ endpoint, credentials, firstRevision });
+        const opened = yield* openUpstream({
+          endpoint: access.endpoint,
+          credentials,
+          firstRevision,
+          prepareSend: prepareRequest(access.credentials, admit),
+          readCurrentCredentials: buildCurrentCredentialsReader(access.credentials),
+        });
         worked.current = opened.revision;
         return { tools: yield* opened.listTools(deadline), revision: opened.revision };
       }),
@@ -224,6 +243,7 @@ const make = Effect.gen(function* () {
         state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
         Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
       );
+      // Also the check's rule for every request it sends (`listTools`).
       const guardRefresh: RefreshGuard<typeof CHECK_SUPERSEDED> = checkBasisHolds.pipe(
         Effect.catchTag("SqlError", Effect.die),
       );
@@ -233,8 +253,9 @@ const make = Effect.gen(function* () {
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(
-            access.endpoint,
+            access,
             credentials,
+            guardRefresh,
             worked,
             worked.current ?? server.protocolVersion,
             deadline,

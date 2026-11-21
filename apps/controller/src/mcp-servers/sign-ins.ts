@@ -10,22 +10,12 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
-import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import { Secrets, type SecretOwner } from "../secrets";
 import { mcpServerRepository, type McpServerStoredSource } from "./repository";
 
 /** The name of the secret that holds a pasted token. */
 export const SIGN_IN_TOKEN_SECRET = "token";
-
-/**
- * A server's sign-in was replaced after the caller took the destination it
- * works for, so what the caller holds is out of date.
- */
-export class McpServerSignInReplaced extends Schema.TaggedError<McpServerSignInReplaced>()(
-  "McpServerSignInReplaced",
-  {},
-) {}
 
 /** The sign-in a server was added with: what its `source` holds as `signIn`. */
 type SignIn = Extract<McpServerStoredSource, { readonly kind: "url" }>["signIn"];
@@ -56,29 +46,6 @@ const make = Effect.gen(function* () {
      * Never fails: a broken secret store is a defect.
      */
     readToken,
-
-    /**
-     * Returns the token as `readToken` does, and fails with
-     * `McpServerSignInReplaced` when the server's `revision` is no longer
-     * `revision`. Every change of a server's sign-in raises its revision, so
-     * a request that continues an exchange opened with an older sign-in never
-     * carries a newer one. The token is read before the revision: a change
-     * that lands between the two reads shows in the revision, and the old
-     * token is never returned together with the new revision.
-     */
-    readTokenWhileRevisionIs: (
-      serverId: string,
-      signIn: SignIn,
-      revision: number,
-    ): Effect.Effect<string | undefined, McpServerSignInReplaced> =>
-      Effect.gen(function* () {
-        const token = yield* readToken(serverId, signIn);
-        const found = yield* Effect.orDie(servers.readMany([serverId], "without-tools"));
-        if (found.get(serverId)?.revision !== revision) {
-          return yield* new McpServerSignInReplaced();
-        }
-        return token;
-      }),
 
     /**
      * Returns a string that changes whenever the server's sign-in changes:

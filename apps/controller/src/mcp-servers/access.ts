@@ -31,7 +31,7 @@ import {
   type McpServerAvailabilityView,
   type UsablePlugin,
 } from "./catalogue";
-import type { StoredMcpServerAvailability } from "./repository";
+import type { McpServerStoredSource, StoredMcpServerAvailability } from "./repository";
 import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
 /**
@@ -142,9 +142,17 @@ export interface ServerCredentials {
   /**
    * Returns the credentials as they are stored now and never renews them, for
    * a request that only continues an exchange that already went out or ends
-   * a session. Fails with `ServerCredentialsUnavailable`.
+   * a session. `openedWithIdentity` is the identity of the credentials the
+   * upstream session was opened with. A server added by URL has one sign-in
+   * for the life of a session, so it fails when the stored token is not the
+   * one the session opened with: a request of an old session never carries a
+   * different token. A plugin server's Connection renews its token under the
+   * same sign-in, so it returns the stored credentials. Fails with
+   * `ServerCredentialsUnavailable`.
    */
-  readonly readWithoutRefresh: Effect.Effect<UpstreamCredentials, ServerCredentialsUnavailable>;
+  readonly readWithoutRefresh: (
+    openedWithIdentity: string,
+  ) => Effect.Effect<UpstreamCredentials, ServerCredentialsUnavailable>;
   /**
    * Returns a string that changes whenever the stored credentials change,
    * including a renewal. A caller reads it before and after it reads the
@@ -185,6 +193,41 @@ export interface UsableAccess {
 
 /** How to reach one MCP Server now, or why it cannot be reached. */
 export type ServerAccess = UnusableAccess | UsableAccess;
+
+/**
+ * Prepares a request that starts an exchange with the server, and returns the
+ * credentials the request carries. The check, the call and every request of
+ * the opening of an upstream session prepare their requests with this, so a
+ * request never carries credentials older than the moment it is sent.
+ *
+ * It reads the credentials as they are stored now, renewing them first when
+ * they have expired, and then runs `admit`. `admit` is the caller's own rule
+ * for whether the request may still go out: it fails when the destination
+ * changed, and the request is not sent. It also runs under the Connection's
+ * refresh permit, right before a renewal calls the provider. A renewal does
+ * not move the destination, so `admit` cannot see one that landed while it
+ * ran. `ServerCredentials.readVersion` can: when it changed, the credentials
+ * read are no longer current and are read again.
+ *
+ * Fails with whatever `admit` fails with, and with
+ * `ServerCredentialsUnavailable` when the server cannot give credentials.
+ * May call the provider and write state, so it never runs inside a
+ * transaction.
+ */
+export const prepareRequest = <Refusal>(
+  credentials: ServerCredentials,
+  admit: Effect.Effect<void, Refusal>,
+): Effect.Effect<UpstreamCredentials, ServerCredentialsUnavailable | Refusal> =>
+  Effect.gen(function* () {
+    while (true) {
+      // Read before the credentials, so that a renewal that stores new ones in
+      // between shows as a different version, never as the same.
+      const version = yield* credentials.readVersion;
+      const prepared = yield* credentials.readForUse(admit);
+      yield* admit;
+      if ((yield* credentials.readVersion) === version) return prepared;
+    }
+  });
 
 /**
  * Converts a Connection's failure to give credentials into the status an MCP
@@ -310,10 +353,11 @@ const resolvePluginAccess = (
               ? new ServerCredentialsCannotRefresh({ message: error.message })
               : mapUnavailable(error),
         ),
-      readWithoutRefresh: Effect.mapError(
-        connectionTypes.readCredentialsWithoutRefresh(connection.id),
-        toUnavailable,
-      ),
+      readWithoutRefresh: () =>
+        Effect.mapError(
+          connectionTypes.readCredentialsWithoutRefresh(connection.id),
+          toUnavailable,
+        ),
       readVersion: connectionTypes.readCredentialsVersion(connection.id),
       describeRejected: () => ({
         status: "error",
@@ -324,29 +368,24 @@ const resolvePluginAccess = (
   };
 };
 
+/** The source of a server added by URL. */
+type UrlSource = Extract<McpServerStoredSource, { readonly kind: "url" }>;
+
 /**
  * Builds the access of a server added by URL: requests go to its own address,
  * with its pasted token as a bearer token when it holds one. There is nothing
  * to refresh, so a token the server refuses stays refused until the user
  * replaces it, and the server then needs sign-in.
  *
- * The access is made for the `revision` the server had when it was resolved.
- * Every change of a URL server's sign-in raises the revision, so a request
- * that only continues an exchange, or ends an upstream session, never carries
- * a token that replaced the one the session was opened with
+ * A request that only continues an exchange, or ends an upstream session,
+ * never carries a token other than the one the session was opened with
  * (`readWithoutRefresh`).
  */
 const resolveUrlAccess = (
-  server: StoredMcpServerAvailability,
+  { name, id }: StoredMcpServerAvailability,
+  { url, signIn }: UrlSource,
   signIns: McpServerSignIns,
 ): UsableAccess => {
-  const { source, name, id, revision } = server;
-  if (source.kind !== "url") {
-    // The dependencies of a view are read from its server's source, so a URL
-    // access is only asked for a server added by URL.
-    throw new Error(`MCP server ${id} has no URL to reach it at`);
-  }
-  const { url, signIn } = source;
   const toUpstream = (token: string | undefined): UpstreamCredentials => {
     const credentials = token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token };
     return {
@@ -376,16 +415,17 @@ const resolveUrlAccess = (
             message: `${name} holds a sign-in that cannot be renewed`,
           }),
         ),
-      readWithoutRefresh: signIns.readTokenWhileRevisionIs(id, signIn, revision).pipe(
-        Effect.map(toUpstream),
-        Effect.mapError(
-          () =>
-            new ServerCredentialsUnavailable({
-              status: "error",
-              detail: `The sign-in of ${name} was replaced`,
-            }),
+      readWithoutRefresh: (openedWithIdentity) =>
+        Effect.flatMap(Effect.map(signIns.readToken(id, signIn), toUpstream), (stored) =>
+          stored.identity === openedWithIdentity
+            ? Effect.succeed(stored)
+            : Effect.fail(
+                new ServerCredentialsUnavailable({
+                  status: "error",
+                  detail: `The sign-in of ${name} was replaced`,
+                }),
+              ),
         ),
-      ),
       readVersion: signIns.readVersion(id),
       describeRejected: (offersOAuth) => ({
         status: "needs-sign-in",
@@ -414,7 +454,12 @@ export const resolveServerAccess = (
 ): ServerAccess => {
   const judged = judgeDependencies(view.dependencies);
   if (judged._tag === "unusable") return judged;
-  return judged.kind === "plugin"
-    ? resolvePluginAccess(judged, connectionTypes)
-    : resolveUrlAccess(view.server, signIns);
+  if (judged.kind === "plugin") return resolvePluginAccess(judged, connectionTypes);
+  const { source } = view.server;
+  if (source.kind !== "url") {
+    // The dependencies of a view are read from its server's source, so a view
+    // with URL dependencies has a server added by URL.
+    throw new Error(`MCP server ${view.server.id} has no URL to reach it at`);
+  }
+  return resolveUrlAccess(view.server, source, signIns);
 };
