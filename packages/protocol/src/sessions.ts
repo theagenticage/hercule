@@ -928,14 +928,14 @@ const SessionUsageUpdated = Schema.Union([
  * public API's `Session.mcpServers` uses this type for `leftOut`.
  */
 export const McpServerLeftOutReason = Schema.Literals([
+  "runner-too-old",
+  "harness-unsupported",
+  "missing-grant",
   "switched-off",
   "checking",
   "needs-sign-in",
   "unreachable",
   "error",
-  "runner-too-old",
-  "harness-unsupported",
-  "missing-grant",
 ]);
 
 export type McpServerLeftOutReason = Schema.Schema.Type<typeof McpServerLeftOutReason>;

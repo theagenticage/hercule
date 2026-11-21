@@ -1082,9 +1082,12 @@ const insertMcpServers = (servers: ReadonlyArray<TestMcpServer>) =>
       sql,
       Effect.forEach(servers, (server) =>
         Effect.gen(function* () {
+          const contributionId = server.contributionId ?? DESK_SERVER_CONTRIBUTION_ID;
+          // The Connection is of the type the contribution needs, which is `<plugin id>/desk`.
+          const pluginId = contributionId.slice(0, contributionId.indexOf("/"));
           const connection = yield* connections.insert({
-            pluginId: "github",
-            type: GITHUB_CONNECTION_TYPE,
+            pluginId,
+            type: `${pluginId}/desk`,
             label: server.name,
             displayName: server.name,
             accountId: `account-${server.name}`,
@@ -1094,7 +1097,7 @@ const insertMcpServers = (servers: ReadonlyArray<TestMcpServer>) =>
           });
           const stored = yield* mcpServers.insert({
             name: server.name,
-            contributionId: server.contributionId ?? DESK_SERVER_CONTRIBUTION_ID,
+            contributionId,
             connectionId: connection.id,
             accountId: `account-${server.name}`,
             connectionGeneration: 0,

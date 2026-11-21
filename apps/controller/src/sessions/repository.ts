@@ -1538,7 +1538,9 @@ const make = Effect.gen(function* () {
      * Records why each listed server could not be called at the session's
      * last start. `reasonsById` holds the reason of every server that was left
      * out. A server in the session's list that it does not name is recorded as
-     * `null`: it could be called. An id that is not in the list is ignored.
+     * `null`: it could be called. An id that is not in the list is ignored. It
+     * writes one statement to clear the list and one for each reason that
+     * occurs, however long the list is.
      */
     recordLeftOut: (
       sessionId: string,
@@ -1546,14 +1548,16 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const session = uuidFromString(sessionId);
-        const rows = yield* sql<{ readonly mcp_server_id: Uint8Array }>`
-          SELECT mcp_server_id FROM session_mcp_servers WHERE session_id = ${session}`;
+        const idsByReason = new Map<McpServerLeftOutReason, Array<Uint8Array>>();
+        for (const [id, reason] of reasonsById) {
+          idsByReason.set(reason, [...(idsByReason.get(reason) ?? []), uuidFromString(id)]);
+        }
+        yield* sql`UPDATE session_mcp_servers SET left_out = NULL WHERE session_id = ${session}`;
         yield* Effect.forEach(
-          rows,
-          (row) =>
-            sql`UPDATE session_mcp_servers
-                SET left_out = ${reasonsById.get(uuidToString(row.mcp_server_id)) ?? null}
-                WHERE session_id = ${session} AND mcp_server_id = ${row.mcp_server_id}`,
+          idsByReason,
+          ([reason, ids]) =>
+            sql`UPDATE session_mcp_servers SET left_out = ${reason}
+                WHERE session_id = ${session} AND mcp_server_id IN ${sql.in(ids)}`,
           { discard: true },
         );
       }),

@@ -39,13 +39,23 @@ import type {
   ConnectionStatus,
   McpServer as McpServerRecord,
   McpServerStatus,
+  Project,
+  Session,
 } from "@hercule/contract";
+import type { Plugin } from "@hercule/plugin-host";
 import { connectionRepository, OAUTH_TOKENS } from "../connections";
 import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso, withTransaction } from "../db";
 import { get, post, send, type ServerHarness } from "../http/testing";
 import { NO_INTAKE_OVERRIDES } from "../intake-settings";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
+import {
+  WAIT_DEADLINE_MS,
+  findProviderAccountId,
+  readProfileNamed,
+  type Arranged,
+} from "../sessions/testing";
+import { withFleet } from "../workspaces/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 import type { McpServerView, PluginState } from "./catalogue";
 
@@ -601,6 +611,66 @@ export const createServers = async (
     servers.push({ id: server.id, name });
   }
   return servers;
+};
+
+/** Creates a Project with the request body given, and returns the raw response. */
+export const createProject = (
+  controller: Pick<SetUpController, "base" | "token">,
+  body: unknown,
+  token = controller.token,
+) => post(controller.base, "/api/v1/projects", body, token);
+
+/** Reads a Project, failing the test when it cannot be read. */
+export const readProject = async (
+  controller: Pick<SetUpController, "base" | "token">,
+  id: string,
+): Promise<Project> => {
+  const response = await get(controller.base, `/api/v1/projects/${id}`, controller.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Project;
+};
+
+/** A test that sets up a fleet and several Threads gets more than one wait deadline. */
+export const TEST_TIMEOUT_MS = WAIT_DEADLINE_MS * 3 + 10_000;
+
+/**
+ * Runs `body` against a fleet with the given plugins and three MCP Servers
+ * named alpha, bravo and charlie.
+ */
+export const withServers = (
+  plugins: ReadonlyArray<Plugin>,
+  body: (arranged: Arranged, servers: readonly [ServerRef, ServerRef, ServerRef]) => Promise<void>,
+): Promise<void> =>
+  withFleet(
+    async (arranged) => {
+      const servers = await createServers(
+        { harness: arranged.harness, base: arranged.harness.base, token: arranged.token },
+        ["alpha", "bravo", "charlie"],
+      );
+      await body(arranged, servers as unknown as readonly [ServerRef, ServerRef, ServerRef]);
+    },
+    { plugins },
+  );
+
+/** Returns the ids of the session's list of MCP Servers, in list order. */
+export const listMcpServerIds = (session: Session): ReadonlyArray<string> =>
+  session.mcpServers.map((entry) => entry.mcpServerId);
+
+/** Creates an Agent on the worker profile and returns its id. */
+export const createAgent = async (arranged: Arranged): Promise<string> => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/agents",
+    {
+      name: "assessor",
+      systemPrompt: "You assess tasks.",
+      providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
+      permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
+    },
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { readonly id: string }).id;
 };
 
 export const requestUpdate = (controller: SetUpController, id: string, body: unknown) =>
