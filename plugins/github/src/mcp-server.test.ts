@@ -23,6 +23,7 @@ describe("GitHub's MCP server request", () => {
     expect(url).toBe(MCP_URL);
     expect(headers).not.toHaveProperty("Authorization");
     expect(headers).toHaveProperty("X-MCP-Toolsets");
+    expect(headers).toHaveProperty("X-MCP-Exclude-Tools");
   });
 
   it("asks only for toolsets the device flow's scopes cover", () => {
@@ -51,13 +52,9 @@ describe("GitHub's MCP server request", () => {
     ]);
   });
 
-  it("leaves out the toolsets that need a scope the Connection lacks or a Copilot subscription", () => {
+  it("excludes delete_repository by name, because its scope is not one the Connection has", () => {
     const { headers } = githubMcpServer.buildUpstreamRequest({ credentials: {}, config: {} });
-    const toolsets = readToolsets(headers);
-    for (const left of ["gists", "projects", "governance"]) {
-      expect(toolsets).not.toContain(left);
-    }
-    expect(toolsets.filter((name) => name.startsWith("copilot"))).toEqual([]);
+    expect(headers["X-MCP-Exclude-Tools"]).toBe("delete_repository");
   });
 
   it("builds a URL on its declared origin", () => {

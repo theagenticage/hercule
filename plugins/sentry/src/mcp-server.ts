@@ -26,12 +26,8 @@ const SENTRY_MCP_URL = `${SENTRY_MCP_ORIGIN}/mcp?disable-skills=project-manageme
  * Sentry Connection's token only that way (a real call on 2026-11-20 got it
  * accepted, and refused plain `Bearer`).
  *
- * It never throws. The core calls it only with the credentials of a Connection
- * of this plugin's type, which always hold a token, so a Connection without
- * one is a state this function does not handle. It then returns no
- * `Authorization` header, and Sentry answers the call with its own 401, which
- * is the true statement of what is wrong. It does not invent a token or an
- * empty `Sentry-Bearer` value.
+ * It never throws. When the credentials hold no token it returns no
+ * `Authorization` header.
  */
 const buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"] = ({ credentials }) => {
   const token = readToken(credentials);

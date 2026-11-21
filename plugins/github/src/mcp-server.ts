@@ -10,11 +10,11 @@ const GITHUB_MCP_URL = `${GITHUB_MCP_ORIGIN}/mcp/`;
 /**
  * The toolsets the server is asked for in the `X-MCP-Toolsets` header: the
  * ones where the Connection's device flow scopes (`repo`, `read:org`,
- * `notifications`, `workflow`) cover every tool, or every tool but one
- * destructive tool whose refusal stays that call's own answer. A tool that
- * needs a scope the token lacks makes GitHub answer with an OAuth scope
- * challenge, which the gateway cannot answer, so a toolset with such tools
- * is kept out of the list rather than left to fail.
+ * `notifications`, `workflow`) cover every tool, after the tools named in
+ * `GITHUB_MCP_EXCLUDED_TOOLS` are excluded. A tool that needs a scope the
+ * token lacks makes GitHub answer with an OAuth scope challenge, which the
+ * gateway cannot answer, so a toolset with such tools is kept out of the list
+ * rather than left to fail.
  *
  * Read from github/github-mcp-server at commit
  * 9a72d8d38fec18c207cd924b33aa0eb3e186252c on 2026-11-21: `pkg/github/tools.go`
@@ -22,11 +22,6 @@ const GITHUB_MCP_URL = `${GITHUB_MCP_ORIGIN}/mcp/`;
  * "OAuth Challenge Scopes" in that repository's README). `repo` includes
  * `security_events`, so the code security, secret protection, Dependabot and
  * security advisory toolsets are covered.
- *
- * Kept although one tool is not covered: `repos`. Its `delete_repository` needs
- * `delete_repo`, but reading files, commits and branches is the toolset's main
- * use, and a call to that one tool then fails with GitHub's refusal as that
- * call's own answer.
  *
  * Left out, and why:
  * - `gists` (`gist`), `projects` (`project`, `read:project`) and `governance`
@@ -58,23 +53,31 @@ const GITHUB_MCP_TOOLSETS = [
 ].join(",");
 
 /**
+ * The tools sent in the `X-MCP-Exclude-Tools` header. GitHub removes them even
+ * when their toolset is enabled (documented in `docs/server-configuration.md`
+ * of github/github-mcp-server, section "Excluding Specific Tools").
+ *
+ * `repos` is kept, because reading files, commits and branches is its main
+ * use. Its `delete_repository` needs `delete_repo`, which the Connection does
+ * not have, so it is excluded by name.
+ */
+const GITHUB_MCP_EXCLUDED_TOOLS = "delete_repository";
+
+/**
  * Builds the call to GitHub's MCP server from a GitHub Connection's decoded
  * credentials. Returns the server's URL, an `Authorization` header with the
  * Connection's token (the pasted `pat`, or the device flow's `accessToken`),
- * and the `X-MCP-Toolsets` header with the toolsets the device flow's scopes
- * cover.
+ * the `X-MCP-Toolsets` header with the toolsets the device flow's scopes
+ * cover, and the `X-MCP-Exclude-Tools` header with the tools to leave out of
+ * them.
  *
  * The toolsets are the same for every token, because this function is pure and
  * cannot ask GitHub which scopes a pasted token has. A pasted token whose
  * scopes do not cover a tool in the list gets that tool's own failure when the
  * tool is called.
  *
- * It never throws. The core calls it only with the credentials of a Connection
- * of this plugin's type, which always hold a token, so a Connection without
- * one is a state this function does not handle. It then returns no
- * `Authorization` header, and GitHub answers the call with its own 401, which
- * is the true statement of what is wrong. It does not invent a token or an
- * empty `Bearer` value.
+ * It never throws. When the credentials hold no token it returns no
+ * `Authorization` header.
  */
 const buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"] = ({ credentials }) => {
   const token = readToken(credentials);
@@ -83,6 +86,7 @@ const buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"] = ({ c
     headers: {
       ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
       "X-MCP-Toolsets": GITHUB_MCP_TOOLSETS,
+      "X-MCP-Exclude-Tools": GITHUB_MCP_EXCLUDED_TOOLS,
     },
   };
 };

@@ -17,12 +17,8 @@ const LINEAR_MCP_URL = `${LINEAR_MCP_ORIGIN}/mcp`;
  * takes OAuth tokens and API keys alike in the `Authorization: Bearer` header
  * (https://linear.app/docs/mcp).
  *
- * It never throws. The core calls it only with the credentials of a Connection
- * of this plugin's type, which always hold a token, so a Connection without
- * one is a state this function does not handle. It then returns no
- * `Authorization` header, and Linear answers the call with its own 401, which
- * is the true statement of what is wrong. It does not invent a token or an
- * empty `Bearer` value.
+ * It never throws. When the credentials hold no token it returns no
+ * `Authorization` header.
  */
 const buildUpstreamRequest: McpServerContribution["buildUpstreamRequest"] = ({ credentials }) => {
   const token = credentials["accessToken"] ?? credentials["apiKey"];
