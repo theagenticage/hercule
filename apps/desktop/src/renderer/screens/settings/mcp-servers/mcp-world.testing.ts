@@ -112,6 +112,7 @@ export const buildMcpWorld = (
       if (
         world.servers.some(
           (each) =>
+            each.source.kind === "plugin" &&
             each.source.contributionId === source.contributionId &&
             each.source.connectionId === source.connectionId,
         )

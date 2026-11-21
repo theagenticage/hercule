@@ -93,9 +93,12 @@ function McpServerPage(): JSX.Element | null {
   if (server === undefined || gone) return null;
 
   const view = buildMcpServerViews([server], connections, plugins)[0]!;
-  const origin = readMcpServerOffers(plugins).find(
-    (offer) => offer.contributionId === server.source.contributionId,
-  )?.origin;
+  const { source } = server;
+  const origin =
+    source.kind === "plugin"
+      ? readMcpServerOffers(plugins).find((offer) => offer.contributionId === source.contributionId)
+          ?.origin
+      : undefined;
   const pluginName = plugins.find((plugin) => plugin.id === view.pluginId)?.displayName;
   const chip = "rounded-full border border-line px-2 py-0.5 text-fine text-muted";
 

@@ -99,9 +99,11 @@ function McpServerPage(): JSX.Element {
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   // One server in, one view out.
   const view = buildMcpServerViews([query.data], connections, plugins)[0]!;
-  const offer = readMcpServerOffers(plugins).find(
-    (each) => each.contributionId === query.data.source.contributionId,
-  );
+  const { source } = query.data;
+  const offer =
+    source.kind === "plugin"
+      ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
+      : undefined;
   const flip = useServerSwitch({ kind: "update", serverId: id });
   const check = useMutation({
     mutationFn: () => client.mcpServer.check({ params: { id } }),
