@@ -776,7 +776,8 @@ const MCP_IMAGE_COPY = "[image not kept]";
  * replaced by `MCP_IMAGE_COPY`, at any depth. A string that holds a copy, such
  * as a data URL, keeps its other text. `copies` lists longer strings first, so
  * a copy that is part of a longer one cannot break the longer one up. Object
- * keys are left as they are.
+ * keys are scrubbed like strings. When two keys become the same text, the
+ * first keeps its value and the later ones are dropped.
  */
 const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknown => {
   if (typeof value === "string") {
@@ -784,9 +785,12 @@ const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknow
   }
   if (Array.isArray(value)) return value.map((item) => scrubImageCopies(item, copies));
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, field]) => [key, scrubImageCopies(field, copies)]),
-    );
+    const scrubbed = new Map<string, unknown>();
+    for (const [key, field] of Object.entries(value)) {
+      const scrubbedKey = scrubImageCopies(key, copies) as string;
+      if (!scrubbed.has(scrubbedKey)) scrubbed.set(scrubbedKey, scrubImageCopies(field, copies));
+    }
+    return Object.fromEntries(scrubbed);
   }
   return value;
 };

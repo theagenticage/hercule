@@ -4470,7 +4470,7 @@ describe("the images in the result of an MCP tool call", () => {
       { type: "text", text: "Taken just now" },
     ],
     // The same image again, as MCP servers often repeat it.
-    structuredContent: { screenshot: IMAGE },
+    structuredContent: { screenshot: IMAGE, [IMAGE]: "keyed by the image" },
     _meta: { preview: `data:image/png;base64,${IMAGE}` },
   };
 
@@ -4497,7 +4497,10 @@ describe("the images in the result of an MCP tool call", () => {
           result: {
             content: blocks,
             // Every other copy of the image's bytes is replaced, and the text around it stays.
-            structuredContent: { screenshot: "[image not kept]" },
+            structuredContent: {
+              screenshot: "[image not kept]",
+              "[image not kept]": "keyed by the image",
+            },
             _meta: { preview: "data:image/png;base64,[image not kept]" },
           },
         },
