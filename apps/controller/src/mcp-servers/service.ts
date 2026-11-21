@@ -42,7 +42,7 @@ import {
   parseServerAddress,
   type ServerAddress,
 } from "./addresses";
-import { mcpServerCatalogue } from "./catalogue";
+import { judgeContributionPlugin } from "./catalogue";
 import { McpServerChecks } from "./checks";
 import { McpServerListHolders } from "./list-holders";
 import { mcpServerRepository, type StoredMcpServer } from "./repository";
@@ -186,7 +186,6 @@ const make = Effect.gen(function* () {
   const checks = yield* McpServerChecks;
   const listHolders = yield* McpServerListHolders;
   const signIns = yield* mcpServerSignIns;
-  const { readPluginState } = yield* mcpServerCatalogue;
 
   const readOrFail = (id: string): Effect.Effect<StoredMcpServer, NotFound | SqlError> =>
     Effect.flatMap(
@@ -219,13 +218,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const contribution = findPluginOnOrigin(address.origin, yield* plugins.listMcpServers());
       if (contribution === undefined) return;
-      const state = yield* readPluginState(contribution.id);
+      const state = judgeContributionPlugin(contribution, yield* plugins.loaded());
       const ofType = (yield* connections.ofPlugin(contribution.pluginId)).filter(
         (connection) => connection.type === contribution.connectionType,
       );
       const connection = pickConnectionToPointAt(ofType);
-      const pluginState: PluginOriginState =
-        state._tag === "active" || state._tag === "failed-to-start" ? state._tag : "switched-off";
+      const pluginState: PluginOriginState = state._tag;
       return yield* Effect.fail(
         createConflictError(
           `${address.origin} is the ${contribution.displayName} MCP server. ${buildPluginOriginAdvice(

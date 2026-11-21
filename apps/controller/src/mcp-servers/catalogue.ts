@@ -297,6 +297,23 @@ export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal 
 type DependencyIds = Pick<StoredMcpServerAvailability, "source">;
 
 /**
+ * Judges whether the plugin that offers a registered contribution can serve
+ * it, from the plugins the host loaded. Never returns `missing`, because the
+ * contribution is known.
+ */
+export const judgeContributionPlugin = (
+  contribution: RegisteredMcpServer,
+  loaded: ReadonlyArray<LoadedPlugin>,
+): Exclude<PluginState, { readonly _tag: "missing" }> => {
+  const plugin = loaded.find((one) => one.id === contribution.pluginId);
+  if (plugin?.status._tag === "active") return { _tag: "active", contribution };
+  return {
+    _tag: plugin?.status._tag === "errored" ? "failed-to-start" : "switched-off",
+    pluginName: plugin?.displayName ?? contribution.pluginId,
+  };
+};
+
+/**
  * Judges whether the plugin that offers a contribution can serve it, from the
  * contributions the host registered and the plugins it loaded. `missing` when
  * no registered contribution has this id.
@@ -307,13 +324,9 @@ const judgePluginState = (
   loaded: ReadonlyArray<LoadedPlugin>,
 ): PluginState => {
   const contribution = registered.find((one) => one.id === contributionId);
-  if (contribution === undefined) return { _tag: "missing" };
-  const plugin = loaded.find((one) => one.id === contribution.pluginId);
-  if (plugin?.status._tag === "active") return { _tag: "active", contribution };
-  return {
-    _tag: plugin?.status._tag === "errored" ? "failed-to-start" : "switched-off",
-    pluginName: plugin?.displayName ?? contribution.pluginId,
-  };
+  return contribution === undefined
+    ? { _tag: "missing" }
+    : judgeContributionPlugin(contribution, loaded);
 };
 
 const make = Effect.gen(function* () {
@@ -380,17 +393,6 @@ const make = Effect.gen(function* () {
   }
 
   return {
-    /**
-     * Reads the state of the plugin that offers the contribution, as it is
-     * now. `missing` when no plugin this boot loaded registered it.
-     */
-    readPluginState: (contributionId: string): Effect.Effect<PluginState> =>
-      Effect.gen(function* () {
-        const loaded = yield* plugins.loaded();
-        const registered = yield* plugins.listMcpServers();
-        return judgePluginState(contributionId, registered, loaded);
-      }),
-
     /** Reads the Connection and the plugin of a server as they are now. */
     readDependencies: (server: DependencyIds): Effect.Effect<McpServerDependencies, SqlError> =>
       Effect.map(readDependenciesOfMany([server]), (findDependencies) => findDependencies(server)),

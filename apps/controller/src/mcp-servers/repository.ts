@@ -285,6 +285,18 @@ const toServer = (row: McpServerRow): StoredMcpServer => ({
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * The columns a write sets when the server's old result no longer holds: the
+   * status goes back to `checking` with no detail and no cause, the failed
+   * checks end, the next check is due at `at` (so it happens even when the
+   * request for it is lost), and `revision` goes up, so a check that started
+   * before cannot write its result.
+   */
+  const backToChecking = (at: string) => sql`
+    status = 'checking', status_detail = NULL, status_cause = NULL,
+    failed_checks = 0, next_check_at = ${at},
+    revision = revision + 1, updated_at = ${at}`;
+
   const readById = (id: string): Effect.Effect<Option.Option<StoredMcpServer>, SqlError> =>
     Effect.map(
       sql<McpServerRow>`SELECT ${sql.literal(COLUMNS)} FROM mcp_servers
@@ -496,9 +508,7 @@ const make = Effect.gen(function* () {
         enabled
           ? sql`
             UPDATE mcp_servers
-            SET enabled = 1, status = 'checking', status_detail = NULL, status_cause = NULL,
-                failed_checks = 0, next_check_at = ${at},
-                revision = revision + 1, updated_at = ${at}
+            SET enabled = 1, ${backToChecking(at)}
             WHERE id = ${uuidFromString(id)}
           `
           : sql`
@@ -524,10 +534,7 @@ const make = Effect.gen(function* () {
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
-          SET sign_in = 'token',
-              status = 'checking', status_detail = NULL,
-              failed_checks = 0, next_check_at = ${at},
-              revision = revision + 1, updated_at = ${at}
+          SET sign_in = 'token', ${backToChecking(at)}
           WHERE id = ${uuidFromString(id)}
         `,
       ),
@@ -564,9 +571,7 @@ const make = Effect.gen(function* () {
               account_id = ${source.accountId},
               url = NULL, normalized_url = NULL, sign_in = NULL, sign_in_offered = NULL,
               connection_generation = ${source.connectionGeneration},
-              status = 'checking', status_detail = NULL, status_cause = NULL,
-              protocol_version = NULL, failed_checks = 0,
-              next_check_at = ${source.at}, revision = revision + 1, updated_at = ${source.at}
+              protocol_version = NULL, ${backToChecking(source.at)}
           WHERE id = ${uuidFromString(id)}
         `,
       ),
