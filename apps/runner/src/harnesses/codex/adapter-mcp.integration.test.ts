@@ -21,6 +21,8 @@ import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/proto
 import { makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerSpawn } from "./rpc";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
+import { findCodexTestBinary } from "./codex-binary.testing";
 import { createFixtureWatch } from "./fixture-watch.testing";
 import { startMcpCallModel } from "./mock-model.testing";
 import {
@@ -34,13 +36,10 @@ import { buildContext, SESSION, SPEC } from "./testing";
 
 afterAll(cleanupHomes);
 
-const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
+const binary = findCodexTestBinary();
 
 /** The value of the session token. A test looks for it in files and in the process arguments. */
 const TOKEN = "tok-synthetic-7f3a9c";
-
-/** The name of the environment variable the adapter gives Codex for the token. */
-const TOKEN_VARIABLE = "HERCULE_TOKEN";
 
 /** Returns the name the approval card shows for a call of `tool`. */
 const buildExpectedCardName = (tool: string): string => `mcp__tools__${tool}`;
@@ -112,7 +111,7 @@ const createFixture = () => {
           env: {
             PATH: process.env["PATH"] ?? "",
             HOME: userHome,
-            [TOKEN_VARIABLE]: TOKEN,
+            [SESSION_TOKEN_VARIABLE]: TOKEN,
             HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
           },
         },
@@ -345,7 +344,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
       (text) => JSON.parse(text) as { method?: string; params?: { config?: unknown } },
     ).find((frame) => frame.method === "thread/start");
     expect(started?.params?.config).toMatchObject({
-      "mcp_servers.tools.bearer_token_env_var": TOKEN_VARIABLE,
+      "mcp_servers.tools.bearer_token_env_var": SESSION_TOKEN_VARIABLE,
     });
     // While the session runs, Codex keeps a snapshot of the shell's environment in
     // `shell_snapshots/`, and that file holds every variable, the token included.
@@ -461,15 +460,5 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
         ),
       ).toEqual([]);
     });
-  });
-
-  it("sets the tool list feature and shows no warning", async () => {
-    const { startRun } = createFixture();
-    const run = await startRun("approval-required");
-    const started = run.spawned[0]!.written.map(
-      (text) => JSON.parse(text) as { method?: string; params?: { config?: object } },
-    ).find((frame) => frame.method === "thread/start");
-    expect(started?.params?.config).toMatchObject({ "features.mcp_tool_list_changed": true });
-    expect(listRunnerWarnings(run.seen)).toEqual([]);
   });
 });

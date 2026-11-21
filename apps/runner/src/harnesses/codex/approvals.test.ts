@@ -1,5 +1,5 @@
 /**
- * Tests for every server-to-client request codex 0.154.0 declares, each sent
+ * Tests for every server-to-client request Codex declares (as of 0.171.0), each sent
  * to the scripted app-server: what the user is shown, what is sent back for
  * each decision, and what happens to a request the user never resolves. A
  * request with no reply leaves the turn hanging forever with no error, so the
@@ -159,8 +159,8 @@ const FILE_CHANGE_PARAMS = {
 };
 
 /**
- * At 0.154.0 the paths are not in the request params. They are in the file
- * change item, which arrives before the request.
+ * The request's params carry no paths (see `FileChangeRequestApprovalParams`).
+ * They are in the file change item, which arrives before the request.
  */
 const FILE_ITEM_STARTED = {
   method: "item/started",

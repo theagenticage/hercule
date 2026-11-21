@@ -76,9 +76,10 @@ import {
 } from "./mock-model.testing";
 import type { SessionStartContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
+import { findCodexTestBinary } from "./codex-binary.testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
-const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
+const binary = findCodexTestBinary();
 
 const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 

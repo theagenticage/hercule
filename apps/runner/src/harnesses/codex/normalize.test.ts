@@ -250,7 +250,7 @@ const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = 
   // Review mode is shown as a notice and not as an item.
   [{ type: "enteredReviewMode", id: "i18", review: "r" }, null],
   [{ type: "exitedReviewMode", id: "i19", review: "r" }, null],
-  // Not in the union at 0.154.0: an item type added by a later release.
+  // Not in the union of Codex 0.171.0: stands for an item type a later release adds.
   [{ type: "somethingCodexGrew", id: "i20" }, "unknown"],
 ];
 

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import { decideMcpConfig } from "./mcp";
 import type { Rpc, RpcError } from "./rpc";
 
@@ -60,7 +61,7 @@ describe("deciding the MCP config of a Codex thread", () => {
       expect(decision).toEqual({
         config: {
           "mcp_servers.tools.url": GATEWAY.url,
-          "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
+          "mcp_servers.tools.bearer_token_env_var": SESSION_TOKEN_VARIABLE,
           "mcp_servers.tools.default_tools_approval_mode": "prompt",
           "features.mcp_tool_list_changed": true,
         },

@@ -48,6 +48,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import { findCodexTestBinary } from "../../../runner/src/harnesses/codex/codex-binary.testing";
 import { buildMcpServerConfig } from "../../../runner/src/harnesses/codex/mcp";
 import {
   buildAppServerCommand,
@@ -81,7 +82,7 @@ import {
 import { send, waitWithin } from "./testing";
 import { withFleet } from "../workspaces/testing";
 
-const codex = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
+const codex = findCodexTestBinary();
 
 /** The most one step of these tests waits for Codex, which is a separate process that starts slowly. */
 const STEP_MS = 30_000;
