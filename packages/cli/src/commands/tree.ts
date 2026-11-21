@@ -515,7 +515,7 @@ const buildOneOfFields = (
     throw new Error(`${name}: a oneOf row needs a field that is an object or a union of objects`);
   }
   const literals = members.map(readLiteralKeys);
-  const memberOf = row.oneOf.map((entry) => {
+  const membersByEntry = row.oneOf.map((entry) => {
     const member = members[literals.findIndex((one) => hasSameEntries(one, entry.fixed))];
     if (member === undefined) {
       throw new Error(
@@ -524,7 +524,7 @@ const buildOneOfFields = (
     }
     return member;
   });
-  const unmatched = members.findIndex((member) => !memberOf.includes(member));
+  const unmatched = members.findIndex((member) => !membersByEntry.includes(member));
   if (unmatched !== -1) {
     throw new Error(
       `${name}: no entry stands for the member ${JSON.stringify(literals[unmatched])} of the union`,
@@ -533,7 +533,7 @@ const buildOneOfFields = (
 
   const keys = new Map<string, { readonly type: Ast; readonly field: Field }>();
   for (const [index, entry] of row.oneOf.entries()) {
-    const member = memberOf[index]!;
+    const member = membersByEntry[index]!;
     for (const key of Object.keys(entry.fixed)) readObjectKey(name, member, key);
     const uncovered = (member.propertySignatures ?? []).find(
       (property) =>

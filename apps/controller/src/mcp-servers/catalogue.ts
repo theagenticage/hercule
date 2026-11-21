@@ -351,14 +351,14 @@ const make = Effect.gen(function* () {
       ]);
       const loaded = yield* plugins.loaded();
       const registered = yield* plugins.listMcpServers();
-      const readPluginState = (contributionId: string): PluginState =>
+      const judgePluginOfContribution = (contributionId: string): PluginState =>
         judgePluginState(contributionId, registered, loaded);
       return ({ source }) =>
         source.kind === "plugin"
           ? {
               kind: "plugin",
               connection: found.get(source.connectionId),
-              plugin: readPluginState(source.contributionId),
+              plugin: judgePluginOfContribution(source.contributionId),
             }
           : { kind: "url", source };
     });

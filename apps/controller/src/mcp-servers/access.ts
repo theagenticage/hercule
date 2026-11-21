@@ -32,7 +32,7 @@ import {
   type UsablePlugin,
 } from "./catalogue";
 import type { McpServerUrlSource, StoredMcpServerAvailability } from "./repository";
-import { listQueryValues } from "./addresses";
+import { listSecretLikeQueryValues } from "./addresses";
 import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
 /**
@@ -391,7 +391,10 @@ const resolveUrlAccess = (
     // The address's query values are secret too: many servers take an API key
     // there, and one that echoes its request URL must not hand it to an agent.
     const queryValues = Object.fromEntries(
-      listQueryValues(url).map((value, index) => [`${QUERY_VALUE_PREFIX}${String(index)}`, value]),
+      listSecretLikeQueryValues(url).map((value, index) => [
+        `${QUERY_VALUE_PREFIX}${String(index)}`,
+        value,
+      ]),
     );
     const credentials = {
       ...(token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token }),

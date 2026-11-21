@@ -4,7 +4,7 @@ import {
   buildDefaultServerName,
   findPluginOnOrigin,
   hideQueryValues,
-  listQueryValues,
+  listSecretLikeQueryValues,
   parseServerAddress,
 } from "./addresses";
 
@@ -19,7 +19,7 @@ interface Refusal {
 }
 
 /** Runs an effect that must fail with a `Validation` error and returns its envelope. */
-const refusalOf = async (effect: Effect.Effect<unknown, { readonly error: unknown }>) =>
+const readRefusal = async (effect: Effect.Effect<unknown, { readonly error: unknown }>) =>
   (await Effect.runPromise(Effect.flip(effect))).error as Refusal;
 
 const read = (input: string) => Effect.runPromise(parseServerAddress(input));
@@ -75,6 +75,8 @@ describe("parseServerAddress", () => {
     ["https://mcp.sentry.dev./mcp", "https://mcp.sentry.dev/mcp"],
     ["https://mcp.sentry.dev.:8443/mcp", "https://mcp.sentry.dev:8443/mcp"],
     ["https://MCP.Sentry.Dev./mcp/", "https://mcp.sentry.dev/mcp"],
+    ["https://mcp.sentry.dev../mcp", "https://mcp.sentry.dev/mcp"],
+    ["https://mcp.sentry.dev...:8443/mcp", "https://mcp.sentry.dev:8443/mcp"],
   ])("gives %s the key %s: a trailing dot on the host is the same host", async (input, key) => {
     const address = await read(input);
     expect(address.normalizedUrl).toBe(key);
@@ -123,7 +125,7 @@ describe("parseServerAddress", () => {
     ["a fragment", "https://example.com/mcp#top", "#fragment"],
     ["an empty fragment", "https://example.com/mcp#", "#fragment"],
   ])("refuses %s on source.url, and says what to give instead", async (_what, input, words) => {
-    const error = await refusalOf(parseServerAddress(input));
+    const error = await readRefusal(parseServerAddress(input));
     expect(error.code).toBe("validation");
     expect(error.details.issues).toHaveLength(1);
     expect(error.details.issues[0]!.path).toEqual(["source", "url"]);
@@ -131,13 +133,13 @@ describe("parseServerAddress", () => {
   });
 
   it("never repeats a password in its refusal", async () => {
-    const error = await refusalOf(parseServerAddress("https://me:hunter2@example.com/mcp"));
+    const error = await readRefusal(parseServerAddress("https://me:hunter2@example.com/mcp"));
     expect(JSON.stringify(error)).not.toContain("hunter2");
   });
 });
 
 describe("buildDefaultServerName", () => {
-  const nameOf = async (input: string) =>
+  const readDefaultName = async (input: string) =>
     Effect.runPromise(buildDefaultServerName(await read(input)));
 
   it.each([
@@ -152,19 +154,23 @@ describe("buildDefaultServerName", () => {
     ["http://192.168.0.1/mcp", "192"],
     ["http://[::1]:3000/mcp", "1"],
   ])("makes %s the name %s", async (input, name) => {
-    expect(await nameOf(input)).toBe(name);
+    expect(await readDefaultName(input)).toBe(name);
   });
 
   it("cuts the label to 16 characters and trims the underscore the cut leaves", async () => {
-    expect(await nameOf("https://abcdefghijklmnopqrstuvwxyz.example.com")).toBe("abcdefghijklmnop");
-    expect(await nameOf("https://abcdefghijklmno-pqrs.example.com")).toBe("abcdefghijklmno");
+    expect(await readDefaultName("https://abcdefghijklmnopqrstuvwxyz.example.com")).toBe(
+      "abcdefghijklmnop",
+    );
+    expect(await readDefaultName("https://abcdefghijklmno-pqrs.example.com")).toBe(
+      "abcdefghijklmno",
+    );
   });
 
   it.each([
     ["a host that is hercule", "https://hercule.example.com"],
     ["a host with no label left", "https://api"],
   ])("refuses %s on source.name, and tells the user to give a name", async (_what, input) => {
-    const error = await refusalOf(buildDefaultServerName(await read(input)));
+    const error = await readRefusal(buildDefaultServerName(await read(input)));
     expect(error.code).toBe("validation");
     expect(error.details.issues[0]!.path).toEqual(["source", "name"]);
     expect(error.details.issues[0]!.message).toContain(
@@ -203,8 +209,15 @@ describe("findPluginOnOrigin", () => {
 
 describe("hideQueryValues", () => {
   it("keeps every query parameter's name and hides its value", () => {
-    expect(hideQueryValues("https://mcp.x.com/mcp?api_key=K&org=o&flag")).toBe(
-      "https://mcp.x.com/mcp?api_key=…&org=…&flag",
+    expect(hideQueryValues("https://mcp.x.com/mcp?api_key=K&org=o")).toBe(
+      "https://mcp.x.com/mcp?api_key=…&org=…",
+    );
+  });
+
+  it("hides a part with no equals sign whole, as it is a value with no name", () => {
+    expect(hideQueryValues("https://mcp.x.com/mcp?SECRETKEY")).toBe("https://mcp.x.com/mcp?…");
+    expect(hideQueryValues("https://mcp.x.com/mcp?a=1&SECRETKEY")).toBe(
+      "https://mcp.x.com/mcp?a=…&…",
     );
   });
 
@@ -213,12 +226,34 @@ describe("hideQueryValues", () => {
   });
 });
 
-describe("listQueryValues", () => {
-  it("lists each value as written and decoded, and leaves out empty ones", () => {
-    expect(listQueryValues("https://x.com/mcp?a=p%40ss&b=&c=plain")).toEqual([
-      "p%40ss",
-      "p@ss",
-      "plain",
+describe("listSecretLikeQueryValues", () => {
+  it("lists a key-like value and leaves out the ordinary ones", () => {
+    expect(
+      listSecretLikeQueryValues(
+        "https://x.com/mcp?api_key=key4eC39HqLyjWDarjtT1zdp7dcFakeForTests&read_only=true&features=docs&v=1&format=object&empty=&flag",
+      ),
+    ).toEqual(["key4eC39HqLyjWDarjtT1zdp7dcFakeForTests"]);
+  });
+
+  it("lists a part with no equals sign as a value when it is key-like", () => {
+    expect(listSecretLikeQueryValues("https://x.com/mcp?SECRETKEY1&flag")).toEqual(["SECRETKEY1"]);
+  });
+
+  it("lists a value of exactly 8 characters and leaves out one of 7", () => {
+    expect(listSecretLikeQueryValues("https://x.com/mcp?a=abcd1234&b=abcd123")).toEqual([
+      "abcd1234",
+    ]);
+  });
+
+  it("lists the decoded form of a value too when the decoded form is key-like", () => {
+    expect(listSecretLikeQueryValues("https://x.com/mcp?k=abc%2Fdef%2Bghi")).toEqual([
+      "abc/def+ghi",
+    ]);
+  });
+
+  it("leaves out a value that has a character a token cannot have", () => {
+    expect(listSecretLikeQueryValues("https://x.com/mcp?a=p%40ssw0rd1&b=two+words+here")).toEqual([
+      "two+words+here",
     ]);
   });
 });

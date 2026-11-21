@@ -9,7 +9,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { createValidationError, type Validation } from "@hercule/contract";
+import { createValidationError, McpServerToken, type Validation } from "@hercule/contract";
 import { McpServerName } from "@hercule/plugin-host";
 
 /** An address a user gave, read and checked. */
@@ -48,9 +48,9 @@ const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
  * become one spelling (RFC 3986 section 6.2.2.2, and the absolute form of a
  * host name):
  *
- * - One trailing `.` is removed from the host, so `https://mcp.sentry.dev./mcp`
- *   is `https://mcp.sentry.dev/mcp`. A host such as `.` that would be left
- *   empty is kept.
+ * - Every trailing `.` is removed from the host, so `https://mcp.sentry.dev./mcp`
+ *   and `https://mcp.sentry.dev../mcp` are `https://mcp.sentry.dev/mcp`. A host
+ *   such as `.` that would be left empty is kept.
  * - A percent-escape of an unreserved character (`A-Z a-z 0-9 - . _ ~`) in the
  *   path becomes the character itself, so `/%6Dcp` is `/mcp`. Every other
  *   escape stays an escape, with its hex digits in upper case, so `%2f` is
@@ -62,9 +62,9 @@ const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
  * The query is left as it is.
  */
 const foldEquivalentSpellings = (parsed: URL): void => {
-  if (parsed.hostname.length > 1 && parsed.hostname.endsWith(".")) {
-    parsed.hostname = parsed.hostname.slice(0, -1);
-  }
+  let hostname = parsed.hostname;
+  while (hostname.length > 1 && hostname.endsWith(".")) hostname = hostname.slice(0, -1);
+  parsed.hostname = hostname;
   parsed.pathname = parsed.pathname.replace(/%([0-9A-Fa-f]{2})/g, (_escape, hex: string) => {
     const character = String.fromCharCode(Number.parseInt(hex, 16));
     return UNRESERVED.test(character) ? character : `%${hex.toUpperCase()}`;
@@ -138,7 +138,8 @@ const HIDDEN_QUERY_VALUE = "…";
 /**
  * Returns the address as clients see it: every query parameter keeps its name
  * and loses its value, so `https://mcp.x.com/mcp?api_key=K&org=o` is
- * `https://mcp.x.com/mcp?api_key=…&org=…`. An address with no query is returned
+ * `https://mcp.x.com/mcp?api_key=…&org=…`. A part with no `=` (`?SECRETKEY`)
+ * is a value with no name, and it is hidden whole: `?…`. An address with no query is returned
  * as it is. Many servers take an API key in the query, so no value of it may be
  * shown; the stored address keeps the full query, because requests go there.
  */
@@ -150,24 +151,36 @@ export const hideQueryValues = (address: string): string => {
     .split("&")
     .map((parameter) => {
       const equals = parameter.indexOf("=");
-      return equals === -1 ? parameter : `${parameter.slice(0, equals)}=${HIDDEN_QUERY_VALUE}`;
+      return equals === -1
+        ? HIDDEN_QUERY_VALUE
+        : `${parameter.slice(0, equals)}=${HIDDEN_QUERY_VALUE}`;
     })
     .join("&");
   return `${address.slice(0, address.indexOf("?"))}?${hidden}`;
 };
 
+const isSecretLike = Schema.is(McpServerToken);
+
 /**
- * Lists the value of every query parameter of the address, in the form it is
- * written in the address and, when it differs, decoded. A server that echoes
- * its request URL may use either form. Empty values are left out.
+ * Lists the value of every query parameter of the address that could be a
+ * secret, in the form it is written in the address and, when it differs,
+ * decoded. A part with no `=` counts as a value. A server that echoes its request URL may use either form. A value
+ * could be a secret when it passes the rule of a pasted token
+ * (`McpServerToken`); every other value, empty ones included, is left out.
+ *
+ * Why not every value: ordinary values such as `true`, `1`, `docs` or `object`
+ * appear in every answer, and removing them would corrupt answers and tool
+ * definitions (`"rows": 4110` would become `"rows": 4[removed][removed]0`). A
+ * key is long and key-like enough to be a secret exactly when it passes the
+ * same rule as a token, and the rule also keeps a short value from matching
+ * the `[removed]` marker itself.
  */
-export const listQueryValues = (address: string): ReadonlyArray<string> => {
+export const listSecretLikeQueryValues = (address: string): ReadonlyArray<string> => {
   const { search } = new URL(address);
   const values = new Set<string>();
   for (const parameter of search.slice(1).split("&")) {
-    const equals = parameter.indexOf("=");
-    if (equals === -1) continue;
-    const written = parameter.slice(equals + 1);
+    // A part with no `=` is a value with no name, so it is listed whole.
+    const written = parameter.slice(parameter.indexOf("=") + 1);
     values.add(written);
     try {
       values.add(decodeURIComponent(written.replaceAll("+", " ")));
@@ -175,8 +188,7 @@ export const listQueryValues = (address: string): ReadonlyArray<string> => {
       // A malformed escape has no decoded form; the written form is still listed.
     }
   }
-  values.delete("");
-  return [...values];
+  return [...values].filter(isSecretLike);
 };
 
 /** The host labels that say what a server is and not whose it is, so they never name a server. */

@@ -55,7 +55,7 @@ import {
   type McpServerRow,
 } from "./testing";
 
-const requestsOf = (fake: FakeUpstream, method: string) =>
+const listRequestsByMethod = (fake: FakeUpstream, method: string) =>
   fake.requests.filter((request) => request.method === method);
 
 const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
@@ -209,7 +209,9 @@ describe("a call to a server added by URL", () => {
         type: "text",
         text: JSON.stringify({ text: "hello" }),
       });
-      expect(requestsOf(fake, "tools/call")).toMatchObject([{ tool: "echo", status: 200 }]);
+      expect(listRequestsByMethod(fake, "tools/call")).toMatchObject([
+        { tool: "echo", status: 200 },
+      ]);
     });
   });
 
@@ -358,7 +360,7 @@ describe("the sign-in a request carries", () => {
         const serverId = await insertUrlServer({ token: "old-token" });
         await waitForResult(controller);
         expect((await callAs(controller, serverId))._tag).toBe("Success");
-        const endsBefore = requestsOf(fake, "?").length;
+        const endsBefore = listRequestsByMethod(fake, "?").length;
 
         await replaceToken(controller, serverId, "new-token");
         await Effect.runPromise(
@@ -371,7 +373,7 @@ describe("the sign-in a request carries", () => {
         // The session ends on its own at the server in time. What matters is
         // that the request that ends it is not sent with the token that
         // replaced the old one.
-        expect(requestsOf(fake, "?")).toHaveLength(endsBefore);
+        expect(listRequestsByMethod(fake, "?")).toHaveLength(endsBefore);
         expect(fake.requests.map((request) => request.authorization)).not.toContain(
           "Bearer new-token",
         );
@@ -386,7 +388,7 @@ describe("the sign-in a request carries", () => {
         const serverId = await insertUrlServer({ token: "old-token" });
         await waitForResult(controller);
         expect((await callAs(controller, serverId))._tag).toBe("Success");
-        const endsBefore = requestsOf(fake, "?").length;
+        const endsBefore = listRequestsByMethod(fake, "?").length;
 
         await Effect.runPromise(
           controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(
@@ -395,7 +397,7 @@ describe("the sign-in a request carries", () => {
           ),
         );
 
-        const ends = requestsOf(fake, "?");
+        const ends = listRequestsByMethod(fake, "?");
         expect(ends).toHaveLength(endsBefore + 1);
         expect(ends.at(-1)?.authorization).toBe("Bearer old-token");
       },
@@ -492,7 +494,7 @@ describe("a call that a new sign-in overtakes", () => {
         const result = await call;
 
         expect(result._tag).toBe("Failure");
-        expect(requestsOf(fake, "tools/call")).toEqual([]);
+        expect(listRequestsByMethod(fake, "tools/call")).toEqual([]);
         expect(
           fake.requests
             .slice(heldIndex)
@@ -542,12 +544,12 @@ describe("the request that ends an upstream session of a server added by URL", (
         const serverId = await insertUrlServer({ token: "old-token" });
         await waitForResult(controller);
         expect((await callAs(controller, serverId))._tag).toBe("Success");
-        const endsBefore = requestsOf(fake, "?").length;
+        const endsBefore = listRequestsByMethod(fake, "?").length;
 
         expect((await requestUpdate(controller, serverId, { enabled: false })).status).toBe(200);
 
         const ends = await eventually(
-          () => Promise.resolve(requestsOf(fake, "?")),
+          () => Promise.resolve(listRequestsByMethod(fake, "?")),
           (found) => found.length === endsBefore + 1,
         );
         expect(ends.at(-1)?.authorization).toBe("Bearer old-token");
@@ -562,16 +564,23 @@ describe("the request that ends an upstream session of a server added by URL", (
         const serverId = await insertUrlServer({ token: "old-token" });
         await waitForResult(controller);
         expect((await callAs(controller, serverId))._tag).toBe("Success");
-        const oldSession = requestsOf(fake, "tools/call").at(-1)?.sessionId;
+        const oldSession = listRequestsByMethod(fake, "tools/call").at(-1)?.sessionId;
         expect(oldSession).toBeTruthy();
 
         await readRecord(await sendToken(controller, serverId, "new-token"));
         await waitForResult(controller);
-        await sleep(200);
 
-        // The check the new token asks for ends its own session, which is not this one.
-        const ends = requestsOf(fake, "?").filter((request) => request.sessionId === oldSession);
-        expect(ends.map((request) => request.authorization)).not.toContain("Bearer new-token");
+        // The check the new token asks for ends its own session with the new
+        // token. Waiting for that request, not for a pause, means the end of
+        // the old session cannot be missed for arriving late.
+        const ends = await eventually(
+          () => Promise.resolve(listRequestsByMethod(fake, "?")),
+          (found) => found.some((request) => request.authorization === "Bearer new-token"),
+        );
+        const endsOfOldSession = ends.filter((request) => request.sessionId === oldSession);
+        expect(endsOfOldSession.map((request) => request.authorization)).not.toContain(
+          "Bearer new-token",
+        );
       },
       { fake: { protocols: [McpProtocol.v2025_11_25] } },
     );
@@ -581,7 +590,7 @@ describe("the request that ends an upstream session of a server added by URL", (
 describe("an upstream session of a server added by URL", () => {
   /** Reads the MCP session id of each `tools/call` the fake received. */
   const sessionsOfCalls = (fake: FakeUpstream) =>
-    requestsOf(fake, "tools/call").map((request) => request.sessionId);
+    listRequestsByMethod(fake, "tools/call").map((request) => request.sessionId);
 
   it("survives a check that writes a new check time with the same tools, and is replaced when the sign-in was replaced", async () => {
     await withUrlRig(
@@ -612,7 +621,7 @@ describe("an upstream session of a server added by URL", () => {
         await replaceToken(controller, serverId, "new-token");
         expect((await callAs(controller, serverId))._tag).toBe("Success");
 
-        const calls = requestsOf(fake, "tools/call");
+        const calls = listRequestsByMethod(fake, "tools/call");
         expect(calls[2]?.sessionId).not.toBe(opened);
         expect(calls[2]?.authorization).toBe("Bearer new-token");
       },
@@ -660,7 +669,7 @@ describe("a credential the server echoes", () => {
     );
   });
 
-  it("is removed when it is a value in the address's query", async () => {
+  it("is removed when it is a key-like value in the address's query, and an ordinary value is not", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       fake.intercept = ({ method, id, url }) =>
         method === "tools/call"
@@ -672,7 +681,7 @@ describe("a credential the server echoes", () => {
           : undefined;
       const serverId = await insertUrlServerAt(
         controller,
-        `${fake.url}?api_key=k3y-9f2a7c&org=acme`,
+        `${fake.url}?api_key=key4eC39HqLyjWDarjtT1zdp7dcFakeForTests&org=acme`,
       );
       await waitForResult(controller);
 
@@ -680,9 +689,65 @@ describe("a credential the server echoes", () => {
 
       expect(result).toMatchObject({
         _tag: "Success",
-        success: { content: [{ text: "you called /mcp?api_key=[removed]&org=[removed]" }] },
+        success: { content: [{ text: "you called /mcp?api_key=[removed]&org=acme" }] },
       });
     });
+  });
+
+  // `project_ref=abcd1234` is 8 letters and digits, so it passes the rule of a
+  // token and is removed like one. `true`, `docs` and `1` are not removed:
+  // they are in every answer.
+  it("leaves ordinary query values in the answers and the stored tools, and removes the key-like one", async () => {
+    await withUrlRig(
+      async ({ controller, fake }) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? Response.json({
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  content: [
+                    {
+                      type: "text",
+                      text: '{"rls_enabled": true, "rows": 4110, "ref": "abcd1234", "topic": "docs"}',
+                    },
+                  ],
+                },
+              })
+            : undefined;
+        const serverId = await insertUrlServerAt(
+          controller,
+          `${fake.url}?project_ref=abcd1234&read_only=true&features=docs&v=1&format=object`,
+        );
+
+        const row = await waitForResult(controller);
+        const result = await callAs(controller, serverId);
+
+        expect(row.status).toBe("ready");
+        expect(JSON.parse(row.tools)).toMatchObject([
+          { name: "echo", inputSchema: { type: "object" } },
+          { name: "search_docs", inputSchema: { type: "object" } },
+        ]);
+        expect(result).toMatchObject({
+          _tag: "Success",
+          success: {
+            content: [
+              {
+                text: '{"rls_enabled": true, "rows": 4110, "ref": "[removed]", "topic": "docs"}',
+              },
+            ],
+          },
+        });
+      },
+      {
+        fake: {
+          tools: [
+            { name: "echo", description: "Echoes its text" },
+            { name: "search_docs", description: "Searches the docs" },
+          ],
+        },
+      },
+    );
   });
 
   it("leaves out a tool that no longer fits the tool schema once the credential is removed from one of its keys", async () => {
@@ -764,7 +829,7 @@ describe("the size of a tool list", () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer();
       const first = await waitForResult(controller);
-      const listsBefore = requestsOf(fake, "tools/list").length;
+      const listsBefore = listRequestsByMethod(fake, "tools/list").length;
       let page = 0;
       fake.intercept = ({ method, id }) => {
         if (method !== "tools/list") return undefined;
@@ -782,7 +847,7 @@ describe("the size of a tool list", () => {
       expect(row.status_detail).toBe("The server's tool list is larger than 4 MiB");
       expect(row.tools).toBe(first.tools);
       // 3 pages of 1.5 MiB pass 4 MiB, and no fourth page is asked for.
-      expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(3);
+      expect(listRequestsByMethod(fake, "tools/list").length - listsBefore).toBe(3);
     });
   });
 
@@ -790,7 +855,7 @@ describe("the size of a tool list", () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer();
       const first = await waitForResult(controller);
-      const listsBefore = requestsOf(fake, "tools/list").length;
+      const listsBefore = listRequestsByMethod(fake, "tools/list").length;
       let page = 0;
       fake.intercept = ({ method, id }) => {
         if (method !== "tools/list") return undefined;
@@ -820,7 +885,7 @@ describe("the size of a tool list", () => {
 
       expect(row.status_detail).toBe("The server's tool list is larger than 4 MiB");
       expect(row.tools).toBe(first.tools);
-      expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(3);
+      expect(listRequestsByMethod(fake, "tools/list").length - listsBefore).toBe(3);
     });
   });
 
@@ -828,7 +893,7 @@ describe("the size of a tool list", () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer();
       const first = await waitForResult(controller);
-      const listsBefore = requestsOf(fake, "tools/list").length;
+      const listsBefore = listRequestsByMethod(fake, "tools/list").length;
       let page = 0;
       fake.intercept = ({ method, id }) => {
         if (method !== "tools/list") return undefined;
@@ -847,7 +912,7 @@ describe("the size of a tool list", () => {
         "The server's tool list has more than 100 pages or 10,000 tools",
       );
       expect(row.tools).toBe(first.tools);
-      expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(100);
+      expect(listRequestsByMethod(fake, "tools/list").length - listsBefore).toBe(100);
     });
   });
 
