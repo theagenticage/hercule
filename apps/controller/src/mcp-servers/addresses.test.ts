@@ -65,6 +65,43 @@ describe("parseServerAddress", () => {
     );
   });
 
+  it.each([
+    ["https://mcp.sentry.dev./mcp", "https://mcp.sentry.dev/mcp"],
+    ["https://mcp.sentry.dev.:8443/mcp", "https://mcp.sentry.dev:8443/mcp"],
+    ["https://MCP.Sentry.Dev./mcp/", "https://mcp.sentry.dev/mcp"],
+  ])("gives %s the key %s: a trailing dot on the host is the same host", async (input, key) => {
+    const address = await read(input);
+    expect(address.normalizedUrl).toBe(key);
+    expect(new URL(address.url).hostname).toBe(new URL(key).hostname);
+    expect(address.origin).toBe(new URL(key).origin);
+  });
+
+  it("folds a percent-escaped unreserved character in the path, in the key and in the address", async () => {
+    const address = await read("https://x.com/%6Dcp/%41%2d%2E%5f%7e/%39");
+    expect(address.url).toBe("https://x.com/mcp/A-._~/9");
+    expect(address.normalizedUrl).toBe("https://x.com/mcp/A-._~/9");
+  });
+
+  it("keeps every other escape in the path, with its hex digits in upper case", async () => {
+    const address = await read("https://x.com/a%2fb/%e2%82%ac/%20/%25");
+    expect(address.url).toBe("https://x.com/a%2Fb/%E2%82%AC/%20/%25");
+    expect(address.normalizedUrl).toBe("https://x.com/a%2Fb/%E2%82%AC/%20/%25");
+  });
+
+  it("leaves the escapes in the query as they are", async () => {
+    expect((await read("https://x.com/mcp?a=%6d%2f")).normalizedUrl).toBe(
+      "https://x.com/mcp?a=%6d%2f",
+    );
+  });
+
+  it("does not fold repeated slashes, and removes exactly one trailing slash", async () => {
+    expect((await read("https://x.com/mcp//")).normalizedUrl).toBe("https://x.com/mcp/");
+    expect((await read("https://x.com//mcp")).normalizedUrl).toBe("https://x.com//mcp");
+    expect((await read("https://x.com/mcp//")).normalizedUrl).not.toBe(
+      (await read("https://x.com/mcp")).normalizedUrl,
+    );
+  });
+
   it("keeps the trailing slash in the address that requests go to", async () => {
     expect((await read("https://api.githubcopilot.com/mcp/")).url).toBe(
       "https://api.githubcopilot.com/mcp/",
@@ -139,6 +176,11 @@ describe("findPluginOnOrigin", () => {
 
   it("returns the first contribution whose origin is the origin", () => {
     expect(findPluginOnOrigin("https://mcp.b.com:8443", contributions)?.id).toBe("b/b");
+  });
+
+  it("finds the plugin for an address whose host ends in a dot", async () => {
+    const address = await read("https://mcp.a.com./mcp");
+    expect(findPluginOnOrigin(address.origin, contributions)?.id).toBe("a/a");
   });
 
   it("matches the whole origin: a port, a scheme and a host all count", () => {

@@ -19,8 +19,10 @@ export interface ServerAddress {
    * requests go to. The parser only spells the address the way every client
    * does: `https:example.com/mcp` becomes `https://example.com/mcp`, the scheme
    * and host are in lower case, the default port is gone and a bare `?` with
-   * nothing after it is gone. The path, its trailing slash and the query are
-   * kept, because a server may need them as they are.
+   * nothing after it is gone. `foldEquivalentSpellings` then removes a
+   * trailing `.` from the host and spells the path's percent-escapes in their
+   * one canonical form. The path's own characters, its trailing slash and the
+   * query are kept, because a server may need them as they are.
    */
   readonly url: string;
   /**
@@ -38,12 +40,45 @@ const refuseUrl = (message: string): Effect.Effect<never, Validation> =>
 const refuseName = (message: string): Effect.Effect<never, Validation> =>
   Effect.fail(createValidationError([{ path: ["source", "name"], message }]));
 
+/** The characters RFC 3986 section 2.3 calls unreserved: escaping one of them changes nothing. */
+const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
+
+/**
+ * Rewrites the address in place so that spellings that reach the same server
+ * become one spelling (RFC 3986 section 6.2.2.2, and the absolute form of a
+ * host name):
+ *
+ * - One trailing `.` is removed from the host, so `https://mcp.sentry.dev./mcp`
+ *   is `https://mcp.sentry.dev/mcp`. A host such as `.` that would be left
+ *   empty is kept.
+ * - A percent-escape of an unreserved character (`A-Z a-z 0-9 - . _ ~`) in the
+ *   path becomes the character itself, so `/%6Dcp` is `/mcp`. Every other
+ *   escape stays an escape, with its hex digits in upper case, so `%2f` is
+ *   `%2F`. A reserved character is never decoded, because `%2F` and `/` mean
+ *   different things to a server.
+ *
+ * Repeated slashes (`/mcp//`) are not folded into one: a server may route
+ * `/mcp/` and `/mcp//` differently, and no rule says they are one address.
+ * The query is left as it is.
+ */
+const foldEquivalentSpellings = (parsed: URL): void => {
+  if (parsed.hostname.length > 1 && parsed.hostname.endsWith(".")) {
+    parsed.hostname = parsed.hostname.slice(0, -1);
+  }
+  parsed.pathname = parsed.pathname.replace(/%([0-9A-Fa-f]{2})/g, (_escape, hex: string) => {
+    const character = String.fromCharCode(Number.parseInt(hex, 16));
+    return UNRESERVED.test(character) ? character : `%${hex.toUpperCase()}`;
+  });
+};
+
 /**
  * Builds the key that makes two spellings of one address one server. It is
  * taken from the address as the WHATWG URL parser reads it, so the scheme and
  * host are in lower case, the scheme's default port is gone, and dot segments
- * (`/a/../b`) are resolved. On top of that, one trailing `/` is removed from
- * the path, so `https://a.com`, `https://a.com/` and `https://a.com/mcp/`
+ * (`/a/../b`) are resolved. `foldEquivalentSpellings` has already run on the
+ * address, so a trailing `.` on the host is gone and the path's percent-escapes
+ * are canonical. On top of that, exactly one trailing `/` is removed from
+ * the path (a path ending in `//` keeps its other slash), so `https://a.com`, `https://a.com/` and `https://a.com/mcp/`
  * match `https://a.com` and `https://a.com/mcp`. The case of the path and the
  * query are kept exactly, because a server may tell them apart. A bare `?`
  * with nothing after it is the same address as none: `parseServerAddress`
@@ -89,6 +124,7 @@ export const parseServerAddress = (input: string): Effect.Effect<ServerAddress, 
     // The parser keeps a bare `?` in `href` and reports its `search` as empty.
     // Setting `search` to the empty text removes it.
     if (parsed.search === "") parsed.search = "";
+    foldEquivalentSpellings(parsed);
     return {
       url: parsed.href,
       normalizedUrl: buildNormalizedAddress(parsed),
