@@ -768,6 +768,29 @@ const listFrameItems = (frame: NotificationFrame): ReadonlyArray<Record<string, 
  */
 const MCP_IMAGE_NOT_KEPT = "Hercule does not keep the images of a Codex MCP tool's result yet.";
 
+/** What replaces a copy of an MCP image's base64 found outside its image block. */
+const MCP_IMAGE_COPY = "[image not kept]";
+
+/**
+ * Returns `value` with every exact copy of the base64 strings in `copies`
+ * replaced by `MCP_IMAGE_COPY`, at any depth. A string that holds a copy, such
+ * as a data URL, keeps its other text. `copies` lists longer strings first, so
+ * a copy that is part of a longer one cannot break the longer one up. Object
+ * keys are left as they are.
+ */
+const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknown => {
+  if (typeof value === "string") {
+    return copies.reduce((text, copy) => text.replaceAll(copy, MCP_IMAGE_COPY), value);
+  }
+  if (Array.isArray(value)) return value.map((item) => scrubImageCopies(item, copies));
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [key, scrubImageCopies(field, copies)]),
+    );
+  }
+  return value;
+};
+
 /**
  * Removes the bytes of images from a notification frame, in place, before
  * anything else reads the frame. Left in, they would be copied into every
@@ -778,8 +801,11 @@ const MCP_IMAGE_NOT_KEPT = "Hercule does not keep the images of a Codex MCP tool
  *   `result`. The field is removed, because the image reaches nobody through
  *   the stream.
  * - An `mcpToolCall` item holds MCP's image blocks in `result.content`. Each
- *   is replaced by an `unavailable` image (see `ToolResultImage`). The model
- *   already has its own copy, and the text blocks stay.
+ *   is replaced by an `unavailable` image (see `ToolResultImage`), and every
+ *   other copy of its base64 in the result, such as one in
+ *   `structuredContent` or `_meta`, is replaced by a short placeholder. The
+ *   model already has its own copy, and the text blocks stay. A result too
+ *   deeply nested to walk is dropped whole, so no bytes stay.
  */
 const stripImageBytes = (frame: NotificationFrame): void => {
   for (const item of listFrameItems(frame)) {
@@ -787,10 +813,21 @@ const stripImageBytes = (frame: NotificationFrame): void => {
     if (item["type"] !== "mcpToolCall") continue;
     const content = (item["result"] as { readonly content?: unknown } | null | undefined)?.content;
     if (!Array.isArray(content)) continue;
+    const copies = new Set<string>();
     for (const [index, block] of content.entries()) {
-      if ((block as { readonly type?: unknown } | null)?.type === "image") {
-        content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
-      }
+      const image = block as { readonly type?: unknown; readonly data?: unknown } | null;
+      if (image?.type !== "image") continue;
+      if (typeof image.data === "string" && image.data !== "") copies.add(image.data);
+      content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
+    }
+    if (copies.size === 0) continue;
+    try {
+      item["result"] = scrubImageCopies(
+        item["result"],
+        [...copies].toSorted((a, b) => b.length - a.length),
+      );
+    } catch {
+      Reflect.deleteProperty(item, "result");
     }
   }
 };

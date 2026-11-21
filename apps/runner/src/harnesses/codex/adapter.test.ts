@@ -4469,8 +4469,9 @@ describe("the images in the result of an MCP tool call", () => {
       { type: "image", data: IMAGE, mimeType: "image/png" },
       { type: "text", text: "Taken just now" },
     ],
-    structuredContent: null,
-    _meta: null,
+    // The same image again, as MCP servers often repeat it.
+    structuredContent: { screenshot: IMAGE },
+    _meta: { preview: `data:image/png;base64,${IMAGE}` },
   };
 
   it("become unavailable in the item, and the bytes reach no event", async () => {
@@ -4490,7 +4491,18 @@ describe("the images in the result of an MCP tool call", () => {
       NOT_KEPT,
       { type: "text", text: "Taken just now" },
     ];
-    expect(completed.raw).toMatchObject({ payload: { item: { result: { content: blocks } } } });
+    expect(completed.raw).toMatchObject({
+      payload: {
+        item: {
+          result: {
+            content: blocks,
+            // Every other copy of the image's bytes is replaced, and the text around it stays.
+            structuredContent: { screenshot: "[image not kept]" },
+            _meta: { preview: "data:image/png;base64,[image not kept]" },
+          },
+        },
+      },
+    });
     // The expanded step shows the same blocks, as Claude Code's tool result does.
     expect(completed.detail).toEqual({
       name: "get_snapshot_image",
@@ -4520,6 +4532,7 @@ describe("the images in the result of an MCP tool call", () => {
 
     expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
     expect(JSON.stringify(run.seen)).toContain("does not keep");
+    expect(JSON.stringify(run.seen)).toContain("[image not kept]");
   });
 
   it("show the message of a call that failed as the item's content", async () => {
