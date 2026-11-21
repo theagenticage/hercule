@@ -105,6 +105,20 @@ const WITHOUT_IMAGES: ModelProfile = {
 const buildImage = (name: string): File =>
   new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: "image/png" });
 
+/**
+ * Opens the `+` menu, which jsdom has no popover API for, by sending the
+ * `toggle` event the browser sends, and returns its "Attach an image" row.
+ */
+const openAttachRow = (): HTMLElement => {
+  act(() => {
+    fireEvent(
+      document.querySelector("[popover][aria-label='Add']")!,
+      Object.assign(new Event("toggle"), { newState: "open" }),
+    );
+  });
+  return screen.getByRole("menuitem", { name: "Attach an image", hidden: true });
+};
+
 /** Returns the card's hidden file picker. */
 const readPicker = (): HTMLInputElement => document.querySelector("input[type=file]")!;
 
@@ -168,6 +182,10 @@ const renderComposer = async (
       },
     },
   );
+  // The `+` menu loads when the composer first draws, and replaces a plain `+` that does nothing.
+  await waitFor(() => {
+    expect(document.querySelector("[popover][aria-label='Add']")).not.toBeNull();
+  });
   // Only whether the thread is blocked matters here, not why, and a missing
   // workspace changes the reason but never turns a blocked thread into an open one.
   if (findResumeBlockedReason(thread.session, undefined) === null) {
@@ -557,9 +575,7 @@ describe("the composer", () => {
     expect(dictate.getAttribute("aria-disabled")).toBe("true");
     await user.click(dictate);
     expect(calls).toHaveLength(sent);
-    expect(screen.getByRole("button", { name: "Attach" }).hasAttribute("aria-disabled")).toBe(
-      false,
-    );
+    expect(openAttachRow().hasAttribute("aria-disabled")).toBe(false);
   });
 
   it("uploads a picked image, holds the send until it is uploaded, then sends it alone", async () => {
@@ -667,7 +683,7 @@ describe("the composer", () => {
     });
     const sent = calls.length;
 
-    const attach = screen.getByRole("button", { name: "Attach" });
+    const attach = openAttachRow();
     expect(attach.getAttribute("aria-disabled")).toBe("true");
     expect(attach.getAttribute("title")).toBe("Claude Sonnet 5 does not accept images");
 
@@ -997,7 +1013,7 @@ describe("the shrunk composer", () => {
     expect(reports.focus).toEqual([true]);
     // Moving within the composer reports the blur and the focus, both in it.
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Attach" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add" }));
     expect(reports.focus).toEqual([true, true, true]);
     act(() => {
       (document.activeElement as HTMLElement).blur();
@@ -1317,7 +1333,7 @@ describe("the composer answering a question", () => {
   it("refuses a pasted image with a notice, keeps Attach off with the reason, and puts nothing on the shelf", async () => {
     const user = userEvent.setup();
     const { calls, pendingSubmissions } = await renderAsking(ASKED);
-    const attach = screen.getByRole("button", { name: "Attach" });
+    const attach = openAttachRow();
     expect(attach.getAttribute("aria-disabled")).toBe("true");
     expect(attach.title).toBe("An answer takes text only");
 

@@ -32,9 +32,11 @@ import "./mcp-servers.css";
  *   dialog opened with, so no row jumps while it is used.
  * - The foot holds `foot`, the quiet button `reset` that goes back to the
  *   list the list started from (left out with `null`), and Done.
- * - Each change calls `onChange` with the whole new list, which never holds
- *   two servers of one name. While `busy`, a write of the list is running and
- *   the controls ignore changes. `error` is the reason for a write the
+ * - Each change calls `onChange` with a function that returns the new list
+ *   for the list as it is when the change is written. The result never holds
+ *   two servers of one name, so the caller applies the choice to its current
+ *   list, never to the one this dialog last drew. While `busy`, a write of the
+ *   list is running and the controls ignore changes. `error` is the reason for a write the
  *   controller refused, shown under the rows.
  *
  * `onClose` is called whenever the dialog closes, and the caller then
@@ -63,7 +65,7 @@ export function ServerPickerDialog({
   } | null;
   readonly busy: boolean;
   readonly error: string | null;
-  readonly onChange: (mcpServerIds: readonly string[]) => void;
+  readonly onChange: (update: (current: readonly string[]) => readonly string[]) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -76,7 +78,7 @@ export function ServerPickerDialog({
   const choose = (row: ServerPickerRow, serverId: string | null, shownId: string): void => {
     if (busy) return;
     setRememberedAccounts({ ...rememberedAccounts, [row.name]: shownId });
-    onChange(chooseNamedServer(mcpServerIds, views, row.name, serverId));
+    onChange((current) => chooseNamedServer(current, views, row.name, serverId));
   };
 
   return (
@@ -179,7 +181,7 @@ export function ServerPickerDialog({
             className="btn btn--quiet"
             aria-disabled={busy}
             onClick={() => {
-              if (!busy) onChange(reset.mcpServerIds);
+              if (!busy) onChange(() => reset.mcpServerIds);
             }}
           >
             {reset.label}

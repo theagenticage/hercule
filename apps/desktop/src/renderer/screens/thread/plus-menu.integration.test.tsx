@@ -1,0 +1,540 @@
+/**
+ * Tests the composer's `+` menu with the thread's MCP servers, on a Draft
+ * Thread and on a started thread, against the stubbed controller: its two
+ * rows and the words on the second, the red dot, the submenu and the order of
+ * its rows, the picker's rows, what a change writes (a draft's pick sent with
+ * the first message, a started thread's `session.update`), the refusal under
+ * the menu, answer mode, and what the thread reads.
+ *
+ * jsdom has no popover API, so a test sends the `toggle` event the browser
+ * sends when the popover opens. The menu and its submenu load the first time
+ * they are needed, so the tests wait for them.
+ */
+import { describe, expect, it } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { buildDraftKey } from "../../app/pending-submissions";
+import { holdAnswer, THREAD_FIXTURES, type ThreadRecords } from "../../app/testing";
+import {
+  buildServer,
+  LINEAR,
+  LINEAR_CONNECTION,
+  LINEAR_ID,
+  SENTRY_HOBBY,
+  SENTRY_HOBBY_ID,
+  SENTRY_WORK,
+  SENTRY_WORK_ID,
+} from "../settings/mcp-servers/mcp-servers.testing";
+import {
+  findCalls,
+  findPlusPopover,
+  findSwitch,
+  openComposerApp,
+  openServersSubmenu,
+  OPS,
+  readListWrites,
+  readServersRowWords,
+  readSpawns,
+  readSubmenuRows,
+  toggleMenu,
+  waitForTopicReads,
+  WEBSHOP,
+  withServers,
+} from "./thread-servers.testing";
+
+const SERVER_LIST = "/api/v1/mcp-servers";
+
+/** An id that names no server, as a server deleted since a pick was made. */
+const DELETED_ID = "01a06d02-8300-7000-8000-0000000000ff";
+
+/** The webshop project with `ids` as its list of servers. */
+const webshopWith = (ids: readonly string[]) => ({ ...WEBSHOP, mcpServerIds: [...ids] });
+
+/** The idle fixture thread, in webshop, with `servers` as its list. */
+const threadWith = (servers: Parameters<typeof withServers>[1]): ThreadRecords =>
+  withServers(THREAD_FIXTURES.finished, servers);
+
+/** Returns `count` ready servers named `tool01`, `tool02`, ... with distinct ids, all on the Linear Connection. */
+const buildManyServers = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    buildServer(
+      `01a06d02-8400-7000-8000-${String(index + 1).padStart(12, "0")}`,
+      `tool${String(index + 1).padStart(2, "0")}`,
+      LINEAR_CONNECTION,
+    ),
+  );
+
+/** Sentry's work server, which needs sign-in. */
+const SENTRY_SIGNED_OUT = {
+  ...SENTRY_WORK,
+  status: "needs-sign-in",
+  statusDetail: "The token was revoked.",
+} as const;
+
+describe("the + menu on a Draft Thread", () => {
+  it("has two rows, and counts the servers the draft starts with, which are its project's", async () => {
+    const app = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([SENTRY_WORK_ID, LINEAR_ID]), OPS],
+    });
+    const popover = await findPlusPopover();
+    await waitForTopicReads(app);
+    toggleMenu(popover, "open");
+
+    expect(
+      within(popover)
+        .getAllByRole("menuitem", { hidden: true })
+        .map((row) => row.textContent),
+    ).toEqual(["Attach an image", "MCP servers2"]);
+    expect(document.querySelector(".plus-dot")).toBeNull();
+    // The draft read the servers when it opened, to know whether one of them needs sign-in,
+    // and again on the topic's first push. Opening the menu read nothing more.
+    expect(findCalls(app.calls, "GET", SERVER_LIST)).toHaveLength(2);
+  });
+
+  it("says none and reads nothing while the list is empty, and reads when the MCP row opens", async () => {
+    const app = await openComposerApp(`/?project=${WEBSHOP.id}`, { servers: [SENTRY_WORK] });
+    const { calls, live } = app;
+    const popover = await findPlusPopover();
+
+    toggleMenu(popover, "open");
+
+    expect(readServersRowWords(popover)).toBe("none");
+    expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(0);
+    expect(live.readTopics()).not.toContain("mcpServer");
+
+    await openServersSubmenu();
+    await waitForTopicReads(app);
+
+    expect(readSubmenuRows(popover)).toEqual(["sentry work"]);
+    // The read when the row opened, and the one on the topic's first push.
+    expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(2);
+  });
+
+  it("reads the servers when the draft has some, holds the topic while it is open, and drops it when the user leaves", async () => {
+    const app = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+    const { calls, live, router } = app;
+    await waitForTopicReads(app);
+    const reads = findCalls(calls, "GET", SERVER_LIST).length;
+
+    await act(async () => {
+      await router.navigate({ to: "/settings/providers" });
+    });
+
+    await waitFor(() => {
+      expect(live.readTopics()).not.toContain("mcpServer");
+    });
+    // The read when the draft opened, and the one on the topic's first push; leaving reads nothing.
+    expect(reads).toBe(2);
+    expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(reads);
+  });
+
+  it("puts a red dot on the + and reads '1 needs sign-in' while a server of the list needs it", async () => {
+    await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_SIGNED_OUT, LINEAR],
+      projects: [webshopWith([SENTRY_WORK_ID, LINEAR_ID]), OPS],
+    });
+    const popover = await findPlusPopover();
+
+    await waitFor(() => {
+      expect(document.querySelector(".plus-dot")).not.toBeNull();
+    });
+    toggleMenu(popover, "open");
+
+    expect(readServersRowWords(popover)).toBe("1 needs sign-in");
+    expect(popover.querySelector(".plus-fine.is-fail")).not.toBeNull();
+  });
+
+  it("keeps the rows in the order the submenu opened with while the user switches them", async () => {
+    await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, SENTRY_HOBBY, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+
+    const popover = await openServersSubmenu();
+    // The draft's own server first, then the others.
+    expect(readSubmenuRows(popover)).toEqual(["linear acme", "sentry"]);
+
+    fireEvent.click(findSwitch("linear"));
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-checked")).toBe("false");
+    });
+    fireEvent.click(findSwitch("sentry"));
+    await waitFor(() => {
+      expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("true");
+    });
+
+    expect(readSubmenuRows(popover)).toEqual(["linear acme", "sentry"]);
+  });
+
+  it("lists eight names and '1 more server…' for nine, which opens the picker, and lists nine of the draft's own", async () => {
+    const nine = buildManyServers(9);
+    await openComposerApp(`/?project=${WEBSHOP.id}`, { servers: nine });
+    const popover = await openServersSubmenu();
+
+    expect(readSubmenuRows(popover)).toHaveLength(8);
+    fireEvent.click(
+      within(popover).getByRole("menuitem", { name: "1 more server…", hidden: true }),
+    );
+
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect(within(picker).getAllByRole("checkbox")).toHaveLength(9);
+  });
+
+  it("shows every one of nine own servers, with no 'more' row", async () => {
+    const nine = buildManyServers(9);
+    await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: nine,
+      projects: [webshopWith(nine.map((server) => server.id)), OPS],
+    });
+
+    const popover = await openServersSubmenu();
+
+    expect(readSubmenuRows(popover)).toHaveLength(9);
+    expect(
+      within(popover).queryByRole("menuitem", { name: /more server/, hidden: true }),
+    ).toBeNull();
+  });
+
+  it("sends no list for an untouched draft, so a default changed meanwhile still applies", async () => {
+    const { calls } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("sends the list the user changed with the first message", async () => {
+    const { calls } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+    await openServersSubmenu();
+
+    fireEvent.click(findSwitch("sentry"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).toMatchObject({ mcpServerIds: [LINEAR_ID, SENTRY_WORK_ID] });
+  });
+
+  it("sends an empty list when the user switched every server off", async () => {
+    const { calls } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+    await openServersSubmenu();
+
+    fireEvent.click(findSwitch("linear"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).toMatchObject({ mcpServerIds: [] });
+  });
+
+  it("swaps the account of a name in one change, and the select is off while the name is off", async () => {
+    const { calls } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, SENTRY_HOBBY],
+      projects: [webshopWith([SENTRY_WORK_ID]), OPS],
+    });
+    await openServersSubmenu();
+    const select = screen.getByRole<HTMLSelectElement>("combobox", {
+      name: "Account of sentry",
+      hidden: true,
+    });
+    expect(select.value).toBe(SENTRY_WORK_ID);
+
+    fireEvent.change(select, { target: { value: SENTRY_HOBBY_ID } });
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).toMatchObject({ mcpServerIds: [SENTRY_HOBBY_ID] });
+  });
+
+  it("disables the account select while the name is off", async () => {
+    await openComposerApp(`/?project=${WEBSHOP.id}`, { servers: [SENTRY_WORK, SENTRY_HOBBY] });
+
+    await openServersSubmenu();
+
+    const select = screen.getByRole<HTMLSelectElement>("combobox", {
+      name: "Account of sentry",
+      hidden: true,
+    });
+    expect(select.disabled).toBe(true);
+  });
+
+  it("does not carry a pick made in another project, and shows the list the project gives", async () => {
+    const { calls, context } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+    act(() => {
+      context.controller!.pendingSubmissions.writePicks(buildDraftKey(WEBSHOP.id, null), {
+        mcpServers: { projectId: OPS.id, mcpServerIds: [SENTRY_WORK_ID] },
+      });
+    });
+    const popover = await openServersSubmenu();
+
+    // The pick of the other project is ignored: the draft shows its own project's list.
+    expect(readServersRowWords(popover)).toBe("1");
+    expect(findSwitch("linear").getAttribute("aria-checked")).toBe("true");
+    expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("false");
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("drops a server deleted since the pick was made with the user's next change, and not before", async () => {
+    const { context } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [LINEAR, SENTRY_WORK],
+      projects: [webshopWith([]), OPS],
+    });
+    const key = buildDraftKey(WEBSHOP.id, null);
+    act(() => {
+      context.controller!.pendingSubmissions.writePicks(key, {
+        mcpServers: { projectId: WEBSHOP.id, mcpServerIds: [LINEAR_ID, DELETED_ID] },
+      });
+    });
+    await openServersSubmenu();
+    // Reading the servers changes nothing in the pick.
+    expect(context.controller!.pendingSubmissions.read(key).picks.mcpServers?.mcpServerIds).toEqual(
+      [LINEAR_ID, DELETED_ID],
+    );
+
+    fireEvent.click(findSwitch("sentry"));
+
+    await waitFor(() => {
+      expect(
+        context.controller!.pendingSubmissions.read(key).picks.mcpServers?.mcpServerIds,
+      ).toEqual([LINEAR_ID, SENTRY_WORK_ID]);
+    });
+  });
+});
+
+describe("the + menu on a started thread", () => {
+  it("writes one session.update with the current list, and keeps the switches off while it runs", async () => {
+    const thread = threadWith([LINEAR]);
+    const held = holdAnswer();
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      holdWrite: held.handler,
+    });
+    await openServersSubmenu();
+
+    fireEvent.click(findSwitch("sentry"));
+
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    });
+    // A second press while the write runs starts no second write.
+    fireEvent.click(findSwitch("linear"));
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+    expect(readListWrites(calls, thread.session.id)[0]!.body).toEqual({
+      mcpServerIds: [LINEAR_ID, SENTRY_WORK_ID],
+    });
+
+    held.answer({ body: {} });
+
+    await waitFor(() => {
+      expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("true");
+    });
+    expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+  });
+
+  it("swaps the account of a name in one write", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, SENTRY_HOBBY],
+    });
+    await openServersSubmenu();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Account of sentry", hidden: true }), {
+      target: { value: SENTRY_HOBBY_ID },
+    });
+
+    await waitFor(() => {
+      expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+    });
+    expect(readListWrites(calls, thread.session.id)[0]!.body).toEqual({
+      mcpServerIds: [SENTRY_HOBBY_ID],
+    });
+  });
+
+  it("shows the controller's refusal under the menu and leaves the list as the session holds it", async () => {
+    const thread = threadWith([LINEAR]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [`PATCH /api/v1/sessions/${thread.session.id}`]: {
+          status: 403,
+          body: {
+            error: {
+              code: "forbidden",
+              message: "This session needs the grant mcp.manage.",
+              details: { grant: "mcp.manage" },
+            },
+          },
+        },
+      },
+    });
+    const popover = await openServersSubmenu();
+
+    fireEvent.click(findSwitch("sentry"));
+
+    const refusal = await within(popover).findByRole("alert", { hidden: true });
+    expect(refusal.textContent).toBe("This session needs the grant mcp.manage.");
+    expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("false");
+    expect(findSwitch("sentry").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("says where the list started, and writes the project's list from the quiet button", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+    });
+    const popover = await openServersSubmenu();
+    expect(popover.querySelector(".plus-foot .menu-note")?.textContent).toBe(
+      "Starts from webshop's list. Changes are for this thread only. Back to webshop's list",
+    );
+
+    fireEvent.click(
+      within(popover).getByRole("button", { name: "Back to webshop's list", hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+    });
+    expect(readListWrites(calls, thread.session.id)[0]!.body).toEqual({
+      mcpServerIds: [LINEAR_ID],
+    });
+  });
+
+  it("reads nothing for a thread with no server, and once for a thread that has some", async () => {
+    const empty = await openComposerApp(`/threads/${THREAD_FIXTURES.finished.session.id}`, {
+      servers: [LINEAR],
+    });
+    await findPlusPopover();
+    expect(findCalls(empty.calls, "GET", SERVER_LIST)).toHaveLength(0);
+    expect(empty.live.readTopics()).not.toContain("mcpServer");
+  });
+
+  it("reads the servers once for a thread that has some, holds the topic, and drops it on leaving", async () => {
+    const thread = threadWith([LINEAR]);
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR],
+    });
+    const { calls, live, router } = app;
+    await waitForTopicReads(app);
+    // The read when the thread opened, and the one on the topic's first push.
+    expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(2);
+    const reads = findCalls(calls, "GET", SERVER_LIST).length;
+
+    await act(async () => {
+      await router.navigate({ to: "/settings/providers" });
+    });
+
+    await waitFor(() => {
+      expect(live.readTopics()).not.toContain("mcpServer");
+    });
+    expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(reads);
+  });
+
+  it("puts a red dot on the + when a server of the thread needs sign-in", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_SIGNED_OUT],
+    });
+    const popover = await findPlusPopover();
+
+    await waitFor(() => {
+      expect(document.querySelector(".plus-dot")).not.toBeNull();
+    });
+    toggleMenu(popover, "open");
+    expect(readServersRowWords(popover)).toBe("1 needs sign-in");
+  });
+
+  it("says a server that needs sign-in stays on, and its button opens the Connection's Reconnect dialog", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_SIGNED_OUT],
+    });
+    const popover = await openServersSubmenu();
+
+    expect(popover.querySelector(".plus-row-name small")?.textContent).toBe(
+      "on, joins once you sign inReconnect Sentry · work",
+    );
+    expect(findSwitch("sentry").getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(
+      within(popover).getByRole("button", { name: "Reconnect Sentry · work", hidden: true }),
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Reconnect Sentry · work" })).toBeTruthy();
+  });
+
+  it("keeps the attach row off and the MCP servers row usable while the composer answers a question", async () => {
+    const asking: ThreadRecords = withServers(
+      {
+        ...THREAD_FIXTURES.waiting,
+        session: {
+          ...THREAD_FIXTURES.waiting.session,
+          openRequests: [
+            {
+              requestId: "req-2",
+              itemId: "tool-2",
+              kind: "question",
+              detail: {
+                questions: [
+                  {
+                    question: "Which storage?",
+                    header: "Storage",
+                    options: [],
+                    multiSelect: false,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      [LINEAR],
+    );
+    await openComposerApp(`/threads/${asking.session.id}`, { thread: asking, servers: [LINEAR] });
+    const popover = await findPlusPopover();
+    toggleMenu(popover, "open");
+
+    const attach = within(popover).getByRole("menuitem", { name: "Attach an image", hidden: true });
+    const servers = within(popover).getByRole("menuitem", { name: /^MCP servers/, hidden: true });
+
+    expect(attach.getAttribute("aria-disabled")).toBe("true");
+    expect(servers.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(servers);
+    await within(popover).findByRole("group", { name: "Servers of this thread", hidden: true });
+  });
+});

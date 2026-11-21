@@ -164,6 +164,38 @@ export const countServersNeedingSignIn = (
     (view) => mcpServerIds.includes(view.server.id) && view.displayStatus === "needs-sign-in",
   ).length;
 
+/** The words on the `+` menu's "MCP servers" row. */
+export interface ThreadServersRow {
+  /** "none", a count such as "3", or "1 needs sign-in" / "2 need sign-in". */
+  readonly words: string;
+  /** Whether `words` says a server needs sign-in, so the row draws them in the failure colour. */
+  readonly failing: boolean;
+}
+
+/**
+ * Returns the words for the "MCP servers" row of the `+` menu: "none" for an
+ * empty list, the number of servers otherwise, and "1 needs sign-in" or "2
+ * need sign-in" while a server of the Thread's list needs sign-in
+ * (`countServersNeedingSignIn`). Pass no views while the servers are not read
+ * yet: the row then shows the count, and the words change once they are.
+ */
+export const describeThreadServersRow = (
+  views: readonly McpServerView[],
+  mcpServerIds: readonly string[],
+): ThreadServersRow => {
+  const needSignIn = countServersNeedingSignIn(views, mcpServerIds);
+  if (needSignIn > 0) {
+    return {
+      words: `${String(needSignIn)} ${needSignIn === 1 ? "needs" : "need"} sign-in`,
+      failing: true,
+    };
+  }
+  return {
+    words: mcpServerIds.length === 0 ? "none" : String(mcpServerIds.length),
+    failing: false,
+  };
+};
+
 /** One server name in the picker. */
 export interface ServerPickerRow {
   readonly name: string;
