@@ -4522,6 +4522,39 @@ describe("the images in the result of an MCP tool call", () => {
         },
       },
     });
+    // The expanded step shows the same blocks, as Claude Code's tool result does.
+    expect(completed.detail).toEqual({
+      name: "get_snapshot_image",
+      server: "sentry",
+      kind: "mcp",
+      content: [
+        { type: "text", text: "Snapshot of the issue" },
+        { type: "image", attachment: STORED },
+      ],
+    });
+  });
+
+  it("show the message of a call that failed as the item's content", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: { ...buildCall(null, "failed"), error: { message: "Sentry refused the request" } },
+        completedAtMs: 1,
+      },
+    });
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    const completed = filterByTag(run.seen, "item.completed")[0]!;
+    expect(completed.status).toBe("failed");
+    expect(completed.detail).toMatchObject({ content: "Sentry refused the request" });
   });
 
   it("are replaced in the items of a completed turn too", async () => {
