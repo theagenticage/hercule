@@ -134,20 +134,16 @@ const buildGrantedProfile = ({
 const ELICITATION = "mcpServer/elicitation/request";
 
 /**
- * Reads the `_meta` of an MCP elicitation that asks to run a tool. Returns
- * `undefined` for any other elicitation, such as a server asking for a form.
- * `toolName` is `undefined` when Codex does not name the tool: the oldest
- * Codex Hercule supports sends no `tool_name`, and names the tool only in the
- * `message` text, which is not parsed.
+ * Reads the name of the tool that an MCP elicitation asks to run, from its
+ * `_meta`. Returns `undefined` for any other elicitation, such as a server
+ * asking for a form, and for a tool call whose `_meta` has no `tool_name`.
  */
-const readToolCallMeta = (
-  params: McpServerElicitationRequestParams,
-): { readonly toolName: string | undefined } | undefined => {
+const readToolName = (params: McpServerElicitationRequestParams): string | undefined => {
   const meta = params._meta;
   if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
   if (meta["codex_approval_kind"] !== "mcp_tool_call") return undefined;
   const tool = meta["tool_name"];
-  return { toolName: typeof tool === "string" ? tool : undefined };
+  return typeof tool === "string" ? tool : undefined;
 };
 
 /**
@@ -159,11 +155,11 @@ const readToolCallMeta = (
  * repository's own server named `tools__sentry` with a tool `whoami` would
  * otherwise look the same. A call to any other server is shown as
  * `<server>/<tool>`, as its item is. Any other elicitation, and a tool call
- * whose tool Codex does not name, is shown as its server, and a server with
+ * whose `_meta` has no `tool_name`, is shown as its server, and a server with
  * an empty name as the request method.
  */
 const buildElicitationToolName = (params: McpServerElicitationRequestParams): string => {
-  const toolName = readToolCallMeta(params)?.toolName;
+  const toolName = readToolName(params);
   if (toolName !== undefined) {
     return truncateFact(
       params.serverName === MCP_GATEWAY_ENTRY_NAME
@@ -177,26 +173,23 @@ const buildElicitationToolName = (params: McpServerElicitationRequestParams): st
 /**
  * Returns the id the elicitation is filed under. A question about a tool call
  * belongs to that call's item when it is the one running call of the turn that
- * matches the question: the same MCP server, and the same tool when Codex
- * names it. The client marks the item a request names as awaiting approval.
+ * matches the question: the same MCP server and the same tool. The client marks
+ * the item a request names as awaiting approval.
  *
  * With no match, or with several, the question is filed under its turn (or
  * the thread, when it has no turn): guessing would mark the wrong item. Any
- * other elicitation belongs to no item and is filed the same way.
+ * other elicitation, and a tool call whose `_meta` has no `tool_name`, belongs
+ * to no item and is filed the same way.
  */
 const findElicitationItemId = (
   params: McpServerElicitationRequestParams,
   arrival: Arrival,
 ): string => {
-  const toolCall = readToolCallMeta(params);
-  if (toolCall !== undefined && params.turnId !== null) {
+  const toolName = readToolName(params);
+  if (toolName !== undefined && params.turnId !== null) {
     const matches = arrival
       .listRunningMcpCalls(params.turnId)
-      .filter(
-        (call) =>
-          call.server === params.serverName &&
-          (toolCall.toolName === undefined || call.tool === toolCall.toolName),
-      );
+      .filter((call) => call.server === params.serverName && call.tool === toolName);
     if (matches.length === 1) return ensureId(matches[0]!.itemId);
   }
   return ensureId(params.turnId ?? arrival.threadId);

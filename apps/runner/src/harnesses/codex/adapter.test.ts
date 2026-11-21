@@ -146,7 +146,7 @@ describe("what the Codex adapter reports about a machine", () => {
     const { result } = runProbe();
 
     const probed = await result;
-    expect(probed.harnessVersion).toBe("0.154.0");
+    expect(probed.harnessVersion).toBe("0.171.0");
   });
 
   it("reports no version when the user agent has none", async () => {
@@ -4871,15 +4871,6 @@ describe("the rate limits a Codex session reports", () => {
 describe("the MCP servers a Codex session is given", () => {
   const GATEWAY = { name: "tools", url: "http://127.0.0.1:7777/mcp" };
 
-  /** The `initialize` reply of a Codex with this user agent. */
-  const initializeWithUserAgent = (userAgent: string): Answers => ({
-    initialize: () => ({ ...INITIALIZE, userAgent }),
-  });
-
-  /** The `initialize` reply of a Codex of this version. */
-  const initializeAs = (version: string): Answers =>
-    initializeWithUserAgent(`hercule/${version} (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)`);
-
   /** Starts a session whose context lists the gateway, or no MCP server at all. */
   const startWithServers = async (
     servers: SessionStartContext["mcpServers"],
@@ -4902,7 +4893,7 @@ describe("the MCP servers a Codex session is given", () => {
   it.each(CONTINUATIONS)(
     "sends the gateway in the config of %s, and the name of the token variable, not the token",
     async (method, spec) => {
-      const { requests } = await startWithServers([GATEWAY], spec, initializeAs("0.171.0"));
+      const { requests } = await startWithServers([GATEWAY], spec);
 
       expect(listSentParams(requests, method)).toEqual([
         expect.objectContaining({
@@ -4947,50 +4938,11 @@ describe("the MCP servers a Codex session is given", () => {
     });
   });
 
-  it.each(["0.164.0", "0.171.0", "1.0.0"])(
-    "sends the tool list feature and no warning at Codex %s",
-    async (version) => {
-      const run = await startWithServers([GATEWAY], SPEC, initializeAs(version));
-      await settle();
-
-      expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
-        config: { "features.mcp_tool_list_changed": true },
-      });
-      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
-    },
-  );
-
-  it.each([
-    ["a Codex at 0.163.9", initializeAs("0.163.9"), "0.163.9"],
-    ["a Codex at 0.154.0", initializeAs("0.154.0"), "0.154.0"],
-    // A version that only starts like 0.164.0 must not be taken for it: Codex
-    // refuses a config key it does not know, and the thread would not start.
-    ["a Codex at 0.164.0-alpha.1", initializeAs("0.164.0-alpha.1"), "0.164.0-alpha.1"],
-    ["a Codex at 0.164.0junk", initializeAs("0.164.0junk"), "0.164.0junk"],
-    ["a Codex at 0.164.0.1", initializeAs("0.164.0.1"), "0.164.0.1"],
-    [
-      "a Codex whose user agent has no version",
-      initializeWithUserAgent("unknown"),
-      "unknown version",
-    ],
-  ])("leaves the tool list feature out and warns once for %s", async (_name, answers, shown) => {
-    const run = await startWithServers([GATEWAY], SPEC, answers);
-    await waitUntil(
-      "warned about the tool list",
-      () => filterByTag(run.seen, "runtime.warning").length === 1,
-    );
+  it("starts a session with the gateway without a warning", async () => {
+    const run = await startWithServers([GATEWAY], SPEC);
     await settle();
 
-    // Codex refuses a config key it does not know, so the key must be absent.
-    expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
-      config: { "mcp_servers.tools.url": GATEWAY.url },
-    });
-    expect(
-      (listSentParams(run.requests, "thread/start")[0] as { readonly config: object }).config,
-    ).not.toHaveProperty("features.mcp_tool_list_changed");
-    expect(filterByTag(run.seen, "runtime.warning").map((event) => event.message)).toEqual([
-      `This Codex (${shown}) does not re-read its tool list, so an MCP Server added while the thread runs is usable from its next start. Upgrade Codex to 0.164.0 or newer.`,
-    ]);
+    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
   });
 
   it("gives a subagent thread resumed on its own the same config as the root", async () => {
@@ -5002,7 +4954,7 @@ describe("the MCP servers a Codex session is given", () => {
         subagents: [{ subagentId: CHILD, itemId: "original-spawn" }],
       },
     };
-    const run = createDriving(initializeAs("0.171.0"));
+    const run = createDriving();
     await Effect.runPromise(
       run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: [GATEWAY] }),
     );
@@ -5040,7 +4992,6 @@ describe("the MCP servers a Codex session is given", () => {
       "gives %s no gateway keys, and warns with the file and the fix",
       async (method, spec) => {
         const run = await startWithServers([GATEWAY], spec, {
-          ...initializeAs("0.171.0"),
           ...configuredBy({ tools: { tools: { x: { approval_mode: "approve" } } } }),
         });
         await waitUntil(
@@ -5064,7 +5015,6 @@ describe("the MCP servers a Codex session is given", () => {
 
     it("changes nothing when the configuration sets another server's name", async () => {
       const run = await startWithServers([GATEWAY], SPEC, {
-        ...initializeAs("0.171.0"),
         ...configuredBy({ docs: { command: "docs-server" } }),
       });
       await settle();
@@ -5077,7 +5027,6 @@ describe("the MCP servers a Codex session is given", () => {
 
     it("does not mistake a longer server name for the gateway's", async () => {
       const run = await startWithServers([GATEWAY], SPEC, {
-        ...initializeAs("0.171.0"),
         ...configuredBy({ tools_extra: { url: "http://example.test/mcp" } }),
       });
 
@@ -5086,7 +5035,6 @@ describe("the MCP servers a Codex session is given", () => {
 
     it("gives no gateway keys and warns with Codex's own message when it cannot read its configuration", async () => {
       const run = await startWithServers([GATEWAY], SPEC, {
-        ...initializeAs("0.171.0"),
         "config/read": () => buildRefusal("invalid transport in `mcp_servers.tools`"),
       });
       await waitUntil(
@@ -5105,7 +5053,6 @@ describe("the MCP servers a Codex session is given", () => {
       // reason. The thread's own start trusts the project and merges its
       // table, so the layer still counts.
       const run = await startWithServers([GATEWAY], SPEC, {
-        ...initializeAs("0.171.0"),
         "config/read": () => ({
           config: {},
           layers: [
@@ -5148,7 +5095,6 @@ describe("the MCP servers a Codex session is given", () => {
       ["a layer with no source", { layers: [{ config: {} }] }],
     ])("treats a reply to config/read with %s like a failed read", async (_name, reply) => {
       const run = await startWithServers([GATEWAY], SPEC, {
-        ...initializeAs("0.171.0"),
         "config/read": () => reply,
       });
       await waitUntil(
@@ -5165,12 +5111,5 @@ describe("the MCP servers a Codex session is given", () => {
 
       expect(listSentParams(run.requests, "config/read")).toEqual([]);
     });
-  });
-
-  it("does not warn about the tool list when the session has no MCP server", async () => {
-    const run = await startWithServers([], SPEC, initializeAs("0.154.0"));
-    await settle();
-
-    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
   });
 });

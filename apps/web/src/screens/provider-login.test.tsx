@@ -41,7 +41,7 @@ const SNAPSHOT: CapabilitySnapshot = {
   runnerId: RUNNER,
   harnessId: "codex/codex",
   probedAt: "2026-09-14T09:10:00.000Z",
-  harnessVersion: "0.154.0",
+  harnessVersion: "0.171.0",
   versionVerdict: "ok",
   auth: { status: "ok", identity: "rogier@example.com" },
   models: [],

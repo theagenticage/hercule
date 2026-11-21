@@ -47,11 +47,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  buildMcpServerConfig,
-  supportsToolListChanged,
-} from "../../../runner/src/harnesses/codex/mcp";
-import { parseVersion } from "../../../runner/src/harnesses/codex/probe";
+import { buildMcpServerConfig } from "../../../runner/src/harnesses/codex/mcp";
 import { buildAppServerCommand } from "../../../runner/src/harnesses/codex/rpc";
 import {
   startScriptedModel,
@@ -215,8 +211,6 @@ interface ReportedCall {
 
 /** A running `codex app-server`, and the questions a test can put to it. */
 interface RunningCodex {
-  /** The version Codex reports in its user agent, which decides what config the adapter sends. */
-  readonly version: string | null;
   /** Opens a thread the way the adapter does and returns its id. */
   readonly startThread: () => Promise<string>;
   /** Sends a prompt and waits until the turn ends. */
@@ -306,12 +300,11 @@ const withCodexHome = async (
       return answer.result!;
     };
 
-    const initialized = await request("initialize", {
+    await request("initialize", {
       clientInfo: { name: "hercule-test", title: null, version: "0.0.0" },
       capabilities: { experimentalApi: false },
     });
     await write({ method: "initialized" });
-    const version = parseVersion(initialized["userAgent"] as string);
 
     // The thread's parameters as the adapter builds them for full access, with
     // its own MCP config. The gateway entry is given whether or not the
@@ -326,7 +319,6 @@ const withCodexHome = async (
         config: buildMcpServerConfig(
           [{ name: GATEWAY_NAME, url: `${options.gatewayUrl}/mcp` }],
           "approve",
-          supportsToolListChanged(version),
         ),
       }) satisfies Partial<ThreadStartParams>;
     const readThreadId = (result: Record<string, unknown>): string =>
@@ -337,7 +329,6 @@ const withCodexHome = async (
       ).length;
 
     const started: RunningCodex = {
-      version,
       startThread: async () =>
         readThreadId(
           await request("thread/start", {
@@ -559,12 +550,9 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 
-  // An older Codex does not re-read its tool list, and the adapter warns the user instead.
-  it("lists again when a server is added to the Thread, and calls the new tool once", async (context) => {
+  it("lists again when a server is added to the Thread, and calls the new tool once", async () => {
     await withCodexOnGateway({ listed: false }, async (rig, home) => {
       const running = await home.start();
-      // The version that decides whether the adapter sends the tool list feature is the one that decides here.
-      if (!supportsToolListChanged(running.version)) context.skip();
       const threadId = await running.startThread();
       // Codex connects when the thread opens, and the gateway lists no tool yet.
       expect(await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200)).toBe(true);
@@ -660,8 +648,9 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 
-  // Records which shape a Codex gives a few hundred tools: Codex 0.169.0 and 0.171.0 offer all 300 inline, and
-  // 0.154.0 defers every MCP tool behind tool search. Either way the model calls one tool once.
+  // Records which shape a Codex gives a few hundred tools: Codex 0.171.0 offers all 300 inline for the model
+  // used here. It defers every MCP tool behind tool search when its search tool is enabled, which depends on
+  // the model and the feature flags. Either way the model calls one tool once.
   it("shows a few hundred tools to the model inline or behind tool search, and calls one of them once", async () => {
     const tools = Array.from({ length: 300 }, (_, number) => ({
       name: `tool${String(number).padStart(3, "0")}`,

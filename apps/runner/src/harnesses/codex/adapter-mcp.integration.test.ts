@@ -10,8 +10,8 @@
  * calls an outside service.
  *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
- * What Codex shows depends on its version, so the tests read the version from
- * the binary and expect what that version does.
+ * The tests expect the behaviour of Hercule's Codex floor, 0.171.0, and of newer
+ * releases.
  */
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +19,6 @@ import { afterAll, describe, expect, it, onTestFinished } from "vitest";
 import { Effect } from "effect";
 import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { makeCodexAdapter } from "./adapter";
-import { buildNoToolListChangedWarning } from "./mcp";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerSpawn } from "./rpc";
 import { createFixtureWatch } from "./fixture-watch.testing";
@@ -43,31 +42,8 @@ const TOKEN = "tok-synthetic-7f3a9c";
 /** The name of the environment variable the adapter gives Codex for the token. */
 const TOKEN_VARIABLE = "HERCULE_TOKEN";
 
-/** Reads the version of the Codex binary, such as `0.169.0`. */
-const readCodexVersion = (): string => {
-  const output = Bun.spawnSync([binary!, "--version"], {
-    env: { PATH: process.env["PATH"] ?? "" },
-  }).stdout.toString();
-  return /\d+\.\d+\.\d+/.exec(output)![0];
-};
-
-const codexVersion = binary === undefined ? "0.0.0" : readCodexVersion();
-
-/**
- * Codex re-reads a server's tool list only from 0.164.0, and only then does
- * the adapter set the feature instead of warning.
- */
-const hasToolListFeature = Bun.semver.satisfies(codexVersion, ">=0.164.0");
-
-/**
- * Codex names the tool in the approval of an MCP tool call from 0.167.0 on (0.166.0 and older send none).
- * Without a tool name, the card shows the server instead.
- */
-const namesToolInApproval = Bun.semver.satisfies(codexVersion, ">=0.167.0");
-
 /** Returns the name the approval card shows for a call of `tool`. */
-const buildExpectedCardName = (tool: string): string =>
-  namesToolInApproval ? `mcp__tools__${tool}` : "tools";
+const buildExpectedCardName = (tool: string): string => `mcp__tools__${tool}`;
 
 type Opened = Extract<HarnessEvent, { _tag: "request.opened" }>;
 
@@ -374,8 +350,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     // While the session runs, Codex keeps a snapshot of the shell's environment in
     // `shell_snapshots/`, and that file holds every variable, the token included.
     // Codex deletes it when the app-server exits, so it is left out here. After
-    // the stop it is checked too, but only for a Codex that deletes it: before
-    // 0.169.0, Codex leaves the file behind (known issue #1234).
+    // the stop it is checked too.
     const scanFolders = [home, userHome, cwd];
     const findTokenFiles = (includeSnapshots: boolean) =>
       scanFolders
@@ -385,7 +360,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(scanFolders.flatMap(listFiles).length).toBeGreaterThan(0);
     expect(findTokenFiles(false)).toEqual([]);
     await run.stop();
-    expect(findTokenFiles(Bun.semver.satisfies(codexVersion, ">=0.169.0"))).toEqual([]);
+    expect(findTokenFiles(true)).toEqual([]);
   });
 
   describe("when a trusted project's config sets an MCP server", () => {
@@ -479,7 +454,6 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
       await run.answer(opened, "allow");
 
       expect(mcp.listCalledTools()).toEqual([SEARCH_ISSUES_TOOL]);
-      // The only runner warning that may appear is the tool list one of an older Codex.
       expect(
         listRunnerWarnings(run.seen).filter(
           (warning) =>
@@ -489,21 +463,13 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     });
   });
 
-  it("sets the tool list feature for a Codex that has it, and warns for one that has not", async () => {
+  it("sets the tool list feature and shows no warning", async () => {
     const { startRun } = createFixture();
     const run = await startRun("approval-required");
     const started = run.spawned[0]!.written.map(
       (text) => JSON.parse(text) as { method?: string; params?: { config?: object } },
     ).find((frame) => frame.method === "thread/start");
-    const warnings = listRunnerWarnings(run.seen);
-    if (hasToolListFeature) {
-      expect(started?.params?.config).toMatchObject({ "features.mcp_tool_list_changed": true });
-      expect(warnings).toEqual([]);
-    } else {
-      expect(started?.params?.config).not.toHaveProperty(["features.mcp_tool_list_changed"]);
-      expect(
-        warnings.map((warning) => (warning._tag === "runtime.warning" ? warning.message : "")),
-      ).toEqual([buildNoToolListChangedWarning(codexVersion)]);
-    }
+    expect(started?.params?.config).toMatchObject({ "features.mcp_tool_list_changed": true });
+    expect(listRunnerWarnings(run.seen)).toEqual([]);
   });
 });
