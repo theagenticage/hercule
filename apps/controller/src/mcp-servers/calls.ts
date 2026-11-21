@@ -527,41 +527,14 @@ const make = Effect.gen(function* () {
       const name = server.name;
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
 
-      // Why a check before a send or a refresh refused it. The client can only
-      // fail with its own error, and a refresh only with the Connection's, so
-      // the reason is kept here for the code that returns the refusal.
-      let refusal: McpCallRefused | undefined;
-      const failKeepingRefusal =
-        <E>(toError: (refused: McpCallRefused) => E) =>
-        (refused: McpCallRefused) =>
-          Effect.andThen(
-            Effect.sync(() => {
-              refusal = refused;
-            }),
-            Effect.fail(toError(refused)),
-          );
-
       /**
        * Runs under the Connection's refresh permit, right before a refresh
        * calls the provider: the rule of `checkBeforeSend`.
        */
-      const guardRefresh: RefreshGuard = checkBeforeSend(first).pipe(
-        Effect.asVoid,
-        Effect.catch(
-          failKeepingRefusal(
-            (refused) =>
-              new ConnectionCredentialsUnavailable({ reason: "refused", message: refused.message }),
-          ),
-        ),
-      );
+      const guardRefresh: RefreshGuard<McpCallRefused> = Effect.asVoid(checkBeforeSend(first));
 
       /** Returns the refusal that a failure to give credentials means for this call. */
       const buildUnavailableRefusal = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
-        if (error.reason === "refused") {
-          return (
-            refusal ?? new McpCallRefused({ reason: "error", message: buildChangedMessage(first) })
-          );
-        }
         const { status } = buildStatusFromUnavailable(error, connection, contribution.displayName);
         return new McpCallRefused({ reason: status, message: describeRefusal(status, name) });
       };
@@ -572,16 +545,20 @@ const make = Effect.gen(function* () {
        * `checkBeforeSend`, so a wait for credentials never lets an older check
        * stand. The request carries the credentials it returns, which are read
        * again when a refresh stored new ones meanwhile. When the rule refuses,
-       * the refusal is kept and the request is not sent.
+       * the request is not sent and the call fails with the refusal.
        */
-      const prepareSend: PrepareSend = Effect.gen(function* () {
+      const prepareSend: PrepareSend<McpCallRefused> = Effect.gen(function* () {
         while (true) {
           // Read before the credentials, so that a refresh that stores new
           // ones in between shows as a different version, never as the same.
           const version = yield* connectionTypes.readCredentialsVersion(server.connectionId);
           const credentials = yield* connectionTypes
             .readCredentialsForUse(server.connectionId, guardRefresh)
-            .pipe(Effect.mapError(buildUnavailableRefusal));
+            .pipe(
+              Effect.mapError((error) =>
+                error instanceof McpCallRefused ? error : buildUnavailableRefusal(error),
+              ),
+            );
           yield* checkDestination(first);
           // A refresh does not move the Connection's `credentialsGeneration`,
           // so a refresh that stored new tokens while the check above ran is
@@ -592,12 +569,17 @@ const make = Effect.gen(function* () {
           yield* refuseUnlessServing;
           return credentials;
         }
-      }).pipe(
-        Effect.catch(
-          failKeepingRefusal(
-            (refused) => new UpstreamError({ reason: "refused", message: refused.message }),
-          ),
-        ),
+      });
+
+      /**
+       * The same preparation for the requests that open a session, which
+       * several calls can share. A refusal there ends the opening as a
+       * request that was not sent; each call that waited for the opening then
+       * runs its own checks for its own refusal (`refuseUpstreamFailure`).
+       */
+      const prepareOpeningSend: PrepareSend = Effect.mapError(
+        prepareSend,
+        (refused) => new UpstreamError({ reason: "refused", message: refused.message }),
       );
 
       // Every credential value any attempt of this call sent, on any upstream
@@ -613,7 +595,7 @@ const make = Effect.gen(function* () {
        */
       const attempt = (credentials: ConnectionCredentialsForUse) =>
         Effect.acquireUseRelease(
-          holdSlot(input.upstreamScope, first, credentials, prepareSend),
+          holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
           (slot) =>
             Effect.flatMap(Deferred.await(slot.opening), (opened) =>
               opened
@@ -652,7 +634,7 @@ const make = Effect.gen(function* () {
       /** Sends the call, and once more on a new session when the server expired the one it used. */
       const sendReplacingExpiredSession = (
         credentials: ConnectionCredentialsForUse,
-      ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | ExchangeBroken> =>
+      ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | McpCallRefused | ExchangeBroken> =>
         attempt(credentials).pipe(
           Effect.catchTag("SessionExpired", () => {
             if (replacedSession) {
@@ -679,9 +661,8 @@ const make = Effect.gen(function* () {
             case "not-serving":
               return yield* Effect.fail(buildNotServingRefusal(failure.message));
             case "refused": {
-              if (refusal !== undefined) return yield* Effect.fail(refusal);
-              // Another call's checks refused the opening this call waited
-              // for. Its own checks give this call's reason.
+              // The checks refused the opening this call started or waited
+              // for. This call's own checks give its reason.
               yield* checkBeforeSend(first);
               return yield* refuse("error", name, buildChangedMessage(first));
             }

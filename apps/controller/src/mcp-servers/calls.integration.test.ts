@@ -132,7 +132,7 @@ const withReadyServer = (
               );
               yield* Effect.promise(() =>
                 eventually(
-                  async () => requestsOf(rig.fake, method).length,
+                  () => Promise.resolve(requestsOf(rig.fake, method).length),
                   (count) => count > received,
                 ),
               );
