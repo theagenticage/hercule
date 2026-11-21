@@ -227,7 +227,7 @@ export const useThreadServers = ({
           : readErrorMessage(addressed.error),
     mcpServerIds,
     start,
-    row: describeThreadServersRow(views ?? [], mcpServerIds),
+    row: describeThreadServersRow(views?.map((view) => view.server) ?? [], mcpServerIds),
     writing: write.writing,
     refusal: write.refusal === null ? null : readErrorMessage(write.refusal),
     chooseServer: (name, serverId) => {

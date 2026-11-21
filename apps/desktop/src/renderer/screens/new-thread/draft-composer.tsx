@@ -19,7 +19,7 @@ import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { LazyDraftPlus } from "../thread/lazy-thread-servers";
-import { PlusPlaceholder } from "../thread/plus-placeholder";
+import { DraftPlusPlaceholder } from "../thread/plus-placeholder";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -249,7 +249,7 @@ export function DraftComposer({
         skills={skills}
         renderPlus={(attach) => (
           // Without its own boundary, the menu's load would suspend the draft.
-          <Suspense fallback={<PlusPlaceholder />}>
+          <Suspense fallback={<DraftPlusPlaceholder view={view} />}>
             <LazyDraftPlus view={view} onChoose={onChoose} attach={attach} />
           </Suspense>
         )}

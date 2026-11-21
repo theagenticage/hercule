@@ -4,8 +4,7 @@
  * to the list is written. A Draft Thread keeps its list with its other unsent
  * picks. A started thread writes `session.update` at once.
  */
-import { useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { queryKeys, type DraftView, type ThreadChoice } from "@hercule/client-core";
 import {
@@ -16,7 +15,12 @@ import {
 import type { Session } from "@hercule/contract";
 import { useMcpServerViews, readCachedStartList } from "../../app/mcp-server-views";
 import { mcpWriteKeys, useMcpWrite } from "../../app/mcp-write";
-import { settingsQuery, sessionQuery } from "../../app/queries";
+import { sessionQuery } from "../../app/queries";
+import {
+  useCachedMcpServers,
+  useDraftListRecords,
+  useStartedThreadIds,
+} from "./thread-server-rows";
 
 /**
  * What the `+` menu needs of the thread's servers. The row's words and the
@@ -67,27 +71,20 @@ export function useDraftServers({
 }): ThreadServers {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
-  const projectId = view.resolved.config.projectId ?? null;
-  const { projects } = view.catalogs;
-  // The new-thread route's loader caches the settings, and a draft never reads them itself.
-  const settings = useQuery({ ...settingsQuery(client), enabled: false }).data;
-  const defaultIds = settings?.user["thread.mcpServerIds"] ?? [];
-  // Until the servers are read, the start list is taken as the records hold it. The
-  // default list may still name a deleted server then, which only the count shows.
-  const unreadStartIds = projects.find((each) => each.id === projectId)?.mcpServerIds ?? defaultIds;
-  const pick = view.resolved.mcpServerIds;
-  const holdsServers = (pick ?? unreadStartIds).length > 0;
+  const { projectId, projects, defaultIds, pick, recordedIds } = useDraftListRecords(view);
+  const holdsServers = recordedIds.length > 0;
   const { views } = useMcpServerViews(holdsServers ? "read" : "off");
   const ids =
     pick ??
     (views === undefined
-      ? unreadStartIds
+      ? recordedIds
       : decideThreadStartList(projectId, projects, defaultIds, views).mcpServerIds);
+  const row = describeThreadServersRow(useCachedMcpServers() ?? [], ids);
   const readStartIds = (): readonly string[] => readCachedStartList(queryClient, client, projectId);
   return {
     ids,
     projectId,
-    row: describeThreadServersRow(views ?? [], ids),
+    row,
     // The picks are in a store that re-renders the draft before the next event, so `pick` is
     // current. Without one, the draft's list is the start list, which the cache holds now.
     change: (update) => {
@@ -120,11 +117,8 @@ export function useStartedThreadServers(session: Session): ThreadServers {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const sessionId = session.id;
-  const ids = useMemo(
-    () => session.mcpServers.map((server) => server.mcpServerId),
-    [session.mcpServers],
-  );
-  const { views } = useMcpServerViews("cache");
+  const ids = useStartedThreadIds(session);
+  const row = describeThreadServersRow(useCachedMcpServers() ?? [], ids);
   const write = useMcpWrite<(current: readonly string[]) => readonly string[]>({
     mutationKey: mcpWriteKeys.threadList(sessionId),
     mutationFn: (update) => {
@@ -140,7 +134,7 @@ export function useStartedThreadServers(session: Session): ThreadServers {
   return {
     ids,
     projectId: session.projectId,
-    row: describeThreadServersRow(views ?? [], ids),
+    row,
     change: write.start,
     readStartIds: () => readCachedStartList(queryClient, client, session.projectId),
     busy: write.isRunning,

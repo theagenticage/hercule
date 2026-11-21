@@ -10,20 +10,8 @@ import { describeConnectionTypeName } from "../connection-settings";
 import { listConnectionTypes } from "../connection-types";
 import { parsePluginId } from "../plugin-id";
 import { formatCount } from "../threads/work-summary";
+import { decideDisplayStatus, type McpServerDisplayStatus } from "./display-status";
 import { readMcpServerOffers } from "./offers";
-
-/**
- * What a screen shows as a server's status. It is the record's `status`, but
- * `off` comes first: a server whose `enabled` is false reads "off" whatever
- * its status was when the user switched it off.
- */
-export type McpServerDisplayStatus =
-  | "ready"
-  | "checking"
-  | "needs-sign-in"
-  | "unreachable"
-  | "error"
-  | "off";
 
 const STATUS_WORDS: Readonly<Record<McpServerDisplayStatus, string>> = {
   ready: "ready",
@@ -55,10 +43,6 @@ export interface McpServerView {
   /** The reason for a failing status in words a person can act on, for a tooltip. `null` when the server is not failing. */
   readonly statusDetail: string | null;
 }
-
-/** Returns the status a screen shows for `server`. */
-const decideDisplayStatus = (server: McpServer): McpServerDisplayStatus =>
-  server.enabled ? server.status : "off";
 
 /**
  * Returns the views of `servers`, in the same order. A view carries the

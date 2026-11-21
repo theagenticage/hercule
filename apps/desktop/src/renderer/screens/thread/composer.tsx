@@ -62,7 +62,7 @@ import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { LazyStartedThreadPlus } from "./lazy-thread-servers";
-import { PlusPlaceholder } from "./plus-placeholder";
+import { StartedThreadPlusPlaceholder } from "./plus-placeholder";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 
@@ -337,7 +337,7 @@ export function ThreadComposer({
       step={answer?.step}
       renderPlus={(attach) => (
         // Without its own boundary, the menu's load would suspend the composer.
-        <Suspense fallback={<PlusPlaceholder />}>
+        <Suspense fallback={<StartedThreadPlusPlaceholder session={session} />}>
           <LazyStartedThreadPlus
             session={session}
             attach={attach}

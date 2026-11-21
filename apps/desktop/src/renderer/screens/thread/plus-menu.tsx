@@ -2,10 +2,10 @@ import { Suspense, useState, type JSX, type KeyboardEvent } from "react";
 import { ToolsIcon } from "../../icons/tools";
 import { FileIcon } from "../../icons/file";
 import { ChevronRightIcon } from "../../icons/chevron-right";
-import { PlusIcon } from "../../icons/plus";
 import type { PlusAttach } from "../session/composer-frame";
 import { isMenuFocusKey, moveMenuFocus } from "../move-menu-focus";
 import { ComposerMenu } from "./composer-menu";
+import { PlusFace, describePlusLabel } from "./plus-face";
 import { LazyThreadServerPicker, LazyThreadServersMenu } from "./lazy-thread-servers";
 import { ReconnectDialog } from "./reconnect-dialog";
 import type { ThreadServers } from "./use-thread-servers";
@@ -52,13 +52,8 @@ export function PlusMenu({
         width="bare"
         disabled={disabled}
         triggerClassName="icon-btn plus-button"
-        triggerLabel={row.failing ? `Add (${row.words})` : "Add"}
-        trigger={
-          <>
-            <PlusIcon />
-            {row.failing && <i className="dot dot--fail plus-dot" />}
-          </>
-        }
+        triggerLabel={describePlusLabel(row)}
+        trigger={<PlusFace row={row} />}
         onOpen={servers.clearRefusal}
       >
         {(close) => (

@@ -16,6 +16,7 @@ export {
   type StatusBandAction,
   type WarningFix,
 } from "./fix";
+export { type McpServerDisplayStatus } from "./display-status";
 export { chooseNamedServer, groupServersByName, type ServerNameGroup } from "./named-lists";
 export { describeOfferAddress, readMcpServerOffers, type McpServerOffer } from "./offers";
 export {
@@ -45,20 +46,21 @@ export {
 export {
   buildServerPicker,
   buildThreadServerMenu,
-  countServersNeedingSignIn,
-  describeThreadServersRow,
   orderMenuNames,
   type RememberedAccounts,
   type ServerMenuRow,
   type ServerPicker,
   type ServerPickerRow,
   type ThreadServerMenu,
-  type ThreadServersRow,
 } from "./thread-menu";
+export {
+  countServersNeedingSignIn,
+  describeThreadServersRow,
+  type ThreadServersRow,
+} from "./thread-servers-row";
 export {
   buildMcpServerViews,
   describeReconnect,
-  type McpServerDisplayStatus,
   type McpServerView,
   type ReconnectTarget,
 } from "./views";

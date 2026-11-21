@@ -258,6 +258,13 @@
 .mcp-record .set-sec > h2 + * {
   margin-top: 12px;
 }
+/* settings.css gives a row that follows a heading 10px with a rule of the same
+   weight as the one above, so the two tie and the load order of the
+   stylesheets decided: the first row sat 2px higher whenever settings.css
+   loaded last. A third class on this rule settles it. */
+.mcp-record .set-sec > h2 + .set-row {
+  margin-top: 12px;
+}
 .mcp-record .set-sec > p {
   margin: 3px 0 12px;
 }
