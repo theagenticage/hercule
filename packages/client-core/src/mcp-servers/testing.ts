@@ -10,7 +10,7 @@ import { buildMcpServerViews, type McpServerView } from "./views";
 const AT = "2026-11-20T09:00:00.000Z";
 
 /** Returns a plugin that declares the Connection type `<id>/<id>` and the MCP server `<id>/<id>` reached with it. */
-const buildPlugin = (id: string, typeName: string): PluginDetail => ({
+export const buildPlugin = (id: string, typeName: string): PluginDetail => ({
   id,
   displayName: typeName,
   hostApi: 1,
@@ -41,14 +41,19 @@ const buildPlugin = (id: string, typeName: string): PluginDetail => ({
 
 export const SENTRY_PLUGIN = buildPlugin("sentry", "Sentry");
 export const LINEAR_PLUGIN = buildPlugin("linear", "Linear");
-export const PLUGINS: readonly PluginDetail[] = [SENTRY_PLUGIN, LINEAR_PLUGIN];
+export const OFFERING_PLUGINS: readonly PluginDetail[] = [SENTRY_PLUGIN, LINEAR_PLUGIN];
 
-/** Returns a connected Connection of `type` with `label`. */
-export const buildConnection = (id: string, type: string, label: string): Connection => ({
+/** Returns a connected Connection of `type`, labelled `label`, that acts as `displayName`. */
+export const buildConnection = (
+  id: string,
+  type: string,
+  label: string,
+  displayName = label,
+): Connection => ({
   id,
   type,
   label,
-  displayName: label,
+  displayName,
   status: "connected",
   labels: [],
   config: {},
@@ -100,4 +105,4 @@ export const LINEAR = buildServer("s-linear", "linear", "c-linear");
 
 /** Returns the views of `servers` on the fixture Connections and plugins. */
 export const buildViews = (servers: readonly McpServer[]): McpServerView[] =>
-  buildMcpServerViews(servers, CONNECTIONS, PLUGINS);
+  buildMcpServerViews(servers, CONNECTIONS, OFFERING_PLUGINS);

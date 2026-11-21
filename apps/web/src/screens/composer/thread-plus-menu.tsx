@@ -76,10 +76,7 @@ export function ThreadPlusMenu({
         onOpenChange={handleOpenChange}
         attachDisabledReason={attachDisabledReason}
         onFiles={onFiles}
-        servers={{
-          count: servers.mcpServerIds.length,
-          needSignInCount: servers.needSignInCount,
-        }}
+        serversRow={servers.row}
         submenu={
           servers.views !== undefined && servers.start !== undefined ? (
             <ThreadServersMenu

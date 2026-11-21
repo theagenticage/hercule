@@ -10,72 +10,12 @@
 import { screen, within } from "@testing-library/react";
 import type userEvent from "@testing-library/user-event";
 import type { Connection, McpServer, PluginDetail, Session } from "@hercule/contract";
+import {
+  buildConnection,
+  buildPlugin,
+  buildServer,
+} from "@hercule/client-core/mcp-servers/testing";
 import type { Handler } from "./testing";
-
-const AT = "2026-11-20T09:00:00.000Z";
-
-/** Returns a plugin that declares the Connection type `<slug>/<slug>` and the MCP server `<slug>/<slug>` reached with it. */
-const buildPlugin = (slug: string, displayName: string): PluginDetail => ({
-  id: slug,
-  displayName,
-  hostApi: 1,
-  capabilities: ["connections", "mcp-servers"],
-  enabled: true,
-  status: { _tag: "active" },
-  config: {},
-  contributions: [
-    {
-      extensionPoint: "connection-type",
-      id: `${slug}/${slug}`,
-      definition: { type: `${slug}/${slug}`, displayName, setup: [] },
-    },
-    {
-      extensionPoint: "mcp-server",
-      id: `${slug}/${slug}`,
-      definition: {
-        displayName,
-        description: `The ${displayName} MCP server.`,
-        connectionType: `${slug}/${slug}`,
-        origin: `https://mcp.${slug}.example`,
-      },
-    },
-  ],
-  intake: { eventKinds: [], signalKinds: [] },
-  entityKinds: [],
-});
-
-const buildConnection = (id: string, slug: string, label: string): Connection => ({
-  id,
-  type: `${slug}/${slug}`,
-  label,
-  displayName: `acct:${label}`,
-  status: "connected",
-  labels: [],
-  config: {},
-  feedIntervals: {},
-  credentials: [],
-  createdAt: AT,
-  updatedAt: AT,
-});
-
-const buildServer = (
-  id: string,
-  slug: string,
-  connectionId: string,
-  overrides: Partial<McpServer> = {},
-): McpServer => ({
-  id,
-  name: slug,
-  source: { kind: "plugin", contributionId: `${slug}/${slug}`, connectionId },
-  enabled: true,
-  status: "ready",
-  statusDetail: null,
-  tools: [{ name: "search", description: "Searches." }],
-  checkedAt: AT,
-  createdAt: AT,
-  updatedAt: AT,
-  ...overrides,
-});
 
 const makeId = (kind: string, n: number): string =>
   `0199c0ff-${kind.repeat(4)}-7000-8000-${String(n).padStart(12, "0")}`;
@@ -113,7 +53,12 @@ export const MCP_PLUGINS: readonly PluginDetail[] = [...new Set(SLUGS)].map((slu
 const LABELS = ["work", "hobby", "acme", "wiki", "rogier", "ops", "docs", "prod", "shop", "design"];
 
 export const MCP_CONNECTIONS: readonly Connection[] = SLUGS.map((slug, index) =>
-  buildConnection(makeId("c", index + 1), slug, LABELS[index]!),
+  buildConnection(
+    makeId("c", index + 1),
+    `${slug}/${slug}`,
+    LABELS[index]!,
+    `acct:${LABELS[index]}`,
+  ),
 );
 
 /** The server of the index in `SLUGS`, ready and on. */

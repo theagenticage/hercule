@@ -4,7 +4,7 @@ import { buildMcpServerSettingsRows, describeNamingProjects } from "./settings-l
 import {
   CONNECTIONS,
   LINEAR,
-  PLUGINS,
+  OFFERING_PLUGINS,
   SENTRY_HOBBY,
   SENTRY_PLUGIN,
   buildConnection,
@@ -19,7 +19,7 @@ describe("buildMcpServerSettingsRows", () => {
       servers: [],
       // Listed out of order on purpose.
       connections: [...CONNECTIONS].reverse(),
-      plugins: PLUGINS,
+      plugins: OFFERING_PLUGINS,
       projects: [],
     });
 
@@ -34,7 +34,7 @@ describe("buildMcpServerSettingsRows", () => {
     const [linear] = buildMcpServerSettingsRows({
       servers: [],
       connections: CONNECTIONS,
-      plugins: PLUGINS,
+      plugins: OFFERING_PLUGINS,
       projects: [WEBSHOP],
     });
 
@@ -51,7 +51,7 @@ describe("buildMcpServerSettingsRows", () => {
     const rows = buildMcpServerSettingsRows({
       servers: [SENTRY_HOBBY, LINEAR],
       connections: CONNECTIONS,
-      plugins: PLUGINS,
+      plugins: OFFERING_PLUGINS,
       projects: [WEBSHOP, BLOG],
     });
 

@@ -10,6 +10,7 @@ import {
 import {
   buildMcpServerViews,
   decideStatusBand,
+  describeOfferAddress,
   readMcpServerOffers,
 } from "@hercule/client-core/mcp-servers";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
@@ -22,7 +23,6 @@ import {
 } from "../../../../../app/queries";
 import { LazyConnectionSetupDialog } from "../../../../../screens/settings/connections/lazy-connection-setup-dialog";
 import {
-  describeOfferAddress,
   ServerHead,
   ServerSection,
   ToolsSection,

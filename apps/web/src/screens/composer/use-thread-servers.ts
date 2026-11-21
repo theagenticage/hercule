@@ -9,10 +9,11 @@ import {
 } from "@hercule/client-core";
 import {
   chooseNamedServer,
-  countServersNeedingSignIn,
   decideThreadStartList,
+  describeThreadServersRow,
   resolveDraftMcpServerIds,
   type McpServerView,
+  type ThreadServersRow,
   type ThreadStartList,
 } from "@hercule/client-core/mcp-servers";
 import type { Project } from "@hercule/contract";
@@ -30,8 +31,8 @@ export interface ThreadServers {
   readonly mcpServerIds: readonly string[];
   /** Where the list started. `undefined` while `views` is. */
   readonly start: ThreadStartList | undefined;
-  /** How many servers of the thread's list need sign-in. */
-  readonly needSignInCount: number;
+  /** The words for the menu's "MCP servers" row. Until `views` is read they show the count alone. */
+  readonly row: ThreadServersRow;
   /** Whether a write of a started thread's list is in flight. The controls ignore clicks meanwhile. */
   readonly writing: boolean;
   /** Why the last write was refused, or `null`. */
@@ -150,7 +151,7 @@ export const useThreadServers = ({
     readFailure: failure === null ? null : readErrorMessage(failure),
     mcpServerIds,
     start,
-    needSignInCount: views === undefined ? 0 : countServersNeedingSignIn(views, mcpServerIds),
+    row: describeThreadServersRow(views ?? [], mcpServerIds),
     writing: write.isPending,
     refusal: write.error === null ? null : readErrorMessage(write.error),
     chooseServer: (name, serverId) => {

@@ -22,6 +22,7 @@
     "./machine-storage": "./src/fleet/machine-storage.ts",
     "./machine-work": "./src/fleet/machine-work.ts",
     "./mcp-servers": "./src/mcp-servers/index.ts",
+    "./mcp-servers/testing": "./src/mcp-servers/testing.ts",
     "./metrics-history": "./src/fleet/metrics-history.ts",
     "./node-details": "./src/node-details.ts",
     "./project-groups": "./src/project-groups.ts",

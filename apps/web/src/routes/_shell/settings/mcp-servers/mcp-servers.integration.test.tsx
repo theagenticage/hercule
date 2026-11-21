@@ -635,7 +635,7 @@ describe("Settings > MCP servers > one server's page", () => {
     expect(await screen.findByRole("heading", { name: "sentry work" })).toBeTruthy();
     const text = readPageText();
     expect(text).toContain("From the Sentry plugin");
-    expect(text).toContain("https://mcp.sentry.example");
+    expect(text).toContain("mcp.sentry.example");
     expect(screen.queryByRole("status")).toBeNull();
     expect(text).toContain("Off keeps the name, the sign-in and the projects that name it.");
     expect(text).toContain("Agents see its tools as mcp__tools__sentry__<tool>.");

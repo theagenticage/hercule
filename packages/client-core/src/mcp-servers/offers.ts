@@ -61,3 +61,11 @@ export const readMcpServerOffers = (plugins: readonly PluginDetail[]): McpServer
       ];
     }),
   );
+
+/**
+ * Returns the address a plugin's server is reached at, for a chip on the
+ * server's page: the offer's `origin` without its scheme, such as
+ * `mcp.sentry.dev`.
+ */
+export const describeOfferAddress = (origin: string): string =>
+  origin.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");

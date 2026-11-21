@@ -14,13 +14,6 @@ import { ServerName, ServerSwitch } from "./server-parts";
 import "./mcp-servers.css";
 
 /**
- * Returns the address a plugin's server is reached at, for the page's chip:
- * the offer's `origin` without its scheme, such as `mcp.sentry.dev`.
- */
-export const describeOfferAddress = (origin: string): string =>
-  origin.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
-
-/**
  * Renders the head of the page, where the eye lands: the server's mark and
  * its name with its account, large, under it two chips, the plugin the
  * server comes from and its `address`, and then the status `band`, when the

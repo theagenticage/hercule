@@ -1,26 +1,8 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
+import type { ThreadServersRow } from "@hercule/client-core/mcp-servers";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { cn, Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@hercule/ui";
 import { MenuRow } from "./menu";
-
-/** What the "MCP servers" row says about the thread's list. */
-export interface ServersSummary {
-  /** How many servers the thread has. */
-  readonly count: number;
-  /** How many of them need sign-in. */
-  readonly needSignInCount: number;
-}
-
-/**
- * Returns the note on the "MCP servers" row: how many servers need sign-in
- * while any does, else how many the thread has, or "none".
- */
-const describeServersNote = ({ count, needSignInCount }: ServersSummary): string => {
-  if (needSignInCount > 0) {
-    return `${String(needSignInCount)} ${needSignInCount === 1 ? "needs" : "need"} sign-in`;
-  }
-  return count === 0 ? "none" : String(count);
-};
 
 const holdFocus = (event: Event): void => {
   event.preventDefault();
@@ -46,7 +28,7 @@ export function PlusMenu({
   onOpenChange,
   attachDisabledReason,
   onFiles,
-  servers,
+  serversRow,
   submenu,
 }: {
   readonly open: boolean;
@@ -54,19 +36,20 @@ export function PlusMenu({
   /** Why no image can be attached, or `null` when one can. */
   readonly attachDisabledReason: string | null;
   readonly onFiles: (files: readonly File[]) => void;
-  readonly servers: ServersSummary;
+  readonly serversRow: ThreadServersRow;
   /** The content of the submenu "Servers of this thread". */
   readonly submenu: ReactNode;
 }): JSX.Element {
   const picker = useRef<HTMLInputElement>(null);
-  const needsSignIn = servers.needSignInCount > 0;
   return (
     <>
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label={needsSignIn ? "Add to thread, a server needs sign-in" : "Add to thread"}
+            aria-label={
+              serversRow.failing ? "Add to thread, a server needs sign-in" : "Add to thread"
+            }
             title="Attach an image or choose MCP servers"
             className={cn(
               "relative inline-flex size-[26px] shrink-0 cursor-pointer items-center justify-center rounded-[7px] text-[17px] text-muted",
@@ -75,7 +58,7 @@ export function PlusMenu({
             )}
           >
             +
-            {needsSignIn ? (
+            {serversRow.failing ? (
               <span
                 aria-hidden="true"
                 className="absolute top-[3px] right-[3px] size-1.5 rounded-full bg-fail"
@@ -93,7 +76,7 @@ export function PlusMenu({
         >
           <PlusMenuRows
             attachDisabledReason={attachDisabledReason}
-            servers={servers}
+            serversRow={serversRow}
             submenu={submenu}
             onAttach={() => {
               picker.current?.click();
@@ -126,12 +109,12 @@ export function PlusMenu({
  */
 function PlusMenuRows({
   attachDisabledReason,
-  servers,
+  serversRow,
   submenu,
   onAttach,
 }: {
   readonly attachDisabledReason: string | null;
-  readonly servers: ServersSummary;
+  readonly serversRow: ThreadServersRow;
   readonly submenu: ReactNode;
   readonly onAttach: () => void;
 }): JSX.Element {
@@ -156,9 +139,7 @@ function PlusMenuRows({
               name="MCP servers"
               note={
                 <>
-                  <span className={cn(servers.needSignInCount > 0 && "text-fail")}>
-                    {describeServersNote(servers)}
-                  </span>
+                  <span className={cn(serversRow.failing && "text-fail")}>{serversRow.words}</span>
                   <span aria-hidden="true" className="text-fine">
                     ›
                   </span>
