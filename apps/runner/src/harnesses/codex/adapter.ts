@@ -1016,23 +1016,26 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
         },
-        // Takes the image bytes out of a frame the moment it arrives, before
-        // it is queued, so a queued frame never holds megabytes. A result with
-        // an image is delivered once the image is uploaded. Only a session's
-        // host uploads: a text generation or a probe has no session to keep
-        // an image for.
+        // Takes the generated image's bytes out of a frame the moment it
+        // arrives. The images of an MCP result are replaced by references
+        // when the frame reaches the head of the queue, so one frame uploads
+        // at a time. A waiting frame holds its images meanwhile, which is
+        // bounded: the MCP Gateway caps each message at 4 MiB and each token
+        // at 32 running calls. Only a session's host uploads: a text
+        // generation or a probe has no session to keep an image for.
         prepareNotification: (frame) => {
           try {
             stripImageBytes(frame);
             const results = sessionId === undefined ? [] : listMcpResultItems(frame);
             if (sessionId === undefined || results.length === 0) return undefined;
-            return Effect.runPromise(
-              replaceMcpResultImages(uploader, sessionId, results, uploads.signal),
-            ).catch(() => {
-              // The upload code never fails, so this is a defect. The bytes
-              // are still dropped rather than passed on.
-              for (const item of results) Reflect.deleteProperty(item, "result");
-            });
+            return () =>
+              Effect.runPromise(
+                replaceMcpResultImages(uploader, sessionId, results, uploads.signal),
+              ).catch(() => {
+                // The upload code never fails, so this is a defect. The bytes
+                // are still dropped rather than passed on.
+                for (const item of results) Reflect.deleteProperty(item, "result");
+              });
           } catch {
             return undefined;
           }

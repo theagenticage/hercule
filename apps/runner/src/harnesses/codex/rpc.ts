@@ -64,12 +64,14 @@ export interface RpcHandlers {
   readonly onWarning: (message: string) => void;
   /**
    * Called for each notification as it arrives, before it is delivered.
-   * Returns a promise to wait for before the notification is delivered, such
-   * as the upload of an image the notification carries, or `undefined` to
-   * deliver it at once. Everything that arrives after a notification that
-   * waits is delivered after it. The promise must not reject.
+   * Returns the work to finish before the notification is delivered, such as
+   * the upload of an image it carries, or `undefined` to deliver it at once.
+   * The work starts only when the notification reaches the head of the queue,
+   * so at most one notification prepares at a time. Everything that arrives
+   * after a notification that waits is delivered after it. The work must not
+   * reject.
    */
-  readonly prepareNotification?: (frame: NotificationFrame) => Promise<void> | undefined;
+  readonly prepareNotification?: (frame: NotificationFrame) => (() => Promise<void>) | undefined;
 }
 
 export interface Rpc {
@@ -152,14 +154,14 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
    * frame queues behind it, so a reply can never overtake the notification
    * the app-server sent before it.
    */
-  const deliverInOrder = (prepared: Promise<void> | undefined, run: () => void): void => {
-    if (prepared === undefined && waiting === 0) {
+  const deliverInOrder = (prepare: (() => Promise<void>) | undefined, run: () => void): void => {
+    if (prepare === undefined && waiting === 0) {
       run();
       return;
     }
     waiting += 1;
     tail = tail
-      .then(() => prepared)
+      .then(() => prepare?.())
       .then(() => {
         try {
           run();

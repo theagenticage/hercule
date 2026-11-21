@@ -4724,6 +4724,38 @@ describe("the images in the result of an MCP tool call", () => {
       expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
     });
 
+    it("uploads the images of one frame at a time, in the order the frames came", async () => {
+      const releases: Array<() => void> = [];
+      const run = await startWithUploader(() =>
+        Effect.callback<ToolResultImage>((resume) => {
+          releases.push(() => resume(Effect.succeed({ type: "image", attachment: STORED })));
+        }),
+      );
+
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "first"));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "second"));
+      await waitUntil("started the first upload", () => releases.length === 1);
+      await settle();
+      // The second frame waits for its turn, so its upload has not started.
+      expect(releases).toHaveLength(1);
+
+      releases[0]!();
+      await waitUntil("started the second upload", () => releases.length === 2);
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
+        "first",
+      ]);
+      releases[1]!();
+      await waitUntil(
+        "completed both calls",
+        () => filterByTag(run.seen, "item.completed").length === 2,
+      );
+
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).toEqual([
+        "first",
+        "second",
+      ]);
+    });
+
     it("emits the call before the message that steers the turn afterwards", async () => {
       let release: () => void = () => undefined;
       let started = false;
