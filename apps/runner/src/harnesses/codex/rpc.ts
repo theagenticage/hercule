@@ -62,6 +62,14 @@ export interface RpcHandlers {
   readonly onServerRequest: (frame: ServerRequestFrame) => void;
   readonly onNotification: (frame: NotificationFrame) => void;
   readonly onWarning: (message: string) => void;
+  /**
+   * Called for each notification as it arrives, before it is delivered.
+   * Returns a promise to wait for before the notification is delivered, such
+   * as the upload of an image the notification carries, or `undefined` to
+   * deliver it at once. Everything that arrives after a notification that
+   * waits is delivered after it. The promise must not reject.
+   */
+  readonly prepareNotification?: (frame: NotificationFrame) => Promise<void> | undefined;
 }
 
 export interface Rpc {
@@ -75,6 +83,13 @@ export interface Rpc {
   readonly answer: (id: string | number, body: RpcReply) => void;
   /** Reads stdout until the app-server closes it. No reply is delivered until this runs. */
   readonly pump: Effect.Effect<void>;
+  /**
+   * Runs `run` once every frame received so far has been delivered: at once
+   * when none is waiting. Callers that act on something the app-server did,
+   * such as the end of a session, use it so the action comes after the
+   * frames that were sent before it.
+   */
+  readonly afterPending: (run: () => void) => void;
 }
 
 /**
@@ -116,6 +131,38 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   let next = 1;
   let gone = false;
   let complained = false;
+  let waiting = 0;
+  let tail: Promise<void> = Promise.resolve();
+
+  /**
+   * Delivers everything the app-server sends in the order it sent it: replies,
+   * notifications, server requests and the end of its output. This is the one
+   * place that rule lives. A frame is delivered at once while nothing waits.
+   * When a notification has to wait (see `prepareNotification`), every later
+   * frame queues behind it, so a reply can never overtake the notification
+   * the app-server sent before it.
+   */
+  const deliverInOrder = (prepared: Promise<void> | undefined, run: () => void): void => {
+    if (prepared === undefined && waiting === 0) {
+      run();
+      return;
+    }
+    waiting += 1;
+    tail = tail
+      .then(() => prepared)
+      .then(() => {
+        try {
+          run();
+        } catch (error) {
+          handlers.onWarning(
+            `a frame from the app-server could not be handled: ${describeError(error)}`,
+          );
+        }
+      })
+      .finally(() => {
+        waiting -= 1;
+      });
+  };
 
   /**
    * Writes one frame. Returns the error message if the write failed, or
@@ -172,14 +219,18 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
     const method = frame["method"];
     const id = frame["id"];
     if (typeof method !== "string") {
-      if (typeof id === "number") settle(frame, id);
+      if (typeof id === "number") deliverInOrder(undefined, () => settle(frame, id));
       return;
     }
     if (typeof id !== "string" && typeof id !== "number") {
-      handlers.onNotification({ method, params: frame["params"] });
+      const notification = { method, params: frame["params"] };
+      deliverInOrder(handlers.prepareNotification?.(notification), () =>
+        handlers.onNotification(notification),
+      );
       return;
     }
-    handlers.onServerRequest({ id, method, params: frame["params"] });
+    const request = { id, method, params: frame["params"] };
+    deliverInOrder(undefined, () => handlers.onServerRequest(request));
   };
 
   const abandon = (): void => {
@@ -220,6 +271,8 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
     answer: (id, body) => void send({ id, ...body }),
 
+    afterPending: (run) => deliverInOrder(undefined, run),
+
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
         try {
@@ -234,7 +287,7 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead
         // of letting each one wait for its timeout.
-        abandon();
+        deliverInOrder(undefined, abandon);
         resume(Effect.void);
       })();
     }),

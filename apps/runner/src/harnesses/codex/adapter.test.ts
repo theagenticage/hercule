@@ -49,6 +49,7 @@ import {
 } from "./threads";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import type { AttachmentUploader } from "../../attachments";
+import type { ToolResultImage } from "@hercule/protocol";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -4611,6 +4612,96 @@ describe("the images in the result of an MCP tool call", () => {
       "call-slow",
       "call-fast",
     ]);
+  });
+
+  describe("while an upload holds the completion of a call", () => {
+    /**
+     * Starts a session whose uploader never finishes by itself, like a slow
+     * controller. An aborted upload ends at once and leaves the image
+     * unavailable, which is what a real uploader does when the session stops.
+     */
+    const startHeld = async () => {
+      let started = false;
+      const run = await startWithUploader((_sessionId, _bytes, signal) =>
+        Effect.callback<ToolResultImage>((resume) => {
+          started = true;
+          signal.addEventListener("abort", () =>
+            resume(Effect.succeed({ type: "image", unavailable: "The session stopped." })),
+          );
+        }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+      await waitUntil("started the upload", () => started);
+      return run;
+    };
+
+    /** The tags of the call's completion and of the exit, in the order they were emitted. */
+    const listCompletionAndExit = (run: ReturnType<typeof createDriving>): ReadonlyArray<string> =>
+      run.seen
+        .filter(
+          (event) =>
+            (event._tag === "item.completed" && event.itemId === "call-1") ||
+            event._tag === "session.exited",
+        )
+        .map((event) => event._tag);
+
+    it("emits the call before the exit when the session is stopped", async () => {
+      const run = await startHeld();
+
+      await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
+      expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+      expect(JSON.stringify(filterByTag(run.seen, "item.completed").at(-1)?.raw)).toContain(
+        "The session stopped.",
+      );
+    });
+
+    it("emits the call before the exit when the app-server exits", async () => {
+      const run = await startHeld();
+
+      run.spawns[0]!.crash();
+      await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+      expect(listCompletionAndExit(run)).toEqual(["item.completed", "session.exited"]);
+    });
+
+    it("emits the call before the message that steers the turn afterwards", async () => {
+      let release: () => void = () => undefined;
+      let started = false;
+      const run = await startWithUploader(() =>
+        Effect.callback<ToolResultImage>((resume) => {
+          started = true;
+          release = () => resume(Effect.succeed({ type: "image", attachment: STORED }));
+        }),
+      );
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
+      await waitUntil("started the upload", () => started);
+
+      // The reply to the steer arrives behind the held completion, so the
+      // input is reported only after the completion.
+      const steering = Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "one more instruction" }),
+      );
+      await settle();
+      expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).not.toContain(
+        "call-1",
+      );
+      release();
+      expect(await steering).toMatchObject({ delivery: "steered" });
+
+      const order = run.seen
+        .filter(
+          (event) =>
+            event._tag === "item.completed" &&
+            (event.itemId === "call-1" || event.kind === "user_message"),
+        )
+        .map((event) => (event as { readonly kind: string }).kind);
+      expect(order).toEqual(["user_message", "tool_call", "user_message"]);
+    });
   });
 });
 
