@@ -512,14 +512,24 @@ Sentry kills the old access token the moment it is refreshed. The gateway never 
 - URL: `https://mcp.linear.app/mcp`.
 - Header: `Authorization: Bearer <token>`. A pasted API key works too.
 
-**Verify at build time:** that Linear accepts the Connection's token as `Bearer`. [#1209](https://github.com/theagenticage/hercule/issues/1209).
+*(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* The token is the redirect flow's access token, or else the pasted API key, and both are sent as `Bearer`. Linear's GraphQL API takes a pasted key without `Bearer`; its MCP server takes OAuth tokens and API keys alike as `Bearer` ([Linear: MCP server](https://linear.app/docs/mcp)).
+
+**Verify at build time:** that Linear accepts the Connection's token as `Bearer`. [#1209](https://github.com/theagenticage/hercule/issues/1209). *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* ~~Built from Linear's documentation and checked against a fake server. A real call needs Rogier's sign-in and is still open.~~ **Proven on 2026-11-21** in #1209's live sitting ([the sitting's result](https://github.com/theagenticage/hercule/issues/1209#issuecomment-7060978302)): with the redirect flow's token as `Bearer`, the server listed 78 tools and `get_user` returned the Connection's account. The pasted API key was not tried live.
 
 ### 6.3 GitHub
 
 - URL: `https://api.githubcopilot.com/mcp/`.
 - Header: `Authorization: Bearer <token>`. `X-MCP-Toolsets` is limited to what the Connection's scopes cover.
 
-**Verify at build time:** that GitHub accepts the Connection's token as `Bearer`, with that `X-MCP-Toolsets`. [#1209](https://github.com/theagenticage/hercule/issues/1209).
+*(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* What "the Connection's scopes cover" means in the build:
+
+- **The toolsets.** `X-MCP-Toolsets` names the 17 toolsets in which the device flow's scopes (`repo`, `read:org`, `notifications`, `workflow`) cover every tool: `actions`, `code_quality`, `code_security`, `context`, `dependabot`, `discussions`, `git`, `issues`, `labels`, `notifications`, `orgs`, `pull_requests`, `repos`, `secret_protection`, `security_advisories`, `stargazers` and `users`. `repo` includes `security_events`. The list was read from the source of `github/github-mcp-server` at commit `9a72d8d38`: the toolset ids and each tool's declared scopes.
+- **One tool left out by name.** `repos` holds `delete_repository`, which needs `delete_repo`. `X-MCP-Exclude-Tools: delete_repository` removes it, and GitHub applies that header after the toolsets.
+- **Left out:** `gists` (`gist`), `projects` (`project`, `read:project`) and `governance` (`admin:org`, `admin:enterprise`, `read:enterprise`), because they need scopes the Connection lacks. The `copilot` toolsets are also left out, because they need a Copilot subscription rather than a scope. So is the remote-only `github_support_docs_search`, whose scopes the source does not declare.
+- **Why it matters.** For an OAuth token, GitHub answers a tool that needs a missing scope with a scope challenge. The gateway cannot answer that challenge, so such a tool would only fail.
+- **For Rogier: a pasted token gets the same list.** `buildUpstreamRequest` is pure, so it cannot ask GitHub which scopes a pasted token has. A classic token without `read:org`, or a fine-grained token (which GitHub never lets read notifications), therefore lists tools it cannot use. Such a call fails as that call's own answer and leaves the server's status alone ([section 5.3](#53-status)). The recommendation is to keep this. The alternative is to read a pasted token's scopes when the Connection is validated and store them, so that the list can follow them.
+
+**Verify at build time:** that GitHub accepts the Connection's token as `Bearer`, with that `X-MCP-Toolsets`. [#1209](https://github.com/theagenticage/hercule/issues/1209). *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* ~~Built from GitHub's documentation and source and checked against a fake server. A real call needs Rogier's sign-in and is still open. It must show `get_file_contents` in the list and no `delete_repository`.~~ **Proven on 2026-11-21** in #1209's live sitting ([the sitting's result](https://github.com/theagenticage/hercule/issues/1209#issuecomment-7060978302)): with the device flow's token as `Bearer`, the toolsets and the excluded tool, the server listed 78 tools, `get_file_contents` among them and no `delete_repository`, and `get_me` returned the Connection's account. A pasted token was not tried live.
 
 **GitHub has no special rule.** A GitHub MCP server is a plugin server like any other, reached with its own Connection. No code compares it with the workspace's account. A Thread whose GitHub server acts as another account than the one its repository pushes as may meet a mismatch, which the agent reports.
 

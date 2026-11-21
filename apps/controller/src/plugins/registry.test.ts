@@ -13,6 +13,7 @@ import {
   Plugins,
   registry,
   type RegisteredHarness,
+  type RegisteredMcpServer,
   type RegisteredProvider,
 } from "./index";
 import { asUser, buildPluginStack } from "./testing";
@@ -441,6 +442,7 @@ const SHIPPED_PROVIDERS = [
 let details: ReadonlyArray<PluginDetail>;
 let harnesses: ReadonlyArray<RegisteredHarness>;
 let providers: ReadonlyArray<RegisteredProvider>;
+let mcpServers: ReadonlyArray<RegisteredMcpServer>;
 
 describe("the shipped registry after a boot", () => {
   beforeAll(async () => {
@@ -450,6 +452,7 @@ describe("the shipped registry after a boot", () => {
         yield* host.boot(registry);
         harnesses = yield* host.harnesses();
         providers = yield* host.providers();
+        mcpServers = yield* host.listMcpServers();
         return yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
       }),
     );
@@ -512,6 +515,14 @@ describe("the shipped registry after a boot", () => {
     expect(checked.mark?.paths).toHaveLength(1);
     // The host keeps the mark it was given, so the apps draw it.
     expect(details.find((one) => one.id === id)?.mark).toEqual(plugin?.manifest.mark);
+  });
+
+  it("builds every MCP server's URL on the origin it declares", () => {
+    expect(mcpServers.length).toBeGreaterThan(0);
+    for (const server of mcpServers) {
+      const { url } = server.buildUpstreamRequest({ credentials: {}, config: {} });
+      expect(new URL(url).origin, server.id).toBe(server.origin);
+    }
   });
 
   it("agrees with itself: every provider a harness runs lists that harness, and every harness a provider lists runs it", () => {
