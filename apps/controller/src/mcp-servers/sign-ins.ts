@@ -83,9 +83,14 @@ const make = Effect.gen(function* () {
     /**
      * Returns a string that changes whenever the server's sign-in changes:
      * its `revision` and the name and rotation time of each secret, without
-     * decrypting any. The `revision` is in it because every new sign-in
-     * raises it, while deleting and storing a secret again within the same
-     * clock tick can leave its rotation time unchanged.
+     * decrypting any. Both are in it on purpose.
+     *
+     * - The `revision` rises with every new sign-in today, and covers a
+     *   secret that is deleted and stored again within the same clock tick,
+     *   which can leave its rotation time unchanged.
+     * - The secrets' rotation times are what changes when a token is rotated
+     *   without a new sign-in, as an OAuth refresh will do: it replaces the
+     *   token and does not raise the `revision`.
      */
     readVersion: (serverId: string): Effect.Effect<string> =>
       Effect.gen(function* () {
