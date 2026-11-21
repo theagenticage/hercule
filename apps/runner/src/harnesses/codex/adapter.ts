@@ -2005,6 +2005,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     harnessId: CODEX,
     harnessName: CODEX_NAME,
     binaryName: CODEX_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.fromPubSub(publishedUsage),

@@ -24,8 +24,13 @@ import { runProcess, spawnAppServer } from "../process";
 import type { AppServerSpawn } from "./rpc";
 import { createFixtureWatch } from "./fixture-watch.testing";
 import { startMcpCallModel } from "./mock-model.testing";
-import { SEARCH_ISSUES_TOOL, startFakeMcpServer, WHOAMI_TOOL } from "../fake-mcp-server.testing";
-import { cleanupHomes, createScratchHome } from "../testing";
+import {
+  SEARCH_ISSUES_TOOL,
+  SNAPSHOT_IMAGE_TOOL,
+  startFakeMcpServer,
+  WHOAMI_TOOL,
+} from "../fake-mcp-server.testing";
+import { cleanupHomes, createScratchHome, PNG_BYTES } from "../testing";
 import { buildContext, SESSION, SPEC } from "./testing";
 
 afterAll(cleanupHomes);
@@ -80,6 +85,13 @@ interface SpawnedAppServer {
   readonly exited: Promise<number>;
 }
 
+/** The reference the fake uploader returns for every image it is given. */
+const STORED_IMAGE = {
+  id: "0199e0e7-0000-7000-8000-0000000000a1",
+  mimeType: "image/png" as const,
+  sizeBytes: PNG_BYTES.length,
+};
+
 /** The things one test shares between the sessions it starts. */
 const createFixture = () => {
   const mcp = startFakeMcpServer();
@@ -89,6 +101,8 @@ const createFixture = () => {
   writeFileSync(join(home, "codex", "config.toml"), model.config);
   const userHome = createScratchHome("mcp-user");
   const cwd = createScratchHome("mcp-cwd");
+  /** The bytes of each image the adapter uploaded to the (fake) controller. */
+  const uploaded: Array<Uint8Array> = [];
   const runs: Array<{ readonly stop: () => Promise<void> }> = [];
   onTestFinished(async () => {
     for (const run of runs) await run.stop();
@@ -133,6 +147,13 @@ const createFixture = () => {
         {
           ...context,
           binary: binary!,
+          attachmentUploader: {
+            upload: (_sessionId, bytes) =>
+              Effect.sync(() => {
+                uploaded.push(bytes);
+                return { type: "image" as const, attachment: STORED_IMAGE };
+              }),
+          },
           mcpServers: [{ name: "tools", url: mcp.url }],
           env: {
             PATH: process.env["PATH"] ?? "",
@@ -195,7 +216,7 @@ const createFixture = () => {
     return run;
   };
 
-  return { mcp, model, home, userHome, cwd, startRun };
+  return { mcp, model, home, userHome, cwd, uploaded, startRun };
 };
 
 /** Lists the warnings the runner itself adds. A warning Codex sent has `raw` and is left out. */
@@ -255,6 +276,8 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
           kind: "tool_approval",
           detail: { toolName: buildExpectedCardName(tool) },
         });
+        // The approval is filed under the call's own item, so a surface can show it there.
+        expect(opened.request.itemId).toBe(findCallItems(run.seen).at(-1)!.itemId);
         expect(mcp.listCalledTools()).toEqual(calledSoFar);
         await run.answer(opened, "allow");
         calledSoFar.push(tool);
@@ -282,6 +305,32 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     await run.callTool(WHOAMI_TOOL);
     expect(run.listOpened()).toEqual([]);
     expect(mcp.listCalledTools()).toEqual([SEARCH_ISSUES_TOOL, WHOAMI_TOOL]);
+  });
+
+  it("keeps an image of a tool result as a reference, and puts no image bytes in an event", async () => {
+    const { startRun, uploaded } = createFixture();
+    const run = await startRun("full-access");
+    await run.callTool(SNAPSHOT_IMAGE_TOOL);
+    expect(uploaded.map((bytes) => Buffer.from(bytes).toString("base64"))).toEqual([
+      PNG_BYTES.toString("base64"),
+    ]);
+    expect(JSON.stringify(run.seen)).not.toContain(PNG_BYTES.toString("base64"));
+    expect(findCallItems(run.seen).at(-1)).toMatchObject({
+      _tag: "item.completed",
+      status: "completed",
+      raw: {
+        payload: {
+          item: {
+            result: {
+              content: [
+                { type: "text", text: `result of ${SNAPSHOT_IMAGE_TOOL}` },
+                { type: "image", attachment: STORED_IMAGE },
+              ],
+            },
+          },
+        },
+      },
+    });
   });
 
   describe("in auto", () => {
@@ -352,8 +401,9 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     });
     // While the session runs, Codex keeps a snapshot of the shell's environment in
     // `shell_snapshots/`, and that file holds every variable, the token included.
-    // Codex deletes it when the app-server exits, so it is left out here and
-    // checked below, after the stop.
+    // Codex deletes it when the app-server exits, so it is left out here. After
+    // the stop it is checked too, but only for a Codex that deletes it: before
+    // 0.169.0, Codex leaves the file behind (known issue #1234).
     const scanFolders = [home, userHome, cwd];
     const findTokenFiles = (includeSnapshots: boolean) =>
       scanFolders
@@ -363,7 +413,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
     expect(scanFolders.flatMap(listFiles).length).toBeGreaterThan(0);
     expect(findTokenFiles(false)).toEqual([]);
     await run.stop();
-    expect(findTokenFiles(true)).toEqual([]);
+    expect(findTokenFiles(isAtLeast(codexVersion, [0, 169, 0]))).toEqual([]);
   });
 
   it("still connects to the gateway and asks, when a trusted project's config disables the gateway entry", async () => {

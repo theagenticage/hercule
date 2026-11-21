@@ -4,16 +4,20 @@
  * It speaks the older Streamable HTTP style that Codex and Claude Code still
  * use: an `initialize` request that answers with an `Mcp-Session-Id` header,
  * a GET stream for notifications, and one POST per JSON-RPC request. It offers
- * two tools, named the way the gateway names them (`<server>__<tool>`), and
+ * three tools, named the way the gateway names them (`<server>__<tool>`), and
  * records every request it receives, so a test can check what the harness
  * sent and that a call reached the server (or did not).
  */
+import { PNG_BYTES } from "./testing";
 
 /** The tool the fake offers with no annotations. */
 export const SEARCH_ISSUES_TOOL = "sentry__search_issues";
 
 /** The tool the fake offers with the `readOnlyHint` annotation. */
 export const WHOAMI_TOOL = "sentry__whoami";
+
+/** The tool the fake offers whose result holds an image, `PNG_BYTES`, as an MCP image block. */
+export const SNAPSHOT_IMAGE_TOOL = "sentry__get_snapshot_image";
 
 /** One request the fake received. `tool` is set on `tools/call` only. */
 export interface FakeMcpRequest {
@@ -44,6 +48,11 @@ const TOOLS = [
     description: "Returns the Sentry user the gateway acts as.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: SNAPSHOT_IMAGE_TOOL,
+    description: "Returns a snapshot of an issue as an image.",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 
@@ -105,9 +114,18 @@ export const startFakeMcpServer = (): FakeMcpServer => {
         case "tools/list":
           result = { tools: TOOLS };
           break;
-        case "tools/call":
-          result = { content: [{ type: "text", text: `result of ${String(body.params?.name)}` }] };
+        case "tools/call": {
+          const name = String(body.params?.name);
+          result = {
+            content: [
+              { type: "text", text: `result of ${name}` },
+              ...(name === SNAPSHOT_IMAGE_TOOL
+                ? [{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }]
+                : []),
+            ],
+          };
           break;
+        }
         default:
           return Response.json(
             {
