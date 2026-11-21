@@ -696,11 +696,18 @@ describe("typing", () => {
     // the result is for.
     moveCursorToLine(16);
     await user.keyboard("{End}e: x");
-    expect(hasErrorOnLine(16)).toBe(true);
+    // An underline is drawn in a render after the keys, and on a loaded machine
+    // that render may not be done when the keys return. So each check waits
+    // for the state it asserts.
+    await waitFor(() => {
+      expect(hasErrorOnLine(16)).toBe(true);
+    });
     await user.keyboard("{Backspace}{Backspace}{Backspace}");
 
-    expect(hasErrorOnLine(16)).toBe(false);
-    expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
+    await waitFor(() => {
+      expect(hasErrorOnLine(16)).toBe(false);
+      expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
+    });
   });
 
   it("keeps each \\r\\n of a source as the author types, and underlines its errors in the right places", async () => {
