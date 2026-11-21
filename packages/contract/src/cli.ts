@@ -607,7 +607,7 @@ export const CLI = {
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key. Nor is `mcp-server`: an MCP Server's sign-in is set through the server's own operations.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key. Nor is `mcp-server`: give a server added by address its token with `hercule mcp-server set-token`.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
