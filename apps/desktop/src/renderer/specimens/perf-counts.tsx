@@ -7,7 +7,9 @@
  * really sends.
  *
  * `?screen=inbox` opens the Inbox on 300 waiting things; `?screen=work` opens
- * Work on 300 Tasks in 10 Projects. The page exposes `window.perfCounts`
+ * Work on 300 Tasks in 10 Projects; `?screen=mcp` opens Settings > MCP servers
+ * on three servers, with a thread that has them (perf-counts-mcp-world.ts).
+ * The page exposes `window.perfCounts`
  * (`PerfCountsPage`) for the check to read the counters and to change the
  * world and push, as the controller would.
  *
@@ -54,6 +56,7 @@ import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import { buildRouterContext } from "../app/context";
 import { BOOT_HANDLERS, buildSidebarHandlers, SIDEBAR_FIXTURE } from "../app/fake-controller";
 import { createAppRouter } from "../app/router";
+import { buildMcpWorld, MCP_THREAD } from "./perf-counts-mcp-world";
 import type { PerfCountsPage } from "./perf-counts-page";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 
@@ -337,16 +340,28 @@ const BRIDGE: Bridge = {
 };
 
 const screenName = new URLSearchParams(location.search).get("screen");
-const worlds = { inbox: buildInboxWorld, work: buildWorkWorld } as const;
-if (screenName !== "inbox" && screenName !== "work") {
+const worlds = {
+  inbox: buildInboxWorld,
+  work: buildWorkWorld,
+  mcp: () => ({ handlers: buildMcpWorld(), changes: {} as Record<string, () => void> }),
+} as const;
+/** The address each screen opens at. */
+const START_PATHS = { inbox: "/inbox", work: "/work", mcp: "/settings/mcp-servers" } as const;
+if (screenName !== "inbox" && screenName !== "work" && screenName !== "mcp") {
   throw new Error(
-    `Unknown screen "${String(screenName)}" in the URL. Use ?screen=inbox or ?screen=work.`,
+    `Unknown screen "${String(screenName)}" in the URL. Use ?screen=inbox, ?screen=work or ?screen=mcp.`,
   );
 }
 const world = worlds[screenName]();
 const handlers: Record<string, Handler> = {
   ...BOOT_HANDLERS,
-  ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+  // The thread of the MCP world is the sidebar's own, with its three servers.
+  ...buildSidebarHandlers({
+    ...SIDEBAR_FIXTURE,
+    threads: SIDEBAR_FIXTURE.threads.map((thread) =>
+      screenName === "mcp" && thread.id === MCP_THREAD.id ? MCP_THREAD : thread,
+    ),
+  }),
   ...world.handlers,
 };
 const { fetch, calls } = createApiStub(handlers);
@@ -360,7 +375,7 @@ globalThis.WebSocket = function (url: string) {
 
 const context = await buildRouterContext(BRIDGE);
 const router = createAppRouter(context);
-router.history.replace(`/${screenName}`);
+router.history.replace(START_PATHS[screenName]);
 await router.load();
 const root = document.getElementById("root");
 if (root === null) throw new Error("perf-counts.html is missing #root");

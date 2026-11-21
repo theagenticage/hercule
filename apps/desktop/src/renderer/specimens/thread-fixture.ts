@@ -191,7 +191,7 @@ const CAUSE_MESSAGE = [
  * The push's own item has not started: the book draws no work stretch after
  * the second message, and a started item would draw one.
  */
-const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
+export const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
   [0, { _tag: "turn.started", turnId: TURN_ID, model: CLAUDE_OPUS.slug }],
   ...runItem([0, 0], "it-ask", "user_message", {
     text:
