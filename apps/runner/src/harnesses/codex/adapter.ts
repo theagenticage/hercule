@@ -1198,6 +1198,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readApprovalPaths(item));
         }
+        if (item.type === "mcpToolCall") {
+          // Kept while the call runs, so the question Codex asks before it
+          // runs the call can be filed under the call's item.
+          if (frame.method === "item/completed") thread.runningMcpCalls.delete(item.id);
+          else {
+            const { turnId } = frame.params as ItemStartedNotification;
+            thread.runningMcpCalls.set(item.id, {
+              itemId: item.id,
+              turnId,
+              server: item.server,
+              tool: item.tool,
+            });
+          }
+        }
         if (asyncItem !== undefined) {
           openAsyncQuestion(
             held,
@@ -1474,6 +1488,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       requestId: crypto.randomUUID(),
       threadId: thread.state.threadId,
       paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+      listRunningMcpCalls: (turnId) =>
+        [...thread.runningMcpCalls.values()].filter((call) => call.turnId === turnId),
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
     thread.parks.set(request.requestId, park);
@@ -1978,6 +1994,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               // still need replies, without duplicate resolution events.
               cancelRequests(held, thread, false);
               thread.fileChanges.clear();
+              thread.runningMcpCalls.clear();
             },
             failSession: () => exitSession(held, "crash"),
             reports,

@@ -41,6 +41,15 @@ import type {
   ToolRequestUserInputResponse,
 } from "./types";
 
+/** An MCP tool call item that Codex has started and not yet completed. */
+export interface RunningMcpCall {
+  readonly itemId: string;
+  readonly turnId: string;
+  /** The MCP server's name, as in Codex's `mcpToolCall` item. */
+  readonly server: string;
+  readonly tool: string;
+}
+
 /** What the adapter knows about an arriving request that is not in the request's params. */
 export interface Arrival {
   readonly requestId: string;
@@ -48,6 +57,8 @@ export interface Arrival {
   readonly threadId: string;
   /** Returns the paths of a file change item. A file change request does not include them. */
   readonly paths: (itemId: string) => ReadonlyArray<string>;
+  /** Returns the MCP tool call items of the thread that are running in this turn. */
+  readonly listRunningMcpCalls: (turnId: string) => ReadonlyArray<RunningMcpCall>;
 }
 
 export interface Asked {
@@ -122,23 +133,61 @@ const buildGrantedProfile = ({
 const ELICITATION = "mcpServer/elicitation/request";
 
 /**
- * Returns the name an MCP elicitation is shown under. An approval of a tool
+ * Reads the `_meta` of an MCP elicitation that asks to run a tool. Returns
+ * `undefined` for any other elicitation, such as a server asking for a form.
+ * `toolName` is `undefined` when Codex does not name the tool: the oldest
+ * Codex Hercule supports sends no `tool_name`, and names the tool only in the
+ * `message` text, which is not parsed.
+ */
+const readToolCallMeta = (
+  params: McpServerElicitationRequestParams,
+): { readonly toolName: string | undefined } | undefined => {
+  const meta = params._meta;
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
+  if (meta["codex_approval_kind"] !== "mcp_tool_call") return undefined;
+  const tool = meta["tool_name"];
+  return { toolName: typeof tool === "string" ? tool : undefined };
+};
+
+/**
+ * Returns the name an MCP elicitation is shown under. A question about a tool
  * call is shown as the tool the model sees, `mcp__<server>__<tool>`, the same
  * name Claude Code's approval shows for an MCP tool. Any other elicitation,
- * such as a server asking for a form, is shown as its server, and a server
- * with an empty name as the request method.
+ * and a tool call whose tool Codex does not name, is shown as its server, and
+ * a server with an empty name as the request method.
  */
 const buildElicitationToolName = (params: McpServerElicitationRequestParams): string => {
-  const meta = params._meta;
-  if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
-    const tool = meta["tool_name"];
-    if (meta["codex_approval_kind"] === "mcp_tool_call" && typeof tool === "string") {
-      return truncateFact(`mcp__${params.serverName}__${tool}`);
-    }
-  }
-  // The oldest Codex Hercule supports sends no `tool_name`, so its tool-call question is shown as
-  // its server. The tool is named only in the `message` text, which is not parsed.
+  const toolName = readToolCallMeta(params)?.toolName;
+  if (toolName !== undefined) return truncateFact(`mcp__${params.serverName}__${toolName}`);
   return params.serverName === "" ? ELICITATION : truncateFact(params.serverName);
+};
+
+/**
+ * Returns the id the elicitation is filed under. A question about a tool call
+ * belongs to that call's item when it is the one running call of the turn that
+ * matches the question: the same MCP server, and the same tool when Codex
+ * names it. The client marks the item a request names as awaiting approval.
+ *
+ * With no match, or with several, the question is filed under its turn (or
+ * the thread, when it has no turn): guessing would mark the wrong item. Any
+ * other elicitation belongs to no item and is filed the same way.
+ */
+const findElicitationItemId = (
+  params: McpServerElicitationRequestParams,
+  arrival: Arrival,
+): string => {
+  const toolCall = readToolCallMeta(params);
+  if (toolCall !== undefined && params.turnId !== null) {
+    const matches = arrival
+      .listRunningMcpCalls(params.turnId)
+      .filter(
+        (call) =>
+          call.server === params.serverName &&
+          (toolCall.toolName === undefined || call.tool === toolCall.toolName),
+      );
+    if (matches.length === 1) return ensureId(matches[0]!.itemId);
+  }
+  return ensureId(params.turnId ?? arrival.threadId);
 };
 
 /**
@@ -208,11 +257,9 @@ export const ASKED: Readonly<Record<string, Asked>> = {
   }),
 
   [ELICITATION]: buildAsked<McpServerElicitationRequestParams>({
-    opens: (params, { requestId, threadId }) => ({
-      requestId,
-      // An elicitation belongs to no item, so it is filed under its turn, or
-      // under the thread when the request has no turn id.
-      itemId: ensureId(params.turnId ?? threadId),
+    opens: (params, arrival) => ({
+      requestId: arrival.requestId,
+      itemId: findElicitationItemId(params, arrival),
       kind: "tool_approval",
       // The reply has no "accept for this session", so `allow_always` is not
       // offered: the adapter would have to replace it with something else.

@@ -84,7 +84,7 @@ export const buildMcpServerConfig = (
     ? {}
     : {
         ...Object.fromEntries(
-          servers.flatMap((server) => [
+          servers.flatMap((server): Array<[string, JsonValue]> => [
             [`mcp_servers.${server.name}.url`, server.url],
             [`mcp_servers.${server.name}.enabled`, true],
             [`mcp_servers.${server.name}.disabled_tools`, []],
