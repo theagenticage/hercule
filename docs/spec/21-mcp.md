@@ -461,7 +461,7 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 
 | Status | Meaning |
 |---|---|
-| `checking` | From creation, or from switching on, until the first list ends. A later check does not go back to `checking`. Its result sets the status |
+| `checking` | From creation, or from switching on, until the first list ends. A later check does not go back to `checking`. Its result sets the status. *(Amended 2026-11-21, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* A new sign-in (`setToken`) and Replace also go back to `checking`, because the last status was about a sign-in or a destination that is gone |
 | `ready` | The last list or call succeeded |
 | `needs-sign-in` | The credential is not usable ([sections 5.1](#51-a-plugin-servers-credential) and [5.2](#52-a-url-servers-sign-in)) |
 | `unreachable` | No usable answer, and trying again later may cure it: no connection, a connection that closes in the middle of an exchange, a timeout on a check, an HTTP 5xx, or an HTTP 429. Checked again with backoff |
