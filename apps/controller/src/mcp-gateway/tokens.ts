@@ -17,12 +17,13 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import type { SessionActor } from "../actor";
 import { PROFILE_GRANTS_TOPIC, RecordChanges } from "../db";
 import { McpServerCalls } from "../mcp-servers";
 import { PromotionState } from "../promotion";
 import { makeFreshReads } from "./reads";
+import type { SeenWarning } from "./refusals";
 import { fingerprintServed } from "./served";
 import type { OpenStream } from "./streams";
 import { makeNameLedger, type NameLedger } from "./tool-names";
@@ -32,6 +33,21 @@ const SWEEP_INTERVAL = Duration.minutes(1);
 
 /** The most MCP sessions one Session Token keeps. A harness that never sends DELETE loses its oldest. */
 const MAX_MCP_SESSIONS_PER_TOKEN = 16;
+
+/**
+ * The most `subscriptions/listen` streams one Session Token keeps open. Claude
+ * Code opens one, and a few more when subagents connect on their own. Each open
+ * stream holds a response and a queue, and costs a read on every server change.
+ */
+export const MAX_LISTEN_STREAMS_PER_TOKEN = 8;
+
+/**
+ * The most `tools/call` requests one Session Token runs at once. A harness
+ * runs the calls of one turn side by side, and subagents add a few more. An
+ * agent with a shell can send calls directly, and each one that runs holds an
+ * upstream request on the user's credential for up to a minute.
+ */
+export const MAX_RUNNING_CALLS_PER_TOKEN = 32;
 
 /** Who is calling: the Session Token the route resolved, and the session behind it. */
 export interface McpCaller {
@@ -44,8 +60,20 @@ export interface McpSession {
   readonly id: string;
   /** The revision `initialize` negotiated. Later requests of the session must not name another. */
   readonly revision: string;
-  /** The `tools/call` requests running now, by their JSON-RPC id, so `notifications/cancelled` can stop one. */
-  readonly calls: Map<string, Fiber.Fiber<unknown, unknown>>;
+  /**
+   * The `tools/call` requests running now, each with its JSON-RPC id as JSON
+   * text, so `notifications/cancelled` can stop the ones it names. Keyed by the
+   * running call, because two calls can share an id.
+   */
+  readonly calls: Map<Fiber.Fiber<unknown, unknown>, string>;
+}
+
+/** What the gateway remembers about the warnings it wrote to the Thread of one Session Token. */
+export interface WarningState {
+  /** When the Thread was last told about each refusal. */
+  readonly seen: Map<string, SeenWarning>;
+  /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
+  readonly writing: Semaphore.Semaphore;
 }
 
 /** What the gateway keeps for one Session Token. */
@@ -60,20 +88,30 @@ export interface TokenState {
   readonly names: NameLedger;
   /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
   readonly admission: Semaphore.Semaphore;
+  readonly warnings: WarningState;
 }
 
 /** Tells every open stream of the token to list the tools again. */
 export const notifyListChanged = (state: TokenState): Effect.Effect<void> =>
   Effect.forEach([...state.streams], (stream) => stream.notifyListChanged, { discard: true });
 
-/** Stops the call of the MCP session with this JSON-RPC id, if it is running. */
+/** Stops the calls of the MCP session that have this JSON-RPC id, if any is running. */
 export const cancelCall = (
   session: McpSession | undefined,
   requestId: unknown,
 ): Effect.Effect<void> => {
-  const running = session?.calls.get(JSON.stringify(requestId));
-  return running === undefined ? Effect.void : Effect.asVoid(Fiber.interrupt(running));
+  const key = JSON.stringify(requestId);
+  return Effect.forEach(
+    [...(session?.calls ?? [])].filter(([, runningKey]) => runningKey === key),
+    ([running]) => Fiber.interrupt(running),
+    { discard: true },
+  );
 };
+
+/** Returns whether the token may open one more `subscriptions/listen` stream. The GET streams of its MCP sessions are not counted. */
+export const hasRoomForListenStream = (state: TokenState): boolean =>
+  [...state.streams].filter((stream) => stream.mcpSessionId === undefined).length <
+  MAX_LISTEN_STREAMS_PER_TOKEN;
 
 /** Builds the gateway's per-token state and the operations on it. */
 export const makeTokenStates = Effect.gen(function* () {
@@ -103,6 +141,7 @@ export const makeTokenStates = Effect.gen(function* () {
       runningCalls: new Set(),
       names: makeNameLedger(),
       admission: Semaphore.makeUnsafe(1),
+      warnings: { seen: new Map(), writing: Semaphore.makeUnsafe(1) },
     };
     states.set(tokenHash, created);
     return created;
@@ -127,7 +166,7 @@ export const makeTokenStates = Effect.gen(function* () {
     state.mcpSessions.delete(mcpSessionId);
     return Effect.andThen(
       endStreams(state, mcpSessionId),
-      Effect.forEach([...session.calls.values()], (call) => Fiber.interrupt(call), {
+      Effect.forEach([...session.calls.keys()], (call) => Fiber.interrupt(call), {
         discard: true,
       }),
     );
@@ -158,23 +197,25 @@ export const makeTokenStates = Effect.gen(function* () {
   /**
    * Runs a `tools/call` as a fiber of the token and waits for its exit. While
    * it runs, `notifications/cancelled`, the end of its MCP session and the end
-   * of the token can interrupt it.
+   * of the token can interrupt it. Returns `none`, and runs nothing, when the
+   * token already runs `MAX_RUNNING_CALLS_PER_TOKEN` calls.
    */
   const runCall = <A>(
     state: TokenState,
     session: McpSession | undefined,
     requestId: unknown,
     call: Effect.Effect<A>,
-  ): Effect.Effect<Exit.Exit<A>> =>
+  ): Effect.Effect<Option.Option<Exit.Exit<A>>> =>
     Effect.gen(function* () {
+      if (state.runningCalls.size >= MAX_RUNNING_CALLS_PER_TOKEN) return Option.none();
       const running = yield* Effect.forkChild(call);
-      const key = JSON.stringify(requestId);
-      session?.calls.set(key, running);
+      session?.calls.set(running, JSON.stringify(requestId));
       state.runningCalls.add(running);
       return yield* Fiber.await(running).pipe(
+        Effect.map(Option.some),
         Effect.ensuring(
           Effect.sync(() => {
-            session?.calls.delete(key);
+            session?.calls.delete(running);
             state.runningCalls.delete(running);
           }),
         ),
@@ -211,7 +252,8 @@ export const makeTokenStates = Effect.gen(function* () {
             const alive = !closing && states.get(state.tokenHash) === state;
             const sessionAlive =
               stream.mcpSessionId === undefined || state.mcpSessions.has(stream.mcpSessionId);
-            if (!alive || !sessionAlive) return undefined;
+            const roomLeft = stream.mcpSessionId !== undefined || hasRoomForListenStream(state);
+            if (!alive || !sessionAlive || !roomLeft) return undefined;
             const old = [...state.streams].filter(
               (other) =>
                 stream.mcpSessionId !== undefined && other.mcpSessionId === stream.mcpSessionId,
@@ -252,19 +294,25 @@ export const makeTokenStates = Effect.gen(function* () {
   // -- Keeping in step with the database ------------------------------------
 
   /**
-   * Forgets a Session Token that no longer resolves: ends its streams, stops
-   * its calls and then closes its upstream sessions, so no call is still using
-   * one.
+   * Forgets a Session Token that no longer resolves: ends its streams at once,
+   * then stops its calls and closes its upstream sessions in the background,
+   * in that order, so no call is still using a session when it closes. An
+   * upstream server that answers slowly holds up only that background work,
+   * never the follower of changes.
    */
   const forgetToken = (state: TokenState): Effect.Effect<void> =>
     Effect.gen(function* () {
       states.delete(state.tokenHash);
       yield* endStreams(state);
-      yield* Effect.forEach([...state.runningCalls], (call) => Fiber.interrupt(call), {
-        discard: true,
-      });
       state.mcpSessions.clear();
-      yield* catalogue.closeUpstreamSessionsExcept(state.tokenHash, new Set());
+      const calls = [...state.runningCalls];
+      yield* forkAndAbsorbFailures(
+        "Closing the upstream MCP sessions of a token that ended failed",
+        Effect.andThen(
+          Effect.forEach(calls, (call) => Fiber.interrupt(call), { discard: true }),
+          catalogue.closeUpstreamSessionsExcept(state.tokenHash, new Set()),
+        ),
+      );
     });
 
   /**
@@ -274,16 +322,19 @@ export const makeTokenStates = Effect.gen(function* () {
    * - each open stream that was last told about another tool list gets
    *   `list_changed`. Each stream is judged against what it was told itself,
    *   so a `tools/list` that one client made never hides the change from
-   *   another. A token with no stream needs no comparison;
+   *   another. A token with no stream needs no comparison, so its tool lists
+   *   are not read;
    * - the upstream sessions of the servers the session is not served any
-   *   more are closed.
+   *   more are closed in the background.
    */
   const reconcileToken = (state: TokenState): Effect.Effect<void> =>
     Effect.gen(function* () {
       const actor = yield* reads.resolveActor(state.tokenHash);
       if (Option.isNone(actor)) return yield* forgetToken(state);
-      const served = yield* reads.readServed(actor.value);
+      let servedServerIds: ReadonlyArray<string>;
       if (state.streams.size > 0) {
+        const served = yield* reads.readServed(actor.value);
+        servedServerIds = served.map(({ server }) => server.id);
         const fingerprint = fingerprintServed(served, actor.value, state.names);
         yield* Effect.forEach(
           [...state.streams].filter((stream) => stream.told !== fingerprint),
@@ -293,10 +344,13 @@ export const makeTokenStates = Effect.gen(function* () {
           },
           { discard: true },
         );
+      } else {
+        const served = yield* reads.readServedAvailability(actor.value);
+        servedServerIds = served.map(({ server }) => server.id);
       }
-      yield* catalogue.closeUpstreamSessionsExcept(
-        state.tokenHash,
-        new Set(served.map(({ server }) => server.id)),
+      yield* forkAndAbsorbFailures(
+        "Closing the upstream MCP sessions of servers a session is not served any more failed",
+        catalogue.closeUpstreamSessionsExcept(state.tokenHash, new Set(servedServerIds)),
       );
     });
 

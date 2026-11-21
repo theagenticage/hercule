@@ -4,7 +4,6 @@
  * map `claimWarning` records into.
  */
 import type { McpServerWarningReason } from "@hercule/protocol";
-import type { StoredMcpServer } from "../mcp-servers";
 
 /** Why a call was refused: a reason the Thread can name, or a tool name no server of the session has. */
 export type RefusalReason = McpServerWarningReason | "unknown-tool";
@@ -69,18 +68,8 @@ export const buildNotInListRefusal = (
   tool,
   message:
     `The MCP server "${serverName}" is not in this Thread's list any more. ` +
-    "Ask the user to add it back to the Thread.",
-});
-
-/** The tool is no longer in the server's stored tool list. */
-export const buildToolGoneRefusal = (
-  server: Pick<StoredMcpServer, "id" | "name">,
-  toolName: string,
-): Refusal => ({
-  reason: "unknown-tool",
-  server: { id: server.id, name: server.name },
-  tool: toolName,
-  message: `The MCP server "${server.name}" no longer offers a tool named "${showToolName(toolName)}".`,
+    "The user may have removed it from the Thread or deleted it. " +
+    "If you still need it, ask the user to check which MCP servers this Thread has.",
 });
 
 /** Returns the line the Thread shows for a refused call. */

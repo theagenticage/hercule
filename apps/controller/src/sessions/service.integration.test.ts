@@ -1485,6 +1485,83 @@ describe("the MCP servers of a session at a start", () => {
   });
 });
 
+describe("MCP servers added to a running session", () => {
+  /** Inserts a runner row, which the warning reads the capabilities of. */
+  const insertRunnerWithCapabilities = (capabilities: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runnerId = mintId();
+      yield* withTransaction(
+        sql,
+        sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, negotiated_capabilities, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  ${`hash-${runnerId}`}, ${JSON.stringify(capabilities)}, ${at}, ${at})`,
+      );
+      return runnerId;
+    });
+
+  /** Starts an idle session with an empty list, adds a server to it, and returns the warnings it wrote. */
+  const addServerToRunningSession = (
+    name: string,
+    harnessId: string,
+    capabilities: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const rows = yield* sessionRepository;
+      const runnerId = yield* insertRunnerWithCapabilities(capabilities);
+      const [sentry] = yield* insertMcpServers([{ name, status: "ready" }]);
+      const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+        harnessId,
+        permissionProfileId: yield* aProfileWith(["mcp.use"]),
+        servers: [],
+      });
+      yield* claimStarting(runnerId, 1, undefined, undefined, capabilities);
+      yield* withTransaction(sql, rows.moved(sessionId, "idle", at));
+      yield* withTransaction(
+        sql,
+        Effect.provideService(sessions.setMcpServers(sessionId, [sentry!]), CurrentActor, USER),
+      );
+      return { sentry: sentry!, warnings: yield* readRuntimeWarnings(sessionId) };
+    });
+
+  it("warns once, naming the server and why, when the runner is too old or the harness cannot take MCP servers", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        return {
+          tooOld: yield* addServerToRunningSession("old", NATIVE_MCP_HARNESS_ID, []),
+          bare: yield* addServerToRunningSession("bare", BARE_MCP_HARNESS_ID, [
+            MCP_SERVERS_CAPABILITY,
+          ]),
+          fine: yield* addServerToRunningSession("fine", NATIVE_MCP_HARNESS_ID, [
+            MCP_SERVERS_CAPABILITY,
+          ]),
+        };
+      }),
+    );
+
+    expect(result.tooOld.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: old (its runner is too old to reach MCP servers)",
+        mcpServers: [{ mcpServerId: result.tooOld.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.bare.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: bare (its harness cannot be given MCP servers)",
+        mcpServers: [{ mcpServerId: result.bare.sentry, reason: "harness-unsupported" }],
+      }),
+    ]);
+    expect(result.fine.warnings).toEqual([]);
+  });
+});
+
 describe("SessionService.inputFrame", () => {
   it("fails with a defect on a step prompt whose session no step started", async () => {
     const row: StoredInput = {
@@ -2583,7 +2660,7 @@ describe("a warning the controller writes while a turn runs", () => {
     expect(cut!.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
     // `encodeURIComponent` throws on a lone surrogate.
     expect(() => encodeURIComponent(cut!)).not.toThrow();
-    expect(cut!.endsWith("...")).toBe(true);
+    expect(cut!.endsWith("…")).toBe(true);
     expect(short).toBe("short");
   });
 

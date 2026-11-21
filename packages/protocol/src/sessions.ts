@@ -132,6 +132,13 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
+ * The name of the gateway's entry in `SessionSpec.mcpServers`. A harness puts
+ * it in front of every tool name, so the model sees
+ * `mcp__tools__<server>__<tool>`.
+ */
+export const MCP_GATEWAY_ENTRY_NAME = "tools";
+
+/**
  * The gateway's entry in `SessionSpec.mcpServers` (spec 06 section 4): the one
  * MCP server the harness is given, the MCP Gateway in the controller. It holds
  * a path and a word, never an address or a token: the runner binds `url`
@@ -140,7 +147,7 @@ export const DisallowedTool = Schema.String.check(
  */
 export const HarnessMcpServer = Schema.Struct({
   /** The name in front of every tool the model sees: `mcp__tools__<server>__<tool>`. */
-  name: Schema.Literal("tools"),
+  name: Schema.Literal(MCP_GATEWAY_ENTRY_NAME),
   type: Schema.Literal("http"),
   /** A path on the controller, such as `/mcp`, resolved by the runner to an absolute URL. */
   url: Fact,

@@ -6,7 +6,6 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { McpSchema } from "effect/ai";
 import { ControllerSealed, PromotionInProgress } from "@hercule/contract";
@@ -14,13 +13,7 @@ import { absorbFailures } from "../absorbing";
 import { buildSessionStamp, type SessionActor } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
-import {
-  buildErrorResult,
-  decideCallRefusal,
-  isServable,
-  McpCallRefused,
-  McpServerCalls,
-} from "../mcp-servers";
+import { buildErrorResult, McpCallRefused, McpServerCalls } from "../mcp-servers";
 import { PromotionState } from "../promotion";
 import { SessionService } from "../sessions";
 import type { JsonObject } from "./protocol";
@@ -29,11 +22,9 @@ import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
   buildRefusalWarning,
-  buildToolGoneRefusal,
   buildUnknownToolRefusal,
   claimWarning,
   type Refusal,
-  type SeenWarning,
 } from "./refusals";
 import { holdsMcpUse } from "./served";
 import { notifyListChanged, type TokenState } from "./tokens";
@@ -54,14 +45,6 @@ type CallOutcome =
   | { readonly _tag: "refused"; readonly reason: string }
   | { readonly _tag: "failed" };
 
-/** What the gateway remembers about the warnings it wrote to one Thread. */
-interface WarningState {
-  /** When the Thread was last told about each refusal. */
-  readonly seen: Map<string, SeenWarning>;
-  /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
-  readonly writing: Semaphore.Semaphore;
-}
-
 const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
   error instanceof ControllerSealed || error instanceof PromotionInProgress;
 
@@ -73,16 +56,6 @@ export const makeCallPolicy = Effect.gen(function* () {
   const catalogue = yield* McpServerCalls;
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
-
-  const warningStates = new WeakMap<TokenState, WarningState>();
-
-  const findOrCreateWarningState = (state: TokenState): WarningState => {
-    const existing = warningStates.get(state);
-    if (existing !== undefined) return existing;
-    const created: WarningState = { seen: new Map(), writing: Semaphore.makeUnsafe(1) };
-    warningStates.set(state, created);
-    return created;
-  };
 
   /** Reads what a call means and whether it may go on, without sending anything. */
   const decideCall = (
@@ -102,9 +75,13 @@ export const makeCallPolicy = Effect.gen(function* () {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
+      // The server the name reaches is the one of that name in the session's
+      // list now, which may be another account than the one the name was sent
+      // for. Whether it is ready and still lists the tool is the catalogue's
+      // decision, made when the call is sent.
       const views = yield* reads.readListedAvailability(actor.sessionId);
-      const view = views.find(({ server }) => server.name === meaning.serverName);
-      if (view === undefined) {
+      const listed = views.find(({ server }) => server.name === meaning.serverName);
+      if (listed === undefined) {
         return {
           _tag: "refused",
           refusal: buildNotInListRefusal(
@@ -114,23 +91,7 @@ export const makeCallPolicy = Effect.gen(function* () {
           ),
         };
       }
-      const { server } = view;
-      const unavailable = isServable(view) ? null : decideCallRefusal(view);
-      if (unavailable !== null) {
-        return {
-          _tag: "refused",
-          refusal: {
-            ...unavailable,
-            server: { id: server.id, name: server.name },
-            tool: meaning.tool,
-          },
-        };
-      }
-      // Only the server being called has its stored tools read.
-      const tools = yield* reads.readServerTools(server.id);
-      if (!tools.some((tool) => tool.name === meaning.tool)) {
-        return { _tag: "refused", refusal: buildToolGoneRefusal(server, meaning.tool) };
-      }
+      const { server } = listed;
       return { _tag: "call", serverId: server.id, serverName: server.name, tool: meaning.tool };
     });
 
@@ -174,7 +135,7 @@ export const makeCallPolicy = Effect.gen(function* () {
    * nothing for the agent.
    */
   const warnThread = (state: TokenState, refusal: Refusal): Effect.Effect<void> => {
-    const warnings = findOrCreateWarningState(state);
+    const warnings = state.warnings;
     return absorbFailures(
       "Writing the warning about a refused MCP tool call failed",
       warnings.writing.withPermits(1)(
@@ -325,7 +286,28 @@ export const makeCallPolicy = Effect.gen(function* () {
       call: { readonly name: string; readonly arguments: JsonObject | undefined },
     ): Effect.Effect<McpSchema.CallToolResult> =>
       Effect.gen(function* () {
-        const decision = yield* decideCall(state, actor, call.name);
+        const startedAt = Date.now();
+        // A call interrupted or killed while it is being decided still gets
+        // its entry, as `failed`. While the controller is frozen or sealed the
+        // gate refuses the write, and then the call goes unaudited as spec 21
+        // section 3.9 says of every call in that window.
+        const decision = yield* decideCall(state, actor, call.name).pipe(
+          Effect.onError(() =>
+            Effect.uninterruptible(
+              promotion
+                .admit(
+                  auditCall(
+                    actor,
+                    undefined,
+                    undefined,
+                    { _tag: "failed" },
+                    Date.now() - startedAt,
+                  ),
+                )
+                .pipe(Effect.catchIf(isPromotionRefusal, () => Effect.void)),
+            ),
+          ),
+        );
         // Admitted, so that a freeze waits for the call and its audit entry, and
         // so that nothing here writes once the database stops accepting writes.
         return yield* promotion
