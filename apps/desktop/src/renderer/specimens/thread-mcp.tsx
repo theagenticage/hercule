@@ -30,6 +30,10 @@ if (state === "lines") {
   // Each line is drawn as a plain warning until its code has loaded, and then
   // gets its button.
   await waitForParts(".error-note button", 2);
+  // The `+` is final once its menu has loaded (the button then opens a popover)
+  // and the thread's list holds the server that needs sign-in, which puts a
+  // red dot on it. Capturing before that catches the plain `+` that stands in.
+  await waitForPart(".composer-row button.plus-button[popovertarget] .plus-dot");
 } else if (state === "menu") {
   await mountThreadSpecimen(MCP_THREAD.records, MCP_THREAD.thread, MCP_RECORDS);
   // The `+` is a plain button until the menu's code has loaded.
