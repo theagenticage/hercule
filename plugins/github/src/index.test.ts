@@ -14,6 +14,7 @@ import type {
   ConnectionTypeContribution,
   EventSourceContribution,
   ExternalAccount,
+  McpServerContribution,
   Plugin,
   RegistrationHost,
   WorkflowActionContribution,
@@ -29,10 +30,12 @@ const collectContributions = async (
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
   readonly sources: ReadonlyArray<EventSourceContribution>;
   readonly actions: ReadonlyArray<WorkflowActionContribution>;
+  readonly mcpServers: ReadonlyArray<McpServerContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
   const sources: Array<EventSourceContribution> = [];
   const actions: Array<WorkflowActionContribution> = [];
+  const mcpServers: Array<McpServerContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) =>
@@ -52,9 +55,12 @@ const collectContributions = async (
           actions.push(contribution);
         }),
     },
+    mcpServers: {
+      register: (contribution) => Effect.sync(() => void mcpServers.push(contribution)),
+    },
   };
   await Effect.runPromise(plugin.register(host));
-  return { types, sources, actions };
+  return { types, sources, actions, mcpServers };
 };
 
 const PAT = "ghp_a-real-looking-token";
@@ -124,7 +130,7 @@ const ACTIONS = [
 ];
 
 describe("what the github plugin registers", () => {
-  it("requests the capabilities its connection type, ingest and actions use", () => {
+  it("requests the capabilities its connection type, ingest, actions and MCP server use", () => {
     expect(github.manifest).toMatchObject({
       id: "github",
       capabilities: [
@@ -134,8 +140,15 @@ describe("what the github plugin registers", () => {
         "resources",
         "entities",
         "workflow-actions",
+        "mcp-servers",
       ],
     });
+  });
+
+  it("contributes one MCP server", async () => {
+    const { mcpServers } = await collectContributions(github);
+
+    expect(mcpServers.map((server) => server.id)).toEqual(["github"]);
   });
 
   it("declares the entity kinds it reports and an entities feed to poll them", async () => {

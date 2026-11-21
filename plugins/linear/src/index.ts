@@ -1,13 +1,15 @@
 /**
- * The Linear plugin: the Linear connection type, and the event source that
+ * The Linear plugin: the Linear connection type, the event source that
  * polls Linear for the issues the user watches, for their inbox and for the
- * issues assigned to them.
+ * issues assigned to them, and the MCP server that gives sessions Linear's
+ * tools.
  */
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   type EventSourceContribution,
   type Plugin,
 } from "@hercule/plugin-host";
@@ -16,6 +18,7 @@ import { LINEAR_ENTITY_KINDS } from "./entity-kinds";
 import { linearEntityLookup } from "./entity-lookup";
 import { openLinearIngest } from "./ingest";
 import { LINEAR_EVENT_KINDS } from "./kinds";
+import { linearMcpServer } from "./mcp-server";
 import { LINEAR_SIGNAL_KINDS } from "./signal-kinds";
 
 /**
@@ -54,7 +57,7 @@ export const linear: Plugin = {
     id: "linear",
     displayName: "Linear",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "entities"],
+    capabilities: ["connections", "event-sources", "events", "entities", "mcp-servers"],
     configSchema: Schema.Struct({}),
     mark: { paths: [LINEAR_MARK_PATH], hue: 268 },
   },
@@ -62,6 +65,7 @@ export const linear: Plugin = {
     Effect.gen(function* () {
       yield* registerConnectionType(host, connectionType);
       yield* registerEventSource(host, eventSource);
+      yield* registerMcpServer(host, linearMcpServer);
     }),
   // The host opens and polls the ingest handles itself, so there is nothing
   // for the plugin to start.
