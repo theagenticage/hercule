@@ -1142,7 +1142,12 @@ const make = Effect.gen(function* () {
         const reason = decideLeftOutReason(delivery, view);
         if (reason === null) continue;
         reasons.set(mcpServerId, reason);
-        leftOut.push({ mcpServerId, name: view.server.name, reason });
+        leftOut.push({
+          mcpServerId,
+          name: view.server.name,
+          sourceKind: view.server.source.kind,
+          reason,
+        });
       }
       yield* sessions.recordLeftOut(sessionId, reasons);
       if (leftOut.length === 0) return;
@@ -1194,7 +1199,12 @@ const make = Effect.gen(function* () {
         const view = views.get(mcpServerId);
         // The caller checked the list, so every added id is a server.
         if (view === undefined) return yield* Effect.die(`MCP server ${mcpServerId} is missing`);
-        unreachable.push({ mcpServerId, name: view.server.name, reason });
+        unreachable.push({
+          mcpServerId,
+          name: view.server.name,
+          sourceKind: view.server.source.kind,
+          reason,
+        });
       }
       const warning = buildLeftOutWarning(unreachable);
       yield* appendRuntimeWarning(session.id, warning.message, at, warning.mcpServers);

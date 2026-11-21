@@ -23,10 +23,12 @@ import type { McpServerLeftOutReason } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { connectionRepository, type StoredConnection } from "../connections";
-import { PluginHost, type RegisteredMcpServer } from "../plugins";
+import { PluginHost, type LoadedPlugin, type RegisteredMcpServer } from "../plugins";
 import {
   mcpServerRepository,
   type McpServerColumns,
+  type McpServerStoredSource,
+  type McpServerUrlSource,
   type StoredMcpServer,
   type StoredMcpServerAvailability,
 } from "./repository";
@@ -44,28 +46,35 @@ export type PluginState =
   | { readonly _tag: "missing" };
 
 /**
- * What a server depends on outside its own row: its Connection and its
- * plugin. A check reads it before it decides, and `writeCheckResult` reads it
- * again before it writes.
+ * What a server depends on outside its own row. A plugin server depends on
+ * its Connection and its plugin. A check reads it before it decides, and
+ * `writeCheckResult` reads it again before it writes. A server added by URL
+ * depends on nothing outside its row, so its entry only carries the row's
+ * `source`, narrowed to the URL kind, for whoever resolves how to reach it.
  */
-export interface McpServerDependencies {
-  /** `undefined` when the Connection no longer exists. */
-  readonly connection: StoredConnection | undefined;
-  readonly plugin: PluginState;
-}
+export type McpServerDependencies =
+  | {
+      readonly kind: "plugin";
+      /** `undefined` when the Connection no longer exists. */
+      readonly connection: StoredConnection | undefined;
+      readonly plugin: PluginState;
+    }
+  | { readonly kind: "url"; readonly source: McpServerUrlSource };
 
 /**
  * Tells whether two readings of the dependencies are the same for a server:
  * the same plugin state, and the same Connection with the same status and
- * credentials generation.
+ * credentials generation. A server added by URL has nothing that can differ.
  */
 export const isSameDependencies = (
   before: McpServerDependencies,
   now: McpServerDependencies,
 ): boolean =>
-  before.plugin._tag === now.plugin._tag &&
-  before.connection?.status === now.connection?.status &&
-  before.connection?.credentialsGeneration === now.connection?.credentialsGeneration;
+  before.kind === "plugin" && now.kind === "plugin"
+    ? before.plugin._tag === now.plugin._tag &&
+      before.connection?.status === now.connection?.status &&
+      before.connection?.credentialsGeneration === now.connection?.credentialsGeneration
+    : before.kind === now.kind;
 
 /** What a server shows when its plugin or its Connection cannot serve it. */
 export interface Unusable {
@@ -75,24 +84,37 @@ export interface Unusable {
   readonly cause: "plugin" | "connection";
 }
 
-/** A server whose plugin is active and whose Connection exists and is not `needs-reauth` or `disabled`. */
-export interface Usable {
+/** A plugin server whose plugin is active and whose Connection exists and is not `needs-reauth` or `disabled`. */
+export interface UsablePlugin {
   readonly _tag: "usable";
+  readonly kind: "plugin";
   readonly contribution: RegisteredMcpServer;
   readonly connection: StoredConnection;
 }
 
+/** A server added by URL. It depends on nothing outside its row, so nothing can make it unusable. */
+export interface UsableUrl {
+  readonly _tag: "usable";
+  readonly kind: "url";
+  readonly source: McpServerUrlSource;
+}
+
+/** A server that can be reached, whichever way it was added. */
+export type Usable = UsablePlugin | UsableUrl;
+
 /**
- * Judges whether a server's plugin and Connection can serve it. When they
- * cannot, returns what the server shows: its plugin is missing or switched
- * off or failed to start, or its Connection is gone, `disabled` or
+ * Judges whether the things a server depends on can serve it. A server added
+ * by URL has none, so it is always usable. For a plugin server, returns what
+ * the server shows when it cannot be served: its plugin is missing or
+ * switched off or failed to start, or its Connection is gone, `disabled` or
  * `needs-reauth`. The check and the follower both use it, so they show the
  * same words.
  */
-export const judgeDependencies = ({
-  plugin,
-  connection,
-}: McpServerDependencies): Usable | Unusable => {
+export const judgeDependencies = (dependencies: McpServerDependencies): Usable | Unusable => {
+  if (dependencies.kind === "url") {
+    return { _tag: "usable", kind: "url", source: dependencies.source };
+  }
+  const { plugin, connection } = dependencies;
   switch (plugin._tag) {
     case "missing":
       return {
@@ -142,7 +164,7 @@ export const judgeDependencies = ({
       cause: "connection",
     };
   }
-  return { _tag: "usable", contribution: plugin.contribution, connection };
+  return { _tag: "usable", kind: "plugin", contribution: plugin.contribution, connection };
 };
 
 /** One MCP Server and what it depends on, read at one moment. */
@@ -180,6 +202,9 @@ interface Unavailable {
  * 3. its Connection is not of the type its plugin's contribution needs:
  *    `error`, because the credentials would go to the wrong origin;
  * 4. its stored status is not `ready`.
+ *
+ * A server added by URL has no plugin or Connection, so only the first and the
+ * last apply to it.
  */
 const findUnavailable = ({
   server,
@@ -188,7 +213,9 @@ const findUnavailable = ({
   if (!server.enabled) return { reason: "switched-off" };
   const judged = judgeDependencies(dependencies);
   if (judged._tag === "unusable") return { reason: judged.status, detail: judged.detail };
-  if (judged.connection.type !== judged.contribution.connectionType) return { reason: "error" };
+  if (judged.kind === "plugin" && judged.connection.type !== judged.contribution.connectionType) {
+    return { reason: "error" };
+  }
   return server.status === "ready" ? null : { reason: server.status };
 };
 
@@ -216,15 +243,30 @@ export interface CallRefusal {
   readonly message: string;
 }
 
-/** Returns the line the agent reads when a call to the server named `name` is refused for `reason`. */
-export const describeRefusal = (reason: ServerUnavailableReason, name: string): string => {
+/**
+ * Returns what the user does to sign in to a server, as the end of a
+ * sentence: a plugin server is signed in to through its Connection, and a
+ * server added by URL through its own settings. Every message that tells the
+ * user how to sign in uses this wording.
+ */
+export const describeSignInFix = (sourceKind: McpServerStoredSource["kind"]): string =>
+  sourceKind === "plugin"
+    ? "reconnect it in Settings > Connections"
+    : "paste a token or sign in in Settings > MCP servers";
+
+/** Returns the line the agent reads when a call to `server` is refused for `reason`. */
+export const describeRefusal = (
+  reason: ServerUnavailableReason,
+  server: Pick<StoredMcpServerAvailability, "name" | "source">,
+): string => {
+  const { name } = server;
   switch (reason) {
     case "switched-off":
       return `${name} is switched off. Ask the user to switch it on in Settings.`;
     case "checking":
       return `${name} is still being checked. Try again in a minute.`;
     case "needs-sign-in":
-      return `${name} needs sign-in. Ask the user to reconnect it in Settings > Connections.`;
+      return `${name} needs sign-in. Ask the user to ${describeSignInFix(server.source.kind)}.`;
     case "unreachable":
       return `${name} could not be reached. Try again later.`;
     case "error":
@@ -247,12 +289,45 @@ export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal 
     message:
       detail !== undefined && reason === "error"
         ? `${name} is not available: ${detail}.`
-        : describeRefusal(reason, name),
+        : describeRefusal(reason, view.server),
   };
 };
 
-/** The fields of a server row that decide what it depends on. */
-type DependencyIds = Pick<StoredMcpServer, "connectionId" | "contributionId">;
+/** The field of a server row that decides what it depends on. */
+type DependencyIds = Pick<StoredMcpServerAvailability, "source">;
+
+/**
+ * Judges whether the plugin that offers a registered contribution can serve
+ * it, from the plugins the host loaded. Never returns `missing`, because the
+ * contribution is known.
+ */
+export const judgeContributionPlugin = (
+  contribution: RegisteredMcpServer,
+  loaded: ReadonlyArray<LoadedPlugin>,
+): Exclude<PluginState, { readonly _tag: "missing" }> => {
+  const plugin = loaded.find((one) => one.id === contribution.pluginId);
+  if (plugin?.status._tag === "active") return { _tag: "active", contribution };
+  return {
+    _tag: plugin?.status._tag === "errored" ? "failed-to-start" : "switched-off",
+    pluginName: plugin?.displayName ?? contribution.pluginId,
+  };
+};
+
+/**
+ * Judges whether the plugin that offers a contribution can serve it, from the
+ * contributions the host registered and the plugins it loaded. `missing` when
+ * no registered contribution has this id.
+ */
+const judgePluginState = (
+  contributionId: string,
+  registered: ReadonlyArray<RegisteredMcpServer>,
+  loaded: ReadonlyArray<LoadedPlugin>,
+): PluginState => {
+  const contribution = registered.find((one) => one.id === contributionId);
+  return contribution === undefined
+    ? { _tag: "missing" }
+    : judgeContributionPlugin(contribution, loaded);
+};
 
 const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
@@ -269,23 +344,23 @@ const make = Effect.gen(function* () {
     given: ReadonlyArray<DependencyIds>,
   ): Effect.Effect<(server: DependencyIds) => McpServerDependencies, SqlError> =>
     Effect.gen(function* () {
-      const found = yield* connections.readMany([...new Set(given.map((one) => one.connectionId))]);
+      const found = yield* connections.readMany([
+        ...new Set(
+          given.flatMap(({ source }) => (source.kind === "plugin" ? [source.connectionId] : [])),
+        ),
+      ]);
       const loaded = yield* plugins.loaded();
       const registered = yield* plugins.listMcpServers();
-      const readPluginState = (contributionId: string): PluginState => {
-        const contribution = registered.find((one) => one.id === contributionId);
-        if (contribution === undefined) return { _tag: "missing" };
-        const plugin = loaded.find((one) => one.id === contribution.pluginId);
-        if (plugin?.status._tag === "active") return { _tag: "active", contribution };
-        return {
-          _tag: plugin?.status._tag === "errored" ? "failed-to-start" : "switched-off",
-          pluginName: plugin?.displayName ?? contribution.pluginId,
-        };
-      };
-      return (server) => ({
-        connection: found.get(server.connectionId),
-        plugin: readPluginState(server.contributionId),
-      });
+      const judgePluginOfContribution = (contributionId: string): PluginState =>
+        judgePluginState(contributionId, registered, loaded);
+      return ({ source }) =>
+        source.kind === "plugin"
+          ? {
+              kind: "plugin",
+              connection: found.get(source.connectionId),
+              plugin: judgePluginOfContribution(source.contributionId),
+            }
+          : { kind: "url", source };
     });
 
   /**

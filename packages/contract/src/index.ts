@@ -29,9 +29,10 @@ export {
   type SkillReference,
 } from "@hercule/protocol";
 
+export { API_PREFIX } from "./api-prefix";
+
 export {
   ALL_OPERATIONS,
-  API_PREFIX,
   OPERATIONS,
   canCarrySecrets,
   isOperationId,
@@ -83,6 +84,8 @@ export {
   type CliRow,
   type FieldRow,
   type NounRow,
+  type ObjectFlagsRow,
+  type ObjectKeyRow,
   type ResolvingQuery,
 } from "./cli";
 
@@ -121,6 +124,7 @@ export {
   type CapDetails,
   ShrinkDetails,
   InvalidStateDetails,
+  ConflictDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -493,9 +497,11 @@ export {
   McpServerIds,
   McpServerLeftOutReason,
   McpServerName,
+  McpServerSetTokenInput,
   McpServerSource,
   McpServerStatus,
   McpServerTool,
+  McpServerToken,
   McpServerUpdateInput,
   SessionMcpServer,
 } from "./groups/mcp-server";

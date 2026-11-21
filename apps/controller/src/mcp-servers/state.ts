@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import type { McpServerStatus } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
@@ -22,7 +23,9 @@ import {
   mcpServerCatalogue,
   type McpServerDependencies,
 } from "./catalogue";
+import type { ServerCredentials } from "./access";
 import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
+import type { UpstreamError } from "./upstream";
 
 const MINUTE_MILLIS = 60 * 1000;
 
@@ -52,7 +55,9 @@ const computeBackoffMillis = (failedChecks: number): number =>
  * server that cannot be reached backs off: the failures in a row are counted
  * and the next check is planned by `computeBackoffMillis`. Any other failure
  * waits a day. The tools are left as they were. `protocolVersion` is the MCP
- * revision whose handshake worked, when one did.
+ * revision whose handshake worked, when one did. `signInOffered` is stored
+ * with the failure, under the same write, so it is never newer than the
+ * status it explains.
  */
 export const buildFailureEdit = (
   server: Pick<StoredMcpServer, "failedChecks">,
@@ -60,12 +65,16 @@ export const buildFailureEdit = (
     readonly status: "unreachable" | "error" | "needs-sign-in";
     readonly detail: string;
     readonly cause?: "plugin" | "connection" | null;
+    readonly signInOffered?: "oauth" | "token" | null;
   },
   at: string,
   protocolVersion?: string,
 ): McpServerEdit => {
   const planAfter = (millis: number): string => new Date(Date.parse(at) + millis).toISOString();
-  const revisionEdit = protocolVersion === undefined ? {} : { protocolVersion };
+  const observed = {
+    ...(protocolVersion === undefined ? {} : { protocolVersion }),
+    ...(failure.signInOffered == null ? {} : { signInOffered: failure.signInOffered }),
+  };
   if (failure.status === "unreachable") {
     const failedChecks = server.failedChecks + 1;
     return {
@@ -74,7 +83,7 @@ export const buildFailureEdit = (
       statusCause: null,
       failedChecks,
       nextCheckAt: planAfter(computeBackoffMillis(failedChecks)),
-      ...revisionEdit,
+      ...observed,
     };
   }
   return {
@@ -83,13 +92,85 @@ export const buildFailureEdit = (
     statusCause: failure.cause ?? null,
     failedChecks: 0,
     nextCheckAt: planAfter(DAILY_CHECK_MILLIS),
-    ...revisionEdit,
+    ...observed,
   };
 };
+
+/**
+ * Converts a failure of an upstream call into the status an MCP Server shows
+ * for it, with a detail a person can read and the sign-in the server offers.
+ * A server that cannot be reached or does not answer in time is `unreachable`,
+ * because trying again later may work. A server that refused the credentials
+ * has the status, the words and the sign-in offer that its credentials give
+ * (`ServerCredentials.describeRejected`). Every other failure is `error`, with
+ * no sign-in offer: the server answered with something Hercule cannot use.
+ *
+ * A check and a failed call both turn their failure into a stored status
+ * through this function, and nowhere else, so the two cannot read one answer
+ * differently.
+ */
+export const buildStatusFromFailure = (
+  failure: UpstreamError,
+  credentials: Pick<ServerCredentials, "describeRejected">,
+): {
+  readonly status: "unreachable" | "error" | "needs-sign-in";
+  readonly detail: string;
+  readonly signInOffered: "oauth" | "token" | null;
+} => {
+  switch (failure.reason) {
+    case "unreachable":
+    case "timeout":
+      return { status: "unreachable", detail: failure.message, signInOffered: null };
+    case "unauthorized":
+      return credentials.describeRejected(failure.offersOAuth === true);
+    default:
+      return { status: "error", detail: failure.message, signInOffered: null };
+  }
+};
+
+/**
+ * Builds the edit that stores an upstream failure that is about the whole
+ * server, as `buildStatusFromFailure` reads it and `buildFailureEdit` stores
+ * it. `credentials` are the server's own, which say what a refusal of them
+ * means.
+ */
+export const buildUpstreamFailureEdit = (
+  server: Pick<StoredMcpServer, "failedChecks">,
+  failure: UpstreamError,
+  credentials: Pick<ServerCredentials, "describeRejected">,
+  at: string,
+  protocolVersion?: string,
+): McpServerEdit =>
+  buildFailureEdit(server, buildStatusFromFailure(failure, credentials), at, protocolVersion);
 
 /** Returns the id of the plugin that offers a contribution: `sentry/sentry` is offered by `sentry`. */
 export const parsePluginId = (contributionId: string): string =>
   contributionId.slice(0, contributionId.indexOf("/"));
+
+/**
+ * Returns whether a server of this kind entering `status` raises a Notification
+ * (spec 21 section 5.5). Every server does for `unreachable` and `error`. A
+ * server added by URL also does for `needs-sign-in`, because only the user can
+ * sign it in again. A plugin server never does: its status follows its
+ * Connection, which raises a Notification of its own.
+ */
+const raisesNotification = (
+  kind: StoredMcpServer["source"]["kind"],
+  status: McpServerStatus,
+): boolean =>
+  status === "unreachable" || status === "error" || (kind === "url" && status === "needs-sign-in");
+
+/** Returns the title of the Notification for a server entering a status that raises one. */
+const describeFailure = (name: string, status: McpServerStatus): string => {
+  switch (status) {
+    case "unreachable":
+      return `MCP server ${name} is unreachable`;
+    case "needs-sign-in":
+      return `MCP server ${name} needs a sign-in`;
+    default:
+      return `MCP server ${name} has an error`;
+  }
+};
 
 /**
  * What a state write was based on: the server's `revision` and the
@@ -115,15 +196,19 @@ const make = Effect.gen(function* () {
    * Writes an edit to a server that is still as `current`, and keeps the
    * Notification episode (`notified_status`) in the same transaction:
    *
-   * - entering `unreachable` or `error` with no episode open raises one
-   *   `core.mcp-server-failed` Notification and opens the episode;
+   * - entering a status that `raisesNotification` for this kind of server,
+   *   with no episode open, on a server that has been `ready` at least once
+   *   (`checkedAt` is set), raises one `core.mcp-server-failed` Notification
+   *   and opens the episode. A server that has never worked raises none: see
+   *   the comment in the body;
    * - going to `ready` ends the episode;
    * - every other status leaves it as it is, so one episode raises one
-   *   Notification however its status moves between `unreachable` and `error`.
+   *   Notification however its status moves between the statuses that raise.
    *
    * `updated_at` moves, and the write is announced on the `mcpServer` live
    * topic, only when it changes what the record shows: its status, detail,
-   * tools or last check time. A write that only reschedules or counts failures
+   * tools, last check time or, for a server added by URL, the sign-in it
+   * offers. A write that only reschedules or counts failures
    * leaves both alone. `at` is the instant of the write. Must run inside a
    * transaction.
    */
@@ -138,16 +223,22 @@ const make = Effect.gen(function* () {
       if (status === "ready") {
         notifiedStatus = null;
       } else if (
-        (status === "unreachable" || status === "error") &&
-        current.notifiedStatus === null
+        status !== undefined &&
+        raisesNotification(current.source.kind, status) &&
+        current.notifiedStatus === null &&
+        // A Notification is for trouble the user would not have seen
+        // otherwise. A server that has never worked is still being set up: the
+        // person adding it (the Add dialog, `hercule mcp-server read`) sees
+        // its failed first checks for themselves. `checkedAt` is set by the
+        // first successful check only, so the first failure after the server
+        // has worked is the first one that can raise a Notification. Nothing
+        // is stored for the failures before it, so no episode is open then.
+        current.checkedAt !== null
       ) {
         notifiedStatus = status;
         yield* notifier.createCoreNotification({
           kind: "core.mcp-server-failed",
-          title:
-            status === "unreachable"
-              ? `MCP server ${current.name} is unreachable`
-              : `MCP server ${current.name} has an error`,
+          title: describeFailure(current.name, status),
           ...(edit.statusDetail === undefined || edit.statusDetail === null
             ? {}
             : { body: edit.statusDetail }),
@@ -160,7 +251,10 @@ const make = Effect.gen(function* () {
         (edit.statusDetail !== undefined && edit.statusDetail !== current.statusDetail) ||
         (edit.tools !== undefined &&
           JSON.stringify(edit.tools) !== JSON.stringify(current.tools)) ||
-        (edit.checkedAt !== undefined && edit.checkedAt !== current.checkedAt);
+        (edit.checkedAt !== undefined && edit.checkedAt !== current.checkedAt) ||
+        (edit.signInOffered !== undefined &&
+          current.source.kind === "url" &&
+          edit.signInOffered !== current.source.signInOffered);
       yield* servers.update(
         current.id,
         { ...edit, ...(notifiedStatus === undefined ? {} : { notifiedStatus }) },
@@ -285,6 +379,9 @@ const make = Effect.gen(function* () {
               }
               return false;
             }
+            // The follower follows Connections and plugins, which a server added
+            // by URL has none of.
+            if (judged.kind === "url") return false;
             const reconnected =
               judged.connection.credentialsGeneration !== server.connectionGeneration;
             if (!reconnected && server.statusCause === null) return false;

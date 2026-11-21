@@ -122,6 +122,13 @@ export type FieldRow =
        * only way to pass the value.
        */
       readonly required?: true;
+      /**
+       * Marks a value that must stay off every command line, such as a token
+       * or a password. Its help examples and the refusal shown at a terminal
+       * read it from a file (`hercule ... < token.txt`), never `echo <value> |`,
+       * because the shell keeps an echoed value in its history.
+       */
+      readonly secret?: true;
     }
   | {
       /**
@@ -171,25 +178,37 @@ export type FieldRow =
     }
   | {
       /**
-       * Fills an object-valued field from several flags, one per key of the
-       * object, and from fixed values the command line never types:
-       * `--plugin sentry/sentry --connection 1f3a9c2e` sends `{ kind:
-       * "plugin", contributionId: "sentry/sentry", connectionId: <full id> }`.
+       * Fills a field that holds one of several object shapes, told apart by
+       * a literal key such as `kind`: `--plugin sentry/sentry --connection
+       * 1f3a9c2e` sends `{ kind: "plugin", ... }` and `--url <address>` sends
+       * `{ kind: "url", ... }`. The field's schema must be a union of
+       * objects, with one entry here for each member, and the entry's `fixed`
+       * must be exactly the member's literal keys with their values. A field
+       * with a single shape is a `oneOf` of one entry.
+       *
+       * The command line picks the entry by its `selector` flag:
+       *
+       * - Giving the selector of one entry picks it. Selectors of two entries
+       *   together are refused, and so is a flag of another entry's keys.
+       * - The keys the picked entry requires are required on the command
+       *   line, and no other entry's keys are.
+       * - With no selector given, a required field is refused, and an optional
+       *   field is left out of the request.
+       *
+       * A flag is one flag of the command, however many entries declare it:
+       * entries share a key by naming it in their `flags`, and the key must
+       * have the same schema in every member that has it. Its spelling, its
+       * stdin read and what it resolves come from the first entry that
+       * declares it. Only its `help` is the entry's own.
+       *
        * Each flag is an ordinary flag in help and in errors: a missing
        * required key is reported by its flag, and an optional key is optional
-       * on the command line. Which keys are required is read from the
-       * field's schema.
-       *
-       * Every key in `fixed` and `flags` must be a key of the object, and a
-       * key holds one value, never a list. The object is sent as soon as one
-       * of its flags is given.
+       * on the command line. Which keys are required is read from the field's
+       * schema. Every key in an entry's `fixed` and `flags` must be a key of
+       * its object, every key the object requires must be in one of them, and
+       * a key holds one value, never a list.
        */
-      readonly object: {
-        /** Keys sent with this text as their value, whatever the command line says. */
-        readonly fixed: Readonly<Record<string, string>>;
-        /** The flag of each key of the object, by the key's name. */
-        readonly flags: Readonly<Record<string, ObjectKeyRow>>;
-      };
+      readonly oneOf: ReadonlyArray<ObjectFlagsRow>;
     }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
@@ -197,12 +216,35 @@ export type FieldRow =
    */
   | { readonly hidden: true };
 
-/** The flag that fills one key of an object field, as `object` on a `FieldRow` declares it. */
+/**
+ * One entry of a `oneOf` row: the flags that fill one object shape, one per
+ * key, and the keys sent with fixed values.
+ */
+export interface ObjectFlagsRow {
+  /** The line that leads this entry's flags in the command's help. */
+  readonly help: string;
+  /** The spelling of the flag that picks this entry, one of the `flag` values in `flags`. */
+  readonly selector: string;
+  /** Keys sent with this text as their value, whatever the command line says. */
+  readonly fixed: Readonly<Record<string, string>>;
+  /** The flag of each key of the object, by the key's name. */
+  readonly flags: Readonly<Record<string, ObjectKeyRow>>;
+}
+
+/** The flag that fills one key of an object field, as an entry of `oneOf` on a `FieldRow` declares it. */
 export interface ObjectKeyRow {
   readonly flag: string;
   readonly help: string;
   /** The list operation that resolves an id tail given for this flag, as on a plain flag. */
   readonly resolves?: OperationId;
+  /**
+   * Makes the command read this key from stdin, as a `stdin` row does for a
+   * whole field: no `--<flag>` takes the value, and `--<flag>-stdin` asks for
+   * the read when the key is optional.
+   */
+  readonly stdin?: true;
+  /** Marks a value that must stay off every command line, as `secret` does on a `stdin` row. */
+  readonly secret?: true;
 }
 
 /**
@@ -318,6 +360,7 @@ export const CLI = {
       username: { flag: "username", help: "The user name to create." },
       password: {
         stdin: true,
+        secret: true,
         flag: "password",
         help: "The password to set; it never reaches the process list or the shell history.",
       },
@@ -386,10 +429,11 @@ export const CLI = {
     fields: {
       current: {
         stdin: true,
+        secret: true,
         flag: "current",
         help: "The current password.",
       },
-      next: { stdin: true, flag: "next", help: "The password to set." },
+      next: { stdin: true, secret: true, flag: "next", help: "The password to set." },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
@@ -566,7 +610,7 @@ export const CLI = {
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect. Nor is `provider-account`: use `hercule provider-account update` to set or replace an account's key. Nor is `mcp-server`: give a server added by address its token with `hercule mcp-server set-token`.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
@@ -581,13 +625,13 @@ export const CLI = {
         positional: true,
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
-      value: { stdin: true, flag: "value", help: "The secret value." },
+      value: { stdin: true, secret: true, flag: "value", help: "The secret value." },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`. Nor is `provider-account`: an account's key goes with the account, with `hercule provider-account delete`, and `hercule provider-account update` replaces it.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`. Nor is `provider-account`: an account's key goes with the account, with `hercule provider-account delete`, and `hercule provider-account update` replaces it. Nor is `mcp-server`: an MCP Server's sign-in goes when the server does, with `hercule mcp-server delete`.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {
@@ -4579,44 +4623,79 @@ export const CLI = {
   },
   "mcpServer.create": {
     command: "mcp-server create",
-    help: "Adds an MCP server from a plugin's Connection. It starts in `checking`; run `hercule mcp-server read` to see the result. A server of the same contribution and account that already exists is refused.",
+    help: "Adds an MCP server, from a plugin's Connection or by its address. It starts in `checking`; run `hercule mcp-server read` to see the result. By address, a server that needs a sign-in ends in `needs-sign-in`, which `hercule mcp-server read` explains; give the token with --token-stdin to skip that step, or later with `hercule mcp-server set-token`. A server that exists already is refused.",
     examples: [
       { args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e"] },
       {
         args: ["--plugin", "sentry/sentry", "--connection", "1f3a9c2e", "--name", "work_sentry"],
       },
+      { args: ["--url", "https://mcp.notion.com/mcp"] },
+      {
+        args: ["--url", "https://mcp.example.com/mcp", "--name", "example", "--token-stdin"],
+        stdin: "the_token_the_server_expects",
+      },
     ],
     fields: {
       source: {
-        object: {
-          fixed: { kind: "plugin" },
-          flags: {
-            contributionId: {
-              flag: "plugin",
-              help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry.",
-            },
-            connectionId: {
-              flag: "connection",
-              help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
-              resolves: "connection.query",
-            },
-            name: {
-              flag: "name",
-              help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes its contribution's name.",
+        oneOf: [
+          {
+            help: "From a plugin's Connection:",
+            selector: "plugin",
+            fixed: { kind: "plugin" },
+            flags: {
+              contributionId: {
+                flag: "plugin",
+                help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry.",
+              },
+              connectionId: {
+                flag: "connection",
+                help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
+                resolves: "connection.query",
+              },
+              name: {
+                flag: "name",
+                help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes its contribution's name.",
+              },
             },
           },
-        },
+          {
+            help: "By its address:",
+            selector: "url",
+            fixed: { kind: "url" },
+            flags: {
+              url: {
+                flag: "url",
+                help: "The server's address, starting with http:// or https://. It holds no user name or password and no #fragment. Requests go to it as the URL standard writes it (https:a.com/mcp is https://a.com/mcp), with a trailing dot on the host dropped and escaped plain characters decoded (/%6Dcp is /mcp), so keep a trailing slash if the server needs one. Its query values are hidden when the server is read. Put no secret in it: the token goes in --token-stdin.",
+              },
+              name: {
+                flag: "name",
+                help: "The server's name, fixed once the server exists: lowercase letters and digits joined by single underscores, 16 characters at most, and not hercule. Without it, the server takes the first part of the address's host that is not mcp, www or api, so mcp.notion.com becomes notion; a host that gives no valid name needs --name.",
+              },
+              token: {
+                flag: "token",
+                stdin: true,
+                secret: true,
+                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
+              },
+            },
+          },
+        ],
       },
     },
     errors: {
       conflict:
-        "a server of this contribution and account exists already; the message names it. Switch it on with `hercule mcp-server update`, or read it with `hercule mcp-server read`",
+        "the server exists already, and the message names it: a plugin server of the same contribution and account, or a server of the same address (two spellings of one address count as one). Read it with `hercule mcp-server read`, or delete it first with `hercule mcp-server delete`. Or the address is one a plugin offers a server for: the message says how to add that server from your Connection instead",
+      validation:
+        "the address is not http or https, holds a user name or password or a #fragment, or no name can be made from its host, so give one with --name. Or the name breaks the name rule. Or the token is not a bearer token as described for --token-stdin. Or no plugin offers the contribution, or the Connection is not of its type",
     },
   },
   "mcpServer.update": {
     command: "mcp-server update",
-    help: "Switches an MCP server on or off. A server that is off gives its tools to no session, and stays on every list that names it.",
-    examples: [{ args: ["1f3a9c2e", "--enabled", "false"] }],
+    help: "Switches an MCP server on or off, or moves a server added by address onto a plugin's Connection. A server that is off gives its tools to no session, and stays on every list that names it. Moving is for a server whose address is the plugin's own: the server keeps its id, its name and every list that names it, its own sign-in is deleted, and it lists its tools again through the Connection, with the old list kept until then. Give --enabled, or --plugin with --connection, or both.",
+    examples: [
+      { args: ["1f3a9c2e", "--enabled", "false"] },
+      { args: ["1f3a9c2e", "--plugin", "sentry/sentry", "--connection", "7d2b4e90"] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -4625,8 +4704,36 @@ export const CLI = {
       },
       enabled: {
         flag: "enabled",
-        help: "true to switch the server on, false to switch it off. Without it the call is refused.",
+        help: "true to switch the server on, false to switch it off.",
       },
+      source: {
+        oneOf: [
+          {
+            help: "To move the server onto a plugin's Connection:",
+            selector: "plugin",
+            fixed: { kind: "plugin" },
+            flags: {
+              contributionId: {
+                flag: "plugin",
+                help: "The plugin's MCP server contribution, written <plugin>/<contribution>, such as sentry/sentry. The server's address must be the one the plugin's server is reached at.",
+              },
+              connectionId: {
+                flag: "connection",
+                help: "The Connection whose account the server acts as, by its id or a tail of eight or more characters. Find it with `hercule connection list`.",
+                resolves: "connection.query",
+              },
+            },
+          },
+        ],
+      },
+    },
+    errors: {
+      validation:
+        "you gave neither --enabled nor --plugin. Or no plugin offers the contribution, or the Connection is not of its type, or the server's address is not the one the plugin's server is reached at",
+      conflict:
+        "the plugin already has a server for the Connection's account, and the message names it: use that one, or delete it first with `hercule mcp-server delete`",
+      invalid_state:
+        "you gave --plugin and the server is reached with a Connection already: moving is for a server added by address",
     },
   },
   "mcpServer.delete": {
@@ -4654,6 +4761,31 @@ export const CLI = {
     },
     errors: {
       invalid_state: "the server is switched off; switch it on with `hercule mcp-server update`",
+    },
+  },
+  "mcpServer.setToken": {
+    command: "mcp-server set-token",
+    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. The server goes back to `checking`. A server that is on lists its tools again with the token; run `hercule mcp-server read` later to see the result. A server that is switched off is checked with the token when you switch it on with `hercule mcp-server update`. The token is read from stdin, so give it from a file (`< token.txt`) or from a password manager: a token typed on the command line stays in your shell history.",
+    examples: [{ args: ["1f3a9c2e"], stdin: "the_token_the_server_expects" }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+      token: {
+        stdin: true,
+        secret: true,
+        required: true,
+        flag: "token",
+        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces.",
+      },
+    },
+    errors: {
+      validation:
+        "the token is not a bearer token: it is shorter than 8 characters, holds characters other than letters, digits and - . _ ~ + /, or has `Bearer ` in front of it or a space in it",
+      invalid_state:
+        "the server is a plugin server, which is reached with its Connection: reconnect that Connection with `hercule connection set-credentials` or in Settings > Connections",
     },
   },
   "skill.diff": {

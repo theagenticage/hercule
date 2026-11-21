@@ -1108,7 +1108,7 @@ const insertMcpServers = (servers: ReadonlyArray<TestMcpServer>) =>
             config: {},
             at,
           });
-          const stored = yield* mcpServers.insert({
+          const stored = yield* mcpServers.insertPlugin({
             name: server.name,
             contributionId,
             connectionId: connection.id,

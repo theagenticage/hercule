@@ -463,11 +463,11 @@ describe("runner metrics", () => {
   });
 });
 
-// `mcp-server create` fills its `source` object from three flags and a fixed kind.
-describe("an object field filled from several flags", () => {
+// `mcp-server create` sends one of two shapes of `source`, picked by the flags given.
+describe("mcp-server create", () => {
   const mcpServerCreate = lookUpCommand("mcp-server", "create");
 
-  it("builds the object from the flags and the fixed kind", async () => {
+  it("builds a plugin source from its flags and the fixed kind", async () => {
     const args = await parseArguments(
       mcpServerCreate,
       ["--plugin", "sentry/sentry", "--connection", ID, "--name", "work_sentry"],
@@ -483,26 +483,60 @@ describe("an object field filled from several flags", () => {
     });
   });
 
-  it("leaves the optional name out", async () => {
-    const args = await parseArguments(
+  it("builds a source by address, with a token read from stdin only when --token-stdin is given", async () => {
+    const withToken = await parseArguments(
       mcpServerCreate,
-      ["--connection", ID, "--plugin", "sentry/sentry"],
+      ["--url", "https://mcp.example.com/mcp", "--name", "example", "--token-stdin"],
+      stubStdin("s3cret-t0ken\n"),
+    );
+    expect(withToken.payload).toEqual({
+      source: {
+        kind: "url",
+        url: "https://mcp.example.com/mcp",
+        name: "example",
+        token: "s3cret-t0ken",
+      },
+    });
+
+    const withoutToken = await parseArguments(
+      mcpServerCreate,
+      ["--url", "https://mcp.example.com/mcp"],
       refuseStdinRead,
     );
-    expect(args.payload).toEqual({
-      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId: ID },
+    expect(withoutToken.payload).toEqual({
+      source: { kind: "url", url: "https://mcp.example.com/mcp" },
     });
   });
 
-  it("reports a missing key by its flag, not by its place in the payload", async () => {
+  it("has no --token flag that would put the token in argv", async () => {
+    await expect(
+      parseArguments(
+        mcpServerCreate,
+        ["--url", "https://mcp.example.com/mcp", "--token", "s3cret-t0ken"],
+        refuseStdinRead,
+      ),
+    ).rejects.toThrow("--token does not exist");
+  });
+
+  it("refuses the flags of both forms before it reads stdin", async () => {
+    const refused = parseArguments(
+      mcpServerCreate,
+      ["--url", "https://mcp.example.com/mcp", "--plugin", "sentry/sentry", "--token-stdin"],
+      refuseStdinRead,
+    );
+    await expect(refused).rejects.toThrow(UsageError);
+    await expect(refused).rejects.toThrow("cannot be given with");
+  });
+
+  it("reports a missing key of the picked form by its flag", async () => {
     await expect(
       parseArguments(mcpServerCreate, ["--plugin", "sentry/sentry"], refuseStdinRead),
     ).rejects.toThrow(new UsageError("missing required --connection", "mcp-server create"));
+    await expect(
+      parseArguments(mcpServerCreate, ["--token-stdin"], refuseStdinRead),
+    ).rejects.toThrow("no flag says which form to use");
     await expect(parseArguments(mcpServerCreate, ["--name", "x"], refuseStdinRead)).rejects.toThrow(
-      "missing required --plugin, --connection",
-    );
-    await expect(parseArguments(mcpServerCreate, [], refuseStdinRead)).rejects.toThrow(
-      "missing required --plugin, --connection",
+      "no flag says which form to use: give --plugin and --connection, or --url",
     );
   });
 
@@ -510,5 +544,18 @@ describe("an object field filled from several flags", () => {
     await expect(
       parseArguments(mcpServerCreate, ["--source", "{}"], refuseStdinRead),
     ).rejects.toThrow("unknown flag --source");
+  });
+});
+
+describe("mcp-server set-token", () => {
+  const setToken = lookUpCommand("mcp-server", "set-token");
+
+  it("reads the token from stdin and takes no flag for it", async () => {
+    const args = await parseArguments(setToken, [ID], stubStdin("s3cret-t0ken\n"));
+    expect(args.positionals).toEqual([ID]);
+    expect(args.payload).toEqual({ token: "s3cret-t0ken" });
+    await expect(
+      parseArguments(setToken, [ID, "--token", "s3cret-t0ken"], refuseStdinRead),
+    ).rejects.toThrow("--token does not exist");
   });
 });

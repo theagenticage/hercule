@@ -1343,7 +1343,7 @@ const insertMcpServer = (name: string) =>
       config: {},
       at,
     });
-    const stored = yield* servers.insert({
+    const stored = yield* servers.insertPlugin({
       name,
       contributionId: "acme/desk",
       connectionId: connection.id,

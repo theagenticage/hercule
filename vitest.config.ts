@@ -107,6 +107,7 @@ const binaryTests = [
   "e2e/skill-library-session.test.ts",
   "e2e/repository-skills-session.test.ts",
   "e2e/skill-references-session.test.ts",
+  "e2e/mcp-url-servers.test.ts",
   // upgrade.test.ts downloads the matching edge asset for this platform
   // (linux-x64, linux-arm64, or darwin-arm64) and runs it. Other platforms
   // fail in CI and skip locally.

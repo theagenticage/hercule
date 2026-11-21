@@ -121,7 +121,7 @@ const followUntil = (
               );
             }
             yield* sql`UPDATE connections SET credentials_generation = ${arrangement.credentialsGeneration}`;
-            const server = yield* servers.insert({
+            const server = yield* servers.insertPlugin({
               name: "desk",
               contributionId: "acme/desk",
               connectionId: connection.id,

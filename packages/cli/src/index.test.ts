@@ -466,6 +466,23 @@ describe("a stdin field with no pipe", () => {
     );
   });
 
+  it("asks for a secret from a file, and never shows it piped from echo", async () => {
+    const base = stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" } });
+    const io = { ...base, isTty: () => true };
+
+    expect(
+      await main(
+        ["--home", home, "mcp-server", "set-token", "1f3a9c2e1d0a3c5b6e8f9a1b2c3d4e5f"],
+        io,
+      ),
+    ).toBe(2);
+    const shown = base.stderr.join("\n");
+    expect(shown).toContain(
+      "hercule mcp-server set-token 1f3a9c2e1d0a3c5b6e8f9a1b2c3d4e5f < token.txt",
+    );
+    expect(shown).not.toContain("echo");
+  });
+
   it("sends the images with empty text when --image is given, without reading stdin", async () => {
     writeFileSync(join(home, "shot.png"), "PNG!");
     const attachmentId = buildId("bbbbbbb2");

@@ -92,6 +92,14 @@
  * whose session lease is still active. After the upgrade both workspaces read
  * with the same holders and kept-until time, so the rebuild lost no lease.
  *
+ * Migration 130 rebuilds `mcp_servers` so a server can come from an address,
+ * and `project_mcp_servers` and `session_mcp_servers` are emptied and filled
+ * again around that rebuild. When the edge database has not run it yet, and
+ * has the MCP Server tables, the fixture writes a switched-off plugin server
+ * on a disabled Connection, and puts it on the test Project's list and on a
+ * Thread's list with a left-out reason. After the upgrade the server reads
+ * with the same name and plugin source, and both lists still name it.
+ *
  * Migration 106 gives audit entries a `runner_id`, filled from the payload's
  * runner, or through its workspace's or session's runner. The edge binary
  * writes five of the 19 kinds the migration fills itself: the real runner's
@@ -316,6 +324,25 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 
 /** When the seeded released lease keeps its workspace until: far enough that the sweep never collects it. */
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
+
+/** The migration that gives `mcp_servers` a source that may be an address, and `secrets` the `mcp-server` owner kind. */
+const MCP_SERVER_URL_SOURCE_MIGRATION = 130;
+
+/** The migration that creates `project_mcp_servers` and `session_mcp_servers`, after `mcp_servers` itself. */
+const MCP_SERVER_LISTS_MIGRATION = 127;
+
+/**
+ * The plugin MCP Server that `persistMcpServerRows` writes, with the
+ * Connection it names. The server is switched off and the Connection is
+ * disabled, so the upgraded controller has nothing to check or to follow.
+ */
+const SEEDED_MCP_SERVER_ID = "0199e0e7-0000-7000-8000-000000000d02";
+const SEEDED_MCP_CONNECTION_ID = "0199e0e7-0000-7000-8000-000000000d01";
+const SEEDED_MCP_SERVER_NAME = "upgrade_fixture";
+const SEEDED_MCP_CONTRIBUTION_ID = "upgrade/fixture";
+
+/** Why the seeded Thread's last start left the seeded MCP Server out. */
+const SEEDED_MCP_LEFT_OUT = "needs-sign-in";
 
 /**
  * The migration that adds `tasks.stage`. Migration 111, which gives the
@@ -1556,6 +1583,68 @@ function persistWorkspaceLeases(home: string): boolean {
       null,
       null,
     );
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Writes a plugin MCP Server in the shape migration 130 rebuilds, with the
+ * Connection it names, and puts it on a Project's list and on a Thread's list
+ * (with a left-out reason), into the database the edge binary created. Returns
+ * true when it wrote them.
+ *
+ * The rows go straight into the database because a server needs a plugin that
+ * offers a contribution and a signed-in Connection, which this test has
+ * neither of. A database that already ran migration 130 is skipped because
+ * its table would not be in the old shape, and one that has not run migration
+ * 127 is skipped because it has no lists to keep.
+ */
+function persistMcpServerRows(
+  home: string,
+  owners: { readonly projectId: string; readonly threadId: string },
+): boolean {
+  const version = readMigrationVersion(home);
+  if (version >= MCP_SERVER_URL_SOURCE_MIGRATION || version < MCP_SERVER_LISTS_MIGRATION) {
+    return false;
+  }
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    database
+      .query(
+        `INSERT INTO connections (id, plugin_id, type, label, display_name, account_id, status,
+                                  labels, config, created_at, updated_at)
+         VALUES (?, 'github', 'github/github', 'upgrade-fixture', 'GitHub', 'upgrade-fixture-1',
+                 'disabled', '[]', '{}', ?, ?)`,
+      )
+      .run(uuidBlob(SEEDED_MCP_CONNECTION_ID), at, at);
+    database
+      .query(
+        `INSERT INTO mcp_servers (id, name, contribution_id, connection_id, account_id, enabled,
+                                  status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'upgrade-fixture-1', 0, 'checking', ?, ?)`,
+      )
+      .run(
+        uuidBlob(SEEDED_MCP_SERVER_ID),
+        SEEDED_MCP_SERVER_NAME,
+        SEEDED_MCP_CONTRIBUTION_ID,
+        uuidBlob(SEEDED_MCP_CONNECTION_ID),
+        at,
+        at,
+      );
+    database
+      .query(
+        `INSERT INTO project_mcp_servers (project_id, position, mcp_server_id) VALUES (?, 0, ?)`,
+      )
+      .run(uuidBlob(owners.projectId), uuidBlob(SEEDED_MCP_SERVER_ID));
+    database
+      .query(
+        `INSERT INTO session_mcp_servers (session_id, position, mcp_server_id, left_out)
+         VALUES (?, 0, ?, ?)`,
+      )
+      .run(uuidBlob(owners.threadId), uuidBlob(SEEDED_MCP_SERVER_ID), SEEDED_MCP_LEFT_OUT);
     return true;
   } finally {
     database.close();
@@ -2881,6 +2970,10 @@ describe("upgrading from the previous edge release", () => {
         withoutLedger: piAccount.id,
       });
       const workspaceLeasesSeeded = persistWorkspaceLeases(home);
+      const mcpServerRowsSeeded = persistMcpServerRows(home, {
+        projectId: project.id,
+        threadId: codexSessionId,
+      });
       const taskStageRows = persistTaskStageRows(home, {
         home,
         providerAccountId: claudeAccount.id,
@@ -3234,6 +3327,46 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the workspace leases fixture: the edge database already ran migration ${String(ARCHIVED_SESSIONS_MIGRATION)}.`,
+        );
+      }
+
+      // The rebuilt `mcp_servers` kept the seeded server with a plugin source,
+      // and the two lists that name it were put back with their order and
+      // their left-out reason.
+      if (mcpServerRowsSeeded) {
+        const upgradedServer = expectJson<{
+          id: string;
+          name: string;
+          enabled: boolean;
+          source: unknown;
+        }>(await runCli(["mcp-server", "read", SEEDED_MCP_SERVER_ID, "--json"], upgraded));
+        expect(upgradedServer).toMatchObject({
+          id: SEEDED_MCP_SERVER_ID,
+          name: SEEDED_MCP_SERVER_NAME,
+          enabled: false,
+          source: {
+            kind: "plugin",
+            contributionId: SEEDED_MCP_CONTRIBUTION_ID,
+            connectionId: SEEDED_MCP_CONNECTION_ID,
+          },
+        });
+        const projectWithServer = expectJson<{ mcpServerIds: ReadonlyArray<string> }>(
+          await runCli(["project", "read", project.id, "--json"], upgraded),
+        );
+        expect(projectWithServer.mcpServerIds).toEqual([SEEDED_MCP_SERVER_ID]);
+        const threadWithServer = expectJson<{
+          mcpServers: ReadonlyArray<{ mcpServerId: string; name: string; leftOut: string | null }>;
+        }>(await runCli(["session", "read", codexSessionId, "--json"], upgraded));
+        expect(threadWithServer.mcpServers).toEqual([
+          {
+            mcpServerId: SEEDED_MCP_SERVER_ID,
+            name: SEEDED_MCP_SERVER_NAME,
+            leftOut: SEEDED_MCP_LEFT_OUT,
+          },
+        ]);
+      } else {
+        console.log(
+          `Skipping the MCP servers fixture: the edge database already ran migration ${String(MCP_SERVER_URL_SOURCE_MIGRATION)}, or has no MCP Server lists yet.`,
         );
       }
 

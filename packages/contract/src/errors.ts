@@ -21,6 +21,7 @@
  */
 import { Schema, SchemaIssue } from "effect";
 import { GrantSchema, type Grant } from "./grants";
+import { Id } from "./ids";
 
 /** The closed code enum, extended additively. */
 export const ERROR_CODES = [
@@ -124,12 +125,46 @@ export class NotFound extends Schema.Error<NotFound>("hercule/NotFound")(
   { description: "NotFound", httpApiStatus: ERROR_STATUS.not_found },
 ) {}
 
+/**
+ * The details of a `conflict` error, present only when a client can act on
+ * the reason, not just show the message. A client shows the message as it is
+ * and never matches its text.
+ *
+ * - `mcp-server-exists`: the MCP Server to create exists already, and
+ *   `mcpServerId` is that server. One address is one server, and so is one
+ *   plugin contribution with one external account. A client points at the
+ *   existing server instead of offering the create again.
+ * - `mcp-server-on-plugin-origin`: the address to add as an MCP Server is one
+ *   a plugin offers a server for, and a server for it is made from the
+ *   plugin's Connection, never by address. `contributionId` is the plugin's
+ *   MCP server contribution. `connectionId` is one of the user's Connections
+ *   of the type that contribution is reached with, or `null` when the user
+ *   has none, so the user connects the plugin first. A connected Connection
+ *   is preferred, then one that needs to sign in again, then a switched-off
+ *   one, and only the first can serve the server at once. `pluginState` is
+ *   `active` when the plugin runs, `switched-off` when the user switched it
+ *   off, and `failed-to-start` when it is on but did not start: a client
+ *   offers to switch a plugin on only in the second case.
+ */
+export const ConflictDetails = Schema.Union([
+  Schema.Struct({ reason: Schema.Literal("mcp-server-exists"), mcpServerId: Id }),
+  Schema.Struct({
+    reason: Schema.Literal("mcp-server-on-plugin-origin"),
+    contributionId: Schema.String,
+    connectionId: Schema.NullOr(Id),
+    pluginState: Schema.Literals(["active", "switched-off", "failed-to-start"]),
+  }),
+]);
+
+export type ConflictDetails = Schema.Schema.Type<typeof ConflictDetails>;
+
 /** The write collides with something that already exists. */
 export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
   {
     error: Schema.Struct({
       code: Schema.Literal("conflict"),
       message: Schema.String,
+      details: Schema.optionalKey(ConflictDetails),
     }),
   },
   { description: "Conflict", httpApiStatus: ERROR_STATUS.conflict },
@@ -289,8 +324,10 @@ export const createNotFoundError = (message: string): NotFound =>
   new NotFound({ error: { code: "not_found", message } });
 
 /** Creates the error for a write that collides with something that already exists. */
-export const createConflictError = (message: string): Conflict =>
-  new Conflict({ error: { code: "conflict", message } });
+export const createConflictError = (message: string, details?: ConflictDetails): Conflict =>
+  new Conflict({
+    error: { code: "conflict", message, ...(details === undefined ? {} : { details }) },
+  });
 
 /**
  * Creates the error for an entity whose state does not allow the operation.

@@ -31,25 +31,37 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { McpSchema } from "effect/ai";
 import { absorbFailures } from "../absorbing";
-import {
-  ConnectionTypes,
-  type ConnectionCredentialsForUse,
-  type RefreshGuard,
-} from "../connections";
+import { ConnectionTypes, type RefreshGuard } from "../connections";
 import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
-import type { PluginHost, RegisteredMcpServer } from "../plugins";
+import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
-import { judgeDependencies, type McpServerDependencies } from "./catalogue";
+import type { Secrets } from "../secrets";
+import {
+  prepareRequest,
+  resolveServerAccess,
+  type ServerCredentials,
+  type ServerCredentialsUnavailable,
+  type UpstreamCredentials,
+  type UsableAccess,
+} from "./access";
+import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
-import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
+import { mcpServerSignIns } from "./sign-ins";
 import {
-  buildStatusFromFailure,
-  buildStatusFromUnavailable,
-  MAX_UPSTREAM_MESSAGE_BYTES,
+  buildFailureEdit,
+  buildUpstreamFailureEdit,
+  DAILY_CHECK_MILLIS,
+  mcpServerState,
+} from "./state";
+import {
+  buildCurrentCredentialsReader,
+  MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
   runWithCredentials,
+  toStoredTool,
+  TOOL_LIST_TOO_LARGE,
   UPSTREAM_WORK_DEADLINE,
   type UpstreamError,
 } from "./upstream";
@@ -116,6 +128,12 @@ type CheckResult =
       readonly detail: string;
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
+    }
+  | {
+      /** The listing failed in a way that is about the whole server (`buildUpstreamFailureEdit`). */
+      readonly _tag: "upstream-failed";
+      readonly failure: UpstreamError;
+      readonly credentials: ServerCredentials;
     };
 
 /** What a check fails with when the server changed after the check started, so its outcome is dropped. */
@@ -127,23 +145,11 @@ const buildFailedResult = (
   cause: "plugin" | "connection" | null = null,
 ): CheckResult => ({ _tag: "failed", status, detail, cause });
 
-/** Copies a tool as plain JSON, keeping the whole definition so the gateway can serve it. */
-const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
-  JSON.parse(
-    JSON.stringify({
-      name: tool.name,
-      title: tool.title,
-      description: tool.description ?? "",
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    }),
-  ) as StoredMcpTool;
-
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
  * and resets the schedule to a day. A failure is stored as `buildFailureEdit`
- * builds it, with the revision whose handshake worked, when one did.
+ * or `buildUpstreamFailureEdit` builds it, with the revision whose handshake
+ * worked, when one did.
  */
 const buildEdit = (
   server: StoredMcpServer,
@@ -162,12 +168,21 @@ const buildEdit = (
         failedChecks: 0,
         nextCheckAt: new Date(Date.parse(at) + DAILY_CHECK_MILLIS).toISOString(),
       }
-    : buildFailureEdit(server, result, at, worked.current ?? undefined);
+    : result._tag === "upstream-failed"
+      ? buildUpstreamFailureEdit(
+          server,
+          result.failure,
+          result.credentials,
+          at,
+          worked.current ?? undefined,
+        )
+      : buildFailureEdit(server, result, at, worked.current ?? undefined);
 
 const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
+  const signIns = yield* mcpServerSignIns;
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
 
@@ -176,20 +191,32 @@ const make = Effect.gen(function* () {
    * an `UpstreamError` when the listing takes longer than `deadline`. Records
    * the revision whose handshake worked in `worked`, before it lists, so the
    * revision is known when the listing fails.
+   *
+   * Every request prepares itself with `prepareRequest`: it carries the
+   * credentials stored when it is sent, and `admit` fails when the check no
+   * longer applies, which stops the listing with that failure. `credentials`
+   * only build the address of the session.
    */
-  const listTools = (
-    contribution: RegisteredMcpServer,
-    credentials: ConnectionCredentialsForUse,
+  const listTools = <Refusal>(
+    access: UsableAccess,
+    credentials: UpstreamCredentials,
+    admit: Effect.Effect<void, Refusal>,
     worked: WorkedRevision,
     firstRevision: string | null,
     deadline: Duration.Duration,
   ): Effect.Effect<
     { readonly tools: ReadonlyArray<McpSchema.Tool>; readonly revision: string },
-    UpstreamError
+    UpstreamError | Refusal | ServerCredentialsUnavailable
   > =>
     Effect.scoped(
       Effect.gen(function* () {
-        const opened = yield* openUpstream({ contribution, credentials, firstRevision });
+        const opened = yield* openUpstream({
+          endpoint: access.endpoint,
+          credentials,
+          firstRevision,
+          prepareSend: prepareRequest(access.credentials, admit),
+          readCurrentCredentials: buildCurrentCredentialsReader(access.credentials),
+        });
         worked.current = opened.revision;
         return { tools: yield* opened.listTools(deadline), revision: opened.revision };
       }),
@@ -205,12 +232,12 @@ const make = Effect.gen(function* () {
    *
    * When the server refuses the credentials, they are refreshed and the
    * listing is tried once more (`runWithCredentials`). A refresh changes the
-   * Connection, so it starts only if the server, its revision and its
-   * Connection are still as the check found them. That is checked before the
+   * credentials, so it starts only if the server, its revision and what it
+   * depends on are still as the check found them. That is checked before the
    * refresh after a rejection, and again under the Connection's refresh
    * permit, right before every request to the provider, because the check may
    * wait a long time for the permit. Otherwise the outcome is `discarded`, and
-   * the Connection is left alone.
+   * the credentials are left alone.
    *
    * The whole evaluation is bound by `McpServerCheckDeadline`. A check that
    * is still running then ends `unreachable`, like any server that does not
@@ -222,36 +249,30 @@ const make = Effect.gen(function* () {
     worked: WorkedRevision,
   ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
-      const judged = judgeDependencies(dependencies);
-      if (judged._tag === "unusable")
-        return buildFailedResult(judged.status, judged.detail, judged.cause);
-      const { contribution, connection } = judged;
-      const deadline = yield* McpServerCheckDeadline;
-      // Checked at use, not only at create, because the credentials of a
-      // Connection of another type would go to this server's origin.
-      if (connection.type !== contribution.connectionType) {
-        return buildFailedResult(
-          "error",
-          `This server needs a ${contribution.connectionType} Connection, and ${connection.label} is another type`,
-        );
+      // Resolved here, at use, because the check is about to send.
+      const access = resolveServerAccess({ server, dependencies }, connectionTypes, signIns);
+      if (access._tag === "unusable") {
+        return buildFailedResult(access.status, access.detail, access.cause);
       }
+      const deadline = yield* McpServerCheckDeadline;
 
       const checkBasisHolds = Effect.flatMap(
         state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
         Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
       );
+      // Also the check's rule for every request it sends (`listTools`).
       const guardRefresh: RefreshGuard<typeof CHECK_SUPERSEDED> = checkBasisHolds.pipe(
         Effect.catchTag("SqlError", Effect.die),
       );
 
       return yield* runWithCredentials({
-        connections: connectionTypes,
-        connectionId: server.connectionId,
+        credentials: access.credentials,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(
-            contribution,
+            access,
             credentials,
+            guardRefresh,
             worked,
             worked.current ?? server.protocolVersion,
             deadline,
@@ -266,26 +287,26 @@ const make = Effect.gen(function* () {
               buildFailedResult("unreachable", "The server did not answer in time"),
             onSome: ({ tools, revision }): CheckResult => {
               const stored = tools.map(toStoredTool);
+              // The listing stops early when the server's definitions pass the
+              // limit (`limitToolListing`). The list is measured again here,
+              // as it is stored, because removing credentials from it can make
+              // it longer.
               return new TextEncoder().encode(JSON.stringify(stored)).length >
-                MAX_UPSTREAM_MESSAGE_BYTES
-                ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
+                MAX_TOOL_DEFINITIONS_BYTES
+                ? buildFailedResult("error", TOOL_LIST_TOO_LARGE)
                 : { _tag: "ready", tools: stored, revision };
             },
           }),
         ),
         Effect.catchTags({
-          UpstreamError: (failure) => {
-            const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
-            return Effect.succeed(buildFailedResult(status, detail));
-          },
-          ConnectionCredentialsUnavailable: (error) => {
-            const { status, detail, cause } = buildStatusFromUnavailable(
-              error,
-              connection,
-              contribution.displayName,
-            );
-            return Effect.succeed(buildFailedResult(status, detail, cause));
-          },
+          UpstreamError: (failure) =>
+            Effect.succeed<CheckResult>({
+              _tag: "upstream-failed",
+              failure,
+              credentials: access.credentials,
+            }),
+          ServerCredentialsUnavailable: ({ status, detail, cause }) =>
+            Effect.succeed(buildFailedResult(status, detail, cause)),
           CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),
         }),
       );
@@ -375,5 +396,5 @@ const make = Effect.gen(function* () {
 export const McpServerChecksLayer: Layer.Layer<
   McpServerChecks,
   never,
-  SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier
+  SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier | Secrets
 > = Layer.effect(McpServerChecks)(make).pipe(Layer.provide(FetchHttpClient.layer));

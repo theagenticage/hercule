@@ -53,6 +53,13 @@ export const formatFieldName = (field: Field): string =>
       : `--${field.spelling}`;
 
 /**
+ * Returns a flag as the caller writes it to give the field. A field read from
+ * stdin is given by its marker, `--<flag>-stdin`.
+ */
+const formatFlagToGive = (field: Field): string =>
+  `--${field.spelling}${field.stdin ? "-stdin" : ""}`;
+
+/**
  * Returns how a positional is shown in usage lines: `<signal-id>`,
  * `<signal-id>...` for a list positional, which takes one or more words, or
  * `[<runner-id>]` for one that may be left out.
@@ -154,12 +161,11 @@ const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
 export const readGivenValue = (given: Record<string, unknown>, field: Field): unknown =>
   field.within === undefined
     ? given[field.name]
-    : (given[field.within.field] as Record<string, unknown> | undefined)?.[field.name];
+    : (given[field.within] as Record<string, unknown> | undefined)?.[field.name];
 
 /**
  * Sets the value of a field in the request part `into`. A flag that fills one
- * key of an object field sets that key in a copy of the object, which starts
- * as the object's fixed values when no other flag has made it yet.
+ * key of an object field sets that key in a copy of the object.
  */
 export const setGivenValue = (
   into: Record<string, unknown>,
@@ -170,8 +176,8 @@ export const setGivenValue = (
     into[field.name] = value;
     return;
   }
-  const object = (into[field.within.field] ?? field.within.fixed) as Record<string, unknown>;
-  into[field.within.field] = { ...object, [field.name]: value };
+  const object = (into[field.within] ?? {}) as Record<string, unknown>;
+  into[field.within] = { ...object, [field.name]: value };
 };
 
 /**
@@ -202,6 +208,78 @@ const assignFieldValue = (
   }
   const existing = into[field.name];
   into[field.name] = Array.isArray(existing) ? [...(existing as Array<unknown>), value] : [value];
+};
+
+/**
+ * Picks the entry of each `oneOf` field by the selector flag the command line
+ * gave, adds the entry's fixed values to the field in `payload`, and returns
+ * the fields of the entries not picked. Throws a `UsageError` when two
+ * selectors are given, when no selector is given for a field the request
+ * needs, or when a flag is given that the picked entry has no key for.
+ *
+ * A field the request may leave out (`optional`) picks no entry when none of
+ * its flags is given, and all its flags count as not picked.
+ */
+const pickEntries = (
+  command: Command,
+  payload: Record<string, unknown>,
+  marked: ReadonlySet<Field>,
+  help: string,
+): ReadonlySet<Field> => {
+  const unpicked = new Set<Field>();
+  const wasGiven = (field: Field): boolean =>
+    readGivenValue(payload, field) !== undefined || marked.has(field);
+  for (const choice of command.choices) {
+    const toGive = choice.entries
+      .map((entry) =>
+        [
+          ...new Set([
+            entry.selector,
+            ...entry.flags.map((flag) => flag.field).filter((field) => !field.optional),
+          ]),
+        ]
+          .map(formatFlagToGive)
+          .join(" and "),
+      )
+      .join(", or ");
+    const picked = choice.entries.filter((entry) => wasGiven(entry.selector));
+    if (picked.length === 0) {
+      const flagGiven = choice.entries.some((entry) =>
+        entry.flags.some((flag) => wasGiven(flag.field)),
+      );
+      if (choice.optional && !flagGiven) {
+        for (const entry of choice.entries)
+          for (const flag of entry.flags) unpicked.add(flag.field);
+        continue;
+      }
+      throw new UsageError(`no flag says which form to use: give ${toGive}`, help);
+    }
+    if (picked.length > 1) {
+      throw new UsageError(
+        `${formatFlagToGive(picked[1]!.selector)} cannot be given with ${formatFlagToGive(picked[0]!.selector)}: give ${toGive}`,
+        help,
+      );
+    }
+    const entry = picked[0]!;
+    const keys = entry.flags.map((flag) => flag.field);
+    const others = choice.entries
+      .flatMap((one) => one.flags.map((flag) => flag.field))
+      .filter((field) => !keys.includes(field));
+    const stray = others.find(wasGiven);
+    if (stray !== undefined) {
+      const owners = choice.entries
+        .filter((one) => one.flags.some((flag) => flag.field === stray))
+        .map((one) => formatFlagToGive(one.selector))
+        .join(" or ");
+      throw new UsageError(
+        `${formatFlagToGive(stray)} is for ${owners}; it cannot be given with ${formatFlagToGive(entry.selector)}`,
+        help,
+      );
+    }
+    for (const field of others) unpicked.add(field);
+    payload[choice.field] = { ...entry.fixed, ...(payload[choice.field] as object) };
+  }
+  return unpicked;
 };
 
 /**
@@ -430,11 +508,14 @@ export const parseArguments = async (
     }
   }
 
+  // The flags of an entry that was not picked are ignored from here on: they
+  // are neither required nor read from stdin.
+  const unpicked = pickEntries(command, payload, marked, help);
+  const given = command.payload.filter((field) => !unpicked.has(field));
+
   // A required content field is always read; an optional one only when its
   // marker was given, so an empty pipe never clears a field nobody named.
-  const reading = command.payload.filter(
-    (field) => field.stdin && (!field.optional || marked.has(field)),
-  );
+  const reading = given.filter((field) => field.stdin && (!field.optional || marked.has(field)));
 
   // Check everything that argv alone can decide before reading the pipe, so a
   // command line that cannot work does not consume stdin first.
@@ -460,12 +541,12 @@ export const parseArguments = async (
 
   checkPaging(command, { limit, cursor, sort }, help);
 
-  const missing = command.payload
+  const missing = given
     .filter(
       (field) =>
         !field.optional && readGivenValue(payload, field) === undefined && !reading.includes(field),
     )
-    .map((field) => `--${field.spelling}${field.stdin ? "-stdin" : ""}`);
+    .map(formatFlagToGive);
   if (missing.length > 0) {
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
   }
@@ -476,14 +557,14 @@ export const parseArguments = async (
     (field) => field.standsInForStdin && field.name in payload,
   );
   if (reading.length > 0 && hasOtherInput && stdinIsTerminal) {
-    for (const field of reading) payload[field.name] = coerceFieldValue(field, "", help);
+    for (const field of reading) setGivenValue(payload, field, coerceFieldValue(field, "", help));
   } else if (reading.length > 0) {
     // Strip one trailing newline, because heredocs and editors add one. Files
     // saved on Windows end with `\r\n`, which counts as that newline.
     const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
-      payload[field.name] = coerceFieldValue(field, text, help);
+      setGivenValue(payload, field, coerceFieldValue(field, text, help));
     } else {
       // Split at `\r\n` too, so no line of a Windows file keeps a trailing `\r`.
       const lines = text.split(/\r?\n/);
@@ -496,7 +577,7 @@ export const parseArguments = async (
         );
       }
       reading.forEach((field, index) => {
-        payload[field.name] = coerceFieldValue(field, lines[index]!, help);
+        setGivenValue(payload, field, coerceFieldValue(field, lines[index]!, help));
       });
     }
   }

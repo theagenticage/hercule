@@ -71,7 +71,7 @@ const toUsageError = (error: RequestError, command: Command): UsageError => {
   // key, such as `source.connectionId`.
   const named = new Map(
     [...command.positionals, ...command.payload, ...command.query].map((field) => [
-      field.within === undefined ? field.name : `${field.within.field}.${field.name}`,
+      field.within === undefined ? field.name : `${field.within}.${field.name}`,
       formatFieldName(field),
     ]),
   );
@@ -105,13 +105,18 @@ const buildStdinReader = (
   return () => {
     const fields = command.payload.filter((field) => field.stdin);
     const names = fields.map((field) => field.name);
-    const asked =
+    const subject =
       names.length === 1
-        ? `${names[0]} is read from stdin, and stdin is a terminal. Pipe it in:`
-        : `${names.join(" and ")} are read from stdin, and stdin is a terminal. Pipe them in:`;
+        ? `${names[0]} is read from stdin, and stdin is a terminal.`
+        : `${names.join(" and ")} are read from stdin, and stdin is a terminal.`;
+    const pronoun = names.length === 1 ? "it" : "them";
+    // A secret must not be typed on the command line, where the shell keeps it in its history.
+    const instruction = fields.some((field) => field.secret)
+      ? `Give ${pronoun} from a file, or pipe ${pronoun} in from a password manager, so no secret is typed on the command line:`
+      : `Pipe ${pronoun} in:`;
     throw new UsageError(
       [
-        asked,
+        `${subject} ${instruction}`,
         ...buildShellExample(command, tokens, names.map((name) => `<${name}>`).join("\n")),
       ].join("\n"),
       command.spelling,

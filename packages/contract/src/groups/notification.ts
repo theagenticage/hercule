@@ -31,8 +31,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Actor, Id, isQualifiedId, Timestamp } from "../ids";
-import { isOperationId } from "../operations";
+import { Actor, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
@@ -247,22 +246,20 @@ const isNestedDeeperThan = (value: unknown, levels: number): boolean => {
  * id or a plugin action's qualified id, the Connection it acts through, and
  * its whole input as one object.
  *
- * This schema only bounds the input's size and nesting. The core checks the
- * rest when the Notification or the Signal is written, and again before the
- * operation runs: that the operation lists the place in its `usableIn`, that
+ * This schema only bounds the input's size and nesting. It does not check
+ * that `op` names an operation, because that needs the operation table, and
+ * a schema in the API's declaration reaches the web app's first paint with
+ * the table in tow (about 3 kB gzipped). The core checks the rest when the
+ * Notification or the Signal is written, and again before the operation
+ * runs: that `op` is an operation or a plugin action (`permission.request`
+ * checks this on its own), that the operation lists the place in its `usableIn`, that
  * the input fits the operation's schema (`decodeAnswerOperation` for a
  * contract operation), and that a named Connection fits the action. A stored
  * answer is read with this looser schema, so it stays readable after an
  * operation's `usableIn` or input schema changes.
  */
 export const BoundOperation = Schema.Struct({
-  op: Schema.String.check(
-    Schema.makeFilter((op) =>
-      isOperationId(op) || isQualifiedId(op)
-        ? undefined
-        : `There is no operation named ${JSON.stringify(op)}. Bind a contract operation id, such as run.start, or a plugin action's qualified id, such as github/pr.merge.`,
-    ),
-  ),
+  op: Schema.String,
   /**
    * The Connection a plugin action acts through. Present exactly when the
    * action declares a Connection type; it stays out of `input`.

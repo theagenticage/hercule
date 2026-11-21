@@ -17,9 +17,6 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import type { Grant } from "./grants";
 
-/** The prefix every route carries. */
-export const API_PREFIX = "/api/v1";
-
 /**
  * What a caller must hold. A grant always contains a dot, so the three markers
  * can never collide with one:
@@ -48,12 +45,19 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * `bound-operations.test.ts` refuses it when it is too dangerous for one click.
  * Which operations a workflow step may call is decided by the built-in
  * actions, not by this field.
+ *
+ * `carriesSecret` marks an operation whose input can carry a secret although
+ * its grant does not show it: the grant family of `requires` already says so
+ * for the `credential`, `secret` and `infra` families (see `canCarrySecrets`).
+ * `mcp.manage` also covers operations that carry none, so
+ * `mcpServer.create` and `mcpServer.setToken`, which take a token, set it.
  */
 interface OperationRow {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
   readonly readOnly?: true;
+  readonly carriesSecret?: true;
   readonly usableIn?: readonly [AnswerPlace, ...ReadonlyArray<AnswerPlace>];
 }
 
@@ -919,13 +923,24 @@ const TABLE = {
 
   "mcpServer.query": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers" },
   "mcpServer.read": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers/:id" },
-  "mcpServer.create": { requires: "mcp.manage", method: "POST", path: "/api/v1/mcp-servers" },
+  "mcpServer.create": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers",
+  },
   "mcpServer.update": { requires: "mcp.manage", method: "PATCH", path: "/api/v1/mcp-servers/:id" },
   "mcpServer.delete": { requires: "mcp.manage", method: "DELETE", path: "/api/v1/mcp-servers/:id" },
   "mcpServer.check": {
     requires: "mcp.manage",
     method: "POST",
     path: "/api/v1/mcp-servers/:id/check",
+  },
+  "mcpServer.setToken": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/token",
   },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
@@ -1114,6 +1129,8 @@ export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).ma
 /** Checks whether the string is an operation id. */
 export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
+const ROWS: Readonly<Record<OperationId, OperationRow>> = TABLE;
+
 /** Returns what a caller must hold to call the operation. */
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;
 
@@ -1127,7 +1144,8 @@ export const readRequirement = (id: OperationId): Requirement => TABLE[id].requi
  * - `connection.manage`, because a Connection is created with its
  *   credentials;
  * - no grant at all, before sign-in: `auth.login` and `setup.complete` carry
- *   a password.
+ *   a password;
+ * - a row that sets `carriesSecret`, which takes a token.
  *
  * Text that could hold such a value must not be copied into a record many
  * readers see, such as a notification or an event.
@@ -1138,6 +1156,7 @@ export const canCarrySecrets = (id: OperationId): boolean => {
     /^(credential|secret|infra)\./.test(requirement) ||
     requirement === "connection.manage" ||
     requirement === "unauthenticated" ||
-    requirement === "setup-token"
+    requirement === "setup-token" ||
+    ROWS[id].carriesSecret === true
   );
 };

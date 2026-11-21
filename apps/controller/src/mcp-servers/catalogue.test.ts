@@ -99,6 +99,41 @@ describe("the verdicts of the catalogue view", () => {
       refusedFor: "error",
       leftOutFor: "error",
     },
+    {
+      name: "a healthy server added by URL is listed, called and delivered, with no plugin or Connection",
+      facts: { url: { signIn: "token" } },
+      servable: true,
+      refusedFor: null,
+      leftOutFor: null,
+    },
+    {
+      name: "a server added by URL that needs sign-in stays listed while its calls are refused",
+      facts: { url: { signIn: "none" }, status: "needs-sign-in" },
+      servable: true,
+      refusedFor: "needs-sign-in",
+      leftOutFor: "needs-sign-in",
+    },
+    {
+      name: "a server added by URL with no stored list yet is not listed, and says it is still being checked",
+      facts: { url: { signIn: "none" }, status: "checking", checkedAt: null },
+      servable: false,
+      refusedFor: "checking",
+      leftOutFor: "checking",
+    },
+    {
+      name: "a switched-off server added by URL is not listed",
+      facts: { url: { signIn: "none" }, enabled: false },
+      servable: false,
+      refusedFor: "switched-off",
+      leftOutFor: "switched-off",
+    },
+    {
+      name: "a server added by URL whose stored status is unreachable stays listed",
+      facts: { url: { signIn: "token" }, status: "unreachable" },
+      servable: true,
+      refusedFor: "unreachable",
+      leftOutFor: "unreachable",
+    },
   ])("$name", ({ facts, servable, refusedFor, leftOutFor }) => {
     const view = buildMcpServerView(facts);
 
@@ -119,6 +154,15 @@ describe("the verdicts of the catalogue view", () => {
     );
     expect(decideCallRefusal(buildMcpServerView({ status: "unreachable" }))?.message).toBe(
       "desk could not be reached. Try again later.",
+    );
+  });
+
+  it("sends the agent of a server added by URL to the server's own settings, and not to a Connection", () => {
+    expect(
+      decideCallRefusal(buildMcpServerView({ url: { signIn: "token" }, status: "needs-sign-in" }))
+        ?.message,
+    ).toBe(
+      "desk needs sign-in. Ask the user to paste a token or sign in in Settings > MCP servers.",
     );
   });
 });

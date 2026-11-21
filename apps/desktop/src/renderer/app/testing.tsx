@@ -69,6 +69,7 @@ import {
   NO_SIDEBAR_RECORDS,
 } from "./fake-controller";
 import { buildRouterContext, type RouterContext } from "./context";
+import { REQUEST_TIMEOUT_MS } from "./controller-client";
 import { SHARED_READ_WINDOW_MS } from "./live";
 import { createAppRouter } from "./router";
 
@@ -357,6 +358,10 @@ export const neverAnswer = (): Promise<Answer> => new Promise(() => {});
  * test can call `answer` before the first request has arrived. That reply is
  * kept and answers the first request as soon as it arrives. Without this, the
  * reply would be lost and the request would wait forever.
+ *
+ * The app gives up on a request after `REQUEST_TIMEOUT_MS` of real time. A
+ * test that holds a request across steps that can be slow on a busy machine
+ * calls `stopRequestTimeLimit` first.
  */
 export const holdAnswer = (): {
   readonly handler: () => Promise<Answer>;
@@ -387,6 +392,32 @@ export const holdAnswer = (): {
       });
     },
   };
+};
+
+/**
+ * Stops the app's request time limit (`REQUEST_TIMEOUT_MS`) from firing for
+ * the rest of the test, so a request that the test holds stays pending
+ * however slowly the test's other steps run. Without it, a busy machine can
+ * take longer than the limit, and the app fails the held request with a
+ * `ConnectionError` the test did not plan. It replaces each timer of that
+ * length with a real timer that never fires by itself, and restores
+ * `setTimeout` when the test ends. Fake timers cannot be used here: Testing
+ * Library's `findBy` and `waitFor` wait on a timer of their own, which a fake
+ * clock never fires. Any other timer of that length is held too.
+ */
+export const stopRequestTimeLimit = (): void => {
+  const realSetTimeout = globalThis.setTimeout;
+  const spy = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) =>
+      realSetTimeout(
+        callback,
+        delay === REQUEST_TIMEOUT_MS ? 2 ** 30 : delay,
+        ...rest,
+      )) as typeof setTimeout);
+  onTestFinished(() => {
+    spy.mockRestore();
+  });
 };
 
 /**

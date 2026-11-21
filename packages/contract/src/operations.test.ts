@@ -20,10 +20,20 @@ describe("canCarrySecrets", () => {
     },
   );
 
-  it.each<OperationId>(["task.delete", "session.input", "profile.update"])(
-    "does not report %s",
+  it.each<OperationId>(["mcpServer.create", "mcpServer.setToken"])(
+    "reports %s, which takes the token of an MCP server",
     (id) => {
-      expect(canCarrySecrets(id)).toBe(false);
+      expect(canCarrySecrets(id)).toBe(true);
     },
   );
+
+  it.each<OperationId>([
+    "mcpServer.update",
+    "mcpServer.check",
+    "task.delete",
+    "session.input",
+    "profile.update",
+  ])("does not report %s", (id) => {
+    expect(canCarrySecrets(id)).toBe(false);
+  });
 });

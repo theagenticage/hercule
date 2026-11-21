@@ -917,6 +917,55 @@ describe("a flag that fills one key of an object", () => {
     expect(fetch.calls.length).toBe(2);
   });
 
+  it("moves a server onto a plugin's Connection with update, resolving both tails, and sends no source with --enabled alone", async () => {
+    const connectionId = buildId("ccccccc3");
+    const serverId = buildId("aaaaaaa1");
+    const server = {
+      id: serverId,
+      name: "sentry",
+      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId },
+      enabled: true,
+      status: "checking",
+      statusDetail: null,
+      tools: [],
+      checkedAt: null,
+      createdAt: "2026-09-15T10:00:00.000Z",
+      updatedAt: "2026-09-15T10:00:00.000Z",
+    };
+    const { fetch, client } = stubClient((request) => {
+      if (request.method !== "GET") return server;
+      return request.path === "/api/v1/connections"
+        ? { items: [buildConnection(connectionId)] }
+        : { items: [server] };
+    });
+    const command = lookUpCommand("mcp-server", "update");
+
+    await execute(
+      client,
+      command,
+      await parseArguments(
+        command,
+        ["aaaaaaa1", "--plugin", "sentry/sentry", "--connection", "0ccccccc3"],
+        refuseStdinRead,
+      ),
+    );
+    await execute(
+      client,
+      command,
+      await parseArguments(command, ["aaaaaaa1", "--enabled", "false"], refuseStdinRead),
+    );
+
+    const sent = fetch.calls.filter((call) => call.method === "PATCH");
+    expect(sent).toMatchObject([
+      {
+        path: `/api/v1/mcp-servers/${serverId}`,
+        body: { source: { kind: "plugin", contributionId: "sentry/sentry", connectionId } },
+      },
+      { path: `/api/v1/mcp-servers/${serverId}`, body: { enabled: false } },
+    ]);
+    expect(sent[1]?.body).not.toHaveProperty("source");
+  });
+
   it("fails with not_found, and sends nothing, when no Connection ends with the tail", async () => {
     const { fetch, client } = stubClient(() => ({ items: [] }));
     const command = lookUpCommand("mcp-server", "create");
@@ -928,5 +977,81 @@ describe("a flag that fills one key of an object", () => {
 
     await expect(execute(client, command, args)).rejects.toThrow("no connection whose id ends");
     expect(fetch.calls.map((call) => call.method)).toEqual(["GET"]);
+  });
+});
+
+// Tests the forms of `mcp-server create` that need no Connection, and `set-token`, through the whole request.
+describe("an MCP server added by its address", () => {
+  const serverId = buildId("aaaaaaa1");
+  const buildServer = () => ({
+    id: serverId,
+    name: "notion",
+    source: {
+      kind: "url",
+      url: "https://mcp.notion.com/mcp",
+      signIn: "token",
+      signInOffered: null,
+    },
+    enabled: true,
+    status: "checking",
+    statusDetail: null,
+    tools: [],
+    checkedAt: null,
+    createdAt: "2026-09-15T10:00:00.000Z",
+    updatedAt: "2026-09-15T10:00:00.000Z",
+  });
+
+  it("is created with the token read from stdin, and looks up no Connection", async () => {
+    const { fetch, client } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--url", "https://mcp.notion.com/mcp", "--token-stdin"],
+      () => Promise.resolve("s3cret-t0ken\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/mcp-servers",
+      body: { source: { kind: "url", url: "https://mcp.notion.com/mcp", token: "s3cret-t0ken" } },
+    });
+  });
+
+  it("is refused when the flags of both forms are given, before stdin is read and with nothing sent", async () => {
+    const { fetch } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+
+    await expect(
+      parseArguments(
+        command,
+        ["--url", "https://mcp.notion.com/mcp", "--plugin", "sentry/sentry", "--token-stdin"],
+        refuseStdinRead,
+      ),
+    ).rejects.toThrow(UsageError);
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("gets a token from stdin with set-token, and resolves the id tail", async () => {
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/mcp-servers" && request.method === "GET"
+        ? { items: [buildServer()] }
+        : buildServer(),
+    );
+    const command = lookUpCommand("mcp-server", "set-token");
+    const args = await parseArguments(command, ["aaaaaaa1"], () =>
+      Promise.resolve("s3cret-t0ken\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/mcp-servers" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/mcp-servers/${serverId}/token`,
+      body: { token: "s3cret-t0ken" },
+    });
   });
 });

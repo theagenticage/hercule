@@ -18,6 +18,7 @@ export {
 } from "./repository";
 export { OAuthCallbackRouteLayer } from "./route";
 export {
+  computeCredentialsIdentity,
   ConnectionCannotRefresh,
   ConnectionCredentialsUnavailable,
   ConnectionTypes,
