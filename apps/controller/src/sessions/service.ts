@@ -2974,7 +2974,7 @@ const make = Effect.gen(function* () {
                 spec: {
                   ...spec.value,
                   ...(coordination === undefined ? {} : { coordination }),
-                  ...(gateway.runnerReachesMcpServers && gateway.harnessPassthrough === "native"
+                  ...(decideNoGatewayReason(gateway) === null
                     ? { mcpServers: [MCP_GATEWAY_ENTRY] }
                     : {}),
                 },
