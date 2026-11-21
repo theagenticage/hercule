@@ -18,7 +18,6 @@ interface FieldRow {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
-  readonly object?: ObjectRow;
   readonly oneOf?: ReadonlyArray<ObjectRow & { readonly help?: string }>;
 }
 
@@ -57,10 +56,9 @@ const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
       .flatMap(([name, field]): Array<[string, string, FieldRow]> => {
-        const objects = field.oneOf ?? (field.object === undefined ? [] : [field.object]);
-        return field.oneOf === undefined && field.object === undefined
+        return field.oneOf === undefined
           ? [[id, name, field]]
-          : objects.flatMap((object) =>
+          : field.oneOf.flatMap((object) =>
               Object.entries(object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
                 id,
                 `${name}.${key}`,

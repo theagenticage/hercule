@@ -108,6 +108,26 @@ const QualifiedContributionId = Schema.String.check(
 );
 
 /**
+ * The token a user pastes for an MCP server added by address: an RFC 6750
+ * bearer token, which is letters, digits and `-._~+/`, optionally ending in
+ * `=`, at least 8 characters long.
+ *
+ * The limits are not only manners. Hercule replaces a secret it finds in what
+ * a server sends with `[removed]`, and a token of 7 characters or fewer could
+ * be a part of that marker, so the marker would be taken for the secret. A
+ * token with spaces could be trimmed by `fetch` in the `Authorization` header
+ * while Hercule looks for the untrimmed text, so the secret would not be
+ * found.
+ */
+export const McpServerToken = Schema.String.check(
+  Schema.makeFilter((token) =>
+    /^[A-Za-z0-9\-._~+/]+=*$/.test(token) && token.length >= 8
+      ? undefined
+      : "A token is at least 8 characters of letters, digits and - . _ ~ + /, optionally ending in =. Paste the token alone, without `Bearer ` in front of it and without spaces.",
+  ),
+);
+
+/**
  * Where an MCP Server is reached from:
  *
  * - `plugin`: a server a plugin offers, reached with the credential of one of
@@ -175,8 +195,8 @@ export type McpServer = Schema.Schema.Type<typeof McpServer>;
  * for a server added by URL.
  *
  * `url` is any text here: the service checks it and says what is wrong. A
- * `token` is stored as the server's sign-in before the first check, so the
- * check already carries it.
+ * `token` (see `McpServerToken`) is stored as the server's sign-in before the
+ * first check, so the check already carries it.
  */
 export const McpServerCreateInput = closedStruct({
   source: Schema.Union([
@@ -190,7 +210,7 @@ export const McpServerCreateInput = closedStruct({
       kind: Schema.Literal("url"),
       url: Schema.String,
       name: Schema.optionalKey(McpServerName),
-      token: Schema.optionalKey(Schema.NonEmptyString),
+      token: Schema.optionalKey(McpServerToken),
     }),
   ]),
 });
@@ -208,7 +228,7 @@ export const McpServerUpdateInput = closedStruct({
 export type McpServerUpdateInput = Schema.Schema.Type<typeof McpServerUpdateInput>;
 
 /** The payload of `mcpServer.setToken`: the token the user pasted for the server. */
-export const McpServerSetTokenInput = closedStruct({ token: Schema.NonEmptyString });
+export const McpServerSetTokenInput = closedStruct({ token: McpServerToken });
 
 export type McpServerSetTokenInput = Schema.Schema.Type<typeof McpServerSetTokenInput>;
 

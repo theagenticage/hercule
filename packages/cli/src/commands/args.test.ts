@@ -487,14 +487,14 @@ describe("mcp-server create", () => {
     const withToken = await parseArguments(
       mcpServerCreate,
       ["--url", "https://mcp.example.com/mcp", "--name", "example", "--token-stdin"],
-      stubStdin("s3cret\n"),
+      stubStdin("s3cret-t0ken\n"),
     );
     expect(withToken.payload).toEqual({
       source: {
         kind: "url",
         url: "https://mcp.example.com/mcp",
         name: "example",
-        token: "s3cret",
+        token: "s3cret-t0ken",
       },
     });
 
@@ -512,7 +512,7 @@ describe("mcp-server create", () => {
     await expect(
       parseArguments(
         mcpServerCreate,
-        ["--url", "https://mcp.example.com/mcp", "--token", "s3cret"],
+        ["--url", "https://mcp.example.com/mcp", "--token", "s3cret-t0ken"],
         refuseStdinRead,
       ),
     ).rejects.toThrow("--token does not exist");
@@ -551,11 +551,11 @@ describe("mcp-server set-token", () => {
   const setToken = lookUpCommand("mcp-server", "set-token");
 
   it("reads the token from stdin and takes no flag for it", async () => {
-    const args = await parseArguments(setToken, [ID], stubStdin("s3cret\n"));
+    const args = await parseArguments(setToken, [ID], stubStdin("s3cret-t0ken\n"));
     expect(args.positionals).toEqual([ID]);
-    expect(args.payload).toEqual({ token: "s3cret" });
+    expect(args.payload).toEqual({ token: "s3cret-t0ken" });
     await expect(
-      parseArguments(setToken, [ID, "--token", "s3cret"], refuseStdinRead),
+      parseArguments(setToken, [ID, "--token", "s3cret-t0ken"], refuseStdinRead),
     ).rejects.toThrow("--token does not exist");
   });
 });

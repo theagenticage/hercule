@@ -119,15 +119,6 @@ export interface NewUrlMcpServer {
 }
 
 /**
- * Checks whether a failed write broke a UNIQUE constraint of the table: a
- * second server for one plugin contribution and account, or for one
- * normalized address. A writer that looked for the existing server first and
- * found none can still meet this when another write committed in between.
- */
-export const isUniqueViolation = (error: SqlError): boolean =>
-  error.reason._tag === "UniqueViolation";
-
-/**
  * The columns that hold a row's source. The table's CHECK guarantees that a
  * row has the columns of its kind and none of the other's, so the two shapes
  * are the only ones a read can find.

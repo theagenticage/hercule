@@ -1,8 +1,7 @@
 /**
  * Tests how a server added by URL is reached, against a real controller and a
  * fake outside MCP server that speaks the protocol for real. The tests write
- * the server's rows themselves, because no operation creates such a server
- * yet:
+ * the server's rows themselves, so that they can give it any state:
  *
  * - a check lists the tools with no sign-in and with a pasted token, and an
  *   HTTP 401 makes the server `needs-sign-in` and records which sign-in the
@@ -19,14 +18,24 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Redacted } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Fiber from "effect/Fiber";
 import { McpProtocol } from "effect/ai";
 import { Secrets } from "../secrets";
-import { send } from "../http/testing";
+import {
+  collectPushes,
+  fetchTicket,
+  onSocket,
+  send,
+  waitForLiveToSettle,
+  waitWithin,
+} from "../http/testing";
 import type { SetUpController } from "../workflows/testing";
+import { resolveServerAccess, ServerCredentialsUnavailable } from "./access";
 import { McpCallRefused, type McpToolCall } from "./calls";
 import { McpServerSignInReplaced, mcpServerSignIns } from "./sign-ins";
 import {
   eventually,
+  buildMcpServerView,
   readRow,
   requestCheck,
   runSql,
@@ -152,6 +161,16 @@ describe("the check of a server added by URL", () => {
       `Bearer error_description="resource_metadata=x"`,
       "token",
     ],
+    [
+      "a Basic challenge that carries the parameter",
+      `Basic realm="mcp", resource_metadata="https://auth.example/meta"`,
+      "token",
+    ],
+    [
+      "a Basic challenge and a Bearer challenge that names its OAuth metadata",
+      `Basic realm="mcp", Bearer error="invalid_token", resource_metadata="https://auth.example/meta"`,
+      "oauth",
+    ],
   ] as const)(
     "needs sign-in after an HTTP 401 with %s, and records that the server offers %s",
     async (_name, challenge, offered) => {
@@ -273,8 +292,76 @@ describe("a call to a server added by URL", () => {
   });
 });
 
+describe("a call that the server refuses with HTTP 401", () => {
+  it("records what the server offers, the way a check does", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      const serverId = await insertUrlServer({ token: "t0ken-1234" });
+      await waitForResult(controller);
+      fake.authorize = () => false;
+      fake.challenge = `Bearer resource_metadata="https://auth.example/meta"`;
+
+      expect((await callAs(controller, serverId))._tag).toBe("Failure");
+
+      expect(await readRow(controller)).toMatchObject({
+        status: "needs-sign-in",
+        sign_in_offered: "oauth",
+      });
+    });
+  });
+
+  it("records a plain token as the offer when the challenge names no OAuth metadata", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      const serverId = await insertUrlServer({ token: "t0ken-1234" });
+      await waitForResult(controller);
+      fake.authorize = () => false;
+      fake.challenge = `Basic realm="mcp", resource_metadata="https://auth.example/meta"`;
+
+      expect((await callAs(controller, serverId))._tag).toBe("Failure");
+
+      expect((await readRow(controller)).sign_in_offered).toBe("token");
+    });
+  });
+
+  it("announces a change of the offered sign-in alone, with the status unchanged, on the live topic", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      fake.authorize = () => false;
+      const serverId = await insertUrlServer();
+      const refused = await waitForStatus(controller, "needs-sign-in");
+      expect(refused.sign_in_offered).toBe("token");
+      const ticket = await fetchTicket(controller.base, controller.token);
+
+      await onSocket(controller.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const pushes = yield* collectPushes(client, "mcpServer");
+          yield* Effect.promise(async () => {
+            await waitForLiveToSettle();
+            const announced = pushes.received.length;
+            fake.challenge = `Bearer resource_metadata="https://auth.example/meta"`;
+
+            expect((await requestCheck(controller, serverId)).status).toBe(200);
+            const offered = await eventually(
+              () => readRow(controller),
+              (row) => row.sign_in_offered === "oauth",
+            );
+
+            expect(offered.status).toBe("needs-sign-in");
+            expect(await waitWithin(2000, () => pushes.received.length > announced)).toBe(true);
+            expect(pushes.received.at(-1)).toEqual({
+              _tag: "invalidate",
+              ids: [serverId],
+              kind: "updated",
+            });
+          });
+          yield* Fiber.interrupt(pushes.fiber);
+        }),
+      );
+    });
+  });
+});
+
 describe("the sign-in a request carries", () => {
-  it("is never a newer one than the upstream session was opened with, for a request that only continues an exchange or ends the session", async () => {
+  it("sends no DELETE to end an upstream session whose token was replaced, so the new token never goes with it", async () => {
     await withUrlRig(
       async ({ controller, fake, insertUrlServer }) => {
         const serverId = await insertUrlServer({ token: "old-token" });
@@ -337,6 +424,37 @@ describe("the sign-in a request carries", () => {
       expect(await Effect.runPromise(signIns.readTokenWhileRevisionIs(serverId, "token", 1))).toBe(
         "new-token",
       );
+    });
+  });
+
+  it("is not the one a request that continues an exchange carries, when the token was replaced after the exchange began", async () => {
+    await withUrlRig(async ({ controller, insertUrlServer }) => {
+      const serverId = await insertUrlServer({ token: "old-token" });
+      const signIns = await readSignIns(controller);
+      // The view an exchange began with, at revision 0.
+      const began = buildMcpServerView({ url: { signIn: "token" } });
+      const accessWhenBegun = (revision: number) => {
+        const access = resolveServerAccess(
+          { ...began, server: { ...began.server, id: serverId, revision } },
+          {} as never,
+          signIns,
+        );
+        if (access._tag !== "usable") throw new Error("a server added by URL is always usable");
+        return access.credentials;
+      };
+      const continued = accessWhenBegun(0);
+      expect((await Effect.runPromise(continued.readWithoutRefresh)).credentials["token"]).toBe(
+        "old-token",
+      );
+
+      await replaceToken(controller, serverId, "new-token");
+
+      const failure = await Effect.runPromise(Effect.flip(continued.readWithoutRefresh));
+      expect(failure).toBeInstanceOf(ServerCredentialsUnavailable);
+      // An exchange that begins after the change carries the new token.
+      expect(
+        (await Effect.runPromise(accessWhenBegun(1).readWithoutRefresh)).credentials["token"],
+      ).toBe("new-token");
     });
   });
 
@@ -446,6 +564,22 @@ describe("a credential the server echoes", () => {
     );
   });
 
+  it("leaves out a tool that no longer fits the tool schema once the credential is removed from one of its keys", async () => {
+    await withUrlRig(
+      async ({ controller, insertUrlServer }) => {
+        // The shortest token that is accepted is 8 characters, and this one is
+        // the start of the required key `inputSchema`.
+        await insertUrlServer({ token: "inputSch" });
+
+        const row = await waitForResult(controller);
+
+        expect(row.status).toBe("ready");
+        expect(JSON.parse(row.tools)).toEqual([]);
+      },
+      { fake: { tools: [{ name: "echo", description: "Echoes its text" }] } },
+    );
+  });
+
   it("is removed from the error a tool answers with", async () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "s3cret-t0ken" });
@@ -495,6 +629,44 @@ describe("the size of a tool list", () => {
       expect(row.status_detail).toBe("The server's tool list is larger than 4 MiB");
       expect(row.tools).toBe(first.tools);
       // 3 pages of 1.5 MiB pass 4 MiB, and no fourth page is asked for.
+      expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(3);
+    });
+  });
+
+  it("counts each tool as the client keeps it, so large `_meta` fields end the check as an error", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      const serverId = await insertUrlServer();
+      const first = await waitForResult(controller);
+      const listsBefore = requestsOf(fake, "tools/list").length;
+      let page = 0;
+      fake.intercept = ({ method, id }) => {
+        if (method !== "tools/list") return undefined;
+        page += 1;
+        // What is stored of each tool is a few bytes. Only `_meta` is large.
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            ttlMs: 0,
+            cacheScope: "private",
+            tools: [
+              {
+                name: `meta-${String(page)}`,
+                description: "small",
+                inputSchema: { type: "object" },
+                _meta: { padding: BIG_DESCRIPTION },
+              },
+            ],
+            nextCursor: `cursor-${String(page)}`,
+          },
+        });
+      };
+
+      expect((await requestCheck(controller, serverId)).status).toBe(200);
+      const row = await waitForStatus(controller, "error");
+
+      expect(row.status_detail).toBe("The server's tool list is larger than 4 MiB");
+      expect(row.tools).toBe(first.tools);
       expect(requestsOf(fake, "tools/list").length - listsBefore).toBe(3);
     });
   });

@@ -45,6 +45,7 @@ import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
+  decideSignInOffered,
   MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
   runWithCredentials,
@@ -269,13 +270,7 @@ const make = Effect.gen(function* () {
         Effect.catchTags({
           UpstreamError: (failure) => {
             const { status, detail } = buildStatusFromFailure(failure, access.credentials);
-            // Only a server added by URL has a sign-in to offer.
-            const signInOffered =
-              failure.reason === "unauthorized" && server.source.kind === "url"
-                ? failure.offersOAuth === true
-                  ? "oauth"
-                  : "token"
-                : undefined;
+            const signInOffered = decideSignInOffered(failure, server.source.kind);
             return Effect.succeed(buildFailedResult(status, detail, null, signInOffered));
           },
           ServerCredentialsUnavailable: ({ status, detail, cause }) =>

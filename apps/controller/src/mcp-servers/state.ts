@@ -156,7 +156,8 @@ const make = Effect.gen(function* () {
    *
    * `updated_at` moves, and the write is announced on the `mcpServer` live
    * topic, only when it changes what the record shows: its status, detail,
-   * tools or last check time. A write that only reschedules or counts failures
+   * tools, last check time or, for a server added by URL, the sign-in it
+   * offers. A write that only reschedules or counts failures
    * leaves both alone. `at` is the instant of the write. Must run inside a
    * transaction.
    */
@@ -191,7 +192,10 @@ const make = Effect.gen(function* () {
         (edit.statusDetail !== undefined && edit.statusDetail !== current.statusDetail) ||
         (edit.tools !== undefined &&
           JSON.stringify(edit.tools) !== JSON.stringify(current.tools)) ||
-        (edit.checkedAt !== undefined && edit.checkedAt !== current.checkedAt);
+        (edit.checkedAt !== undefined && edit.checkedAt !== current.checkedAt) ||
+        (edit.signInOffered !== undefined &&
+          current.source.kind === "url" &&
+          edit.signInOffered !== current.source.signInOffered);
       yield* servers.update(
         current.id,
         { ...edit, ...(notifiedStatus === undefined ? {} : { notifiedStatus }) },

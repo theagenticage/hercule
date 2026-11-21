@@ -14,7 +14,6 @@ interface RowField {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
-  readonly object?: unknown;
   readonly oneOf?: unknown;
 }
 
@@ -109,13 +108,9 @@ describe("the spelling of a command", () => {
       const fields = [...command.payload, ...command.query];
       // Entries of a `oneOf` field may share a flag, so it counts once.
       const flags = [
-        ...fields
-          .filter((field) => field.within?.entry === undefined)
-          .map((field) => field.spelling),
+        ...fields.filter((field) => field.within === undefined).map((field) => field.spelling),
         ...new Set(
-          fields
-            .filter((field) => field.within?.entry !== undefined)
-            .map((field) => field.spelling),
+          fields.filter((field) => field.within !== undefined).map((field) => field.spelling),
         ),
       ];
       for (const flag of flags) {

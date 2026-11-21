@@ -171,24 +171,6 @@ export type FieldRow =
     }
   | {
       /**
-       * Fills an object-valued field from several flags, one per key of the
-       * object, and from fixed values the command line never types:
-       * `--plugin sentry/sentry --connection 1f3a9c2e` sends `{ kind:
-       * "plugin", contributionId: "sentry/sentry", connectionId: <full id> }`.
-       * Each flag is an ordinary flag in help and in errors: a missing
-       * required key is reported by its flag, and an optional key is optional
-       * on the command line. Which keys are required is read from the
-       * field's schema.
-       *
-       * Every key in `fixed` and `flags` must be a key of the object, every
-       * key the object requires must be in one of them, and a key holds one
-       * value, never a list. The object is sent as soon as one of its flags
-       * is given.
-       */
-      readonly object: ObjectFlagsRow;
-    }
-  | {
-      /**
        * Fills a field that holds one of several object shapes, told apart by
        * a literal key such as `kind`: `--plugin sentry/sentry --connection
        * 1f3a9c2e` sends `{ kind: "plugin", ... }` and `--url <address>` sends
@@ -196,9 +178,10 @@ export type FieldRow =
        * objects, with one entry here for each member, and the entry's `fixed`
        * must be exactly the member's literal keys with their values.
        *
-       * Each entry is an `object` row with a `help` that leads its flags in
-       * the command's help. The command line picks the entry by the flags it
-       * gives:
+       * Each entry gives the flags of one object shape (`ObjectFlagsRow`) and
+       * a `help` that leads its flags in the command's help. A field with a
+       * single shape is a `oneOf` of one entry. The command line picks the
+       * entry by the flags it gives:
        *
        * - A flag that only one entry declares picks that entry. Flags of two
        *   entries together are refused, and so is a command line with no
@@ -208,6 +191,13 @@ export type FieldRow =
        *   none of them.
        * - The keys the picked entry requires are required on the command
        *   line, and no other entry's keys are.
+       *
+       * Each flag is an ordinary flag in help and in errors: a missing
+       * required key is reported by its flag, and an optional key is optional
+       * on the command line. Which keys are required is read from the field's
+       * schema. Every key in an entry's `fixed` and `flags` must be a key of
+       * its object, every key the object requires must be in one of them, and
+       * a key holds one value, never a list.
        *
        * At most one flag read from stdin may be declared across the entries,
        * so the help can say what stdin holds without naming an entry.
@@ -222,8 +212,7 @@ export type FieldRow =
 
 /**
  * The flags that fill an object field, one per key, and the keys sent with
- * fixed values. An `object` row is one of these, and each entry of a `oneOf`
- * row is one with a lead line.
+ * fixed values. Each entry of a `oneOf` row is one of these, with a lead line.
  */
 export interface ObjectFlagsRow {
   /** Keys sent with this text as their value, whatever the command line says. */
@@ -232,7 +221,7 @@ export interface ObjectFlagsRow {
   readonly flags: Readonly<Record<string, ObjectKeyRow>>;
 }
 
-/** The flag that fills one key of an object field, as `object` or `oneOf` on a `FieldRow` declares it. */
+/** The flag that fills one key of an object field, as an entry of `oneOf` on a `FieldRow` declares it. */
 export interface ObjectKeyRow {
   readonly flag: string;
   readonly help: string;
@@ -4669,7 +4658,7 @@ export const CLI = {
               token: {
                 flag: "token",
                 stdin: true,
-                help: "The token the server expects, sent to it as a bearer token. Without it, the first check goes with no sign-in.",
+                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
               },
             },
           },
@@ -4680,7 +4669,7 @@ export const CLI = {
       conflict:
         "the server exists already, and the message names it: a plugin server of the same contribution and account, or a server of the same address (two spellings of one address count as one). Read it with `hercule mcp-server read`, or delete it first with `hercule mcp-server delete`. Or the address is one a plugin offers a server for: the message says how to add that server from your Connection instead",
       validation:
-        "the address is not http or https, holds a user name or password or a #fragment, or no name can be made from its host, so give one with --name. Or the name breaks the name rule. Or no plugin offers the contribution, or the Connection is not of its type",
+        "the address is not http or https, holds a user name or password or a #fragment, or no name can be made from its host, so give one with --name. Or the name breaks the name rule. Or the token is not a bearer token as described for --token-stdin. Or no plugin offers the contribution, or the Connection is not of its type",
     },
   },
   "mcpServer.update": {
@@ -4740,10 +4729,12 @@ export const CLI = {
         stdin: true,
         required: true,
         flag: "token",
-        help: "The token the server expects, sent to it as a bearer token.",
+        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces.",
       },
     },
     errors: {
+      validation:
+        "the token is not a bearer token: it is shorter than 8 characters, holds characters other than letters, digits and - . _ ~ + /, or has `Bearer ` in front of it or a space in it",
       invalid_state:
         "the server is a plugin server, which is reached with its Connection: reconnect that Connection with `hercule connection set-credentials` or in Settings > Connections",
     },

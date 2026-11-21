@@ -39,10 +39,10 @@ import {
   parseServerAddress,
   type ServerAddress,
 } from "./addresses";
-import { mcpServerCatalogue } from "./catalogue";
+import { mcpServerCatalogue, type PluginState } from "./catalogue";
 import { McpServerChecks } from "./checks";
 import { McpServerListHolders } from "./list-holders";
-import { isUniqueViolation, mcpServerRepository, type StoredMcpServer } from "./repository";
+import { mcpServerRepository, type StoredMcpServer } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
 
 /** What `update` takes: the server and the fields to change. */
@@ -106,6 +106,32 @@ const buildUrlServerExists = (existing: StoredMcpServer): Conflict =>
     { reason: "mcp-server-exists", mcpServerId: existing.id },
   );
 
+/**
+ * Builds what the user does instead of adding a plugin's server by address,
+ * by what the user has: the plugin is switched off or failed to start, or it
+ * runs and the user has a Connection of its type or has none.
+ */
+const buildPluginOriginAdvice = (facts: {
+  readonly plugin: string;
+  readonly contributionId: string;
+  readonly state: PluginState["_tag"];
+  readonly connection: { readonly id: string; readonly label: string } | undefined;
+}): string => {
+  const { plugin, contributionId, connection } = facts;
+  const switchOn = "switch its server on in Settings > MCP servers";
+  const connectFirst = connection === undefined ? "connect it, then " : "";
+  switch (facts.state) {
+    case "failed-to-start":
+      return `The ${plugin} plugin failed to start: see Settings > Plugins. Once it runs, ${connectFirst}${switchOn}.`;
+    case "active":
+      return connection === undefined
+        ? `It is reached with a ${plugin} Connection, with no second sign-in. Connect ${plugin} first in Settings > Connections, then ${switchOn}.`
+        : `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contributionId} --connection ${connection.id}\`.`;
+    default:
+      return `The ${plugin} plugin is switched off: switch it on in Settings > Plugins, ${connection === undefined ? connectFirst : "then "}${switchOn}.`;
+  }
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const servers = yield* mcpServerRepository;
@@ -152,32 +178,23 @@ const make = Effect.gen(function* () {
         (connection) => connection.type === contribution.connectionType,
       );
       const connection = ofType.find((one) => one.status !== "disabled") ?? ofType[0];
-      const { displayName: plugin } = contribution;
-      const pluginEnabled = state._tag === "active";
-      const lead = `${address.origin} is the ${plugin} MCP server.`;
-      const switchOn = "switch its server on in Settings > MCP servers";
-      let advice: string;
-      if (!pluginEnabled) {
-        const why =
-          state._tag === "failed-to-start"
-            ? `The ${plugin} plugin failed to start: see Settings > Plugins.`
-            : `The ${plugin} plugin is switched off: switch it on in Settings > Plugins,`;
-        advice =
-          state._tag === "failed-to-start"
-            ? `${why} Once it runs, ${connection === undefined ? "connect it, then " : ""}${switchOn}.`
-            : `${why} ${connection === undefined ? "connect it, then " : "then "}${switchOn}.`;
-      } else if (connection === undefined) {
-        advice = `It is reached with a ${plugin} Connection, with no second sign-in. Connect ${plugin} first in Settings > Connections, then ${switchOn}.`;
-      } else {
-        advice = `It is reached with your ${plugin} Connection ${connection.label}, with no second sign-in: switch it on in Settings > MCP servers, or run \`hercule mcp-server create --plugin ${contribution.id} --connection ${connection.id}\`.`;
-      }
       return yield* Effect.fail(
-        createConflictError(`${lead} ${advice}`, {
-          reason: "mcp-server-on-plugin-origin",
-          contributionId: contribution.id,
-          connectionId: connection?.id ?? null,
-          pluginEnabled,
-        }),
+        createConflictError(
+          `${address.origin} is the ${contribution.displayName} MCP server. ${buildPluginOriginAdvice(
+            {
+              plugin: contribution.displayName,
+              contributionId: contribution.id,
+              state: state._tag,
+              connection,
+            },
+          )}`,
+          {
+            reason: "mcp-server-on-plugin-origin",
+            contributionId: contribution.id,
+            connectionId: connection?.id ?? null,
+            pluginEnabled: state._tag === "active",
+          },
+        ),
       );
     });
 
@@ -216,6 +233,10 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
+      // The lookup and the insert run in one transaction, and SQLite lets one
+      // writer at a time through, so a create that committed first is always
+      // seen here. The table's UNIQUE constraint on the contribution and the
+      // account is only a backstop.
       const existing = yield* servers.findByContributionAndAccount(
         contributionId,
         connection.value.accountId,
@@ -254,6 +275,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const address = yield* parseServerAddress(source.url);
       yield* refuseAddressOnPluginOrigin(address);
+      // As in `insertPluginServer`: one transaction and one writer at a time
+      // make this lookup see every committed create, and the UNIQUE
+      // constraint on the address is only a backstop.
       const existing = yield* servers.findByNormalizedUrl(address.normalizedUrl);
       if (Option.isSome(existing)) return yield* Effect.fail(buildUrlServerExists(existing.value));
       const name = source.name ?? (yield* buildDefaultServerName(address));
@@ -274,39 +298,6 @@ const make = Effect.gen(function* () {
         at,
       });
       return server;
-    });
-
-  /**
-   * Turns the failure of a create that lost a race into the refusal the
-   * loser would have got had it come second: another create committed the
-   * same address, or the same contribution and account, between this one's
-   * look for it and its insert. The failure is the database's UNIQUE
-   * constraint, and the existing server is read again, outside the rolled
-   * back transaction. Returns the failure unchanged when no server is found.
-   */
-  const refuseLostRace = (
-    source: CreateSource,
-    failure: SqlError,
-  ): Effect.Effect<never, Validation | Conflict | SqlError> =>
-    Effect.gen(function* () {
-      if (source.kind === "url") {
-        const address = yield* parseServerAddress(source.url);
-        const existing = yield* servers.findByNormalizedUrl(address.normalizedUrl);
-        if (Option.isSome(existing))
-          return yield* Effect.fail(buildUrlServerExists(existing.value));
-      } else {
-        const connection = yield* connections.one(source.connectionId);
-        const existing = Option.isSome(connection)
-          ? yield* servers.findByContributionAndAccount(
-              source.contributionId,
-              connection.value.accountId,
-            )
-          : Option.none();
-        if (Option.isSome(existing)) {
-          return yield* Effect.fail(buildPluginServerExists(source.contributionId, existing.value));
-        }
-      }
-      return yield* Effect.fail(failure);
     });
 
   return {
@@ -349,7 +340,7 @@ const make = Effect.gen(function* () {
      *   a plugin offers a server for.
      *
      * Two creates of one server that run at once get one server and one
-     * `mcp-server-exists` refusal, never an internal error.
+     * `mcp-server-exists` refusal.
      */
     create: (
       input: McpServerCreateInput,
@@ -360,10 +351,6 @@ const make = Effect.gen(function* () {
         const created = yield* withTransaction(
           sql,
           source.kind === "plugin" ? insertPluginServer(source) : insertUrlServer(source),
-        ).pipe(
-          Effect.catchTag("SqlError", (failure) =>
-            isUniqueViolation(failure) ? refuseLostRace(source, failure) : Effect.fail(failure),
-          ),
         );
         yield* checks.wake;
         return toRecord(created);

@@ -69,6 +69,7 @@ import { mcpServerSignIns } from "./sign-ins";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
   buildStatusFromFailure,
+  decideSignInOffered,
   openUpstream,
   runWithCredentials,
   UPSTREAM_WORK_DEADLINE,
@@ -401,12 +402,17 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  /** Writes a failure that is about the whole server as its status, unless something newer happened. */
+  /**
+   * Writes a failure that is about the whole server as its status, with what a
+   * server added by URL offers as a sign-in when the failure is an HTTP 401,
+   * unless something newer happened.
+   */
   const writeFailure = (
     server: StoredMcpServer,
     basis: StateBasis,
     status: "unreachable" | "error" | "needs-sign-in",
     detail: string,
+    signInOffered: "oauth" | "token" | undefined,
   ): Effect.Effect<void> =>
     absorbFailures(
       `Writing the status of MCP server ${server.id} after a call failed`,
@@ -415,7 +421,11 @@ const make = Effect.gen(function* () {
         yield* state.writeCheckResult(
           server.id,
           basis,
-          buildFailureEdit(server, { status, detail }, at),
+          buildFailureEdit(
+            server,
+            { status, detail, ...(signInOffered === undefined ? {} : { signInOffered }) },
+            at,
+          ),
           at,
         );
       }),
@@ -667,7 +677,13 @@ const make = Effect.gen(function* () {
             }
             default: {
               const { status, detail } = buildStatusFromFailure(failure, serverCredentials);
-              yield* writeFailure(server, basis, status, detail);
+              yield* writeFailure(
+                server,
+                basis,
+                status,
+                detail,
+                decideSignInOffered(failure, server.source.kind),
+              );
               return yield* progress.toolPostSent && status === "unreachable"
                 ? refuse(status, describeMayHaveRun(name, `${name} could not be reached`))
                 : refuse(status, describeRefusal(status, server));

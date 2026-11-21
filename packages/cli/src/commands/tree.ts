@@ -14,9 +14,8 @@
  * exceptions the table opts into are a record of text values, given as
  * repeated `--<flag> <field>=<value>` (see `namedValues` on the row), and a
  * list of objects that a list positional fills one key of (see `itemKey`), and
- * an object that several flags fill one key each of (see `object`), or one of
- * several object shapes, picked by which of those flags are given (see
- * `oneOf`).
+ * an object, or one of several object shapes, that several flags fill one key
+ * each of, picked by which of those flags are given (see `oneOf`).
  *
  * A field whose row is `skillFolder` becomes the positional `<folder>`. The
  * command then reads that folder and sends one request per skill in it (see
@@ -139,16 +138,16 @@ export interface Field {
   /**
    * Set when the flag fills one key of an object field of the request: the
    * name of that object field, and the keys sent with fixed values beside
-   * the flags'. Set by the row's `object` and `oneOf` forms; `undefined` for
-   * every other field. For `oneOf`, `entry` is the position of the field's
-   * entry in the row, and the field is sent only when that entry is picked.
-   * A flag that several entries declare is one field of each of them.
+   * the flags'. Set by the row's `oneOf` form; `undefined` for every other
+   * field. `entry` is the position of the field's entry in the row, and the
+   * field is sent only when that entry is picked. A flag that several entries
+   * declare is one field of each of them.
    */
   readonly within:
     | {
         readonly field: string;
         readonly fixed: Readonly<Record<string, string>>;
-        readonly entry: number | undefined;
+        readonly entry: number;
       }
     | undefined;
   readonly help: string;
@@ -397,12 +396,7 @@ const listResolvingQueries = (
 const buildField = (
   name: string,
   ast: Ast,
-  row:
-    | Exclude<
-        FieldRow,
-        { readonly hidden: true } | { readonly object: unknown } | { readonly oneOf: unknown }
-      >
-    | ObjectKeyRow,
+  row: Exclude<FieldRow, { readonly hidden: true } | { readonly oneOf: unknown }> | ObjectKeyRow,
   carriedIn: FieldCarrier,
   schema: unknown,
 ): Field => {
@@ -453,8 +447,7 @@ const buildField = (
 
 /**
  * Builds one field for each flag of an object row, each typed by its key of
- * the object. `entry` is the position of the row in a `oneOf` row, or
- * `undefined` for an `object` row. Throws when the table is wrong: a flag or
+ * the object. `entry` is the position of the row in its `oneOf` row. Throws when the table is wrong: a flag or
  * a fixed value names a key the object does not have, a key the object
  * requires has neither, or a flag's key holds a list.
  */
@@ -463,7 +456,7 @@ const buildObjectFields = (
   object: Ast,
   row: ObjectFlagsRow,
   carriedIn: FieldCarrier,
-  entry: number | undefined,
+  entry: number,
 ): ReadonlyArray<Field> => {
   const readKey = (key: string): Ast => {
     const property = object.propertySignatures?.find((one) => String(one.name) === key);
@@ -532,7 +525,7 @@ const hasSameChoices = (
  * - the field is not a union of objects;
  * - a member has no entry, an entry's `fixed` values are not the literal keys
  *   of any member, or two entries stand for one member;
- * - an entry is wrong as an `object` row is (see `buildObjectFields`);
+ * - an entry is wrong as `buildObjectFields` explains;
  * - an entry has no flag that no other entry declares, so no command line
  *   could pick it;
  * - a flag spelled the same in several entries means a different key, type,
@@ -621,8 +614,7 @@ const buildOneOfFields = (
  * - A field with no row is missing from the contract's CLI table, so this
  *   throws rather than creating a flag with no name.
  * - A field whose row is hidden gets no flag.
- * - A field whose row is `object` becomes one field per flag of the row, and
- *   one whose row is `oneOf` one field per flag of each entry.
+ * - A field whose row is `oneOf` becomes one field per flag of each entry.
  * - A field whose row asks for named values throws when its schema is not a
  *   record of text values, or when the row also makes it positional,
  *   because the table is wrong.
@@ -669,7 +661,6 @@ const buildFields = (
             `${id}: ${name} takes named values, but its schema is not a record of text`,
           );
         }
-        if ("object" in row) return buildObjectFields(name, type, row.object, carriedIn, undefined);
         if ("oneOf" in row) return buildOneOfFields(name, type, row, carriedIn);
         return [buildField(name, type, row, carriedIn, readFieldSchema(name))];
       })

@@ -43,6 +43,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -75,7 +76,11 @@ export const UPSTREAM_WORK_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.
 /** The largest message a server may send, or the controller may send: one JSON answer or one SSE event. */
 export const MAX_UPSTREAM_MESSAGE_BYTES = 4 * 1024 * 1024;
 
-/** The most the stored definitions of one server's tools may take, as JSON. */
+/**
+ * The most the definitions of one server's tools may take, as JSON. A listing
+ * is measured twice: while it is read, with each tool as the client keeps it
+ * (`limitToolListing`), and again as it is stored (the check).
+ */
 export const MAX_TOOL_DEFINITIONS_BYTES = 4 * 1024 * 1024;
 
 /** The most pages of `tools/list` one listing may read. */
@@ -84,29 +89,25 @@ const MAX_TOOL_LIST_PAGES = 100;
 /** What a check says when a server's tool definitions are over `MAX_TOOL_DEFINITIONS_BYTES`. */
 export const TOOL_LIST_TOO_LARGE = "The server's tool list is larger than 4 MiB";
 
-/** The fields of a tool the controller stores. */
-type StorableTool = Pick<
-  McpSchema.Tool,
-  "name" | "title" | "description" | "inputSchema" | "outputSchema" | "annotations"
->;
+/** Returns the tool as a decoded `McpSchema.Tool`, or `None` when it does not fit that schema. */
+const decodeTool = Schema.decodeUnknownOption(McpSchema.Tool);
 
 /**
- * Returns the JSON a tool is stored as: the whole definition, so the gateway
- * can serve it. `description` is `""` when the server gave none.
+ * Copies a tool as plain JSON, keeping the whole definition so the gateway can
+ * serve it. `description` is `""` when the server gave none. The fields the
+ * controller does not store (`icons`, `_meta`) are left out.
  */
-const serializeStoredTool = (tool: StorableTool): string =>
-  JSON.stringify({
-    name: tool.name,
-    title: tool.title,
-    description: tool.description ?? "",
-    inputSchema: tool.inputSchema,
-    outputSchema: tool.outputSchema,
-    annotations: tool.annotations,
-  });
-
-/** Copies a tool as plain JSON, keeping the whole definition so the gateway can serve it. */
 export const toStoredTool = (tool: McpSchema.Tool): StoredMcpTool =>
-  JSON.parse(serializeStoredTool(tool)) as StoredMcpTool;
+  JSON.parse(
+    JSON.stringify({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description ?? "",
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
+    }),
+  ) as StoredMcpTool;
 
 /**
  * What one listing of a server's tools has read so far. `exceeded` is the
@@ -357,23 +358,53 @@ const buildFailure = (
   });
 
 /**
- * Tells whether a `WWW-Authenticate` header carries a `resource_metadata`
- * parameter, which is how a server points at the OAuth metadata of its
- * resource (RFC 9728). Quoted values are skipped, so a parameter named inside
- * another parameter's text does not count.
+ * Tells whether a `WWW-Authenticate` header has a `Bearer` challenge with a
+ * `resource_metadata` parameter, which is how a server points at the OAuth
+ * metadata of its resource (RFC 9728). A header may hold several challenges
+ * (`Basic realm="x", Bearer resource_metadata="..."`), and the parameter
+ * counts only inside the `Bearer` one. Quoted values are blanked first, so a
+ * comma or a parameter name inside another parameter's text changes nothing.
  */
-const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean =>
-  wwwAuthenticate !== undefined &&
-  /(?:^|[\s,])resource_metadata\s*=/i.test(wwwAuthenticate.replace(/"(?:[^"\\]|\\.)*"/g, '""'));
+const offersOAuthMetadata = (wwwAuthenticate: string | undefined): boolean => {
+  if (wwwAuthenticate === undefined) return false;
+  let inBearerChallenge = false;
+  for (const part of wwwAuthenticate.replace(/"(?:[^"\\]|\\.)*"/g, '""').split(",")) {
+    const text = part.trim();
+    // A part that starts a challenge is a scheme, then a space, then the
+    // challenge's first parameter. A parameter of the current challenge is
+    // `name=value`, with the name directly followed by `=`.
+    const isParameter = /^[^\s=]+\s*=/.test(text);
+    const challenge = isParameter ? null : /^(\S+)(?:\s+(.*))?$/.exec(text);
+    if (challenge !== null) inBearerChallenge = challenge[1]?.toLowerCase() === "bearer";
+    const parameter = challenge === null ? text : (challenge[2] ?? "");
+    if (inBearerChallenge && /^resource_metadata\s*=/i.test(parameter)) return true;
+  }
+  return false;
+};
+
+/**
+ * Returns what a server added by URL offers as a sign-in after it refused a
+ * request with HTTP 401, or `undefined` for any other failure and for a plugin
+ * server, which has no sign-in to offer. A check and a failed call both record
+ * it, so the two cannot read one answer differently.
+ */
+export const decideSignInOffered = (
+  failure: UpstreamError,
+  sourceKind: "plugin" | "url",
+): "oauth" | "token" | undefined => {
+  if (failure.reason !== "unauthorized" || sourceKind !== "url") return undefined;
+  return failure.offersOAuth === true ? "oauth" : "token";
+};
 
 /**
  * Counts one answer to `tools/list` into `listing`, and returns the client
  * failure that ends the listing when it passed a limit, and `undefined`
  * otherwise. A listing ends as soon as:
  *
- * - the definitions read so far, measured as they are stored, pass
- *   `MAX_TOOL_DEFINITIONS_BYTES`, so a server that never stops sending pages
- *   cannot make the controller hold them all;
+ * - the tools read so far pass `MAX_TOOL_DEFINITIONS_BYTES`, so a server that
+ *   never stops sending pages cannot make the controller hold them all. Each
+ *   tool is measured whole, as the client keeps it in memory, `icons` and
+ *   `_meta` included, and not only by the fields that are stored;
  * - the page just read is the last page allowed and the server points at one
  *   more.
  *
@@ -394,7 +425,7 @@ const limitToolListing = (
   for (const tool of tools) {
     if (typeof tool !== "object" || tool === null) continue;
     // One byte more for the comma between two tools.
-    listing.bytes += new TextEncoder().encode(serializeStoredTool(tool as StorableTool)).length + 1;
+    listing.bytes += new TextEncoder().encode(JSON.stringify(tool)).length + 1;
   }
   const message =
     listing.bytes > MAX_TOOL_DEFINITIONS_BYTES
@@ -556,7 +587,9 @@ export interface OpenedUpstream {
    * Lists the server's tools. Removes from them every credential value the
    * session sent. A tool whose name holds one is left out and logged,
    * because the name is what a call sends back, so rewriting it would
-   * dispatch to another tool or to none. Fails with an `UpstreamError`, with
+   * dispatch to another tool or to none. A tool that no longer decodes as
+   * `McpSchema.Tool` after the removal is left out and logged too. The log
+   * line names the server and never the tool. Fails with an `UpstreamError`, with
    * reason `too-large` when the list passed 4 MiB of definitions or 100 pages
    * (`limitToolListing`).
    */
@@ -952,7 +985,17 @@ export const openUpstream = (
               `${endpoint.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
             );
           }
-          return removeSentValues(kept);
+          // Removing a value from a key can break the tool: a key the schema
+          // requires, such as `inputSchema`, may hold a short token. What no
+          // longer decodes is left out, like a tool whose name holds one.
+          const scrubbed = removeSentValues(kept);
+          const decodable = scrubbed.filter((tool) => Option.isSome(decodeTool(tool)));
+          if (decodable.length < scrubbed.length) {
+            yield* Effect.logWarning(
+              `${endpoint.displayName}'s MCP server listed ${String(scrubbed.length - decodable.length)} tool(s) that were no longer a valid tool definition once credential values were removed from them. They were left out of the stored list.`,
+            );
+          }
+          return decodable;
         }),
       callTool: <Refusal>(call: ToolCall<Refusal>) => {
         const state: UpstreamCallState<Refusal> = {

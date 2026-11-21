@@ -459,6 +459,65 @@ describe("giving a server a token", () => {
   });
 });
 
+describe("a pasted token", () => {
+  // Each text is refused whatever the operation, because the rule lives in the
+  // contract. The first four are what a user pastes by mistake.
+  const refusedTokens: ReadonlyArray<readonly [string, string]> = [
+    ["with Bearer in front", "Bearer abc12345"],
+    ["with a space inside", "abc 12345678"],
+    ["with a newline at the end", "abc12345678\n"],
+    ["with a character a bearer token has not", "abc12345\u00e9"],
+    ["of 7 characters, which could be a part of the marker that replaces a secret", "removed"],
+    ["with = before its end", "abc=12345"],
+    ["that is empty", ""],
+  ];
+
+  it.each(refusedTokens)(
+    "is refused as validation when it is %s, without repeating it",
+    async (_why, token) => {
+      await withUrlRig(async ({ controller, fake }) => {
+        const created = await readRecord(
+          await createByAddress(controller, { url: fake.url, name: "remote" }),
+        );
+
+        const onCreate = await readRefusal(
+          await createByAddress(controller, { url: `${fake.url}?other=1`, name: "other", token }),
+          400,
+        );
+        const onSet = await readRefusal(await sendToken(controller, created.id, token), 400);
+
+        for (const [refusal, path] of [
+          [onCreate, ["source", "token"]],
+          [onSet, ["token"]],
+        ] as const) {
+          expect(refusal.code).toBe("validation");
+          expect(refusal.details).toMatchObject({ issues: [{ path }] });
+          const shown = JSON.stringify(refusal);
+          expect(shown).toContain("without `Bearer ` in front of it and without spaces");
+          // A token that is not valid is never repeated, so nothing that holds
+          // a secret by mistake echoes it back.
+          if (token.length > 7) expect(shown).not.toContain(token);
+        }
+        expect(await countServers(controller)).toBe(1);
+      });
+    },
+  );
+
+  it.each(["abc12345", "tok-3f9a1c7e5b2d", "eyJhbGciOi.J9_x~y+z/0", "dGVzdA=="])(
+    "is accepted when it is %s",
+    async (token) => {
+      await withUrlRig(async ({ controller, fake }) => {
+        const created = await readRecord(
+          await createByAddress(controller, { url: fake.url, name: "remote", token }),
+        );
+
+        expect(created.source).toMatchObject({ signIn: "token" });
+        expect((await sendToken(controller, created.id, token)).status).toBe(200);
+      });
+    },
+  );
+});
+
 describe("deleting a server added by its address", () => {
   it("removes its sign-in secrets", async () => {
     await withUrlRig(async ({ controller, fake }) => {
@@ -507,7 +566,7 @@ describe("a server added by its address that needs sign-in", () => {
       );
 
       // A wrong token is another refusal in the same episode.
-      await sendToken(controller, created.id, "wrong");
+      await sendToken(controller, created.id, "wrong-token");
       await waitForStatus(controller, "needs-sign-in");
       expect(await countNotifications(controller)).toBe(1);
 

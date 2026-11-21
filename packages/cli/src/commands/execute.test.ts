@@ -958,7 +958,7 @@ describe("an MCP server added by its address", () => {
     const args = await parseArguments(
       command,
       ["--url", "https://mcp.notion.com/mcp", "--token-stdin"],
-      () => Promise.resolve("s3cret\n"),
+      () => Promise.resolve("s3cret-t0ken\n"),
     );
 
     await execute(client, command, args);
@@ -967,7 +967,7 @@ describe("an MCP server added by its address", () => {
     expect(fetch.calls[0]).toMatchObject({
       method: "POST",
       path: "/api/v1/mcp-servers",
-      body: { source: { kind: "url", url: "https://mcp.notion.com/mcp", token: "s3cret" } },
+      body: { source: { kind: "url", url: "https://mcp.notion.com/mcp", token: "s3cret-t0ken" } },
     });
   });
 
@@ -992,7 +992,9 @@ describe("an MCP server added by its address", () => {
         : buildServer(),
     );
     const command = lookUpCommand("mcp-server", "set-token");
-    const args = await parseArguments(command, ["aaaaaaa1"], () => Promise.resolve("s3cret\n"));
+    const args = await parseArguments(command, ["aaaaaaa1"], () =>
+      Promise.resolve("s3cret-t0ken\n"),
+    );
 
     await execute(client, command, args);
 
@@ -1000,7 +1002,7 @@ describe("an MCP server added by its address", () => {
     expect(fetch.calls[1]).toMatchObject({
       method: "POST",
       path: `/api/v1/mcp-servers/${serverId}/token`,
-      body: { token: "s3cret" },
+      body: { token: "s3cret-t0ken" },
     });
   });
 });

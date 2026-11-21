@@ -489,7 +489,7 @@ export const parseArguments = async (
       if (inline !== undefined) throw new UsageError(`--${name} takes no value`, help);
       for (const field of fields) {
         marked.add(field);
-        if (field.within?.entry !== undefined) touched.add(field);
+        if (field.within !== undefined) touched.add(field);
       }
       continue;
     }
@@ -507,7 +507,7 @@ export const parseArguments = async (
     const text = value();
     for (const each of fields) {
       const parsed = parseWrittenValue(each, text, help);
-      if (each.within?.entry === undefined) {
+      if (each.within === undefined) {
         assignFieldValue(payloadGiven === undefined ? query : payload, each, parsed, help);
       } else {
         touched.add(each);
