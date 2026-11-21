@@ -74,6 +74,7 @@ import {
   type ExchangeBroken,
   type OpenedUpstream,
   type PrepareSend,
+  type ToolCallProgress,
 } from "./upstream";
 
 /**
@@ -115,6 +116,15 @@ const CALL_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(15));
 
 /** What the agent reads when a call could not read the database. */
 const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
+
+/**
+ * Returns the line the agent reads when the call's own request went out and
+ * then something failed, so the call may have run. `what` says what failed.
+ * It asks the agent to check with the user first, because sending the call
+ * again could do its work twice.
+ */
+const describeMayHaveRun = (target: string, what: string): string =>
+  `The call was sent to ${target}, but ${what}, so the call may have run. Ask the user before trying it again.`;
 
 /** The answer to the agent when the server's answer was over the size cap. */
 const TOO_LARGE_ANSWER = "the answer was larger than 4 MiB";
@@ -422,7 +432,10 @@ const make = Effect.gen(function* () {
    * sends the call, and when the server answers 401 to the call's own request
    * refreshes the Connection's credentials and sends it once more.
    */
-  const runCall = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
+  const runCall = (
+    input: McpToolCall,
+    progress: ToolCallProgress,
+  ): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
     Effect.gen(function* () {
       const refuse = (
         reason: ServerUnavailableReason | "timed-out",
@@ -603,6 +616,7 @@ const make = Effect.gen(function* () {
                   tool: first.tool,
                   arguments: input.arguments,
                   prepareSend,
+                  progress,
                   sentValues,
                 })
                 .pipe(
@@ -655,7 +669,13 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           switch (failure.reason) {
             case "timeout":
-              return yield* refuse("timed-out", name);
+              return yield* progress.toolPostSent
+                ? refuse(
+                    "timed-out",
+                    name,
+                    describeMayHaveRun(name, `${name} did not answer in time`),
+                  )
+                : refuse("timed-out", name);
             case "too-large":
               return yield* refuse("error", name, `${name}: ${TOO_LARGE_ANSWER}.`);
             case "not-serving":
@@ -669,7 +689,9 @@ const make = Effect.gen(function* () {
             default: {
               const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
               yield* writeFailure(server, basis, status, detail);
-              return yield* refuse(status, name);
+              return yield* progress.toolPostSent && status === "unreachable"
+                ? refuse(status, name, describeMayHaveRun(name, `${name} could not be reached`))
+                : refuse(status, name);
             }
           }
         });
@@ -684,29 +706,30 @@ const make = Effect.gen(function* () {
           UpstreamError: refuseUpstreamFailure,
           ConnectionCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
           ExchangeBroken: () =>
-            refuse(
-              "error",
-              name,
-              `The call was sent to ${name}, but the exchange with it broke, so the call may have run. Check before trying it again.`,
-            ),
+            refuse("error", name, describeMayHaveRun(name, "the exchange with it broke")),
         }),
       );
     });
 
   const callTool = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
-    Effect.flatMap(
-      Effect.timeoutOption(runCall(input), CALL_DEADLINE),
-      Option.match({
-        onNone: () =>
-          Effect.fail(
-            new McpCallRefused({
-              reason: "timed-out",
-              message: "The call took too long. Try again later.",
-            }),
-          ),
-        onSome: Effect.succeed,
-      }),
-    );
+    Effect.suspend(() => {
+      const progress: ToolCallProgress = { toolPostSent: false };
+      return Effect.flatMap(
+        Effect.timeoutOption(runCall(input, progress), CALL_DEADLINE),
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new McpCallRefused({
+                reason: "timed-out",
+                message: progress.toolPostSent
+                  ? describeMayHaveRun("the server", "the call did not finish in time")
+                  : "The call took too long. Try again later.",
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      );
+    });
 
   return { callTool, closeUpstreamSessionsExcept };
 });

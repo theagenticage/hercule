@@ -130,6 +130,19 @@ export type PrepareSend<Refusal = never> = Effect.Effect<
 >;
 
 /**
+ * What the caller of a call can read while the call runs. The upstream client
+ * writes it.
+ */
+export interface ToolCallProgress {
+  /**
+   * The call's own `tools/call` request went out in the attempt that runs now.
+   * From then on the call may have run, so a failure no longer says that the
+   * call can be sent again. An attempt starts with it `false`.
+   */
+  toolPostSent: boolean;
+}
+
+/**
  * What the requests of one call keep for themselves while they go through the
  * upstream client, which concurrent calls share. `callTool` of `OpenedUpstream`
  * makes one and provides it (see `CurrentUpstreamCall`), and the client reads
@@ -154,8 +167,8 @@ interface UpstreamCallState<Refusal = never> {
    * the code that returns the failure of the call.
    */
   refusal: UpstreamError | Refusal | undefined;
-  /** The call's own `tools/call` request was sent. */
-  toolPostSent: boolean;
+  /** Whether the call's own `tools/call` request was sent. */
+  readonly progress: ToolCallProgress;
   /**
    * The HTTP status the server answered the call's own `tools/call` request
    * with. `undefined` until it answered. A failure of any other request of the
@@ -413,6 +426,8 @@ export interface ToolCall<Refusal = never> {
   readonly arguments: Readonly<Record<string, unknown>> | undefined;
   /** Runs before the call's own `tools/call` request, and gives the credentials it carries. */
   readonly prepareSend: PrepareSend<Refusal>;
+  /** Tells the caller whether the call's own request went out. See `ToolCallProgress`. */
+  readonly progress: ToolCallProgress;
   /**
    * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that
    * any attempt of the logical call sent. The caller gives every attempt the
@@ -538,7 +553,7 @@ export const openUpstream = (
       prepareSend: target.prepareSend,
       sentCredentials: undefined,
       refusal: undefined,
-      toolPostSent: false,
+      progress: { toolPostSent: false },
       toolPostStatus: undefined,
       sentValues,
     };
@@ -619,8 +634,9 @@ export const openUpstream = (
         if (state === sessionState && startsExchange) state.refusal = undefined;
         // The call's own `tools/call` request is the first request of the call
         // that carries one.
-        const isToolPost = startsExchange && !state.toolPostSent && isToolCallRequest(request);
-        if (isToolPost) state.toolPostSent = true;
+        const isToolPost =
+          startsExchange && !state.progress.toolPostSent && isToolCallRequest(request);
+        if (isToolPost) state.progress.toolPostSent = true;
         const response = yield* sendingClient.execute(
           HttpClientRequest.setUrl(HttpClientRequest.setHeaders(request, built.headers), built.url),
         );
@@ -642,7 +658,7 @@ export const openUpstream = (
         // They carry the credentials stored now and are let through while not
         // serving, so the exchange settles. Reading the credentials starts no
         // refresh while the controller is not serving.
-        if (state.toolPostSent) {
+        if (state.progress.toolPostSent) {
           return yield* promotion.whenServing(
             Effect.flatMap(readCurrentCredentials, (used) => sendWith(request, used, state, false)),
           );
@@ -757,7 +773,7 @@ export const openUpstream = (
         // this one was never sent. Both leave the tool unrun. A 404 on any
         // other request of this call, sent after the tool, says nothing.
         return Effect.fail(
-          call.toolPostSent && call.toolPostStatus !== 404
+          call.progress.toolPostSent && call.toolPostStatus !== 404
             ? { _tag: "ExchangeBroken", sessionExpired: true }
             : { _tag: "SessionExpired" },
         );
@@ -796,7 +812,7 @@ export const openUpstream = (
       }
       // The tool went out, and then a request that continues its exchange was
       // refused before it was sent, so the call may have run.
-      if (call.toolPostSent && call.refusal !== undefined) {
+      if (call.progress.toolPostSent && call.refusal !== undefined) {
         return Effect.fail({ _tag: "ExchangeBroken", sessionExpired: false });
       }
       const failure = describeFailure(error, call);
@@ -829,10 +845,11 @@ export const openUpstream = (
           prepareSend: call.prepareSend,
           sentCredentials: undefined,
           refusal: undefined,
-          toolPostSent: false,
+          progress: call.progress,
           toolPostStatus: undefined,
           sentValues: call.sentValues,
         };
+        call.progress.toolPostSent = false;
         return mcpClient
           .callTool({
             tool: call.tool,

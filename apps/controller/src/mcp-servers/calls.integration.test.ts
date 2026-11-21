@@ -170,6 +170,10 @@ const textOf = (result: {
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
 }): string | undefined => result.content[0]?.text;
 
+/** Returns the message of a refused call. */
+const failureMessage = (result: Awaited<ReturnType<typeof runCall>>): string | undefined =>
+  result._tag === "Failure" ? result.failure.message : undefined;
+
 /** Counts the times the fake provider was asked to refresh a token. */
 const countRefreshes = (provider: Rig["provider"]) =>
   provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
@@ -487,6 +491,7 @@ describe("a call", () => {
       const result = await callPastDeadline("tools/call");
 
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
+      expect(failureMessage(result)).toContain("the call may have run. Ask the user before");
       expect((await readRow(controller)).status).toBe("ready");
     });
   });
@@ -509,6 +514,10 @@ describe("a call", () => {
         const result = await call();
 
         expect(result).toMatchObject({ _tag: "Failure", failure: { reason: status } });
+        // The tool's request went out, so an unreachable server may have run it.
+        if (status === "unreachable") {
+          expect(failureMessage(result)).toContain("the call may have run. Ask the user before");
+        }
         const row = await eventually(
           () => readRow(controller),
           (found) => found.status === status,
@@ -527,6 +536,8 @@ describe("a call", () => {
       const result = await call();
 
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "unreachable" } });
+      // Nothing was sent, so trying again is fine.
+      expect(failureMessage(result)).toContain("Try again later");
       const row = await eventually(
         () => readRow(controller),
         (found) => found.status === "unreachable",
@@ -1774,6 +1785,8 @@ describe("closing upstream MCP sessions", () => {
         };
         const abandoned = await callPastDeadline("initialize");
         expect(abandoned).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
+        // The tool was never sent, so trying again is fine.
+        expect(failureMessage(abandoned)).toBe("The call took too long. Try again later.");
 
         // A cancelled opening never goes on to send what follows the handshake.
         await sleep(300);
