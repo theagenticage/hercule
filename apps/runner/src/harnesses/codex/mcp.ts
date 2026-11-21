@@ -22,28 +22,24 @@ import type { JsonValue } from "./types";
 export type McpToolApprovalMode = "prompt" | "approve";
 
 /**
- * The first Codex release that re-reads a server's tool list when the server
- * says it changed (`features.mcp_tool_list_changed`). Codex refuses a config
- * key it does not know, so the key is sent only to a release that has it.
+ * The Codex releases that re-read a server's tool list when the server says it
+ * changed (`features.mcp_tool_list_changed`), as a semver range. Codex refuses
+ * a config key it does not know, so the key is sent only to a release that has
+ * it.
  */
-const TOOL_LIST_CHANGED_SINCE = [0, 164, 0] as const;
+const TOOL_LIST_CHANGED_RANGE = ">=0.164.0";
 
 /**
  * Checks whether a Codex of this version re-reads a server's tool list when
  * the server says it changed. `version` is what `parseVersion` read from the
- * app-server's user agent, or `null`. Returns false for `null` and for a
- * version that is not three numbers: the key is then left out, which is safe
- * for every release.
+ * app-server's user agent, or `null`. The check is strict: `null`, a
+ * pre-release such as `0.164.0-alpha.1`, and anything that is not a plain
+ * semver version such as `0.164.0junk` or `0.164.0.1` all return false. A
+ * false positive would make Codex refuse to start the thread, while a false
+ * negative only costs a warning.
  */
-export const supportsToolListChanged = (version: string | null): boolean => {
-  const parts = version?.split(".", 3).map((part) => Number.parseInt(part, 10));
-  if (parts === undefined || parts.length !== 3 || !parts.every(Number.isInteger)) return false;
-  for (const [index, part] of parts.entries()) {
-    const needed = TOOL_LIST_CHANGED_SINCE[index]!;
-    if (part !== needed) return part > needed;
-  }
-  return true;
-};
+export const supportsToolListChanged = (version: string | null): boolean =>
+  version !== null && Bun.semver.satisfies(version, TOOL_LIST_CHANGED_RANGE);
 
 /**
  * Returns the warning for a session whose Codex does not re-read its tool

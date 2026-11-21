@@ -4798,6 +4798,11 @@ describe("the MCP servers a Codex session is given", () => {
   it.each([
     ["a Codex at 0.163.9", initializeAs("0.163.9"), "0.163.9"],
     ["a Codex at 0.154.0", initializeAs("0.154.0"), "0.154.0"],
+    // A version that only starts like 0.164.0 must not be taken for it: Codex
+    // refuses a config key it does not know, and the thread would not start.
+    ["a Codex at 0.164.0-alpha.1", initializeAs("0.164.0-alpha.1"), "0.164.0-alpha.1"],
+    ["a Codex at 0.164.0junk", initializeAs("0.164.0junk"), "0.164.0junk"],
+    ["a Codex at 0.164.0.1", initializeAs("0.164.0.1"), "0.164.0.1"],
     [
       "a Codex whose user agent has no version",
       initializeWithUserAgent("unknown"),
