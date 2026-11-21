@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  buildOptionsLabel,
+  describeOptionsLabel,
   resolveDisplayTimezone,
   type ModelPill,
   type RecentModel,
@@ -24,8 +24,9 @@ import { HarnessLogo } from "./harness-logo";
 
 /**
  * Renders the model options pick in a composer's row: the options' values in
- * one word, or "Model options", as a trigger that opens the options menu, see
- * `OptionsMenu`.
+ * one word after the option's name, such as "Effort: High", or "Model
+ * options", as a trigger that opens the options menu, see `OptionsMenu`. The
+ * name stays in the muted ink while the pick is open.
  *
  * `descriptors` are the options the model declares, `selected` the values in
  * use, and `modelName` the model's name for the menu's header. `onChoose`
@@ -45,6 +46,7 @@ export function OptionsPick({
   readonly disabled: boolean;
   readonly onChoose: (choice: ThreadChoice) => void;
 }): JSX.Element {
+  const label = describeOptionsLabel(descriptors, selected);
   return (
     <ComposerMenu
       label="Model options"
@@ -54,7 +56,18 @@ export function OptionsPick({
       trigger={
         <>
           <SlidersIcon size={14} />
-          {buildOptionsLabel(descriptors, selected) ?? "Model options"}
+          {label === null ? (
+            "Model options"
+          ) : (
+            <span>
+              {label.name !== null && (
+                <>
+                  <span className="pick-option-name">{label.name}:</span>{" "}
+                </>
+              )}
+              {label.value}
+            </span>
+          )}
         </>
       }
     >

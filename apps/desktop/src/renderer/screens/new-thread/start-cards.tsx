@@ -18,7 +18,8 @@ const StarterThreads = lazy(() =>
  * Renders the start cards under a Draft Thread's composer, as the Bureau
  * book's `session-empty` page draws them: "Start from Intake", then up to
  * three planned tasks of the project, most urgent first. Each card shows where
- * the task came from, its priority as bars, and its title.
+ * the task came from, its priority in words ("Urgent" in the failure hue) and
+ * as bars, and its title.
  *
  * While the project has no planned task, three starter threads take the cards'
  * place, see `StarterThreads`.
@@ -72,14 +73,13 @@ export function StartCards({
           >
             <span className="start-top">
               {card.source === "github" ? <GitHubMark size={14} /> : <TasksIcon size={14} />}
-              <span>Task</span>
+              <span className={card.priority === "urgent" ? "start-priority is-urgent" : undefined}>
+                {card.priorityText}
+              </span>
               <span className="spacer" />
-              <span
-                className="bars"
-                data-p={card.bars}
-                role="img"
-                aria-label={`${card.priority} priority`}
-              >
+              {/* The word before it says the priority, so the bars are hidden from
+                  assistive technology. */}
+              <span className="bars" data-p={card.bars} aria-hidden="true">
                 <i />
                 <i />
                 <i />

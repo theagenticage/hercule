@@ -11,7 +11,7 @@ export interface Composer {
   readonly field: Locator;
   readonly send: Locator;
   readonly stop: Locator;
-  /** The button that opens the model options menu. Its text is the effort, such as "Medium". */
+  /** The button that opens the model options menu. Its text is the effort, such as "Effort: Medium". */
   readonly optionsTrigger: Locator;
   /** The model pill, the button that opens the model menu. */
   readonly modelPill: Locator;

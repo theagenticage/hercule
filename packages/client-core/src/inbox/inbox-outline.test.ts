@@ -26,6 +26,16 @@ describe("describeInboxRail", () => {
     expect(savedQueries[1]).toMatchObject({ icon: { pluginId: "linear" }, shortcut: "2" });
   });
 
+  it("gives Everything the list icon, so it does not repeat the Inbox's tray", () => {
+    const counts = buildInboxOutline({
+      savedQueries: [
+        { id: "everything", name: "Everything", order: "newest", signalKinds: [], count: 12 },
+      ],
+    });
+    const { savedQueries } = describeInboxRail(counts, PLUGINS, time);
+    expect(savedQueries[0]).toMatchObject({ icon: "list" });
+  });
+
   it("names a pin's account only when its source has several, and a failing source's time", () => {
     const counts = buildInboxOutline({
       pins: [

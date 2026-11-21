@@ -8,8 +8,10 @@ import { trackBody } from "../app/motion";
 import { inboxCountQuery, userQuery } from "../app/queries";
 import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
+import { InboxIcon } from "../icons/inbox";
 import { IntakeIcon } from "../icons/intake";
 import { OfficeIcon } from "../icons/office";
+import { OverviewIcon } from "../icons/overview";
 import { WikiIcon } from "../icons/wiki";
 import { WorkflowsIcon } from "../icons/workflows";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
@@ -37,6 +39,10 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   you instead. The row is also selected on a run's page, because a run
  *   belongs to its workflow, as the book draws it.
  * - Discussions and Wiki, with no count either.
+ *
+ * Each row draws an icon of its own, so no two places look alike: a grid for
+ * Overview, the house for The office (as the shared row's Office button), the
+ * tray for the Inbox and the tray with an arrow into it for Intake.
  *
  * The shell's loader reads the To do list, Tracking's reads and the Inbox's
  * counts, and keeps them cached for the life of the window, so nothing here
@@ -78,7 +84,7 @@ export function WorkSection(): JSX.Element {
           void navigate({ to: "/office" });
         }}
       >
-        <OfficeIcon />
+        <OverviewIcon />
         <span>Overview</span>
         {hasFailedRun && <i className="nav-dot" />}
       </Link>
@@ -178,7 +184,7 @@ function InboxRow(): JSX.Element {
       activeProps={SELECTED_LINK_PROPS}
       aria-label={description.length > 0 ? `Inbox, ${description.join(", ")}` : undefined}
     >
-      <IntakeIcon />
+      <InboxIcon />
       <span>Inbox</span>
       {hasNewArrival && <i className="nav-new" />}
       {waiting > 0 && <InboxCount value={waiting} />}

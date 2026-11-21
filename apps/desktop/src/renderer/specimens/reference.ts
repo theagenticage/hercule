@@ -10,6 +10,7 @@
  * docs/design/crew-bureau-2.
  */
 import "./sheet.css";
+import { INTAKE_ICON_OUTLINES, OVERVIEW_ICON_OUTLINES } from "../icons/app-icon-outlines";
 import { SHEET, type IconName, type Piece } from "./cells";
 import { applySheetAppearance, buildBookLook, markSheetReady, readCrew } from "./sheet-page";
 
@@ -19,8 +20,26 @@ const crew = readCrew();
 const BOOK_ICON_NAMES: Partial<Record<IconName, string>> = {
   "chevron-left": "chev-l",
   "chevron-right": "chev-r",
+  inbox: "intake",
   workspace: "worktree",
 };
+
+// The icons the book does not draw, by their outlines in the app.
+const APP_ICON_OUTLINES: Partial<Record<IconName, ReadonlyArray<string>>> = {
+  intake: INTAKE_ICON_OUTLINES,
+  overview: OVERVIEW_ICON_OUTLINES,
+};
+
+/**
+ * Returns the markup of an icon the book does not draw: its outlines in the
+ * svg frame that crew.js's `icon` writes, attribute for attribute. The cell
+ * then checks that the app's `IconFrame` draws the outlines as the book's
+ * frame does.
+ */
+function drawAppIcon(outlines: ReadonlyArray<string>, size: number): string {
+  const paths = outlines.map((outline) => `<path d="${outline}"/>`).join("");
+  return `<svg class="ic" viewBox="0 0 16 16" width="${String(size)}" height="${String(size)}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
 
 /** Returns the book's markup for one cell's piece. */
 function drawPiece(piece: Piece): string {
@@ -38,8 +57,12 @@ function drawPiece(piece: Piece): string {
       return crew.you(piece.size);
     case "mark":
       return crew.mark(piece.state, 14);
-    case "icon":
-      return crew.icon(BOOK_ICON_NAMES[piece.icon] ?? piece.icon, piece.size);
+    case "icon": {
+      const outlines = APP_ICON_OUTLINES[piece.icon];
+      return outlines === undefined
+        ? crew.icon(BOOK_ICON_NAMES[piece.icon] ?? piece.icon, piece.size)
+        : drawAppIcon(outlines, piece.size);
+    }
   }
 }
 

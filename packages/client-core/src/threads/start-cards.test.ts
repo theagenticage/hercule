@@ -34,6 +34,16 @@ describe("buildStartCards", () => {
     expect(cards.map((card) => card.bars)).toEqual([1, 2, 3, 4]);
   });
 
+  it.each([
+    ["urgent", "Urgent"],
+    ["high", "High"],
+    ["normal", "Normal"],
+    ["low", "Low"],
+  ] as const)("words the %s priority as %s", (priority, word) => {
+    const [card] = buildStartCards([buildTask({ priority })]);
+    expect(card?.priorityText).toBe(word);
+  });
+
   it("draws the GitHub mark only when the task's first external ref is a GitHub one", () => {
     const entry = { at: AT, actor: "user" } as const;
     const [github, sentry, bare] = buildStartCards([

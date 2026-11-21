@@ -100,7 +100,7 @@ describe("the Fleet page", () => {
 
     const card = locateCard(page, "studio");
     await card.getByText("1 thread waits for a slot").waitFor();
-    await card.getByRole("button", { name: "Allow 2" }).click();
+    await card.getByRole("button", { name: "Raise cap to 2" }).click();
 
     await expect
       .poll(
@@ -111,7 +111,7 @@ describe("the Fleet page", () => {
     await waitForStatus(waiting!.id, "busy");
     // Nothing waits any more, so the card loses its line and its button.
     await expect.poll(() => card.getByText("waits for a slot").count()).toBe(0);
-    expect(await card.getByRole("button", { name: /^Allow/ }).count()).toBe(0);
+    expect(await card.getByRole("button", { name: /^Raise cap/ }).count()).toBe(0);
   });
 
   it("shows the disk of a real runner as a percentage", async () => {

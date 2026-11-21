@@ -382,7 +382,18 @@ describe("decideMachineNeed", () => {
     });
   });
 
-  it("reports a disk below its limit", () => {
+  it("reports a disk below its limit by how full it is, in the words of a nearly full disk", () => {
+    // 8 GB free of 1,000 GB is under the 10 GiB limit.
+    const machine = buildMachine(withDisk(8e9));
+
+    expect(findNeed(machine)).toEqual({
+      kind: "disk-below-limit",
+      hue: "fail",
+      line: "Disk 99% full. It takes no new sessions.",
+    });
+  });
+
+  it("reports a disk below its limit without a percentage when the disk reports no total size", () => {
     const machine = buildMachine({
       metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
@@ -751,48 +762,48 @@ describe("MachineSummary drawing", () => {
   const drawing = (cap: number, running: number, waiting = 0) =>
     summarize({ maxConcurrentSessions: cap }, { running, waiting }).drawing;
 
-  it("draws one block per slot at a cap of 16", () => {
+  it("cuts the bar once per slot at a cap of 16", () => {
     expect(drawing(16, 12, 3)).toMatchObject({
-      shape: "blocks",
+      sessionsPerCut: 1,
       cap: 16,
       running: 12,
       free: 4,
       waiting: 3,
-      waitingBlocks: 3,
+      waitingDrawn: 3,
     });
   });
 
-  it("draws one bar above a cap of 16", () => {
+  it("cuts the bar every 10 sessions above a cap of 16", () => {
     expect(drawing(17, 12, 3)).toMatchObject({
-      shape: "bar",
+      sessionsPerCut: 10,
       cap: 17,
       running: 12,
       free: 5,
       waiting: 3,
-      waitingBlocks: 0,
+      waitingDrawn: 3,
     });
   });
 
-  it("draws blocks for 16 sessions running past a lower cap, and a bar for 17", () => {
-    expect(drawing(4, 16)).toMatchObject({ shape: "blocks", running: 16, free: 0 });
-    expect(drawing(4, 17)).toMatchObject({ shape: "bar", running: 17, free: 0 });
+  it("cuts per slot for 16 sessions running past a lower cap, and every 10 for 17", () => {
+    expect(drawing(4, 16)).toMatchObject({ sessionsPerCut: 1, running: 16, free: 0 });
+    expect(drawing(4, 17)).toMatchObject({ sessionsPerCut: 10, running: 17, free: 0 });
   });
 
-  it("draws a bar when the cap was lowered under many running sessions", () => {
-    expect(drawing(4, 100)).toMatchObject({ shape: "bar", cap: 4, running: 100, free: 0 });
+  it("cuts every 10 sessions when the cap was lowered under many running sessions", () => {
+    expect(drawing(4, 100)).toMatchObject({ sessionsPerCut: 10, cap: 4, running: 100, free: 0 });
   });
 
   it("has no free slot when more sessions run than the cap allows", () => {
     expect(drawing(4, 6)).toMatchObject({ cap: 4, running: 6, free: 0 });
   });
 
-  it("draws at most 16 waiting blocks, and keeps the full count of waiting sessions", () => {
-    expect(drawing(16, 16, 16)).toMatchObject({ waiting: 16, waitingBlocks: 16 });
-    expect(drawing(16, 16, 40)).toMatchObject({ waiting: 40, waitingBlocks: 16 });
+  it("draws at most 16 waiting sessions while cut per slot, and keeps the full count", () => {
+    expect(drawing(16, 16, 16)).toMatchObject({ waiting: 16, waitingDrawn: 16 });
+    expect(drawing(16, 16, 40)).toMatchObject({ waiting: 40, waitingDrawn: 16 });
   });
 
-  it("draws no waiting blocks in a bar, which stretches over all of the waiting sessions", () => {
-    expect(drawing(17, 17, 40)).toMatchObject({ waiting: 40, waitingBlocks: 0 });
+  it("draws every waiting session while cut every 10", () => {
+    expect(drawing(17, 17, 40)).toMatchObject({ waiting: 40, waitingDrawn: 40 });
   });
 
   it("words the sessions running against the cap, and the sessions waiting", () => {
@@ -832,13 +843,13 @@ describe("MachineSummary drawing", () => {
     it("keeps the sessions that wait for it, because the controller still knows them", () => {
       expect(awayDrawing(16, 12, 5)).toMatchObject({
         waiting: 5,
-        waitingBlocks: 5,
+        waitingDrawn: 5,
         waitingText: "5 waiting",
       });
     });
 
-    it("draws blocks for a cap of 16, however many sessions it last ran", () => {
-      expect(awayDrawing(4, 100, 0)).toMatchObject({ shape: "blocks", running: 0, free: 4 });
+    it("cuts per slot for a cap of 16, however many sessions it last ran", () => {
+      expect(awayDrawing(4, 100, 0)).toMatchObject({ sessionsPerCut: 1, running: 0, free: 4 });
     });
   });
 });

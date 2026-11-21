@@ -172,7 +172,7 @@ describe("the saves of one machine", () => {
     const cap = renderHook(() => useCapRow(client), { wrapper });
     render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, { wrapper });
 
-    await user.click(screen.getByRole("button", { name: "Allow 20" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 20" }));
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas"]);
     });
@@ -201,7 +201,7 @@ describe("the saves of one machine", () => {
     const first = render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, {
       wrapper,
     });
-    await user.click(screen.getByRole("button", { name: "Allow 20" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 20" }));
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas"]);
     });
@@ -231,7 +231,7 @@ describe("the saves of one machine", () => {
     const first = render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, {
       wrapper,
     });
-    await user.click(screen.getByRole("button", { name: "Allow 20" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 20" }));
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas"]);
     });
@@ -263,8 +263,8 @@ describe("the saves of one machine", () => {
       { wrapper },
     );
 
-    await user.click(screen.getByRole("button", { name: "Allow 20" }));
-    await user.click(screen.getByRole("button", { name: "Allow 5" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 20" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 5" }));
 
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas", "PATCH moss"]);
@@ -283,12 +283,12 @@ describe("the saves of one machine", () => {
     const { wrapper } = setUpRunners();
     render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />, { wrapper });
 
-    await user.click(screen.getByRole("button", { name: "Allow 17" }));
+    await user.click(screen.getByRole("button", { name: "Raise cap to 17" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
       "Could not allow 17 sessions: The runner is being retired.",
     );
-    expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Raise cap to 17" })).toBeTruthy();
   });
 
   describe("an Allow that is refused", () => {
@@ -320,7 +320,7 @@ describe("the saves of one machine", () => {
         <AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />,
         { wrapper },
       );
-      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await user.click(screen.getByRole("button", { name: "Raise cap to 17" }));
       await waitFor(() => {
         expect(readWrites(calls)).toEqual(["PATCH atlas"]);
       });
@@ -334,7 +334,7 @@ describe("the saves of one machine", () => {
       expect((await screen.findByRole("alert")).textContent).toBe(
         "Could not allow 17 sessions: The runner is being retired.",
       );
-      expect(screen.getByRole("button", { name: "Allow 19" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Raise cap to 19" })).toBeTruthy();
     });
 
     it("stays shown on a button drawn anew after the refusal", async () => {
@@ -347,7 +347,7 @@ describe("the saves of one machine", () => {
         <AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />,
         { wrapper },
       );
-      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await user.click(screen.getByRole("button", { name: "Raise cap to 17" }));
       await screen.findByRole("alert");
 
       first.unmount();
@@ -365,10 +365,10 @@ describe("the saves of one machine", () => {
       gate.open();
       const { wrapper } = setUpRunners();
       render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />, { wrapper });
-      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await user.click(screen.getByRole("button", { name: "Raise cap to 17" }));
       await screen.findByRole("alert");
 
-      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await user.click(screen.getByRole("button", { name: "Raise cap to 17" }));
 
       await waitFor(() => {
         expect(screen.queryByRole("alert")).toBeNull();

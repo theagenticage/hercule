@@ -5,6 +5,14 @@
  */
 import type { Task, TaskPriority } from "@hercule/contract";
 
+/** The priority in words, the card's eyebrow. "Urgent" is drawn in the failure hue. */
+const PRIORITY_WORDS: Readonly<Record<TaskPriority, StartCard["priorityText"]>> = {
+  urgent: "Urgent",
+  high: "High",
+  normal: "Normal",
+  low: "Low",
+};
+
 /** How many of four bars a priority fills. Four is urgent, which is drawn in the failure hue. */
 const PRIORITY_BARS: Readonly<Record<TaskPriority, 1 | 2 | 3 | 4>> = {
   urgent: 4,
@@ -17,6 +25,8 @@ export interface StartCard {
   readonly taskId: string;
   /** The task's priority, which the bars draw and which a screen reader reads out instead. */
   readonly priority: TaskPriority;
+  /** The priority in words, which the card shows above its title: "Urgent", "High", "Normal" or "Low". */
+  readonly priorityText: "Urgent" | "High" | "Normal" | "Low";
   readonly bars: 1 | 2 | 3 | 4;
   /**
    * The system the task came from, when the card can draw its mark: `github`
@@ -61,6 +71,7 @@ export const buildStartCards = (tasks: readonly Task[]): readonly StartCard[] =>
     return {
       taskId: task.id,
       priority: task.priority,
+      priorityText: PRIORITY_WORDS[task.priority],
       bars: PRIORITY_BARS[task.priority],
       source: ref?.startsWith("github:") === true ? "github" : null,
       title: task.title,

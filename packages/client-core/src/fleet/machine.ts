@@ -209,23 +209,30 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
   return isDesktopOs && facts.totalMemoryBytes >= DESKTOP_MEMORY_BYTES ? "desktop" : "laptop";
 };
 
-/** The most slots, and the most waiting sessions, drawn one block each. */
-const MAX_BLOCKS = 16;
+/** The most slots, and the most waiting sessions, the bar cuts one by one. */
+const MAX_SLOTS_CUT_ONE_BY_ONE = 16;
+
+/** How many sessions one cut of the bar stands for once it has more than 16 slots. */
+const SESSIONS_PER_WIDE_CUT = 10;
 
 /**
  * How to draw a machine's sessions against its cap, and the words drawn beside
- * it. `blocks` is one block per slot, `bar` is one bar cut every 10 sessions.
- * `running` slots are filled, `free` slots are empty, and `waiting` is the
- * number of sessions waiting for a slot, drawn as marigold after the cap. The
- * drawn total is `max(cap, running) + waiting`: after the user lowers the cap
- * below the sessions running, `free` is 0 and `running` runs past the cap. The
- * renderer needs `cap` to mark where the cap ends in that case, and where the
- * waiting part starts.
+ * it. Every machine draws the same bar. `running` slots are filled, `free`
+ * slots are empty, and `waiting` is the number of sessions waiting for a slot,
+ * drawn as a marigold part after the cap. The drawn total is
+ * `max(cap, running) + waitingDrawn`: after the user lowers the cap below the
+ * sessions running, `free` is 0 and `running` runs past the cap. The renderer
+ * needs `cap` to mark where the cap ends in that case, and where the waiting
+ * part starts.
  *
- * `waitingBlocks` is how many waiting blocks the `blocks` shape draws: at most
- * 16, because the drawing is clipped to its place anyway and the text beside it
- * carries the count. It is 0 for a `bar`, which draws one stretch for all of
- * `waiting`.
+ * `sessionsPerCut` is how many sessions each cut of the bar stands for: 1
+ * while both the cap and the sessions running are at most 16, so the bar
+ * still reads as slots, and 10 above that, so a cap of 100 stays countable.
+ *
+ * `waitingDrawn` is how many of the `waiting` sessions the bar draws: at most
+ * 16 while it is cut per slot, so a long queue cannot squeeze the cap's part
+ * to nothing, and all of them when it is cut every 10. The words beside the
+ * bar carry the count.
  *
  * A machine that is `isAway` (offline or unreachable) runs nothing that can be
  * counted: `running` is 0 and every slot is `free`, and the renderer draws the
@@ -233,12 +240,12 @@ const MAX_BLOCKS = 16;
  * knows what waits for the machine.
  */
 export interface SessionsDrawing {
-  readonly shape: "blocks" | "bar";
+  readonly sessionsPerCut: 1 | 10;
   readonly cap: number;
   readonly running: number;
   readonly free: number;
   readonly waiting: number;
-  readonly waitingBlocks: number;
+  readonly waitingDrawn: number;
   readonly isAway: boolean;
   /** The sessions running as text: "12", or "–" while the machine is away. */
   readonly runningText: string;
@@ -249,26 +256,26 @@ export interface SessionsDrawing {
 }
 
 /**
- * Returns the counts and words to draw a machine's sessions from: blocks while
- * both the cap and the sessions running are at most 16, a bar otherwise. A cap
- * lowered from 100 to 4 under 100 running sessions is therefore a bar, not 100
- * blocks. A machine running more sessions than its cap has 0 free slots, never
- * a negative number. An away machine counts as running none (see
- * `SessionsDrawing`).
+ * Returns the counts and words to draw a machine's sessions from: a bar cut
+ * per slot while both the cap and the sessions running are at most 16, and
+ * every 10 sessions otherwise. A cap lowered from 100 to 4 under 100 running
+ * sessions is therefore cut every 10, not into 100 slots. A machine running
+ * more sessions than its cap has 0 free slots, never a negative number. An
+ * away machine counts as running none (see `SessionsDrawing`).
  */
 export const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
   const { runner, waiting } = machine;
   const isAway = runner.connectivity !== "online";
   const cap = runner.maxConcurrentSessions;
   const running = isAway ? 0 : machine.running;
-  const shape = cap <= MAX_BLOCKS && running <= MAX_BLOCKS ? "blocks" : "bar";
+  const isCutPerSlot = cap <= MAX_SLOTS_CUT_ONE_BY_ONE && running <= MAX_SLOTS_CUT_ONE_BY_ONE;
   return {
-    shape,
+    sessionsPerCut: isCutPerSlot ? 1 : SESSIONS_PER_WIDE_CUT,
     cap,
     running,
     free: Math.max(0, cap - running),
     waiting,
-    waitingBlocks: shape === "blocks" ? Math.min(waiting, MAX_BLOCKS) : 0,
+    waitingDrawn: isCutPerSlot ? Math.min(waiting, MAX_SLOTS_CUT_ONE_BY_ONE) : waiting,
     isAway,
     runningText: isAway ? "–" : String(running),
     capText: ` of ${String(cap)}`,
@@ -561,7 +568,7 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
  * something else (a workspace, an account), and a machine that is away, told to
  * take no new work, or low on disk starts no session whatever its cap. The
  * first two needs already name the machine's state. The rule also keeps the
- * Allow button from ever lowering the cap: its value, running plus waiting, is
+ * "Raise cap to N" button from ever lowering the cap: its value, running plus waiting, is
  * above the cap by construction.
  */
 export const decideMachineNeed = (
@@ -582,11 +589,17 @@ export const decideMachineNeed = (
   if (runner.connectivity === "unreachable") {
     return { kind: "unreachable", hue: "fail", line: describeUnreachable(seen) };
   }
+  // The disk's percentage when it has one, in the words of "Disk 87% full"
+  // below. A disk without a reported total size has none.
+  const diskPercent = measureDisk(runner)?.use?.percent;
   if (isDiskBelowLimit(runner)) {
     return {
       kind: "disk-below-limit",
       hue: "fail",
-      line: "Disk below its limit. It takes no new sessions.",
+      line:
+        diskPercent === undefined
+          ? "Disk below its limit. It takes no new sessions."
+          : `Disk ${String(diskPercent)}% full. It takes no new sessions.`,
     };
   }
   const isCapHoldingSessionsBack =
@@ -603,7 +616,6 @@ export const decideMachineNeed = (
     };
   }
   // A disk without a reported total size has no percentage, so it is never "nearly full".
-  const diskPercent = measureDisk(runner)?.use?.percent;
   if (diskPercent !== undefined && diskPercent >= DISK_YOU_FROM_PERCENT) {
     return { kind: "disk-nearly-full", hue: "you", line: `Disk ${String(diskPercent)}% full` };
   }

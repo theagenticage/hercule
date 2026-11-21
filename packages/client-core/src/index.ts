@@ -934,7 +934,11 @@ export {
   mergeTranscript,
 } from "./threads/transcript";
 export { isThreadCopy, ThreadCopy } from "./threads/thread-copy";
-export { buildOptionsLabel } from "./threads/options-label";
+export {
+  buildOptionsLabel,
+  describeOptionsLabel,
+  type OptionsLabel,
+} from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { parseOptionChoice } from "./threads/option-choice";
 export {

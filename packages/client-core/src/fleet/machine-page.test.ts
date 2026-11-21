@@ -531,7 +531,7 @@ describe("describeMachinePage instruments", () => {
       const drawing = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 })
         .sessions.drawing;
 
-      expect(drawing).toMatchObject({ shape: "bar", cap: 17, running: 12, waiting: 3 });
+      expect(drawing).toMatchObject({ sessionsPerCut: 10, cap: 17, running: 12, waiting: 3 });
     });
   });
 

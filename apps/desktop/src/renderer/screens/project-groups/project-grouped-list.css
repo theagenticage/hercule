@@ -4,11 +4,14 @@
    places every item by it. Each one's height is a custom property that the
    list places it by too (styles/row-heights.css). */
 
-/* A project's heading: its tile, then its name, in the heading's muted ink
-   and in sentence case, unlike a workflow group's uppercase label. */
+/* A project's heading: its tile, then its name, in the heading's muted ink at
+   the rows' body size and semibold, and in sentence case, unlike a workflow
+   group's uppercase label. So it cannot be taken for a repository's
+   sub-heading, which is smaller, fainter and lighter. */
 .group-h.group-h--proj {
   color: var(--muted);
-  font-size: var(--t-12);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
   letter-spacing: 0;
   text-transform: none;
 }

@@ -149,7 +149,7 @@ describe("the composer", () => {
     const composer = locateComposer(page);
     await composer.field.fill("Half a thought");
 
-    expect(await composer.optionsTrigger.textContent()).toBe("Medium");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: Medium");
     await composer.optionsTrigger.click();
     // The trigger follows the menu's toggle event, which the browser sends
     // just after it shows or hides the menu.
@@ -213,7 +213,7 @@ describe("the composer", () => {
     expect(await effort.getByRole("button", { name: "High" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(await composer.optionsTrigger.textContent()).toBe("High");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: High");
     await page.keyboard.press("Escape");
     await composer.optionsMenu.waitFor({ state: "hidden" });
 
@@ -234,7 +234,7 @@ describe("the composer", () => {
       .toEqual({ model: "scripted-large", options: { effort: "high" } });
     await expect.poll(() => composer.note.textContent()).toBe("");
     expect(await composer.modelPill.textContent()).toBe("Scripted Large");
-    expect(await composer.optionsTrigger.textContent()).toBe("High");
+    expect(await composer.optionsTrigger.textContent()).toBe("Effort: High");
   });
 
   it("keeps a thread's unsent text and picks while another thread is open", async () => {
