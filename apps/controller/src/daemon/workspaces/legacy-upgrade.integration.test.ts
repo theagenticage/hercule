@@ -323,6 +323,7 @@ const withLegacyController = async (
             reopened_at: null,
             process_started_at: null,
             library_skills: null,
+            mcp_gateway: null,
             role: null,
             tainted: 0,
             kind: "thread",
