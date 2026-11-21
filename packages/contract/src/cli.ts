@@ -5134,6 +5134,10 @@ export const CLI = {
       },
     },
     errors: {
+      validation:
+        "--mcp-server names a server that does not exist, names one twice, or names two servers with the same name, or the session is not a Thread and --mcp-server names any server; the message says which",
+      forbidden:
+        "you lack session.update, or you gave --mcp-server and lack mcp.manage, which only the user gives: ask the user to do it",
       invalid_state:
         "the Thread is archived, which refuses every update, or the session has exited, which refuses a change of model or options. A change of --mcp-server alone works on a queued, running or exited Thread, because the list is read again at the next start",
     },

@@ -11,10 +11,13 @@
  *   agent reads when it may not;
  * - `decideLeftOutReason` (`left-out.ts`): why a session's start left it out.
  *
- * The verdicts agree on every case they share and differ in two on purpose.
- * A server whose Connection needs sign-in is listed while its calls are
- * refused. And a start puts `checking` before the causes in the Connection and
- * the plugin, which a call does not.
+ * The verdicts agree on every case they share and differ in two on purpose:
+ *
+ * - `isServable` lists a server whose Connection needs sign-in, and one whose
+ *   Connection is of the wrong type, while calls to them are refused and a
+ *   start leaves them out;
+ * - a start puts `checking` before the causes in the Connection and the
+ *   plugin, which a call does not.
  */
 import type { McpServerLeftOutReason } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
@@ -174,7 +177,9 @@ interface Unavailable {
  * 1. it is switched off;
  * 2. its plugin or Connection cannot serve it (`judgeDependencies`): `error`,
  *    or `needs-sign-in` when only the Connection needs a new sign-in;
- * 3. its stored status is not `ready`.
+ * 3. its Connection is not of the type its plugin's contribution needs:
+ *    `error`, because the credentials would go to the wrong origin;
+ * 4. its stored status is not `ready`.
  */
 const findUnavailable = ({
   server,
@@ -183,6 +188,7 @@ const findUnavailable = ({
   if (!server.enabled) return { reason: "switched-off" };
   const judged = judgeDependencies(dependencies);
   if (judged._tag === "unusable") return { reason: judged.status, detail: judged.detail };
+  if (judged.connection.type !== judged.contribution.connectionType) return { reason: "error" };
   return server.status === "ready" ? null : { reason: server.status };
 };
 
@@ -195,8 +201,8 @@ export const decideUnavailableReason = (
  * Returns whether `tools/list` shows the server: it is switched on, it has a
  * stored tool list, its plugin is active and its Connection exists and is not
  * switched off. A server whose Connection needs sign-in is still shown, and a
- * call to it is refused with that reason. A server that is not `ready` is
- * shown too.
+ * call to it is refused with that reason. A server that is not `ready`, and one
+ * whose Connection is of the wrong type, are shown too.
  */
 export const isServable = ({ server, dependencies }: McpServerAvailabilityView): boolean => {
   if (!server.enabled || server.checkedAt === null) return false;
@@ -229,29 +235,20 @@ const describeRefusal = (reason: ServerUnavailableReason, name: string): string 
 /**
  * Returns why a call may not go to the server now, with the words the agent
  * reads, or `null` when it may. The reason is what `findUnavailable` finds.
- * A server whose Connection is not of the type its plugin's contribution
- * needs is refused as `error` too, because its credentials would go to the
- * wrong origin. The caller checks that the server lists the tool.
+ * The caller checks that the server lists the tool.
  */
 export const decideCallRefusal = (view: McpServerAvailabilityView): CallRefusal | null => {
   const { name } = view.server;
   const unavailable = findUnavailable(view);
-  if (unavailable !== null) {
-    const { reason, detail } = unavailable;
-    return {
-      reason,
-      message:
-        detail !== undefined && reason === "error"
-          ? `${name} is not available: ${detail}.`
-          : describeRefusal(reason, name),
-    };
-  }
-  const { plugin, connection } = view.dependencies;
-  return plugin._tag === "active" &&
-    connection !== undefined &&
-    connection.type !== plugin.contribution.connectionType
-    ? { reason: "error", message: describeRefusal("error", name) }
-    : null;
+  if (unavailable === null) return null;
+  const { reason, detail } = unavailable;
+  return {
+    reason,
+    message:
+      detail !== undefined && reason === "error"
+        ? `${name} is not available: ${detail}.`
+        : describeRefusal(reason, name),
+  };
 };
 
 /** The fields of a server row that decide what it depends on. */
@@ -313,9 +310,9 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ReadonlyMap<string, McpServerAvailabilityView>, SqlError> {
     return Effect.gen(function* () {
       const found = yield* servers.readMany(ids, columns);
-      const dependenciesOf = yield* readDependenciesOfMany([...found.values()]);
+      const findDependencies = yield* readDependenciesOfMany([...found.values()]);
       return new Map(
-        [...found].map(([id, server]) => [id, { server, dependencies: dependenciesOf(server) }]),
+        [...found].map(([id, server]) => [id, { server, dependencies: findDependencies(server) }]),
       );
     });
   }
@@ -323,7 +320,7 @@ const make = Effect.gen(function* () {
   return {
     /** Reads the Connection and the plugin of a server as they are now. */
     readDependencies: (server: DependencyIds): Effect.Effect<McpServerDependencies, SqlError> =>
-      Effect.map(readDependenciesOfMany([server]), (dependenciesOf) => dependenciesOf(server)),
+      Effect.map(readDependenciesOfMany([server]), (findDependencies) => findDependencies(server)),
 
     readViews,
   };

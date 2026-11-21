@@ -93,11 +93,11 @@ describe("the verdicts of the catalogue view", () => {
       leftOutFor: "checking",
     },
     {
-      name: "a server whose Connection is of another type than its plugin needs is refused a call but not left out",
+      name: "a server whose Connection is of another type than its plugin needs stays listed, and its calls and its start give `error`",
       facts: { connectionType: "other/desk" },
       servable: true,
       refusedFor: "error",
-      leftOutFor: null,
+      leftOutFor: "error",
     },
   ])("$name", ({ facts, servable, refusedFor, leftOutFor }) => {
     const view = buildMcpServerView(facts);

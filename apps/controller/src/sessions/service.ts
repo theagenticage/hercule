@@ -906,7 +906,7 @@ const keepsStepPromptOnExit = (
  * from it, so a runner must not be able to name servers there. Returns any
  * other event as it is.
  */
-const withoutControllerFields = (event: HarnessEvent): HarnessEvent => {
+const removeControllerFields = (event: HarnessEvent): HarnessEvent => {
   if (event._tag !== "runtime.warning" || event.mcpServers === undefined) return event;
   const copy = { ...event };
   delete copy.mcpServers;
@@ -3939,7 +3939,7 @@ const make = Effect.gen(function* () {
      * or has already seen the event.
      *
      * The fields only the controller writes are dropped from the event first
-     * (`withoutControllerFields`), so a runner cannot store them.
+     * (`removeControllerFields`), so a runner cannot store them.
      *
      * A delta's tap is announced here, before the transaction and never inside
      * it. A delta is not stored until it is flushed, but a client watching the
@@ -3952,7 +3952,7 @@ const make = Effect.gen(function* () {
       reported: HarnessEvent,
     ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
-        const event = withoutControllerFields(reported);
+        const event = removeControllerFields(reported);
         const id = event.sessionId;
         const found = yield* sessions.one(id);
         // A runner may report only on sessions placed on it. An event for any

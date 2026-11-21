@@ -63,12 +63,12 @@ export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>;
  * `runtime.warning` names the same reasons. A client reads it to say what to
  * do:
  *
- * - `switched-off`: the server's `enabled` is false;
- * - `checking`: the server's first list of tools has not ended;
- * - `needs-sign-in`, `unreachable`, `error`: the server's status at that start;
  * - `runner-too-old`: the session's runner does not support MCP servers;
  * - `harness-unsupported`: the session's harness cannot be given MCP servers;
- * - `missing-grant`: the session's Permission Profile lacks `mcp.use`.
+ * - `missing-grant`: the session's Permission Profile lacks `mcp.use`;
+ * - `switched-off`: the server's `enabled` is false;
+ * - `checking`: the server's first list of tools has not ended;
+ * - `needs-sign-in`, `unreachable`, `error`: the server's status at that start.
  *
  * When several reasons apply, the first in this order is the one recorded.
  */

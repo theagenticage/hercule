@@ -916,10 +916,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Checks a list of MCP Server ids the spawn was given or read from the
-   * user's setting, and returns it. Fails with `Validation`.
+   * Checks a list of MCP Server ids the spawn was given, and returns it.
+   * Fails with `Validation`.
    */
-  const checkedMcpServerIds = (
+  const checkMcpServerIds = (
     ids: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyArray<string>, Validation | SqlError> =>
     Effect.as(mcpServerLists.checkList(ids, ["mcpServerIds"]), ids);
@@ -935,25 +935,25 @@ const make = Effect.gen(function* () {
    *
    * The caller's and the Project's list are copied as they are: they were
    * checked when they were written, and a delete of a server removes it from
-   * them in its own transaction. The setting is checked again
-   * (`mcpServerListRule`), because deleting a server does not rewrite it. Run
-   * it inside the transaction that writes the session, so a server deleted at
-   * the same moment cannot slip into the list.
+   * them in its own transaction. The setting is not rewritten by a delete, so
+   * the read drops the ids of deleted servers
+   * (`SettingsOperations.readThreadMcpServerIds`). Nothing else can have
+   * changed in it, because a server's name is fixed. Run it inside the
+   * transaction that writes the session, so a server deleted at the same
+   * moment cannot slip into the list.
    */
   const chooseDefaultMcpServerIds = (
     actor: Actor,
     caller: StoredSession | undefined,
     project: Option.Option<{ readonly mcpServerIds: ReadonlyArray<string> }>,
-  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError | Validation> =>
+  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError> =>
     Effect.gen(function* () {
       if (caller !== undefined) return caller.mcpServers.map((entry) => entry.mcpServerId);
       if (Option.isSome(project)) return project.value.mcpServerIds;
       // A run or a plugin cannot start a Thread (refused before this), so the
       // actor here is the user.
       if (actor._tag !== "user") return [];
-      return yield* checkedMcpServerIds(
-        yield* settingsOperations.readThreadMcpServerIds(actor.userId),
-      );
+      return yield* settingsOperations.readThreadMcpServerIds(actor.userId);
     });
 
   /**
@@ -1581,7 +1581,7 @@ const make = Effect.gen(function* () {
           // An Agent's session has no MCP Servers yet.
           const mcpServerIds =
             decoded.mcpServerIds !== undefined
-              ? yield* checkedMcpServerIds(decoded.mcpServerIds)
+              ? yield* checkMcpServerIds(decoded.mcpServerIds)
               : agent === undefined
                 ? yield* chooseDefaultMcpServerIds(actor, caller, project)
                 : [];
