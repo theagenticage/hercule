@@ -111,7 +111,6 @@ import {
   initializeAppServer,
   makeProbe,
   describeRpcError,
-  parseVersion,
   readAccount,
   STANDARD_TIER,
   type AppServer,
@@ -1135,16 +1134,15 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
 
   /**
    * Starts the session's app-server and makes it ready: the handshake, the
-   * login check and the skill roots. Returns the host with the Codex version
-   * read from the handshake, or `null` when the user agent has none. Fails,
-   * and kills the app-server, when any step fails.
+   * login check and the skill roots. Returns the host. Fails, and kills the
+   * app-server, when any step fails.
    */
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
     ctx: HarnessRunnerContext,
     binary: string,
-  ): Effect.Effect<{ readonly host: Host; readonly codexVersion: string | null }, AdapterError> =>
+  ): Effect.Effect<Host, AdapterError> =>
     Effect.suspend(() => {
       // A session resumed in place starts again under the same id. An entry
       // left here belongs to the run that ended: it must not be used, and must
@@ -1161,7 +1159,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       ];
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
-          Effect.flatMap(
+          Effect.andThen(
             Effect.mapError(
               initializeAppServer(host),
               (error) =>
@@ -1169,14 +1167,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
                   message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
                 }),
             ),
-            (initialized) =>
-              Effect.as(
-                Effect.andThen(
-                  requireLogin(host),
-                  setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
-                ),
-                parseVersion(initialized.userAgent),
-              ),
+            Effect.andThen(
+              requireLogin(host),
+              setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            ),
           ),
           {
             // Registered only after the handshake, the login check and the
@@ -1186,9 +1180,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               host.kill();
               return Effect.fail(error);
             },
-            onSuccess: (codexVersion) => {
+            onSuccess: () => {
               hosts.set(sessionId, host);
-              return Effect.succeed({ host, codexVersion });
+              return Effect.succeed(host);
             },
           },
         ),
@@ -1982,7 +1976,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
-        const { host, codexVersion } = yield* startSessionHost(sessionId, spec, ctx, binary);
+        const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
         const method =
           carried === undefined
@@ -1995,7 +1989,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           cwd: ctx.cwd,
           servers: ctx.mcpServers,
           approvalMode: MCP_TOOL_APPROVAL_MODES[spec.accessMode],
-          codexVersion,
         });
         const threadParams = buildThreadParams(spec, ctx, userInstructions, mcp.config);
         const opened = yield* Effect.matchEffect(

@@ -377,9 +377,8 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(toolName.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
   });
 
-  it("shows the question of Codex 0.154.0, which sends no tool name, named after the server entry", async () => {
-    // Params as captured on the real Codex 0.154.0. The tool is named only
-    // inside `message`, which is prose and is not parsed.
+  it("shows a question whose `_meta` names no tool as its server", async () => {
+    // The tool is named only inside `message`, which is prose and is not parsed.
     const run = await pushServerRequest(ELICITATION, {
       threadId: THREAD,
       turnId: TURN,
@@ -440,14 +439,13 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(request.itemId).toBe("call-search");
   });
 
-  it("files a question that names no tool under the one running call of its server", async () => {
-    const legacyMeta = { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: undefined };
+  it("files a question that names no tool under its turn, because no call can be matched to it", async () => {
     const request = await askAboutCall([["call-search", "sentry__search_issues"]], {
       ...TOOL_CALL_ELICITATION_PARAMS,
-      _meta: legacyMeta,
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: undefined },
     });
 
-    expect(request.itemId).toBe("call-search");
+    expect(request.itemId).toBe(TURN);
   });
 
   it("files the question under its turn when two running calls match, because a guess would mark the wrong item", async () => {

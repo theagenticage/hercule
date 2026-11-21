@@ -64,7 +64,7 @@ export const SPEC: SessionSpec = {
 
 /** `samples/probe-initialize.json`. The version lives inside the user agent. */
 export const INITIALIZE = {
-  userAgent: "hercule/0.154.0 (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)",
+  userAgent: "hercule/0.171.0 (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)",
   codexHome: "/private/tmp/ch.XXXX",
   platformFamily: "unix",
   platformOs: "macos",

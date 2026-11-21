@@ -26,36 +26,6 @@ import type { ConfigReadParams, JsonValue } from "./types";
 export type McpToolApprovalMode = "prompt" | "approve";
 
 /**
- * The Codex releases that re-read a server's tool list when the server says it
- * changed (`features.mcp_tool_list_changed`), as a semver range. Codex refuses
- * a config key it does not know, so the key is sent only to a release that has
- * it.
- */
-const TOOL_LIST_CHANGED_RANGE = ">=0.164.0";
-
-/**
- * Checks whether a Codex of this version re-reads a server's tool list when
- * the server says it changed. `version` is what `parseVersion` read from the
- * app-server's user agent, or `null`. The check is strict: `null`, a
- * pre-release such as `0.164.0-alpha.1`, and anything that is not a plain
- * semver version such as `0.164.0junk` or `0.164.0.1` all return false. A
- * false positive would make Codex refuse to start the thread, while a false
- * negative only costs a warning.
- */
-export const supportsToolListChanged = (version: string | null): boolean =>
-  version !== null && Bun.semver.satisfies(version, TOOL_LIST_CHANGED_RANGE);
-
-/**
- * Returns the warning for a session whose Codex does not re-read its tool
- * list, so a Hercule user is not surprised when a new MCP Server does not show
- * up in a running thread.
- */
-export const buildNoToolListChangedWarning = (version: string | null): string =>
-  `This Codex (${version ?? "unknown version"}) does not re-read its tool list, ` +
-  "so an MCP Server added while the thread runs is usable from its next start. " +
-  "Upgrade Codex to 0.164.0 or newer.";
-
-/**
  * What Hercule reads of a `config/read` reply: every layer of Codex's
  * configuration, with its source and its own settings. `layers` is `null`
  * when Codex was not asked for layers. A layer Codex found but does not use
@@ -140,7 +110,8 @@ const buildMcpConfigUnreadWarning = (reason: string): string =>
  *   session's token, never the token: Codex reads the variable itself when it
  *   connects and sends the token as a bearer token.
  * - Each server gets the approval mode of the session's Access Mode.
- * - The tool list feature is set only when the running Codex has it.
+ * - Codex is told to re-read a server's tool list when the server says it
+ *   changed (`features.mcp_tool_list_changed`).
  *
  * Exported so the real-binary test starts Codex with exactly this config.
  * `decideMcpConfig` is what a session start calls.
@@ -148,7 +119,6 @@ const buildMcpConfigUnreadWarning = (reason: string): string =>
 export const buildMcpServerConfig = (
   servers: ReadonlyArray<ResolvedMcpServer>,
   approvalMode: McpToolApprovalMode,
-  toolListChanged: boolean,
 ): Record<string, JsonValue> =>
   servers.length === 0
     ? {}
@@ -160,7 +130,7 @@ export const buildMcpServerConfig = (
             [`mcp_servers.${server.name}.default_tools_approval_mode`, approvalMode],
           ]),
         ),
-        ...(toolListChanged ? { "features.mcp_tool_list_changed": true } : {}),
+        "features.mcp_tool_list_changed": true,
       };
 
 /** What `decideMcpConfig` decides for a session start. */
@@ -185,17 +155,14 @@ export interface McpConfigDecision {
  *   unread when the request failed, when `layers` is missing or invalid, and
  *   when a layer has no settings object. Codex then usually refuses to open the
  *   thread on the same configuration, and that failure reports it.
- * - A Codex that does not re-read its tool list gets one more warning.
  *
- * Never fails. `codexVersion` is what `parseVersion` read from the app-server's
- * user agent, or `null`.
+ * Never fails.
  */
 export const decideMcpConfig = (input: {
   readonly rpc: Rpc;
   readonly cwd: string | null;
   readonly servers: ReadonlyArray<ResolvedMcpServer>;
   readonly approvalMode: McpToolApprovalMode;
-  readonly codexVersion: string | null;
 }): Effect.Effect<McpConfigDecision> => {
   const unread = (reason: string): McpConfigDecision => ({
     config: {},
@@ -220,15 +187,7 @@ export const decideMcpConfig = (input: {
           if (taking === undefined) free.push(server);
           else warnings.push(buildMcpNameTakenWarning(server.name, taking));
         }
-        // Deleted when Hercule's minimum Codex version reaches 0.164.0.
-        const toolListChanged = supportsToolListChanged(input.codexVersion);
-        if (free.length > 0 && !toolListChanged) {
-          warnings.push(buildNoToolListChangedWarning(input.codexVersion));
-        }
-        return {
-          config: buildMcpServerConfig(free, input.approvalMode, toolListChanged),
-          warnings,
-        };
+        return { config: buildMcpServerConfig(free, input.approvalMode), warnings };
       },
     },
   );

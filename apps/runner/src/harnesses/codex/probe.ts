@@ -119,7 +119,7 @@ export const describeRpcError = (host: AppServer, error: RpcError): string => {
  */
 const USER_AGENT = /^[^/\s]+\/(\S+)/;
 
-export const parseVersion = (userAgent: string): string | null =>
+const parseVersion = (userAgent: string): string | null =>
   USER_AGENT.exec(userAgent)?.[1]?.slice(0, MAX_FACT_LENGTH) ?? null;
 
 /**
