@@ -113,7 +113,7 @@ const openUpstreamTo = (fake: FakeUpstream, firstRevision: string | null = null)
             origin: fake.origin,
             buildUpstreamRequest: () => ({ url: fake.url, headers: {} }),
           },
-          credentials: { credentials: {}, config: {}, identity: "identity-1" },
+          credentials: { credentials: {}, secretNames: [], config: {}, identity: "identity-1" },
           firstRevision,
         }).pipe(Effect.map((opened) => opened.revision)),
       ).pipe(
@@ -174,12 +174,13 @@ describe("the fallback to an older MCP revision", () => {
 });
 
 describe("openUpstream", () => {
-  it("gives each call's requests that call's own credentials, and removes only the long ones from its answer", async () => {
+  it("gives each call's requests that call's own credentials, and removes only the secret ones from its answer, whatever their length", async () => {
     const fake = await startFakeUpstream();
     try {
       const credentialsOf = (token: string) => ({
-        // `org` is too short to count as a secret that must be removed from answers.
-        credentials: { token, org: "acme" },
+        // `organization` only names something, so it stays readable; `token` is secret, however short.
+        credentials: { token, organization: "acme-corp-industries" },
+        secretNames: ["token"],
         config: {},
         identity: `identity-${token}`,
       });
@@ -200,7 +201,7 @@ describe("openUpstream", () => {
                   headers: { Authorization: `Bearer ${credentials["token"] ?? ""}` },
                 }),
               },
-              credentials: credentialsOf("opening-token-0"),
+              credentials: credentialsOf("tok-0"),
               firstRevision: null,
             });
             const [tool] = yield* opened.listTools(Duration.seconds(5));
@@ -208,12 +209,12 @@ describe("openUpstream", () => {
             const callWith = (token: string) =>
               opened.callTool({
                 tool,
-                arguments: { text: token, org: "acme" },
+                arguments: { text: token, org: "acme-corp-industries" },
                 prepareSend: Effect.succeed(credentialsOf(token)),
                 progress: { toolPostSent: false },
                 sentValues: new Set(),
               });
-            return yield* Effect.all([callWith("token-one-1234"), callWith("token-two-5678")], {
+            return yield* Effect.all([callWith("tok-1"), callWith("tok-2")], {
               concurrency: 2,
             });
           }),
@@ -228,10 +229,10 @@ describe("openUpstream", () => {
         .filter((request) => request.method === "tools/call")
         .map((request) => request.authorization)
         .sort();
-      expect(sent).toEqual(["Bearer token-one-1234", "Bearer token-two-5678"]);
+      expect(sent).toEqual(["Bearer tok-1", "Bearer tok-2"]);
       for (const result of results) {
         expect(JSON.stringify(result.content)).toContain(
-          '{\\"text\\":\\"[removed]\\",\\"org\\":\\"acme\\"}',
+          '{\\"text\\":\\"[removed]\\",\\"org\\":\\"acme-corp-industries\\"}',
         );
       }
     } finally {
@@ -263,7 +264,7 @@ describe("openUpstream", () => {
                 origin: fake.origin,
                 buildUpstreamRequest: () => ({ url: fake.url, headers: {} }),
               },
-              credentials: { credentials: {}, config: {}, identity: "identity-1" },
+              credentials: { credentials: {}, secretNames: [], config: {}, identity: "identity-1" },
               firstRevision: null,
             });
             return yield* opened.listTools(Duration.seconds(5));

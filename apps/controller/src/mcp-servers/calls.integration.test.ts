@@ -230,13 +230,8 @@ describe("a refused call", () => {
       const unknownTool = await call({ tool: "nope" });
       const unknownServer = await call({ serverId: "0199e0e7-0000-7000-8000-0000000000aa" });
 
-      expect(unknownTool).toMatchObject({
-        _tag: "Failure",
-        failure: {
-          reason: "error",
-          message: expect.stringContaining("no longer offers this tool"),
-        },
-      });
+      expect(unknownTool).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
+      expect(JSON.stringify(unknownTool)).toContain("no longer offers this tool");
       expect(unknownServer).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
       expect(fake.requests).toHaveLength(before);
     });
@@ -1534,7 +1529,7 @@ describe("what each request carries and what comes back", () => {
 
         expect(result).toMatchObject({
           _tag: "Success",
-          success: { structuredContent: { "[removed]": 1 } },
+          success: { structuredContent: { "Bearer [removed]": 1 } },
         });
       },
       { oauth: true },

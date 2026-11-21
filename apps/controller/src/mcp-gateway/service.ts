@@ -21,7 +21,6 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpSchema } from "effect/ai";
 import type { SessionActor } from "../actor";
-import { buildErrorResult } from "../mcp-servers";
 import { makeCallPolicy } from "./call-policy";
 import {
   buildDiscoverResult,
@@ -53,6 +52,7 @@ import {
   type RequestRefusal,
 } from "./protocol";
 import { makeFreshReads } from "./reads";
+import { buildTooManyCallsRefusal } from "./refusals";
 import { buildServedInstructions, buildToolDefinition, projectTools } from "./served";
 import { buildServerSentBody } from "./streams";
 import {
@@ -272,18 +272,12 @@ const make = Effect.gen(function* () {
         callPolicy.runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
       );
       if (Option.isNone(ran)) {
-        return respondJson(
-          buildRpcResult(
-            id,
-            buildToolCallResult(
-              era,
-              buildErrorResult(
-                `This session already has ${MAX_RUNNING_CALLS_PER_TOKEN} MCP tool calls running, which is the most it may run at once. ` +
-                  "Wait for some of them to finish and then call again.",
-              ),
-            ),
-          ),
+        const refused = yield* callPolicy.refuseCall(
+          state,
+          actor,
+          buildTooManyCallsRefusal(MAX_RUNNING_CALLS_PER_TOKEN),
         );
+        return respondJson(buildRpcResult(id, buildToolCallResult(era, refused)));
       }
       const exit = ran.value;
       if (Exit.isSuccess(exit)) {

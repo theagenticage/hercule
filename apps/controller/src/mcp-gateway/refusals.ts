@@ -72,6 +72,18 @@ export const buildNotInListRefusal = (
     "If you still need it, ask the user to check which MCP servers this Thread has.",
 });
 
+/**
+ * The session already runs the most `tools/call` requests a Session Token may
+ * run at once. The refusal names no server and no tool, because the call is
+ * refused before it is read.
+ */
+export const buildTooManyCallsRefusal = (maxRunningCalls: number): Refusal => ({
+  reason: "error",
+  message:
+    `This session already has ${maxRunningCalls} MCP tool calls running, which is the most it may run at once. ` +
+    "Wait for some of them to finish and then call again.",
+});
+
 /** Returns the line the Thread shows for a refused call. */
 export const buildRefusalWarning = (refusal: Refusal): string =>
   `A tool call was refused. ${refusal.message}`;

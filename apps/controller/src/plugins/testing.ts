@@ -403,7 +403,14 @@ export const buildMcpServerPlugin = (
             type: "desk",
             displayName: "Desk",
             ...(providerUrl === undefined
-              ? { setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }] }
+              ? {
+                  setup: [
+                    {
+                      kind: "credentials",
+                      fields: [{ name: "token", label: "Token", secret: true }],
+                    },
+                  ],
+                }
               : {
                   setup: [{ kind: "device" }],
                   device: {
@@ -487,7 +494,7 @@ export const buildForgePlugin = (
           type: "forge",
           displayName: "Forge",
           setup: [
-            { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
+            { kind: "credentials", fields: [{ name: "token", label: "Token", secret: true }] },
             ...(tokenUrl === undefined ? [] : [{ kind: "oauth" as const }]),
           ],
           ...(tokenUrl === undefined
@@ -763,7 +770,9 @@ export const createIntakeFixture = (): {
         registerConnectionType(host, {
           type: "intaked",
           displayName: "Intaked",
-          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+          setup: [
+            { kind: "credentials", fields: [{ name: "token", label: "Token", secret: true }] },
+          ],
           validate: (credentials: Record<string, string>) =>
             Effect.succeed({
               displayName: "Intaked",

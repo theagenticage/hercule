@@ -793,7 +793,7 @@ interface ConnectionTypeContribution {
 
 type SetupStep =
   | { kind: "checklist"; markdown: string }    // platform-side prep: Discord intents + invite URL; Slack Socket Mode + scopes; the Google recipe
-  | { kind: "credentials"; fields: CredentialField[] }   // one or more secret fields (Slack: bot token + app-level token)
+  | { kind: "credentials"; fields: CredentialField[] }   // one or more pasted fields (Slack: bot token + app-level token); `CredentialField = { name, label, help?, secret? }`
   | { kind: "oauth" }                          // run the core OAuth2 client against `oauth`
   | { kind: "device" }                         // run the core device flow client against `device`
   | { kind: "pairing" }                        // core-owned: DM the bot a one-time code ([./12-assistants.md](./12-assistants.md) section 4.1); channels only
@@ -816,6 +816,8 @@ interface DeviceDeclaration {
   scopes: string[]
 }
 ```
+
+*(Amended 2026-11-21, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A credential field marks itself secret.** A `CredentialField` has an optional `secret: true`. A field that holds a token or a key sets it. A field that only names something, such as an organization slug or a URL, leaves it out. The Connection stores both kinds the same way. The mark tells the core which pasted values must never reach an agent: the MCP Gateway removes the values of the marked fields, and the OAuth access token, from every answer and tool definition it relays ([./21-mcp.md](./21-mcp.md#51-a-plugin-servers-credential)). The core removes no other value of the Connection. A field with no mark is shown to the agent if a server echoes it, so a plugin marks every token and key.
 
 *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The `device` step and its `DeviceDeclaration` are new. The bullets from "Which flows a type offers" to "Token endpoint errors" below describe them, and the rules for a type that offers more than one flow.
 

@@ -274,7 +274,45 @@ export const makeCallPolicy = Effect.gen(function* () {
     );
   };
 
+  /**
+   * Runs `executeCall` admitted, so that a freeze waits for the call and its
+   * audit entry, and so that nothing here writes once the database stops
+   * accepting writes. Answers with the gate's message instead, and writes
+   * nothing, when the controller is frozen or sealed.
+   */
+  const admitExecution = (
+    state: TokenState,
+    actor: SessionActor,
+    call: { readonly arguments: JsonObject | undefined },
+    decision: CallDecision,
+  ): Effect.Effect<McpSchema.CallToolResult> =>
+    promotion
+      .admit(executeCall(state, actor, call, decision))
+      .pipe(
+        Effect.catchIf(isPromotionRefusal, (gate) =>
+          refuseWhileNotServing(
+            actor.sessionId,
+            decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
+            decision._tag === "call" ? decision.tool : undefined,
+            gate.error.message,
+          ),
+        ),
+      );
+
   return {
+    /**
+     * Refuses a call that was never started, because its token already runs
+     * the most calls it may. Audits the refusal and tells the Thread like every
+     * other refusal, and returns the tool result with `isError: true`. Never
+     * fails.
+     */
+    refuseCall: (
+      state: TokenState,
+      actor: SessionActor,
+      refusal: Refusal,
+    ): Effect.Effect<McpSchema.CallToolResult> =>
+      admitExecution(state, actor, { arguments: undefined }, { _tag: "refused", refusal }),
+
     /**
      * Runs one `tools/call` for the session and returns its tool result: the
      * server's answer, or a refusal with `isError: true`. Never fails: a defect
@@ -308,20 +346,7 @@ export const makeCallPolicy = Effect.gen(function* () {
             ),
           ),
         );
-        // Admitted, so that a freeze waits for the call and its audit entry, and
-        // so that nothing here writes once the database stops accepting writes.
-        return yield* promotion
-          .admit(executeCall(state, actor, call, decision))
-          .pipe(
-            Effect.catchIf(isPromotionRefusal, (gate) =>
-              refuseWhileNotServing(
-                actor.sessionId,
-                decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
-                decision._tag === "call" ? decision.tool : undefined,
-                gate.error.message,
-              ),
-            ),
-          );
+        return yield* admitExecution(state, actor, call, decision);
       }),
   };
 });

@@ -180,15 +180,6 @@ interface UpstreamCallState<Refusal = never> {
   readonly sentValues: Set<string>;
 }
 
-/**
- * Credential values of this many characters or fewer are too short to remove
- * from text without damaging it. A Connection a user pastes holds short fields
- * that are no secret, such as Sentry's organization slug, and removing them
- * would mangle ordinary answers. Every token and key a supported Connection
- * type holds is far longer.
- */
-const MIN_SECRET_LENGTH = 8;
-
 const CurrentUpstreamCall = Context.Reference<UpstreamCallState<unknown> | undefined>(
   "hercule/controller/mcp-servers/CurrentUpstreamCall",
   { defaultValue: () => undefined },
@@ -429,8 +420,8 @@ export interface ToolCall<Refusal = never> {
   /** Tells the caller whether the call's own request went out. See `ToolCallProgress`. */
   readonly progress: ToolCallProgress;
   /**
-   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that
-   * any attempt of the logical call sent. The caller gives every attempt the
+   * Collects every secret credential value (`secretNames`) that any attempt
+   * of the logical call sent. The caller gives every attempt the
    * same set, also an attempt on another upstream session, so a value from a
    * rejected attempt is removed from the answer of a later one.
    */
@@ -509,8 +500,8 @@ export interface UpstreamTarget {
    */
   readonly readCurrentCredentials?: PrepareSend;
   /**
-   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that a
-   * request of this session sent. The caller keeps the set, so it still has
+   * Collects every secret credential value (`secretNames`) that a request of
+   * this session sent. The caller keeps the set, so it still has
    * the values of a session that failed to open or expired and is replaced.
    * Without it, the session keeps a set of its own.
    */
@@ -617,8 +608,9 @@ export const openUpstream = (
       Effect.gen(function* () {
         const built = yield* buildRequest(used);
         state.sentCredentials = used;
-        for (const value of [...Object.values(built.headers), ...Object.values(used.credentials)]) {
-          if (value.length > MIN_SECRET_LENGTH) {
+        for (const name of used.secretNames) {
+          const value = used.credentials[name];
+          if (value !== undefined && value !== "") {
             sentValues.add(value);
             state.sentValues.add(value);
           }

@@ -5,7 +5,7 @@
  * endpoint:
  *
  * - what a read returns for OAuth tokens and for pasted credentials, with the
- *   Connection's config and an identity that never reveals the credentials;
+ *   names of the secret ones, the Connection's config and an identity that never reveals the credentials;
  * - each way a read refuses, and the Connection status it leaves behind;
  * - the refresh after an outside server rejected the credentials: skipped when
  *   the stored credentials already changed, done once for concurrent callers,
@@ -123,7 +123,12 @@ const run = <A, E>(
             contribution: {
               type: PASTED_TYPE,
               displayName: "Pasted type",
-              setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+              setup: [
+                {
+                  kind: "credentials",
+                  fields: [{ name: "apiKey", label: "API key", secret: true }],
+                },
+              ],
               configSchema,
               validate: () => Effect.succeed({ displayName: "acct", accountId: "1" }),
             },
@@ -239,6 +244,7 @@ describe("the credentials the core reads to call an outside server", () => {
     const read = await run({ tokens: FRESH_TOKENS }, readForUse);
 
     expect(read.credentials).toEqual({ accessToken: "stored-token" });
+    expect(read.secretNames).toEqual(["accessToken"]);
     expect(read.config).toEqual({ region: "eu" });
     expect(read.identity).toMatch(/^[0-9a-f]{64}$/);
     expect(read.identity).not.toContain("stored-token");
@@ -260,6 +266,9 @@ describe("the credentials the core reads to call an outside server", () => {
     );
 
     expect(first.credentials).toEqual({ apiKey: "key-1", region: "us" });
+    // Only the field the type marks `secret` is one; `region` only names something.
+    expect(first.secretNames).toContain("apiKey");
+    expect(first.secretNames).not.toContain("region");
     expect(first.config).toEqual({ region: "eu" });
     expect(again.credentials).toEqual({ apiKey: "key-2", region: "us" });
     expect(again.identity).not.toBe(first.identity);

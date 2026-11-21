@@ -104,9 +104,14 @@ const NEEDS_SIGN_IN_BODY =
  *   reveals them. It changes when the credentials change, and a caller hands
  *   it back to `refreshAfterRejection` to say which credentials the outside
  *   server refused.
+ * - `secretNames` are the names, among `credentials`, of the values that must
+ *   never reach an agent: the fields the type marks `secret`, and
+ *   `accessToken`. The other values only name something, such as an
+ *   organization slug, and may be shown.
  */
 export interface ConnectionCredentialsForUse {
   readonly credentials: Record<string, string>;
+  readonly secretNames: ReadonlyArray<string>;
   readonly config: unknown;
   readonly identity: string;
 }
@@ -844,7 +849,20 @@ const make = Effect.gen(function* () {
                   message: `the config of the connection '${row.label}' does not fit its type: ${error.message}`,
                 }),
             );
-      return { credentials, config, identity: computeCredentialsIdentity(credentials) };
+      const secretNames = [
+        "accessToken",
+        ...type.contribution.setup.flatMap((step) =>
+          step.kind === "credentials"
+            ? step.fields.filter((field) => field.secret === true).map((field) => field.name)
+            : [],
+        ),
+      ];
+      return {
+        credentials,
+        secretNames,
+        config,
+        identity: computeCredentialsIdentity(credentials),
+      };
     });
 
   /**

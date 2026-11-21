@@ -532,7 +532,7 @@ describe("what a check never does", () => {
         // A rewritten name would be sent back to the server as the name of
         // another tool, so that tool is not stored at all.
         expect(JSON.parse(row.tools)).toMatchObject([
-          { name: "plain", description: "sent [removed] to this tool" },
+          { name: "plain", description: "sent Bearer [removed] to this tool" },
         ]);
       },
       {

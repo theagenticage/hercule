@@ -1547,6 +1547,14 @@ describe("what one Session Token may hold at once", () => {
       expect(textOf(over)).toContain(String(MAX_RUNNING_CALLS_PER_TOKEN));
       expect(textOf(over)).toContain("Wait for some of them to finish");
       expect(listToolPostsSince(mark)).toHaveLength(MAX_RUNNING_CALLS_PER_TOKEN);
+      // The refusal is audited and told to the Thread like any other. The
+      // running calls have no entry yet, because they have not ended.
+      const [entry, ...others] = await readCallAudit(thread.session.id);
+      expect(others).toEqual([]);
+      expect(entry?.payload).toMatchObject({ outcome: "refused", reason: "error" });
+      const [warning, ...moreWarnings] = await readWarnings(thread.session.id);
+      expect(warning?.message).toContain("Wait for some of them to finish");
+      expect(moreWarnings).toEqual([]);
 
       release();
       for (const answer of await Promise.all(running)) {

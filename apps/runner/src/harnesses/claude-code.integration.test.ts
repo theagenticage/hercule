@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema, Stream } from "effect";
 import {
   query as sdkQuery,
@@ -51,15 +51,42 @@ import { ensureRootBoundary } from "../workspaces";
 
 const binary = Bun.which("claude") ?? undefined;
 
+/** The folders the running test made. `afterEach` removes them, so a run that dies later leaves none behind. */
 const homes: Array<string> = [];
 
-afterAll(() => {
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+/** Every folder any test made, so `afterAll` can remove what a Claude Code process wrote into one later. */
+const madeHomes: Array<string> = [];
+
+/** The folder of the plugin directory `prepareTool` makes once for the whole file. `afterAll` removes it. */
+let toolHome: string | undefined;
+
+/**
+ * Removes a folder with its contents. It retries, because a Claude Code
+ * process that is still shutting down can write into the folder while it is
+ * being removed, and one folder that cannot be removed must not leave the
+ * others behind.
+ */
+const removeFolder = (folder: string): void =>
+  rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
+afterEach(() => {
+  for (const home of homes.splice(0)) removeFolder(home);
+});
+
+afterAll(async () => {
+  // A session that was stopped can leave its Claude Code process running for a
+  // moment, and the process then creates its cache folder again under the
+  // `HOME` it was given, inside a folder `afterEach` already removed. Waiting
+  // lets it finish, and then those folders go too.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  for (const home of madeHomes.splice(0)) removeFolder(home);
+  if (toolHome !== undefined) removeFolder(toolHome);
 });
 
 const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
   homes.push(home);
+  madeHomes.push(home);
   return home;
 };
 
@@ -74,7 +101,8 @@ const createTemporaryHome = (): string => {
 let tool: SessionStartContext["herculeTool"] | undefined;
 const prepareTool = (): SessionStartContext["herculeTool"] => {
   if (tool === undefined) {
-    const under = createTemporaryHome();
+    const under = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
+    toolHome = under;
     const {
       herculeTool: { claudePluginDir },
     } = prepareTooling({
