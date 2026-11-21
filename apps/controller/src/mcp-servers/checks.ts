@@ -40,6 +40,7 @@ import type { Secrets } from "../secrets";
 import {
   prepareRequest,
   resolveServerAccess,
+  type ServerCredentials,
   type ServerCredentialsUnavailable,
   type UpstreamCredentials,
   type UsableAccess,
@@ -48,10 +49,14 @@ import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
-import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
+import {
+  buildFailureEdit,
+  buildUpstreamFailureEdit,
+  DAILY_CHECK_MILLIS,
+  mcpServerState,
+} from "./state";
 import {
   buildCurrentCredentialsReader,
-  buildStatusFromFailure,
   MAX_TOOL_DEFINITIONS_BYTES,
   openUpstream,
   runWithCredentials,
@@ -123,8 +128,12 @@ type CheckResult =
       readonly detail: string;
       /** What made the status, when it is the plugin or the Connection and not the server. */
       readonly cause: "plugin" | "connection" | null;
-      /** What a server added by URL said it accepts when it refused the request, when it did. */
-      readonly signInOffered: "oauth" | "token" | null;
+    }
+  | {
+      /** The listing failed in a way that is about the whole server (`buildUpstreamFailureEdit`). */
+      readonly _tag: "upstream-failed";
+      readonly failure: UpstreamError;
+      readonly credentials: ServerCredentials;
     };
 
 /** What a check fails with when the server changed after the check started, so its outcome is dropped. */
@@ -134,13 +143,13 @@ const buildFailedResult = (
   status: "unreachable" | "error" | "needs-sign-in",
   detail: string,
   cause: "plugin" | "connection" | null = null,
-  signInOffered: "oauth" | "token" | null = null,
-): CheckResult => ({ _tag: "failed", status, detail, cause, signInOffered });
+): CheckResult => ({ _tag: "failed", status, detail, cause });
 
 /**
  * Builds the edit that stores a check's outcome. A success stores the tools
  * and resets the schedule to a day. A failure is stored as `buildFailureEdit`
- * builds it, with the revision whose handshake worked, when one did.
+ * or `buildUpstreamFailureEdit` builds it, with the revision whose handshake
+ * worked, when one did.
  */
 const buildEdit = (
   server: StoredMcpServer,
@@ -159,7 +168,15 @@ const buildEdit = (
         failedChecks: 0,
         nextCheckAt: new Date(Date.parse(at) + DAILY_CHECK_MILLIS).toISOString(),
       }
-    : buildFailureEdit(server, result, at, worked.current ?? undefined);
+    : result._tag === "upstream-failed"
+      ? buildUpstreamFailureEdit(
+          server,
+          result.failure,
+          result.credentials,
+          at,
+          worked.current ?? undefined,
+        )
+      : buildFailureEdit(server, result, at, worked.current ?? undefined);
 
 const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
@@ -282,13 +299,12 @@ const make = Effect.gen(function* () {
           }),
         ),
         Effect.catchTags({
-          UpstreamError: (failure) => {
-            const { status, detail, signInOffered } = buildStatusFromFailure(
+          UpstreamError: (failure) =>
+            Effect.succeed<CheckResult>({
+              _tag: "upstream-failed",
               failure,
-              access.credentials,
-            );
-            return Effect.succeed(buildFailedResult(status, detail, null, signInOffered));
-          },
+              credentials: access.credentials,
+            }),
           ServerCredentialsUnavailable: ({ status, detail, cause }) =>
             Effect.succeed(buildFailedResult(status, detail, cause)),
           CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),

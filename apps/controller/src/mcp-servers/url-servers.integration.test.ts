@@ -321,6 +321,33 @@ describe("a call that the server refuses with HTTP 401", () => {
     });
   });
 
+  it("leaves the same stored state as a check that gets the same 401", async () => {
+    await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
+      const serverId = await insertUrlServer({ token: "t0ken-1234" });
+      await waitForResult(controller);
+      fake.authorize = () => false;
+      fake.challenge = `Bearer resource_metadata="https://auth.example/meta"`;
+      const readFailure = async () => {
+        const { status, status_detail, status_cause, sign_in_offered, failed_checks } =
+          await waitForStatus(controller, "needs-sign-in");
+        return { status, status_detail, status_cause, sign_in_offered, failed_checks };
+      };
+
+      expect((await callAs(controller, serverId))._tag).toBe("Failure");
+      const afterCall = await readFailure();
+      await runSql(
+        controller,
+        controller.harness
+          .sql`UPDATE mcp_servers SET status = 'ready', status_detail = NULL, sign_in_offered = NULL`,
+      );
+      expect((await requestCheck(controller, serverId)).status).toBe(200);
+      const afterCheck = await readFailure();
+
+      expect(afterCheck).toEqual(afterCall);
+      expect(afterCall.sign_in_offered).toBe("oauth");
+    });
+  });
+
   it("records a plain token as the offer when the challenge names no OAuth metadata", async () => {
     await withUrlRig(async ({ controller, fake, insertUrlServer }) => {
       const serverId = await insertUrlServer({ token: "t0ken-1234" });

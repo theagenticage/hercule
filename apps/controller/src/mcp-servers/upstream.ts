@@ -36,8 +36,8 @@
  *
  * The file also holds what every caller does with an upstream failure:
  * `runWithCredentials` gets the server's credentials and refreshes them once
- * when the server refuses them, and `buildStatusFromFailure` says what status
- * a failure gives the server.
+ * when the server refuses them. What status a failure gives the server is
+ * decided in `state.ts`.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -1072,36 +1072,6 @@ export const openUpstream = <Refusal = never>(
     // Every revision was refused.
     return yield* Effect.fail(buildFailure("unsupported-revision"));
   });
-
-/**
- * Converts a failure of an upstream call into the status an MCP Server shows
- * for it, with a detail a person can read. A server that cannot be reached or
- * does not answer in time is `unreachable`, because trying again later may
- * work. A server that refused the credentials has the status, the words and
- * the sign-in offer that its credentials give
- * (`ServerCredentials.describeRejected`). Every other failure is `error`, with
- * no sign-in offer: the server answered with something Hercule cannot use.
- * A check and a failed call both use this, so the two cannot read one answer
- * differently.
- */
-export const buildStatusFromFailure = (
-  failure: UpstreamError,
-  credentials: Pick<ServerCredentials, "describeRejected">,
-): {
-  readonly status: "unreachable" | "error" | "needs-sign-in";
-  readonly detail: string;
-  readonly signInOffered: "oauth" | "token" | null;
-} => {
-  switch (failure.reason) {
-    case "unreachable":
-    case "timeout":
-      return { status: "unreachable", detail: failure.message, signInOffered: null };
-    case "unauthorized":
-      return credentials.describeRejected(failure.offersOAuth === true);
-    default:
-      return { status: "error", detail: failure.message, signInOffered: null };
-  }
-};
 
 /**
  * Builds the `readCurrentCredentials` of an upstream target from a server's

@@ -23,7 +23,9 @@ import {
   mcpServerCatalogue,
   type McpServerDependencies,
 } from "./catalogue";
+import type { ServerCredentials } from "./access";
 import { mcpServerRepository, type McpServerEdit, type StoredMcpServer } from "./repository";
+import type { UpstreamError } from "./upstream";
 
 const MINUTE_MILLIS = 60 * 1000;
 
@@ -93,6 +95,53 @@ export const buildFailureEdit = (
     ...observed,
   };
 };
+
+/**
+ * Converts a failure of an upstream call into the status an MCP Server shows
+ * for it, with a detail a person can read and the sign-in the server offers.
+ * A server that cannot be reached or does not answer in time is `unreachable`,
+ * because trying again later may work. A server that refused the credentials
+ * has the status, the words and the sign-in offer that its credentials give
+ * (`ServerCredentials.describeRejected`). Every other failure is `error`, with
+ * no sign-in offer: the server answered with something Hercule cannot use.
+ *
+ * A check and a failed call both turn their failure into a stored status
+ * through this function, and nowhere else, so the two cannot read one answer
+ * differently.
+ */
+export const buildStatusFromFailure = (
+  failure: UpstreamError,
+  credentials: Pick<ServerCredentials, "describeRejected">,
+): {
+  readonly status: "unreachable" | "error" | "needs-sign-in";
+  readonly detail: string;
+  readonly signInOffered: "oauth" | "token" | null;
+} => {
+  switch (failure.reason) {
+    case "unreachable":
+    case "timeout":
+      return { status: "unreachable", detail: failure.message, signInOffered: null };
+    case "unauthorized":
+      return credentials.describeRejected(failure.offersOAuth === true);
+    default:
+      return { status: "error", detail: failure.message, signInOffered: null };
+  }
+};
+
+/**
+ * Builds the edit that stores an upstream failure that is about the whole
+ * server, as `buildStatusFromFailure` reads it and `buildFailureEdit` stores
+ * it. `credentials` are the server's own, which say what a refusal of them
+ * means.
+ */
+export const buildUpstreamFailureEdit = (
+  server: Pick<StoredMcpServer, "failedChecks">,
+  failure: UpstreamError,
+  credentials: Pick<ServerCredentials, "describeRejected">,
+  at: string,
+  protocolVersion?: string,
+): McpServerEdit =>
+  buildFailureEdit(server, buildStatusFromFailure(failure, credentials), at, protocolVersion);
 
 /** Returns the id of the plugin that offers a contribution: `sentry/sentry` is offered by `sentry`. */
 export const parsePluginId = (contributionId: string): string =>

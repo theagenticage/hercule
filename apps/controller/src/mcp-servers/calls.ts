@@ -52,6 +52,7 @@ import {
   prepareRequest,
   readCredentialsGeneration,
   resolveServerAccess,
+  type ServerCredentials,
   type ServerCredentialsUnavailable,
   type UpstreamCredentials,
   type UsableAccess,
@@ -66,10 +67,14 @@ import {
 } from "./catalogue";
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerSignIns } from "./sign-ins";
-import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
+import {
+  buildStatusFromFailure,
+  buildUpstreamFailureEdit,
+  mcpServerState,
+  type StateBasis,
+} from "./state";
 import {
   buildCurrentCredentialsReader,
-  buildStatusFromFailure,
   openUpstream,
   runWithCredentials,
   UPSTREAM_WORK_DEADLINE,
@@ -386,16 +391,14 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Writes a failure that is about the whole server as its status, with what a
-   * server added by URL offers as a sign-in when the failure is an HTTP 401,
-   * unless something newer happened.
+   * Writes a failure that is about the whole server as its status, unless
+   * something newer happened (`buildUpstreamFailureEdit`).
    */
   const writeFailure = (
     server: StoredMcpServer,
     basis: StateBasis,
-    status: "unreachable" | "error" | "needs-sign-in",
-    detail: string,
-    signInOffered: "oauth" | "token" | null,
+    failure: UpstreamError,
+    credentials: ServerCredentials,
   ): Effect.Effect<void> =>
     absorbFailures(
       `Writing the status of MCP server ${server.id} after a call failed`,
@@ -404,7 +407,7 @@ const make = Effect.gen(function* () {
         yield* state.writeCheckResult(
           server.id,
           basis,
-          buildFailureEdit(server, { status, detail, signInOffered }, at),
+          buildUpstreamFailureEdit(server, failure, credentials, at),
           at,
         );
       }),
@@ -636,11 +639,8 @@ const make = Effect.gen(function* () {
               return yield* refuse("error", buildChangedMessage(first));
             }
             default: {
-              const { status, detail, signInOffered } = buildStatusFromFailure(
-                failure,
-                serverCredentials,
-              );
-              yield* writeFailure(server, basis, status, detail, signInOffered);
+              yield* writeFailure(server, basis, failure, serverCredentials);
+              const { status } = buildStatusFromFailure(failure, serverCredentials);
               return yield* progress.toolPostSent && status === "unreachable"
                 ? refuse(status, describeMayHaveRun(name, `${name} could not be reached`))
                 : refuse(status, describeRefusal(status, server));
