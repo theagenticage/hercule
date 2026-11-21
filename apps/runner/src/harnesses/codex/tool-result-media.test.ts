@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { NotificationFrame } from "./rpc";
 import { removeMediaBytes } from "./tool-result-media";
 
-const IMAGE = Buffer.from("not really a picture, but long enough").toString("base64");
-const AUDIO = Buffer.from("not really a sound, but long enough").toString("base64");
-const BLOB = Buffer.from("not really a document, but long enough").toString("base64");
+const IMAGE = Buffer.from(
+  "not really a picture, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
+const AUDIO = Buffer.from(
+  "not really a sound, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
+const BLOB = Buffer.from(
+  "not really a document, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
 
 const NOT_KEPT = "[bytes not kept]";
 
@@ -126,8 +132,56 @@ describe("removing the media bytes of a notification frame", () => {
       expect(JSON.stringify(frame)).not.toContain(IMAGE);
     });
 
+    it("replaces a second copy of the bytes of audio and of an embedded resource", () => {
+      const frame = buildFrame({
+        content: [
+          { type: "audio", data: AUDIO, mimeType: "audio/wav" },
+          { type: "resource", resource: { uri: "file:///report.pdf", blob: BLOB } },
+        ],
+        structuredContent: { recording: AUDIO, report: [BLOB] },
+        _meta: { preview: `data:audio/wav;base64,${AUDIO}` },
+      });
+
+      removeMediaBytes(frame);
+
+      expect(readResults(frame)).toMatchObject([
+        {
+          structuredContent: { recording: NOT_KEPT, report: [NOT_KEPT] },
+          _meta: { preview: `data:audio/wav;base64,${NOT_KEPT}` },
+        },
+      ]);
+      expect(JSON.stringify(frame)).not.toContain(AUDIO);
+      expect(JSON.stringify(frame)).not.toContain(BLOB);
+    });
+
+    it.each([
+      ["a short word", "Completed"],
+      ["text that is long but not base64", "Snapshot of the issue, taken just now by the tool"],
+      ["base64 shorter than any real payload", "aGVsbG8gd29ybGQ="],
+    ])("does not scrub a text that a server reuses as an image's data: %s", (_name, text) => {
+      const frame = buildFrame({
+        content: [
+          { type: "text", text },
+          { type: "image", data: text, mimeType: "image/png" },
+        ],
+        structuredContent: { summary: text },
+        _meta: null,
+      });
+
+      removeMediaBytes(frame);
+
+      expect(readResults(frame)).toMatchObject([
+        {
+          content: [{ type: "text", text }, { type: "image" }],
+          structuredContent: { summary: text },
+        },
+      ]);
+    });
+
     it("numbers a key that collides with another after the rewrite, so no field is lost", () => {
-      const other = Buffer.from("another picture, long enough too").toString("base64");
+      const other = Buffer.from(
+        "another picture, long enough too, to count as bytes".repeat(3),
+      ).toString("base64");
       const frame = buildFrame({
         content: [
           { type: "image", data: IMAGE, mimeType: "image/png" },
@@ -165,6 +219,43 @@ describe("removing the media bytes of a notification frame", () => {
       removeMediaBytes(frame);
 
       expect(readResults(frame)).toEqual([undefined]);
+    });
+  });
+
+  describe("a copy of the bytes under another key of the call item", () => {
+    const buildCallWithCopies = () => ({
+      ...buildCall(buildImageResult()),
+      arguments: { previous: IMAGE, note: "kept" },
+      _meta: { origin: `data:image/png;base64,${IMAGE}` },
+    });
+
+    it.each([
+      ["an item frame", () => buildItemFrame(buildCallWithCopies())],
+      ["a turn frame", () => buildTurnFrame([buildCallWithCopies()])],
+    ])("is replaced in %s", (_name, buildFrame) => {
+      const frame = buildFrame();
+
+      removeMediaBytes(frame);
+
+      const params = frame.params as { item?: unknown; turn?: { items: ReadonlyArray<unknown> } };
+      expect(params.turn?.items[0] ?? params.item).toMatchObject({
+        arguments: { previous: NOT_KEPT, note: "kept" },
+        _meta: { origin: `data:image/png;base64,${NOT_KEPT}` },
+      });
+      expect(JSON.stringify(frame)).not.toContain(IMAGE);
+    });
+
+    it("is dropped with its key when too deeply nested to walk, and the other keys stay", () => {
+      let deep: unknown = IMAGE;
+      for (let level = 0; level < 30_000; level += 1) deep = [deep];
+      const frame = buildItemFrame({ ...buildCallWithCopies(), arguments: deep });
+
+      removeMediaBytes(frame);
+
+      const item = (frame.params as { item: Record<string, unknown> }).item;
+      expect(item).not.toHaveProperty("arguments");
+      expect(item).toMatchObject({ tool: "sentry__get_snapshot_image", status: "completed" });
+      expect(JSON.stringify(frame)).not.toContain(IMAGE);
     });
   });
 
