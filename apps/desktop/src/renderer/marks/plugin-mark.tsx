@@ -1,5 +1,6 @@
 import { decidePluginColor, decidePluginMark, type PluginIdentity } from "@hercule/client-core";
 import type { JSX } from "react";
+import { ToolsIcon } from "../icons/tools";
 import { buildPluginColorStyle } from "./plugin-color";
 import "../logos/logos.css";
 
@@ -16,6 +17,9 @@ const SOLID_MARK_SCALE = 0.9;
  *   `plugins` does not hold the plugin, the initial of its name in a rounded
  *   square.
  *
+ * With a `pluginId` of `null`, such as a server added by URL, which has no
+ * plugin, it draws the tools icon instead.
+ *
  * A mark that declares `solid` is drawn at 90% of `size`. A mark that
  * declares a `hue` or a `color` is drawn in it (see `buildPluginColorStyle`),
  * and a mark with neither takes the text colour.
@@ -29,11 +33,12 @@ export function PluginMark({
   plugins,
   size,
 }: {
-  /** The plugin's id, as `parsePluginId` returns it: `github` for `github/pr.create`. */
-  readonly pluginId: string;
+  /** The plugin's id, as `parsePluginId` returns it: `github` for `github/pr.create`. `null` when there is no plugin. */
+  readonly pluginId: string | null;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly size: number;
 }): JSX.Element {
+  if (pluginId === null) return <ToolsIcon size={size} />;
   const drawing = decidePluginMark(pluginId, plugins);
   const declared = plugins.find((plugin) => plugin.id === pluginId)?.mark;
   const drawnSize = declared?.solid === true ? Math.round(size * SOLID_MARK_SCALE) : size;

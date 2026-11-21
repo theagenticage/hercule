@@ -29,6 +29,27 @@ describe("buildMcpServerViews", () => {
     expect(linear).toMatchObject({ pluginId: "linear", account: "acme", typeName: "Linear" });
   });
 
+  it("gives a server added by URL no plugin and the address's host as its account", () => {
+    const [view] = buildViews([
+      buildServer("s-url", "docs", "", {
+        source: {
+          kind: "url",
+          url: "https://mcp.docs.example.com/v1",
+          signIn: "none",
+          signInOffered: null,
+        },
+      }),
+    ]);
+
+    expect(view).toMatchObject({
+      pluginId: null,
+      connection: undefined,
+      account: "mcp.docs.example.com",
+      typeName: "",
+      secondLine: "mcp.docs.example.com · 2 tools",
+    });
+  });
+
   it("says '1 tool' for one tool, and gives no count before the first check", () => {
     const [one, unchecked] = buildViews([
       buildServer("s-1", "sentry", "c-work", { tools: [{ name: "a", description: "" }] }),

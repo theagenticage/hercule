@@ -25,11 +25,18 @@ const STATUS_WORDS: Readonly<Record<McpServerDisplayStatus, string>> = {
 /** One MCP Server, joined with what a screen needs to draw it. */
 export interface McpServerView {
   readonly server: McpServer;
-  /** The plugin that offers the server, whose mark it wears. */
-  readonly pluginId: string;
+  /**
+   * The plugin that offers the server, whose mark it wears. `null` for a
+   * server added by URL: it has no plugin, so a screen draws the tools icon.
+   */
+  readonly pluginId: string | null;
   /** The Connection the server is reached with, or `undefined` when it is not in the list read. */
   readonly connection: Connection | undefined;
-  /** The Connection's label, which tells two servers of one name apart. `undefined` without a Connection. */
+  /**
+   * The label that tells two servers of one name apart: the Connection's label
+   * for a plugin server (`undefined` without a Connection), the address's host
+   * for a server added by URL.
+   */
   readonly account: string | undefined;
   /** The display name of the Connection's type, such as "Sentry". */
   readonly typeName: string;
@@ -60,19 +67,38 @@ export const buildMcpServerViews = (
   const offers = readMcpServerOffers(plugins);
   const types = listConnectionTypes(plugins);
   return servers.map((server) => {
-    const connection = connections.find((each) => each.id === server.source.connectionId);
-    const offer = offers.find((each) => each.contributionId === server.source.contributionId);
-    const pluginId = parsePluginId(server.source.contributionId) ?? server.source.contributionId;
-    const type = types.find((each) => each.type === (connection?.type ?? offer?.connectionType));
-    const typeName =
-      connection === undefined
-        ? (type?.displayName ?? pluginId)
-        : describeConnectionTypeName(connection, type);
+    const { source } = server;
     const displayStatus = decideDisplayStatus(server);
     const failing =
       displayStatus === "needs-sign-in" ||
       displayStatus === "unreachable" ||
       displayStatus === "error";
+    if (source.kind === "url") {
+      const host = new URL(source.url).host;
+      return {
+        server,
+        pluginId: null,
+        connection: undefined,
+        account: host,
+        typeName: "",
+        secondLine:
+          server.checkedAt === null
+            ? host
+            : `${host} · ${formatCount(server.tools.length, "tool")}`,
+        displayStatus,
+        statusWord: STATUS_WORDS[displayStatus],
+        failing,
+        statusDetail: failing ? server.statusDetail : null,
+      };
+    }
+    const connection = connections.find((each) => each.id === source.connectionId);
+    const offer = offers.find((each) => each.contributionId === source.contributionId);
+    const pluginId = parsePluginId(source.contributionId) ?? source.contributionId;
+    const type = types.find((each) => each.type === (connection?.type ?? offer?.connectionType));
+    const typeName =
+      connection === undefined
+        ? (type?.displayName ?? pluginId)
+        : describeConnectionTypeName(connection, type);
     // Before the first check there is no tool count to give. A server whose
     // check found no tools has been checked, and says "0 tools".
     const secondLine =

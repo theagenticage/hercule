@@ -57,9 +57,10 @@ export const buildMcpServerSettingsRows = ({
         .map((connection) => {
           const view =
             views.find(
-              (each) =>
-                each.server.source.contributionId === offer.contributionId &&
-                each.server.source.connectionId === connection.id,
+              ({ server: { source } }) =>
+                source.kind === "plugin" &&
+                source.contributionId === offer.contributionId &&
+                source.connectionId === connection.id,
             ) ?? null;
           const typeName = describeConnectionTypeName(
             connection,
