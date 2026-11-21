@@ -236,6 +236,13 @@ The rows are in the order of precedence. When several reasons apply to one serve
 
 The controller writes one `runtime.warning` for the servers left out, with the field `mcpServers` naming each server and its reason ([section 3.6](#36-a-refused-call)).
 
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* Four rules for that warning and the reasons behind it:
+
+- **The status is the current one.** A server's `needs-sign-in` and `error` come from its Connection and its plugin as they are at the start, not only from the status the checks last wrote, because the follower writes a status some time after the Connection or the plugin changes. A Connection that is switched off or gone, or a plugin that is stopped, gives `error`. A Connection that needs sign-in gives `needs-sign-in`. Both come after the reasons above them in the table: a server whose first list has not ended is still `checking`, and a switched-off server is still `switched-off`.
+- **The field holds every server up to the wire limit.** The `mcpServers` field holds up to 64 entries, so each server of a list of up to 64 left-out servers gets its fix button. The message names the first 20 servers in words and ends with "and N more" for the rest.
+- **A list of more than 64 left-out servers** puts the first 64 in the field, and the message says how many of the servers it counts are not in it, as in "and 50 more (6 of them are not given a fix button)". Those servers are still recorded in the session's `leftOut`.
+- **Only the controller writes the field.** A `runtime.warning` a runner reports has `mcpServers` removed before it is stored. A runner cannot attach a fix button to its own warning.
+
 This record is a diagnostic. It is never changed while the session runs. The reasons `runner-too-old` and `harness-unsupported` describe delivery only: the gateway still answers a live Session Token by the live rule ([section 3.3](#33-what-a-session-sees)). So a server that was `needs-sign-in` at the start but has a stored list is listed, and a call to it is refused with the reason, until it is `ready` again. A server left out because it had no stored list yet is listed as soon as it has one (`list_changed`), and one left out because it was not `ready` can be called as soon as it is.
 
 ### 3.9 Audit
@@ -331,7 +338,7 @@ Every list write needs the grant `mcp.manage`, checked inside the operation in a
 
 - Every session on a runner and harness that support it gets one entry, the gateway's, named `tools`: its runner lists the capability `mcpServers` and its harness declares `mcpPassthrough: "native"`. It gets the entry also with an empty list, so a server added later works without a restart.
 - The cost is one idle connection per session to the controller. Codex also shows the model one line about the server.
-- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212).
+- A runner without the capability gets a spec without the field. Every server in the session's list is left out with `runner-too-old`, and the Thread says so. A harness without `mcpPassthrough: "native"` leaves every server out with `harness-unsupported`. pi is `unsupported` until [#1212](https://github.com/theagenticage/hercule/issues/1212). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* Codex is `unsupported` until [#1209](https://github.com/theagenticage/hercule/issues/1209) maps the entry in its adapter ([./06-providers.md](./06-providers.md#4-harnessadapter), decided by Rogier, 2026-11-20).
 - Tool search is the harness's own. The gateway offers no search tool.
 
 ## 5. Credentials and status

@@ -243,6 +243,7 @@ const NEW_SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T10:00:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const buildController = (
@@ -1788,6 +1789,7 @@ const WORLD = buildThreadsWorld(IDS);
 const buildProject = (id: string, name: string): Project => ({
   id,
   name,
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 });

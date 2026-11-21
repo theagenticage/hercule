@@ -2010,10 +2010,11 @@ export const CLI = {
   },
   "project.create": {
     command: "project create",
-    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The one default it carries is a Model Profile, which a new thread in the project starts on. The description is markdown.",
+    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. It carries two defaults for a new thread in it: a Model Profile to start on and MCP servers to start with. The description is markdown.",
     examples: [
       { args: ["--name", "Hercule v1"] },
       { args: ["--name", "Hercule v1", "--model-profile", "01a2b3c4"] },
+      { args: ["--name", "Hercule v1", "--mcp-server", "5d7e1a90", "--mcp-server", "c3b8f642"] },
       {
         args: ["--name", "Hercule v1", "--description-stdin"],
         stdin: "Everything for the first release.",
@@ -2031,16 +2032,27 @@ export const CLI = {
         help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters. Leave it off and a new thread starts on the thread default.",
         resolves: "modelProfile.query",
       },
+      mcpServerIds: {
+        flag: "mcp-server",
+        help: "An MCP server a new thread in this project starts with, by its id or a tail of eight or more characters. Repeat the flag for each server. Needs the `mcp.manage` grant. Leave it off for none; the CLI cannot send an empty list, so clear the list in the apps or through the API.",
+        resolves: "mcpServer.query",
+      },
     },
-    errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
+    errors: {
+      validation:
+        "the name is empty or too long, --model-profile is no profile, or --mcp-server names a server that does not exist, names one twice, or names two servers with the same name; the message says which",
+      forbidden:
+        "you lack project.write, or you gave --mcp-server and lack mcp.manage, which only the user gives: ask the user to do it",
+    },
   },
   "project.update": {
     command: "project update",
-    help: "Edits a project; a field you leave out is not changed. Changing the Model Profile changes no thread that already exists.",
+    help: "Edits a project; a field you leave out is not changed. Changing the Model Profile or the MCP servers changes no thread that already exists.",
     examples: [
       { args: ["1f3a9c2e", "--name", "Hercule v1.1"] },
       { args: ["1f3a9c2e", "--model-profile", "01a2b3c4"] },
       { args: ["1f3a9c2e", "--model-profile", "null"] },
+      { args: ["1f3a9c2e", "--mcp-server", "5d7e1a90"] },
       {
         args: ["1f3a9c2e", "--description-stdin"],
         stdin: "Shipped; keeping it for the follow-ups.",
@@ -2063,8 +2075,18 @@ export const CLI = {
         help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters; `null` removes it, and a new thread starts on the thread default.",
         resolves: "modelProfile.query",
       },
+      mcpServerIds: {
+        flag: "mcp-server",
+        help: "An MCP server a new thread in this project starts with, by its id or a tail of eight or more characters. Repeat the flag for each server. The servers given replace the project's whole list, so name every server it is to keep. Needs the `mcp.manage` grant. The CLI cannot send an empty list, because a flag given zero times sends nothing; clear the list in the apps or through the API.",
+        resolves: "mcpServer.query",
+      },
     },
-    errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
+    errors: {
+      validation:
+        "the name is empty or too long, --model-profile is no profile, or --mcp-server names a server that does not exist, names one twice, or names two servers with the same name; the message says which",
+      forbidden:
+        "you lack project.write, or you gave --mcp-server and lack mcp.manage, which only the user gives: ask the user to do it",
+    },
   },
   "project.delete": {
     command: "project delete",
@@ -4974,6 +4996,10 @@ export const CLI = {
         stdin: "These two things are one problem. Find the cause.",
       },
       {
+        args: ["--mcp-server", "5d7e1a90", "--mcp-server", "c3b8f642"],
+        stdin: "Find out why the last Sentry issue started and fix it.",
+      },
+      {
         args: [
           "--context",
           '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"}',
@@ -5066,10 +5092,15 @@ export const CLI = {
         flag: "dedup-key",
         help: "Your idempotency key: a second spawn with the same key from the same actor (you, whichever credential you use, or the same session) returns the first session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
       },
+      mcpServerIds: {
+        flag: "mcp-server",
+        help: "An MCP server the Thread starts with, by its id or a tail of eight or more characters. Repeat the flag for each server. Without the flag, a Thread the user starts gets its project's servers, or else the user's default servers; a Thread a session starts, and a fork, copy the calling session's servers. Needs the `mcp.manage` grant, and is not allowed with --agent. The CLI cannot send an empty list, because a flag given zero times sends nothing; start a Thread with no servers from the apps or through the API.",
+        resolves: "mcpServer.query",
+      },
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's. Or you are a session using --new-task, which is the user's own act: ask the user to start the Thread",
+        "you lack session.spawn, which a Permission Request can get you. Or you gave --mcp-server and lack mcp.manage, which only the user gives: ask the user to do it. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's. Or you are a session using --new-task, which is the user's own act: ask the user to start the Thread",
       invalid_state:
         "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`. Or the Task named with --task is done or dropped: reopen the Task, or leave --task off. Or a thing named in --new-task is a place that groups work, or Hercule cannot read it now",
       not_found:
@@ -5080,8 +5111,11 @@ export const CLI = {
   },
   "session.update": {
     command: "session update",
-    help: "Changes what a session runs under from here on: its model and the per-model options. Options are merged into the ones it already runs with, unless --model changes the model: then the choices start empty, because they belong to the model that offered them.",
-    examples: [{ args: ["1f3a9c2e", "--model", "claude-opus-4"] }],
+    help: "Changes what a session runs under from here on: its model, options and MCP servers. Options are merged into the ones it already runs with, unless --model changes the model: then the choices start empty, because they belong to the model that offered them. --mcp-server replaces the session's list of MCP servers and leaves the model alone.",
+    examples: [
+      { args: ["1f3a9c2e", "--model", "claude-opus-4"] },
+      { args: ["1f3a9c2e", "--mcp-server", "5d7e1a90", "--mcp-server", "c3b8f642"] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -5093,8 +5127,20 @@ export const CLI = {
         flag: "options",
         help: "The per-model choices as inline JSON; they are merged into what is already set.",
       },
+      mcpServerIds: {
+        flag: "mcp-server",
+        help: "An MCP server the thread has from here on, by its id or a tail of eight or more characters. Repeat the flag for each server. The servers given replace the thread's whole list, so name every server it is to keep. Needs the `mcp.manage` grant. The CLI cannot send an empty list, because a flag given zero times sends nothing; clear the list in the apps or through the API.",
+        resolves: "mcpServer.query",
+      },
     },
-    errors: { invalid_state: "that session has exited; there is nothing left to configure" },
+    errors: {
+      validation:
+        "--mcp-server names a server that does not exist, names one twice, or names two servers with the same name, or the session is not a Thread and --mcp-server names any server; the message says which",
+      forbidden:
+        "you lack session.update, or you gave --mcp-server and lack mcp.manage, which only the user gives: ask the user to do it",
+      invalid_state:
+        "the Thread is archived, which refuses every update, or the session has exited, which refuses a change of model or options. A change of --mcp-server alone works on a queued, running or exited Thread, because the list is read again at the next start",
+    },
   },
   "session.input": {
     command: "session input",

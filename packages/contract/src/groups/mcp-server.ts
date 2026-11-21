@@ -13,6 +13,7 @@
  */
 import { Schema } from "effect";
 import { McpServerName } from "@hercule/plugin-host";
+import { McpServerLeftOutReason } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -55,6 +56,45 @@ export const McpServerStatus = Schema.Literals([
 ]);
 
 export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>;
+
+/**
+ * Why a server in a session's list could not be called at the session's last
+ * start (spec 21 section 3.8). The protocol owns it, because a
+ * `runtime.warning` names the same reasons. A client reads it to say what to
+ * do:
+ *
+ * - `runner-too-old`: the session's runner does not support MCP servers;
+ * - `harness-unsupported`: the session's harness cannot be given MCP servers;
+ * - `missing-grant`: the session's Permission Profile lacks `mcp.use`;
+ * - `switched-off`: the server's `enabled` is false;
+ * - `checking`: the server's first list of tools has not ended;
+ * - `needs-sign-in`, `unreachable`, `error`: the server's status at that start.
+ *
+ * When several reasons apply, the first in this order is the one recorded.
+ */
+export { McpServerLeftOutReason } from "@hercule/protocol";
+
+/**
+ * A list of MCP Server ids, as a Project, a session or the thread default
+ * holds one. The list is in the order the caller gave. The id rules (the
+ * servers exist, none twice, no two of one name) are the service's.
+ */
+export const McpServerIds = Schema.Array(Id);
+
+/**
+ * One entry of a session's own list of MCP Servers.
+ *
+ * `name` is the server's name when the entry was written and never changes.
+ * `leftOut` is why the last start could not call the server, or `null` when it
+ * could, and also for an entry added since that start.
+ */
+export const SessionMcpServer = Schema.Struct({
+  mcpServerId: Id,
+  name: McpServerName,
+  leftOut: Schema.NullOr(McpServerLeftOutReason),
+});
+
+export type SessionMcpServer = Schema.Schema.Type<typeof SessionMcpServer>;
 
 /** A contribution's id, qualified with its plugin's id, such as `sentry/sentry`. */
 const QualifiedContributionId = Schema.String.check(

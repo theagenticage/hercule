@@ -25,8 +25,11 @@ export interface StoredMcpTool {
   readonly annotations?: Schema.Json;
 }
 
-/** An MCP Server row, with its JSON column read. */
-export interface StoredMcpServer {
+/**
+ * An MCP Server row without its stored tool definitions, which can be several
+ * MiB. A reader that only judges whether the server can serve takes this.
+ */
+export interface StoredMcpServerAvailability {
   readonly id: string;
   readonly name: string;
   /** The plugin's MCP server contribution, qualified (`sentry/sentry`). */
@@ -42,7 +45,6 @@ export interface StoredMcpServer {
    * plugin and not the server. `null` when the status is the server's own.
    */
   readonly statusCause: string | null;
-  readonly tools: ReadonlyArray<StoredMcpTool>;
   readonly checkedAt: string | null;
   readonly protocolVersion: string | null;
   /**
@@ -100,6 +102,14 @@ interface McpServerRow {
   readonly updated_at: string;
 }
 
+/** An MCP Server row, with its JSON column read. */
+export interface StoredMcpServer extends StoredMcpServerAvailability {
+  readonly tools: ReadonlyArray<StoredMcpTool>;
+}
+
+/** Which columns a read of many servers fetches: `without-tools` leaves out the tool definitions. */
+export type McpServerColumns = "with-tools" | "without-tools";
+
 /**
  * The columns an update may set. An absent field is left unchanged, and a
  * `null` clears a nullable column.
@@ -120,17 +130,14 @@ export interface McpServerEdit {
   readonly bumpRevision?: true;
 }
 
-const COLUMNS =
+const COLUMNS_WITHOUT_TOOLS =
   "id, name, contribution_id, connection_id, account_id, enabled, status, status_detail, " +
-  "status_cause, tools, checked_at, protocol_version, revision, connection_generation, " +
+  "status_cause, checked_at, protocol_version, revision, connection_generation, " +
   "notified_status, next_check_at, failed_checks, created_at, updated_at";
+const COLUMNS = `${COLUMNS_WITHOUT_TOOLS}, tools`;
 
-/**
- * Converts a row to a server. Only this repository writes the `tools` column,
- * so a column that does not parse means the database is broken, not an error
- * a caller can act on.
- */
-const toServer = (row: McpServerRow): StoredMcpServer => ({
+/** Converts a row to a server without its tool definitions. */
+const toServerAvailability = (row: Omit<McpServerRow, "tools">): StoredMcpServerAvailability => ({
   id: uuidToString(row.id),
   name: row.name,
   contributionId: row.contribution_id,
@@ -140,7 +147,6 @@ const toServer = (row: McpServerRow): StoredMcpServer => ({
   status: row.status,
   statusDetail: row.status_detail,
   statusCause: row.status_cause,
-  tools: JSON.parse(row.tools) as ReadonlyArray<StoredMcpTool>,
   checkedAt: row.checked_at,
   protocolVersion: row.protocol_version,
   revision: row.revision,
@@ -150,6 +156,16 @@ const toServer = (row: McpServerRow): StoredMcpServer => ({
   failedChecks: row.failed_checks,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+});
+
+/**
+ * Converts a row to a server. Only this repository writes the `tools` column,
+ * so a column that does not parse means the database is broken, not an error
+ * a caller can act on.
+ */
+const toServer = (row: McpServerRow): StoredMcpServer => ({
+  ...toServerAvailability(row),
+  tools: JSON.parse(row.tools) as ReadonlyArray<StoredMcpTool>,
 });
 
 const make = Effect.gen(function* () {
@@ -162,8 +178,64 @@ const make = Effect.gen(function* () {
       (rows) => Option.map(Option.fromNullishOr(rows[0]), toServer),
     );
 
+  /**
+   * Returns each server that exists, by its id, in one query. An id that no
+   * server has is left out of the map. With `without-tools` the query does
+   * not fetch the tool definitions. `tools` is the last column of the table
+   * (migration 0125), and SQLite keeps a long value in overflow pages after
+   * the columns before it, so this query never reads those pages, however long
+   * the stored lists are.
+   */
+  function readMany(
+    ids: ReadonlyArray<string>,
+    columns: "with-tools",
+  ): Effect.Effect<ReadonlyMap<string, StoredMcpServer>, SqlError>;
+  function readMany(
+    ids: ReadonlyArray<string>,
+    columns: "without-tools",
+  ): Effect.Effect<ReadonlyMap<string, StoredMcpServerAvailability>, SqlError>;
+  function readMany(
+    ids: ReadonlyArray<string>,
+    columns: McpServerColumns,
+  ): Effect.Effect<ReadonlyMap<string, StoredMcpServerAvailability>, SqlError>;
+  function readMany(
+    ids: ReadonlyArray<string>,
+    columns: McpServerColumns,
+  ): Effect.Effect<ReadonlyMap<string, StoredMcpServerAvailability>, SqlError> {
+    if (ids.length === 0) return Effect.succeed(new Map());
+    const withTools = columns === "with-tools";
+    return Effect.map(
+      sql<McpServerRow>`SELECT ${sql.literal(withTools ? COLUMNS : COLUMNS_WITHOUT_TOOLS)}
+                        FROM mcp_servers WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+      (rows) =>
+        new Map(
+          rows.map((row) => [
+            uuidToString(row.id),
+            withTools ? toServer(row) : toServerAvailability(row),
+          ]),
+        ),
+    );
+  }
+
   return {
     readById,
+
+    /**
+     * Returns the name of each server that exists, by its id, in one query. An
+     * id that no server has is left out of the map.
+     */
+    readNames: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly name: string }>`
+              SELECT id, name FROM mcp_servers WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.name])),
+          ),
+
+    readMany,
 
     /** Returns every server, sorted by name and then by id. */
     list: (): Effect.Effect<ReadonlyArray<StoredMcpServer>, SqlError> =>

@@ -36,6 +36,7 @@ const WORK = buildModelProfile(
 const buildProject = (id: string, fields: Partial<Project> = {}): Project => ({
   id,
   name: id,
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
   ...fields,

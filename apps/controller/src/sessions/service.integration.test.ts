@@ -20,6 +20,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   HarnessNotInstalled,
+  MCP_SERVERS_CAPABILITY,
   SessionSpec,
   SteerRefused,
   type AdapterError,
@@ -54,9 +55,15 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
+import { mcpServerRepository } from "../mcp-servers";
 import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer } from "../plugins";
-import { buildHarnessDefinition, createPluginFixture, USER } from "../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildMcpServerPlugin,
+  createPluginFixture,
+  USER,
+} from "../plugins/testing";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
@@ -383,6 +390,7 @@ const claimStarting = (
   room: number,
   coordination?: string,
   findModelDeclarations: StartNeeds["findModelDeclarations"] = () => Effect.succeed(undefined),
+  negotiatedCapabilities: ReadonlyArray<string> = [],
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -396,7 +404,7 @@ const claimStarting = (
         prepareHarnessAccount: prepareAccount,
         findModelDeclarations,
         buildCoordination: () => Effect.succeed(coordination),
-        runner: { name: "a runner", negotiatedCapabilities: [] },
+        runner: { name: "a runner", negotiatedCapabilities },
         localRunnerId: undefined,
       }),
     );
@@ -999,6 +1007,426 @@ describe("SessionService.claimStarts", () => {
     // claim.
     expect(result.after?.status).toBe("queued");
     expect(result.hash).toBeNull();
+  });
+});
+
+/** The harness of the MCP tests that can be given the gateway's entry. */
+const NATIVE_MCP_HARNESS_ID = "mcptest/native";
+
+/** The harness of the MCP tests that cannot (`mcpPassthrough: "unsupported"`). */
+const BARE_MCP_HARNESS_ID = "mcptest/bare";
+
+/** The contribution of the plugin whose MCP servers the tests list. */
+const DESK_SERVER_CONTRIBUTION_ID = "mcpdesk/desk";
+
+/** The contribution of a second plugin, which a test can stop without stopping the first. */
+const OTHER_DESK_SERVER_CONTRIBUTION_ID = "mcpother/desk";
+
+/**
+ * Registers the two harnesses of the MCP tests, which the claim reads
+ * `mcpPassthrough` from, and the two plugins that offer the tests' MCP
+ * servers.
+ */
+const bootMcpHarnesses = Effect.flatMap(PluginHost, (host) => {
+  const native = buildHarnessDefinition("native");
+  return host.boot([
+    createPluginFixture({
+      id: "mcptest",
+      definitions: [
+        native,
+        {
+          ...buildHarnessDefinition("bare"),
+          declared: { ...native.declared, mcpPassthrough: "unsupported" },
+        },
+      ],
+    }).plugin,
+    buildMcpServerPlugin("mcpdesk"),
+    buildMcpServerPlugin("mcpother"),
+  ]);
+});
+
+/** Inserts a permission profile with the grants given and returns its id. */
+const aProfileWith = (grants: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const id = mintId();
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${`profile ${id}`}, ${JSON.stringify(grants)}, 0, ${at}, ${at})
+      `,
+    );
+    return id;
+  });
+
+/** What an MCP server is in these tests: its name and what the checks last wrote about it. */
+interface TestMcpServer {
+  readonly name: string;
+  readonly status: "checking" | "ready" | "needs-sign-in" | "unreachable" | "error";
+  readonly enabled?: boolean;
+  /** The status of the server's Connection, `connected` unless given. */
+  readonly connectionStatus?: "connected" | "needs-reauth" | "disabled";
+  /** The contribution the server comes from, `DESK_SERVER_CONTRIBUTION_ID` unless given. */
+  readonly contributionId?: string;
+}
+
+/** Inserts the MCP servers on a Connection of their own each, and returns their ids in order. */
+const insertMcpServers = (servers: ReadonlyArray<TestMcpServer>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const connections = yield* connectionRepository;
+    const mcpServers = yield* mcpServerRepository;
+    return yield* withTransaction(
+      sql,
+      Effect.forEach(servers, (server) =>
+        Effect.gen(function* () {
+          const contributionId = server.contributionId ?? DESK_SERVER_CONTRIBUTION_ID;
+          // The Connection is of the type the contribution needs, which is `<plugin id>/desk`.
+          const pluginId = contributionId.slice(0, contributionId.indexOf("/"));
+          const connection = yield* connections.insert({
+            pluginId,
+            type: `${pluginId}/desk`,
+            label: server.name,
+            displayName: server.name,
+            accountId: `account-${server.name}`,
+            labels: [],
+            config: {},
+            at,
+          });
+          const stored = yield* mcpServers.insert({
+            name: server.name,
+            contributionId,
+            connectionId: connection.id,
+            accountId: `account-${server.name}`,
+            connectionGeneration: 0,
+            at,
+          });
+          if (server.connectionStatus !== undefined) {
+            yield* sql`
+              UPDATE connections SET status = ${server.connectionStatus}
+              WHERE id = ${uuidFromString(connection.id)}`;
+          }
+          yield* sql`
+            UPDATE mcp_servers SET status = ${server.status},
+              enabled = ${server.enabled === false ? 0 : 1}
+            WHERE id = ${uuidFromString(stored.id)}`;
+          return stored.id;
+        }),
+      ),
+    );
+  });
+
+/** Queues a session on `harnessId` and profile `permissionProfileId`, with the servers as its list. */
+const insertQueuedSessionWithServers = (
+  runnerId: string,
+  options: {
+    readonly harnessId: string;
+    readonly permissionProfileId: string;
+    readonly servers: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  },
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sessionRepository;
+    const providerAccountId = mintId();
+    const sessionId = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec: buildSpec(providerAccountId, "clever"),
+      harnessId: options.harnessId,
+      permissionProfileId: options.permissionProfileId,
+    });
+    yield* withTransaction(
+      sql,
+      rows.replaceMcpServers(
+        sessionId,
+        options.servers.map((server) => server.id),
+      ),
+    );
+    return sessionId;
+  });
+
+/** Returns the `runtime.warning` events of the session's stream, in order. */
+const readRuntimeWarnings = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly event: string }>`
+      SELECT event FROM session_stream
+      WHERE session_id = ${uuidFromString(sessionId)}
+        AND json_extract(event, '$._tag') = 'runtime.warning'
+      ORDER BY position`;
+    return rows.map(
+      (row) => JSON.parse(row.event) as { readonly message: string; readonly mcpServers?: unknown },
+    );
+  });
+
+/** Returns the reason of each entry of the session's list, in list order, by the server's name. */
+const readLeftOut = (sessionId: string) =>
+  Effect.gen(function* () {
+    const rows = yield* sessionRepository;
+    return (yield* rows.one(sessionId))
+      .pipe(Option.getOrThrow)
+      .mcpServers.map((entry) => [entry.name, entry.leftOut] as const);
+  });
+
+describe("the MCP servers of a session at a start", () => {
+  /** The capabilities of a runner that can give a harness the gateway's entry. */
+  const withMcp = [MCP_SERVERS_CAPABILITY];
+
+  it("records why each server cannot be called, and writes one warning that names them", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "ready" },
+          { name: "linear", status: "needs-sign-in" },
+          { name: "github", status: "ready", enabled: false },
+          { name: "fresh", status: "checking" },
+        ]);
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: ["sentry", "linear", "github", "fresh"].map((name, index) => ({
+            id: ids[index]!,
+            name,
+          })),
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return {
+          ids,
+          leftOut: yield* readLeftOut(sessionId),
+          warnings: yield* readRuntimeWarnings(sessionId),
+        };
+      }),
+    );
+
+    expect(result.leftOut).toEqual([
+      ["sentry", null],
+      ["linear", "needs-sign-in"],
+      ["github", "switched-off"],
+      ["fresh", "checking"],
+    ]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({
+      message:
+        "MCP servers not available in this session: linear (needs sign-in), github (switched off), fresh (still being checked)",
+      mcpServers: [
+        { mcpServerId: result.ids[1], reason: "needs-sign-in" },
+        { mcpServerId: result.ids[2], reason: "switched-off" },
+        { mcpServerId: result.ids[3], reason: "checking" },
+      ],
+    });
+  });
+
+  it("judges the servers without reading their stored tool lists", async () => {
+    // A tool list can be several MiB, and the claim holds the database writer. The
+    // column is made invalid JSON on purpose, past its CHECK: a claim that decoded
+    // it would fail.
+    const leftOut = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const sql = yield* SqlClient.SqlClient;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "ready" },
+          { name: "linear", status: "needs-sign-in" },
+        ]);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`PRAGMA ignore_check_constraints = ON`;
+            yield* sql`UPDATE mcp_servers SET tools = 'not json'`;
+            yield* sql`PRAGMA ignore_check_constraints = OFF`;
+          }),
+        );
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: [
+            { id: ids[0]!, name: "sentry" },
+            { id: ids[1]!, name: "linear" },
+          ],
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return yield* readLeftOut(sessionId);
+      }),
+    );
+
+    expect(leftOut).toEqual([
+      ["sentry", null],
+      ["linear", "needs-sign-in"],
+    ]);
+  });
+
+  it("leaves out every server for the runner, the harness and the profile, in that order, and writes no warning when nothing is left out", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const withUse = yield* aProfileWith(["mcp.use"]);
+        const withoutUse = yield* aProfileWith(["session.read"]);
+        const [ready] = yield* insertMcpServers([{ name: "sentry", status: "ready" }]);
+        const list = [{ id: ready!, name: "sentry" }];
+        const oldRunner = mintId();
+        const tooOld = yield* insertQueuedSessionWithServers(oldRunner, {
+          harnessId: BARE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        yield* claimStarting(oldRunner, 1);
+
+        const runnerId = mintId();
+        const bare = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: BARE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        const ungranted = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        const fine = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: withUse,
+          servers: list,
+        });
+        yield* claimStarting(runnerId, 3, undefined, undefined, withMcp);
+
+        return {
+          tooOld: yield* readLeftOut(tooOld),
+          bare: yield* readLeftOut(bare),
+          ungranted: yield* readLeftOut(ungranted),
+          fine: yield* readLeftOut(fine),
+          fineWarnings: yield* readRuntimeWarnings(fine),
+          tooOldWarnings: yield* readRuntimeWarnings(tooOld),
+        };
+      }),
+    );
+
+    expect(result.tooOld).toEqual([["sentry", "runner-too-old"]]);
+    expect(result.bare).toEqual([["sentry", "harness-unsupported"]]);
+    expect(result.ungranted).toEqual([["sentry", "missing-grant"]]);
+    expect(result.fine).toEqual([["sentry", null]]);
+    expect(result.fineWarnings).toEqual([]);
+    expect(result.tooOldWarnings).toHaveLength(1);
+  });
+
+  it("decides from the Connection and the plugin as they are at the claim, before anything wrote the server's status, and keeps the order of the reasons", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const servers: ReadonlyArray<TestMcpServer> = [
+          { name: "healthy", status: "ready" },
+          { name: "connection-off", status: "ready", connectionStatus: "disabled" },
+          { name: "reauth", status: "ready", connectionStatus: "needs-reauth" },
+          {
+            name: "plugin-stopped",
+            status: "ready",
+            contributionId: OTHER_DESK_SERVER_CONTRIBUTION_ID,
+          },
+          { name: "switched-off", status: "ready", enabled: false, connectionStatus: "disabled" },
+          { name: "first-list", status: "checking", connectionStatus: "disabled" },
+        ];
+        const ids = yield* insertMcpServers(servers);
+        yield* host.stop("mcpother");
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: servers.map((server, index) => ({ id: ids[index]!, name: server.name })),
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return yield* readLeftOut(sessionId);
+      }),
+    );
+
+    expect(result).toEqual([
+      ["healthy", null],
+      ["connection-off", "error"],
+      ["reauth", "needs-sign-in"],
+      ["plugin-stopped", "error"],
+      ["switched-off", "switched-off"],
+      ["first-list", "checking"],
+    ]);
+  });
+
+  it("records again at the next start, which is how a resume starts", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "unreachable" },
+          { name: "linear", status: "needs-sign-in" },
+        ]);
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: [
+            { id: ids[0]!, name: "sentry" },
+            { id: ids[1]!, name: "linear" },
+          ],
+        });
+        const [first] = yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+        const afterFirst = yield* readLeftOut(sessionId);
+
+        // The runner never got the frame, so the session goes back to the queue,
+        // and the user signs in to linear before it starts again.
+        yield* withTransaction(sql, sessions.requeue(first!));
+        yield* withTransaction(
+          sql,
+          sql`UPDATE mcp_servers SET status = 'ready' WHERE id = ${uuidFromString(ids[1]!)}`,
+        );
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return {
+          afterFirst,
+          afterSecond: yield* readLeftOut(sessionId),
+          warnings: yield* readRuntimeWarnings(sessionId),
+        };
+      }),
+    );
+
+    expect(result.afterFirst).toEqual([
+      ["sentry", "unreachable"],
+      ["linear", "needs-sign-in"],
+    ]);
+    expect(result.afterSecond).toEqual([
+      ["sentry", "unreachable"],
+      ["linear", null],
+    ]);
+    expect(result.warnings.map((warning) => warning.message)).toEqual([
+      "MCP servers not available in this session: sentry (unreachable), linear (needs sign-in)",
+      "MCP servers not available in this session: sentry (unreachable)",
+    ]);
+  });
+
+  it("does nothing for a session with an empty list", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith([]),
+          servers: [],
+        });
+        yield* claimStarting(runnerId, 1);
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    expect(warnings).toEqual([]);
   });
 });
 
@@ -1991,6 +2419,35 @@ describe("a report applied after its session ended", () => {
     expect(result.session.status).toBe("exited");
     expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
+  });
+});
+
+describe("a runner's runtime warning", () => {
+  it("is stored without the MCP server entries, which only the controller writes", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const event = {
+          _tag: "runtime.warning" as const,
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          message: "the harness retried",
+          mcpServers: [{ mcpServerId: mintId(), reason: "needs-sign-in" as const }],
+        };
+
+        const folded = yield* sessions.foldReport(runnerId, 1, event);
+        yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!));
+
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    expect(warnings).toEqual([expect.objectContaining({ message: "the harness retried" })]);
+    expect(warnings[0]).not.toHaveProperty("mcpServers");
   });
 });
 

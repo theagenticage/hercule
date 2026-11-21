@@ -37,6 +37,7 @@ import {
   type ModelSelection,
   type ModelDeclaration,
   type HarnessEvent,
+  type McpServerLeftOutReason,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -47,6 +48,7 @@ import {
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  MCP_SERVERS_CAPABILITY,
   SKILLS_CAPABILITY,
 } from "@hercule/protocol";
 import {
@@ -97,6 +99,12 @@ import {
   type Actor,
 } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
+import {
+  buildLeftOutWarning,
+  decideLeftOutReason,
+  mcpServerCatalogue,
+  type LeftOutServer,
+} from "../mcp-servers";
 import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
 import {
@@ -334,6 +342,12 @@ export interface CreateRequest {
   readonly titleParts?: TitleParts | undefined;
   /** The role the caller chose; `undefined` for a session that starts without one. */
   readonly role: string | undefined;
+  /**
+   * The ids of the servers in the session's own list, already checked or
+   * copied from a list that was, by the caller (`mcpServerListRule`). Absent
+   * for a session that has none.
+   */
+  readonly mcpServerIds?: ReadonlyArray<string> | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -885,6 +899,20 @@ const keepsStepPromptOnExit = (
   exited.resumable &&
   !exited.crashGuardArmed;
 
+/**
+ * Returns the event a runner reported without the fields only the controller
+ * may write. Today that is `mcpServers` on a `runtime.warning`: the controller
+ * writes it for the servers a start left out, and a client draws a fix button
+ * from it, so a runner must not be able to name servers there. Returns any
+ * other event as it is.
+ */
+const removeControllerFields = (event: HarnessEvent): HarnessEvent => {
+  if (event._tag !== "runtime.warning" || event.mcpServers === undefined) return event;
+  const copy = { ...event };
+  delete copy.mcpServers;
+  return copy;
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
@@ -906,6 +934,7 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const host = yield* PluginHost;
+  const catalogue = yield* mcpServerCatalogue;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
@@ -1010,19 +1039,73 @@ const make = Effect.gen(function* () {
    * transaction, and announces the session's transcript. The write moves the
    * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
    * cached ingest state is dropped once the transaction commits, and ingest
-   * reads the new offset.
+   * reads the new offset. `mcpServers` is given when the warning is about
+   * MCP Servers.
    */
   const appendRuntimeWarning = (
     sessionId: string,
     message: string,
     at: string,
+    mcpServersLeftOut?: ReadonlyArray<Pick<LeftOutServer, "mcpServerId" | "reason">>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.appendRuntimeWarning(sessionId, message, at);
+      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersLeftOut);
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });
       yield* announce({ _tag: "transcript", sessionId });
+    });
+
+  /**
+   * Records which MCP Servers of the session's list can be called at this
+   * start, and why each other one cannot (`decideLeftOutReason`), and writes
+   * one `runtime.warning` naming the servers left out. Does nothing for a
+   * session whose list is empty. Joins the caller's transaction, and the
+   * caller announces the session. It reads the harness, the profile grants and
+   * the servers' status from the database, never from outside. A server's
+   * status is judged against its Connection and plugin as they are now, so a
+   * change the follower has not yet written is not missed.
+   */
+  const recordMcpServersLeftOut = (
+    sessionId: string,
+    harnessId: string,
+    runner: StartNeeds["runner"],
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const listedIds = yield* sessions.readMcpServerIds(sessionId);
+      if (listedIds.length === 0) return;
+      const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
+      const delivery = {
+        runnerReachesMcpServers: (runner.negotiatedCapabilities ?? []).includes(
+          MCP_SERVERS_CAPABILITY,
+        ),
+        // A harness this build no longer carries cannot be given the entry.
+        harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
+        profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
+          "mcp.use",
+        ),
+      } as const;
+      const views = yield* catalogue.readViews(listedIds, "without-tools");
+      const reasons = new Map<string, McpServerLeftOutReason>();
+      const leftOut: Array<LeftOutServer> = [];
+      for (const mcpServerId of listedIds) {
+        const view = views.get(mcpServerId);
+        // A list entry references its server, and a delete removes the entry first.
+        if (view === undefined) {
+          return yield* Effect.die(
+            `session ${sessionId} lists the missing MCP server ${mcpServerId}`,
+          );
+        }
+        const reason = decideLeftOutReason(delivery, view);
+        if (reason === null) continue;
+        reasons.set(mcpServerId, reason);
+        leftOut.push({ mcpServerId, name: view.server.name, reason });
+      }
+      yield* sessions.recordLeftOut(sessionId, reasons);
+      if (leftOut.length === 0) return;
+      const warning = buildLeftOutWarning(leftOut);
+      yield* appendRuntimeWarning(sessionId, warning.message, at, warning.mcpServers);
     });
 
   /**
@@ -2520,6 +2603,9 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
+          yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
+        }
         // A session a tainted session starts, or a fork of a tainted one,
         // starts tainted (spec 13 section 10).
         yield* taint.passOn(open.id, open.parentSessionId);
@@ -2543,6 +2629,9 @@ const make = Effect.gen(function* () {
           record: { topic: "session", id: open.id, conversationId: open.conversationId ?? null },
           payload: {
             ...open.payload,
+            ...(open.mcpServerIds === undefined || open.mcpServerIds.length === 0
+              ? {}
+              : { mcpServerIds: open.mcpServerIds }),
             sessionId: open.id,
             runnerId: open.runnerId,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
@@ -2752,6 +2841,9 @@ const make = Effect.gen(function* () {
                 at,
               );
             }
+            // Decided at every start, like the skills, so a resume records the
+            // servers again.
+            yield* recordMcpServersLeftOut(row.id, row.harnessId, needs.runner, at);
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
             if (!modelDeclarationsByPair.has(pair)) {
@@ -3138,6 +3230,40 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(sessionId, modelSelection);
         yield* announceSessionChangeById(sessionId);
+      }),
+
+    /**
+     * Replaces the session's own list of MCP Servers with the server ids given,
+     * joining the caller's transaction. A server that was already in
+     * the list keeps what the last start recorded for it. The caller has
+     * checked the list (`mcpServerListRule`).
+     *
+     * When the set of servers changes, it writes a `session.mcpServersChanged`
+     * audit entry stamped with the caller, holding the ids added and the ids
+     * removed. A list the session had, in another order, is not a change of
+     * what the session can reach, so it writes no entry. The session is
+     * announced either way, by the entry's record or directly.
+     */
+    setMcpServers: (
+      sessionId: string,
+      after: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const before = yield* sessions.readMcpServerIds(sessionId);
+        yield* sessions.replaceMcpServers(sessionId, after);
+        const added = after.filter((id) => !before.includes(id));
+        const removed = before.filter((id) => !after.includes(id));
+        const session = Option.getOrThrow(yield* sessions.one(sessionId));
+        if (added.length === 0 && removed.length === 0) {
+          return yield* announceSessionChange(session);
+        }
+        yield* audit.append({
+          kind: "session.mcpServersChanged",
+          actor: yield* currentStamp,
+          record: { topic: "session", id: sessionId, conversationId: session.conversationId },
+          payload: { sessionId, added, removed },
+          at: yield* nowIso,
+        });
       }),
 
     /**
@@ -3812,6 +3938,9 @@ const make = Effect.gen(function* () {
      * is nothing to write: the session does not exist, is not on this runner,
      * or has already seen the event.
      *
+     * The fields only the controller writes are dropped from the event first
+     * (`removeControllerFields`), so a runner cannot store them.
+     *
      * A delta's tap is announced here, before the transaction and never inside
      * it. A delta is not stored until it is flushed, but a client watching the
      * session must see it as soon as it is reported. So the tap is sent
@@ -3820,9 +3949,10 @@ const make = Effect.gen(function* () {
     foldReport: (
       runnerId: string,
       seq: number,
-      event: HarnessEvent,
+      reported: HarnessEvent,
     ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
+        const event = removeControllerFields(reported);
         const id = event.sessionId;
         const found = yield* sessions.one(id);
         // A runner may report only on sessions placed on it. An event for any

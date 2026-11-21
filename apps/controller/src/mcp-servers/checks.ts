@@ -41,15 +41,10 @@ import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
 import { PromotionState } from "../promotion";
+import { judgeDependencies, type McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
-import {
-  computeBackoffMillis,
-  DAILY_CHECK_MILLIS,
-  judgeDependencies,
-  mcpServerState,
-  type McpServerDependencies,
-} from "./state";
+import { computeBackoffMillis, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
   MAX_UPSTREAM_MESSAGE_BYTES,

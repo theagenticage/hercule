@@ -133,6 +133,7 @@ import sessionTaint from "./0123-session-taint";
 import connectionCredentialsGeneration from "./0124-connection-credentials-generation";
 import mcpServers from "./0125-mcp-servers";
 import mcpGrants from "./0126-mcp-grants";
+import mcpServerLists from "./0127-mcp-server-lists";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -260,6 +261,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [124, "connection-credentials-generation", Effect.succeed(connectionCredentialsGeneration)],
   [125, "mcp-servers", Effect.succeed(mcpServers)],
   [126, "mcp-grants", Effect.succeed(mcpGrants)],
+  [127, "mcp-server-lists", Effect.succeed(mcpServerLists)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

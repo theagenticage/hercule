@@ -42,6 +42,7 @@ const SESSION: Session = {
   exitedAt: null,
   lastActivityAt: AT,
   unenforced: [],
+  mcpServers: [],
 };
 
 const SUBAGENT: Subagent = {

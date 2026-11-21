@@ -57,6 +57,7 @@ const buildSession = (tail: string) => ({
   exitedAt: null,
   lastActivityAt: "2026-09-15T10:00:00.000Z",
   unenforced: [],
+  mcpServers: [],
 });
 
 const buildInput = (inputId: string, sessionId: string) => ({
@@ -372,7 +373,13 @@ describe("a flag that names a Model Profile", () => {
     createdAt: AT,
     updatedAt: AT,
   };
-  const project = { id: buildId("bbbbbbb2"), name: "Hercule v1", createdAt: AT, updatedAt: AT };
+  const project = {
+    id: buildId("bbbbbbb2"),
+    name: "Hercule v1",
+    mcpServerIds: [],
+    createdAt: AT,
+    updatedAt: AT,
+  };
 
   /** Answers the list of Model Profiles with one whose id ends in `aaaaaaa1`, and any write with a valid record. */
   const stubServer = () =>

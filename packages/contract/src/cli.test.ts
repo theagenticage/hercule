@@ -465,6 +465,8 @@ const RESOLVES: Record<string, string> = {
   "project.delete id": "project.query",
   "project.create modelProfileId": "modelProfile.query",
   "project.update modelProfileId": "modelProfile.query",
+  "project.create mcpServerIds": "mcpServer.query",
+  "project.update mcpServerIds": "mcpServer.query",
 
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
@@ -579,6 +581,8 @@ const RESOLVES: Record<string, string> = {
   "session.spawn projectId": "project.query",
   "session.spawn runnerId": "runner.query",
   "session.spawn taskId": "task.query",
+  "session.spawn mcpServerIds": "mcpServer.query",
+  "session.update mcpServerIds": "mcpServer.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
   "session.querySkills id": "session.query",

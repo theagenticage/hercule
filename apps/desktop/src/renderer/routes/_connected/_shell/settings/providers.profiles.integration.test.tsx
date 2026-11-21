@@ -78,6 +78,7 @@ const WORK: ModelProfile = buildModelProfile(
 const buildProject = (id: string, name: string, modelProfileId?: string): Project => ({
   id: `01a06d02-8000-7000-8000-0000000000${id}`,
   name,
+  mcpServerIds: [],
   ...(modelProfileId === undefined ? {} : { modelProfileId }),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

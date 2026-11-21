@@ -79,6 +79,7 @@ import {
   SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
+  McpServerListHoldersLayer,
   Provisioning,
   ProvisioningLayer,
   TextGenerationLayer,
@@ -987,7 +988,10 @@ const ExternalEntityDomainLayer = ExternalEntityServiceLayer.pipe(
  * Placement, provided the External Entity service it needs. It is one layer
  * so every group that uses placement shares one instance of it.
  */
-const PlacementDomainLayer = PlacementLayer.pipe(Layer.provide(ExternalEntityDomainLayer));
+const PlacementDomainLayer = PlacementLayer.pipe(
+  Layer.provide(ExternalEntityDomainLayer),
+  Layer.provide(SettingsOperationsLayer),
+);
 
 /**
  * The run service with the services it is built from.
@@ -1126,10 +1130,15 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  // The checks are merged into the output because the controller daemon's
-  // scheduler requests them too, and a check must be one instance to run at
-  // most once per server.
-  McpServerServiceLayer.pipe(Layer.provideMerge(McpServerChecksLayer)),
+  // Deleting a server removes it from the lists that hold it, through the
+  // controller daemon, which reaches the Projects and Sessions the domain
+  // cannot import. The checks are merged into the output because the
+  // controller daemon's scheduler requests them too, and a check must be one
+  // instance to run at most once per server.
+  McpServerServiceLayer.pipe(
+    Layer.provideMerge(McpServerChecksLayer),
+    Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
+  ),
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
