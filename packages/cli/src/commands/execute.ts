@@ -42,7 +42,13 @@ import {
 } from "@hercule/contract";
 import { Effect, Result } from "effect";
 import { UsageError } from "../exit";
-import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
+import {
+  coerceFieldValue,
+  formatFieldName,
+  readGivenValue,
+  setGivenValue,
+  type Arguments,
+} from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
 
 /** The client's operations, as the command tree calls them: `client[entity][verb](request)`. */
@@ -261,7 +267,7 @@ const resolveTails = async (
 ): Promise<Record<string, unknown>> => {
   const resolved = { ...values };
   for (const field of fields) {
-    const given = resolved[field.name];
+    const given = readGivenValue(resolved, field);
     if (given === undefined) continue;
     // The list is read at most once per field, however many tails it was given.
     let listed: Promise<ReadonlyArray<string>> | undefined;
@@ -274,9 +280,11 @@ const resolveTails = async (
           ? validateWrittenId(command, field, text)
           : resolveTail(command, field, text, readIds);
     // Each id of a repeated field resolves the way a single one does.
-    resolved[field.name] = Array.isArray(given)
-      ? await Promise.all(given.map(resolveText))
-      : await resolveText(given);
+    setGivenValue(
+      resolved,
+      field,
+      Array.isArray(given) ? await Promise.all(given.map(resolveText)) : await resolveText(given),
+    );
   }
   return resolved;
 };

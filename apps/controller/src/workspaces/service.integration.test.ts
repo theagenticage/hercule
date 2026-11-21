@@ -11,6 +11,7 @@ import { uuidFromString } from "../db/id";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { ConnectionTypesLayer } from "../connections";
 import { AuditLogLayer } from "../events";
+import { NotifierLayer } from "../notifications";
 import { SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer } from "../plugins";
 import { ServingPromotionStateLayer } from "../promotion/testing";
@@ -34,6 +35,7 @@ const serviceLayer = WorkspaceServiceLayer.pipe(
   Layer.provideMerge(PluginConfigsLayer),
   Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(SettingsLayer),
+  Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
   Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

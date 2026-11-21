@@ -11,7 +11,14 @@ import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import { AuthError, PluginError, type FeedDeclaration } from "@hercule/plugin-host";
 import { MAX_FEED_INTERVAL_SECONDS } from "@hercule/contract";
-import { connectionRepository, type StoredConnection } from "../connections";
+import {
+  connectionRepository,
+  ConnectionTypes,
+  OAUTH_TOKENS,
+  type StoredConnection,
+} from "../connections";
+import { serializeTokens } from "../connections/oauth";
+import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso } from "../db";
 import { Secrets } from "../secrets";
 import {
@@ -37,7 +44,11 @@ const START = Date.parse("2026-09-01T12:00:00.000Z");
 
 /** Runs a test body on a fresh plugin stack and a `TestClock` set to `START`. */
 const run = <A, E>(
-  body: Effect.Effect<A, E, PluginHost | IngestLoops | Secrets | SqlClient.SqlClient>,
+  body: Effect.Effect<
+    A,
+    E,
+    PluginHost | IngestLoops | Secrets | SqlClient.SqlClient | ConnectionTypes
+  >,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.andThen(TestClock.setTime(START), body).pipe(
@@ -460,6 +471,35 @@ describe("IngestLoops failures", () => {
     expect(seen.open).toEqual([]);
   });
 
+  it("raises one Notification for an AuthError, and one more for an AuthError after a reconnect", async () => {
+    const fixture = createEventSourceFixture();
+    fixture.poll = () => Effect.fail(new AuthError({ message: "Acme rejected the token" }));
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const { connection, ingest } = yield* openConnection(fixture);
+        yield* advance(3600);
+        const afterFirst = yield* listConnectionErrorTitles;
+        // The user reconnects, which sets the Connection `connected`, and the
+        // controller daemon opens it again.
+        const connections = yield* connectionRepository;
+        yield* inTransaction(
+          connections.update(connection.id, { status: "connected" }, yield* nowIso),
+        );
+        const host = yield* PluginHost;
+        const source = (yield* host.listActiveEventSources())[0];
+        if (source === undefined) return yield* Effect.die("the fixture registered no source");
+        yield* ingest.open(source, connection, host.listActiveEventSources);
+        yield* advance(3600);
+        return { afterFirst, afterSecond: yield* listConnectionErrorTitles };
+      }),
+    );
+
+    expect(seen.afterFirst).toHaveLength(1);
+    expect(seen.afterFirst[0]).toContain("needs signing in again");
+    expect(seen.afterSecond).toHaveLength(2);
+  });
+
   it("ignores an AuthError when the credentials were replaced while the poll ran", async () => {
     const fixture = createEventSourceFixture();
     const started = Deferred.makeUnsafe<void>();
@@ -503,6 +543,96 @@ describe("IngestLoops failures", () => {
     expect(seen.calls.filter((call) => call === "poll notifications")).toHaveLength(2);
     expect(seen.calls).not.toContain("close");
     expect(seen.open).toHaveLength(1);
+  });
+});
+
+describe("an AuthError while a refresh of the Connection's token is in flight", () => {
+  it("does not mark the Connection once the refresh has stored its new token", async () => {
+    const provider = createDeviceProvider();
+    const fixture = createEventSourceFixture({ deviceProviderUrl: provider.base });
+    const rejected = Deferred.makeUnsafe<void>();
+    let polls = 0;
+    // The first poll is rejected, as a poll is when the provider has already
+    // invalidated the old token for a refresh that has not stored the new one.
+    fixture.poll = () => {
+      polls += 1;
+      if (polls > 1) return Effect.succeed({});
+      return Effect.andThen(
+        Deferred.await(rejected),
+        Effect.fail(new AuthError({ message: "Acme rejected the token" })),
+      );
+    };
+    const refreshAsked = Promise.withResolvers<void>();
+    const refreshMayAnswer = Promise.withResolvers<void>();
+    provider.answers.token = async () => {
+      refreshAsked.resolve();
+      await refreshMayAnswer.promise;
+      return buildJsonResponse({
+        access_token: "refreshed-token",
+        refresh_token: "refresh-2",
+        token_type: "bearer",
+        expires_in: 8 * 60 * 60,
+      });
+    };
+    const waitRealMillis = (millis: number) =>
+      Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, millis)));
+
+    try {
+      const seen = await run(
+        Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.boot([fixture.plugin]);
+          const connection = yield* insertFixtureConnection();
+          // A token inside the refresh margin, so the first read refreshes it.
+          yield* inTransaction(
+            Effect.flatMap(Secrets, (secrets) =>
+              secrets.set(
+                { kind: "connection", id: connection.id },
+                OAUTH_TOKENS,
+                Redacted.make(
+                  serializeTokens({
+                    accessToken: "stored-token",
+                    refreshToken: "refresh-1",
+                    expiresAt: new Date(START + 5 * 60 * 1000).toISOString(),
+                  }),
+                ),
+              ),
+            ),
+          );
+          const source = (yield* host.listActiveEventSources())[0];
+          if (source === undefined) return yield* Effect.die("the fixture registered no source");
+          const ingest = yield* IngestLoops;
+          yield* ingest.open(source, connection, host.listActiveEventSources);
+          yield* advance(0);
+
+          const types = yield* ConnectionTypes;
+          const refreshing = yield* Effect.forkChild(types.readCredentialsForUse(connection.id));
+          yield* Effect.promise(() => refreshAsked.promise);
+          yield* Deferred.succeed(rejected, undefined);
+          // The poll's AuthError now waits for the refresh to end.
+          yield* waitRealMillis(50);
+          refreshMayAnswer.resolve();
+          yield* Fiber.join(refreshing);
+
+          // The ingest goes on polling one interval after it ignored the AuthError.
+          for (let attempt = 0; attempt < 100 && polls < 2; attempt++) {
+            yield* advance(60);
+            yield* waitRealMillis(10);
+          }
+          return {
+            status: yield* readStatus(connection),
+            polls,
+            open: yield* ingest.listOpen(),
+          };
+        }),
+      );
+
+      expect(seen.status).toEqual({ status: "connected", detail: undefined });
+      expect(seen.polls).toBe(2);
+      expect(seen.open).toHaveLength(1);
+    } finally {
+      await provider.stop();
+    }
   });
 });
 

@@ -24,8 +24,11 @@ import { withPluginColor } from "./drawing";
  * - Version 8 made `releaseSource` required on `HarnessDefinition`: where the
  *   harness's releases are published. A harness plugin built against version 7
  *   declares none, so the host refuses it at load.
+ * - Version 9 added MCP servers as an extension point: the `mcp-servers`
+ *   capability and `registerMcpServer`. The set of extension points is part of
+ *   the host contract, so a plugin built against version 8 is refused at load.
  */
-export const HOST_API = 8;
+export const HOST_API = 9;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are
@@ -40,6 +43,8 @@ export const PLUGIN_CAPABILITIES = [
   "channels",
   "event-sources",
   "workflow-actions",
+  // Offering one vendor's MCP server to sessions.
+  "mcp-servers",
   "connections",
   "events",
   "notifications",

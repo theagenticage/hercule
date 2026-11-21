@@ -67,14 +67,20 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
  * the caller wrote it.
  */
 const toUsageError = (error: RequestError, command: Command): UsageError => {
+  // A flag that fills one key of an object field is found by the path of that
+  // key, such as `source.connectionId`.
   const named = new Map(
     [...command.positionals, ...command.payload, ...command.query].map((field) => [
-      field.name,
+      field.within === undefined ? field.name : `${field.within.field}.${field.name}`,
       formatFieldName(field),
     ]),
   );
   const refused = error.issues.map((issue) => {
-    const label = issue.path[0] === undefined ? undefined : named.get(issue.path[0]);
+    const label =
+      issue.path[0] === undefined
+        ? undefined
+        : (named.get(`${String(issue.path[0])}.${String(issue.path[1])}`) ??
+          named.get(String(issue.path[0])));
     return label === undefined ? issue.message : `${label}: ${issue.message}`;
   });
   return new UsageError(refused.join("; "), command.spelling);

@@ -1057,6 +1057,16 @@ describe("failures", () => {
     expect(io.stderr.join("\n")).toContain("run `hercule task create --help`");
   });
 
+  it("names the flag, not the payload path, when a key of an object field does not fit", async () => {
+    const { io, fetch, run } = createStubCli();
+    expect(
+      await run("mcp-server", "create", "--plugin", "sentry", "--connection", buildId("aaaaaaa1")),
+    ).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("--plugin: Write a contribution id as <plugin id>/");
+    expect(io.stderr.join("\n")).not.toContain("source");
+  });
+
   it("names a field read from stdin by its name, never by a flag it does not have", async () => {
     // An empty pipe is an invalid value for the field, and there is no
     // `--text` flag to fix, so the message must point at the pipe.

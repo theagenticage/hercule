@@ -28,6 +28,7 @@ import { pluginRepository } from "./repository";
 import { registry as shipped } from "./registry";
 import {
   buildHarnessDefinition,
+  buildMcpServerPlugin,
   createIntakeFixture,
   createPluginFixture,
   IDLE_FEEDS,
@@ -1117,6 +1118,42 @@ describe("an event source whose kind is not namespaced", () => {
         expect(Object.keys(definition.kinds)).toEqual(["acme.thing.happened"]);
       },
       { plugins: [buildEventSourcePlugin(["acme.thing.happened"])] },
+    );
+  });
+});
+
+describe("an MCP server a plugin offers, over the plugin routes", () => {
+  const EXPECTED = {
+    extensionPoint: "mcp-server",
+    id: "acme/desk",
+    definition: {
+      id: "acme/desk",
+      displayName: "Desk",
+      description: "Read and update Desk tickets.",
+      connectionType: "acme/desk",
+      origin: "https://mcp.desk.example",
+    },
+  };
+
+  it("is listed with every public field and no function, also once its plugin is disabled", async () => {
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+        const readContribution = (plugin: PluginDetail) =>
+          plugin.contributions.find((one) => one.extensionPoint === "mcp-server");
+
+        const listed = (await listPlugins(base, token)).find((plugin) => plugin.id === "acme");
+        expect(readContribution(listed!)).toEqual(EXPECTED);
+        expect(readContribution(await readPlugin(base, token, "acme"))).toEqual(EXPECTED);
+
+        expect((await movePlugin(base, token, "acme", "disable")).status).toBe(200);
+
+        const disabled = await readPlugin(base, token, "acme");
+        expect(disabled.enabled).toBe(false);
+        expect(readContribution(disabled)).toEqual(EXPECTED);
+        expect(JSON.stringify(disabled)).not.toContain("buildUpstreamRequest");
+      },
+      { plugins: [buildMcpServerPlugin("acme")] },
     );
   });
 });

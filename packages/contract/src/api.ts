@@ -41,6 +41,7 @@ import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
+import { mcpServer } from "./groups/mcp-server";
 import { skill } from "./groups/skill";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
@@ -97,6 +98,7 @@ export const api = HttpApi.make("hercule")
     memory,
     wikiPage,
     skill,
+    mcpServer,
     attachment,
     controller,
   )

@@ -31,6 +31,7 @@ import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
+import { McpServerChecksLayer, McpServerService, McpServerServiceLayer } from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -513,6 +514,21 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(wiki.update({ ...params, ...payload })),
       );
+  }),
+);
+
+const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
+  Effect.gen(function* () {
+    const mcpServers = yield* McpServerService;
+    return handlers
+      .handle("query", () => withApiErrors(mcpServers.query()))
+      .handle("read", ({ params }) => withApiErrors(mcpServers.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(mcpServers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(mcpServers.update({ ...params, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(mcpServers.delete(params.id)))
+      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)));
   }),
 );
 
@@ -1110,6 +1126,10 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
+  // The checks are merged into the output because the controller daemon's
+  // scheduler requests them too, and a check must be one instance to run at
+  // most once per server.
+  McpServerServiceLayer.pipe(Layer.provideMerge(McpServerChecksLayer)),
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
@@ -1280,6 +1300,7 @@ export const handlerLayers = Layer.mergeAll(
   discussionRoutes,
   wikiPageRoutes,
   skillRoutes,
+  mcpServerRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

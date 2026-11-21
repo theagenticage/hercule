@@ -119,6 +119,7 @@ The route is `POST /mcp`, `GET /mcp` and `DELETE /mcp` on the controller. It is 
   - a call already sent may finish;
   - scheduled checks and refresh writes wait for the phase to end.
 - **Streams end** when the session ends, when the controller freezes or seals, and at shutdown.
+- *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A session running across a promotion keeps the old address until its next start.** The runner binds the gateway's address and the token when a session starts, from the `HERCULE_API_URL` it gives the session ([./06-providers.md](./06-providers.md#4-harnessadapter)). The session's `hercule` CLI reads the same variable, and it does not follow a promotion either: after the seal, A answers its calls with `controller_sealed` and the new address, and the CLI prints that error. So once A seals, a session that started on A reaches only A's gateway: `tools/list` still answers from A's stored lists while A runs, every `tools/call` is refused with A's `controller_sealed` message, and once A stops, the harness cannot reach the gateway at all. The tools work again from the session's next start, a resume included, because the runner, which has followed the forwarding pointer to B, binds B's address then. A proxy on the runner that would let a running session follow the move is a follow-up ticket, not part of v1.
 - **An `Mcp-Session-Id` belongs to one token.** An `Mcp-Session-Id` the gateway issues is bound to the Session Token it was created with. A request that names it with any other token gets 404. `DELETE` ends that MCP session only, never the Thread or its token. A resume mints a new token, so the old token's streams end with it.
 - **The grant.** Every call needs `mcp.use` in the session's profile ([./13-security.md](./13-security.md#61-grant-families)). `mcp.use` alone allows acting through the server's Connection. `connection.use` is not also required, because the user put that server on that Thread.
 - **The list.** A call is allowed only for a server in the session's own list ([section 3.5](#35-a-call)).
@@ -173,6 +174,8 @@ A tool is named `<server name>__<tool name>`. The harness puts the gateway's own
 5. A call with no answer within 60 seconds is refused as a timeout. The 60 seconds cover the whole call: opening the upstream MCP session, the refresh, the retry and the tool.
 
 Answers have a size cap. Its size is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
+
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **The cap is 4 MiB per message from a server**: one JSON answer, or one event of an SSE answer. It is large enough for a screenshot in an image block (Sentry's `get_snapshot_image`), and it bounds what one call can hold in the controller's memory. An answer over it is refused as a tool result with `isError: true` ("the answer was larger than 4 MiB"). A tool list is bounded the same way per message, and also by the client's own limits of 100 pages and 10,000 tools; a server's stored tool definitions are refused above 4 MiB in all, which sets the server to `error`.
 
 ### 3.6 A refused call
 
@@ -246,9 +249,19 @@ The gateway writes one audit entry per `tools/call`. Its home is [./13-security.
 
 It never holds the arguments or the result.
 
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **While the controller is frozen or sealed, a refused call is not audited** (decided by Rogier, 2026-11-20). The database refuses writes then, so the gateway can write neither the audit entry nor the `runtime.warning` of section 3.6 on the Thread. It writes one line to the controller's log instead: the session, the MCP Server, the tool's original name and the reason. The agent still gets its tool result with `isError: true` and the gate's message. Outside that window every `tools/call` gets its audit entry.
+
 ### 3.10 Upstream sessions
 
 Towards servers, the gateway tries `2026-07-28` first and falls back to the older handshake by MCP's versioning rules. It remembers per server what worked.
+
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The revisions are tried in the order `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`. The next one is tried only when the server shows it does not speak the revision:
+
+- **The modern handshake, `server/discover`, falls back to the older `initialize` handshake whenever the server shows it does not know it.** Servers say so in different ways, and the official TypeScript SDK's does not use MCP's unsupported-version error: it answers a request before `initialize` with HTTP 400 and code -32000 ("Bad Request: Server not initialized"), and a request with a version it does not support with HTTP 400 and code -32000 ("Unsupported protocol version"). So the fallback happens on an HTTP 400, 404 or 405 to `server/discover`, and on a JSON-RPC error to it with the code method not found (-32601), invalid request (-32600), -32000 or MCP's unsupported-version code (-32022).
+- **Within the older handshake**, an `initialize` answered with another revision, or with HTTP 400 and the unsupported-version code, tries the next older revision.
+- **Nothing else falls back.** A 401, a 403, a 429, an HTTP 5xx, no connection, a connection that closes in the middle of the exchange, and a timeout end the attempt with their own status ([section 5.3](#53-status)), because another revision would not change them.
+
+Effect 4.0.7's `McpClient` speaks only `2025-11-25` and `2026-07-28` and refuses a server that answers an older revision, but Sentry answered `2025-06-18`. Effect's own protocol modules for `2025-06-18` and `2025-03-26` work with the same client, so the gateway passes those to it. A server that speaks none of the four is `error`. An older server can be left with one upstream MCP session from a refused `initialize`, which it ends itself; because the revision that worked is remembered, this happens once per server.
 
 - **Scope.** An upstream MCP session belongs to one Session Token (one harness incarnation) and one server. So a server that keeps state per MCP session never mixes two Threads, and a resume starts with fresh remote state.
 - **Opening and closing.** Its first call opens it. Concurrent first calls share one opening. It closes when the token ends, or when the server is switched off, deleted or replaced.
@@ -261,11 +274,11 @@ Towards servers, the gateway tries `2026-07-28` first and falls back to the olde
 
 ### 3.11 Build-time verifications
 
-**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules, as it does for the GET stream ([section 3.2](#32-protocol-revisions-and-what-is-spoken)). [#1208](https://github.com/theagenticage/hercule/issues/1208).
+~~**Verify at build time:** that Effect's MCP server can answer each session its own tool list, and can send `list_changed` to one session only. If it cannot, the gateway writes that part on Effect's protocol modules, as it does for the GET stream ([section 3.2](#32-protocol-revisions-and-what-is-spoken)). [#1208](https://github.com/theagenticage/hercule/issues/1208).~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Checked: it cannot.** Effect 4.0.7's `McpServer` keeps one tool registry per server. Whether a tool is listed depends only on the client's protocol revision, capabilities and name (its `EnabledWhen` annotation), never on the request or its token, and `notifications/tools/list_changed` goes to every connected client. So the gateway writes its session-facing protocol itself: the JSON-RPC methods of section 3.2, on the message schemas of Effect's `McpSchema`.
 
 **Verify at build time:** that each adapter works on the wire paths the gateway serves, with the real harness: Claude Code on the modern path (`server/discover`, `subscriptions/listen`) and on the older one, Codex and pi on the older one. Claude Code's probe showed that it tries modern discovery first and then falls back. That it works on the modern path, and sees `list_changed` there, is not proven. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
 
-**Verify at build time:** that Effect's MCP client keeps an upstream MCP session across a credential refresh when the credential is supplied per request ([section 3.10](#310-upstream-sessions)). If it cannot, the gateway writes the transport. [#1208](https://github.com/theagenticage/hercule/issues/1208).
+~~**Verify at build time:** that Effect's MCP client keeps an upstream MCP session across a credential refresh when the credential is supplied per request ([section 3.10](#310-upstream-sessions)). If it cannot, the gateway writes the transport. [#1208](https://github.com/theagenticage/hercule/issues/1208).~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Checked: it does.** Effect's `McpClient` sends through the HTTP client it is given, so a client that adds the current credential to each request carries a new credential on the same `Mcp-Session-Id`. A probe against a fake server showed two calls on one upstream session with two different tokens. The gateway writes no transport of its own.
 
 **Verify at build time:** that each harness opens a new MCP session after a 404 when the controller restarted, on the older handshake. [#1208](https://github.com/theagenticage/hercule/issues/1208) for Claude Code, [#1209](https://github.com/theagenticage/hercule/issues/1209) for Codex, [#1212](https://github.com/theagenticage/hercule/issues/1212) for pi.
 
@@ -331,7 +344,9 @@ On an HTTP 401 from the server, before the tool ran, if the token sent is still 
 
 - **The provider refuses the refresh.** The refresh follows the existing Connection rules ([./05-plugins.md](./05-plugins.md#101-the-setup-flow-contribution)). The Connection is marked `needs-reauth`, and its servers move to `needs-sign-in`. The fix is "Reconnect <Connection>".
 - **The provider cannot be reached.** The Connection is left as it is, and the call is refused as `unreachable`, for this call only.
-- **The credential is a pasted one.** It has no refresh. A 401 moves the server to `error` ("refused the Connection's token").
+- **There is nothing to refresh.** A pasted credential has no refresh, and neither do OAuth tokens with no refresh token or a Connection type with no refresh endpoint. *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* A 401 then moves the **server** to `error` ("refused the Connection's token") and leaves the **Connection** alone, with no Notification: the Connection's own sign-in may be fine, and the server may refuse for a reason a new sign-in does not cure. This differs from a stale token that cannot be refreshed, which the Connection rules above already mark `needs-reauth`, because there nothing at all is known to work.
+- **The Connection changed while its token was being refreshed.** If the user reconnected twice in a row while a refresh and its repeat were in flight, the server is `unreachable` and is checked again with the backoff of [section 5.3](#53-status). The Connection is not marked.
+- **The Connection is not `needs-reauth` but holds no credentials** (a Connection of a type with no sign-in flow, whose secrets are gone). The server is `error` ("The Connection <label> holds no credentials"), not `needs-sign-in`, because the Connection does not say it needs signing in.
 - **The refresh works and the server still refuses the fresh token.** The MCP Server goes to `error`, with the reason ("Sentry's MCP server refused the Connection's token"). The Connection is left alone. Reconnecting gives a token of the same kind, and marking the Connection would stop the Inbox polls for nothing.
 
 ### 5.2 A URL server's sign-in
@@ -351,17 +366,20 @@ Its OAuth tokens are refreshed one at a time, by the refresh code `connections` 
 | `checking` | From creation, or from switching on, until the first list ends. A later check does not go back to `checking`. Its result sets the status |
 | `ready` | The last list or call succeeded |
 | `needs-sign-in` | The credential is not usable ([sections 5.1](#51-a-plugin-servers-credential) and [5.2](#52-a-url-servers-sign-in)) |
-| `unreachable` | No answer: no connection, or a timeout on a check. Checked again with backoff |
-| `error` | The server answers but refuses or fails: a 401 after a working refresh, a protocol error, a revision the gateway cannot speak, or the plugin switched off |
+| `unreachable` | No usable answer, and trying again later may cure it: no connection, a connection that closes in the middle of an exchange, a timeout on a check, an HTTP 5xx, or an HTTP 429. Checked again with backoff |
+| `error` | The server answers but refuses or fails: a 401 after a working refresh, a protocol error (an answer that is not MCP, or an HTTP 4xx other than 401, 429 and the fallback cases of [section 3.10](#310-upstream-sessions)), a revision the gateway cannot speak, or the plugin switched off |
 
 - A server keeps its last stored tools in every status.
-- **Server-wide failures change the status:** no connection, a timeout on a check, a 401 after a working refresh, a protocol error and an unsupported revision. A tool result with `isError: true`, a tool-level error, or a 403 on one tool is that call's answer and changes nothing.
+- **Server-wide failures change the status:** no connection, a connection that closes mid-exchange, a timeout on a check, an HTTP 5xx or 429, a 401 after a working refresh, a protocol error and an unsupported revision. A tool result with `isError: true`, a tool-level error, or a 403 on one tool is that call's answer and changes nothing.
 - A check's result never overwrites a newer change: switching off, a reconnect, Replace or a delete.
 - The remedy for `error` is "Check now" and the detail. It is never "Reconnect".
 - A plugin server follows its Connection. A Connection that moves to `needs-reauth` moves its servers to `needs-sign-in`. This reaches `mcp-servers` through the Connection observer ([section 1.3](#13-the-domain-graph)).
-- A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off").
+- A plugin that is switched off does not serve its servers. They are `error`, with the reason ("The Sentry plugin is switched off"). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* A plugin that is enabled but failed to start does not serve them either, and the reason says so, because the remedy differs ("The Sentry plugin failed to start: see Settings > Plugins").
+- *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **A Connection that is switched off is like a plugin that is switched off** (decided by Rogier, 2026-11-20). Its servers are `error`, with the reason ("The Connection Sentry (work) is switched off"), and they are not served: `tools/list` leaves them out and a call is refused. Switching the Connection on lists the servers again.
 
 The backoff schedule for `unreachable` is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
+
+*(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **The backoff for `unreachable`:** the server is checked again after 1 minute, then 5 minutes, then 15 minutes, then 1 hour, and then every hour until a check succeeds. A success, a reconnect of its Connection, switching it on and `mcpServer.check` start the schedule over. The daily list of section 5.4 goes on beside it.
 
 ### 5.4 When a server is listed
 
@@ -377,7 +395,7 @@ A list that differs from the stored one triggers `list_changed` for the sessions
 
 ### 5.5 Notifications
 
-Entering `needs-sign-in`, `unreachable` or `error` raises one Notification per episode, never for a server that is switched off. An episode ends when the server is `ready` again. A plugin server never raises one for `needs-sign-in`, because its Connection already does. The Notification subject gains MCP Server ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)).
+Entering `needs-sign-in`, `unreachable` or `error` raises one Notification per episode, never for a server that is switched off. An episode ends when the server is `ready` again. A plugin server never raises one for `needs-sign-in`, because its Connection already does. *(Amended 2026-11-21, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* That holds for every cause: the core raises the Connection's Notification whenever it sets the Connection to `needs-reauth`, whether a refresh was refused, an ingest `AuthError` came in, or the plugin reported it ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2). Rogier decided this. The Notification subject gains MCP Server ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The kind is `core.mcp-server-failed`, informational, raised in the transaction that writes the status, with the server as subject. A plugin that is not in this build counts as a plugin that is switched off: the server is `error` with cause `plugin`, and it is checked again when the plugin is back.
 
 ### 5.6 Outbound rules
 
@@ -394,10 +412,10 @@ Three plugins offer a server in v1. Each is reached with the plugin's Connection
 
 ### 6.1 Sentry
 
-- URL: `https://mcp.sentry.dev/mcp?disable-skills=project-management`. The query drops 18 tools that the Connection's scopes do not cover.
+- URL: `https://mcp.sentry.dev/mcp?disable-skills=project-management`. The query drops ~~18~~ 19 tools that the Connection's scopes do not cover, and 55 remain *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The server does not filter its list by the token's scopes: without the query it lists 74 tools. So the query is what keeps the unusable tools out, and a scope the token lacks would show only when such a tool is called, as that call's own answer.
 - Header: `Authorization: Sentry-Bearer <token>`.
 
-**Verify at build time:** that `mcp.sentry.dev` accepts a Hercule Sentry Connection's token as `Sentry-Bearer`. This is unproven. A proof call is the first acceptance criterion of [#1208](https://github.com/theagenticage/hercule/issues/1208). If it fails, that slice stops and reports, because it then needs another route to "no second sign-in".
+~~**Verify at build time:** that `mcp.sentry.dev` accepts a Hercule Sentry Connection's token as `Sentry-Bearer`. This is unproven. A proof call is the first acceptance criterion of [#1208](https://github.com/theagenticage/hercule/issues/1208). If it fails, that slice stops and reports, because it then needs another route to "no second sign-in".~~ *(Amended 2026-11-20, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* **Proven on 2026-11-20** ([the proof](https://github.com/theagenticage/hercule/issues/1208#issuecomment-7041913349)). A token from Hercule's Sentry application, made by the Connection's device flow with its six scopes, was accepted as `Sentry-Bearer` (`initialize`, `tools/list` and a `whoami` call all answered 200), and the same token as plain `Bearer` got 401. Sentry answered the older revision `2025-06-18` it was asked for.
 
 Sentry kills the old access token the moment it is refreshed. The gateway never hands a token out, so a refresh cannot break a running session.
 

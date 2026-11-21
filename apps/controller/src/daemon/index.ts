@@ -80,6 +80,7 @@ export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
 export { runHarnessReleaseCheckLoop } from "./harnesses";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
+export { McpServerCheckInterval, runMcpServerChecksScheduler } from "./mcp-servers";
 export {
   DiscussionInputs,
   DiscussionInputsLayer,

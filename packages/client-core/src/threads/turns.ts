@@ -30,6 +30,7 @@ import {
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findFirstMessageItemId, splitSentText } from "./first-message";
+import { readUserSender } from "./sender";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -116,16 +117,6 @@ const readUserSkills = (detail: unknown): readonly string[] => {
     ? (skills as readonly unknown[]).filter((name): name is string => typeof name === "string")
     : [];
   return valid.length === 0 ? NO_SKILLS : valid;
-};
-
-/**
- * Returns the id of the session whose agent sent a `user_message`, from its
- * detail's `senderSessionId`. Returns `undefined` for a message the session's
- * owner sent, which carries no sender.
- */
-export const readUserSender = (detail: unknown): string | undefined => {
-  const sender = readJsonObject(detail)?.senderSessionId;
-  return typeof sender === "string" && sender !== "" ? sender : undefined;
 };
 
 /**

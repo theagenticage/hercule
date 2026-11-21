@@ -21,9 +21,13 @@
  * to the database happens inside a transaction, so such a change is not a
  * database change: it is a `tap`, which is never written to the database.
  *
- * The listener is optional. A controller with no live socket, such as a
- * migration run or a repository test, provides none, and then nothing is
- * published.
+ * The listener is optional. The controller provides one `AfterCommit` that
+ * hands every committed change to everything that follows changes: the live
+ * topics and the in-process followers of `RecordChanges` (see
+ * `LiveTopicsLayer`). It is one service so that no code path, such as the
+ * fiber of a run, can reach one follower and miss the other. A controller
+ * with no live socket, such as a migration run or a repository test, provides
+ * none, and then nothing is published.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

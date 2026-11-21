@@ -228,6 +228,5 @@ describe("disposal intent after a complete controller process restart", () => {
         await controller.stop();
       }
     },
-    30_000,
   );
 });

@@ -486,6 +486,16 @@ export {
   SkillUpdate,
   type SkillFile,
 } from "./groups/skill";
+export {
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServer,
+  McpServerCreateInput,
+  McpServerName,
+  McpServerSource,
+  McpServerStatus,
+  McpServerTool,
+  McpServerUpdateInput,
+} from "./groups/mcp-server";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

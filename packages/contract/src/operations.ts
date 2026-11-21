@@ -917,6 +917,17 @@ const TABLE = {
     path: "/api/v1/skills/apply-updates",
   },
 
+  "mcpServer.query": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers" },
+  "mcpServer.read": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.create": { requires: "mcp.manage", method: "POST", path: "/api/v1/mcp-servers" },
+  "mcpServer.update": { requires: "mcp.manage", method: "PATCH", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.delete": { requires: "mcp.manage", method: "DELETE", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.check": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/check",
+  },
+
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",

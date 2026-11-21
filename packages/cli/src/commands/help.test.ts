@@ -133,3 +133,24 @@ describe("an example", () => {
     expect(lines).toContain("  hercule skill import ~/.agents/skills");
   });
 });
+
+describe("a command whose object field is filled from several flags", () => {
+  const command = readCommand("mcpServer.create");
+
+  it("shows each flag in the usage line's flags section like an ordinary flag", () => {
+    const lines = buildCommandHelp(command);
+    expect(lines).toContain("usage: hercule mcp-server create [flags]");
+    const flags = readSection(lines, "flags:").filter((line) => line.trimStart().startsWith("--"));
+    expect(flags.map((line) => line.trim().replace(/\s+/g, " "))).toEqual([
+      "--plugin <text> required",
+      "--connection <text> required",
+      "--name <text> optional",
+    ]);
+  });
+
+  it("shows the examples as flags", () => {
+    expect(readSection(buildCommandHelp(command), "examples:")).toContain(
+      "  hercule mcp-server create --plugin sentry/sentry --connection 1f3a9c2e",
+    );
+  });
+});

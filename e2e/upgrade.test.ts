@@ -12,8 +12,9 @@
  * gives the signal grants, migration 76 gives (to `unrestricted` only)
  * `thread.start`, migration 78 gives the discussion grants, migration 80
  * gives the wiki grants and migration 85 gives the `skill` grants (to
- * `unrestricted` and `assistant` only), and one open signal whose match
- * values migration 73 sorts by name. The session holds two inputs, one with
+ * `unrestricted` and `assistant` only), migration 126 gives the `mcp` grants
+ * (to the shipped profiles only: a custom profile keeps its grants), and one
+ * open signal whose match values migration 73 sorts by name. The session holds two inputs, one with
  * an image, which migration 77 copies into a rebuilt `session_inputs`. The
  * session's turns hold tool calls from its own agent and from a subagent
  * beside an item that is not a tool call, which
@@ -261,6 +262,26 @@ const SKILL_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> =
   assistant: ["skill.read", "skill.write"],
   unrestricted: ["skill.read"],
   worker: [],
+};
+
+/** The name of the profile the fixture makes, which no migration of grants may change. */
+const CUSTOM_PROFILE_NAME = "upgrade-custom";
+
+/**
+ * The migration that adds the `mcp` grants of `MCP_GRANTS_BY_PROFILE` to the
+ * shipped profiles.
+ */
+const MCP_GRANTS_MIGRATION = 126;
+
+/**
+ * The `mcp` grants each shipped profile holds from migration 126 on. No
+ * profile holds `mcp.manage`: only the user gives a session the power to add
+ * a server or change which servers a thread has.
+ */
+const MCP_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> = {
+  assistant: ["mcp.read"],
+  unrestricted: ["mcp.read", "mcp.use"],
+  worker: ["mcp.read", "mcp.use"],
 };
 
 /**
@@ -2612,6 +2633,16 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // A profile the user made. Migration 126 must leave it without `mcp`
+      // grants, as it leaves every profile but the three shipped ones.
+      const customProfile = expectJson<SeededProfile>(
+        await runCli(
+          ["profile", "create", "--name", CUSTOM_PROFILE_NAME, "--grant", "task.read", "--json"],
+          edge,
+        ),
+      );
+      expect(customProfile.name).toBe(CUSTOM_PROFILE_NAME);
+
       const seededSettings = expectJson<{ user: Record<string, unknown> }>(
         await runCli(["settings", "read", "--json"], edge),
       );
@@ -2788,6 +2819,21 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `The edge database already ran migration ${String(SKILL_GRANTS_MIGRATION)}: checking that the skill grants survive the upgrade.`,
+        );
+      }
+
+      // The same holds for the mcp grants, which no edge build before
+      // migration 126 knew.
+      const mcpGrantsMigrated = readMigrationVersion(home) < MCP_GRANTS_MIGRATION;
+      if (mcpGrantsMigrated) {
+        for (const name of Object.keys(MCP_GRANTS_BY_PROFILE)) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          expect(profile?.grants.filter((grant) => grant.startsWith("mcp."))).toEqual([]);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(MCP_GRANTS_MIGRATION)}: checking that the mcp grants survive the upgrade.`,
         );
       }
 
@@ -3384,6 +3430,19 @@ describe("upgrading from the previous edge release", () => {
           `the skill grants of ${name} after the upgrade`,
         ).toEqual([...grants].sort());
       }
+
+      for (const [name, grants] of Object.entries(MCP_GRANTS_BY_PROFILE)) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed, `the ${name} profile after the upgrade`).toBeDefined();
+        expect(
+          listed?.grants.filter((grant) => grant.startsWith("mcp.")).sort(),
+          `the mcp grants of ${name} after the upgrade`,
+        ).toEqual([...grants].sort());
+      }
+      expect(
+        upgradedProfiles.find((profile) => profile.id === customProfile.id)?.grants,
+        "the custom profile after the upgrade",
+      ).toEqual(["task.read"]);
 
       if (signalSeeded) {
         const upgradedSignal = expectJson<{ match: Record<string, string> }>(

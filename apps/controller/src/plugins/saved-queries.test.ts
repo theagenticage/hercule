@@ -6,18 +6,19 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type {
-  InboxClause,
-  PluginManifest,
-  QualifiedEntityKindDeclaration,
-  SavedQuery,
+import {
+  HOST_API,
+  type InboxClause,
+  type PluginManifest,
+  type QualifiedEntityKindDeclaration,
+  type SavedQuery,
 } from "@hercule/plugin-host";
 import { decodeSavedQueries, type SavedQueryContext } from "./saved-queries";
 
 const MANIFEST: PluginManifest = {
   id: "acme",
   displayName: "Acme",
-  hostApi: 8,
+  hostApi: HOST_API,
   capabilities: ["event-sources", "events", "entities"],
   configSchema: Schema.Struct({}),
 };

@@ -17,6 +17,7 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   type AccountKind,
   type FeedDeclaration,
   type ParseCatalogBody,
@@ -36,6 +37,8 @@ import { pluginRepository } from "./repository";
 import {
   asUser,
   buildActionPlugin,
+  buildDeskMcpServer,
+  buildMcpServerPlugin,
   createPluginFixture,
   NOTE_APPEND_ACTION,
   notesPlugin,
@@ -1675,6 +1678,115 @@ const buildEventSourcePlugin = (
       },
     }),
   activate: () => Effect.succeed(Effect.void),
+});
+
+describe("the MCP server catalog", () => {
+  it("finds the live server whatever its plugin's status, and lists every server the boot registered", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme")]);
+        const active = yield* host.findMcpServer("acme/desk");
+        yield* host.stop("acme");
+        return {
+          active,
+          stopped: yield* host.findMcpServer("acme/desk"),
+          stoppedIsActive: yield* host.isActive("acme"),
+          listed: (yield* host.listMcpServers()).map((server) => server.id),
+          absent: yield* host.findMcpServer("acme/other"),
+        };
+      }),
+    );
+
+    expect(Option.getOrThrow(found.active)).toMatchObject({
+      id: "acme/desk",
+      pluginId: "acme",
+      connectionType: "acme/desk",
+    });
+    expect(Option.isSome(found.stopped)).toBe(true);
+    expect(found.stoppedIsActive).toBe(false);
+    expect(found.listed).toEqual(["acme/desk"]);
+    expect(Option.isNone(found.absent)).toBe(true);
+  });
+
+  it("accepts a server registered before its Connection type", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme", { serverFirst: true })]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toBeUndefined();
+    expect(status).toEqual(Option.some({ _tag: "active" }));
+  });
+
+  it.each([
+    [
+      "an id that is not a valid server name",
+      { server: { ...buildDeskMcpServer("acme"), id: "Desk-Tickets" } },
+      "lowercase letters, digits and single _",
+    ],
+    [
+      "the reserved id hercule",
+      { server: { ...buildDeskMcpServer("acme"), id: "hercule" } },
+      "cannot be hercule",
+    ],
+    [
+      "an origin with a path",
+      { server: { ...buildDeskMcpServer("acme"), origin: "https://mcp.desk.example/mcp" } },
+      "exactly the scheme",
+    ],
+    [
+      "a Connection type of another plugin",
+      { server: { ...buildDeskMcpServer("acme"), connectionType: "other/desk" } },
+      "which another plugin owns",
+    ],
+    [
+      "a Connection type the plugin does not register",
+      { registerType: false },
+      "which the plugin acme does not register",
+    ],
+    [
+      "no mcp-servers capability",
+      { capabilities: ["connections"] as const },
+      "the mcp-servers capability was not granted",
+    ],
+  ])("marks a plugin errored for %s", async (_name, options, message) => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme", options)]);
+        return { status: yield* host.status("acme"), servers: yield* host.listMcpServers() };
+      }),
+    );
+
+    expect(readErroredMessage(outcome.status)).toContain(message);
+    expect(outcome.servers).toEqual([]);
+  });
+
+  it("marks a plugin errored when it registers the same server twice", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        const once = buildMcpServerPlugin("acme");
+        yield* host.boot([
+          {
+            ...once,
+            register: (registration) =>
+              Effect.andThen(
+                once.register(registration),
+                registerMcpServer(registration, buildDeskMcpServer("acme")),
+              ),
+          },
+        ]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain("acme/desk is registered twice");
+  });
 });
 
 describe("the event source catalog", () => {

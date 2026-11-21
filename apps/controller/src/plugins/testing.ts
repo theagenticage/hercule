@@ -15,6 +15,7 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type ActionContext,
   type ActivationContext,
@@ -24,6 +25,7 @@ import {
   type IngestConnection,
   type FeedDeclaration,
   type IngestContext,
+  type McpServerContribution,
   type PollResult,
   type Plugin,
   type PluginCapability,
@@ -331,6 +333,96 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
   activate: () => Effect.succeed(Effect.void),
 });
 
+/** Where a test plugin's MCP server is reached: the endpoint, and the origin the plugin declares for it. */
+export interface DeskUpstream {
+  readonly url: string;
+  readonly origin: string;
+}
+
+const UNREACHABLE_DESK_UPSTREAM: DeskUpstream = {
+  url: "https://mcp.desk.example/mcp",
+  origin: "https://mcp.desk.example",
+};
+
+/**
+ * The MCP server of `buildMcpServerPlugin`, with the Connection type
+ * `<plugin id>/desk`. Its requests carry the Connection's token, a pasted
+ * `token` or an OAuth `accessToken`, as a Bearer `Authorization` header.
+ */
+export const buildDeskMcpServer = (
+  pluginId: string,
+  upstream: DeskUpstream = UNREACHABLE_DESK_UPSTREAM,
+): McpServerContribution => ({
+  id: "desk",
+  displayName: "Desk",
+  description: "Read and update Desk tickets.",
+  connectionType: `${pluginId}/desk`,
+  origin: upstream.origin,
+  buildUpstreamRequest: ({ credentials }) => ({
+    url: upstream.url,
+    headers: {
+      Authorization: `Bearer ${credentials["token"] ?? credentials["accessToken"] ?? ""}`,
+    },
+  }),
+});
+
+/**
+ * Builds a plugin, named after its id (`acme` is "Acme"), that registers the
+ * Connection type `desk` and one MCP server, the server first when
+ * `serverFirst` is true. The server is `buildDeskMcpServer` unless `server`
+ * replaces it, and `registerType: false` leaves the Connection type out. The
+ * manifest requests `connections` and `mcp-servers` unless `capabilities`
+ * replaces them.
+ *
+ * The Connection holds a pasted `token`, or, when `deviceProviderUrl` is
+ * given, OAuth tokens that refresh at that provider.
+ */
+export const buildMcpServerPlugin = (
+  id: string,
+  options: {
+    readonly server?: McpServerContribution;
+    readonly serverFirst?: boolean;
+    readonly registerType?: boolean;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+    readonly deviceProviderUrl?: string;
+  } = {},
+): Plugin => ({
+  manifest: {
+    id,
+    displayName: `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`,
+    hostApi: HOST_API,
+    capabilities: options.capabilities ?? ["connections", "mcp-servers"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) => {
+    const providerUrl = options.deviceProviderUrl;
+    const registerType =
+      options.registerType === false
+        ? Effect.void
+        : registerConnectionType(host, {
+            type: "desk",
+            displayName: "Desk",
+            ...(providerUrl === undefined
+              ? { setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }] }
+              : {
+                  setup: [{ kind: "device" }],
+                  device: {
+                    clientId: "desk-client",
+                    deviceCodeUrl: `${providerUrl}/device/code`,
+                    tokenUrl: `${providerUrl}/token`,
+                    scopes: [],
+                  },
+                }),
+            validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
+          });
+    const server = registerMcpServer(host, options.server ?? buildDeskMcpServer(id));
+    return options.serverFirst === true
+      ? Effect.andThen(server, registerType)
+      : Effect.andThen(registerType, server);
+  },
+  activate: () => Effect.succeed(Effect.void),
+});
+
 /** A plugin with the id `notes` that declares `NOTE_APPEND_ACTION`, for tests of action steps. */
 export const notesPlugin: Plugin = buildActionPlugin("notes", NOTE_APPEND_ACTION);
 
@@ -494,6 +586,8 @@ export const createEventSourceFixture = (
     readonly capabilities?: ReadonlyArray<PluginCapability>;
     /** The External Entity kinds the source declares. The manifest needs the `entities` capability then. */
     readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
+    /** Gives the Connection type a device flow whose token endpoint is at this base address, so its tokens can be refreshed. */
+    readonly deviceProviderUrl?: string;
   } = {},
 ): EventSourceFixture => {
   let running = 0;
@@ -518,7 +612,17 @@ export const createEventSourceFixture = (
           registerConnectionType(host, {
             type: "acme",
             displayName: "Acme",
-            setup: [],
+            ...(options.deviceProviderUrl === undefined
+              ? { setup: [] }
+              : {
+                  setup: [{ kind: "device" as const }],
+                  device: {
+                    clientId: "acme-client",
+                    deviceCodeUrl: `${options.deviceProviderUrl}/device/code`,
+                    tokenUrl: `${options.deviceProviderUrl}/token`,
+                    scopes: [],
+                  },
+                }),
             configSchema: Schema.Struct({ project: Schema.optionalKey(Schema.String) }),
             validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
           }),

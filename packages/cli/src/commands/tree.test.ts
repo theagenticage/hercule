@@ -14,6 +14,7 @@ interface RowField {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly object?: unknown;
 }
 
 interface Row {
@@ -151,13 +152,14 @@ describe("the spelling of a command", () => {
 describe("a command's fields against the schema", () => {
   it("has exactly the fields of the schema, minus the ones the row hides", () => {
     for (const command of COMMANDS) {
+      // A flag that fills one key of an object field stands for that field.
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
-        (field) => field.name,
+        (field) => field.within?.field ?? field.name,
       );
       const shown = Object.entries(readRow(command.id).fields ?? {})
         .filter(([, field]) => field.hidden !== true)
         .map(([name]) => name);
-      expect(reflected.sort(), readSpelling(command)).toEqual(shown.sort());
+      expect([...new Set(reflected)].sort(), readSpelling(command)).toEqual(shown.sort());
     }
   });
 
@@ -346,6 +348,25 @@ describe("a command's fields against the schema", () => {
         (field) => field.name === "credentials",
       ),
     ).toMatchObject({ kind: "json", stdin: true });
+  });
+});
+
+// A row's `object` form turns one object-valued field into one flag per key.
+describe("an object field filled from several flags", () => {
+  const fields = findCommandByWords(["mcp-server", "create"])!.payload;
+
+  it("becomes one field per flag, each typed by its key of the object", () => {
+    expect(fields.map((field) => [field.spelling, field.name, field.within?.field])).toEqual([
+      ["plugin", "contributionId", "source"],
+      ["connection", "connectionId", "source"],
+      ["name", "name", "source"],
+    ]);
+    expect(fields.map((field) => field.optional)).toEqual([false, false, true]);
+    expect(fields.map((field) => field.holdsAnId)).toEqual([false, true, false]);
+    expect(fields.find((field) => field.name === "connectionId")!.resolves).toBe(
+      "connection.query",
+    );
+    expect(fields[0]!.within!.fixed).toEqual({ kind: "plugin" });
   });
 });
 

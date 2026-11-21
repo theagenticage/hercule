@@ -215,6 +215,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "events",
       "entities",
       "workflow-actions",
+      "mcp-servers",
     ]);
     expect(findCapabilities("linear")).toEqual([
       "connections",

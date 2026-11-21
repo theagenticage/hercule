@@ -473,6 +473,11 @@ export const queryKeys = {
   /** One Discussion, as `discussion.read` returns it; without the id, the prefix of every Discussion. */
   discussion: (id?: string): LiveQueryKey =>
     id === undefined ? ["discussion"] : ["discussion", id],
+  /** Every MCP Server, as `mcpServer.query` returns them. Live topic: `mcpServer`. */
+  mcpServers: (): LiveQueryKey => ["mcp-servers"],
+  /** One MCP Server, as `mcpServer.read` returns it; without the id, the prefix of every server's page. */
+  mcpServer: (id?: string): LiveQueryKey =>
+    id === undefined ? ["mcp-server"] : ["mcp-server", id],
   /** Every page of the Wiki Page listing, newest first. */
   wikiPages: (): LiveQueryKey => ["wiki-pages"],
   /**
@@ -836,6 +841,13 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.skills(), queryKeys.skill()]
       : [queryKeys.skills(), ...ids.map((name) => queryKeys.skill(name))];
+  }
+  // Any MCP Server change refetches the list. A server's own read is
+  // refetched only when the push lists its id, or when the push lists no ids.
+  if (topic === "mcpServer") {
+    return ids.length === 0
+      ? [queryKeys.mcpServers(), queryKeys.mcpServer()]
+      : [queryKeys.mcpServers(), ...ids.map((id) => queryKeys.mcpServer(id))];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is

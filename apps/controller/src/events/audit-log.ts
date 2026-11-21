@@ -112,6 +112,9 @@ export const AUDIT_KINDS = [
   "skill.applied",
   "skill.rejected",
   "skill.deleted",
+  "mcpServer.created",
+  "mcpServer.updated",
+  "mcpServer.deleted",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
@@ -265,6 +268,9 @@ const RECORD_KINDS = {
   // a client reading it again finds it gone, as after a delete.
   "skill.rejected": "updated",
   "skill.deleted": "deleted",
+  "mcpServer.created": "created",
+  "mcpServer.updated": "updated",
+  "mcpServer.deleted": "deleted",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

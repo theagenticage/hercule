@@ -13,7 +13,8 @@
  * mapping would be a schema-to-flags compiler nobody asked for. The
  * exceptions the table opts into are a record of text values, given as
  * repeated `--<flag> <field>=<value>` (see `namedValues` on the row), and a
- * list of objects that a list positional fills one key of (see `itemKey`).
+ * list of objects that a list positional fills one key of (see `itemKey`), and
+ * an object that several flags fill one key each of (see `object`).
  *
  * A field whose row is `skillFolder` becomes the positional `<folder>`. The
  * command then reads that folder and sends one request per skill in it (see
@@ -48,7 +49,10 @@ export type FieldKind = "string" | "number" | "boolean" | "json" | "namedValues"
 export type FieldCarrier = "path" | "payload" | "query";
 
 export interface Field {
-  /** The name the API knows the field by. */
+  /**
+   * The name the API knows the field by. For a flag that fills one key of an
+   * object field (see `within`), the name of that key.
+   */
   readonly name: string;
   /** The word after `--`, or the word inside `<>` for a positional. */
   readonly spelling: string;
@@ -127,6 +131,15 @@ export interface Field {
    * for a list of objects; absent when the list holds the words themselves.
    */
   readonly itemKey: string | undefined;
+  /**
+   * Set when the flag fills one key of an object field of the request: the
+   * name of that object field, and the keys sent with fixed values beside
+   * the flags'. Set by the row's `object` form; `undefined` for every other
+   * field.
+   */
+  readonly within:
+    | { readonly field: string; readonly fixed: Readonly<Record<string, string>> }
+    | undefined;
   readonly help: string;
 }
 
@@ -353,7 +366,7 @@ const listResolvingQueries = (
 const buildField = (
   name: string,
   ast: Ast,
-  row: Exclude<FieldRow, { readonly hidden: true }>,
+  row: Exclude<FieldRow, { readonly hidden: true } | { readonly object: unknown }>,
   carriedIn: FieldCarrier,
   schema: unknown,
 ): Field => {
@@ -397,8 +410,38 @@ const buildField = (
     resolves: "resolves" in row ? row.resolves : undefined,
     resolvesQueries: listResolvingQueries("resolvesQuery" in row ? row.resolvesQuery : undefined),
     itemKey,
+    within: undefined,
     help: row.help,
   };
+};
+
+/**
+ * Builds one field for each flag of an `object` row, each typed by its key of
+ * the object. Throws when the table is wrong: a flag or a fixed value names
+ * a key the object does not have, or a flag's key holds a list.
+ */
+const buildObjectFields = (
+  name: string,
+  object: Ast,
+  row: Extract<FieldRow, { readonly object: unknown }>,
+  carriedIn: FieldCarrier,
+): ReadonlyArray<Field> => {
+  const readKey = (key: string): Ast => {
+    const property = object.propertySignatures?.find((one) => String(one.name) === key);
+    if (property === undefined) throw new Error(`${name}: ${key} is not a key of the object`);
+    return property.type;
+  };
+  for (const key of Object.keys(row.object.fixed)) readKey(key);
+  return Object.entries(row.object.flags).map(([key, keyRow]) => {
+    const type = readKey(key);
+    if (readElementType(type) !== undefined) {
+      throw new Error(`${name}: ${key} holds a list, and an object flag takes one value`);
+    }
+    return {
+      ...buildField(key, type, keyRow, carriedIn, undefined),
+      within: { field: name, fixed: row.object.fixed },
+    };
+  });
 };
 
 /**
@@ -408,6 +451,7 @@ const buildField = (
  * - A field with no row is missing from the contract's CLI table, so this
  *   throws rather than creating a flag with no name.
  * - A field whose row is hidden gets no flag.
+ * - A field whose row is `object` becomes one field per flag of the row.
  * - A field whose row asks for named values throws when its schema is not a
  *   record of text values, or when the row also makes it positional,
  *   because the table is wrong.
@@ -454,6 +498,7 @@ const buildFields = (
             `${id}: ${name} takes named values, but its schema is not a record of text`,
           );
         }
+        if ("object" in row) return buildObjectFields(name, type, row, carriedIn);
         return [buildField(name, type, row, carriedIn, readFieldSchema(name))];
       })
   );
