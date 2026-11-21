@@ -106,6 +106,7 @@ import { excludeDigest, claimAttachments, readClaimableAttachments } from "../at
 import {
   buildLeftOutWarning,
   decideLeftOutReason,
+  decideUndeliveredReason,
   mcpServerCatalogue,
   type LeftOutServer,
   type StartDelivery,
@@ -1165,12 +1166,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const runner = Option.getOrThrow(yield* runners.read(session.runnerId));
       const gateway = yield* readMcpGatewayDelivery(session.harnessId, runner);
-      const reason: McpServerLeftOutReason | undefined = !gateway.runnerReachesMcpServers
-        ? "runner-too-old"
-        : gateway.harnessPassthrough === "unsupported"
-          ? "harness-unsupported"
-          : undefined;
-      if (reason === undefined) return;
+      const reason = decideUndeliveredReason(gateway);
+      if (reason === null) return;
       const views = yield* catalogue.readViews(addedIds, "without-tools");
       const unreachable: Array<LeftOutServer> = [];
       for (const mcpServerId of addedIds) {

@@ -21,12 +21,8 @@ describe("decideLeftOutReason", () => {
   }>([
     { name: "a ready server is callable", delivery: {}, server: {}, expected: null },
     {
-      name: "a runner without the capability wins over everything",
-      delivery: {
-        runnerReachesMcpServers: false,
-        harnessPassthrough: "unsupported",
-        profileGrantsMcpUse: false,
-      },
+      name: "a native harness on a runner without its capability wins over everything",
+      delivery: { runnerReachesMcpServers: false, profileGrantsMcpUse: false },
       server: brokenServer,
       expected: "runner-too-old",
     },
@@ -34,6 +30,12 @@ describe("decideLeftOutReason", () => {
       name: "an unsupported harness wins over a missing grant and the server's state",
       delivery: { harnessPassthrough: "unsupported", profileGrantsMcpUse: false },
       server: brokenServer,
+      expected: "harness-unsupported",
+    },
+    {
+      name: "an unsupported harness is unsupported whatever its runner negotiated",
+      delivery: { runnerReachesMcpServers: false, harnessPassthrough: "unsupported" },
+      server: {},
       expected: "harness-unsupported",
     },
     {
