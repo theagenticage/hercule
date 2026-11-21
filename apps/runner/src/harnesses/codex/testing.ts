@@ -198,8 +198,19 @@ const DEFAULT_ANSWERS: Answers = {
   // A session refuses to start without a login, so the default account is logged in.
   "account/read": () => CHATGPT,
   "model/list": () => MODELS,
-  // No layer of Codex's configuration sets anything.
-  "config/read": () => ({ config: {}, origins: {}, layers: [] }),
+  // No layer of Codex's configuration sets anything. A real reply always lists
+  // at least one layer, here the user's `config.toml` with empty settings.
+  "config/read": () => ({
+    config: {},
+    origins: {},
+    layers: [
+      {
+        name: { type: "user", file: "/home/me/.codex/config.toml" },
+        version: "sha256:0",
+        config: {},
+      },
+    ],
+  }),
   "thread/start": () => ({ thread: { id: THREAD } }),
   "thread/resume": () => ({ thread: { id: RESUMED } }),
   "thread/fork": () => ({ thread: { id: FORKED } }),
