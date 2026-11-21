@@ -4,6 +4,7 @@ import {
   buildServerPicker,
   buildThreadServerMenu,
   countServersNeedingSignIn,
+  describeThreadServersRow,
   orderMenuNames,
 } from "./thread-menu";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
@@ -188,6 +189,43 @@ describe("countServersNeedingSignIn", () => {
     ]);
 
     expect(countServersNeedingSignIn(views, ["s-work", "s-off", "s-linear"])).toBe(1);
+  });
+});
+
+describe("describeThreadServersRow", () => {
+  it("says none for an empty list, and the count otherwise", () => {
+    const views = buildViews([SENTRY_WORK, LINEAR]);
+
+    expect(describeThreadServersRow(views, [])).toEqual({ words: "none", failing: false });
+    expect(describeThreadServersRow(views, ["s-work"])).toEqual({ words: "1", failing: false });
+    expect(describeThreadServersRow(views, ["s-work", "s-linear"])).toEqual({
+      words: "2",
+      failing: false,
+    });
+  });
+
+  it("names the servers that need sign-in, in the singular and the plural", () => {
+    const views = buildViews([
+      buildServer("s-work", "sentry", "c-work", { status: "needs-sign-in" }),
+      buildServer("s-linear", "linear", "c-linear", { status: "needs-sign-in" }),
+      buildServer("s-gh", "github", "c-linear"),
+    ]);
+
+    expect(describeThreadServersRow(views, ["s-work", "s-gh"])).toEqual({
+      words: "1 needs sign-in",
+      failing: true,
+    });
+    expect(describeThreadServersRow(views, ["s-work", "s-linear", "s-gh"])).toEqual({
+      words: "2 need sign-in",
+      failing: true,
+    });
+  });
+
+  it("shows the count while the servers are not read", () => {
+    expect(describeThreadServersRow([], ["s-work", "s-linear"])).toEqual({
+      words: "2",
+      failing: false,
+    });
   });
 });
 

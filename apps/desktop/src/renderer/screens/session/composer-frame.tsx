@@ -51,6 +51,32 @@ export interface ComposerAttachments {
   readonly onFiles: (files: readonly File[]) => void;
 }
 
+/**
+ * What the `+` menu's "Attach an image" row needs: whether the row is off,
+ * its tooltip (the reason it is off, or "Attach images"), and what a press
+ * does, which opens the file picker.
+ */
+export interface PlusAttach {
+  readonly off: boolean;
+  readonly title: string;
+  readonly onAttach: () => void;
+}
+
+/**
+ * Renders what `render` returns for `attach`. The card calls `render` here
+ * rather than in its own body, because `attach.onAttach` reads the file
+ * input's ref, which a render must not hand to a function call.
+ */
+function PlusSlot({
+  render,
+  attach,
+}: {
+  readonly render: (attach: PlusAttach) => ReactNode;
+  readonly attach: PlusAttach;
+}): ReactNode {
+  return render(attach);
+}
+
 /** The types the file picker offers: the image types the controller takes. */
 const PICKER_ACCEPT = IMAGE_MIME_TYPES.join(",");
 
@@ -117,6 +143,11 @@ export interface ComposerStop {
  * into the field or dropped on the card (see `ComposerAttachments`). Without
  * it, and on a `readOnly` field, Attach does nothing and carries
  * `aria-disabled`. Dictate is drawn but does nothing yet.
+ *
+ * With `renderPlus`, the thread's composers draw a menu in the `+`'s place
+ * (see `PlusMenu`) and Attach becomes one of its rows. `renderPlus` receives
+ * what that row needs. Without it, the `+` is the Attach button itself, as the
+ * assistant's Conversation draws it.
  */
 export function ComposerCard({
   text,
@@ -143,6 +174,7 @@ export function ComposerCard({
   onFieldBlur,
   onComposingChange,
   sendTitle = "Send",
+  renderPlus,
 }: {
   readonly text: string;
   readonly onTextChange: (text: string) => void;
@@ -185,6 +217,8 @@ export function ComposerCard({
   readonly onComposingChange?: ((composing: boolean) => void) | undefined;
   /** The tooltip of Send, which names what sending does. */
   readonly sendTitle?: string;
+  /** Draws the menu that replaces the Attach button, see above. */
+  readonly renderPlus?: ((attach: PlusAttach) => ReactNode) | undefined;
 }): JSX.Element {
   const pickerRef = useRef<HTMLInputElement>(null);
   // A read-only field takes no images either.
@@ -195,6 +229,9 @@ export function ComposerCard({
   const attachOff = taking === undefined || taking.attachBlockedReason !== null;
   const attachTitle =
     taking === undefined ? "Attach" : (taking.attachBlockedReason ?? "Attach images");
+  const openPicker = (): void => {
+    if (!attachOff) pickerRef.current?.click();
+  };
   return (
     <div className="composer-card" {...handlers}>
       {aboveField === undefined || aboveField === null ? null : (
@@ -229,22 +266,27 @@ export function ComposerCard({
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
         <div className="composer-row">
-          <button
-            type="button"
-            className={
-              taking === undefined || taking.attachBlockedReason === null
-                ? "icon-btn"
-                : "icon-btn icon-btn--blocked"
-            }
-            title={attachTitle}
-            aria-label="Attach"
-            aria-disabled={attachOff || undefined}
-            onClick={() => {
-              if (!attachOff) pickerRef.current?.click();
-            }}
-          >
-            <PlusIcon />
-          </button>
+          {renderPlus === undefined ? (
+            <button
+              type="button"
+              className={
+                taking === undefined || taking.attachBlockedReason === null
+                  ? "icon-btn"
+                  : "icon-btn icon-btn--blocked"
+              }
+              title={attachTitle}
+              aria-label="Attach"
+              aria-disabled={attachOff || undefined}
+              onClick={openPicker}
+            >
+              <PlusIcon />
+            </button>
+          ) : (
+            <PlusSlot
+              render={renderPlus}
+              attach={{ off: attachOff, title: attachTitle, onAttach: openPicker }}
+            />
+          )}
           {taking === undefined ? null : (
             <input
               ref={pickerRef}
@@ -350,8 +392,8 @@ export function ComposerCard({
  *   is what the composer covers of the messages, less the 18px the stack
  *   sits above the pane's bottom edge.
  * - `error` is the line under the row, when the last send or Stop failed.
- * - `notice`, `attachments`, `skills`, `step`, `historyKey`, `onFieldBlur` and
- *   `onComposingChange` are the card's, see `ComposerCard`.
+ * - `notice`, `attachments`, `skills`, `step`, `historyKey`, `onFieldBlur`,
+ *   `onComposingChange` and `renderPlus` are the card's, see `ComposerCard`.
  *   While the card's skill list is open, the stack above the card is hidden
  *   (see composer.css), so the list does not cover half of it.
  */
@@ -371,6 +413,7 @@ export function ComposerFrame({
   historyKey,
   onFieldBlur,
   onComposingChange,
+  renderPlus,
   start,
   note,
   end,
@@ -396,6 +439,7 @@ export function ComposerFrame({
   readonly historyKey?: string | undefined;
   readonly onFieldBlur?: (() => void) | undefined;
   readonly onComposingChange?: ((composing: boolean) => void) | undefined;
+  readonly renderPlus?: ((attach: PlusAttach) => ReactNode) | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -468,6 +512,7 @@ export function ComposerFrame({
           historyKey={historyKey}
           onFieldBlur={onFieldBlur}
           onComposingChange={onComposingChange}
+          renderPlus={renderPlus}
           start={start}
           note={note}
           end={end}

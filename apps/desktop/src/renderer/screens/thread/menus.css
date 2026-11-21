@@ -263,3 +263,61 @@ button.line:hover {
   color: var(--muted);
   font-size: var(--t-12);
 }
+
+/* ---------- The composer's `+` menu ---------- */
+/* Not in the book. The menu is two glass panels side by side, the rows and
+   the submenu of the thread's MCP servers, with their feet on one line, so
+   the popover draws nothing itself: its own panel is taken off. The panels
+   stretch to the popover's height, which anchor positioning limits to the
+   room above the `+`, so a long submenu scrolls inside itself. */
+.menu--bare {
+  width: max-content;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.menu--bare:popover-open {
+  display: flex;
+  gap: 6px;
+}
+.plus-main {
+  align-self: flex-end;
+  width: 268px;
+}
+.plus-main .ic {
+  flex: none;
+  color: var(--muted);
+}
+.plus-main [role="menuitem"]:focus,
+.plus-main [role="menuitem"].is-open {
+  background: var(--hover);
+}
+.plus-main [role="menuitem"][aria-disabled="true"] .ic {
+  color: var(--faint);
+}
+.plus-label {
+  flex: 1;
+  min-width: 0;
+}
+.plus-fine {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.plus-fine.is-fail {
+  color: var(--fail-ink);
+}
+/* The dot on the `+` while one of the thread's servers needs sign-in. The
+   ring is the card's colour, so the dot reads as laid on the button. */
+.plus-button {
+  position: relative;
+}
+.plus-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  box-shadow: 0 0 0 2px var(--raised);
+}

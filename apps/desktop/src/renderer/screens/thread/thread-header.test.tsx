@@ -29,6 +29,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubIntersectionObserver,
   THREAD_FIXTURES,
   type Call,
   type Handler,
@@ -47,6 +48,7 @@ function HeaderOfThread({ sessionId }: { readonly sessionId: string }): JSX.Elem
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   forgetSidePaneLayouts();
 });
 
@@ -837,6 +839,8 @@ describe("the side pane's toggle", () => {
   /** Starts the app signed in at `path`, with the delegating thread's reads. */
   const openApp = (path: string) => {
     stubElementSize(800, 800);
+    // The pane lists a running subagent, whose row watches whether it is on screen.
+    stubIntersectionObserver();
     stubApi({
       ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       ...buildThreadHandlers(THREAD_FIXTURES.delegating),

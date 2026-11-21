@@ -18,7 +18,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCREENS = join(HERE, "../../../screens");
 
 /**
- * The folders and single files whose sources are compiled (Settings > MCP servers' routes and screens among them): the route folders
+ * The folders and single files whose sources are compiled (Settings > MCP servers' routes and screens, and the composer's `+` menu with the thread's lines about servers, among them): the route folders
  * of the three pages, of a run's page and of Fleet, the screens they draw, the folders
  * they share, the desk's parts that Work and the Inbox draw, the Work board's screen, its parts, its read and its moves (link, blocker and Initiative changes included, the details pane's sheet and its buttons, and the Initiative sheet) with their undo line and offline time, the Inbox's screen, its parts, its read and its moves, and the Done moves' queue and toast. A folder is compiled
  * without its tests.
@@ -39,6 +39,16 @@ const PATHS = [
   join(SCREENS, "list-pane"),
   join(SCREENS, "thread/use-sender-reading.ts"),
   join(SCREENS, "thread/use-tab-overflow.ts"),
+  join(SCREENS, "thread/plus-menu.tsx"),
+  join(SCREENS, "thread/plus-placeholder.tsx"),
+  join(SCREENS, "thread/thread-plus.tsx"),
+  join(SCREENS, "thread/hold-mcp-servers.tsx"),
+  join(SCREENS, "thread/thread-servers-menu.tsx"),
+  join(SCREENS, "thread/thread-server-picker.tsx"),
+  join(SCREENS, "thread/mcp-warning-line.tsx"),
+  join(SCREENS, "thread/reconnect-dialog.tsx"),
+  join(SCREENS, "thread/use-thread-servers.ts"),
+  join(HERE, "../../../app/mcp-server-views.ts"),
   join(HERE, "../../../app/done-moves.tsx"),
   join(SCREENS, "session-status.tsx"),
   join(SCREENS, "thread/tab-overflow-menu.tsx"),

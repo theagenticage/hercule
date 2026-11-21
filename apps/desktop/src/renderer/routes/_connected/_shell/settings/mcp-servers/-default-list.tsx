@@ -67,8 +67,8 @@ export function DefaultList(): JSX.Element {
           reset={null}
           busy={write.isPending}
           error={write.error === null ? null : `Could not save: ${readErrorMessage(write.error)}`}
-          onChange={(ids) => {
-            write.mutate(ids);
+          onChange={(update) => {
+            write.mutate(update(mcpServerIds));
           }}
           onClose={() => setPicking(false)}
         />

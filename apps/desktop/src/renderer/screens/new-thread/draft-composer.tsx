@@ -1,4 +1,4 @@
-import type { JSX, ReactNode, Ref } from "react";
+import { Suspense, type JSX, type ReactNode, type Ref } from "react";
 import {
   buildComposerPlaceholder,
   formatAccessMode,
@@ -18,6 +18,8 @@ import { ComposerCard, type ComposerAttachments } from "../session/composer-fram
 import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
+import { LazyDraftPlus } from "../thread/lazy-thread-servers";
+import { PlusPlaceholder } from "../thread/plus-placeholder";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -93,7 +95,8 @@ export interface DraftPickReasons {
 /**
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
  * page draws it: the card, see `ComposerCard`, with the shelf of attached
- * images, the message field and a row with Attach, the access mode, the model options when the model has
+ * images, the message field and a row with the `+` menu (Attach an image, and
+ * the draft's MCP servers, see `PlusMenu`), the access mode, the model options when the model has
  * any, the model, Dictate and Send; then the lip under it, with the
  * workspace, the branch when there is one to pick, and the machine.
  *
@@ -244,6 +247,12 @@ export function DraftComposer({
         aboveField={aboveField}
         replaceMessageRef={replaceMessageRef}
         skills={skills}
+        renderPlus={(attach) => (
+          // Without its own boundary, the menu's load would suspend the draft.
+          <Suspense fallback={<PlusPlaceholder />}>
+            <LazyDraftPlus view={view} onChoose={onChoose} attach={attach} />
+          </Suspense>
+        )}
         start={
           offReason === null ? (
             <>
