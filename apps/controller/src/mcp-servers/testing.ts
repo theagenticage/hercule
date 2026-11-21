@@ -58,6 +58,7 @@ import {
 import { withFleet } from "../workspaces/testing";
 import { createConnection, withSetUpController, type SetUpController } from "../workflows/testing";
 import type { McpServerView, PluginState } from "./catalogue";
+import type { McpToolCall } from "./calls";
 import { mcpServerRepository, type McpServerUrlSource } from "./repository";
 
 /**
@@ -559,6 +560,63 @@ export const eventually = async <A>(
   }
   return value;
 };
+
+/** Reads a response that must be a success, as a server record. */
+export const readRecord = async (response: Response): Promise<McpServerRecord> => {
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as McpServerRecord;
+};
+
+/** Reads a response that must be an error with `status`, and returns its error envelope. */
+export const readRefusal = async (
+  response: Response,
+  status: number,
+): Promise<{
+  readonly code: string;
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}> => {
+  const text = await response.text();
+  expect(response.status, text).toBe(status);
+  return (JSON.parse(text) as { readonly error: Awaited<ReturnType<typeof readRefusal>> }).error;
+};
+
+/** Waits until the stored status of the only server is `status`, and returns its row. */
+export const waitForStatus = (controller: SetUpController, status: string): Promise<McpServerRow> =>
+  eventually(
+    () => readRow(controller),
+    (row) => row.status === status,
+  );
+
+/** The upstream scope `callAs` calls under. */
+export const TEST_UPSTREAM_SCOPE = "scope-test";
+
+/**
+ * Calls a tool of a server through the controller's own `callTool`, as a
+ * session would, and returns the result of the call. By default it calls
+ * `echo` with `{ text: "hi" }` and admits the call.
+ */
+export const callAs = (
+  controller: SetUpController,
+  serverId: string,
+  overrides: Partial<McpToolCall> = {},
+) =>
+  Effect.runPromise(
+    Effect.result(
+      controller.harness.mcpServerCalls.callTool({
+        upstreamScope: TEST_UPSTREAM_SCOPE,
+        serverId,
+        tool: "echo",
+        arguments: { text: "hi" },
+        authorize: Effect.void,
+        ...overrides,
+      }),
+    ),
+  );
+
+/** Sends `mcpServer.setToken` and returns the raw response. */
+export const sendToken = (controller: SetUpController, id: string, token: string) =>
+  post(controller.base, `/api/v1/mcp-servers/${id}/token`, { token }, controller.token);
 
 /** Waits until the stored status is not `checking`, and returns the row. */
 export const waitForResult = (controller: SetUpController): Promise<McpServerRow> =>

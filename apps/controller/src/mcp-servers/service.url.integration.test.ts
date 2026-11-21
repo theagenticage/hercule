@@ -28,7 +28,6 @@ import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
 import { disablePlugin, withSetUpController, type SetUpController } from "../workflows/testing";
 import {
   countNotifications,
-  eventually,
   insertPastedConnection,
   readRow,
   requestUpdate,
@@ -37,18 +36,14 @@ import {
   waitForResult,
   withRig,
   withUrlRig,
-  type McpServerRow,
+  callAs,
+  readRecord,
+  readRefusal,
+  sendToken,
+  waitForStatus,
 } from "./testing";
 
 const TOKEN = "tok-3f9a1c7e5b2d";
-
-interface ErrorEnvelope {
-  readonly error: {
-    readonly code: string;
-    readonly message: string;
-    readonly details?: Record<string, unknown>;
-  };
-}
 
 /** Sends `mcpServer.create` for an address and returns the raw response. */
 const createByAddress = (
@@ -60,41 +55,6 @@ const createByAddress = (
     "/api/v1/mcp-servers",
     { source: { kind: "url", ...source } },
     controller.token,
-  );
-
-const sendToken = (controller: SetUpController, id: string, token: string) =>
-  post(controller.base, `/api/v1/mcp-servers/${id}/token`, { token }, controller.token);
-
-/** Reads a response that must be a success, as a server record. */
-const readRecord = async (response: Response): Promise<McpServer> => {
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as McpServer;
-};
-
-/** Reads a response that must be an error, and returns its envelope. */
-const readRefusal = async (response: Response, status: number): Promise<ErrorEnvelope["error"]> => {
-  const text = await response.text();
-  expect(response.status, text).toBe(status);
-  return (JSON.parse(text) as ErrorEnvelope).error;
-};
-
-const waitForStatus = (controller: SetUpController, status: string): Promise<McpServerRow> =>
-  eventually(
-    () => readRow(controller),
-    (row) => row.status === status,
-  );
-
-const callEcho = (controller: SetUpController, serverId: string) =>
-  Effect.runPromise(
-    Effect.result(
-      controller.harness.mcpServerCalls.callTool({
-        upstreamScope: "scope-create",
-        serverId,
-        tool: "echo",
-        arguments: { text: "hi" },
-        authorize: Effect.void,
-      }),
-    ),
   );
 
 /** Returns every row of every table as one text, so a test can look for a value anywhere in the database. */
@@ -504,11 +464,11 @@ describe("giving a server a token", () => {
           await createByAddress(controller, { url: fake.url, name: "remote", token: "old-token" }),
         );
         await waitForResult(controller);
-        expect((await callEcho(controller, created.id))._tag).toBe("Success");
+        expect((await callAs(controller, created.id))._tag).toBe("Success");
 
         await readRecord(await sendToken(controller, created.id, "new-token"));
         await waitForStatus(controller, "ready");
-        expect((await callEcho(controller, created.id))._tag).toBe("Success");
+        expect((await callAs(controller, created.id))._tag).toBe("Success");
 
         const calls = fake.requests.filter((request) => request.method === "tools/call");
         expect(calls.map((call) => call.authorization)).toEqual([

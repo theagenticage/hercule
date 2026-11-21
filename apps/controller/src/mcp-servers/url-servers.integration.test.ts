@@ -31,11 +31,16 @@ import {
 } from "../http/testing";
 import type { SetUpController } from "../workflows/testing";
 import { resolveServerAccess, ServerCredentialsUnavailable } from "./access";
-import { McpCallRefused, type McpToolCall } from "./calls";
+import { McpCallRefused } from "./calls";
 import { mcpServerSignIns } from "./sign-ins";
 import {
   eventually,
   buildMcpServerView,
+  callAs,
+  readRecord,
+  sendToken,
+  TEST_UPSTREAM_SCOPE,
+  waitForStatus,
   readRow,
   requestCheck,
   requestUpdate,
@@ -50,37 +55,10 @@ import {
   type McpServerRow,
 } from "./testing";
 
-const SCOPE = "scope-url";
-
-const callAs = (
-  controller: SetUpController,
-  serverId: string,
-  overrides: Partial<McpToolCall> = {},
-) =>
-  Effect.runPromise(
-    Effect.result(
-      controller.harness.mcpServerCalls.callTool({
-        upstreamScope: SCOPE,
-        serverId,
-        tool: "echo",
-        arguments: { text: "hi" },
-        authorize: Effect.void,
-        ...overrides,
-      }),
-    ),
-  );
-
 const requestsOf = (fake: FakeUpstream, method: string) =>
   fake.requests.filter((request) => request.method === method);
 
 const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
-
-/** Waits until the stored status is `status`, and returns the row. */
-const waitForStatus = (controller: SetUpController, status: string): Promise<McpServerRow> =>
-  eventually(
-    () => readRow(controller),
-    (row) => row.status === status,
-  );
 
 /** Answers a page of `tools/list` with these tools. */
 const buildListPage = (
@@ -122,15 +100,6 @@ const replaceToken = (controller: SetUpController, serverId: string, token: stri
       yield* controller.harness.sql`UPDATE mcp_servers SET revision = revision + 1`;
     }),
   );
-
-/** Gives the server a token through the public `setToken` operation, which raises its revision. */
-const setTokenThroughApi = async (controller: SetUpController, serverId: string, token: string) => {
-  const response = await send("POST", controller.base, `/api/v1/mcp-servers/${serverId}/token`, {
-    body: { token },
-    token: controller.token,
-  });
-  expect(response.status, await response.clone().text()).toBe(200);
-};
 
 describe("the check of a server added by URL", () => {
   it("lists the tools with no sign-in, sending no Authorization header", async () => {
@@ -435,7 +404,10 @@ describe("the sign-in a request carries", () => {
 
         await replaceToken(controller, serverId, "new-token");
         await Effect.runPromise(
-          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(SCOPE, new Set()),
+          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(
+            TEST_UPSTREAM_SCOPE,
+            new Set(),
+          ),
         );
 
         // The session ends on its own at the server in time. What matters is
@@ -459,7 +431,10 @@ describe("the sign-in a request carries", () => {
         const endsBefore = requestsOf(fake, "?").length;
 
         await Effect.runPromise(
-          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(SCOPE, new Set()),
+          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(
+            TEST_UPSTREAM_SCOPE,
+            new Set(),
+          ),
         );
 
         const ends = requestsOf(fake, "?");
@@ -509,9 +484,9 @@ describe("the sign-in a request carries", () => {
       const signIns = await readSignIns(controller);
       const first = await Effect.runPromise(signIns.readVersion(serverId));
 
-      await setTokenThroughApi(controller, serverId, "old-token");
+      await readRecord(await sendToken(controller, serverId, "old-token"));
       const second = await Effect.runPromise(signIns.readVersion(serverId));
-      await setTokenThroughApi(controller, serverId, "old-token");
+      await readRecord(await sendToken(controller, serverId, "old-token"));
       const third = await Effect.runPromise(signIns.readVersion(serverId));
 
       expect(new Set([first, second, third]).size).toBe(3);
@@ -554,7 +529,7 @@ describe("a call that a new sign-in overtakes", () => {
         const call = callAs(controller, serverId);
         await fake.waitForRequests(requestsBefore + 1);
         const heldIndex = fake.requests.length;
-        await setTokenThroughApi(controller, serverId, "new-token");
+        await readRecord(await sendToken(controller, serverId, "new-token"));
         release();
         const result = await call;
 
@@ -583,7 +558,7 @@ describe("a check that a new sign-in overtakes", () => {
         expect((await requestCheck(controller, serverId)).status).toBe(200);
         await fake.waitForRequests(requestsBefore + 1);
         const heldIndex = fake.requests.length;
-        await setTokenThroughApi(controller, serverId, "new-token");
+        await readRecord(await sendToken(controller, serverId, "new-token"));
         release();
 
         // The check that the new sign-in asks for lists the tools with the new token.
@@ -632,7 +607,7 @@ describe("the request that ends an upstream session of a server added by URL", (
         const oldSession = requestsOf(fake, "tools/call").at(-1)?.sessionId;
         expect(oldSession).toBeTruthy();
 
-        await setTokenThroughApi(controller, serverId, "new-token");
+        await readRecord(await sendToken(controller, serverId, "new-token"));
         await waitForResult(controller);
         await sleep(200);
 

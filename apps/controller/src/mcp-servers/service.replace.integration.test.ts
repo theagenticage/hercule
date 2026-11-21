@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import { McpProtocol } from "effect/ai";
-import type { Project, McpServer, Session } from "@hercule/contract";
+import type { Project, Session } from "@hercule/contract";
 import { createConnection } from "../workflows/testing";
 import { get } from "../http/testing";
 import { withTransaction } from "../db";
@@ -42,6 +42,9 @@ import {
   waitForResult,
   withRig,
   type FakeUpstream,
+  callAs,
+  readRecord,
+  readRefusal,
 } from "./testing";
 
 const OLD_TOKEN = "old-token-1234";
@@ -51,27 +54,6 @@ const UNKNOWN_ID = "0199e0e7-0000-7000-8000-00000000dead";
 const replaceSource = (connectionId: string, contributionId = "acme/desk") => ({
   source: { kind: "plugin", contributionId, connectionId },
 });
-
-/** Reads a response that must be a success, as a server record. */
-const readRecord = async (response: Response): Promise<McpServer> => {
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as McpServer;
-};
-
-/** Reads a response that must be an error, and returns its envelope. */
-const readRefusal = async (response: Response, status: number) => {
-  const text = await response.text();
-  expect(response.status, text).toBe(status);
-  return (
-    JSON.parse(text) as {
-      readonly error: {
-        readonly code: string;
-        readonly message: string;
-        readonly details?: Record<string, unknown>;
-      };
-    }
-  ).error;
-};
 
 /** Reads the columns of the only server that Replace writes. */
 const readSourceColumns = (controller: Pick<SetUpController, "harness">, id: string) =>
@@ -101,19 +83,6 @@ const countSecrets = async (controller: Pick<SetUpController, "harness">, id: st
         SELECT COUNT(*) AS n FROM secrets WHERE owner_kind = 'mcp-server' AND owner_id = ${id}`,
     )
   )[0]!.n;
-
-const callEcho = (controller: SetUpController, serverId: string) =>
-  Effect.runPromise(
-    Effect.result(
-      controller.harness.mcpServerCalls.callTool({
-        upstreamScope: "scope-replace",
-        serverId,
-        tool: "echo",
-        arguments: { text: "hi" },
-        authorize: Effect.void,
-      }),
-    ),
-  );
 
 describe("Replace", () => {
   it("keeps the id, the name and the stored tools, clears the address and the secrets, and checks through the Connection", async () => {
@@ -180,7 +149,7 @@ describe("Replace", () => {
         const id = await insertUrlServerAt(controller, fake.url, { token: OLD_TOKEN });
         expect((await requestCheck(controller, id)).status).toBe(200);
         await waitForResult(controller);
-        expect((await callEcho(controller, id))._tag).toBe("Success");
+        expect((await callAs(controller, id))._tag).toBe("Success");
         const oldSessionId = fake.requests.find(
           (request) => request.method === "tools/call",
         )?.sessionId;
@@ -205,7 +174,7 @@ describe("Replace", () => {
         );
         expect(fake.requests.filter((request) => request.method === "tools/call")).toHaveLength(1);
 
-        expect((await callEcho(controller, id))._tag).toBe("Success");
+        expect((await callAs(controller, id))._tag).toBe("Success");
 
         const calls = fake.requests.filter((request) => request.method === "tools/call");
         expect(calls.map((call) => call.authorization)).toEqual([
