@@ -61,7 +61,7 @@ describe("buildLeftOutWarning", () => {
 
     expect(warning).toEqual({
       message:
-        "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers), linear (needs sign-in), docs (needs sign-in: sign in to it in Settings > MCP servers)",
+        "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers), linear (needs sign-in), docs (needs sign-in: paste a token or sign in in Settings > MCP servers)",
       mcpServers: [
         { mcpServerId: "id-sentry", reason: "runner-too-old" },
         { mcpServerId: "id-linear", reason: "needs-sign-in" },

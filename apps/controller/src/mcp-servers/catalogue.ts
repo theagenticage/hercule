@@ -241,12 +241,13 @@ export interface CallRefusal {
 /**
  * Returns what the user does to sign in to a server, as the end of a
  * sentence: a plugin server is signed in to through its Connection, and a
- * server added by URL through its own settings.
+ * server added by URL through its own settings. Every message that tells the
+ * user how to sign in uses this wording.
  */
 export const describeSignInFix = (sourceKind: McpServerStoredSource["kind"]): string =>
   sourceKind === "plugin"
     ? "reconnect it in Settings > Connections"
-    : "sign in to it in Settings > MCP servers";
+    : "paste a token or sign in in Settings > MCP servers";
 
 /** Returns the line the agent reads when a call to `server` is refused for `reason`. */
 export const describeRefusal = (

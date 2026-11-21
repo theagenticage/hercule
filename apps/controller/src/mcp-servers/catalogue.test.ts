@@ -161,6 +161,8 @@ describe("the verdicts of the catalogue view", () => {
     expect(
       decideCallRefusal(buildMcpServerView({ url: { signIn: "token" }, status: "needs-sign-in" }))
         ?.message,
-    ).toBe("desk needs sign-in. Ask the user to sign in to it in Settings > MCP servers.");
+    ).toBe(
+      "desk needs sign-in. Ask the user to paste a token or sign in in Settings > MCP servers.",
+    );
   });
 });

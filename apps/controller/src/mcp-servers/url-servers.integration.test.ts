@@ -214,7 +214,7 @@ describe("the check of a server added by URL", () => {
 
       expect(refused).toMatchObject({
         status_detail:
-          "remote refused its sign-in: paste a new token or sign in again in Settings > MCP servers",
+          "remote refused its sign-in: paste a token or sign in in Settings > MCP servers",
         sign_in_offered: "oauth",
         tools: first.tools,
       });
@@ -273,7 +273,8 @@ describe("a call to a server added by URL", () => {
         _tag: "Failure",
         failure: {
           reason: "needs-sign-in",
-          message: "remote needs sign-in. Ask the user to sign in to it in Settings > MCP servers.",
+          message:
+            "remote needs sign-in. Ask the user to paste a token or sign in in Settings > MCP servers.",
         },
       });
       expect(fake.requests).toHaveLength(before);
@@ -292,7 +293,8 @@ describe("a call to a server added by URL", () => {
         _tag: "Failure",
         failure: {
           reason: "needs-sign-in",
-          message: "remote needs sign-in. Ask the user to sign in to it in Settings > MCP servers.",
+          message:
+            "remote needs sign-in. Ask the user to paste a token or sign in in Settings > MCP servers.",
         },
       });
       expect(result._tag === "Failure" && result.failure).toBeInstanceOf(McpCallRefused);

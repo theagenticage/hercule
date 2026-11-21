@@ -25,7 +25,12 @@ import {
   type RefreshGuard,
   type StoredConnection,
 } from "../connections";
-import { judgeDependencies, type McpServerAvailabilityView, type UsablePlugin } from "./catalogue";
+import {
+  describeSignInFix,
+  judgeDependencies,
+  type McpServerAvailabilityView,
+  type UsablePlugin,
+} from "./catalogue";
 import type { StoredMcpServerAvailability } from "./repository";
 import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
 
@@ -385,10 +390,7 @@ const resolveUrlAccess = (
       readVersion: signIns.readVersion(id),
       describeRejected: () => ({
         status: "needs-sign-in",
-        detail:
-          signIn === "none"
-            ? `${name} asks for sign-in: paste a token or sign in in Settings > MCP servers`
-            : `${name} refused its sign-in: paste a new token or sign in again in Settings > MCP servers`,
+        detail: `${name} ${signIn === "none" ? "asks for sign-in" : "refused its sign-in"}: ${describeSignInFix("url")}`,
       }),
     },
   };

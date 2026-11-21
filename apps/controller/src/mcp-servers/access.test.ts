@@ -224,8 +224,7 @@ describe("resolving the access of a server added by URL", () => {
     });
     expect(resolveUsable({}, url).credentials.describeRejected()).toEqual({
       status: "needs-sign-in",
-      detail:
-        "desk refused its sign-in: paste a new token or sign in again in Settings > MCP servers",
+      detail: "desk refused its sign-in: paste a token or sign in in Settings > MCP servers",
     });
   });
 
