@@ -13,13 +13,14 @@ export {
   type McpServerAvailabilityView,
   type McpServerView,
 } from "./catalogue";
-export { McpServerChecks, McpServerChecksLayer } from "./checks";
+export { McpServerCheckDeadline, McpServerChecks, McpServerChecksLayer } from "./checks";
 export { runConnectionFollower } from "./follower";
 export {
   buildLeftOutWarning,
   decideLeftOutReason,
-  decideUndeliveredReason,
+  decideNoGatewayReason,
   type LeftOutServer,
+  type NoGatewayReason,
   type StartDelivery,
 } from "./left-out";
 export { McpServerListHolders } from "./list-holders";

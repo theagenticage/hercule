@@ -50,6 +50,7 @@ import {
   MAX_UPSTREAM_MESSAGE_BYTES,
   openUpstream,
   runWithCredentials,
+  UPSTREAM_WORK_DEADLINE,
   type UpstreamError,
 } from "./upstream";
 
@@ -81,8 +82,16 @@ export class McpServerChecks extends Context.Service<
   }
 >()("hercule/controller/mcp-servers/McpServerChecks") {}
 
-/** How long listing the tools may take, from the first request to the last page. */
-const LIST_DEADLINE = Duration.seconds(60);
+/**
+ * How long a whole check may take: opening the upstream MCP session, the
+ * refresh, the retry and the listing. It is `UPSTREAM_WORK_DEADLINE` and
+ * ends before a freeze gives up waiting for running work, so a server that
+ * hangs during a check never fails a freeze. Tests set a shorter one.
+ */
+export const McpServerCheckDeadline = Context.Reference<Duration.Duration>(
+  "hercule/controller/mcp-servers/McpServerCheckDeadline",
+  { defaultValue: (): Duration.Duration => UPSTREAM_WORK_DEADLINE },
+);
 
 /**
  * The MCP revision whose handshake worked during a check, or `null` while none
@@ -163,8 +172,9 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
 
   /**
-   * Lists the tools once, on a short-lived client of its own. Records the
-   * revision whose handshake worked in `worked`, before it lists, so the
+   * Lists the tools once, on a short-lived client of its own, and fails with
+   * an `UpstreamError` when the listing takes longer than `deadline`. Records
+   * the revision whose handshake worked in `worked`, before it lists, so the
    * revision is known when the listing fails.
    */
   const listTools = (
@@ -172,6 +182,7 @@ const make = Effect.gen(function* () {
     credentials: ConnectionCredentialsForUse,
     worked: WorkedRevision,
     firstRevision: string | null,
+    deadline: Duration.Duration,
   ): Effect.Effect<
     { readonly tools: ReadonlyArray<McpSchema.Tool>; readonly revision: string },
     UpstreamError
@@ -180,7 +191,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const opened = yield* openUpstream({ contribution, credentials, firstRevision });
         worked.current = opened.revision;
-        return { tools: yield* opened.listTools(LIST_DEADLINE), revision: opened.revision };
+        return { tools: yield* opened.listTools(deadline), revision: opened.revision };
       }),
     ).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -200,6 +211,10 @@ const make = Effect.gen(function* () {
    * permit, right before every request to the provider, because the check may
    * wait a long time for the permit. Otherwise the outcome is `discarded`, and
    * the Connection is left alone.
+   *
+   * The whole evaluation is bound by `McpServerCheckDeadline`. A check that
+   * is still running then ends `unreachable`, like any server that does not
+   * answer in time. A refresh that has started still runs to its own end.
    */
   const evaluate = (
     server: StoredMcpServer,
@@ -211,6 +226,7 @@ const make = Effect.gen(function* () {
       if (judged._tag === "unusable")
         return buildFailedResult(judged.status, judged.detail, judged.cause);
       const { contribution, connection } = judged;
+      const deadline = yield* McpServerCheckDeadline;
       // Checked at use, not only at create, because the credentials of a
       // Connection of another type would go to this server's origin.
       if (connection.type !== contribution.connectionType) {
@@ -233,17 +249,30 @@ const make = Effect.gen(function* () {
         connectionId: server.connectionId,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
-          listTools(contribution, credentials, worked, worked.current ?? server.protocolVersion),
+          listTools(
+            contribution,
+            credentials,
+            worked,
+            worked.current ?? server.protocolVersion,
+            deadline,
+          ),
         checkRefreshAllowed: checkBasisHolds,
         guardRefresh,
       }).pipe(
-        Effect.map(({ tools, revision }): CheckResult => {
-          const stored = tools.map(toStoredTool);
-          return new TextEncoder().encode(JSON.stringify(stored)).length >
-            MAX_UPSTREAM_MESSAGE_BYTES
-            ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
-            : { _tag: "ready", tools: stored, revision };
-        }),
+        Effect.timeoutOption(deadline),
+        Effect.map(
+          Option.match({
+            onNone: (): CheckResult =>
+              buildFailedResult("unreachable", "The server did not answer in time"),
+            onSome: ({ tools, revision }): CheckResult => {
+              const stored = tools.map(toStoredTool);
+              return new TextEncoder().encode(JSON.stringify(stored)).length >
+                MAX_UPSTREAM_MESSAGE_BYTES
+                ? buildFailedResult("error", "The server's tool list is larger than 4 MiB")
+                : { _tag: "ready", tools: stored, revision };
+            },
+          }),
+        ),
         Effect.catchTags({
           UpstreamError: (failure) => {
             const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);

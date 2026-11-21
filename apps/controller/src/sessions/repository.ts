@@ -63,6 +63,7 @@ import {
   type Page,
 } from "../db";
 import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "../permissions";
+import type { NoGatewayReason } from "../mcp-servers";
 import { SessionLibrarySkill } from "../skills";
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
@@ -73,6 +74,11 @@ import { StoredTokenUsage, type StoredUsage } from "./usage";
 
 const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
+);
+
+/** What `sessions.mcp_gateway` holds: `given`, or the reason the start gave no gateway entry. */
+const decodeMcpGateway = Schema.decodeUnknownEffect(
+  Schema.Literals(["given", "runner-too-old", "harness-unsupported"]),
 );
 
 /**
@@ -1280,6 +1286,40 @@ const make = Effect.gen(function* () {
         UPDATE sessions SET library_skills = ${JSON.stringify(skills)}
         WHERE id = ${uuidFromString(sessionId)}
       `),
+
+    /**
+     * Records whether the start that was just claimed gave the harness the MCP
+     * Gateway's entry: `null` when it did, else the reason it did not. A start
+     * that goes back to the queue and is claimed again overwrites it. Does
+     * nothing for an unknown id.
+     */
+    recordMcpGateway: (
+      sessionId: string,
+      noGatewayReason: NoGatewayReason | null,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET mcp_gateway = ${noGatewayReason ?? "given"}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Returns what the session's last claimed start decided about the MCP
+     * Gateway's entry: `null` when it gave one, else the reason it gave none.
+     * Returns none when no start recorded it, which holds for a session that
+     * was started before the record existed, and for an unknown id.
+     */
+    readMcpGateway: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<NoGatewayReason | null>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly mcp_gateway: string | null }>`
+          SELECT mcp_gateway FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        const column = rows[0]?.mcp_gateway;
+        if (column == null) return Option.none();
+        const decided = yield* decodeMcpGateway(column).pipe(Effect.orDie);
+        return Option.some(decided === "given" ? null : decided);
+      }),
 
     /**
      * Returns the library skills the session got at its last claimed start,
