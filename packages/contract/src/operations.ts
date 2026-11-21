@@ -1123,6 +1123,17 @@ export const isOperationId = (id: string): id is OperationId => id in TABLE;
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;
 
 /**
+ * The operations whose input can carry a secret although their grant is not
+ * in a family that says so: `mcp.manage` also covers operations that carry
+ * none. `mcpServer.create` takes the token of a server added by address, and
+ * `mcpServer.setToken` takes a token.
+ */
+const SECRET_CARRYING_OPERATIONS: ReadonlySet<OperationId> = new Set<OperationId>([
+  "mcpServer.create",
+  "mcpServer.setToken",
+]);
+
+/**
  * Checks whether the operation's input can carry a credential or a secret
  * value. These are the operations that need:
  *
@@ -1132,7 +1143,8 @@ export const readRequirement = (id: OperationId): Requirement => TABLE[id].requi
  * - `connection.manage`, because a Connection is created with its
  *   credentials;
  * - no grant at all, before sign-in: `auth.login` and `setup.complete` carry
- *   a password.
+ *   a password;
+ * - one of `SECRET_CARRYING_OPERATIONS`, which take a token.
  *
  * Text that could hold such a value must not be copied into a record many
  * readers see, such as a notification or an event.
@@ -1143,6 +1155,7 @@ export const canCarrySecrets = (id: OperationId): boolean => {
     /^(credential|secret|infra)\./.test(requirement) ||
     requirement === "connection.manage" ||
     requirement === "unauthenticated" ||
-    requirement === "setup-token"
+    requirement === "setup-token" ||
+    SECRET_CARRYING_OPERATIONS.has(id)
   );
 };

@@ -251,6 +251,40 @@ describe("permission.request", () => {
     });
   });
 
+  it.each([
+    [
+      "mcpServer.setToken",
+      { id: "0199e0e7-0000-7000-8000-00000000dead", token: "tok-3f9a1c7e5b2d" },
+    ],
+    [
+      "mcpServer.create",
+      { source: { kind: "url", url: "https://mcp.example.com/mcp", token: "tok-3f9a1c7e5b2d" } },
+    ],
+  ])(
+    "refuses %s, whose input holds the token of an MCP server, and keeps the input nowhere",
+    async (op, input) => {
+      await withPipeline(async (arranged) => {
+        const { asker } = await spawnTwoWorkers(arranged);
+
+        const refused = await readErrorBody(
+          await requestPermission(
+            arranged,
+            { grant: "mcp.manage", reason: REASON, operation: { op, input } },
+            asker.token,
+          ),
+        );
+
+        expect(refused.code).toBe("validation");
+        expect(refused.message).toMatch(/send the request without operation/);
+        expect(refused.message).not.toContain("tok-3f9a1c7e5b2d");
+        expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+        const dump = await arranged.harness.sql`SELECT * FROM permission_requests`;
+        expect(JSON.stringify(dump)).not.toContain("tok-3f9a1c7e5b2d");
+        expect(await arranged.harness.audit("permission.requested")).toEqual([]);
+      });
+    },
+  );
+
   it("refuses an operation input nested past the bound, and accepts one at the bound", async () => {
     await withPipeline(async (arranged) => {
       const { asker } = await spawnTwoWorkers(arranged);
