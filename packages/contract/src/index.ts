@@ -29,9 +29,10 @@ export {
   type SkillReference,
 } from "@hercule/protocol";
 
+export { API_PREFIX } from "./api-prefix";
+
 export {
   ALL_OPERATIONS,
-  API_PREFIX,
   OPERATIONS,
   canCarrySecrets,
   isOperationId,

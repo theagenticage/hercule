@@ -229,6 +229,39 @@ describe("permission.request", () => {
       expect(user.message).toMatch(/only a session can ask/);
     });
   });
+
+  it("refuses an operation that is neither a contract operation nor a plugin action, and accepts a plugin action", async () => {
+    await withPipeline(async (arranged) => {
+      const { asker } = await spawnTwoWorkers(arranged);
+
+      const refused = await readErrorBody(
+        await requestPermission(
+          arranged,
+          {
+            grant: "task.delete",
+            reason: REASON,
+            operation: { op: "task.obliterate", input: {} },
+          },
+          asker.token,
+        ),
+      );
+      expect(refused.code).toBe("validation");
+      expect(refused.message).toMatch(/There is no operation named "task\.obliterate"/);
+      expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+
+      const accepted = await requestPermission(
+        arranged,
+        {
+          grant: "task.delete",
+          reason: REASON,
+          operation: { op: "github/pr.merge", input: {} },
+        },
+        asker.token,
+      );
+      expect(accepted.status).toBe(200);
+    });
+  });
+
   it("refuses an operation whose input can carry a secret, and names what to send instead", async () => {
     await withPipeline(async (arranged) => {
       const { asker } = await spawnTwoWorkers(arranged);

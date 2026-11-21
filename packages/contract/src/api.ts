@@ -7,7 +7,7 @@
  * second naming scheme.
  */
 import * as HttpApi from "effect/http-api/HttpApi";
-import { API_PREFIX } from "./operations";
+import { API_PREFIX } from "./api-prefix";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
 import { assistant } from "./groups/assistant";

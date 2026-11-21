@@ -17,9 +17,6 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import type { Grant } from "./grants";
 
-/** The prefix every route carries. */
-export const API_PREFIX = "/api/v1";
-
 /**
  * What a caller must hold. A grant always contains a dot, so the three markers
  * can never collide with one:
