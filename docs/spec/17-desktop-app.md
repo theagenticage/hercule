@@ -6675,6 +6675,16 @@ The pane is most of the Inbox chunk's growth. The two block renderers load only 
 - **Screens:** no request, element or idle count moved. Renders and restyled moved by run-to-run noise only (Inbox `open` 562 -> 552 renders, `J x50` +6 renders), as the renderer's code did not change.
 - **Work per streamed token:** none; main logs nothing while the page answers.
 
+**MCP servers** ([#1211](https://github.com/theagenticage/hercule/issues/1211)), measured 2026-11-21 on Linux in the container with `perf:counts`, against a baseline of `main`. The plan is [What MCP servers cost](#what-mcp-servers-cost):
+
+- **Processes:** none added. The screens change only the renderer; main and preload are untouched.
+- **Shell reads:** none added. The Inbox's and Work's `open` steps, which hold every shell read, send the same requests as on `main`.
+- **Screens that already existed:** no Inbox or Work count moved beyond run-to-run noise (Inbox `J x50` restyled +11, Work `open` restyled +3). No request, element or idle count moved.
+- **Settings > MCP servers** (the `mcp` screen of the counts page: 3 servers, one thread that has all three): `open` 45 requests, the app's boot reads included. A server's page then reads 1 (`mcpServer.read`). Opening the thread reads 7: its session, transcript, inputs, subagents (twice) and skills, and `mcpServer.query` once. The `+` menu's MCP row reads `mcpServer.query` once more, which is the `mcpServer` topic's first push landing after the thread's step settled: a thread with servers and its menu read the list twice in all, as the plan says.
+- **Idle:** 0 intervals, 0 timers due within a second and 0 animation frames after the list, a server's page, a thread with three servers and the open submenu. The 3 to 9 timers due later than a second are of the kind the Inbox (7) and Work (6) also hold.
+- **Bundle:** the first screen's JavaScript grows from 530.0 to 532.9 kB gzipped (542,715 -> 545,712 bytes), +2,997 bytes, in the Settings row, the two routes' stubs and the `+` menu's second row. Main's startup file stays at 173.1 kB. No dependency joins.
+- **Not measured:** memory with 15 servers and 10 projects, frame times and launch time.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

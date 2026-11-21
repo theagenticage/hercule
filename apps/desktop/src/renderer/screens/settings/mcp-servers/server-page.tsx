@@ -11,6 +11,9 @@ import type { McpServerView, StatusBand, StatusBandAction } from "@hercule/clien
 import { useAgeWords } from "../../../app/age-clock";
 import { PluginMark } from "../../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "./server-parts";
+// The head's mark is the list's `.profile-mark`. A page opened on its own, from a thread's "Open
+// server", does not load the list's code, so the page loads this file itself.
+import "../permission-profiles/permission-profiles.css";
 import "./mcp-servers.css";
 
 /**

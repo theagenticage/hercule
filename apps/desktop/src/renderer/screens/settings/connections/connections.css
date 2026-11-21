@@ -244,7 +244,10 @@
 /* Under a Connection's name, the account, then a quiet line that leads to
    Settings > MCP servers (#1211). It is no switch. The account has a column
    of its own, so the line after it starts at one place on every row; a
-   longer account ends in an ellipsis, by the table's own rule. */
+   longer account ends in an ellipsis, by the table's own rule. In a window
+   so narrow that the name column is less than the account's column and the
+   line together (about 1300px wide), the account gives way, so the line is
+   never cut off. */
 .connection-list .nm .conn-line {
   display: flex;
   align-items: center;
@@ -252,8 +255,8 @@
   overflow: hidden;
 }
 .connection-list .nm .conn-line > span {
-  flex: none;
-  width: 200px;
+  flex: 0 1 200px;
+  min-width: 0;
 }
 /* The line is text with a state mark before it and a chevron after it, so it
    reads as a link and not as a chip. The mark says on, off or failing at a

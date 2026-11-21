@@ -13,7 +13,7 @@
  * - **Controller reads.** The Work board's and the Inbox's speed tests, in their
  *   counts mode (apps/controller/src/db/speed-counts.testing.ts): the
  *   statements and the reply bytes of each read.
- * - **Screens.** The Inbox and Work, booted on a fake controller in one
+ * - **Screens.** The Inbox, Work and Settings > MCP servers, booted on a fake controller in one
  *   Chromium and driven step by step (scripts/perf-counts-screens.ts): the
  *   requests, elements restyled, React renders and elements of each step, and
  *   what stays pending while idle.
@@ -183,7 +183,7 @@ async function measureScreenCounts(): Promise<{ counts: Record<string, number>; 
   await writeFile(join(outDir, "steps.json"), `${JSON.stringify(screens, null, 2)}\n`);
   const counts: Record<string, number> = {};
   const notes: string[] = ["Every component's renders of each step are in `steps.json`."];
-  for (const [screen, { steps, idle }] of Object.entries(screens)) {
+  for (const [screen, { steps, idle, idleAfterSteps }] of Object.entries(screens)) {
     for (const [step, measured] of steps) {
       for (const metric of ["requests", "restyled", "renders", "rowRenders", "elements"] as const) {
         counts[`screens/${screen}/${step}/${metric}`] = measured[metric];
@@ -199,6 +199,11 @@ async function measureScreenCounts(): Promise<{ counts: Record<string, number>; 
       );
     }
     for (const [metric, value] of Object.entries(idle)) counts[`idle/${screen}/${metric}`] = value;
+    for (const [step, reading] of idleAfterSteps) {
+      for (const [metric, value] of Object.entries(reading)) {
+        counts[`idle/${screen}, after ${step}/${metric}`] = value;
+      }
+    }
   }
   return { counts, notes: notes.join("\n") };
 }

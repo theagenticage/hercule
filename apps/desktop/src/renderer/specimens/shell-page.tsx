@@ -12,6 +12,10 @@
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page;
  * - settings-connections.tsx, which opens Settings > Connections;
+ * - settings-mcp-servers.tsx, which opens Settings > MCP servers, the list or
+ *   a server's page;
+ * - thread-mcp.tsx and draft-mcp.tsx, which open a thread and a Draft Thread
+ *   with MCP servers (`mcp`) and their composers' `+` menus;
  * - settings-providers.tsx, which opens Settings > Providers;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows;
@@ -69,6 +73,7 @@ import type {
   InboxValueQuery,
   IgnoreRuleWithCatches,
   Input,
+  McpServer,
   MemoryDocument,
   MemoryEntry,
   ModelCatalog,
@@ -130,6 +135,8 @@ import {
   localRunnerQuery,
   machineActivityQuery,
   machineRecentActivityQuery,
+  mcpServerQuery,
+  mcpServersQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
   modelProfilesQuery,
@@ -216,6 +223,8 @@ import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_s
 import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as SkillsSettingsRoute } from "../routes/_connected/_shell/settings/skills/index";
 import { Route as SkillSettingsRoute } from "../routes/_connected/_shell/settings/skills/$name";
+import { Route as McpServersSettingsRoute } from "../routes/_connected/_shell/settings/mcp-servers/index";
+import { Route as McpServerSettingsRoute } from "../routes/_connected/_shell/settings/mcp-servers/$id";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as InboxRoute } from "../routes/_connected/_shell/inbox";
 import { Route as WorkRoute } from "../routes/_connected/_shell/work";
@@ -406,6 +415,21 @@ export interface SkillsSettingsRecords {
 }
 
 /**
+ * What the MCP screens read besides the shell's lists, which hold the
+ * projects (each with its servers), the Connections and the plugins: the
+ * servers, and the setting that lists the servers of a thread with no project.
+ * Any screen may be given them: Settings > MCP servers and Settings >
+ * Connections read them, and a thread's or a draft's composer reads them for
+ * its `+` menu and its lines.
+ */
+export interface McpServersRecords {
+  /** Every MCP Server, sorted by name, as `mcpServer.query` returns them. */
+  readonly servers: ReadonlyArray<McpServer>;
+  /** The setting `thread.mcpServerIds`. */
+  readonly defaultServerIds: ReadonlyArray<string>;
+}
+
+/**
  * The records Settings > Appearance reads. The section itself reads none:
  * it reads the Appearance from the bridge.
  */
@@ -506,6 +530,7 @@ interface OpenScreens {
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
+  readonly mcp?: McpServersRecords | undefined;
 }
 
 /**
@@ -680,6 +705,7 @@ const seedQueryCache = (
     run,
     discussions,
     wiki,
+    mcp,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, records.threads);
@@ -815,6 +841,16 @@ const seedQueryCache = (
       const [name, revisionHash] = key.split("/") as [string, string];
       queryClient.setQueryData(skillDiffQuery(client, name, revisionHash).queryKey, diff);
     }
+  }
+  if (mcp !== undefined) {
+    queryClient.setQueryData(mcpServersQuery(client).queryKey, mcp.servers);
+    for (const server of mcp.servers) {
+      queryClient.setQueryData(mcpServerQuery(client, server.id).queryKey, server);
+    }
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC", "thread.mcpServerIds": mcp.defaultServerIds },
+    });
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
@@ -1238,6 +1274,19 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  // The layout route of MCP servers only holds the live topic, which this page never pushes on.
+  const mcpServersSettingsRoute = McpServersSettingsRoute.update({
+    id: "/mcp-servers/",
+    path: "/mcp-servers/",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
+  const mcpServerSettingsRoute = McpServerSettingsRoute.update({
+    id: "/mcp-servers/$id",
+    path: "/mcp-servers/$id",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const appearanceSettingsRoute = AppearanceSettingsRoute.update({
     id: "/appearance",
     path: "/appearance",
@@ -1382,6 +1431,8 @@ const buildRouter = (
           permissionProfileSettingsRoute,
           skillsSettingsRoute,
           skillSettingsRoute,
+          mcpServersSettingsRoute,
+          mcpServerSettingsRoute,
         ]),
       ]),
     ]),
@@ -1516,6 +1567,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   ) {
     throw new Error(
       "Settings > Skills drew no list and no skill. Check the page's console for the error.",
+    );
+  }
+  if (
+    path.startsWith("/settings/mcp-servers") &&
+    document.querySelector(".mcp-list, .mcp-record") === null
+  ) {
+    throw new Error(
+      "Settings > MCP servers drew no list and no server. Check the page's console for the error.",
     );
   }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
@@ -1820,8 +1879,9 @@ export async function mountSidebarSpecimen(
 export async function mountThreadSpecimen(
   records: SidebarRecords,
   thread: ThreadScreenRecords,
+  mcp?: McpServersRecords,
 ): Promise<void> {
-  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread });
+  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread, mcp });
 }
 
 /**
@@ -1838,9 +1898,10 @@ export async function mountThreadSpecimen(
 export async function mountDraftSpecimen(
   records: SidebarRecords,
   draft: DraftScreenRecords,
+  mcp?: McpServersRecords,
 ): Promise<void> {
   for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
-  await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
+  await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft, mcp });
 }
 
 /**
@@ -1923,8 +1984,30 @@ export async function mountAppearanceSettingsSpecimen(
 export async function mountConnectionsSettingsSpecimen(
   records: SidebarRecords,
   settings: ConnectionsSettingsRecords,
+  mcp?: McpServersRecords,
 ): Promise<void> {
-  await mountShellSpecimen(records, "/settings/connections", { connectionsSettings: settings });
+  await mountShellSpecimen(records, "/settings/connections", {
+    connectionsSettings: settings,
+    mcp,
+  });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > MCP servers open at `path`: `/settings/mcp-servers` for the
+ * list, or `/settings/mcp-servers/<id>` for one server's page. The main pane
+ * shows the app's real Settings frame and section, which read the servers and
+ * the default list from `mcp`, and the projects, Connections and plugins from
+ * `records`. Returns once the list or the server is in the document. Fails
+ * when the page has no `#root`, draws no sidebar row, no list and no server,
+ * or tries to read a record the cache does not hold.
+ */
+export async function mountMcpServersSettingsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  mcp: McpServersRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { mcp });
 }
 
 /**

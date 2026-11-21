@@ -1,6 +1,6 @@
 /**
  * The screens part of the counts check (scripts/perf-counts.ts): drives the
- * Inbox and Work on the counts page (src/renderer/specimens/perf-counts.tsx)
+ * Inbox, Work and Settings > MCP servers on the counts page (src/renderer/specimens/perf-counts.tsx)
  * in one Playwright Chromium, step by step, and returns what each step cost.
  *
  * For each step it counts:
@@ -15,6 +15,8 @@
  * After the screen opens and has been quiet for a second, it also counts what
  * would keep the page working while idle: the running intervals, the pending
  * timeouts (within a second, and later), and the pending animation frames.
+ * A screen whose steps open other screens also takes that reading after the
+ * steps that ask for it (`measureIdle`).
  *
  * Every step checks that it did what it is named for, such as a row becoming
  * current or a thing leaving the list, so a step that did nothing cannot pass
@@ -63,6 +65,8 @@ export type IdleCounts = Omit<ProbeReading, "renders">;
 export interface ScreenCounts {
   readonly steps: ReadonlyArray<readonly [string, StepCounts]>;
   readonly idle: IdleCounts;
+  /** The idle reading after each step that asked for one, in order of the steps. */
+  readonly idleAfterSteps: ReadonlyArray<readonly [string, IdleCounts]>;
 }
 
 /** One screen's measurement: what the page should show once open, its row component, and its steps. */
@@ -81,6 +85,11 @@ interface StepDriver {
    * when the page does not settle in time.
    */
   readonly measure: (name: string, act: () => Promise<void>, settled: string) => Promise<void>;
+  /**
+   * Waits one second of quiet and records what stays pending then, as the
+   * idle reading after the step `name`, which has just been measured.
+   */
+  readonly measureIdle: (name: string) => Promise<void>;
 }
 
 /** Reads the counts page's object in the page. */
@@ -286,8 +295,47 @@ const WORK: ScreenPlan = {
   },
 };
 
+/** An expression for the part Settings > MCP servers draws last: a row of the list. */
+const MCP_ROW = `document.querySelector(".mcp-row")`;
+
+/** An expression that is true once the composer's `+` has been replaced by its menu, whose code loads lazily. */
+const MCP_PLUS_LOADED = `document.querySelector(".composer-row button.plus-button[popovertarget]") !== null`;
+
+const MCP: ScreenPlan = {
+  drawn: `${MCP_ROW} !== null && ${PAGE}.isLive()`,
+  rowComponent: "ServerRowView",
+  measureSteps: async ({ page, measure, measureIdle }) => {
+    // The thread with three servers is the sidebar's "Bump the Bun pin".
+    const threadLink = await page.evaluate<string>(
+      `[...document.querySelectorAll('a[href^="/threads/"]')].find((row) => row.textContent.includes("Bump the Bun pin")).getAttribute("href")`,
+    );
+    await measure(
+      "open a server's page",
+      () => page.click(".mcp-row-link"),
+      `document.querySelector(".mcp-record") !== null`,
+    );
+    await measureIdle("open a server's page");
+    await measure(
+      "open a thread with three servers",
+      () => page.click(`a[href="${threadLink}"]`),
+      // The red dot of the `+` needs the servers, which the thread reads when it opens.
+      `${MCP_PLUS_LOADED} && document.querySelector(".plus-dot") !== null`,
+    );
+    await measureIdle("open a thread with three servers");
+    await measure(
+      "open the + menu's MCP servers",
+      async () => {
+        await page.click(".composer-row button.plus-button[popovertarget]");
+        await page.click('[data-item="servers"]');
+      },
+      `document.querySelector(".plus-sub .plus-row") !== null`,
+    );
+    await measureIdle("open the + menu's MCP servers");
+  },
+};
+
 /** The screens the check measures, by the name the page takes in `?screen=`. */
-const SCREENS = { inbox: INBOX, work: WORK } as const;
+const SCREENS = { inbox: INBOX, work: WORK, mcp: MCP } as const;
 
 /**
  * Checks that every counter saw the screen open: it sent requests, React
@@ -323,6 +371,7 @@ async function measureScreen(
   const plan = SCREENS[screen];
   const cdp = await page.context().newCDPSession(page);
   const steps: Array<readonly [string, StepCounts]> = [];
+  const idleAfterSteps: Array<readonly [string, IdleCounts]> = [];
   const measure = async (name: string, act: () => Promise<void>, settled: string) => {
     const requestsBefore =
       name === "open" ? 0 : await callPage(page, (perf) => perf.listRequests().length);
@@ -364,17 +413,23 @@ async function measureScreen(
     plan.drawn,
   );
   // The idle reading: what stays pending once the screen has been quiet for a second.
-  await sleep(1_000);
-  const reading = await callPage(page, (perf) => perf.readProbe());
-  const idle: IdleCounts = {
-    intervals: reading.intervals,
-    shortTimeouts: reading.shortTimeouts,
-    longTimeouts: reading.longTimeouts,
-    frames: reading.frames,
+  const readIdle = async (): Promise<IdleCounts> => {
+    await sleep(1_000);
+    const reading = await callPage(page, (perf) => perf.readProbe());
+    return {
+      intervals: reading.intervals,
+      shortTimeouts: reading.shortTimeouts,
+      longTimeouts: reading.longTimeouts,
+      frames: reading.frames,
+    };
   };
-  await plan.measureSteps({ page, measure });
+  const idle = await readIdle();
+  const measureIdle = async (name: string): Promise<void> => {
+    idleAfterSteps.push([name, await readIdle()]);
+  };
+  await plan.measureSteps({ page, measure, measureIdle });
   await cdp.detach();
-  return { steps, idle };
+  return { steps, idle, idleAfterSteps };
 }
 
 /**
