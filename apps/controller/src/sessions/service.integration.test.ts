@@ -1184,8 +1184,14 @@ const readLeftOut = (sessionId: string) =>
   });
 
 describe("the MCP servers of a session at a start", () => {
-  /** The capabilities of a runner that maps the gateway's entry for the native and the bare harness. */
-  const withMcp = [NATIVE_MCP_HARNESS_ID, BARE_MCP_HARNESS_ID].map(buildMcpServersCapability);
+  /**
+   * The capabilities of a runner that maps the gateway's entry for every
+   * harness that can take it. No runner lists one for the bare harness, which
+   * cannot.
+   */
+  const withMcp = [NATIVE_MCP_HARNESS_ID, OTHER_NATIVE_MCP_HARNESS_ID].map(
+    buildMcpServersCapability,
+  );
 
   it("records why each server cannot be called, and writes one warning that names them", async () => {
     const result = await run(
@@ -1277,7 +1283,7 @@ describe("the MCP servers of a session at a start", () => {
     ]);
   });
 
-  it("leaves out every server for the runner, the harness and the profile, in that order, and writes no warning when nothing is left out", async () => {
+  it("leaves out every server for the harness, the runner and the profile, in that order, and writes no warning when nothing is left out", async () => {
     const result = await run(
       Effect.gen(function* () {
         yield* bootMcpHarnesses;
@@ -1287,7 +1293,7 @@ describe("the MCP servers of a session at a start", () => {
         const list = [{ id: ready!, name: "sentry" }];
         const oldRunner = mintId();
         const tooOld = yield* insertQueuedSessionWithServers(oldRunner, {
-          harnessId: BARE_MCP_HARNESS_ID,
+          harnessId: NATIVE_MCP_HARNESS_ID,
           permissionProfileId: withoutUse,
           servers: list,
         });
@@ -1603,8 +1609,10 @@ describe("MCP servers added to a running session", () => {
         yield* bootMcpHarnesses;
         return {
           tooOld: yield* addServerToRunningSession("old", NATIVE_MCP_HARNESS_ID, []),
+          // A runner that has every capability, and the harness cannot take the entry.
           bare: yield* addServerToRunningSession("bare", BARE_MCP_HARNESS_ID, [
-            buildMcpServersCapability(BARE_MCP_HARNESS_ID),
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+            buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID),
           ]),
           fine: yield* addServerToRunningSession("fine", NATIVE_MCP_HARNESS_ID, [
             buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),

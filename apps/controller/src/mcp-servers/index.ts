@@ -18,6 +18,7 @@ export { runConnectionFollower } from "./follower";
 export {
   buildLeftOutWarning,
   decideLeftOutReason,
+  decideUndeliveredReason,
   type LeftOutServer,
   type StartDelivery,
 } from "./left-out";
