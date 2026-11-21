@@ -14,9 +14,10 @@
  * lives. The gateway stops the calls of a token that ended, so a call here
  * never waits for that itself.
  *
- * A call is admitted by the promotion state, so a freeze waits for it, and a
- * call that arrives while the controller is not serving is refused at once.
- * One rule decides whether a call may go on (`checkBeforeSend`): the caller
+ * The gateway admits a call through the promotion state, so a freeze waits
+ * for it. This file admits nothing around the whole call: each exchange with
+ * the outside server is admitted on its own (`upstream.ts`), and a call that
+ * arrives while the controller is not serving is refused at once. One rule decides whether a call may go on (`checkBeforeSend`): the caller
  * may still make it (`McpToolCall.authorize`), the server and the tool are
  * still there as the call found them, and, last, the controller is serving.
  * It runs before every request that starts an exchange with the outside
@@ -52,7 +53,7 @@ import {
 import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
-import { PromotionState } from "../promotion";
+import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
 import {
   decideCallRefusal,
   describeRefusal,
@@ -104,11 +105,13 @@ export interface McpToolCall {
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
 
-/** How long a whole call may take: opening the upstream session, the refresh, the retry and the tool. */
-export const McpCallDeadline = Context.Reference<Duration.Duration>(
-  "hercule/controller/mcp-servers/McpCallDeadline",
-  { defaultValue: () => Duration.seconds(60) },
-);
+/**
+ * How long a whole call may take: opening the upstream session, the refresh,
+ * the retry and the tool. It ends 15 seconds before a freeze gives up waiting
+ * for running work (`DRAIN_TIMEOUT`), so a call that was admitted just before
+ * a freeze never fails the freeze.
+ */
+const CALL_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(15));
 
 /** What the agent reads when a call could not read the database. */
 const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
@@ -710,30 +713,18 @@ const make = Effect.gen(function* () {
     });
 
   const callTool = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
-    Effect.flatMap(McpCallDeadline, (deadline) =>
-      promotion
-        .admit(
-          Effect.flatMap(
-            Effect.timeoutOption(runCall(input), deadline),
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new McpCallRefused({
-                    reason: "timed-out",
-                    message: "The call took too long. Try again later.",
-                  }),
-                ),
-              onSome: Effect.succeed,
+    Effect.flatMap(
+      Effect.timeoutOption(runCall(input), CALL_DEADLINE),
+      Option.match({
+        onNone: () =>
+          Effect.fail(
+            new McpCallRefused({
+              reason: "timed-out",
+              message: "The call took too long. Try again later.",
             }),
           ),
-        )
-        .pipe(
-          Effect.catch((error) =>
-            error instanceof McpCallRefused
-              ? Effect.fail(error)
-              : Effect.fail(buildNotServingRefusal(error.error.message)),
-          ),
-        ),
+        onSome: Effect.succeed,
+      }),
     );
 
   return { callTool, closeUpstreamSessionsExcept };

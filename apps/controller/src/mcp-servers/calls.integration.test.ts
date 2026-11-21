@@ -30,10 +30,12 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as Fiber from "effect/Fiber";
+import { TestClock } from "effect/testing";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
 import { del } from "../http/testing";
-import { McpCallDeadline, McpCallRefused, type McpToolCall } from "./calls";
+import { DRAIN_TIMEOUT } from "../promotion";
+import { McpCallRefused, type McpToolCall } from "./calls";
 import {
   countNotifications,
   eventually,
@@ -67,24 +69,23 @@ interface ReadyRig extends Rig {
   readonly serverId: string;
   readonly connectionId: string;
   /** Calls a tool as `SCOPE_A`, `echo` unless said, and returns the result of the call. */
-  readonly call: (
+  readonly call: (overrides?: Partial<McpToolCall>) => ReturnType<typeof runCall>;
+  /** Calls as the gateway does: admitted by the promotion state, so a freeze waits for the call. */
+  readonly callAdmitted: (overrides?: Partial<McpToolCall>) => Promise<unknown>;
+  /**
+   * Calls as `call` does, with the fake holding its answer to `method`. Once
+   * the fake has received that request, the call's clock moves to just before
+   * a freeze would give up waiting for the call. The held answer is let go
+   * after the call ended.
+   */
+  readonly callPastDeadline: (
+    method: string,
     overrides?: Partial<McpToolCall>,
-    deadline?: Duration.Duration,
   ) => ReturnType<typeof runCall>;
 }
 
-const runCall = (rig: Rig, input: McpToolCall, deadline?: Duration.Duration) =>
-  Effect.runPromise(
-    Effect.result(
-      rig.controller.harness.mcpServerCalls
-        .callTool(input)
-        .pipe(
-          deadline === undefined
-            ? (effect) => effect
-            : Effect.provideService(McpCallDeadline, deadline),
-        ),
-    ),
-  );
+const runCall = (rig: Rig, input: McpToolCall) =>
+  Effect.runPromise(Effect.result(rig.controller.harness.mcpServerCalls.callTool(input)));
 
 /**
  * Starts the rig, creates the server and waits until it is `ready`. The fake
@@ -100,23 +101,54 @@ const withReadyServer = (
       const connectionId = await rig.connect();
       const server = await createServer(rig.controller, { connectionId });
       expect((await waitForResult(rig.controller)).status).toBe("ready");
+      const buildCall = (overrides: Partial<McpToolCall> = {}): McpToolCall => ({
+        upstreamScope: SCOPE_A,
+        serverId: server.id,
+        tool: "echo",
+        arguments: { text: "hi" },
+        authorize: Effect.void,
+        ...overrides,
+      });
       await body({
         ...rig,
         serverId: server.id,
         connectionId,
-        call: (overrides = {}, deadline) =>
-          runCall(
-            rig,
-            {
-              upstreamScope: SCOPE_A,
-              serverId: server.id,
-              tool: "echo",
-              arguments: { text: "hi" },
-              authorize: Effect.void,
-              ...overrides,
-            },
-            deadline,
+        call: (overrides) => runCall(rig, buildCall(overrides)),
+        callAdmitted: (overrides) =>
+          Effect.runPromise(
+            Effect.result(
+              rig.controller.harness.promotion.admit(
+                rig.controller.harness.mcpServerCalls.callTool(buildCall(overrides)),
+              ),
+            ),
           ),
+        callPastDeadline: async (method, overrides) => {
+          const received = requestsOf(rig.fake, method).length;
+          const release = rig.fake.hold(method);
+          const calling = Effect.runPromise(
+            Effect.gen(function* () {
+              const fiber = yield* Effect.forkChild(
+                Effect.result(rig.controller.harness.mcpServerCalls.callTool(buildCall(overrides))),
+              );
+              yield* Effect.promise(() =>
+                eventually(
+                  async () => requestsOf(rig.fake, method).length,
+                  (count) => count > received,
+                ),
+              );
+              // Shortly before a freeze would give up waiting for the call: the
+              // call has ended by then. The client's own 60 second limit on a
+              // handshake is the same as the freeze's, so it has not fired.
+              yield* TestClock.adjust(Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(5)));
+              return yield* Fiber.join(fiber);
+            }).pipe(Effect.provide(TestClock.layer())),
+          );
+          try {
+            return await calling;
+          } finally {
+            release();
+          }
+        },
       });
     },
     {
@@ -372,11 +404,8 @@ describe("a call", () => {
   });
 
   it("is refused as timed out when the whole call takes longer than its deadline, and changes no status", async () => {
-    await withReadyServer(async ({ controller, fake, call }) => {
-      const release = fake.hold("tools/call");
-
-      const result = await call({}, Duration.millis(300));
-      release();
+    await withReadyServer(async ({ controller, callPastDeadline }) => {
+      const result = await callPastDeadline("tools/call");
 
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
       expect((await readRow(controller)).status).toBe("ready");
@@ -1196,7 +1225,7 @@ describe("a reply to a request of the server", () => {
               : undefined;
         const repliesBefore = requestsOf(fake, "?").length;
         const release = fake.hold("tools/call");
-        const pending = call({}, Duration.seconds(5));
+        const pending = call({});
         await eventually(
           () => Promise.resolve(requestsOf(fake, "tools/call").length),
           (count) => count === 1,
@@ -1224,7 +1253,7 @@ describe("a reply to a request of the server", () => {
     "sends the stored token and starts no refresh when the token went stale while the tool ran (controller frozen: %s)",
     async (freezes) => {
       await withReadyServer(
-        async ({ controller, connectionId, fake, provider, call }) => {
+        async ({ controller, connectionId, fake, provider, callAdmitted }) => {
           const { promotion } = controller.harness;
           const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
           provider.answers.token = refreshedToken;
@@ -1236,7 +1265,7 @@ describe("a reply to a request of the server", () => {
                 : undefined;
           const repliesBefore = requestsOf(fake, "?").length;
           const release = fake.hold("tools/call");
-          const pending = call({}, Duration.seconds(5));
+          const pending = callAdmitted();
           await eventually(
             () => Promise.resolve(requestsOf(fake, "tools/call").length),
             (count) => count === 1,
@@ -1658,17 +1687,15 @@ describe("closing upstream MCP sessions", () => {
 
   it("cancels an opening that no call waits for any more, while its token lives", async () => {
     await withReadyServer(
-      async ({ fake, call }) => {
+      async ({ fake, call, callPastDeadline }) => {
         const before = {
           initialize: requestsOf(fake, "initialize").length,
           initialized: requestsOf(fake, "notifications/initialized").length,
           ended: endedSessions(fake).length,
         };
-        const release = fake.hold("initialize");
-        const abandoned = await call({}, Duration.millis(200));
+        const abandoned = await callPastDeadline("initialize");
         expect(abandoned).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
 
-        release();
         // A cancelled opening never goes on to send what follows the handshake.
         await sleep(300);
 

@@ -176,7 +176,7 @@ A tool is named `<server name>__<tool name>`. The harness puts the gateway's own
 2. The session's profile must hold `mcp.use`.
 3. The server must be `ready`. Else the call is refused with the reason.
 4. The gateway takes a fresh credential ([section 5.1](#51-a-plugin-servers-credential)), sends the call upstream ([section 3.10](#310-upstream-sessions)) and returns the server's answer.
-5. A call with no answer within 60 seconds is refused as a timeout. The 60 seconds cover the whole call: opening the upstream MCP session, the refresh, the retry and the tool.
+5. A call with no answer within 45 seconds is refused as a timeout. The 45 seconds cover the whole call: opening the upstream MCP session, the refresh, the retry and the tool. *(Amended 2026-11-21, [#1208](https://github.com/theagenticage/hercule/issues/1208).)* The limit was 60 seconds, the same as the time a promotion freeze waits for running work. A call admitted just before a freeze could then run past it and fail the freeze, which uses up the promotion token. The limit is now the freeze's 60 seconds less 15, so every call has ended, or has been refused, before a freeze gives up. A refresh that has started still runs to its own end, up to its own 30-second timeout, and the freeze waits for it as it does for any refresh.
 
 Answers have a size cap. Its size is an implementer's choice ([./16-open-items.md](./16-open-items.md), class B); [#1208](https://github.com/theagenticage/hercule/issues/1208) states it here.
 
