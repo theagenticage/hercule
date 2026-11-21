@@ -233,7 +233,7 @@ The gateway also sends `list_changed` once when a stream opens, so a change betw
 What each harness does with it:
 
 - **A server taken away** stops working at once on every harness, because the call is refused.
-- **A server added** is usable at once on Claude Code. On Codex it is usable only with Codex's `mcp_tool_list_changed` feature, and until then from the next start. On pi it waits for [#1212](https://github.com/theagenticage/hercule/issues/1212). *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* On Codex 0.164.0 or newer the adapter turns the feature on, so it is usable at once: from the next turn, or within a turn before the next model request.
+- **A server added** is usable at once on Claude Code. On Codex it is usable only with Codex's `mcp_tool_list_changed` feature, and until then from the next start. On pi it waits for [#1212](https://github.com/theagenticage/hercule/issues/1212). *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* On Codex 0.164.0 or newer the adapter turns the feature on, so it is usable at once: from the next turn, or within a turn before the next model request. With Hercule's Codex floor at 0.171.0, that is every Codex.
 
 ~~**Open:** Codex reads a changed tool list only with its `mcp_tool_list_changed` feature, which is under development and off by default. [#1209](https://github.com/theagenticage/hercule/issues/1209) turns it on and finds out whether the config of `thread/start` can set it. If it cannot, #1209 adds a harness capability so the composer can say that a server added now is usable from the next start.~~ *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* **Resolved:** the `config` of `thread/start` sets it, and the Codex adapter turns it on for Codex 0.164.0 or newer, the first release that has it. A Codex thread then lists again like Claude Code, so no harness capability is needed. An older Codex gets one `runtime.warning` at the thread's start, saying that a server added while it runs is usable from its next start ([./06-providers.md](./06-providers.md#102-codex-app-server)).
 
@@ -347,7 +347,7 @@ The live run checked that the call after the restart worked. It did not record t
 
 - `http/mcp-codex.integration.test.ts` starts `codex app-server --strict-config` with the adapter's own `buildMcpServerConfig`, against the real gateway through the recording proxy.
 - `harnesses/codex/adapter-mcp.integration.test.ts` drives the adapter's own `startSession` against a fake MCP server. It covers the approvals per Access Mode, the item and its result, the start, resume and fork `config`, a repository that configures the gateway's name (a fresh Harness Home included), images in a result and the token on disk.
-- Neither file runs in CI, because no CI job installs Codex. They pass on Codex 0.154.0, 0.169.0 and 0.171.0 on a developer's machine.
+- Neither file runs in CI, because no CI job installs Codex. They pass on Codex 0.171.0, Hercule's floor, on a developer's machine; before the floor was raised they also passed on 0.154.0 and 0.169.0.
 
 What the tests assert:
 
@@ -356,7 +356,7 @@ What the tests assert:
 - **A server taken away.** With `list_changed` held back by the proxy, so that Codex still holds the old name, a call to the removed tool reaches the gateway, Codex reports it `failed`, and the outside server gets no call.
 - **A 404 for a forgotten MCP session** (`DELETE /mcp`, as for Claude Code): the next `tools/call` gets 404. Codex opens a new MCP session (`initialize`) and sends the same call again on it before any `tools/list`, and the call succeeds.
 - **Resume and fork** are asserted by the adapter's file: each carries the same `config`, and the new app-server process connects (06 §10.2: without it, nothing connects).
-- **300 tools** are offered directly in the `mcp__tools` namespace by 0.169.0 and 0.171.0, and deferred behind tool search by 0.154.0, whose stand-in then searches and calls a returned tool. One reader of the model request covers both shapes. The file passes on 0.154.0, 0.169.0 and 0.171.0; the test of a server added to a running thread is skipped below 0.164.0.
+- **300 tools** are offered either directly in the `mcp__tools` namespace or behind tool search, as the model's data decides (0.154.0 deferred them; 0.169.0 and 0.171.0 offered them directly here). One reader of the model request covers both shapes, and where they are deferred the stand-in searches and calls a returned tool.
 
 What was observed in probes, and no test asserts:
 
@@ -554,7 +554,7 @@ Sentry kills the old access token the moment it is refreshed. The gateway never 
 1. The user changes the Thread's list, or switches a server on or off, or a daily check finds a new tool list.
 2. After the commit, the gateway sends `notifications/tools/list_changed` on the open stream of each session the change touches ([section 3.7](#37-list-changes)).
 3. The harness lists again and the gateway answers from the stored lists. A server taken away is already refused at the next call.
-4. A Codex Thread without the `mcp_tool_list_changed` feature does not list again. A server added now is usable from the next start. *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* That is a Codex older than 0.164.0. Its Thread was warned at its start.
+4. ~~A Codex Thread without the `mcp_tool_list_changed` feature does not list again. A server added now is usable from the next start.~~ *(Amended 2026-11-21, [#1209](https://github.com/theagenticage/hercule/issues/1209).)* That is a Codex older than 0.164.0. Its Thread was warned at its start.
 
 ## Post-v1
 
