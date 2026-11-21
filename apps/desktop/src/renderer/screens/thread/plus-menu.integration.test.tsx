@@ -327,6 +327,27 @@ describe("the + menu on a Draft Thread", () => {
       ).toEqual([LINEAR_ID, SENTRY_WORK_ID]);
     });
   });
+
+  it("sends a pick without the server deleted since, once the servers are read, though the user changed nothing", async () => {
+    const { context, calls } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [LINEAR, SENTRY_WORK],
+      projects: [webshopWith([]), OPS],
+    });
+    const key = buildDraftKey(WEBSHOP.id, null);
+    act(() => {
+      context.controller!.pendingSubmissions.writePicks(key, {
+        mcpServers: { projectId: WEBSHOP.id, mcpServerIds: [LINEAR_ID, DELETED_ID] },
+      });
+    });
+    await openServersSubmenu();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).toMatchObject({ mcpServerIds: [LINEAR_ID] });
+  });
 });
 
 describe("the + menu on a started thread", () => {
@@ -359,6 +380,61 @@ describe("the + menu on a started thread", () => {
     });
     expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
     expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+  });
+
+  it("keeps the guard when the menu is closed and opened again while the write runs", async () => {
+    const thread = threadWith([LINEAR]);
+    const held = holdAnswer();
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      holdWrite: held.handler,
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    });
+
+    toggleMenu(popover, "closed");
+    await openServersSubmenu();
+    fireEvent.click(findSwitch("linear"));
+
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+    held.answer({ body: {} });
+    await waitFor(() => {
+      expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+  });
+
+  it("reads the servers again when the controller refuses the list with validation", async () => {
+    const thread = threadWith([LINEAR]);
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [`PATCH /api/v1/sessions/${thread.session.id}`]: {
+          status: 400,
+          body: {
+            error: {
+              code: "validation",
+              message: "The list names a server that no longer exists.",
+              details: { issues: [] },
+            },
+          },
+        },
+      },
+    });
+    const popover = await openServersSubmenu();
+    const readsBefore = findCalls(calls, "GET", SERVER_LIST).length;
+
+    fireEvent.click(findSwitch("sentry"));
+
+    await within(popover).findByRole("alert", { hidden: true });
+    await waitFor(() => {
+      expect(findCalls(calls, "GET", SERVER_LIST).length).toBeGreaterThan(readsBefore);
+    });
   });
 
   it("swaps the account of a name in one write", async () => {

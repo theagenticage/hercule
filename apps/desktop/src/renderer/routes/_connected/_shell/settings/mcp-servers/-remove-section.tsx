@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { formatNameList, readErrorMessage } from "@hercule/client-core";
+import { formatNameList, isNotFound, readErrorMessage } from "@hercule/client-core";
 import type { McpServerView } from "@hercule/client-core/mcp-servers";
 import {
   mcpServerQuery,
@@ -19,8 +19,10 @@ import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
  *
  * Once the controller has deleted the server, the page goes to the list. The
  * server's own read is then dropped, so a server that has this id can never
- * show the deleted one first. The projects and the default list, which the
- * controller has rewritten without the server, are read again.
+ * show the deleted one first. The same happens when the controller answers
+ * `not_found`, because another client deleted the server first: the page
+ * leaves rather than keep a server that is gone. The projects and the default
+ * list, which the controller has rewritten without the server, are read again.
  */
 export function RemoveSection({ view }: { readonly view: McpServerView }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -30,14 +32,18 @@ export function RemoveSection({ view }: { readonly view: McpServerView }): JSX.E
   const [confirming, setConfirming] = useState(false);
   const { server, connection } = view;
   const written = view.account === undefined ? server.name : `${server.name} ${view.account}`;
+  const leaveDeletedServer = async (): Promise<void> => {
+    dialogRef.current?.close();
+    // The page leaves before its read is dropped: the page reads the
+    // server, and would otherwise read it again and fail.
+    await navigate({ to: "/settings/mcp-servers" });
+    queryClient.removeQueries({ queryKey: mcpServerQuery(client, server.id).queryKey });
+  };
   const remove = useMutation({
     mutationFn: () => client.mcpServer.delete({ params: { id: server.id } }),
-    onSuccess: async () => {
-      dialogRef.current?.close();
-      // The page leaves before its read is dropped: the page reads the
-      // server, and would otherwise read it again and fail.
-      await navigate({ to: "/settings/mcp-servers" });
-      queryClient.removeQueries({ queryKey: mcpServerQuery(client, server.id).queryKey });
+    onSuccess: leaveDeletedServer,
+    onError: async (error) => {
+      if (isNotFound(error)) await leaveDeletedServer();
     },
     // The refusal may mean the server is already gone, so the list is out of date.
     onSettled: async () => {

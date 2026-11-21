@@ -42,14 +42,27 @@ describe("chooseNamedServer", () => {
     expect(chooseNamedServer(["s-work", "s-linear"], VIEWS, "sentry", null)).toEqual(["s-linear"]);
   });
 
-  it("drops ids no view knows, such as a server deleted since", () => {
-    expect(chooseNamedServer(["s-gone", "s-linear"], VIEWS, "sentry", "s-work")).toEqual([
+  it("keeps ids no view knows, so a write never erases a server the catalogue has not read yet", () => {
+    expect(chooseNamedServer(["s-new", "s-linear"], VIEWS, "sentry", "s-work")).toEqual([
+      "s-new",
       "s-linear",
       "s-work",
     ]);
+    expect(chooseNamedServer(["s-new", "s-work"], VIEWS, "sentry", null)).toEqual(["s-new"]);
+    expect(chooseNamedServer(["s-new", "s-work"], VIEWS, "sentry", "s-hobby")).toEqual([
+      "s-new",
+      "s-hobby",
+    ]);
   });
 
-  it("leaves the name off when the server is not one of that name", () => {
-    expect(chooseNamedServer(["s-linear"], VIEWS, "sentry", "s-linear")).toEqual(["s-linear"]);
+  it("returns the list unchanged, not switched off, when the server is not one of that name", () => {
+    expect(chooseNamedServer(["s-work"], VIEWS, "sentry", "s-linear")).toEqual(["s-work"]);
+    expect(chooseNamedServer(["s-work"], VIEWS, "sentry", "s-gone")).toEqual(["s-work"]);
+  });
+
+  it("never holds two servers of one name, even from a list that already did", () => {
+    expect(
+      chooseNamedServer(["s-work", "s-linear", "s-hobby"], VIEWS, "sentry", "s-hobby"),
+    ).toEqual(["s-hobby", "s-linear"]);
   });
 });

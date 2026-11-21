@@ -53,8 +53,8 @@ export function ThreadServersMenu({
   readonly refusal: string | null;
   /** The user switched the server of `name`: `serverId` on, `null` off. */
   readonly onChoose: (name: string, serverId: string | null) => void;
-  /** The user asked to go back to `mcpServerIds`, the list the thread started from. */
-  readonly onReset: (mcpServerIds: readonly string[]) => void;
+  /** The user asked to go back to the list the thread started from. The caller resolves that list when this is called. */
+  readonly onReset: () => void;
   readonly onOpenPicker: () => void;
 }): JSX.Element {
   const [order] = useState(() => orderMenuNames(views, mcpServerIds));
@@ -163,7 +163,7 @@ export function ThreadServersMenu({
               aria-disabled={writing}
               className="-ml-2 px-2 py-0.5 text-fine"
               onClick={() => {
-                if (menu.reset !== null) onReset(menu.reset.mcpServerIds);
+                if (!writing) onReset();
               }}
             >
               {menu.reset.label}

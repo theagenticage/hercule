@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
 import {
@@ -8,6 +8,7 @@ import {
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
 import { Switch } from "@hercule/ui";
+import { useKeyedWrite } from "../../../../app/use-keyed-write";
 import { McpServerStatusWord } from "../../../../screens/mcp-server-status";
 import { ProviderMark } from "../../../../screens/provider-mark";
 
@@ -19,8 +20,8 @@ import { ProviderMark } from "../../../../screens/provider-mark";
  * - A server with a record opens its page when the row is pressed.
  * - A server with no record yet has no page. Its switch creates the record,
  *   and a switch that is already on writes `enabled` instead.
- * - The switch ignores clicks while its write runs, and a refusal shows under
- *   the row.
+ * - The switch ignores clicks while its write runs, even if the row was drawn
+ *   again meanwhile, and a refusal shows under the row.
  */
 export function ServerRow({
   client,
@@ -34,8 +35,13 @@ export function ServerRow({
   const queryClient = useQueryClient();
   const { view } = row;
 
-  const offer = useMutation({
-    mutationFn: async (enabled: boolean) => {
+  const offer = useKeyedWrite<boolean>({
+    // A server with no record yet is told apart by the Connection and the contribution it would be made for.
+    mutationKey: [
+      "mcp-server-switch",
+      view?.server.id ?? `${row.offer.contributionId}:${row.connection.id}`,
+    ],
+    mutationFn: async (enabled) => {
       if (view === null) {
         await client.mcpServer.create({
           payload: {
@@ -110,17 +116,17 @@ export function ServerRow({
         <span className="shrink-0 px-2.5">
           <Switch
             aria-label={`Offer ${row.name} ${row.connection.label} to threads`}
-            aria-disabled={offer.isPending}
+            aria-disabled={offer.writing}
             checked={view?.server.enabled ?? false}
             onCheckedChange={(enabled) => {
-              offer.mutate(enabled);
+              offer.write(enabled);
             }}
           />
         </span>
       </div>
-      {offer.error === null ? null : (
+      {offer.refusal === null ? null : (
         <p className="px-2.5 pb-1.5 text-fine text-fail" role="alert">
-          {readErrorMessage(offer.error)}
+          {readErrorMessage(offer.refusal)}
         </p>
       )}
     </li>

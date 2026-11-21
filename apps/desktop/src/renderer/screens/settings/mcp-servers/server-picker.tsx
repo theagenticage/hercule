@@ -31,7 +31,8 @@ import "./mcp-servers.css";
  *   account for a name that two accounts share. The rows keep the order the
  *   dialog opened with, so no row jumps while it is used.
  * - The foot holds `foot`, the quiet button `reset` that goes back to the
- *   list the list started from (left out with `null`), and Done.
+ *   list the list started from (left out with `null`; `readIds` returns that
+ *   list when the button is pressed), and Done.
  * - Each change calls `onChange` with a function that returns the new list
  *   for the list as it is when the change is written. The result never holds
  *   two servers of one name, so the caller applies the choice to its current
@@ -61,7 +62,8 @@ export function ServerPickerDialog({
   readonly foot: string;
   readonly reset: {
     readonly label: string;
-    readonly mcpServerIds: readonly string[];
+    /** Returns the list to go back to, read when the user presses the button. */
+    readonly readIds: () => readonly string[];
   } | null;
   readonly busy: boolean;
   readonly error: string | null;
@@ -181,7 +183,7 @@ export function ServerPickerDialog({
             className="btn btn--quiet"
             aria-disabled={busy}
             onClick={() => {
-              if (!busy) onChange(() => reset.mcpServerIds);
+              if (!busy) onChange(reset.readIds);
             }}
           >
             {reset.label}

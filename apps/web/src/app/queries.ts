@@ -311,11 +311,19 @@ export const pluginsQuery = (client: HerculeClient) =>
  * Reads every MCP Server. A user has few, so the contract does not page them.
  * The record carries no joined data: the screens join it with the Connections
  * and the plugins where they draw it.
+ *
+ * The read is never stale by age: a screen that needs the servers holds the
+ * live topic `mcpServer`, whose first push and later pushes read them again.
+ * So a second component that mounts, or a window that gains focus, does not
+ * start another read.
  */
 export const mcpServersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.mcpServers(),
     queryFn: () => client.mcpServer.query(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
 /**

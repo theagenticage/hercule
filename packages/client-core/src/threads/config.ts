@@ -18,7 +18,6 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import type { ShelfItem } from "../attachments/shelf";
-import type { McpServerView } from "../mcp-servers/views";
 import type { ThreadDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";
 
@@ -115,11 +114,12 @@ export interface ThreadCatalogs {
   readonly runners: readonly Runner[];
   readonly thisMacRunnerId: string | null;
   /**
-   * The MCP Servers with their Connections, as `buildMcpServerViews` joins
-   * them. Absent until the catalogue has been read, which is never needed
-   * while the draft's list is untouched.
+   * The ids of the MCP Servers the controller knows. Absent until the list
+   * of servers has been read, which is never needed while the draft's list is
+   * untouched. Ids only, so an app can pass its cached server list without
+   * joining the servers with their Connections.
    */
-  readonly mcpServerViews?: readonly McpServerView[];
+  readonly knownMcpServerIds?: ReadonlySet<string>;
   readonly projects?: readonly Project[];
   readonly resources?: readonly Resource[];
   readonly workspaces?: readonly Workspace[];

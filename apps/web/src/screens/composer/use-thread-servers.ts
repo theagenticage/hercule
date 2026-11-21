@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  queryKeys,
   readErrorMessage,
   type HerculeClient,
   type Live,
@@ -8,6 +9,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import {
+  buildMcpServerViews,
   chooseNamedServer,
   decideThreadStartList,
   describeThreadServersRow,
@@ -18,31 +20,79 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import type { Project } from "@hercule/contract";
 import { useLiveInvalidation } from "../../app/live-invalidation";
-import { projectQuery, sessionQuery } from "../../app/queries";
-import { useMcpServerViews } from "../use-mcp-server-views";
+import {
+  connectionsQuery,
+  mcpServersQuery,
+  pluginsQuery,
+  projectQuery,
+  projectsQuery,
+  sessionQuery,
+  settingsQuery,
+} from "../../app/queries";
+import { isValidationRefusal, useKeyedWrite } from "../../app/use-keyed-write";
+import type { ListUpdate } from "../mcp-server-picker";
+import { useKnownMcpServerIds, useMcpServerViews } from "../use-mcp-server-views";
 
 /** The thread's MCP Servers as the composer's menu, submenu and picker use them. */
 export interface ThreadServers {
-  /** Every MCP Server, or `undefined` while the servers are not read yet. A thread with no server reads them only when a menu or the picker opens. */
+  /** Every MCP Server, or `undefined` while the servers are not read yet. A thread with no server reads them only when its MCP row or the picker opens. */
   readonly views: readonly McpServerView[] | undefined;
-  /** Why the servers could not be read, or `null`. */
+  /** Why the servers or the thread's project could not be read, or `null`. */
   readonly readFailure: string | null;
   /** The thread's list: a draft's pick or its start list, a started thread's `Session.mcpServers`. */
   readonly mcpServerIds: readonly string[];
-  /** Where the list started. `undefined` while `views` is. */
+  /** Where the list started. `undefined` while the servers or the thread's project are not read yet. */
   readonly start: ThreadStartList | undefined;
   /** The words for the menu's "MCP servers" row. Until `views` is read they show the count alone. */
   readonly row: ThreadServersRow;
-  /** Whether a write of a started thread's list is in flight. The controls ignore clicks meanwhile. */
+  /** Whether a write of the started thread's list is in flight, whichever control started it. The controls ignore clicks meanwhile. */
   readonly writing: boolean;
-  /** Why the last write was refused, or `null`. */
+  /** Why the last write was refused, or `null`. It stays until the next write or `clearRefusal`. */
   readonly refusal: string | null;
   /** Switches the server of `name` that the thread has: `serverId` on, `null` off, another account swaps. */
   readonly chooseServer: (name: string, serverId: string | null) => void;
-  /** Replaces the whole list, for the picker and the button that goes back to the start list. */
-  readonly setList: (mcpServerIds: readonly string[]) => void;
+  /** Changes the list, for the picker. `update` is applied to the list as it is when the change is made. */
+  readonly changeList: (update: ListUpdate) => void;
+  /** Goes back to the list the thread started from, resolved when the button is pressed. */
+  readonly resetToStart: () => void;
   readonly clearRefusal: () => void;
 }
+
+/**
+ * Returns the start list of a thread in `projectId` from what the query cache
+ * holds right now, or `undefined` when a read it needs is not there. Pressing
+ * the reset button uses it, so the list that comes back is the project's or
+ * the default list as they are at that moment, not as they were when the menu
+ * was drawn.
+ */
+const readStartListNow = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  projectId: string | null,
+): ThreadStartList | undefined => {
+  const settings = queryClient.getQueryData(settingsQuery(client).queryKey);
+  const servers = queryClient.getQueryData(mcpServersQuery(client).queryKey);
+  const connections = queryClient.getQueryData(connectionsQuery(client).queryKey);
+  const plugins = queryClient.getQueryData(pluginsQuery(client).queryKey);
+  if (settings === undefined || servers === undefined) return undefined;
+  if (connections === undefined || plugins === undefined) return undefined;
+  const listed = queryClient.getQueryData(projectsQuery(client).queryKey)?.items ?? [];
+  const addressed =
+    projectId === null
+      ? undefined
+      : queryClient.getQueryData(projectQuery(client, projectId).queryKey);
+  const projects =
+    addressed === undefined || listed.some((each) => each.id === addressed.id)
+      ? listed
+      : [...listed, addressed];
+  if (projectId !== null && !projects.some((each) => each.id === projectId)) return undefined;
+  return decideThreadStartList(
+    projectId,
+    projects,
+    settings.user["thread.mcpServerIds"] ?? [],
+    buildMcpServerViews(servers.items, connections.items, plugins),
+  );
+};
 
 /**
  * Reads and writes the MCP Servers of the thread the composer belongs to.
@@ -51,15 +101,18 @@ export interface ThreadServers {
  * - A Draft Thread keeps its list as a pick, with the project the pick was
  *   made under (`recordThreadChoice`). It starts as its project's list, or
  *   the default list.
- * - A started thread writes `session.update` at once. The new list is
- *   computed when the write starts, from the session in the cache, so two
- *   quick changes never overwrite each other. One write runs at a time, and
- *   `writing` stays true until the session has been read again. A refusal is
- *   `refusal`, and the list stays as the controller holds it.
+ * - A started thread writes `session.update` at once. Each change is a
+ *   function of the list, applied to the session in the cache when the write
+ *   starts, so two quick changes never overwrite each other. One write runs
+ *   at a time for the session, whichever menu or picker started it, and the
+ *   guard survives closing and opening them: `writing` stays true until the
+ *   session has been read again. A refusal is `refusal`, and the list stays
+ *   as the controller holds it. A refusal as invalid also reads the servers
+ *   again, because it can mean a server was deleted.
  *
  * The servers are read only when they are needed: the list is not empty, or
- * `wanted` says a menu or the picker is open. The live topic `mcpServer` is
- * held for as long as they are needed.
+ * `wanted` says the MCP row or the picker is open. The live topic `mcpServer`
+ * is held for as long as they are needed.
  */
 export const useThreadServers = ({
   client,
@@ -82,22 +135,30 @@ export const useThreadServers = ({
   readonly defaultIds: readonly string[];
   readonly picks: ThreadPicks;
   readonly recordThreadChoice: (choice: ThreadChoice) => void;
-  /** Whether the `+` menu or the picker is open. */
+  /** Whether the MCP row of the `+` menu or the picker is open. */
   readonly wanted: boolean;
 }): ThreadServers => {
   const queryClient = useQueryClient();
   const session = thread.kind === "active" ? thread.session : null;
-  // The project list stops at its first page, so a draft's project may be
-  // missing from it. The draft's loader has read that project on its own, and
-  // this reads only what is already in the cache.
-  const addressedProject = useQuery({
+  // The project list stops at its first page, so the thread's project may be
+  // missing from it. A draft's loader has read that project by its id, so
+  // there this reads only the cache. A started thread reads it when the menu
+  // needs the start list.
+  const missingFromList =
+    projectId !== null && !listedProjects.some((each) => each.id === projectId);
+  const addressed = useQuery({
     ...projectQuery(client, projectId ?? ""),
-    enabled: false,
-  }).data;
+    enabled: missingFromList && session !== null && wanted,
+  });
   const projects =
-    addressedProject === undefined || listedProjects.some((each) => each.id === addressedProject.id)
+    addressed.data === undefined || !missingFromList
       ? listedProjects
-      : [...listedProjects, addressedProject];
+      : [...listedProjects, addressed.data];
+  const projectKnown = projectId === null || projects.some((each) => each.id === projectId);
+
+  // A draft's pick is checked against the servers the controller knows when it
+  // is sent, from the cached list alone.
+  const knownServerIds = useKnownMcpServerIds(client);
 
   // Before the servers are read, the list cannot be checked against them, so
   // these ids are as stored. They only decide whether a read is needed. The
@@ -113,54 +174,76 @@ export const useThreadServers = ({
   const { views, failure } = useMcpServerViews(client, reads);
 
   const start =
-    views === undefined ? undefined : decideThreadStartList(projectId, projects, defaultIds, views);
+    views === undefined || !projectKnown
+      ? undefined
+      : decideThreadStartList(projectId, projects, defaultIds, views);
   const mcpServerIds =
     session === null
-      ? (resolveDraftMcpServerIds(picks, projectId, views) ?? start?.mcpServerIds ?? storedIds)
+      ? (resolveDraftMcpServerIds(picks, projectId, knownServerIds) ??
+        start?.mcpServerIds ??
+        storedIds)
       : storedIds;
 
-  const write = useMutation({
-    mutationFn: async (choose: (current: readonly string[]) => readonly string[]) => {
-      // Only a started thread writes, and `change` only calls this for one.
-      const sessionId = session!.id;
+  const sessionId = session?.id ?? "";
+  const write = useKeyedWrite<ListUpdate>({
+    mutationKey: ["mcp-list", "session", sessionId],
+    mutationFn: async (update) => {
       const cached = queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
       if (cached === undefined)
         throw new Error("This thread is not loaded, so its list cannot change.");
       await client.session.update({
         params: { id: sessionId },
-        payload: { mcpServerIds: choose(cached.mcpServers.map((server) => server.mcpServerId)) },
+        payload: { mcpServerIds: update(cached.mcpServers.map((server) => server.mcpServerId)) },
       });
     },
     // The session is read again after a refusal too, and the mutation stays
     // pending until that read ends, so a control that disables itself while
     // pending never shows the old list between the write and its refresh.
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: sessionQuery(client, session!.id).queryKey }),
+    onSettled: (error) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: sessionQuery(client, sessionId).queryKey }),
+        // An invalid list can name a server that was deleted since the servers were read.
+        isValidationRefusal(error)
+          ? queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers() })
+          : undefined,
+      ]),
   });
 
-  const change = (choose: (current: readonly string[]) => readonly string[]): void => {
+  const changeList = (update: ListUpdate): void => {
     if (session === null) {
-      recordThreadChoice({ kind: "mcpServers", projectId, mcpServerIds: choose(mcpServerIds) });
+      recordThreadChoice({ kind: "mcpServers", projectId, mcpServerIds: update(mcpServerIds) });
       return;
     }
-    if (!write.isPending) write.mutate(choose);
+    write.write(update);
   };
 
   return {
     views,
-    readFailure: failure === null ? null : readErrorMessage(failure),
+    readFailure:
+      failure !== null
+        ? readErrorMessage(failure)
+        : addressed.error === null
+          ? null
+          : readErrorMessage(addressed.error),
     mcpServerIds,
     start,
     row: describeThreadServersRow(views ?? [], mcpServerIds),
-    writing: write.isPending,
-    refusal: write.error === null ? null : readErrorMessage(write.error),
+    writing: write.writing,
+    refusal: write.refusal === null ? null : readErrorMessage(write.refusal),
     chooseServer: (name, serverId) => {
       if (views === undefined) return;
-      change((current) => chooseNamedServer(current, views, name, serverId));
+      changeList((current) => chooseNamedServer(current, views, name, serverId));
     },
-    setList: (ids) => {
-      change(() => ids);
+    changeList,
+    resetToStart: () => {
+      changeList(() => {
+        const startNow = readStartListNow(queryClient, client, projectId);
+        if (startNow === undefined) {
+          throw new Error("The list this thread started from is not read yet. Try again.");
+        }
+        return startNow.mcpServerIds;
+      });
     },
-    clearRefusal: write.reset,
+    clearRefusal: write.clearRefusal,
   };
 };

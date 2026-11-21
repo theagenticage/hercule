@@ -25,7 +25,6 @@ import type { MessageDraft, ThreadCatalogs, ThreadConfig, ThreadPicks } from "./
 import { resolveThreadConfig } from "./resolve-thread";
 import { buildSubmission } from "./submission";
 import { applyThreadChoice } from "./thread-choice";
-import { LINEAR, buildViews } from "../mcp-servers/testing";
 import { WEBSHOP, WEBSHOP_PROJECT } from "./workspaces.testing";
 
 const NO_CATALOGS: ThreadCatalogs = {
@@ -245,7 +244,7 @@ describe("buildSubmission: the draft's list of MCP Servers", () => {
     applyThreadChoice({}, { kind: "mcpServers", projectId, mcpServerIds });
   const send = (picks: ThreadPicks, projectId: string | null = null) =>
     buildDraftSubmission(
-      { ...NO_CATALOGS, mcpServerViews: buildViews([LINEAR]) },
+      { ...NO_CATALOGS, knownMcpServerIds: new Set(["s-linear"]) },
       { ...CONFIG, projectId },
       picks,
       MESSAGE,

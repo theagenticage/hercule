@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import {
@@ -24,6 +24,12 @@ import { mcpServersQuery, pluginsQuery } from "../../../app/queries";
  * A server with a record leads to its page, and one with none to the list.
  * A Connection whose plugin offers no server gets no note. A plugin that
  * offers two servers on one Connection gets one note for each.
+ *
+ * The servers are read here, not by the screen's loader, because a failed
+ * read must not stop the Connection's own actions. Until they are read the
+ * note is not drawn. When the read failed and nothing is cached, the note is
+ * "agent tools: not available" in muted ink and leads nowhere, once for the
+ * Connection.
  */
 export function AgentToolsNote({
   client,
@@ -32,15 +38,18 @@ export function AgentToolsNote({
   readonly client: HerculeClient;
   readonly connection: Connection;
 }): JSX.Element | null {
-  const servers = useSuspenseQuery(mcpServersQuery(client)).data.items;
+  const read = useQuery(mcpServersQuery(client));
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const rows = buildMcpServerSettingsRows({
-    servers,
+    servers: read.data?.items ?? [],
     connections: [connection],
     plugins,
     projects: [],
   });
-  if (rows.length === 0) return null;
+  if (rows.length === 0 || (read.data === undefined && read.error === null)) return null;
+  if (read.data === undefined) {
+    return <span className="self-start text-fine text-muted">agent tools: not available</span>;
+  }
 
   return (
     <>

@@ -42,7 +42,9 @@ export const Route = createFileRoute("/_shell/settings/mcp-servers/$id")({
       context.queryClient.ensureQueryData(connectionsQuery(context.client)),
       context.queryClient.ensureQueryData(pluginsQuery(context.client)),
       context.queryClient.ensureQueryData(projectsQuery(context.client)),
-      context.queryClient.ensureQueryData(settingsQuery(context.client)),
+      // The page's box for the threads without a project edits the default
+      // list, so it starts from the settings as they are now, as the list does.
+      context.queryClient.fetchQuery({ ...settingsQuery(context.client), staleTime: 0 }),
     ]);
   },
   component: McpServerPage,

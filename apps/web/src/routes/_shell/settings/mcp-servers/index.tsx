@@ -16,13 +16,17 @@ import { ServerRow } from "./-server-row";
 
 export const Route = createFileRoute("/_shell/settings/mcp-servers/")({
   staticData: { title: "MCP servers" },
+  // Settings change without a push (a command line, another window), so the
+  // section reads them again each time it opens. A change made while it was
+  // closed would otherwise stay hidden, and the next edit of the default list
+  // would undo it.
   loader: async ({ context }) => {
     await Promise.all([
+      context.queryClient.fetchQuery({ ...settingsQuery(context.client), staleTime: 0 }),
       context.queryClient.ensureQueryData(mcpServersQuery(context.client)),
       context.queryClient.ensureQueryData(connectionsQuery(context.client)),
       context.queryClient.ensureQueryData(pluginsQuery(context.client)),
       context.queryClient.ensureQueryData(projectsQuery(context.client)),
-      context.queryClient.ensureQueryData(settingsQuery(context.client)),
     ]);
   },
   component: McpServers,

@@ -2,8 +2,7 @@ import type { JSX } from "react";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import type { RuntimeNote } from "@hercule/client-core";
 import {
-  decideWarningFix,
-  isActionableWarning,
+  buildMcpWarningLine,
   type McpServerWarningEntry,
   type WarningFix,
 } from "@hercule/client-core/mcp-servers";
@@ -25,16 +24,17 @@ export function NoteLine({ note }: { readonly note: RuntimeNote }): JSX.Element 
 }
 
 /**
- * Draws a warning about MCP servers with the buttons that fix it. The button
- * of each entry is decided by `decideWarningFix` from the servers as they are
- * now, not as they were when the line was written. Entries are not merged:
- * two servers that need sign-in give two buttons.
+ * Draws a warning about MCP servers with the buttons that fix it. Its tone and its buttons come from `buildMcpWarningLine`, which
+ * decides each button from the servers as they are now, not as they were when
+ * the line was written. Entries are not merged: two servers that need sign-in
+ * give two buttons.
  *
  * A warning with at least one button is one the user must act on, and is
- * drawn in the failure colours, as an error is (`isActionableWarning`). Any
- * other is as quiet as every warning. Until the servers are read the line is
- * quiet and has no button. The screen holding the line reads the servers once
- * and keeps the live topic (see `AgentPage`).
+ * drawn in the failure colours. Any other is as quiet as every warning. The
+ * line keeps its severity either way, so a screen reader still hears
+ * "Warning". Until the servers are read the line is quiet and has no button.
+ * The screen holding the line reads the servers once and keeps the live topic
+ * (see `AgentPage`).
  */
 function McpNoteLine({
   note,
@@ -46,21 +46,23 @@ function McpNoteLine({
   const { client } = useRouteContext({ from: "/_shell" });
   const { views } = useMcpServerViews(client, true);
   if (views === undefined) return <RuntimeNoteLine note={note} />;
-  const fixes = entries.flatMap((entry) => {
-    const fix = decideWarningFix(entry, views);
-    return fix === null ? [] : [{ entry, fix }];
-  });
+  const { tone, fixes } = buildMcpWarningLine(entries, views);
   return (
     <RuntimeNoteLine
-      note={isActionableWarning(entries, views) ? { ...note, severity: "error" } : note}
+      note={note}
+      tone={tone}
       actions={
         fixes.length === 0
           ? undefined
-          : fixes.map(({ entry, fix }, index) => (
+          : fixes.map(({ key, fix }) => (
               <FixButton
-                key={index}
+                key={key}
                 fix={fix}
-                serverName={views.find((view) => view.server.id === entry.mcpServerId)?.server.name}
+                serverName={
+                  fix.kind === "open-server"
+                    ? views.find((view) => view.server.id === fix.mcpServerId)?.server.name
+                    : undefined
+                }
               />
             ))
       }

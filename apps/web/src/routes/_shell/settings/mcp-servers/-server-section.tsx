@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   describeAge,
   queryKeys,
@@ -11,6 +11,7 @@ import {
 import type { PluginDetail } from "@hercule/contract";
 import type { McpServerView } from "@hercule/client-core/mcp-servers";
 import { Button, FormCard, Row, Switch, useMinuteClock } from "@hercule/ui";
+import { useKeyedWrite } from "../../../../app/use-keyed-write";
 import { ProviderMark } from "../../../../screens/provider-mark";
 
 /**
@@ -39,8 +40,10 @@ export function ServerSection({
   const now = useMinuteClock();
   const { server, connection } = view;
 
-  const offer = useMutation({
-    mutationFn: (enabled: boolean) =>
+  // The same key as the switch of this server in the list, so the two share one guard.
+  const offer = useKeyedWrite<boolean>({
+    mutationKey: ["mcp-server-switch", server.id],
+    mutationFn: (enabled) =>
       client.mcpServer.update({ params: { id: server.id }, payload: { enabled } }),
     onSettled: () =>
       Promise.all([
@@ -58,18 +61,18 @@ export function ServerSection({
         <div className="flex flex-col gap-1">
           <Switch
             id="mcp-server-offered"
-            aria-disabled={offer.isPending}
+            aria-disabled={offer.writing}
             checked={server.enabled}
             onCheckedChange={(enabled) => {
-              offer.mutate(enabled);
+              offer.write(enabled);
             }}
           />
           <p className="text-fine text-faint">
             Off keeps the name, the sign-in and the projects that name it.
           </p>
-          {offer.error === null ? null : (
+          {offer.refusal === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {readErrorMessage(offer.error)}
+              {readErrorMessage(offer.refusal)}
             </p>
           )}
         </div>

@@ -90,10 +90,12 @@ const holdSameIds = (one: readonly string[], other: readonly string[]): boolean 
  * Returns the submenu for a Thread whose list is `mcpServerIds`.
  *
  * - A server switched off in Settings is offered only when the Thread has it.
- * - The rows follow `order`, a name with no server left drops out, and a
- *   server that is new since the menu opened is not added: it waits in the
- *   picker. The first `max(8, the Thread's own names)` names are rows, and so
- *   is every own name after them, so a name the Thread has never disappears.
+ * - The rows are the names of `order` that still have a server, in that
+ *   order, then the names the Thread owns now that `order` lacks (a server
+ *   added in the picker while the menu is open), appended.
+ * - There are at most `max(8, the number of names the Thread owns now)` rows.
+ *   The Thread's own names are never cut, so the other names give way: a
+ *   Thread that owns one server never gets nine rows.
  * - A server that needs sign-in stays on, and its row says so.
  */
 export const buildThreadServerMenu = ({
@@ -114,14 +116,27 @@ export const buildThreadServerMenu = ({
     views.filter((view) => mcpServerIds.includes(view.server.id)).map((view) => view.server.name),
   );
   const limit = Math.max(NAME_LIMIT, ownNames.size);
-  const offered = order.flatMap((name): ServerNameGroup[] => {
+  const offerAccounts = (name: string): ServerNameGroup[] => {
     const accounts = (groups.find((group) => group.name === name)?.views ?? []).filter(
       (view) => view.server.enabled || mcpServerIds.includes(view.server.id),
     );
     return accounts.length === 0 ? [] : [{ name, views: accounts }];
-  });
+  };
+  const offered = [
+    ...order.flatMap(offerAccounts),
+    ...groups
+      .filter((group) => ownNames.has(group.name) && !order.includes(group.name))
+      .flatMap((group) => offerAccounts(group.name)),
+  ];
+  // The other names fill what the own names leave of the limit.
+  const keptOthers = new Set(
+    offered
+      .filter((group) => !ownNames.has(group.name))
+      .slice(0, limit - ownNames.size)
+      .map((group) => group.name),
+  );
   const rows = offered
-    .filter((group, index) => index < limit || ownNames.has(group.name))
+    .filter((group) => ownNames.has(group.name) || keptOthers.has(group.name))
     .map((group): ServerMenuRow => {
       const shown = decideShownAccount(group, mcpServerIds, rememberedAccounts);
       const on = mcpServerIds.includes(shown.server.id);

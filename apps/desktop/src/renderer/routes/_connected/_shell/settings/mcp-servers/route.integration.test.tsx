@@ -8,9 +8,10 @@
  * never on a timer.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@hercule/contract";
+import { queryKeys } from "@hercule/client-core";
 import { buildErrorBody } from "@hercule/client-core/testing";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import { holdAnswer } from "../../../../../app/testing";
@@ -486,6 +487,58 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     expect(within(findPickRow("linear")).getByRole("checkbox", { checked: false })).toBeTruthy();
   });
 
+  it("keeps the guard of the list when the picker is closed and opened again while its write runs", async () => {
+    const held = holdAnswer();
+    const { calls } = await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: { [`PATCH ${SETTINGS_PATH}`]: held.handler },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    await userEvent.click(within(findPickRow("linear")).getByRole("checkbox"));
+    await waitFor(() => {
+      expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    const sentry = within(findPickRow("sentry")).getByRole("checkbox");
+    expect(sentry.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(sentry);
+    held.answer({ body: { controller: {}, user: { "thread.mcpServerIds": [LINEAR_ID] } } });
+
+    await waitFor(() => {
+      expect(sentry.getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
+  });
+
+  it("applies a change to the setting as the cache holds it when the user presses, not as the picker drew it", async () => {
+    const { world, context } = await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      defaultIds: [SENTRY_WORK_ID],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    const sentry = within(findPickRow("sentry")).getByRole("checkbox");
+
+    // Another client added linear, and a read has put that in the cache, but the
+    // picker has not drawn it yet when the press arrives.
+    context.queryClient.setQueryData(queryKeys.settings(), {
+      controller: {},
+      user: { "thread.mcpServerIds": [SENTRY_WORK_ID, LINEAR_ID] },
+    });
+    fireEvent.click(sentry);
+
+    await waitFor(() => {
+      expect(world.defaultIds).toEqual([LINEAR_ID]);
+    });
+  });
+
   it("shows the status word of a server that is not ready, and a filter past eight names", async () => {
     const tools = Array.from({ length: 9 }, (_, at) =>
       buildServer(
@@ -549,6 +602,70 @@ describe("Settings > MCP servers, the section", () => {
     await waitFor(() => {
       expect(live.readTopics()).not.toContain("mcpServer");
     });
+  });
+
+  it("reads the default list again each time the section opens", async () => {
+    const { world, router, calls } = await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: { "GET /api/v1/skills": { body: { items: [] } } },
+    });
+    await act(() => router.navigate({ to: "/settings/skills" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/settings/skills");
+    });
+    const before = findCalls(calls, "GET", SETTINGS_PATH).length;
+
+    // The CLI changed the setting while the section was closed.
+    world.defaultIds = [LINEAR_ID];
+    await act(() => router.navigate({ to: LIST_PATH }));
+
+    await waitFor(() => {
+      expect(findCalls(calls, "GET", SETTINGS_PATH)).toHaveLength(before + 1);
+    });
+    const group = screen.getByRole("region", { name: "Threads without a project" });
+    await waitFor(() => {
+      expect(group.querySelectorAll(".chip")).toHaveLength(1);
+    });
+  });
+
+  it("does not put a late response of a switch back in the list after a read removed the server", async () => {
+    const held = holdAnswer();
+    let listed = [LINEAR, SENTRY_WORK];
+    let gate: Promise<void> = Promise.resolve();
+    let release = (): void => undefined;
+    const { live } = await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [`PATCH ${SERVER_LIST_PATH}/${SENTRY_WORK_ID}`]: held.handler,
+        // The list answers once the gate is open.
+        [`GET ${SERVER_LIST_PATH}`]: async () => {
+          await gate;
+          return { body: { items: listed } };
+        },
+      },
+    });
+    await userEvent.click(within(findRow("sentry work")).getByRole("switch"));
+
+    // Another client deletes the server, and the live read removes its row.
+    listed = [LINEAR];
+    act(() => {
+      live.pushInvalidation("mcpServer", [SENTRY_WORK_ID], { kind: "deleted" });
+    });
+    // The row stays as the Connection's offer, which has no record.
+    const readsNoRecord = (): boolean =>
+      readCells(findRow("sentry work"))[1]!.includes("switch it on to see its tools");
+    await waitFor(() => {
+      expect(readsNoRecord()).toBe(true);
+    });
+    // The write's own read is held, so only the late response could bring the row back.
+    gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    held.answer({ body: { ...SENTRY_WORK, enabled: false } });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(readsNoRecord()).toBe(true);
+    release();
   });
 
   it("reads the list again on a push, and shows what another client changed", async () => {

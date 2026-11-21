@@ -1776,6 +1776,37 @@ describe("Connections' search params", () => {
     });
   });
 
+  it("says a target is gone when the list the screen held from an earlier visit still names it", async () => {
+    const { hold, router } = await openApp([PAPER, SKY]);
+    await findConnectionRow(SKY);
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    // The connection was deleted while the user was elsewhere.
+    hold([PAPER]);
+
+    await act(() => router.navigate({ to: "/connections", search: { reconnect: SKY.id } }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "That connection no longer exists, so there is nothing to reconnect.",
+    );
+    expect(readPageText()).not.toContain("Reconnect Skyline");
+  });
+
+  it("opens the Reconnect panel of a target the list held from an earlier visit does not name yet", async () => {
+    const { hold, router } = await openApp([PAPER]);
+    await findConnectionRow(PAPER);
+    await act(() => router.navigate({ to: "/settings/plugins" }));
+    // The connection was made while the user was elsewhere.
+    hold([PAPER, SKY]);
+
+    await act(() => router.navigate({ to: "/connections", search: { reconnect: SKY.id } }));
+
+    expect(readPageText(await findConnectionRow(SKY))).toContain("Reconnect Skyline");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+  });
+
   it("says so when the plugin of the connection named by `reconnect` is gone", async () => {
     const orphan: Connection = {
       ...PAPER,
@@ -1844,7 +1875,8 @@ describe("Connections > the agent tools note", () => {
 
   const findNote = async (): Promise<HTMLElement> => {
     const row = await findConnectionRow(PALLET);
-    return within(row).getByRole("link", { name: /agent tools/ });
+    // The note reads the servers itself, after the row has drawn.
+    return within(row).findByRole("link", { name: /agent tools/ });
   };
 
   it("says agent tools are off, and leads to the list, while no server exists", async () => {
@@ -1890,6 +1922,28 @@ describe("Connections > the agent tools note", () => {
       expect(note.className).toContain("text-fail");
       unmount();
     }
+  });
+
+  it("says agent tools are not available when the servers cannot be read, and keeps the Connection's own actions", async () => {
+    await openApp([PAPER, PALLET], {
+      "GET /api/v1/plugins": { body: [...CATALOG, PALLET_PLUGIN] },
+      "GET /api/v1/mcp-servers": {
+        status: 500,
+        body: buildErrorBody("internal", "The servers could not be read."),
+      },
+    });
+
+    const row = await findConnectionRow(PALLET);
+    const note = await within(row).findByText("agent tools: not available");
+    expect(note.className).toContain("text-muted");
+    expect(note.className).not.toContain("text-fail");
+    expect(within(row).queryByRole("link")).toBeNull();
+    // The note's failure does not take the row or the screen away.
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeDefined();
+    expect(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Delete" }),
+    ).toBeDefined();
+    expect(within(await findConnectionRow(PAPER)).queryByText(/agent tools/)).toBeNull();
   });
 
   it("says nothing on a connection whose plugin offers no server", async () => {

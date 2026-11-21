@@ -38,3 +38,18 @@ export const useMcpServerViews = (client: HerculeClient, enabled: boolean): McpS
   );
   return { views, failure: servers.error ?? connections.error ?? plugins.error };
 };
+
+/**
+ * Returns the ids of the MCP Servers in the cache, or `undefined` while the
+ * list of servers has not been read. It reads nothing itself, and it renders
+ * again when the cached list changes. A draft's list is checked against these
+ * ids when the draft is sent, which needs neither the Connections nor the
+ * plugins.
+ */
+export const useKnownMcpServerIds = (client: HerculeClient): ReadonlySet<string> | undefined => {
+  const servers = useQuery({ ...mcpServersQuery(client), enabled: false }).data;
+  return useMemo(
+    () => (servers === undefined ? undefined : new Set(servers.items.map((each) => each.id))),
+    [servers],
+  );
+};

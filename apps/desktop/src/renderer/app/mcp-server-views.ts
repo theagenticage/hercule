@@ -4,13 +4,28 @@
  * to draw them.
  */
 import { useMemo } from "react";
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
-import { buildMcpServerViews, type McpServerView } from "@hercule/client-core/mcp-servers";
+import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import {
+  buildMcpServerViews,
+  decideThreadStartList,
+  type McpServerView,
+} from "@hercule/client-core/mcp-servers";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "./live";
-import { connectionsQuery, mcpServersQuery, pluginsQuery } from "./queries";
+import {
+  connectionsQuery,
+  mcpServersQuery,
+  pluginsQuery,
+  projectsQuery,
+  settingsQuery,
+} from "./queries";
 
 const NO_TOPICS: readonly MutableLiveTopic[] = [];
 
@@ -52,3 +67,41 @@ export function useMcpServerViews(mode: McpServerReadMode): McpServerViews {
   );
   return { views, failure: servers.error === null ? null : readErrorMessage(servers.error) };
 }
+
+/**
+ * Returns the views of every MCP server as the cache holds them now, or
+ * `undefined` while the servers, the Connections or the plugins are not
+ * cached. Reads nothing: a write calls it when the user acts, to decide on
+ * the current records rather than on those a control last drew.
+ */
+export const readCachedMcpServerViews = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): readonly McpServerView[] | undefined => {
+  const servers = queryClient.getQueryData(mcpServersQuery(client).queryKey);
+  const connections = queryClient.getQueryData(connectionsQuery(client).queryKey);
+  const plugins = queryClient.getQueryData(pluginsQuery(client).queryKey);
+  return servers === undefined || connections === undefined || plugins === undefined
+    ? undefined
+    : buildMcpServerViews(servers, connections, plugins);
+};
+
+/**
+ * Returns the list of MCP servers a thread in `projectId` (`null` for no
+ * project) starts with, from the records the cache holds now: its project's
+ * list, or the default list. Servers deleted since are left out once the
+ * servers are cached; until then the lists are returned as they are stored.
+ */
+export const readCachedStartList = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  projectId: string | null,
+): readonly string[] => {
+  const projects = queryClient.getQueryData(projectsQuery(client).queryKey) ?? [];
+  const defaultIds =
+    queryClient.getQueryData(settingsQuery(client).queryKey)?.user["thread.mcpServerIds"] ?? [];
+  const views = readCachedMcpServerViews(queryClient, client);
+  return views === undefined
+    ? (projects.find((project) => project.id === projectId)?.mcpServerIds ?? defaultIds)
+    : decideThreadStartList(projectId, projects, defaultIds, views).mcpServerIds;
+};

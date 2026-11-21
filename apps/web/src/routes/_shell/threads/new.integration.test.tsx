@@ -44,6 +44,7 @@ import {
   type Handler,
 } from "../../../app/testing";
 import {
+  MCP_SERVERS,
   S_DATADOG,
   S_FIGMA,
   S_GITHUB,
@@ -3174,7 +3175,7 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     await user.click(screen.getByRole("button", { name: /send/i }));
   };
 
-  it("has the two rows, says 'none' for a draft with no servers, and reads nothing until the menu opens", async () => {
+  it("has the two rows, says 'none' for a draft with no servers, and reads nothing until the MCP row opens", async () => {
     const user = userEvent.setup();
     const { api, live } = await openServersDraft("/threads/new");
     await screen.findByRole("textbox");
@@ -3182,9 +3183,16 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     expect(readServerReads(api)).toBe(0);
     expect(live.topics()).not.toContain("mcpServer");
 
+    // The `+` menu is also how an image is attached: opening it reads nothing.
     const menu = await openPlusMenu(user);
     expect(within(menu).getByRole("button", { name: "Attach an image" })).toBeDefined();
-    expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain("none");
+    const row = within(menu).getByRole("button", { name: /MCP servers/ });
+    expect(row.textContent).toContain("none");
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    await user.click(row);
+    await screen.findByRole("dialog", { name: "Servers of this thread" });
     await waitFor(() => {
       expect(readServerReads(api)).toBeGreaterThanOrEqual(1);
     });
@@ -3195,6 +3203,7 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     await waitFor(() => {
       expect(live.topics()).not.toContain("mcpServer");
     });
+    expect(readServerReads(api)).toBe(2);
   });
 
   it("starts from the project's list, says so, and reads the servers as soon as the draft opens", async () => {
@@ -3280,6 +3289,31 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     await send(user);
 
     expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_DATADOG.id] });
+  });
+
+  it("does not send a picked server that was deleted while the draft was open", async () => {
+    const user = userEvent.setup();
+    let held = MCP_SERVERS;
+    const { api, live } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_GITHUB.id] },
+      buildMcpServerRoutes(() => held),
+    );
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "notion in this thread" }));
+    held = MCP_SERVERS.filter((server) => server.id !== S_NOTION.id);
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [S_NOTION.id], kind: "deleted" });
+    });
+    await waitFor(() => {
+      expect(within(submenu).queryByRole("switch", { name: "notion in this thread" })).toBeNull();
+    });
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_GITHUB.id] });
   });
 
   it("sends an empty list when the user switched every server off", async () => {

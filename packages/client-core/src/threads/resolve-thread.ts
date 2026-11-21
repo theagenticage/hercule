@@ -215,7 +215,7 @@ const resolveDraft = (
   const mcpServerIds = resolveDraftMcpServerIds(
     picks,
     base.projectId ?? null,
-    catalogs.mcpServerViews,
+    catalogs.knownMcpServerIds,
   );
   const diagnosticRunner =
     runner === undefined

@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   formatNameList,
+  isNotFound,
   queryKeys,
   readErrorMessage,
   type HerculeClient,
@@ -17,7 +18,11 @@ import { CardHeading } from "./-card-heading";
 /**
  * The "Remove" card of a server's page. The button opens a question in place
  * that names the projects that name the server and says what the removal
- * does. Confirming deletes the server and goes back to the list.
+ * does. Confirming deletes the server and goes back to the list. A delete
+ * that finds the server already gone goes back to the list too, because the
+ * page shows a server that no longer exists. Either way the page's own read is
+ * dropped from the cache once the page has been left, so opening its address
+ * again never paints the deleted server.
  */
 export function Remove({
   client,
@@ -34,6 +39,10 @@ export function Remove({
   const [asking, setAsking] = useState(false);
   const { server, connection } = view;
 
+  const leave = async (): Promise<void> => {
+    await navigate({ to: "/settings/mcp-servers", replace: true });
+    queryClient.removeQueries({ queryKey: queryKeys.mcpServer(server.id), exact: true });
+  };
   const remove = useMutation({
     mutationFn: () => client.mcpServer.delete({ params: { id: server.id } }),
     onSuccess: async () => {
@@ -43,7 +52,13 @@ export function Remove({
         queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.settings() }),
       ]);
-      await navigate({ to: "/settings/mcp-servers", replace: true });
+      await leave();
+    },
+    onError: async (error) => {
+      if (!isNotFound(error)) return;
+      // Someone else deleted the server first: the list drops it too.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers() });
+      await leave();
     },
   });
 

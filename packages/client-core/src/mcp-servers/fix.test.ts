@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideStatusBand, decideWarningFix, isActionableWarning } from "./fix";
+import { buildMcpWarningLine, decideStatusBand, decideWarningFix } from "./fix";
 import type { McpServerWarningEntry } from "./fix";
 import { SENTRY_WORK, buildServer, buildViews } from "./testing";
 import { buildMcpServerViews } from "./views";
@@ -53,15 +53,26 @@ describe("decideWarningFix", () => {
   });
 });
 
-describe("isActionableWarning", () => {
-  it("is true when any server the warning names has a button", () => {
-    expect(isActionableWarning([warn("missing-grant"), warn("error")], VIEWS)).toBe(true);
+describe("buildMcpWarningLine", () => {
+  it("is a failure with a button for each entry that has a fix, in the order of the entries", () => {
+    const line = buildMcpWarningLine(
+      [warn("missing-grant"), warn("error"), warn("needs-sign-in")],
+      VIEWS,
+    );
+
+    expect(line.tone).toBe("fail");
+    expect(line.fixes.map(({ key, fix }) => [key, fix.kind])).toEqual([
+      ["s-work:error", "open-server"],
+      ["s-work:needs-sign-in", "reconnect"],
+    ]);
   });
 
-  it("is false when no server has one", () => {
-    expect(isActionableWarning([warn("missing-grant"), warn("error", "s-gone")], VIEWS)).toBe(
-      false,
-    );
+  it("is quiet with no button when no server has a fix", () => {
+    expect(buildMcpWarningLine([warn("missing-grant"), warn("error", "s-gone")], VIEWS)).toEqual({
+      tone: "quiet",
+      fixes: [],
+    });
+    expect(buildMcpWarningLine([], VIEWS)).toEqual({ tone: "quiet", fixes: [] });
   });
 });
 

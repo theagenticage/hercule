@@ -11,6 +11,9 @@ import { Button, ChoiceInput, Input, Select } from "@hercule/ui";
 import { McpServerStatusWord } from "./mcp-server-status";
 import { ProviderMark } from "./provider-mark";
 
+/** A change of a list: the new list, from the list as it is when the change is applied. */
+export type ListUpdate = (current: readonly string[]) => readonly string[];
+
 /**
  * The picker of MCP Servers: one dialog that edits any list of servers, a
  * project's, the default list, or one thread's. It draws a row for each server
@@ -19,10 +22,12 @@ import { ProviderMark } from "./provider-mark";
  * the New project dialog.
  *
  * The component is presentational. It knows nothing of where the list lives:
- * `onChange` receives the whole new list for each click, and the caller
- * decides how to write it. While `pending` is true the caller's write is
- * running, and the controls ignore clicks, so one list never has two writes
- * in flight.
+ * `onChange` receives, for each click, a function from the list as it is
+ * when the caller applies the change to the list to write, and the caller
+ * decides how to write it. The list the dialog draws can be older than the
+ * list the caller holds, so a click never sends the drawn list back. While
+ * `pending` is true the caller's write is running, and the controls ignore
+ * clicks, so one list never has two writes in flight.
  *
  * The order of the names is fixed when the dialog opens (the servers on the
  * list first), so a row never jumps away under the pointer.
@@ -46,15 +51,17 @@ export function McpServerPicker({
   readonly mcpServerIds: readonly string[];
   /** The line at the foot: what a change reaches. */
   readonly foot: string;
-  /** The button that goes back to the list this one started from, or `null` when there is none or the list equals it. */
-  readonly reset: {
-    readonly label: string;
-    readonly mcpServerIds: readonly string[];
-  } | null;
+  /**
+   * The button that goes back to the list this one started from, or `null`
+   * when there is none or the list equals it. `onPress` resolves that list
+   * when the button is pressed, not when the dialog was drawn.
+   */
+  readonly reset: { readonly label: string; readonly onPress: () => void } | null;
   readonly pending: boolean;
   /** Why the last write was refused, or `null`. */
   readonly failure: string | null;
-  readonly onChange: (mcpServerIds: readonly string[]) => void;
+  /** The user changed the list: `update` gives the new list from the list as it is when the caller applies it. */
+  readonly onChange: (update: ListUpdate) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -80,7 +87,7 @@ export function McpServerPicker({
   const choose = (name: string, serverId: string | null, shownId: string): void => {
     if (pending) return;
     setRemembered({ ...remembered, [name]: serverId ?? shownId });
-    onChange(chooseNamedServer(mcpServerIds, views, name, serverId));
+    onChange((current) => chooseNamedServer(current, views, name, serverId));
   };
 
   return (
@@ -202,7 +209,7 @@ export function McpServerPicker({
             <Button
               aria-disabled={pending}
               onClick={() => {
-                if (!pending) onChange(reset.mcpServerIds);
+                if (!pending) reset.onPress();
               }}
             >
               {reset.label}

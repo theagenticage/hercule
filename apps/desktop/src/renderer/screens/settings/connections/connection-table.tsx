@@ -50,7 +50,8 @@ const UNKNOWN_COUNT = (
  *   is that account's name (`showsAccountBesideLabel`). The line is then
  *   left out rather than repeat the name;
  * - on that line, for a Connection in `agentTools`, a small button with what
- *   its plugin's MCP server is doing, which calls `onOpenAgentTools`;
+ *   its plugin's MCP server is doing, which calls `onOpenAgentTools`, or,
+ *   when the servers could not be read, a muted note saying so;
  * - one bar per hour of the last 24, the busiest hour's the tallest, and
  *   the events of those 24 hours. Without `counts`, the bars are left out
  *   and every count reads "–", never 0, because the events are unknown;
@@ -88,7 +89,7 @@ export function ConnectionTable({
    * What each Connection says about its plugin's MCP server, by the
    * Connection's id. A Connection with no entry has no such server and shows
    * nothing about it, and so does every Connection while this is undefined,
-   * because the servers could not be read.
+   * because the servers are still being read.
    */
   readonly agentTools: ReadonlyMap<string, AgentTools> | undefined;
   /** Reconnect is offered only while the Connection's type is in the binary. */

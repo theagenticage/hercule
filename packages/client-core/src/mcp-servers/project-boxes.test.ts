@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildProject } from "../threads/workspaces.testing";
-import { buildProjectBoxes, describeProjectRefusal } from "./project-boxes";
-import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
+import { buildProjectBoxes, decideProjectBoxWrite, describeProjectRefusal } from "./project-boxes";
+import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
 const [WORK, HOBBY] = VIEWS;
@@ -76,5 +76,59 @@ describe("describeProjectRefusal", () => {
     ]);
     expect(refusal?.use.map((part) => part.text).join("")).toBe("Use sentry hobby");
     expect(refusal?.keep.map((part) => part.text).join("")).toBe("Keep sentry work");
+  });
+});
+
+describe("decideProjectBoxWrite", () => {
+  it("ticks by adding the server to the list as it is now", () => {
+    expect(decideProjectBoxWrite(["s-linear"], VIEWS, HOBBY!, "tick")).toEqual({
+      kind: "write",
+      mcpServerIds: ["s-linear", "s-hobby"],
+    });
+  });
+
+  it("refuses a tick while the list names another server of the same name", () => {
+    expect(decideProjectBoxWrite(["s-work", "s-linear"], VIEWS, HOBBY!, "tick")).toEqual({
+      kind: "refused",
+      occupant: WORK,
+    });
+  });
+
+  it("unticks by removing only the page's server, whatever else the list holds", () => {
+    expect(
+      decideProjectBoxWrite(["s-new", "s-hobby", "s-linear"], VIEWS, HOBBY!, "untick"),
+    ).toEqual({ kind: "write", mcpServerIds: ["s-new", "s-linear"] });
+    expect(decideProjectBoxWrite(["s-work"], VIEWS, HOBBY!, "untick")).toEqual({
+      kind: "write",
+      mcpServerIds: ["s-work"],
+    });
+  });
+
+  it("swaps in the old one's place while the list still names the server the user confirmed", () => {
+    expect(
+      decideProjectBoxWrite(["s-work", "s-linear"], VIEWS, HOBBY!, { swapFrom: "s-work" }),
+    ).toEqual({ kind: "write", mcpServerIds: ["s-hobby", "s-linear"] });
+  });
+
+  it("refuses a swap when the list names another occupant by now", () => {
+    const threeViews = buildViews([
+      SENTRY_WORK,
+      SENTRY_HOBBY,
+      buildServer("s-third", "sentry", "c-work"),
+    ]);
+    const third = threeViews[2]!;
+
+    expect(decideProjectBoxWrite(["s-work"], threeViews, HOBBY!, { swapFrom: "s-third" })).toEqual({
+      kind: "refused",
+      occupant: threeViews[0],
+    });
+    expect(third.server.id).toBe("s-third");
+  });
+
+  it("writes a swap as a tick when the list no longer names a server of that name", () => {
+    expect(decideProjectBoxWrite(["s-linear"], VIEWS, HOBBY!, { swapFrom: "s-work" })).toEqual({
+      kind: "write",
+      mcpServerIds: ["s-linear", "s-hobby"],
+    });
   });
 });

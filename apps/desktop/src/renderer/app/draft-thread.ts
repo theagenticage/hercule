@@ -1,7 +1,7 @@
 /**
  * Reads a Draft Thread, for the draft screen and for the sidebar's draft row.
  */
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -15,6 +15,7 @@ import { readRecentModels } from "./recent-models";
 import {
   harnessesQuery,
   localRunnerQuery,
+  mcpServersQuery,
   modelProfilesQuery,
   profilesQuery,
   projectsQuery,
@@ -38,6 +39,11 @@ import {
  * one costs the sidebar only its draft row. A later probe of the local
  * runner, when the runners change, keeps the previous answer until it
  * returns.
+ *
+ * The ids of the MCP servers in the cache go with the reads, so a pick of a
+ * server deleted since is dropped when the draft is submitted. Nothing is read
+ * for them: the list is in the cache once the draft's list of servers has
+ * been shown, and until then the draft's list is untouched.
  */
 export function useDraftReads(isOpen: boolean): DraftReads | null {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
@@ -45,6 +51,11 @@ export function useDraftReads(isOpen: boolean): DraftReads | null {
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const settings = useQuery({ ...settingsQuery(client), enabled: isOpen }).data;
   const profiles = useQuery({ ...profilesQuery(client), enabled: isOpen }).data;
+  const servers = useQuery({ ...mcpServersQuery(client), enabled: false }).data;
+  const knownMcpServerIds = useMemo(
+    () => (servers === undefined ? undefined : new Set(servers.map((server) => server.id))),
+    [servers],
+  );
   const lists = {
     accounts: useSuspenseQuery(providerAccountsQuery(client)).data,
     providers: useSuspenseQuery(providersQuery(client)).data,
@@ -59,7 +70,13 @@ export function useDraftReads(isOpen: boolean): DraftReads | null {
     sessions: useSuspenseQuery(threadsQuery(client)).data,
   };
   if (!isOpen || settings === undefined || profiles === undefined) return null;
-  return { ...lists, settings, profiles, recent: readRecentModels(controller.url) };
+  return {
+    ...lists,
+    ...(knownMcpServerIds === undefined ? {} : { knownMcpServerIds }),
+    settings,
+    profiles,
+    recent: readRecentModels(controller.url),
+  };
 }
 
 /**

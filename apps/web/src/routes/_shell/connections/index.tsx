@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { EmptyState, Group, LaneLabel } from "@hercule/ui";
 import { listConnectionTypes, summarizeConnectionType } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { connectionsQuery, mcpServersQuery, pluginsQuery } from "../../../app/queries";
+import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";
 import { ConnectionRow } from "./-row";
 import { ConnectionSetup } from "./-setup";
@@ -24,14 +24,22 @@ export const Route = createFileRoute("/_shell/connections/")({
     oauth: typeof search["oauth"] === "string" ? search["oauth"] : undefined,
     reconnect: typeof search["reconnect"] === "string" ? search["reconnect"] : undefined,
   }),
-  // Loads the connections, the plugin catalog (which the offers are built
-  // from) and the MCP servers (which the agent tools note of a row is built
-  // from) before the screen renders, so it never renders empty.
-  loader: async ({ context }) => {
+  loaderDeps: ({ search }) => ({ reconnect: search.reconnect }),
+  // Loads the connections and the plugin catalog (which the offers are built
+  // from) before the screen renders, so it never renders empty. The agent
+  // tools note of a row reads the MCP servers itself: a failed read of them
+  // must not stop the Connections from showing.
+  //
+  // A link that names a Connection to reconnect needs the list as it is now,
+  // not the one the cache holds from an earlier visit: the screen decides
+  // from it whether the target exists, and does so once. So with `reconnect`
+  // the list is always read again.
+  loader: async ({ context, deps }) => {
     await Promise.all([
-      context.queryClient.ensureQueryData(connectionsQuery(context.client)),
+      deps.reconnect === undefined
+        ? context.queryClient.ensureQueryData(connectionsQuery(context.client))
+        : context.queryClient.fetchQuery({ ...connectionsQuery(context.client), staleTime: 0 }),
       context.queryClient.ensureQueryData(pluginsQuery(context.client)),
-      context.queryClient.ensureQueryData(mcpServersQuery(context.client)),
     ]);
   },
   component: Connections,

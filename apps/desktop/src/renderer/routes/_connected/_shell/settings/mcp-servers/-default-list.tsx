@@ -1,8 +1,8 @@
-import { useState, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Suspense, useState, type JSX } from "react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
 import { buildMcpServerViews } from "@hercule/client-core/mcp-servers";
+import { mcpWriteKeys, useMcpWrite } from "../../../../../app/mcp-write";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -10,8 +10,7 @@ import {
   settingsQuery,
 } from "../../../../../app/queries";
 import { DefaultServers } from "../../../../../screens/settings/mcp-servers/server-list";
-import { ServerPickerDialog } from "../../../../../screens/settings/mcp-servers/server-picker";
-import { readServersAgain } from "./-keep-server";
+import { LazyServerPickerDialog } from "../../../../../screens/settings/mcp-servers/lazy-server-picker";
 
 /**
  * Renders the group "Threads without a project" and owns its picker (spec 17
@@ -19,11 +18,13 @@ import { readServersAgain } from "./-keep-server";
  * `thread.mcpServerIds`. Change… opens the picker, which writes the setting
  * with `settings.update` at once on each change.
  *
- * The picker computes each new list from the setting as this component last
- * drew it. That is the current setting: while a write runs the picker ignores
- * changes, and the write counts as running until the setting is read again,
- * so a second change never starts from a list the first one replaced. A
- * server that was deleted is already left out of the setting by the read.
+ * The picker sends each change as a function of the list, which is applied
+ * to the setting as the cache holds it when the write starts, so a setting
+ * that was read again since the picker drew is never replaced by an older
+ * list. One write of the setting runs at a time, wherever it was started
+ * from, and counts as running until the setting is read again. Closing and
+ * opening the picker keeps that guard. A server that was deleted is already
+ * left out of the setting by the read.
  */
 export function DefaultList(): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -33,16 +34,16 @@ export function DefaultList(): JSX.Element {
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const [picking, setPicking] = useState(false);
-  const write = useMutation({
-    mutationFn: async (mcpServerIds: readonly string[]) => {
-      const saved = await client.settings.update({
-        payload: { user: { "thread.mcpServerIds": mcpServerIds } },
+  const write = useMcpWrite<(current: readonly string[]) => readonly string[]>({
+    mutationKey: mcpWriteKeys.defaultList(),
+    mutationFn: (update) => {
+      const current =
+        queryClient.getQueryData(settingsQuery(client).queryKey)?.user["thread.mcpServerIds"] ?? [];
+      return client.settings.update({
+        payload: { user: { "thread.mcpServerIds": [...update(current)] } },
       });
-      queryClient.setQueryData(settingsQuery(client).queryKey, saved);
     },
-    onSettled: async () => {
-      await readServersAgain(queryClient, client, undefined, [settingsQuery(client).queryKey]);
-    },
+    refresh: [settingsQuery(client).queryKey],
   });
   const views = buildMcpServerViews(servers, connections, plugins);
   const mcpServerIds = settings.user["thread.mcpServerIds"] ?? [];
@@ -53,25 +54,25 @@ export function DefaultList(): JSX.Element {
         chosen={chosen}
         plugins={plugins}
         onChange={() => {
-          write.reset();
+          write.clearRefusal();
           setPicking(true);
         }}
       />
       {picking && (
-        <ServerPickerDialog
-          views={views}
-          plugins={plugins}
-          mcpServerIds={mcpServerIds}
-          title="MCP servers of threads without a project"
-          foot="A thread in no project starts with this list. Each change is saved as you make it."
-          reset={null}
-          busy={write.isPending}
-          error={write.error === null ? null : `Could not save: ${readErrorMessage(write.error)}`}
-          onChange={(update) => {
-            write.mutate(update(mcpServerIds));
-          }}
-          onClose={() => setPicking(false)}
-        />
+        <Suspense fallback={null}>
+          <LazyServerPickerDialog
+            views={views}
+            plugins={plugins}
+            mcpServerIds={mcpServerIds}
+            title="MCP servers of threads without a project"
+            foot="A thread in no project starts with this list. Each change is saved as you make it."
+            reset={null}
+            busy={write.isRunning}
+            error={write.refusal === null ? null : `Could not save: ${write.refusal}`}
+            onChange={write.start}
+            onClose={() => setPicking(false)}
+          />
+        </Suspense>
       )}
     </>
   );

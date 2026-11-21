@@ -36,6 +36,7 @@ import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { ProviderMark } from "../provider-mark";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
+import { useKnownMcpServerIds } from "../use-mcp-server-views";
 import { PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
@@ -73,7 +74,7 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * Answer mode turns Attach off but leaves the MCP servers row working,
  * because that row edits the thread's list and not the answer being written
  * (decided by Rogier, #1211). The servers are read only when the thread has
- * some or the menu is open.
+ * some, or when the MCP row or the picker opens.
  */
 export function Composer({
   thread,
@@ -101,6 +102,7 @@ export function Composer({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const knownMcpServerIds = useKnownMcpServerIds(client);
   const catalogs = {
     accounts,
     providers,
@@ -112,6 +114,8 @@ export function Composer({
     resources,
     workspaces,
     sessions,
+    // A draft's pick of MCP servers is checked against these when it is sent.
+    ...(knownMcpServerIds === undefined ? {} : { knownMcpServerIds }),
   };
   const [open, setOpen] = useState<SelectorKey | null>(null);
   // The model pill's element. The lip's branch menu measures it to stay clear of the pill.

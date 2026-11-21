@@ -40,9 +40,11 @@ export const groupServersByName = (views: readonly McpServerView[]): ServerNameG
  * A swap puts the new id where the old one was, so it does not reorder the
  * list. A name switched on with none before is appended.
  *
- * Ids that no view knows (a server deleted since the list was read) are
- * dropped, because a list that names one is refused. A `serverId` that is not
- * a server of that name is ignored, which leaves the name off.
+ * Ids that no view knows are kept as they are: a server the thread has but
+ * the catalogue has not read yet must not be erased by an unrelated write. A
+ * list that names a server since deleted is refused by the controller, which
+ * the user sees. A `serverId` that is not a server of `name` returns the list
+ * unchanged: it is not a request to switch the name off.
  */
 export const chooseNamedServer = (
   ids: readonly string[],
@@ -53,13 +55,12 @@ export const chooseNamedServer = (
   const sameName = new Set(
     views.filter((view) => view.server.name === name).map((view) => view.server.id),
   );
-  const known = new Set(views.map((view) => view.server.id));
-  const kept = ids.filter((id) => known.has(id));
-  if (serverId === null || !sameName.has(serverId)) return kept.filter((id) => !sameName.has(id));
-  const first = kept.findIndex((id) => sameName.has(id));
-  const others = kept.filter((id) => !sameName.has(id));
+  if (serverId === null) return ids.filter((id) => !sameName.has(id));
+  if (!sameName.has(serverId)) return [...ids];
+  const first = ids.findIndex((id) => sameName.has(id));
+  const others = ids.filter((id) => !sameName.has(id));
   if (first === -1) return [...others, serverId];
   // Count the ids before the old one that stay, to find its place among them.
-  const place = kept.slice(0, first).filter((id) => !sameName.has(id)).length;
+  const place = ids.slice(0, first).filter((id) => !sameName.has(id)).length;
   return [...others.slice(0, place), serverId, ...others.slice(place)];
 };
