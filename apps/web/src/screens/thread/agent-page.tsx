@@ -27,6 +27,7 @@ import {
   type Live,
   type RuntimeNote,
 } from "@hercule/client-core";
+import { useLiveInvalidation } from "../../app/live-invalidation";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
 import { ContentColumn } from "../content-column";
@@ -39,6 +40,7 @@ import { ConversationSessionNotice } from "./conversation-session-notice";
 import { QueuedInputs } from "./queued-inputs";
 import { SendingMessages } from "./sending-messages";
 import { RequestDock } from "./request-dock";
+import { NoteLine } from "./note-line";
 import { RuntimeNoteLine } from "./runtime-note-line";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
@@ -91,6 +93,13 @@ export function AgentPage({
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
   const { turns, outsideRuntimeNotes } = buildTurns(rows, agent);
+  // A line about MCP servers draws its buttons from the servers as they are
+  // now. So a page that holds one reads the servers (each line does) and keeps
+  // the live topic, and a page without one does neither.
+  const hasMcpNote = [...turns.flatMap((turn) => turn.runtimeNotes), ...outsideRuntimeNotes].some(
+    (note) => note.mcpServers !== undefined,
+  );
+  useLiveInvalidation(live, queryClient, "mcpServer", hasMcpNote);
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
@@ -109,7 +118,7 @@ export function AgentPage({
   const drawRuntimeNotesAfter = (turnCount: number): JSX.Element[] =>
     outsideRuntimeNotes
       .filter((note) => note.turnsBefore === turnCount)
-      .map((note) => <RuntimeNoteLine key={note.key} note={note} />);
+      .map((note) => <NoteLine key={note.key} note={note} />);
   // Turns started in the same minute share one time separator.
   const stamps = chooseStamps(
     turns.map((turn) => turn.startedAt),

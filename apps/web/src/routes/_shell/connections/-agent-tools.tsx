@@ -3,7 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
-import { buildMcpServerSettingsRows } from "@hercule/client-core/mcp-servers";
+import {
+  buildMcpServerSettingsRows,
+  describeAgentToolsNote,
+} from "@hercule/client-core/mcp-servers";
 import { cn } from "@hercule/ui";
 import { mcpServersQuery, pluginsQuery } from "../../../app/queries";
 
@@ -42,13 +45,7 @@ export function AgentToolsNote({
   return (
     <>
       {rows.map(({ view, offer }) => {
-        const failing = view?.failing ?? false;
-        const words =
-          view === null || view.displayStatus === "off"
-            ? "agent tools off"
-            : view.displayStatus === "ready"
-              ? "agent tools on"
-              : `agent tools: ${view.statusWord}`;
+        const { words, failing } = describeAgentToolsNote(view);
         const className = cn(
           "inline-flex items-center gap-1.5 self-start text-fine hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
           failing ? "text-fail" : "text-muted",

@@ -36,9 +36,10 @@ import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { ProviderMark } from "../provider-mark";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
-import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
+import { PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
+import { ThreadPlusMenu } from "./thread-plus-menu";
 import { buildSignInSlot } from "./sign-in-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
@@ -48,7 +49,7 @@ import { useComposerModel } from "./use-composer-model";
 import { useNewModelSave } from "./use-new-model-save";
 import { useTypingGuard } from "./use-typing-guard";
 
-type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
+type SelectorKey = "plus" | "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
 /** Checks whether a drag carries files, rather than text or a link. */
 const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.includes("Files");
@@ -67,6 +68,12 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * option picks are not touched, and the message comes back when answer mode
  * ends. A question that arrives while the user is typing a message waits for
  * the user to pause (`useTypingGuard`).
+ *
+ * The `+` opens a menu: Attach, and the thread's MCP servers (`ThreadPlusMenu`).
+ * Answer mode turns Attach off but leaves the MCP servers row working,
+ * because that row edits the thread's list and not the answer being written
+ * (decided by Rogier, #1211). The servers are read only when the thread has
+ * some or the menu is open.
  */
 export function Composer({
   thread,
@@ -76,7 +83,7 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
@@ -84,9 +91,8 @@ export function Composer({
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   // The zone in which a New row says when its model arrived.
-  const timezone = resolveDisplayTimezone(
-    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
-  );
+  const settings = useSuspenseQuery(settingsQuery(client)).data.user;
+  const timezone = resolveDisplayTimezone(settings.timezone);
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
@@ -292,8 +298,21 @@ export function Composer({
               is measured in JavaScript. */}
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
             <div className="flex min-w-0 flex-[1_1_304px] items-center gap-1.5">
-              <AttachButton
-                disabledReason={
+              <ThreadPlusMenu
+                client={client}
+                live={live}
+                thread={thread}
+                projectId={projectId}
+                projects={projects}
+                defaultIds={settings["thread.mcpServerIds"] ?? []}
+                picks={model.picks}
+                recordThreadChoice={model.recordThreadChoice}
+                plugins={plugins}
+                open={open === "plus"}
+                onOpenChange={(next) => {
+                  handleOpenChange("plus", next);
+                }}
+                attachDisabledReason={
                   answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
                 }
                 // The picker can come back after a question took the composer
