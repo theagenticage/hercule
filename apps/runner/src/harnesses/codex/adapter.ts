@@ -356,6 +356,23 @@ const ACCESS_MODES: Readonly<
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/**
+ * The most bytes of frames that may wait behind an image upload before the
+ * images of later tool results are no longer kept. The MCP Gateway caps each
+ * message at 4 MiB, so 64 MiB is room for sixteen of the largest results
+ * waiting at once, far more than a normal burst, while a runner that hosts
+ * several sessions still never holds more than this much per session.
+ */
+const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
+
+/** The reason shown for an image that was not kept because too many frames were waiting. */
+const IMAGE_BACKLOG = "Too many tool results were waiting to be read, so the image was not kept.";
+
+/** An uploader that keeps nothing: every image it is given becomes unavailable. */
+const REFUSING_UPLOADER: AttachmentUploader = {
+  upload: () => Effect.succeed({ type: "image", unavailable: IMAGE_BACKLOG }),
+};
+
 /** How long a session's exit waits for the app-server's output to end after the process has exited. */
 const OUTPUT_DRAIN_PATIENCE_MS = 2000;
 
@@ -991,6 +1008,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     // ends at once and leaves its image unavailable, so stopping never waits
     // for a slow upload.
     const uploads = new AbortController();
+    // Whether the log already says the backlog is over `MAX_QUEUED_BYTES`.
+    let backlogReported = false;
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
@@ -1016,29 +1035,48 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
         },
-        // Takes the generated image's bytes out of a frame the moment it
+        // Takes a generated image's bytes out of a frame the moment it
         // arrives. The images of an MCP result are replaced by references
         // when the frame reaches the head of the queue, so one frame uploads
-        // at a time. A waiting frame holds its images meanwhile, which is
-        // bounded: the MCP Gateway caps each message at 4 MiB and each token
-        // at 32 running calls. Only a session's host uploads: a text
-        // generation or a probe has no session to keep an image for.
+        // at a time. Frames that wait hold their images meanwhile, and the
+        // queue is bounded by `MAX_QUEUED_BYTES`: past it, a frame's images
+        // are not uploaded but marked unavailable. Only a session's host
+        // uploads: a text generation or a probe has no session to keep an
+        // image for.
         prepareNotification: (frame) => {
-          try {
-            stripImageBytes(frame);
-            const results = sessionId === undefined ? [] : listMcpResultItems(frame);
-            if (sessionId === undefined || results.length === 0) return undefined;
-            return () =>
-              Effect.runPromise(
-                replaceMcpResultImages(uploader, sessionId, results, uploads.signal),
-              ).catch(() => {
-                // The upload code never fails, so this is a defect. The bytes
-                // are still dropped rather than passed on.
-                for (const item of results) Reflect.deleteProperty(item, "result");
-              });
-          } catch {
-            return undefined;
-          }
+          stripImageBytes(frame);
+          if (sessionId === undefined) return undefined;
+          const results = listMcpResultItems(frame);
+          if (results.length === 0) return undefined;
+          return async () => {
+            const overBound = host.rpc.queuedBytes() > MAX_QUEUED_BYTES;
+            try {
+              await Effect.runPromise(
+                Effect.suspend(() => {
+                  if (!overBound) {
+                    backlogReported = false;
+                    return replaceMcpResultImages(uploader, sessionId, results, uploads.signal);
+                  }
+                  // One line per backlog, not per frame.
+                  const report = backlogReported
+                    ? Effect.void
+                    : Effect.logWarning(
+                        `Codex's output is ${String(host.rpc.queuedBytes())} bytes behind for session ${sessionId}, over the ${String(MAX_QUEUED_BYTES)} bytes kept, so the images of the next tool results are not kept.`,
+                      );
+                  backlogReported = true;
+                  return Effect.andThen(
+                    report,
+                    replaceMcpResultImages(REFUSING_UPLOADER, sessionId, results, uploads.signal),
+                  );
+                }),
+              );
+            } catch {
+              // Finding or uploading the images failed, which the code does
+              // not do on purpose. The bytes are still dropped rather than
+              // passed on, and the queue goes on.
+              for (const item of results) Reflect.deleteProperty(item, "result");
+            }
+          };
         },
         onWarning: (message) => {
           rememberComplaint(message);
@@ -1865,19 +1903,22 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             return Effect.fail(failed);
           },
           onSuccess: (sent) =>
-            Effect.sync(() => {
-              if (sessions.get(sessionId) !== held) return;
-              for (const event of buildUserMessage({
-                sessionId,
-                turnId: sent.turnId,
-                text: buildAnswerMessage(question, texts),
-                steered: sent.delivery === "steered",
-                harnessRefs: { threadId: held.binding.nativeSessionId },
-              })) {
-                emit(event);
-              }
-              if (isOpen()) closeAsyncQuestion(held, question, { answers });
-            }),
+            Effect.sync(() =>
+              // In Codex's order, like the message of a plain input.
+              held.host.rpc.afterPending(() => {
+                if (sessions.get(sessionId) !== held) return;
+                for (const event of buildUserMessage({
+                  sessionId,
+                  turnId: sent.turnId,
+                  text: buildAnswerMessage(question, texts),
+                  steered: sent.delivery === "steered",
+                  harnessRefs: { threadId: held.binding.nativeSessionId },
+                })) {
+                  emit(event);
+                }
+                if (isOpen()) closeAsyncQuestion(held, question, { answers });
+              }),
+            ),
         }),
       );
     });
@@ -2220,20 +2261,24 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
           );
         const sent = yield* deliverInput(held, input, skills);
-        for (const event of sessions.get(sessionId) !== held
-          ? []
-          : buildUserMessage({
-              sessionId,
-              turnId: sent.turnId,
-              text: input.text,
-              attachments: input.attachments,
-              skillReferences: skills.translated,
-              senderSessionId: input.senderSessionId,
-              steered: sent.delivery === "steered",
-              harnessRefs: { threadId: held.binding.nativeSessionId },
-            })) {
-          emit(event);
-        }
+        // The reply to the input is answered at once, but the message joins the
+        // events in Codex's order: behind the tool results sent before it that
+        // still wait for their images.
+        held.host.rpc.afterPending(() => {
+          if (sessions.get(sessionId) !== held) return;
+          for (const event of buildUserMessage({
+            sessionId,
+            turnId: sent.turnId,
+            text: input.text,
+            attachments: input.attachments,
+            skillReferences: skills.translated,
+            senderSessionId: input.senderSessionId,
+            steered: sent.delivery === "steered",
+            harnessRefs: { threadId: held.binding.nativeSessionId },
+          })) {
+            emit(event);
+          }
+        });
         return sent;
       }),
 

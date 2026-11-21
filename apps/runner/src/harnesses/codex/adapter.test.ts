@@ -20,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
@@ -4756,7 +4756,7 @@ describe("the images in the result of an MCP tool call", () => {
       ]);
     });
 
-    it("emits the call before the message that steers the turn afterwards", async () => {
+    it("answers a steer at once, and publishes its message behind the held call", async () => {
       let release: () => void = () => undefined;
       let started = false;
       const run = await startWithUploader(() =>
@@ -4769,18 +4769,23 @@ describe("the images in the result of an MCP tool call", () => {
       run.spawns[0]!.push(completedFrame(IMAGE_RESULT));
       await waitUntil("started the upload", () => started);
 
-      // The reply to the steer arrives behind the held completion, so the
-      // input is reported only after the completion.
-      const steering = Effect.runPromise(
+      // The reply to the steer is read at once, so the controller is not kept waiting.
+      const sent = await Effect.runPromise(
         run.adapter.sendInput(SESSION, { text: "one more instruction" }),
       );
-      await settle();
+      expect(sent).toMatchObject({ delivery: "steered" });
       expect(filterByTag(run.seen, "item.completed").map((event) => event.itemId)).not.toContain(
         "call-1",
       );
-      release();
-      expect(await steering).toMatchObject({ delivery: "steered" });
 
+      release();
+      await waitUntil(
+        "published the steering message",
+        () =>
+          run.seen.filter(
+            (event) => event._tag === "item.completed" && event.kind === "user_message",
+          ).length === 2,
+      );
       const order = run.seen
         .filter(
           (event) =>
@@ -4789,6 +4794,80 @@ describe("the images in the result of an MCP tool call", () => {
         )
         .map((event) => (event as { readonly kind: string }).kind);
       expect(order).toEqual(["user_message", "tool_call", "user_message"]);
+    });
+
+    it("drops a result it cannot scan, and goes on with the frames after it", async () => {
+      const run = await startWithUploader(() =>
+        Effect.succeed({ type: "image" as const, attachment: STORED }),
+      );
+      // So deep that finding the images in it overflows the stack.
+      let deep: unknown = "x";
+      for (let level = 0; level < 30_000; level += 1) deep = [deep];
+
+      run.spawns[0]!.push(
+        completedFrame({ content: [deep], structuredContent: null, _meta: null }, "deep"),
+      );
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "after"));
+      await waitUntil(
+        "completed both calls",
+        () => filterByTag(run.seen, "item.completed").length === 2,
+      );
+
+      const completed = filterByTag(run.seen, "item.completed");
+      expect(completed.map((event) => event.itemId)).toEqual(["deep", "after"]);
+      // The result that could not be scanned is dropped, bytes and all.
+      expect(JSON.stringify(completed[0]?.raw)).not.toContain('"result"');
+      expect(JSON.stringify(completed[1]?.raw)).toContain("attachment");
+    });
+
+    it("leaves the images of results unavailable, with one log line, while too many frames wait", async () => {
+      // Effect's default logger writes a warning to the console.
+      const logged: Array<string> = [];
+      for (const method of ["log", "warn", "error"] as const) {
+        const spy = vi.spyOn(console, method).mockImplementation((...parts: Array<unknown>) => {
+          logged.push(parts.map(String).join(" "));
+        });
+        onTestFinished(() => spy.mockRestore());
+      }
+      let releaseFirst: () => void = () => undefined;
+      let uploads = 0;
+      const run = await startWithUploader(() => {
+        uploads += 1;
+        return uploads === 1
+          ? Effect.callback<ToolResultImage>((resume) => {
+              releaseFirst = () => resume(Effect.succeed({ type: "image", attachment: STORED }));
+            })
+          : Effect.succeed({ type: "image" as const, attachment: STORED });
+      });
+      const bigResult = () => ({
+        content: [{ type: "image", data: "A".repeat(8 * 1024 * 1024), mimeType: "image/png" }],
+        structuredContent: null,
+        _meta: null,
+      });
+
+      run.spawns[0]!.push(completedFrame(IMAGE_RESULT, "held"));
+      await waitUntil("started the first upload", () => uploads === 1);
+      // Nine frames of 8 MiB wait behind it: 72 MiB, over the 64 MiB kept.
+      for (let index = 0; index < 9; index += 1) {
+        run.spawns[0]!.push(completedFrame(bigResult(), `big-${String(index)}`));
+      }
+      await settle();
+      releaseFirst();
+      await waitUntil(
+        "completed every call",
+        () => filterByTag(run.seen, "item.completed").length === 10,
+        60_000,
+      );
+
+      const raws = filterByTag(run.seen, "item.completed").map((event) =>
+        JSON.stringify(event.raw),
+      );
+      // The first frame to reach the head sees the backlog and keeps nothing.
+      expect(raws[1]).toContain("Too many tool results were waiting to be read");
+      // Once the backlog is down to the bound, images are kept again.
+      expect(raws[9]).toContain("attachment");
+      expect(JSON.stringify(run.seen)).not.toContain("A".repeat(1000));
+      expect(logged.filter((line) => line.includes("bytes behind"))).toHaveLength(1);
     });
   });
 });

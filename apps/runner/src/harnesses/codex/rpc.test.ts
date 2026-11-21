@@ -289,7 +289,7 @@ describe("a peer that sends bad lines or never replies", () => {
     expect(String(JSON.stringify(failure))).toContain("nope/nothing");
   });
 
-  it("counts the deadline of a request until its reply is read, not until the reply's turn comes", async () => {
+  it("resolves a request when its reply is read, even while an earlier notification still waits", async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -309,7 +309,7 @@ describe("a peer that sends bad lines or never replies", () => {
             JSON.stringify({ id: parseFrame(peer.writes[0]!)["id"], result: { turnId: "t" } }),
           );
           yield* pause;
-          // The reply was read in time, and then waits longer than the deadline.
+          // The reply is read in time, and the notification ahead of it waits longer than the deadline.
           yield* TestClock.adjust(Duration.sum(RPC_DEADLINE, Duration.seconds(10)));
           release();
           const result = yield* Fiber.join(asked);
@@ -321,5 +321,36 @@ describe("a peer that sends bad lines or never replies", () => {
     );
 
     expect(answered).toEqual({ turnId: "t" });
+  });
+
+  it("goes on after a preparation fails: later frames and the end of the output still arrive", async () => {
+    const stdout = createLines();
+    const delivered: Array<string> = [];
+    const warnings: Array<string> = [];
+    const rpc = makeRpc(
+      { write: () => undefined, stdout: stdout.iterable },
+      {
+        onServerRequest: () => undefined,
+        onNotification: (frame) => void delivered.push(frame.method),
+        onWarning: (message) => void warnings.push(message),
+        prepareNotification: (frame) =>
+          frame.method === "bad" ? () => Promise.reject(new Error("could not prepare")) : undefined,
+      },
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const pumping = yield* Effect.forkChild(rpc.pump);
+        stdout.push(JSON.stringify({ method: "bad", params: {} }));
+        stdout.push(JSON.stringify({ method: "after", params: {} }));
+        stdout.end();
+        yield* Effect.promise(() => rpc.ended);
+        yield* Fiber.interrupt(pumping);
+      }),
+    );
+
+    // The failed frame is delivered as it is, and the warning says why.
+    expect(delivered).toEqual(["bad", "after"]);
+    expect(warnings.join(" ")).toContain("could not prepare");
   });
 });
