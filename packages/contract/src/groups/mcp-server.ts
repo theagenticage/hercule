@@ -63,8 +63,9 @@ export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>;
  * `runtime.warning` names the same reasons. A client reads it to say what to
  * do:
  *
- * - `runner-too-old`: the session's runner does not support MCP servers;
  * - `harness-unsupported`: the session's harness cannot be given MCP servers;
+ * - `runner-too-old`: the session's harness can be given them, but its runner
+ *   does not support that harness's MCP servers;
  * - `missing-grant`: the session's Permission Profile lacks `mcp.use`;
  * - `switched-off`: the server's `enabled` is false;
  * - `checking`: the server's first list of tools has not ended;
