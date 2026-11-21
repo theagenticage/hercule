@@ -4,11 +4,11 @@
  *
  * The rules this file enforces for every request that leaves the controller:
  *
- * - The URL and headers come only from the plugin's `buildUpstreamRequest`,
- *   called with the credentials the request is about to carry, after the
- *   controller is known to be serving. The URL must be `http` or `https`, on
- *   the contribution's origin, with no user name or password. Otherwise
- *   nothing is sent.
+ * - The URL and headers come only from the endpoint's `buildRequest`
+ *   (`access.ts`), called with the credentials the request is about to carry,
+ *   after the controller is known to be serving. The URL must be `http` or
+ *   `https`, on the endpoint's origin, with no user name or password.
+ *   Otherwise nothing is sent.
  * - A redirect is never followed, so a credential never reaches another
  *   origin. A 3xx answer is an error.
  * - Nothing is sent while the controller is frozen or sealed: a background
@@ -35,9 +35,9 @@
  * (see `callTool` of `OpenedUpstream`).
  *
  * The file also holds what every caller does with an upstream failure:
- * `runWithCredentials` gets the Connection's credentials and refreshes them
- * once when the server refuses them, and `buildStatusFromFailure` says what
- * status a failure gives the server.
+ * `runWithCredentials` gets the server's credentials and refreshes them once
+ * when the server refuses them, and `buildStatusFromFailure` says what status
+ * a failure gives the server.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -51,16 +51,15 @@ import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { McpClient, type McpClientError, McpProtocol, McpSchema } from "effect/ai";
 import { VERSION } from "@hercule/home/version";
-import {
-  ConnectionCannotRefresh,
-  type ConnectionCredentialsForUse,
-  type ConnectionCredentialsUnavailable,
-  type ConnectionTypes,
-  type RefreshGuard,
-  type StoredConnection,
-} from "../connections";
-import type { RegisteredMcpServer } from "../plugins";
+import type { RefreshGuard } from "../connections";
 import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
+import {
+  ServerCredentialsCannotRefresh,
+  type ServerCredentials,
+  type ServerCredentialsUnavailable,
+  type UpstreamCredentials,
+  type UpstreamEndpoint,
+} from "./access";
 import { removeCredentialValues } from "./credential-values";
 
 /**
@@ -134,7 +133,7 @@ export class UpstreamError extends Schema.TaggedError<UpstreamError>()("Upstream
  * give to all of them.
  */
 export type PrepareSend<Refusal = never> = Effect.Effect<
-  ConnectionCredentialsForUse,
+  UpstreamCredentials,
   UpstreamError | Refusal
 >;
 
@@ -169,7 +168,7 @@ interface UpstreamCallState<Refusal = never> {
    */
   readonly prepareSend: PrepareSend<Refusal> | undefined;
   /** The credentials the last request of this state carried. `undefined` until one was sent. */
-  sentCredentials: ConnectionCredentialsForUse | undefined;
+  sentCredentials: UpstreamCredentials | undefined;
   /**
    * Why the client refused to send a request of this state, when it did. The
    * client can only fail with its own error, so the reason is kept here for
@@ -300,8 +299,8 @@ const buildFailure = (
   });
 
 /**
- * Checks that a URL a plugin built may carry credentials: `http` or `https`,
- * exactly the contribution's origin, and no user name or password. Returns the
+ * Checks that a URL an endpoint built may carry credentials: `http` or `https`,
+ * exactly the endpoint's origin, and no user name or password. Returns the
  * `not-on-origin` failure when it may not, and `undefined` when it may.
  */
 export const checkUrlOnOrigin = (origin: string, url: string): UpstreamError | undefined => {
@@ -480,14 +479,14 @@ export interface OpenedUpstream {
 
 /** What `openUpstream` needs. */
 export interface UpstreamTarget {
-  readonly contribution: RegisteredMcpServer;
+  readonly endpoint: UpstreamEndpoint;
   /**
    * The credentials the transport's address is built from, and that the
    * closing of the upstream session carries. Without `prepareSend`, every
    * request that belongs to no call carries them. A call sends its own (see
    * `UpstreamCallState`).
    */
-  readonly credentials: ConnectionCredentialsForUse;
+  readonly credentials: UpstreamCredentials;
   /** The revision that worked last time, tried first, or `null`. */
   readonly firstRevision: string | null;
   /**
@@ -518,7 +517,7 @@ export interface UpstreamTarget {
 }
 
 /**
- * Opens an MCP client to the contribution's server and returns it with the
+ * Opens an MCP client to the endpoint's server and returns it with the
  * revision that worked. The client stays open until the scope closes, which
  * also ends the upstream session.
  *
@@ -542,7 +541,7 @@ export const openUpstream = (
   HttpClient.HttpClient | PromotionState | Scope.Scope
 > =>
   Effect.gen(function* () {
-    const { contribution } = target;
+    const { endpoint } = target;
     const promotion = yield* PromotionState;
     const baseClient = yield* HttpClient.HttpClient;
     const outer = yield* Scope.Scope;
@@ -558,15 +557,11 @@ export const openUpstream = (
       sentValues,
     };
 
-    const buildRequest = (credentials: ConnectionCredentialsForUse) =>
+    const buildRequest = (credentials: UpstreamCredentials) =>
       Effect.try({
-        try: () =>
-          contribution.buildUpstreamRequest({
-            credentials: credentials.credentials,
-            config: credentials.config,
-          }),
-        // The plugin's function is pure and should not throw. If it does, say
-        // nothing of what it threw, because that may hold the credentials.
+        try: () => endpoint.buildRequest(credentials),
+        // The function is pure and should not throw. If it does, say nothing
+        // of what it threw, because that may hold the credentials.
         catch: () => buildFailure("not-on-origin"),
       });
 
@@ -575,7 +570,7 @@ export const openUpstream = (
       Effect.sync(() => sessionState.sentCredentials ?? target.credentials);
 
     const first = yield* buildRequest(target.credentials);
-    const refusedFirst = checkUrlOnOrigin(contribution.origin, first.url);
+    const refusedFirst = checkUrlOnOrigin(endpoint.origin, first.url);
     if (refusedFirst !== undefined) return yield* Effect.fail(refusedFirst);
 
     const sendingClient = baseClient.pipe(
@@ -610,7 +605,7 @@ export const openUpstream = (
      */
     const sendWith = (
       request: HttpClientRequest.HttpClientRequest,
-      used: ConnectionCredentialsForUse,
+      used: UpstreamCredentials,
       state: UpstreamCallState<unknown>,
       startsExchange: boolean,
     ) =>
@@ -626,7 +621,7 @@ export const openUpstream = (
         }
         // The URL that is sent is the one just built and checked, so a
         // credential in the URL is the current one.
-        const refused = checkUrlOnOrigin(contribution.origin, built.url);
+        const refused = checkUrlOnOrigin(endpoint.origin, built.url);
         if (refused !== undefined) return yield* Effect.fail(refused);
         // A request that goes out clears an older refusal of the requests that
         // belong to no call, so a later failure is not taken for it. The closing
@@ -836,7 +831,7 @@ export const openUpstream = (
           );
           if (kept.length < tools.length) {
             yield* Effect.logWarning(
-              `${contribution.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
+              `${endpoint.displayName}'s MCP server listed ${String(tools.length - kept.length)} tool(s) whose name holds a credential value. They were left out of the stored list.`,
             );
           }
           return removeSentValues(kept);
@@ -903,92 +898,31 @@ export const openUpstream = (
  * Converts a failure of an upstream call into the status an MCP Server shows
  * for it, with a detail a person can read. A server that cannot be reached or
  * does not answer in time is `unreachable`, because trying again later may
- * work. Every other failure is `error`: the server refused the token, or
- * answered with something Hercule cannot use. `displayName` is the plugin's
- * name for the server, for the refused-token line.
+ * work. A server that refused the credentials has the status and the words
+ * its credentials give (`ServerCredentials.describeRejected`). Every other
+ * failure is `error`: the server answered with something Hercule cannot use.
  */
 export const buildStatusFromFailure = (
   failure: UpstreamError,
-  displayName: string,
-): { readonly status: "unreachable" | "error"; readonly detail: string } => {
+  credentials: Pick<ServerCredentials, "describeRejected">,
+): {
+  readonly status: "unreachable" | "error" | "needs-sign-in";
+  readonly detail: string;
+} => {
   switch (failure.reason) {
     case "unreachable":
     case "timeout":
       return { status: "unreachable", detail: failure.message };
     case "unauthorized":
-      return {
-        status: "error",
-        detail: `${displayName}'s MCP server refused the Connection's token`,
-      };
+      return credentials.describeRejected();
     default:
       return { status: "error", detail: failure.message };
   }
 };
 
 /**
- * Converts a Connection's failure to give credentials into the status an MCP
- * Server shows for it, with a detail a person can read, and `cause`
- * `connection` when the Connection needs the user. The text is fixed here and never the Connection's own
- * message, which may hold what the provider sent.
- */
-export const buildStatusFromUnavailable = (
-  error: ConnectionCredentialsUnavailable,
-  connection: Pick<StoredConnection, "label">,
-  displayName: string,
-): {
-  readonly status: "unreachable" | "error" | "needs-sign-in";
-  readonly detail: string;
-  readonly cause?: "connection";
-} => {
-  switch (error.reason) {
-    case "needs-sign-in":
-      return {
-        status: "needs-sign-in",
-        detail: `Reconnect ${connection.label} in Settings > Connections`,
-        cause: "connection",
-      };
-    case "switched-off":
-      return {
-        status: "error",
-        detail: `The Connection ${connection.label} is switched off`,
-        cause: "connection",
-      };
-    case "unreachable":
-      return {
-        status: "unreachable",
-        detail: `${displayName} could not be reached to refresh the sign-in`,
-      };
-    case "credentials-replaced":
-      // The Connection is fine: the user reconnected twice while the sign-in
-      // was refreshed. The backoff checks again soon.
-      return {
-        status: "unreachable",
-        detail: `The sign-in of ${connection.label} was replaced while it was being refreshed`,
-      };
-    case "no-credentials":
-      return {
-        status: "error",
-        detail: `The Connection ${connection.label} holds no credentials: reconnect it in Settings > Connections`,
-      };
-    case "invalid-config":
-      return {
-        status: "error",
-        detail: `The settings of ${connection.label} no longer fit its type: check them in Settings > Connections`,
-      };
-    case "missing":
-      return { status: "error", detail: "The Connection of this server is missing" };
-  }
-};
-
-/** What `runWithCredentials` asks of the Connections: the two ways to get credentials for use. */
-type CredentialSource = Pick<
-  ConnectionTypes["Service"],
-  "readCredentialsForUse" | "refreshAfterRejection"
->;
-
-/**
- * Runs `action` with the credentials of a Connection, and when the server
- * refuses them, refreshes them once and runs it again. Returns what the action
+ * Runs `action` with the credentials of a server, and when the server refuses
+ * them, refreshes them once and runs it again. Returns what the action
  * returned.
  *
  * The retry is allowed only when the action fails with an `UpstreamError` of
@@ -999,19 +933,19 @@ type CredentialSource = Pick<
  * running it again could do the work twice. Any other failure of the action
  * ends it.
  *
- * A refresh changes the Connection, so a caller can refuse it when what it
+ * A refresh changes the credentials, so a caller can refuse it when what it
  * works for has changed, in one of two ways. `checkRefreshAllowed` runs
  * before a refresh after a rejection, and when it fails the refresh and the
- * retry do not happen. `guardRefresh` runs under the Connection's refresh
- * permit, right before every request to the provider this causes, also the
- * refresh of a stale token that the first read starts (`RefreshGuard`).
+ * retry do not happen. `guardRefresh` runs right before every request to the
+ * provider this causes, also the refresh of a stale token that the first read
+ * starts (`RefreshGuard`).
  *
  * Fails with:
  *
- * - `ConnectionCredentialsUnavailable` when the Connection cannot give
- *   credentials, or cannot give new ones after the rejection;
- * - the action's `UpstreamError`, also when the Connection has nothing to
- *   refresh (pasted credentials), and when the retry fails too;
+ * - `ServerCredentialsUnavailable` when the server cannot give credentials,
+ *   or cannot give new ones after the rejection;
+ * - the action's `UpstreamError`, also when there is nothing to refresh
+ *   (pasted credentials), and when the retry fails too;
  * - what `checkRefreshAllowed` and `guardRefresh` fail with.
  */
 export const runWithCredentials = <
@@ -1021,17 +955,14 @@ export const runWithCredentials = <
   G = never,
   R = never,
 >(input: {
-  readonly connections: CredentialSource;
-  readonly connectionId: string;
-  readonly action: (
-    credentials: ConnectionCredentialsForUse,
-  ) => Effect.Effect<A, UpstreamError | F, R>;
+  readonly credentials: ServerCredentials;
+  readonly action: (credentials: UpstreamCredentials) => Effect.Effect<A, UpstreamError | F, R>;
   readonly checkRefreshAllowed?: Effect.Effect<void, E, R>;
   readonly guardRefresh?: RefreshGuard<G>;
-}): Effect.Effect<A, UpstreamError | F | ConnectionCredentialsUnavailable | E | G, R> =>
+}): Effect.Effect<A, UpstreamError | F | ServerCredentialsUnavailable | E | G, R> =>
   Effect.gen(function* () {
-    const { connections, connectionId, action, guardRefresh } = input;
-    const credentials = yield* connections.readCredentialsForUse(connectionId, guardRefresh);
+    const { credentials: server, action, guardRefresh } = input;
+    const credentials = yield* server.readForUse(guardRefresh);
     const first = yield* Effect.result(action(credentials));
     if (first._tag === "Success") return first.success;
     const rejected = first.failure;
@@ -1041,15 +972,11 @@ export const runWithCredentials = <
 
     if (input.checkRefreshAllowed !== undefined) yield* input.checkRefreshAllowed;
     const refreshed = yield* Effect.result(
-      connections.refreshAfterRejection(
-        connectionId,
-        rejected.sentIdentity ?? credentials.identity,
-        guardRefresh,
-      ),
+      server.refreshAfterRejection(rejected.sentIdentity ?? credentials.identity, guardRefresh),
     );
     if (refreshed._tag === "Failure") {
       return yield* Effect.fail(
-        refreshed.failure instanceof ConnectionCannotRefresh ? rejected : refreshed.failure,
+        refreshed.failure instanceof ServerCredentialsCannotRefresh ? rejected : refreshed.failure,
       );
     }
     return yield* action(refreshed.success);

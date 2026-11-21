@@ -31,22 +31,18 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { McpSchema } from "effect/ai";
 import { absorbFailures } from "../absorbing";
-import {
-  ConnectionTypes,
-  type ConnectionCredentialsForUse,
-  type RefreshGuard,
-} from "../connections";
+import { ConnectionTypes, type RefreshGuard } from "../connections";
 import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
-import type { PluginHost, RegisteredMcpServer } from "../plugins";
+import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
-import { judgeDependencies, type McpServerDependencies } from "./catalogue";
+import { resolveServerAccess, type UpstreamCredentials, type UpstreamEndpoint } from "./access";
+import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
 import { buildFailureEdit, DAILY_CHECK_MILLIS, mcpServerState } from "./state";
 import {
   buildStatusFromFailure,
-  buildStatusFromUnavailable,
   MAX_UPSTREAM_MESSAGE_BYTES,
   openUpstream,
   runWithCredentials,
@@ -178,8 +174,8 @@ const make = Effect.gen(function* () {
    * revision is known when the listing fails.
    */
   const listTools = (
-    contribution: RegisteredMcpServer,
-    credentials: ConnectionCredentialsForUse,
+    endpoint: UpstreamEndpoint,
+    credentials: UpstreamCredentials,
     worked: WorkedRevision,
     firstRevision: string | null,
     deadline: Duration.Duration,
@@ -189,7 +185,7 @@ const make = Effect.gen(function* () {
   > =>
     Effect.scoped(
       Effect.gen(function* () {
-        const opened = yield* openUpstream({ contribution, credentials, firstRevision });
+        const opened = yield* openUpstream({ endpoint, credentials, firstRevision });
         worked.current = opened.revision;
         return { tools: yield* opened.listTools(deadline), revision: opened.revision };
       }),
@@ -205,12 +201,12 @@ const make = Effect.gen(function* () {
    *
    * When the server refuses the credentials, they are refreshed and the
    * listing is tried once more (`runWithCredentials`). A refresh changes the
-   * Connection, so it starts only if the server, its revision and its
-   * Connection are still as the check found them. That is checked before the
+   * credentials, so it starts only if the server, its revision and what it
+   * depends on are still as the check found them. That is checked before the
    * refresh after a rejection, and again under the Connection's refresh
    * permit, right before every request to the provider, because the check may
    * wait a long time for the permit. Otherwise the outcome is `discarded`, and
-   * the Connection is left alone.
+   * the credentials are left alone.
    *
    * The whole evaluation is bound by `McpServerCheckDeadline`. A check that
    * is still running then ends `unreachable`, like any server that does not
@@ -222,19 +218,12 @@ const make = Effect.gen(function* () {
     worked: WorkedRevision,
   ): Effect.Effect<CheckResult, SqlError> =>
     Effect.gen(function* () {
-      const judged = judgeDependencies(dependencies);
-      if (judged._tag === "unusable")
-        return buildFailedResult(judged.status, judged.detail, judged.cause);
-      const { contribution, connection } = judged;
-      const deadline = yield* McpServerCheckDeadline;
-      // Checked at use, not only at create, because the credentials of a
-      // Connection of another type would go to this server's origin.
-      if (connection.type !== contribution.connectionType) {
-        return buildFailedResult(
-          "error",
-          `This server needs a ${contribution.connectionType} Connection, and ${connection.label} is another type`,
-        );
+      // Resolved here, at use, because the check is about to send.
+      const access = resolveServerAccess({ server, dependencies }, connectionTypes);
+      if (access._tag === "unusable") {
+        return buildFailedResult(access.status, access.detail, access.cause);
       }
+      const deadline = yield* McpServerCheckDeadline;
 
       const checkBasisHolds = Effect.flatMap(
         state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
@@ -245,12 +234,11 @@ const make = Effect.gen(function* () {
       );
 
       return yield* runWithCredentials({
-        connections: connectionTypes,
-        connectionId: connection.id,
+        credentials: access.credentials,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(
-            contribution,
+            access.endpoint,
             credentials,
             worked,
             worked.current ?? server.protocolVersion,
@@ -275,17 +263,11 @@ const make = Effect.gen(function* () {
         ),
         Effect.catchTags({
           UpstreamError: (failure) => {
-            const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
+            const { status, detail } = buildStatusFromFailure(failure, access.credentials);
             return Effect.succeed(buildFailedResult(status, detail));
           },
-          ConnectionCredentialsUnavailable: (error) => {
-            const { status, detail, cause } = buildStatusFromUnavailable(
-              error,
-              connection,
-              contribution.displayName,
-            );
-            return Effect.succeed(buildFailedResult(status, detail, cause));
-          },
+          ServerCredentialsUnavailable: ({ status, detail, cause }) =>
+            Effect.succeed(buildFailedResult(status, detail, cause)),
           CheckSuperseded: () => Effect.succeed<CheckResult>({ _tag: "discarded" }),
         }),
       );

@@ -5,14 +5,14 @@
  *
  * Upstream MCP sessions live in memory, one per Session Token and server, and
  * the first call that needs one opens it. A session is replaced when the
- * server's `revision` or its Connection's `credentialsGeneration` moved since
- * it opened. It is closed once the calls that use it have ended, when the
- * gateway says its token no longer serves the server
- * (`closeUpstreamSessionsExcept`), when something else replaced it, or when a
- * committed change took the server's destination away. An opening that
- * nothing waits for any more is cancelled at once, also while its token
- * lives. The gateway stops the calls of a token that ended, so a call here
- * never waits for that itself.
+ * server's `revision` or the `generation` of its credentials (for a plugin
+ * server, its Connection's `credentialsGeneration`) moved since it opened. It
+ * is closed once the calls that use it have ended, when the gateway says its
+ * token no longer serves the server (`closeUpstreamSessionsExcept`), when
+ * something else replaced it, or when a committed change took the server's
+ * destination away. An opening that nothing waits for any more is cancelled
+ * at once, also while its token lives. The gateway stops the calls of a token
+ * that ended, so a call here never waits for that itself.
  *
  * The gateway admits a call through the promotion state, so a freeze waits
  * for it. This file admits nothing around the whole call: each exchange with
@@ -42,22 +42,23 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import { McpSchema } from "effect/ai";
 import { McpServerWarningReason } from "@hercule/protocol";
 import { absorbFailures } from "../absorbing";
-import {
-  ConnectionCredentialsUnavailable,
-  ConnectionTypes,
-  type ConnectionCredentialsForUse,
-  type RefreshGuard,
-  type StoredConnection,
-} from "../connections";
+import { ConnectionTypes, type RefreshGuard } from "../connections";
 import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
-import type { PluginHost, RegisteredMcpServer } from "../plugins";
+import type { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
+import {
+  readCredentialsGeneration,
+  resolveServerAccess,
+  type ServerCredentials,
+  type ServerCredentialsUnavailable,
+  type UpstreamCredentials,
+  type UsableAccess,
+} from "./access";
 import {
   decideCallRefusal,
   describeRefusal,
   isSameDependencies,
-  judgeDependencies,
   mcpServerCatalogue,
   type McpServerDependencies,
   type ServerUnavailableReason,
@@ -66,7 +67,6 @@ import type { StoredMcpServer, StoredMcpTool } from "./repository";
 import { buildFailureEdit, mcpServerState, type StateBasis } from "./state";
 import {
   buildStatusFromFailure,
-  buildStatusFromUnavailable,
   openUpstream,
   runWithCredentials,
   UPSTREAM_WORK_DEADLINE,
@@ -129,11 +129,11 @@ const TOO_LARGE_ANSWER = "the answer was larger than 4 MiB";
 interface UpstreamSlot {
   readonly upstreamScope: string;
   readonly serverId: string;
-  /** The Connection the server used when the slot was made. */
-  readonly connectionId: string;
+  /** The record that held the server's credentials when the slot was made (`ServerCredentials.credentialsRecordId`). */
+  readonly credentialsRecordId: string;
   /** The server's `revision` when the slot was made. */
   readonly serverRevision: number;
-  /** The Connection's `credentialsGeneration` when the slot was made. */
+  /** The credentials' `generation` when the slot was made. */
   readonly credentialsGeneration: number;
   /** Ends with the open session, or the reason it could not be opened. */
   readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError>;
@@ -161,8 +161,7 @@ const decodeTool = (stored: StoredMcpTool) => Schema.decodeUnknownEffect(McpSche
 interface Destination {
   readonly server: StoredMcpServer;
   readonly dependencies: McpServerDependencies;
-  readonly contribution: RegisteredMcpServer;
-  readonly connection: StoredConnection;
+  readonly access: UsableAccess;
   /** The tool's definition as it is stored now. */
   readonly tool: McpSchema.Tool;
 }
@@ -185,16 +184,16 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Reads a Connection's credentials as they are stored now, for a request
-   * that only continues an exchange that already went out, and for the DELETE
-   * that ends an upstream session. It never refreshes them, because neither
+   * Reads a server's credentials as they are stored now, for a request that
+   * only continues an exchange that already went out, and for the DELETE that
+   * ends an upstream session. It never refreshes them, because neither
    * request belongs to a call that may still ask the provider for anything,
    * and it runs no check of a caller. Fails with an `UpstreamError` that has
    * reason `refused` when the credentials cannot be read.
    */
-  const readCurrentCredentials = (connectionId: string): PrepareSend =>
+  const readCurrentCredentials = (credentials: ServerCredentials): PrepareSend =>
     Effect.mapError(
-      connectionTypes.readCredentialsWithoutRefresh(connectionId),
+      credentials.readWithoutRefresh,
       () =>
         new UpstreamError({
           reason: "refused",
@@ -230,17 +229,17 @@ const make = Effect.gen(function* () {
   /** Opens the slot's session and ends `opening` with the outcome. */
   const openSlot = (
     slot: UpstreamSlot,
-    contribution: RegisteredMcpServer,
-    credentials: ConnectionCredentialsForUse,
+    access: UsableAccess,
+    credentials: UpstreamCredentials,
     firstRevision: string | null,
     prepareSend: PrepareSend,
   ) =>
     openUpstream({
-      contribution,
+      endpoint: access.endpoint,
       credentials,
       firstRevision,
       prepareSend,
-      readCurrentCredentials: readCurrentCredentials(slot.connectionId),
+      readCurrentCredentials: readCurrentCredentials(access.credentials),
       sentValues: slot.sentValues,
     }).pipe(
       Effect.provideService(Scope.Scope, slot.scope),
@@ -264,23 +263,23 @@ const make = Effect.gen(function* () {
   /**
    * Takes hold of the session for this token and server, and starts opening
    * it when there is none. A session made for an older `revision` of the
-   * server, or an older `credentialsGeneration` of its Connection, is
-   * replaced. `prepareSend` prepares each request of the opening. Call
-   * `releaseSlot` when the call is done with it.
+   * server, or an older `generation` of its credentials, is replaced.
+   * `prepareSend` prepares each request of the opening. Call `releaseSlot`
+   * when the call is done with it.
    */
   const holdSlot = (
     upstreamScope: string,
     destination: Destination,
-    credentials: ConnectionCredentialsForUse,
+    credentials: UpstreamCredentials,
     prepareSend: PrepareSend,
   ): Effect.Effect<UpstreamSlot> =>
     Effect.gen(function* () {
-      const { server, connection, contribution } = destination;
+      const { server, access } = destination;
       const existing = slots.get(upstreamScope)?.get(server.id);
       const usable =
         existing !== undefined &&
         existing.serverRevision === server.revision &&
-        existing.credentialsGeneration === connection.credentialsGeneration;
+        existing.credentialsGeneration === access.credentials.generation;
       if (usable) {
         existing.users += 1;
         return existing;
@@ -291,9 +290,9 @@ const make = Effect.gen(function* () {
       const slot: UpstreamSlot = {
         upstreamScope,
         serverId: server.id,
-        connectionId: connection.id,
+        credentialsRecordId: access.credentials.credentialsRecordId,
         serverRevision: server.revision,
-        credentialsGeneration: connection.credentialsGeneration,
+        credentialsGeneration: access.credentials.generation,
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),
@@ -309,7 +308,7 @@ const make = Effect.gen(function* () {
       // The old session ends without holding up this call.
       if (existing !== undefined) yield* Effect.forkIn(closeWhenDone(existing), serviceScope);
       yield* Effect.forkIn(
-        openSlot(slot, contribution, credentials, server.protocolVersion, prepareSend),
+        openSlot(slot, access, credentials, server.protocolVersion, prepareSend),
         serviceScope,
       );
       return slot;
@@ -350,14 +349,14 @@ const make = Effect.gen(function* () {
   /**
    * Closes the upstream sessions that no longer fit their server after the
    * records `changed` changed: the server was deleted or switched off, or its
-   * `revision` or its Connection's `credentialsGeneration` moved since a
-   * session opened. Calls that still use a session finish with it first.
+   * `revision` or the `generation` of its credentials moved since a session
+   * opened. Calls that still use a session finish with it first.
    */
   const closeSessionsThatLostDestination = (changed: ReadonlySet<string>) =>
     Effect.gen(function* () {
       const touched = [...slots.values()]
         .flatMap((byServer) => [...byServer.values()])
-        .filter((slot) => changed.has(slot.serverId) || changed.has(slot.connectionId));
+        .filter((slot) => changed.has(slot.serverId) || changed.has(slot.credentialsRecordId));
       if (touched.length === 0) return;
       const views = yield* catalogue.readViews(
         touched.map((slot) => slot.serverId),
@@ -369,9 +368,7 @@ const make = Effect.gen(function* () {
           view === undefined ||
           !view.server.enabled ||
           view.server.revision !== slot.serverRevision ||
-          (view.dependencies.kind === "plugin"
-            ? view.dependencies.connection?.credentialsGeneration
-            : undefined) !== slot.credentialsGeneration;
+          readCredentialsGeneration(view) !== slot.credentialsGeneration;
         if (!lost) continue;
         forgetSlot(slot);
         yield* closeWhenDone(slot);
@@ -379,9 +376,9 @@ const make = Effect.gen(function* () {
     });
 
   // Subscribe before anything can open a session, so no change is missed. A
-  // change to a server's own row, or to its Connection, is what can take its
-  // destination away; the follower writes a plugin that stops as a change to
-  // the server's row.
+  // change to a server's own row, or to the record that holds its credentials
+  // (a plugin server's Connection), is what can take its destination away; the
+  // follower writes a plugin that stops as a change to the server's row.
   const changes = yield* recordChanges.subscribe(["mcpServer", "connection"]);
   yield* Effect.forkIn(
     Effect.forever(
@@ -405,7 +402,7 @@ const make = Effect.gen(function* () {
   const writeFailure = (
     server: StoredMcpServer,
     basis: StateBasis,
-    status: "unreachable" | "error",
+    status: "unreachable" | "error" | "needs-sign-in",
     detail: string,
   ): Effect.Effect<void> =>
     absorbFailures(
@@ -424,7 +421,7 @@ const make = Effect.gen(function* () {
   /**
    * Runs one call to the end: checks the server, takes the upstream session,
    * sends the call, and when the server answers 401 to the call's own request
-   * refreshes the Connection's credentials and sends it once more.
+   * refreshes the server's credentials and sends it once more.
    */
   const runCall = (
     input: McpToolCall,
@@ -448,9 +445,10 @@ const make = Effect.gen(function* () {
         );
 
       /**
-       * Reads the server, its plugin and its Connection as they are now, and
-       * refuses unless the call may go to them (`decideCallRefusal`) and the
-       * server still lists the tool.
+       * Reads the server and what it depends on as they are now, and refuses
+       * unless the call may go to it (`decideCallRefusal`) and the server still
+       * lists the tool. Resolves how to reach the server here, because a call
+       * is about to send.
        */
       const readDestination: Effect.Effect<Destination, McpCallRefused> = Effect.gen(function* () {
         const views = yield* catalogue
@@ -467,9 +465,11 @@ const make = Effect.gen(function* () {
         const { server, dependencies } = view;
         const refusal = decideCallRefusal(view);
         if (refusal !== null) return yield* new McpCallRefused(refusal);
-        const judged = judgeDependencies(dependencies);
-        if (judged._tag !== "usable") {
-          return yield* Effect.die(`MCP server ${server.id} is usable but has no plugin`);
+        const access = resolveServerAccess(view, connectionTypes);
+        if (access._tag !== "usable") {
+          return yield* Effect.die(
+            `MCP server ${server.id} passed the call verdict but is unusable`,
+          );
         }
         const stored = server.tools.find((tool) => tool.name === input.tool);
         if (stored === undefined) {
@@ -488,13 +488,7 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
-        return {
-          server,
-          dependencies,
-          contribution: judged.contribution,
-          connection: judged.connection,
-          tool,
-        };
+        return { server, dependencies, access, tool };
       });
 
       const buildChangedMessage = (expected: Destination): string =>
@@ -503,8 +497,8 @@ const make = Effect.gen(function* () {
       /**
        * Refuses unless the caller may still make the call and the destination
        * is still there. With `expected`, the destination must also be the one
-       * the call began with: the same `revision`, plugin state, and Connection
-       * status and generation. Returns the destination as it is now.
+       * the call began with: the same `revision` and the same dependencies
+       * (`isSameDependencies`). Returns the destination as it is now.
        */
       const checkDestination = (
         expected: Destination | undefined,
@@ -534,24 +528,26 @@ const make = Effect.gen(function* () {
         });
 
       const first = yield* checkBeforeSend(undefined);
-      const { server, contribution, connection } = first;
+      const { server, access } = first;
+      const { credentials: serverCredentials } = access;
       const name = server.name;
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
 
       /**
-       * Runs under the Connection's refresh permit, right before a refresh
-       * calls the provider: the rule of `checkBeforeSend`.
+       * Runs right before a refresh calls the provider, under the refresh
+       * permit of a Connection: the rule of `checkBeforeSend`.
        */
       const guardRefresh: RefreshGuard<McpCallRefused> = Effect.asVoid(checkBeforeSend(first));
 
       /** Returns the refusal that a failure to give credentials means for this call. */
-      const buildUnavailableRefusal = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
-        const { status } = buildStatusFromUnavailable(error, connection, contribution.displayName);
-        return new McpCallRefused({ reason: status, message: describeRefusal(status, name) });
-      };
+      const buildUnavailableRefusal = (error: ServerCredentialsUnavailable): McpCallRefused =>
+        new McpCallRefused({
+          reason: error.status,
+          message: describeRefusal(error.status, name),
+        });
 
       /**
-       * Prepares a request that starts an exchange: reads the Connection's
+       * Prepares a request that starts an exchange: reads the server's
        * credentials as they are now, and only then runs the rule of
        * `checkBeforeSend`, so a wait for credentials never lets an older check
        * stand. The request carries the credentials it returns, which are read
@@ -562,20 +558,20 @@ const make = Effect.gen(function* () {
         while (true) {
           // Read before the credentials, so that a refresh that stores new
           // ones in between shows as a different version, never as the same.
-          const version = yield* connectionTypes.readCredentialsVersion(connection.id);
-          const credentials = yield* connectionTypes
-            .readCredentialsForUse(connection.id, guardRefresh)
+          const version = yield* serverCredentials.readVersion;
+          const credentials = yield* serverCredentials
+            .readForUse(guardRefresh)
             .pipe(
               Effect.mapError((error) =>
                 error instanceof McpCallRefused ? error : buildUnavailableRefusal(error),
               ),
             );
           yield* checkDestination(first);
-          // A refresh does not move the Connection's `credentialsGeneration`,
-          // so a refresh that stored new tokens while the check above ran is
-          // found by the version of the stored credentials. Then they are read
-          // again, because they are no longer the current ones.
-          const stored = yield* connectionTypes.readCredentialsVersion(connection.id);
+          // A refresh does not move the credentials' `generation`, so a refresh
+          // that stored new tokens while the check above ran is found by the
+          // version of the stored credentials. Then they are read again,
+          // because they are no longer the current ones.
+          const stored = yield* serverCredentials.readVersion;
           if (stored !== version) continue;
           yield* refuseUnlessServing;
           return credentials;
@@ -604,7 +600,7 @@ const make = Effect.gen(function* () {
        * which reads the credentials and checks again at that moment.
        * `credentials` only build the address of an opening.
        */
-      const attempt = (credentials: ConnectionCredentialsForUse) =>
+      const attempt = (credentials: UpstreamCredentials) =>
         Effect.acquireUseRelease(
           holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
           (slot) =>
@@ -645,7 +641,7 @@ const make = Effect.gen(function* () {
 
       /** Sends the call, and once more on a new session when the server expired the one it used. */
       const sendReplacingExpiredSession = (
-        credentials: ConnectionCredentialsForUse,
+        credentials: UpstreamCredentials,
       ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | McpCallRefused | ExchangeBroken> =>
         attempt(credentials).pipe(
           Effect.catchTag("SessionExpired", () => {
@@ -685,7 +681,7 @@ const make = Effect.gen(function* () {
               return yield* refuse("error", name, buildChangedMessage(first));
             }
             default: {
-              const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
+              const { status, detail } = buildStatusFromFailure(failure, serverCredentials);
               yield* writeFailure(server, basis, status, detail);
               return yield* progress.toolPostSent && status === "unreachable"
                 ? refuse(status, name, describeMayHaveRun(name, `${name} could not be reached`))
@@ -695,14 +691,13 @@ const make = Effect.gen(function* () {
         });
 
       return yield* runWithCredentials({
-        connections: connectionTypes,
-        connectionId: connection.id,
+        credentials: serverCredentials,
         guardRefresh,
         action: sendReplacingExpiredSession,
       }).pipe(
         Effect.catchTags({
           UpstreamError: refuseUpstreamFailure,
-          ConnectionCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
+          ServerCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
           ExchangeBroken: () =>
             refuse("error", name, describeMayHaveRun(name, "the exchange with it broke")),
         }),

@@ -104,14 +104,10 @@ const openUpstreamTo = (fake: FakeUpstream, firstRevision: string | null = null)
     Effect.result(
       Effect.scoped(
         openUpstream({
-          contribution: {
-            id: "sentry/desk",
-            pluginId: "sentry",
+          endpoint: {
             displayName: "Desk",
-            description: "",
-            connectionType: "sentry/desk",
             origin: fake.origin,
-            buildUpstreamRequest: () => ({ url: fake.url, headers: {} }),
+            buildRequest: () => ({ url: fake.url, headers: {} }),
           },
           credentials: { credentials: {}, secretNames: [], config: {}, identity: "identity-1" },
           firstRevision,
@@ -189,14 +185,10 @@ describe("openUpstream", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const opened = yield* openUpstream({
-              contribution: {
-                id: "sentry/desk",
-                pluginId: "sentry",
+              endpoint: {
                 displayName: "Desk",
-                description: "",
-                connectionType: "sentry/desk",
                 origin: fake.origin,
-                buildUpstreamRequest: ({ credentials }) => ({
+                buildRequest: ({ credentials }) => ({
                   url: fake.url,
                   headers: { Authorization: `Bearer ${credentials["token"] ?? ""}` },
                 }),
@@ -255,14 +247,10 @@ describe("openUpstream", () => {
         Effect.scoped(
           Effect.gen(function* () {
             const opened = yield* openUpstream({
-              contribution: {
-                id: "sentry/desk",
-                pluginId: "sentry",
+              endpoint: {
                 displayName: "Desk",
-                description: "",
-                connectionType: "sentry/desk",
                 origin: fake.origin,
-                buildUpstreamRequest: () => ({ url: fake.url, headers: {} }),
+                buildRequest: () => ({ url: fake.url, headers: {} }),
               },
               credentials: { credentials: {}, secretNames: [], config: {}, identity: "identity-1" },
               firstRevision: null,
