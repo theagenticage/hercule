@@ -2,7 +2,11 @@ import { useEffect, type JSX } from "react";
 import { Link, createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, queryKeys, readErrorMessage } from "@hercule/client-core";
-import { buildMcpServerViews, readMcpServerOffers } from "@hercule/client-core/mcp-servers";
+import {
+  buildMcpServerViews,
+  describeOfferAddress,
+  readMcpServerOffers,
+} from "@hercule/client-core/mcp-servers";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
   connectionsQuery,
@@ -114,7 +118,9 @@ function McpServerPage(): JSX.Element | null {
         </h2>
         <div className="flex flex-wrap gap-1.5">
           <span className={chip}>From the {pluginName ?? view.typeName} plugin</span>
-          {origin === undefined ? null : <span className={chip}>{origin}</span>}
+          {origin === undefined ? null : (
+            <span className={chip}>{describeOfferAddress(origin)}</span>
+          )}
         </div>
       </div>
 

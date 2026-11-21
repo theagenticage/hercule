@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PluginDetail } from "@hercule/contract";
-import { readMcpServerOffers } from "./offers";
+import { describeOfferAddress, readMcpServerOffers } from "./offers";
 import { LINEAR_PLUGIN, SENTRY_PLUGIN } from "./testing";
 
 describe("readMcpServerOffers", () => {
@@ -29,5 +29,15 @@ describe("readMcpServerOffers", () => {
     };
 
     expect(readMcpServerOffers([broken])).toEqual([]);
+  });
+});
+
+describe("describeOfferAddress", () => {
+  it.each([
+    ["https://mcp.sentry.dev", "mcp.sentry.dev"],
+    ["https://mcp.example.com:8443", "mcp.example.com:8443"],
+    ["http://localhost:3000", "localhost:3000"],
+  ])("writes the origin %s as %s", (origin, address) => {
+    expect(describeOfferAddress(origin)).toBe(address);
   });
 });

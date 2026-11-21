@@ -3,7 +3,7 @@ import { buildMcpServerViews, describeReconnect } from "./views";
 import {
   CONNECTIONS,
   LINEAR,
-  PLUGINS,
+  OFFERING_PLUGINS,
   SENTRY_HOBBY,
   SENTRY_WORK,
   buildServer,
@@ -72,7 +72,7 @@ describe("buildMcpServerViews", () => {
     const [view] = buildMcpServerViews(
       [SENTRY_WORK],
       CONNECTIONS.filter((connection) => connection.id !== "c-work"),
-      PLUGINS,
+      OFFERING_PLUGINS,
     );
 
     expect(view).toMatchObject({ connection: undefined, account: undefined, typeName: "Sentry" });
@@ -90,7 +90,7 @@ describe("describeReconnect", () => {
   });
 
   it("returns null for a server whose Connection is not in the list", () => {
-    const [view] = buildMcpServerViews([SENTRY_WORK], [], PLUGINS);
+    const [view] = buildMcpServerViews([SENTRY_WORK], [], OFFERING_PLUGINS);
 
     expect(describeReconnect(view!)).toBeNull();
   });
