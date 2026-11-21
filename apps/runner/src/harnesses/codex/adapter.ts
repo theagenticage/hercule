@@ -803,12 +803,14 @@ const scrubImageCopies = (value: unknown, copies: ReadonlyArray<string>): unknow
  * - An `imageGeneration` item holds the generated image, base64 encoded, in
  *   `result`. The field is removed, because the image reaches nobody through
  *   the stream.
- * - An `mcpToolCall` item holds MCP's image blocks in `result.content`. Each
- *   is replaced by an `unavailable` image (see `ToolResultImage`), and every
- *   other copy of its base64 in the result, such as one in
- *   `structuredContent` or `_meta`, is replaced by a short placeholder. The
- *   model already has its own copy, and the text blocks stay. A result too
- *   deeply nested to walk is dropped whole, so no bytes stay.
+ * - An `mcpToolCall` item holds MCP's media blocks in `result.content`. An
+ *   image block is replaced by an `unavailable` image (see `ToolResultImage`).
+ *   The base64 of an audio block's `data` and of an embedded resource's `blob`
+ *   is replaced by a short placeholder, and its `mimeType` and `uri` stay.
+ *   Every other copy of that base64 in the result, such as one in
+ *   `structuredContent` or `_meta`, is replaced too. The model already has its
+ *   own copy, and the text blocks stay. A result too deeply nested to walk is
+ *   dropped whole, so no bytes stay.
  */
 const stripImageBytes = (frame: NotificationFrame): void => {
   for (const item of listFrameItems(frame)) {
@@ -818,10 +820,21 @@ const stripImageBytes = (frame: NotificationFrame): void => {
     if (!Array.isArray(content)) continue;
     const copies = new Set<string>();
     for (const [index, block] of content.entries()) {
-      const image = block as { readonly type?: unknown; readonly data?: unknown } | null;
-      if (image?.type !== "image") continue;
-      if (typeof image.data === "string" && image.data !== "") copies.add(image.data);
-      content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
+      const media = block as {
+        type?: unknown;
+        data?: unknown;
+        resource?: { blob?: unknown } | null;
+      } | null;
+      if (media?.type === "image") {
+        if (typeof media.data === "string" && media.data !== "") copies.add(media.data);
+        content[index] = { type: "image", unavailable: MCP_IMAGE_NOT_KEPT };
+      } else if (media?.type === "audio" && typeof media.data === "string") {
+        if (media.data !== "") copies.add(media.data);
+        media.data = MCP_IMAGE_COPY;
+      } else if (media?.type === "resource" && typeof media.resource?.blob === "string") {
+        if (media.resource.blob !== "") copies.add(media.resource.blob);
+        media.resource.blob = MCP_IMAGE_COPY;
+      }
     }
     if (copies.size === 0) continue;
     try {

@@ -4474,6 +4474,65 @@ describe("the images in the result of an MCP tool call", () => {
     _meta: { preview: `data:image/png;base64,${IMAGE}` },
   };
 
+  const AUDIO = Buffer.from("not really a sound, but long enough").toString("base64");
+  const BLOB = Buffer.from("not really a document, but long enough").toString("base64");
+  const MEDIA_RESULT = {
+    content: [
+      { type: "text", text: "Recorded it" },
+      { type: "audio", data: AUDIO, mimeType: "audio/wav" },
+      {
+        type: "resource",
+        resource: { uri: "file:///report.pdf", mimeType: "application/pdf", blob: BLOB },
+      },
+    ],
+    structuredContent: { sound: AUDIO },
+    _meta: null,
+  };
+
+  const expectMediaBytesGone = (seen: ReadonlyArray<unknown>): void => {
+    const text = JSON.stringify(seen);
+    expect(text).not.toContain(AUDIO);
+    expect(text).not.toContain(BLOB);
+    // Everything but the bytes stays.
+    expect(text).toContain("audio/wav");
+    expect(text).toContain("file:///report.pdf");
+    expect(text).toContain("Recorded it");
+  };
+
+  it("lose the bytes of audio and of an embedded resource in the item", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push(completedFrame(MEDIA_RESULT));
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    expectMediaBytesGone(run.seen);
+  });
+
+  it("lose the bytes of audio and of an embedded resource in the items of a completed turn", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "turn/completed",
+      params: {
+        threadId: THREAD,
+        turn: {
+          id: TURN,
+          items: [buildCall(MEDIA_RESULT)],
+          itemsView: "full",
+          status: "completed",
+        },
+      },
+    });
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expectMediaBytesGone(run.seen);
+  });
+
   it("become unavailable in the item, and the bytes reach no event", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
