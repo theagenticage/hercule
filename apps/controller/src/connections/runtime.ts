@@ -51,7 +51,7 @@ import {
   oauthClients,
   parseTokens,
   refreshAccess,
-  type ProviderUnreachable,
+  ProviderUnreachable,
   serializeTokens,
   type OAuthClient,
   type TokenSet,
@@ -130,11 +130,6 @@ export interface ConnectionCredentialsForUse {
  * - `no-credentials`: the Connection is not `needs-reauth` but holds no
  *   credentials, and its type has no sign-in flow that could give it a token.
  *   The user has to enter them again.
- * - `not-serving`: the caller's `RefreshGuard` found the controller frozen or
- *   sealed, so nothing was sent to the provider. `message` is then the
- *   promotion gate's own text.
- * - `refused`: the caller's `RefreshGuard` refused the refresh for another
- *   reason, so nothing was sent to the provider. The caller knows why.
  *
  * `message` is one line a person can read.
  */
@@ -149,8 +144,6 @@ export class ConnectionCredentialsUnavailable extends Schema.TaggedError<Connect
       "invalid-config",
       "credentials-replaced",
       "no-credentials",
-      "not-serving",
-      "refused",
     ]),
     message: Schema.String,
   },
@@ -159,9 +152,9 @@ export class ConnectionCredentialsUnavailable extends Schema.TaggedError<Connect
 /**
  * A check of the caller's own that a refresh of OAuth tokens runs under the
  * Connection's refresh permit, right before the request to the provider. It
- * fails with a `ConnectionCredentialsUnavailable` (reason `not-serving` or
- * `refused`) when the caller may no longer have the refresh, and then nothing
- * is sent to the provider.
+ * fails with an error of the caller's own type `E` when the caller may no
+ * longer have the refresh, and then nothing is sent to the provider. The
+ * function that ran the refresh fails with that same error.
  *
  * A caller that can lose the right to its call while it waits for the permit,
  * such as a call of the MCP Gateway, gives one: what it checked before it asked
@@ -170,7 +163,7 @@ export class ConnectionCredentialsUnavailable extends Schema.TaggedError<Connect
  * once it stops serving, which the refresh would otherwise do while work the
  * promotion gate already counted runs to its end.
  */
-export type RefreshGuard = Effect.Effect<void, ConnectionCredentialsUnavailable>;
+export type RefreshGuard<E = never> = Effect.Effect<void, E>;
 
 /**
  * A Connection that holds pasted credentials and no OAuth tokens has nothing
@@ -473,15 +466,15 @@ const make = Effect.gen(function* () {
    *   `writeWhileTokensHeld` explains. The refresh is bound to the generation
    *   of `row`, so `row` must have been read before the call.
    */
-  const refreshTokens = <CannotRefresh>(
+  const refreshTokens = <CannotRefresh, GuardFailure>(
     row: StoredConnection,
     type: ConnectionType,
     rejectedIdentity: string | undefined,
     cannotRefresh: (row: StoredConnection, held: string) => Effect.Effect<never, CannotRefresh>,
-    guard: RefreshGuard,
+    guard: RefreshGuard<GuardFailure>,
   ): Effect.Effect<
     TokenSet,
-    ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh
+    ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(
@@ -627,14 +620,14 @@ const make = Effect.gen(function* () {
    * Fails with a `ConnectionCredentialsUnavailable` when the connection may
    * not be used, and as `refreshTokens` does otherwise.
    */
-  const refreshUnderPermit = <CannotRefresh>(
+  const refreshUnderPermit = <CannotRefresh, GuardFailure>(
     connectionId: string,
     rejectedIdentity: string | undefined,
     cannotRefresh: (row: StoredConnection, held: string) => Effect.Effect<never, CannotRefresh>,
-    guard: RefreshGuard,
+    guard: RefreshGuard<GuardFailure>,
   ): Effect.Effect<
     ReadUnderPermit & { readonly tokens: TokenSet },
-    ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh
+    ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     promotion.whenServing(
       readOrCreateRefreshPermit(connectionId).withPermits(1)(
@@ -703,14 +696,14 @@ const make = Effect.gen(function* () {
    * invalidated the old tokens by the time it answers. So a cancelled caller
    * can wait up to the timeout before it stops.
    */
-  const readFreshTokens = (
+  const readFreshTokens = <GuardFailure>(
     row: StoredConnection,
     stored: Redacted.Redacted<string>,
     requireUsable: boolean,
-    guard: RefreshGuard,
+    guard: RefreshGuard<GuardFailure>,
   ): Effect.Effect<
     { readonly tokens: TokenSet; readonly read: ReadUnderPermit | undefined },
-    ConnectionCredentialsUnavailable | ProviderUnreachable
+    ConnectionCredentialsUnavailable | ProviderUnreachable | GuardFailure
   > =>
     Effect.gen(function* () {
       const held = Redacted.value(stored);
@@ -782,13 +775,13 @@ const make = Effect.gen(function* () {
    * provider. `readStoredCredentials` turns that into a `ConnectionUnavailable`
    * for a plugin; the core's own reads keep it apart.
    */
-  const readStoredCredentialsOrUnreachable = (
+  const readStoredCredentialsOrUnreachable = <GuardFailure>(
     row: StoredConnection,
     requireUsable: boolean,
-    guard: RefreshGuard,
+    guard: RefreshGuard<GuardFailure>,
   ): Effect.Effect<
     { readonly credentials: Record<string, string>; readonly read: ReadUnderPermit | undefined },
-    ConnectionCredentialsUnavailable | ProviderUnreachable
+    ConnectionCredentialsUnavailable | ProviderUnreachable | GuardFailure
   > =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(secrets.values({ kind: "connection", id: row.id }));
@@ -854,13 +847,19 @@ const make = Effect.gen(function* () {
       return { credentials, config, identity: computeCredentialsIdentity(credentials) };
     });
 
-  /** Converts a failed read of a token into the error the core's callers see. */
-  const toCredentialsUnavailable = (
-    error: ConnectionCredentialsUnavailable | ProviderUnreachable,
-  ): ConnectionCredentialsUnavailable =>
-    error._tag === "ConnectionCredentialsUnavailable"
-      ? error
-      : new ConnectionCredentialsUnavailable({ reason: "unreachable", message: error.message });
+  /**
+   * Converts the failure of an unreachable provider into the error the
+   * core's callers see, and leaves every other failure, a guard's included,
+   * as it is.
+   */
+  const convertProviderUnreachable = <A, E, R>(
+    effect: Effect.Effect<A, E | ProviderUnreachable, R>,
+  ): Effect.Effect<A, E | ConnectionCredentialsUnavailable, R> =>
+    Effect.mapError(effect, (error) =>
+      error instanceof ProviderUnreachable
+        ? new ConnectionCredentialsUnavailable({ reason: "unreachable", message: error.message })
+        : error,
+    );
 
   const runtimeFor = (pluginId: string): ConnectionsRuntime => {
     /**
@@ -964,21 +963,24 @@ const make = Effect.gen(function* () {
      * longer fits its type's schema).
      *
      * A refresh this causes runs `guard` under the Connection's refresh
-     * permit, right before the request to the provider, and fails as the
-     * guard does.
+     * permit, right before the request to the provider, and fails with
+     * whatever the guard fails with.
      *
      * This may call the provider and write the Connection's status, so it must
      * run outside any transaction.
      */
-    readCredentialsForUse: (
+    readCredentialsForUse: <GuardFailure = never>(
       connectionId: string,
-      guard: RefreshGuard = Effect.void,
-    ): Effect.Effect<ConnectionCredentialsForUse, ConnectionCredentialsUnavailable> =>
+      guard: RefreshGuard<GuardFailure> = Effect.void,
+    ): Effect.Effect<
+      ConnectionCredentialsForUse,
+      ConnectionCredentialsUnavailable | GuardFailure
+    > =>
       Effect.gen(function* () {
         const { row, type } = yield* readConnectionForUse(connectionId);
-        const found = yield* retryWhenCredentialsReplaced(
-          readStoredCredentialsOrUnreachable(row, true, guard),
-        ).pipe(Effect.mapError(toCredentialsUnavailable));
+        const found = yield* convertProviderUnreachable(
+          retryWhenCredentialsReplaced(readStoredCredentialsOrUnreachable(row, true, guard)),
+        );
         // The config comes from the row a refresh read under the permit, not
         // from the earlier read, which a reconnect or a switch off may have outdated.
         return yield* buildCredentialsForUse(
@@ -1056,13 +1058,13 @@ const make = Effect.gen(function* () {
      * This may call the provider and write the Connection's status, so it must
      * run outside any transaction.
      */
-    refreshAfterRejection: (
+    refreshAfterRejection: <GuardFailure = never>(
       connectionId: string,
       rejectedIdentity: string,
-      guard: RefreshGuard = Effect.void,
+      guard: RefreshGuard<GuardFailure> = Effect.void,
     ): Effect.Effect<
       ConnectionCredentialsForUse,
-      ConnectionCredentialsUnavailable | ConnectionCannotRefresh
+      ConnectionCredentialsUnavailable | ConnectionCannotRefresh | GuardFailure
     > =>
       Effect.gen(function* () {
         const { row, type } = yield* readConnectionForUse(connectionId);
@@ -1098,11 +1100,7 @@ const make = Effect.gen(function* () {
             }
             return pasted;
           }),
-        ).pipe(
-          Effect.mapError((error) =>
-            error._tag === "ConnectionCannotRefresh" ? error : toCredentialsUnavailable(error),
-          ),
-        );
+        ).pipe(convertProviderUnreachable);
         return yield* buildCredentialsForUse(
           found.read?.row ?? row,
           found.read?.type ?? type,

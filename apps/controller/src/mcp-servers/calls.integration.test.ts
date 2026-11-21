@@ -30,10 +30,12 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as Fiber from "effect/Fiber";
+import { TestClock } from "effect/testing";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
 import { del } from "../http/testing";
-import { McpCallDeadline, McpCallRefused, type McpToolCall } from "./calls";
+import { DRAIN_TIMEOUT } from "../promotion";
+import { McpCallRefused, type McpToolCall } from "./calls";
 import {
   countNotifications,
   eventually,
@@ -67,24 +69,23 @@ interface ReadyRig extends Rig {
   readonly serverId: string;
   readonly connectionId: string;
   /** Calls a tool as `SCOPE_A`, `echo` unless said, and returns the result of the call. */
-  readonly call: (
+  readonly call: (overrides?: Partial<McpToolCall>) => ReturnType<typeof runCall>;
+  /** Calls as the gateway does: admitted by the promotion state, so a freeze waits for the call. */
+  readonly callAdmitted: (overrides?: Partial<McpToolCall>) => Promise<unknown>;
+  /**
+   * Calls as `call` does, with the fake holding its answer to `method`. Once
+   * the fake has received that request, the call's clock moves to just before
+   * a freeze would give up waiting for the call. The held answer is let go
+   * after the call ended.
+   */
+  readonly callPastDeadline: (
+    method: string,
     overrides?: Partial<McpToolCall>,
-    deadline?: Duration.Duration,
   ) => ReturnType<typeof runCall>;
 }
 
-const runCall = (rig: Rig, input: McpToolCall, deadline?: Duration.Duration) =>
-  Effect.runPromise(
-    Effect.result(
-      rig.controller.harness.mcpServerCalls
-        .callTool(input)
-        .pipe(
-          deadline === undefined
-            ? (effect) => effect
-            : Effect.provideService(McpCallDeadline, deadline),
-        ),
-    ),
-  );
+const runCall = (rig: Rig, input: McpToolCall) =>
+  Effect.runPromise(Effect.result(rig.controller.harness.mcpServerCalls.callTool(input)));
 
 /**
  * Starts the rig, creates the server and waits until it is `ready`. The fake
@@ -100,23 +101,54 @@ const withReadyServer = (
       const connectionId = await rig.connect();
       const server = await createServer(rig.controller, { connectionId });
       expect((await waitForResult(rig.controller)).status).toBe("ready");
+      const buildCall = (overrides: Partial<McpToolCall> = {}): McpToolCall => ({
+        upstreamScope: SCOPE_A,
+        serverId: server.id,
+        tool: "echo",
+        arguments: { text: "hi" },
+        authorize: Effect.void,
+        ...overrides,
+      });
       await body({
         ...rig,
         serverId: server.id,
         connectionId,
-        call: (overrides = {}, deadline) =>
-          runCall(
-            rig,
-            {
-              upstreamScope: SCOPE_A,
-              serverId: server.id,
-              tool: "echo",
-              arguments: { text: "hi" },
-              authorize: Effect.void,
-              ...overrides,
-            },
-            deadline,
+        call: (overrides) => runCall(rig, buildCall(overrides)),
+        callAdmitted: (overrides) =>
+          Effect.runPromise(
+            Effect.result(
+              rig.controller.harness.promotion.admit(
+                rig.controller.harness.mcpServerCalls.callTool(buildCall(overrides)),
+              ),
+            ),
           ),
+        callPastDeadline: async (method, overrides) => {
+          const received = requestsOf(rig.fake, method).length;
+          const release = rig.fake.hold(method);
+          const calling = Effect.runPromise(
+            Effect.gen(function* () {
+              const fiber = yield* Effect.forkChild(
+                Effect.result(rig.controller.harness.mcpServerCalls.callTool(buildCall(overrides))),
+              );
+              yield* Effect.promise(() =>
+                eventually(
+                  () => Promise.resolve(requestsOf(rig.fake, method).length),
+                  (count) => count > received,
+                ),
+              );
+              // Shortly before a freeze would give up waiting for the call: the
+              // call has ended by then. The client's own 60 second limit on a
+              // handshake is the same as the freeze's, so it has not fired.
+              yield* TestClock.adjust(Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(5)));
+              return yield* Fiber.join(fiber);
+            }).pipe(Effect.provide(TestClock.layer())),
+          );
+          try {
+            return await calling;
+          } finally {
+            release();
+          }
+        },
       });
     },
     {
@@ -137,6 +169,10 @@ const requestsOf = (fake: FakeUpstream, method: string) =>
 const textOf = (result: {
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
 }): string | undefined => result.content[0]?.text;
+
+/** Returns the message of a refused call. */
+const failureMessage = (result: Awaited<ReturnType<typeof runCall>>): string | undefined =>
+  result._tag === "Failure" ? result.failure.message : undefined;
 
 /** Counts the times the fake provider was asked to refresh a token. */
 const countRefreshes = (provider: Rig["provider"]) =>
@@ -196,7 +232,10 @@ describe("a refused call", () => {
 
       expect(unknownTool).toMatchObject({
         _tag: "Failure",
-        failure: { reason: "error", message: "The server does not list this tool." },
+        failure: {
+          reason: "error",
+          message: expect.stringContaining("no longer offers this tool"),
+        },
       });
       expect(unknownServer).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
       expect(fake.requests).toHaveLength(before);
@@ -360,6 +399,85 @@ describe("a call", () => {
     });
   });
 
+  it.each<
+    readonly [
+      string,
+      (rig: ReadyRig) => Partial<McpToolCall> | Promise<Partial<McpToolCall>>,
+      string,
+    ]
+  >([
+    [
+      "an answer that asks for more input",
+      ({ fake }: ReadyRig) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? Response.json({
+                jsonrpc: "2.0",
+                id,
+                result: { resultType: "input_required", inputRequests: {} },
+              })
+            : undefined;
+        return {};
+      },
+      "this call needs something Hercule does not support",
+    ],
+    [
+      "an argument that does not fit the header its tool declares",
+      async ({ controller }: ReadyRig) => {
+        await runSql(
+          controller,
+          controller.harness.sql`UPDATE mcp_servers SET tools = ${JSON.stringify([
+            {
+              name: "echo",
+              description: "",
+              inputSchema: {
+                type: "object",
+                properties: { region: { type: "string", "x-mcp-header": "Region" } },
+              },
+            },
+          ])}`,
+        );
+        return { arguments: { region: 5 } };
+      },
+      "did not fit what the tool declares",
+    ],
+    [
+      "a result that does not decode",
+      ({ fake }: ReadyRig) => {
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call"
+            ? Response.json({ jsonrpc: "2.0", id, result: { content: "not a list" } })
+            : undefined;
+        return {};
+      },
+      "did not fit what the tool declares",
+    ],
+    ...[400, 413, 422].map(
+      (status) =>
+        [
+          `HTTP ${String(status)} to the tool's request`,
+          ({ fake }: ReadyRig) => {
+            fake.intercept = ({ method }) =>
+              method === "tools/call" ? new Response(null, { status }) : undefined;
+            return {};
+          },
+          `the server refused this call (HTTP ${String(status)})`,
+        ] as const,
+    ),
+  ])("returns %s as this call's answer, and changes no status", async (_name, prepare, text) => {
+    await withReadyServer(async (rig) => {
+      const overrides = await prepare(rig);
+
+      const result = await rig.call(overrides);
+
+      expect(result).toMatchObject({ _tag: "Success", success: { isError: true } });
+      if (result._tag !== "Success") return;
+      expect(textOf(result.success)).toContain(text);
+      expect((await readRow(rig.controller)).status).toBe("ready");
+      expect(await countNotifications(rig.controller)).toBe(0);
+    });
+  });
+
   it("refuses an answer over the size cap as an error, and changes no status", async () => {
     await withReadyServer(async ({ controller, call }) => {
       const result = await call({ tool: "big" });
@@ -372,13 +490,11 @@ describe("a call", () => {
   });
 
   it("is refused as timed out when the whole call takes longer than its deadline, and changes no status", async () => {
-    await withReadyServer(async ({ controller, fake, call }) => {
-      const release = fake.hold("tools/call");
-
-      const result = await call({}, Duration.millis(300));
-      release();
+    await withReadyServer(async ({ controller, callPastDeadline }) => {
+      const result = await callPastDeadline("tools/call");
 
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
+      expect(failureMessage(result)).toContain("the call may have run. Ask the user before");
       expect((await readRow(controller)).status).toBe("ready");
     });
   });
@@ -386,10 +502,10 @@ describe("a call", () => {
   it.each([
     ["no answer (HTTP 503)", 503, "unreachable", "The server answered with HTTP status 503"],
     [
-      "an HTTP status that is no MCP answer (400)",
-      400,
+      "an HTTP status that is no MCP answer (410)",
+      410,
       "error",
-      "The server answered with HTTP status 400",
+      "The server answered with HTTP status 410",
     ],
   ] as const)(
     "writes the status of the server when it gives %s",
@@ -401,6 +517,10 @@ describe("a call", () => {
         const result = await call();
 
         expect(result).toMatchObject({ _tag: "Failure", failure: { reason: status } });
+        // The tool's request went out, so an unreachable server may have run it.
+        if (status === "unreachable") {
+          expect(failureMessage(result)).toContain("the call may have run. Ask the user before");
+        }
         const row = await eventually(
           () => readRow(controller),
           (found) => found.status === status,
@@ -419,6 +539,8 @@ describe("a call", () => {
       const result = await call();
 
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "unreachable" } });
+      // Nothing was sent, so trying again is fine.
+      expect(failureMessage(result)).toContain("Try again later");
       const row = await eventually(
         () => readRow(controller),
         (found) => found.status === "unreachable",
@@ -1196,7 +1318,7 @@ describe("a reply to a request of the server", () => {
               : undefined;
         const repliesBefore = requestsOf(fake, "?").length;
         const release = fake.hold("tools/call");
-        const pending = call({}, Duration.seconds(5));
+        const pending = call({});
         await eventually(
           () => Promise.resolve(requestsOf(fake, "tools/call").length),
           (count) => count === 1,
@@ -1224,7 +1346,7 @@ describe("a reply to a request of the server", () => {
     "sends the stored token and starts no refresh when the token went stale while the tool ran (controller frozen: %s)",
     async (freezes) => {
       await withReadyServer(
-        async ({ controller, connectionId, fake, provider, call }) => {
+        async ({ controller, connectionId, fake, provider, callAdmitted }) => {
           const { promotion } = controller.harness;
           const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
           provider.answers.token = refreshedToken;
@@ -1236,7 +1358,7 @@ describe("a reply to a request of the server", () => {
                 : undefined;
           const repliesBefore = requestsOf(fake, "?").length;
           const release = fake.hold("tools/call");
-          const pending = call({}, Duration.seconds(5));
+          const pending = callAdmitted();
           await eventually(
             () => Promise.resolve(requestsOf(fake, "tools/call").length),
             (count) => count === 1,
@@ -1658,17 +1780,17 @@ describe("closing upstream MCP sessions", () => {
 
   it("cancels an opening that no call waits for any more, while its token lives", async () => {
     await withReadyServer(
-      async ({ fake, call }) => {
+      async ({ fake, call, callPastDeadline }) => {
         const before = {
           initialize: requestsOf(fake, "initialize").length,
           initialized: requestsOf(fake, "notifications/initialized").length,
           ended: endedSessions(fake).length,
         };
-        const release = fake.hold("initialize");
-        const abandoned = await call({}, Duration.millis(200));
+        const abandoned = await callPastDeadline("initialize");
         expect(abandoned).toMatchObject({ _tag: "Failure", failure: { reason: "timed-out" } });
+        // The tool was never sent, so trying again is fine.
+        expect(failureMessage(abandoned)).toBe("The call took too long. Try again later.");
 
-        release();
         // A cancelled opening never goes on to send what follows the handshake.
         await sleep(300);
 

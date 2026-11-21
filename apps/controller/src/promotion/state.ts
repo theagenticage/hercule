@@ -122,8 +122,9 @@ export interface GateState {
 /**
  * How long a freeze waits for running work to finish. An ingest poll may take
  * minutes, but a controller that is that busy is not ready to move anyway.
+ * Work that the gate admits must end well before this, or it fails the freeze.
  */
-const DRAIN_TIMEOUT: Duration.Duration = Duration.seconds(60);
+export const DRAIN_TIMEOUT: Duration.Duration = Duration.seconds(60);
 
 /** One unit of admitted work, which is running until it ends. */
 interface Admission {

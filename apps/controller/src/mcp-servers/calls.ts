@@ -14,9 +14,10 @@
  * lives. The gateway stops the calls of a token that ended, so a call here
  * never waits for that itself.
  *
- * A call is admitted by the promotion state, so a freeze waits for it, and a
- * call that arrives while the controller is not serving is refused at once.
- * One rule decides whether a call may go on (`checkBeforeSend`): the caller
+ * The gateway admits a call through the promotion state, so a freeze waits
+ * for it. This file admits nothing around the whole call: each exchange with
+ * the outside server is admitted on its own (`upstream.ts`), and a call that
+ * arrives while the controller is not serving is refused at once. One rule decides whether a call may go on (`checkBeforeSend`): the caller
  * may still make it (`McpToolCall.authorize`), the server and the tool are
  * still there as the call found them, and, last, the controller is serving.
  * It runs before every request that starts an exchange with the outside
@@ -52,7 +53,7 @@ import {
 import { nowIso, RecordChanges } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
-import { PromotionState } from "../promotion";
+import { DRAIN_TIMEOUT, PromotionState } from "../promotion";
 import {
   decideCallRefusal,
   describeRefusal,
@@ -73,6 +74,7 @@ import {
   type ExchangeBroken,
   type OpenedUpstream,
   type PrepareSend,
+  type ToolCallProgress,
 } from "./upstream";
 
 /**
@@ -104,14 +106,25 @@ export interface McpToolCall {
   readonly authorize: Effect.Effect<void, McpCallRefused>;
 }
 
-/** How long a whole call may take: opening the upstream session, the refresh, the retry and the tool. */
-export const McpCallDeadline = Context.Reference<Duration.Duration>(
-  "hercule/controller/mcp-servers/McpCallDeadline",
-  { defaultValue: () => Duration.seconds(60) },
-);
+/**
+ * How long a whole call may take: opening the upstream session, the refresh,
+ * the retry and the tool. It ends 15 seconds before a freeze gives up waiting
+ * for running work (`DRAIN_TIMEOUT`), so a call that was admitted just before
+ * a freeze never fails the freeze.
+ */
+const CALL_DEADLINE = Duration.subtract(DRAIN_TIMEOUT, Duration.seconds(15));
 
 /** What the agent reads when a call could not read the database. */
 const DATABASE_UNREADABLE_ANSWER = "Hercule could not read its own database. Try the call again.";
+
+/**
+ * Returns the line the agent reads when the call's own request went out and
+ * then something failed, so the call may have run. `what` says what failed.
+ * It asks the agent to check with the user first, because sending the call
+ * again could do its work twice.
+ */
+const describeMayHaveRun = (target: string, what: string): string =>
+  `The call was sent to ${target}, but ${what}, so the call may have run. Ask the user before trying it again.`;
 
 /** The answer to the agent when the server's answer was over the size cap. */
 const TOO_LARGE_ANSWER = "the answer was larger than 4 MiB";
@@ -419,7 +432,10 @@ const make = Effect.gen(function* () {
    * sends the call, and when the server answers 401 to the call's own request
    * refreshes the Connection's credentials and sends it once more.
    */
-  const runCall = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
+  const runCall = (
+    input: McpToolCall,
+    progress: ToolCallProgress,
+  ): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
     Effect.gen(function* () {
       const refuse = (
         reason: ServerUnavailableReason | "timed-out",
@@ -463,7 +479,11 @@ const make = Effect.gen(function* () {
         }
         const stored = server.tools.find((tool) => tool.name === input.tool);
         if (stored === undefined) {
-          return yield* refuse("error", server.name, "The server does not list this tool.");
+          return yield* refuse(
+            "error",
+            server.name,
+            `The MCP server "${server.name}" no longer offers this tool.`,
+          );
         }
         const tool = yield* decodeTool(stored).pipe(
           Effect.mapError(
@@ -524,41 +544,14 @@ const make = Effect.gen(function* () {
       const name = server.name;
       const basis: StateBasis = { revision: server.revision, dependencies: first.dependencies };
 
-      // Why a check before a send or a refresh refused it. The client can only
-      // fail with its own error, and a refresh only with the Connection's, so
-      // the reason is kept here for the code that returns the refusal.
-      let refusal: McpCallRefused | undefined;
-      const failKeepingRefusal =
-        <E>(toError: (refused: McpCallRefused) => E) =>
-        (refused: McpCallRefused) =>
-          Effect.andThen(
-            Effect.sync(() => {
-              refusal = refused;
-            }),
-            Effect.fail(toError(refused)),
-          );
-
       /**
        * Runs under the Connection's refresh permit, right before a refresh
        * calls the provider: the rule of `checkBeforeSend`.
        */
-      const guardRefresh: RefreshGuard = checkBeforeSend(first).pipe(
-        Effect.asVoid,
-        Effect.catch(
-          failKeepingRefusal(
-            (refused) =>
-              new ConnectionCredentialsUnavailable({ reason: "refused", message: refused.message }),
-          ),
-        ),
-      );
+      const guardRefresh: RefreshGuard<McpCallRefused> = Effect.asVoid(checkBeforeSend(first));
 
       /** Returns the refusal that a failure to give credentials means for this call. */
       const buildUnavailableRefusal = (error: ConnectionCredentialsUnavailable): McpCallRefused => {
-        if (error.reason === "refused") {
-          return (
-            refusal ?? new McpCallRefused({ reason: "error", message: buildChangedMessage(first) })
-          );
-        }
         const { status } = buildStatusFromUnavailable(error, connection, contribution.displayName);
         return new McpCallRefused({ reason: status, message: describeRefusal(status, name) });
       };
@@ -569,16 +562,20 @@ const make = Effect.gen(function* () {
        * `checkBeforeSend`, so a wait for credentials never lets an older check
        * stand. The request carries the credentials it returns, which are read
        * again when a refresh stored new ones meanwhile. When the rule refuses,
-       * the refusal is kept and the request is not sent.
+       * the request is not sent and the call fails with the refusal.
        */
-      const prepareSend: PrepareSend = Effect.gen(function* () {
+      const prepareSend: PrepareSend<McpCallRefused> = Effect.gen(function* () {
         while (true) {
           // Read before the credentials, so that a refresh that stores new
           // ones in between shows as a different version, never as the same.
           const version = yield* connectionTypes.readCredentialsVersion(server.connectionId);
           const credentials = yield* connectionTypes
             .readCredentialsForUse(server.connectionId, guardRefresh)
-            .pipe(Effect.mapError(buildUnavailableRefusal));
+            .pipe(
+              Effect.mapError((error) =>
+                error instanceof McpCallRefused ? error : buildUnavailableRefusal(error),
+              ),
+            );
           yield* checkDestination(first);
           // A refresh does not move the Connection's `credentialsGeneration`,
           // so a refresh that stored new tokens while the check above ran is
@@ -589,12 +586,17 @@ const make = Effect.gen(function* () {
           yield* refuseUnlessServing;
           return credentials;
         }
-      }).pipe(
-        Effect.catch(
-          failKeepingRefusal(
-            (refused) => new UpstreamError({ reason: "refused", message: refused.message }),
-          ),
-        ),
+      });
+
+      /**
+       * The same preparation for the requests that open a session, which
+       * several calls can share. A refusal there ends the opening as a
+       * request that was not sent; each call that waited for the opening then
+       * runs its own checks for its own refusal (`refuseUpstreamFailure`).
+       */
+      const prepareOpeningSend: PrepareSend = Effect.mapError(
+        prepareSend,
+        (refused) => new UpstreamError({ reason: "refused", message: refused.message }),
       );
 
       // Every credential value any attempt of this call sent, on any upstream
@@ -610,7 +612,7 @@ const make = Effect.gen(function* () {
        */
       const attempt = (credentials: ConnectionCredentialsForUse) =>
         Effect.acquireUseRelease(
-          holdSlot(input.upstreamScope, first, credentials, prepareSend),
+          holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
           (slot) =>
             Effect.flatMap(Deferred.await(slot.opening), (opened) =>
               opened
@@ -618,6 +620,7 @@ const make = Effect.gen(function* () {
                   tool: first.tool,
                   arguments: input.arguments,
                   prepareSend,
+                  progress,
                   sentValues,
                 })
                 .pipe(
@@ -649,7 +652,7 @@ const make = Effect.gen(function* () {
       /** Sends the call, and once more on a new session when the server expired the one it used. */
       const sendReplacingExpiredSession = (
         credentials: ConnectionCredentialsForUse,
-      ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | ExchangeBroken> =>
+      ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | McpCallRefused | ExchangeBroken> =>
         attempt(credentials).pipe(
           Effect.catchTag("SessionExpired", () => {
             if (replacedSession) {
@@ -670,22 +673,29 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           switch (failure.reason) {
             case "timeout":
-              return yield* refuse("timed-out", name);
+              return yield* progress.toolPostSent
+                ? refuse(
+                    "timed-out",
+                    name,
+                    describeMayHaveRun(name, `${name} did not answer in time`),
+                  )
+                : refuse("timed-out", name);
             case "too-large":
               return yield* refuse("error", name, `${name}: ${TOO_LARGE_ANSWER}.`);
             case "not-serving":
               return yield* Effect.fail(buildNotServingRefusal(failure.message));
             case "refused": {
-              if (refusal !== undefined) return yield* Effect.fail(refusal);
-              // Another call's checks refused the opening this call waited
-              // for. Its own checks give this call's reason.
+              // The checks refused the opening this call started or waited
+              // for. This call's own checks give its reason.
               yield* checkBeforeSend(first);
               return yield* refuse("error", name, buildChangedMessage(first));
             }
             default: {
               const { status, detail } = buildStatusFromFailure(failure, contribution.displayName);
               yield* writeFailure(server, basis, status, detail);
-              return yield* refuse(status, name);
+              return yield* progress.toolPostSent && status === "unreachable"
+                ? refuse(status, name, describeMayHaveRun(name, `${name} could not be reached`))
+                : refuse(status, name);
             }
           }
         });
@@ -700,41 +710,30 @@ const make = Effect.gen(function* () {
           UpstreamError: refuseUpstreamFailure,
           ConnectionCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
           ExchangeBroken: () =>
-            refuse(
-              "error",
-              name,
-              `The call was sent to ${name}, but the exchange with it broke, so the call may have run. Check before trying it again.`,
-            ),
+            refuse("error", name, describeMayHaveRun(name, "the exchange with it broke")),
         }),
       );
     });
 
   const callTool = (input: McpToolCall): Effect.Effect<McpSchema.CallToolResult, McpCallRefused> =>
-    Effect.flatMap(McpCallDeadline, (deadline) =>
-      promotion
-        .admit(
-          Effect.flatMap(
-            Effect.timeoutOption(runCall(input), deadline),
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new McpCallRefused({
-                    reason: "timed-out",
-                    message: "The call took too long. Try again later.",
-                  }),
-                ),
-              onSome: Effect.succeed,
-            }),
-          ),
-        )
-        .pipe(
-          Effect.catch((error) =>
-            error instanceof McpCallRefused
-              ? Effect.fail(error)
-              : Effect.fail(buildNotServingRefusal(error.error.message)),
-          ),
-        ),
-    );
+    Effect.suspend(() => {
+      const progress: ToolCallProgress = { toolPostSent: false };
+      return Effect.flatMap(
+        Effect.timeoutOption(runCall(input, progress), CALL_DEADLINE),
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new McpCallRefused({
+                reason: "timed-out",
+                message: progress.toolPostSent
+                  ? describeMayHaveRun("the server", "the call did not finish in time")
+                  : "The call took too long. Try again later.",
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      );
+    });
 
   return { callTool, closeUpstreamSessionsExcept };
 });

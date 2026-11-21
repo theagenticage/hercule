@@ -32,7 +32,6 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { McpSchema } from "effect/ai";
 import { absorbFailures } from "../absorbing";
 import {
-  ConnectionCredentialsUnavailable,
   ConnectionTypes,
   type ConnectionCredentialsForUse,
   type RefreshGuard,
@@ -225,23 +224,7 @@ const make = Effect.gen(function* () {
         state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
         Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
       );
-      // The guard can only fail with the Connection's error, so a superseded
-      // check is kept aside here for the code that discards it.
-      let superseded = false;
-      const guardRefresh: RefreshGuard = checkBasisHolds.pipe(
-        Effect.catchTag("CheckSuperseded", () =>
-          Effect.andThen(
-            Effect.sync(() => {
-              superseded = true;
-            }),
-            Effect.fail(
-              new ConnectionCredentialsUnavailable({
-                reason: "refused",
-                message: "The check was superseded",
-              }),
-            ),
-          ),
-        ),
+      const guardRefresh: RefreshGuard<typeof CHECK_SUPERSEDED> = checkBasisHolds.pipe(
         Effect.catchTag("SqlError", Effect.die),
       );
 
@@ -267,7 +250,6 @@ const make = Effect.gen(function* () {
             return Effect.succeed(buildFailedResult(status, detail));
           },
           ConnectionCredentialsUnavailable: (error) => {
-            if (superseded) return Effect.succeed<CheckResult>({ _tag: "discarded" });
             const { status, detail, cause } = buildStatusFromUnavailable(
               error,
               connection,

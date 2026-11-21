@@ -210,6 +210,7 @@ describe("openUpstream", () => {
                 tool,
                 arguments: { text: token, org: "acme" },
                 prepareSend: Effect.succeed(credentialsOf(token)),
+                progress: { toolPostSent: false },
                 sentValues: new Set(),
               });
             return yield* Effect.all([callWith("token-one-1234"), callWith("token-two-5678")], {
