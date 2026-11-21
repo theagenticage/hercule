@@ -26,10 +26,10 @@ const definition: HarnessDefinition = {
       auto: "native",
       "full-access": "native",
     },
-    // Unsupported until #1209 maps the gateway entry in this adapter. With
-    // "native", a Thread would be given the entry, the adapter would ignore
-    // it, and the servers of the session's list would look callable.
-    mcpPassthrough: "unsupported",
+    // The adapter maps the gateway entry into the config of `thread/start`,
+    // `thread/resume` and `thread/fork`, so the servers of the session's list
+    // are callable.
+    mcpPassthrough: "native",
     // The app-server exposes no per-turn tool denylist.
     disallowedTools: "unsupported",
     structuredOutput: "supported",

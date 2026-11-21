@@ -53,6 +53,7 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
   UserMaterial,
@@ -110,10 +111,17 @@ import {
   initializeAppServer,
   makeProbe,
   describeRpcError,
+  parseVersion,
   readAccount,
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
+import {
+  buildMcpServerConfig,
+  buildNoToolListChangedWarning,
+  supportsToolListChanged,
+  type McpToolApprovalMode,
+} from "./mcp";
 import {
   buildUsageReadings,
   completeWindowDurations,
@@ -282,6 +290,16 @@ interface Held {
  * The Codex thread settings for each access mode (spec 06 section 8.1). Codex
  * supports every access mode natively, so there is no fallback here and
  * nothing is silently substituted.
+ *
+ * `mcpToolApprovalMode` is not a thread setting. It is how Codex asks about a
+ * call to a tool of an MCP server, and it goes in the MCP servers' config:
+ *
+ * - Every mode but full access is `prompt`, which asks about every call. A
+ *   tool's annotations (such as "read only") come from an outside server, so
+ *   they must never lower the mode (spec 06 section 10.2). In `auto` mode,
+ *   Codex's own reviewer then judges each call, as it does for other actions.
+ * - Full access is `approve`: it asks nobody, and Codex never asks under the
+ *   approval policy `never` anyway.
  */
 const ACCESS_MODES: Readonly<
   Record<
@@ -290,6 +308,7 @@ const ACCESS_MODES: Readonly<
       readonly approvalPolicy: AskForApproval;
       readonly sandbox: SandboxMode;
       readonly approvalsReviewer: ApprovalsReviewer;
+      readonly mcpToolApprovalMode: McpToolApprovalMode;
     }
   >
 > = {
@@ -297,21 +316,25 @@ const ACCESS_MODES: Readonly<
     approvalPolicy: "untrusted",
     sandbox: "read-only",
     approvalsReviewer: "user",
+    mcpToolApprovalMode: "prompt",
   },
   "auto-accept-edits": {
     approvalPolicy: "on-request",
     sandbox: "workspace-write",
     approvalsReviewer: "user",
+    mcpToolApprovalMode: "prompt",
   },
   auto: {
     approvalPolicy: "on-request",
     sandbox: "workspace-write",
     approvalsReviewer: "auto_review",
+    mcpToolApprovalMode: "prompt",
   },
   "full-access": {
     approvalPolicy: "never",
     sandbox: "danger-full-access",
     approvalsReviewer: "user",
+    mcpToolApprovalMode: "approve",
   },
 };
 
@@ -1050,12 +1073,18 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           : Effect.void,
     );
 
+  /**
+   * Starts the session's app-server and makes it ready: the handshake, the
+   * login check and the skill roots. Returns the host with the Codex version
+   * read from the handshake, or `null` when the user agent has none. Fails,
+   * and kills the app-server, when any step fails.
+   */
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
     ctx: HarnessRunnerContext,
     binary: string,
-  ): Effect.Effect<Host, AdapterError> =>
+  ): Effect.Effect<{ readonly host: Host; readonly codexVersion: string | null }, AdapterError> =>
     Effect.suspend(() => {
       // A session resumed in place starts again under the same id. An entry
       // left here belongs to the run that ended: it must not be used, and must
@@ -1072,18 +1101,22 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       ];
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
-          Effect.andThen(
-            Effect.andThen(
-              Effect.mapError(
-                initializeAppServer(host),
-                (error) =>
-                  new HarnessProtocolError({
-                    message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
-                  }),
-              ),
-              requireLogin(host),
+          Effect.flatMap(
+            Effect.mapError(
+              initializeAppServer(host),
+              (error) =>
+                new HarnessProtocolError({
+                  message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
+                }),
             ),
-            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            (initialized) =>
+              Effect.as(
+                Effect.andThen(
+                  requireLogin(host),
+                  setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+                ),
+                parseVersion(initialized.userAgent),
+              ),
           ),
           {
             // Registered only after the handshake, the login check and the
@@ -1093,9 +1126,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               host.kill();
               return Effect.fail(error);
             },
-            onSuccess: () => {
+            onSuccess: (codexVersion) => {
               hosts.set(sessionId, host);
-              return Effect.succeed(host);
+              return Effect.succeed({ host, codexVersion });
             },
           },
         ),
@@ -1768,14 +1801,19 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * account shares that directory, so a file there would reach assistant
    * sessions and workflow steps too.
    *
+   * The session's MCP servers go in `config`, in all three methods: Codex
+   * does not save them with the thread, so a resumed or forked thread has none
+   * unless they are sent again. Child threads (subagents) inherit them.
+   *
    * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
    * tools, and the Agent record and the Session record both report the field
    * as not enforced, so no behaviour is silently substituted.
    */
   const buildThreadParams = (
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
     userInstructions: string | undefined,
+    toolListChanged: boolean,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -1785,14 +1823,19 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     | "sandbox"
     | "approvalsReviewer"
     | "developerInstructions"
+    | "config"
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
+    const { mcpToolApprovalMode, ...thread } = ACCESS_MODES[spec.accessMode];
+    const config = buildMcpServerConfig(ctx.mcpServers, mcpToolApprovalMode, toolListChanged);
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
       developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
-      ...ACCESS_MODES[spec.accessMode],
+      ...thread,
+      // Left out when empty, so a session with no MCP server sends no `config`.
+      ...(Object.keys(config).length === 0 ? {} : { config }),
     };
   };
 
@@ -1864,7 +1907,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
-        const host = yield* startSessionHost(sessionId, spec, ctx, binary);
+        const { host, codexVersion } = yield* startSessionHost(sessionId, spec, ctx, binary);
+        // The one place that decides whether this Codex re-reads its tool
+        // list. It is deleted when Hercule's minimum Codex version reaches
+        // 0.164.0.
+        const toolListChanged = supportsToolListChanged(codexVersion);
         const carried = spec.continue;
         const method =
           carried === undefined
@@ -1876,12 +1923,12 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           Effect.flatMap(
             carried === undefined
               ? host.rpc.request(method, {
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
                   ephemeral: false,
                 } satisfies ThreadStartParams)
               : host.rpc.request(method, {
                   threadId: carried.nativeSessionId,
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...buildThreadParams(spec, ctx, userInstructions, toolListChanged),
                 } satisfies ThreadResumeParams & ThreadForkParams),
             readThreadOpenedReply(method),
           ),
@@ -1950,6 +1997,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
+        if (ctx.mcpServers.length > 0 && !toolListChanged) {
+          warn(host, buildNoToolListChangedWarning(codexVersion));
+        }
         const dropped = deliverFramesBeforeRegistration(held);
         // The dropped ones belong to no thread, so the session is not told;
         // the runner's log is.

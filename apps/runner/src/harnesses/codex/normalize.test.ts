@@ -739,6 +739,56 @@ describe("the detail a surface shows for an item without opening it", () => {
     expect(readItemDetail(output)).toEqual({ name: "lookup", kind: "native" });
   });
 
+  it("includes the MCP Server and the tool of a call through the MCP Gateway, like Claude Code's item", () => {
+    const gateway = normalizeFromStart([
+      buildItemCompleted({
+        type: "mcpToolCall",
+        id: "i7",
+        server: "tools",
+        tool: "sentry__search_issues",
+        status: "completed",
+      }),
+    ]);
+
+    expect(readItemDetail(gateway)).toEqual({
+      name: "search_issues",
+      server: "sentry",
+      kind: "mcp",
+    });
+  });
+
+  it("keeps a tool name that holds a double underscore whole after the MCP Server", () => {
+    const gateway = normalizeFromStart([
+      buildItemCompleted({
+        type: "mcpToolCall",
+        id: "i7",
+        server: "tools",
+        tool: "sentry__search__issues",
+        status: "completed",
+      }),
+    ]);
+
+    expect(readItemDetail(gateway)).toEqual({
+      name: "search__issues",
+      server: "sentry",
+      kind: "mcp",
+    });
+  });
+
+  it("names a gateway tool with no server part as the call to the entry, as for any other server", () => {
+    const gateway = normalizeFromStart([
+      buildItemCompleted({
+        type: "mcpToolCall",
+        id: "i7",
+        server: "tools",
+        tool: "search",
+        status: "completed",
+      }),
+    ]);
+
+    expect(readItemDetail(gateway)).toEqual({ name: "tools/search", kind: "mcp" });
+  });
+
   it("includes the path of the image an image view read, and no detail for an empty path", () => {
     const viewed = normalizeFromStart([
       buildItemCompleted({ type: "imageView", id: "i15", path: "/tmp/shot.png" }),

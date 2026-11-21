@@ -19,7 +19,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { AnswerNotDelivered } from "@hercule/protocol";
+import { AnswerNotDelivered, MAX_FACT_LENGTH } from "@hercule/protocol";
 import type { ApprovalDecision, HarnessEvent, QuestionAnswers } from "@hercule/protocol";
 import {
   type Answered,
@@ -297,6 +297,24 @@ const ELICITATION_PARAMS = {
   requestedSchema: { type: "object", properties: {}, required: [] },
 };
 
+/** The question Codex asks before it runs a tool of an MCP server, as seen on Codex 0.171.0. */
+const TOOL_CALL_ELICITATION_PARAMS = {
+  threadId: THREAD,
+  turnId: TURN,
+  serverName: "tools",
+  mode: "form",
+  _meta: {
+    codex_approval_kind: "mcp_tool_call",
+    tool_name: "sentry__search_issues",
+    tool_description: "Searches Sentry issues",
+    tool_params: {},
+    tool_params_display: [],
+    tool_annotations: { readOnlyHint: true },
+  },
+  message: 'Allow the tools MCP server to run tool "sentry__search_issues"?',
+  requestedSchema: { type: "object", properties: {} },
+};
+
 const ELICITATION_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, unknown]> = [
   ["allow", { action: "accept", content: null }],
   ["deny", { action: "decline" }],
@@ -318,6 +336,66 @@ describe("an MCP server asking its own question", () => {
   for (const [decision, mapped] of ELICITATION_ANSWERS) {
     it(`replies ${JSON.stringify(mapped)} for ${decision}`, async () => {
       const { run, answered } = await openAndAnswer(ELICITATION, ELICITATION_PARAMS, decision);
+
+      expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
+      expect(listResolutions(run)).toEqual([decision]);
+    });
+  }
+});
+
+describe("Codex asking to run a tool of an MCP server", () => {
+  it("shows a tool approval named as the model sees the tool, with no allow_always", async () => {
+    const run = await pushServerRequest(ELICITATION, TOOL_CALL_ELICITATION_PARAMS);
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "mcp__tools__sentry__search_issues" });
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
+  });
+
+  it("shows a tool name that is too long cut to the protocol's limit", async () => {
+    const run = await pushServerRequest(ELICITATION, {
+      ...TOOL_CALL_ELICITATION_PARAMS,
+      _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "x".repeat(10_000) },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    const toolName = (opened.request.detail as { readonly toolName: string }).toolName;
+    expect(toolName.startsWith("mcp__tools__xxx")).toBe(true);
+    expect(toolName.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+  });
+
+  it("shows the question of Codex 0.154.0, which sends no tool name, named after the server entry", async () => {
+    // Params as captured on the real Codex 0.154.0. The tool is named only
+    // inside `message`, which is prose and is not parsed.
+    const run = await pushServerRequest(ELICITATION, {
+      threadId: THREAD,
+      turnId: TURN,
+      serverName: "tools",
+      mode: "form",
+      _meta: {
+        codex_approval_kind: "mcp_tool_call",
+        tool_description: "Searches Sentry issues.",
+        tool_params: {},
+        tool_params_display: [],
+      },
+      message: 'Allow the tools MCP server to run tool "sentry__search_issues"?',
+      requestedSchema: { type: "object", properties: {} },
+    });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.kind).toBe("tool_approval");
+    expect(opened.request.detail).toEqual({ toolName: "tools" });
+    expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
+  });
+
+  for (const [decision, mapped] of ELICITATION_ANSWERS) {
+    it(`replies ${JSON.stringify(mapped)} for ${decision}`, async () => {
+      const { run, answered } = await openAndAnswer(
+        ELICITATION,
+        TOOL_CALL_ELICITATION_PARAMS,
+        decision,
+      );
 
       expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
       expect(listResolutions(run)).toEqual([decision]);

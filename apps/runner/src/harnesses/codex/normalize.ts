@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import {
   MAX_TODO_STEPS,
+  MCP_GATEWAY_ENTRY_NAME,
   type ImageGenerationDetail,
   type ItemKind,
   type ItemStatus,
@@ -46,6 +47,7 @@ import { clampCount, buildEnvelope, buildRaw, toJson, type Envelope } from "../n
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { ensureId } from "../events";
 import { buildEditedPathFields } from "../edited-paths";
+import { splitGatewayToolName } from "../gateway-tool-name";
 import { requireText, truncateFact, truncateMessage } from "../text";
 import { buildUnknownItemLabel } from "../message-reporting";
 import type { NotificationFrame } from "./rpc";
@@ -277,6 +279,24 @@ const readEditedPaths = (
   });
 
 /**
+ * Builds the detail of an MCP tool call item. For a call through the MCP
+ * Gateway, Codex reports the gateway's entry as the server and
+ * `<server>__<tool>` as the tool. The detail shows the MCP Server behind the
+ * tool and the tool's own name instead, like Claude Code's item does. A call to
+ * any other MCP server is named `<server>/<tool>`, as is a gateway tool whose
+ * name has no server part.
+ */
+const buildMcpToolCallDetail = (
+  server: string,
+  tool: string,
+): { readonly name: string; readonly kind: "mcp"; readonly server?: string } => {
+  const gateway = server === MCP_GATEWAY_ENTRY_NAME ? splitGatewayToolName(tool) : undefined;
+  return gateway === undefined
+    ? { name: truncateFact(`${server}/${tool}`), kind: "mcp" }
+    : { name: truncateFact(gateway.tool), server: truncateFact(gateway.server), kind: "mcp" };
+};
+
+/**
  * Builds an item's `detail`: the one thing a reader wants to see in a row,
  * such as the command that ran, the file a patch touched or an image view
  * read, or the tool that was called. Everything else stays in `raw`. A detail
@@ -304,7 +324,7 @@ const buildDetail = (
       return fields === undefined ? {} : { detail: fields };
     }
     case "mcpToolCall":
-      return { detail: { name: truncateFact(`${item.server}/${item.tool}`), kind: "mcp" } };
+      return { detail: buildMcpToolCallDetail(item.server, item.tool) };
     case "dynamicToolCall":
       return { detail: { name: truncateFact(item.tool), kind: "native" } };
     case "functionCallOutput":

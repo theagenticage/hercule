@@ -122,6 +122,26 @@ const buildGrantedProfile = ({
 const ELICITATION = "mcpServer/elicitation/request";
 
 /**
+ * Returns the name an MCP elicitation is shown under. An approval of a tool
+ * call is shown as the tool the model sees, `mcp__<server>__<tool>`, the same
+ * name Claude Code's approval shows for an MCP tool. Any other elicitation,
+ * such as a server asking for a form, is shown as its server, and a server
+ * with an empty name as the request method.
+ */
+const buildElicitationToolName = (params: McpServerElicitationRequestParams): string => {
+  const meta = params._meta;
+  if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
+    const tool = meta["tool_name"];
+    if (meta["codex_approval_kind"] === "mcp_tool_call" && typeof tool === "string") {
+      return truncateFact(`mcp__${params.serverName}__${tool}`);
+    }
+  }
+  // The oldest Codex Hercule supports sends no `tool_name`, so its tool-call question is shown as
+  // its server. The tool is named only in the `message` text, which is not parsed.
+  return params.serverName === "" ? ELICITATION : truncateFact(params.serverName);
+};
+
+/**
  * The tool name shown when a question request has no questions that can be
  * parsed, and is shown as a tool approval instead.
  */
@@ -197,10 +217,7 @@ export const ASKED: Readonly<Record<string, Asked>> = {
       // The reply has no "accept for this session", so `allow_always` is not
       // offered: the adapter would have to replace it with something else.
       decisions: ["allow", "deny", "cancel"],
-      // A server with an empty name is labelled with the request method.
-      detail: {
-        toolName: params.serverName === "" ? ELICITATION : truncateFact(params.serverName),
-      },
+      detail: { toolName: buildElicitationToolName(params) },
     }),
     replies: (decision) => ({
       result: {

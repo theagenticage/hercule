@@ -4698,3 +4698,131 @@ describe("the rate limits a Codex session reports", () => {
     ]);
   });
 });
+
+describe("the MCP servers a Codex session is given", () => {
+  const GATEWAY = { name: "tools", url: "http://127.0.0.1:7777/mcp" };
+
+  /** The `initialize` reply of a Codex with this user agent. */
+  const initializeWithUserAgent = (userAgent: string): Answers => ({
+    initialize: () => ({ ...INITIALIZE, userAgent }),
+  });
+
+  /** The `initialize` reply of a Codex of this version. */
+  const initializeAs = (version: string): Answers =>
+    initializeWithUserAgent(`hercule/${version} (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)`);
+
+  /** Starts a session whose context lists the gateway, or no MCP server at all. */
+  const startWithServers = async (
+    servers: SessionStartContext["mcpServers"],
+    spec: SessionSpec = SPEC,
+    answers: Answers = {},
+  ): Promise<ReturnType<typeof createDriving>> => {
+    const run = createDriving(answers);
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: servers }),
+    );
+    return run;
+  };
+
+  const CONTINUATIONS: ReadonlyArray<readonly [string, SessionSpec]> = [
+    ["thread/start", SPEC],
+    ["thread/resume", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } }],
+    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }],
+  ];
+
+  it.each(CONTINUATIONS)(
+    "sends the gateway in the config of %s, and the name of the token variable, not the token",
+    async (method, spec) => {
+      const { requests } = await startWithServers([GATEWAY], spec, initializeAs("0.171.0"));
+
+      expect(listSentParams(requests, method)).toEqual([
+        expect.objectContaining({
+          config: {
+            "mcp_servers.tools.url": GATEWAY.url,
+            "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
+            "mcp_servers.tools.default_tools_approval_mode": "prompt",
+            "features.mcp_tool_list_changed": true,
+          },
+        }),
+      ]);
+    },
+  );
+
+  it.each(CONTINUATIONS)(
+    "sends no config in %s when the session has no MCP server",
+    async (method, spec) => {
+      const { requests } = await startWithServers([], spec);
+
+      const [params] = listSentParams(requests, method);
+      expect(params).not.toHaveProperty("config");
+    },
+  );
+
+  it("keeps the approval mode of MCP tools out of the thread's own settings", async () => {
+    const { requests } = await startWithServers([GATEWAY], { ...SPEC, accessMode: "full-access" });
+
+    // Codex refuses a field it does not know, so the table's extra column must not leak.
+    expect(listSentParams(requests, "thread/start")[0]).not.toHaveProperty("mcpToolApprovalMode");
+  });
+
+  it.each([
+    ["approval-required", "prompt"],
+    ["auto-accept-edits", "prompt"],
+    ["auto", "prompt"],
+    ["full-access", "approve"],
+  ] as const)("asks about MCP tool calls in %s mode as %s", async (accessMode, approvalMode) => {
+    const { requests } = await startWithServers([GATEWAY], { ...SPEC, accessMode });
+
+    expect(listSentParams(requests, "thread/start")[0]).toMatchObject({
+      config: { "mcp_servers.tools.default_tools_approval_mode": approvalMode },
+    });
+  });
+
+  it.each(["0.164.0", "0.171.0", "1.0.0"])(
+    "re-reads the tool list on a change, with no warning, at Codex %s",
+    async (version) => {
+      const run = await startWithServers([GATEWAY], SPEC, initializeAs(version));
+      await settle();
+
+      expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
+        config: { "features.mcp_tool_list_changed": true },
+      });
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["a Codex at 0.163.9", initializeAs("0.163.9"), "0.163.9"],
+    ["a Codex at 0.154.0", initializeAs("0.154.0"), "0.154.0"],
+    [
+      "a Codex whose user agent has no version",
+      initializeWithUserAgent("unknown"),
+      "unknown version",
+    ],
+  ])("leaves the tool list feature out and warns once for %s", async (_name, answers, shown) => {
+    const run = await startWithServers([GATEWAY], SPEC, answers);
+    await waitUntil(
+      "warned about the tool list",
+      () => filterByTag(run.seen, "runtime.warning").length === 1,
+    );
+    await settle();
+
+    // Codex refuses a config key it does not know, so the key must be absent.
+    expect(listSentParams(run.requests, "thread/start")[0]).toMatchObject({
+      config: { "mcp_servers.tools.url": GATEWAY.url },
+    });
+    expect(
+      (listSentParams(run.requests, "thread/start")[0] as { readonly config: object }).config,
+    ).not.toHaveProperty("features.mcp_tool_list_changed");
+    expect(filterByTag(run.seen, "runtime.warning").map((event) => event.message)).toEqual([
+      `This Codex (${shown}) does not re-read its tool list, so an MCP Server added while the thread runs is usable from its next start. Upgrade Codex to 0.164.0 or newer.`,
+    ]);
+  });
+
+  it("does not warn about the tool list when the session has no MCP server", async () => {
+    const run = await startWithServers([], SPEC, initializeAs("0.154.0"));
+    await settle();
+
+    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+  });
+});
