@@ -21,7 +21,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   HarnessNotInstalled,
   MAX_MESSAGE_LENGTH,
-  MCP_SERVERS_CAPABILITY,
+  buildMcpServersCapability,
   SessionSpec,
   SteerRefused,
   type AdapterError,
@@ -1014,6 +1014,13 @@ describe("SessionService.claimStarts", () => {
 /** The harness of the MCP tests that can be given the gateway's entry. */
 const NATIVE_MCP_HARNESS_ID = "mcptest/native";
 
+/**
+ * A second harness that can be given the gateway's entry, for a runner that
+ * negotiated the capability of the first harness only (Codex on a runner that
+ * maps the entry for Claude Code and not yet for Codex).
+ */
+const OTHER_NATIVE_MCP_HARNESS_ID = "mcptest/other";
+
 /** The harness of the MCP tests that cannot (`mcpPassthrough: "unsupported"`). */
 const BARE_MCP_HARNESS_ID = "mcptest/bare";
 
@@ -1024,7 +1031,7 @@ const DESK_SERVER_CONTRIBUTION_ID = "mcpdesk/desk";
 const OTHER_DESK_SERVER_CONTRIBUTION_ID = "mcpother/desk";
 
 /**
- * Registers the two harnesses of the MCP tests, which the claim reads
+ * Registers the four harnesses of the MCP tests, which the claim reads
  * `mcpPassthrough` from, and the two plugins that offer the tests' MCP
  * servers.
  */
@@ -1035,11 +1042,17 @@ const bootMcpHarnesses = Effect.flatMap(PluginHost, (host) => {
       id: "mcptest",
       definitions: [
         native,
+        buildHarnessDefinition("other"),
         {
           ...buildHarnessDefinition("bare"),
           declared: { ...native.declared, mcpPassthrough: "unsupported" },
         },
       ],
+    }).plugin,
+    // The harness a runner of the first MCP Gateway build gives the entry to.
+    createPluginFixture({
+      id: "claude-code",
+      definitions: [buildHarnessDefinition("claude-code")],
     }).plugin,
     buildMcpServerPlugin("mcpdesk"),
     buildMcpServerPlugin("mcpother"),
@@ -1171,8 +1184,8 @@ const readLeftOut = (sessionId: string) =>
   });
 
 describe("the MCP servers of a session at a start", () => {
-  /** The capabilities of a runner that can give a harness the gateway's entry. */
-  const withMcp = [MCP_SERVERS_CAPABILITY];
+  /** The capabilities of a runner that maps the gateway's entry for the native and the bare harness. */
+  const withMcp = [NATIVE_MCP_HARNESS_ID, BARE_MCP_HARNESS_ID].map(buildMcpServersCapability);
 
   it("records why each server cannot be called, and writes one warning that names them", async () => {
     const result = await run(
@@ -1486,6 +1499,59 @@ describe("the MCP servers of a session at a start", () => {
     expect(result.bare.mcpServers).toBeUndefined();
     expect(result.stored).not.toHaveProperty("mcpServers");
   });
+
+  it("gives the entry for a harness only to a runner that negotiated the capability of that harness, and leaves its servers out as runner-too-old otherwise", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const [sentry] = yield* insertMcpServers([{ name: "sentry", status: "ready" }]);
+        const profile = yield* aProfileWith(["mcp.use"]);
+        const start = (
+          negotiated: ReadonlyArray<string>,
+          harnessId = OTHER_NATIVE_MCP_HARNESS_ID,
+        ) =>
+          Effect.gen(function* () {
+            const runnerId = mintId();
+            const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+              harnessId,
+              permissionProfileId: profile,
+              servers: [{ id: sentry!, name: "sentry" }],
+            });
+            const [claimed] = yield* claimStarting(runnerId, 1, undefined, undefined, negotiated);
+            return {
+              spec: claimed!.frame.spec,
+              leftOut: yield* readLeftOut(sessionId),
+              warnings: yield* readRuntimeWarnings(sessionId),
+            };
+          });
+        return {
+          // This runner maps the entry for the native harness only.
+          otherHarnessOnly: yield* start([buildMcpServersCapability(NATIVE_MCP_HARNESS_ID)]),
+          // A runner of the first MCP Gateway build lists only the plain capability,
+          // which stands for Claude Code alone: too old for any other harness.
+          plainOnly: yield* start(["mcpServers"]),
+          plainOnlyForClaudeCode: yield* start(["mcpServers"], "claude-code/claude-code"),
+          matching: yield* start([buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID)]),
+        };
+      }),
+    );
+
+    for (const tooOld of [result.otherHarnessOnly, result.plainOnly]) {
+      expect(tooOld.spec.mcpServers).toBeUndefined();
+      expect(tooOld.leftOut).toEqual([["sentry", "runner-too-old"]]);
+      expect(tooOld.warnings).toEqual([
+        expect.objectContaining({
+          message:
+            "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers)",
+        }),
+      ]);
+    }
+    expect(result.plainOnlyForClaudeCode.spec.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.plainOnlyForClaudeCode.leftOut).toEqual([["sentry", null]]);
+    expect(result.matching.spec.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.matching.leftOut).toEqual([["sentry", null]]);
+    expect(result.matching.warnings).toEqual([]);
+  });
 });
 
 describe("MCP servers added to a running session", () => {
@@ -1538,10 +1604,16 @@ describe("MCP servers added to a running session", () => {
         return {
           tooOld: yield* addServerToRunningSession("old", NATIVE_MCP_HARNESS_ID, []),
           bare: yield* addServerToRunningSession("bare", BARE_MCP_HARNESS_ID, [
-            MCP_SERVERS_CAPABILITY,
+            buildMcpServersCapability(BARE_MCP_HARNESS_ID),
           ]),
           fine: yield* addServerToRunningSession("fine", NATIVE_MCP_HARNESS_ID, [
-            MCP_SERVERS_CAPABILITY,
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+          ]),
+          otherHarnessOnly: yield* addServerToRunningSession("other", OTHER_NATIVE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+          ]),
+          otherHarness: yield* addServerToRunningSession("other-ok", OTHER_NATIVE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID),
           ]),
         };
       }),
@@ -1562,6 +1634,15 @@ describe("MCP servers added to a running session", () => {
       }),
     ]);
     expect(result.fine.warnings).toEqual([]);
+    // The runner maps the entry for another harness only: it is too old for this one.
+    expect(result.otherHarnessOnly.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: other (its runner is too old to reach MCP servers)",
+        mcpServers: [{ mcpServerId: result.otherHarnessOnly.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.otherHarness.warnings).toEqual([]);
   });
 });
 
