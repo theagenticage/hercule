@@ -110,13 +110,15 @@ interface MediaBlock {
  * - An `mcpToolCall` item holds MCP's content blocks in `result.content`. An
  *   image block is replaced by an `unavailable` image (see `ToolResultImage`).
  *   The base64 of an audio block's `data` and of an embedded resource's `blob`
- *   is replaced by a placeholder, and its `mimeType` and `uri` stay. Every
- *   other copy of that base64 in the result, such as one in
- *   `structuredContent` or `_meta`, is replaced too. Text blocks stay. Only a
+ *   is replaced by a placeholder, and its `mimeType` and `uri` stay. Text
+ *   blocks stay.
+ * - Every other copy of that base64 in the same `mcpToolCall` item is replaced
+ *   too, under any key of the item: `result.structuredContent`, `result._meta`,
+ *   `arguments` and the rest. Copies in other items of the frame stay. Only a
  *   value that looks like base64 and is long enough counts as bytes (see
  *   `looksLikeMediaBytes`), so a short text is never erased.
  *
- * A result too deeply nested to walk is dropped whole, so no bytes stay.
+ * A field too deeply nested to walk is dropped whole, so no bytes stay.
  */
 export const removeMediaBytes = (frame: NotificationFrame): void => {
   for (const item of listFrameItems(frame)) {
@@ -141,13 +143,13 @@ export const removeMediaBytes = (frame: NotificationFrame): void => {
       }
     }
     if (copies.size === 0) continue;
-    try {
-      item["result"] = scrubMediaCopies(
-        item["result"],
-        [...copies].toSorted((a, b) => b.length - a.length),
-      );
-    } catch {
-      Reflect.deleteProperty(item, "result");
+    const longestFirst = [...copies].toSorted((a, b) => b.length - a.length);
+    for (const [key, field] of Object.entries(item)) {
+      try {
+        item[key] = scrubMediaCopies(field, longestFirst);
+      } catch {
+        Reflect.deleteProperty(item, key);
+      }
     }
   }
 };

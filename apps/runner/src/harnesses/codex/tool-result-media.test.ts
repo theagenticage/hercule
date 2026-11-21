@@ -200,6 +200,43 @@ describe("removing the media bytes of a notification frame", () => {
     });
   });
 
+  describe("a copy of the bytes under another key of the call item", () => {
+    const buildCallWithCopies = () => ({
+      ...buildCall(buildImageResult()),
+      arguments: { previous: IMAGE, note: "kept" },
+      _meta: { origin: `data:image/png;base64,${IMAGE}` },
+    });
+
+    it.each([
+      ["an item frame", () => buildItemFrame(buildCallWithCopies())],
+      ["a turn frame", () => buildTurnFrame([buildCallWithCopies()])],
+    ])("is replaced in %s", (_name, buildFrame) => {
+      const frame = buildFrame();
+
+      removeMediaBytes(frame);
+
+      const params = frame.params as { item?: unknown; turn?: { items: ReadonlyArray<unknown> } };
+      expect(params.turn?.items[0] ?? params.item).toMatchObject({
+        arguments: { previous: NOT_KEPT, note: "kept" },
+        _meta: { origin: `data:image/png;base64,${NOT_KEPT}` },
+      });
+      expect(JSON.stringify(frame)).not.toContain(IMAGE);
+    });
+
+    it("is dropped with its key when too deeply nested to walk, and the other keys stay", () => {
+      let deep: unknown = IMAGE;
+      for (let level = 0; level < 30_000; level += 1) deep = [deep];
+      const frame = buildItemFrame({ ...buildCallWithCopies(), arguments: deep });
+
+      removeMediaBytes(frame);
+
+      const item = (frame.params as { item: Record<string, unknown> }).item;
+      expect(item).not.toHaveProperty("arguments");
+      expect(item).toMatchObject({ tool: "sentry__get_snapshot_image", status: "completed" });
+      expect(JSON.stringify(frame)).not.toContain(IMAGE);
+    });
+  });
+
   it("removes the result of a generated image", () => {
     const frame = buildItemFrame({
       type: "imageGeneration",
