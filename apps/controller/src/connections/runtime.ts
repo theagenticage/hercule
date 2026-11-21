@@ -989,6 +989,42 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns a Connection's credentials as they are stored now, with their
+     * config and identity, and never refreshes them: an access token that is
+     * stale is returned as it is, and the outside server decides. For a
+     * request that only continues an exchange that already went out, or ends
+     * a session, which has no right to ask the provider for anything.
+     *
+     * Fails with a `ConnectionCredentialsUnavailable` whose `reason` is
+     * `missing`, `switched-off`, `needs-sign-in` (the Connection is
+     * `needs-reauth`, or its stored tokens cannot be read),
+     * `no-credentials` or `invalid-config`.
+     */
+    readCredentialsWithoutRefresh: (
+      connectionId: string,
+    ): Effect.Effect<ConnectionCredentialsForUse, ConnectionCredentialsUnavailable> =>
+      Effect.gen(function* () {
+        const { row, type } = yield* readConnectionForUse(connectionId);
+        const stored = yield* Effect.orDie(secrets.values({ kind: "connection", id: row.id }));
+        const tokens = stored.find((one) => one.name === OAUTH_TOKENS);
+        if (tokens !== undefined) {
+          const held = yield* parseStoredTokens(row, Redacted.value(tokens.value));
+          return yield* buildCredentialsForUse(row, type, { accessToken: held.accessToken });
+        }
+        if (stored.length === 0) {
+          return yield* new ConnectionCredentialsUnavailable({
+            reason: "no-credentials",
+            message: `the connection ${row.id} holds no credentials`,
+          });
+        }
+        return yield* buildCredentialsForUse(
+          row,
+          type,
+          Object.fromEntries(stored.map((one) => [one.name, Redacted.value(one.value)])),
+        );
+      }),
+
+    /**
      * Returns a Connection's credentials after an outside server answered 401
      * to a request that carried the credentials with identity
      * `rejectedIdentity`. It runs under the Connection's refresh permit, so

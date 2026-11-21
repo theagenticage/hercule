@@ -30,8 +30,6 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as Fiber from "effect/Fiber";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 import { McpProtocol } from "effect/ai";
 import { buildJsonResponse, readConnection } from "../connections/testing";
 import { del } from "../http/testing";
@@ -40,6 +38,7 @@ import {
   countNotifications,
   eventually,
   readRow,
+  readRunningWork,
   refreshedToken,
   requestUpdate,
   runSql,
@@ -144,12 +143,6 @@ const countRefreshes = (provider: Rig["provider"]) =>
   provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
 
 const sleep = (millis: number) => new Promise((resolve) => setTimeout(resolve, millis));
-
-/** Returns how many units of admitted work the promotion gate counts as running now. */
-const readRunningWork = (promotion: Rig["controller"]["harness"]["promotion"]) =>
-  Effect.runPromise(
-    Effect.map(Stream.runHead(promotion.gateChanges), (state) => Option.getOrThrow(state).running),
-  );
 
 describe("a refused call", () => {
   it.each(["checking", "needs-sign-in", "unreachable", "error"] as const)(
@@ -792,6 +785,34 @@ describe("upstream MCP sessions", () => {
     );
   });
 
+  it("ends a session with the stored token, and calls no provider, when the token went stale meanwhile", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, provider, call }) => {
+        provider.answers.token = refreshedToken;
+        await call();
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stale-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        const endedBefore = requestsOf(fake, "?").length;
+
+        await Effect.runPromise(
+          controller.harness.mcpServerCalls.closeUpstreamSessionsExcept(SCOPE_A, new Set()),
+        );
+
+        expect(
+          requestsOf(fake, "?")
+            .slice(endedBefore)
+            .map((request) => request.authorization),
+        ).toEqual(["Bearer stale-token"]);
+        expect(provider.tokenRequests).toHaveLength(0);
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
   it("sends no DELETE for a session it ends while the controller is frozen", async () => {
     await withReadyServer(
       async ({ controller, fake, call }) => {
@@ -872,6 +893,62 @@ describe("upstream MCP sessions", () => {
         // The first call, the one that was sent, and its single resend.
         expect(requestsOf(fake, "tools/call")).toHaveLength(3);
         expect((await readRow(controller)).status).toBe("error");
+      },
+      { legacy: true },
+    );
+  });
+
+  it("replaces an expired session once per call in all, also when a refresh sends the call again", async () => {
+    await withReadyServer(
+      async ({ fake, provider, call }) => {
+        provider.answers.token = refreshedToken;
+        await call();
+        const expired = requestsOf(fake, "tools/call")[0]?.sessionId;
+        const opened = requestsOf(fake, "initialize").length;
+        // The old session expired. The one that replaces it refuses the stored
+        // token. After the refresh, that session expires as well.
+        fake.intercept = ({ method, sessionId, authorization }) =>
+          method !== "tools/call"
+            ? undefined
+            : sessionId === expired || authorization === "Bearer refreshed-token"
+              ? new Response(null, { status: 404 })
+              : new Response("unauthorized", { status: 401 });
+
+        const result = await call();
+
+        expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
+        expect(countRefreshes(provider)).toBe(1);
+        expect(requestsOf(fake, "initialize")).toHaveLength(opened + 1);
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
+  it("still replaces an expired session once in the next call, after the server refused the reply to a request of its own with 404", async () => {
+    await withReadyServer(
+      async ({ fake, call }) => {
+        fake.intercept = ({ method }) =>
+          method === "tools/call"
+            ? new Response(
+                `data: ${JSON.stringify({ jsonrpc: "2.0", id: "from-server", method: "ping" })}\n\n`,
+                { status: 200, headers: { "content-type": "text/event-stream" } },
+              )
+            : method === "?"
+              ? new Response("gone", { status: 404 })
+              : undefined;
+        const broken = await call();
+        expect(broken).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
+        // The next call meets one expired session of its own.
+        let refused = false;
+        fake.intercept = ({ method }) => {
+          if (method !== "tools/call" || refused) return undefined;
+          refused = true;
+          return new Response(null, { status: 404 });
+        };
+
+        const result = await call();
+
+        expect(result).toMatchObject({ _tag: "Success" });
       },
       { legacy: true },
     );
@@ -1143,47 +1220,60 @@ describe("a reply to a request of the server", () => {
     );
   });
 
-  it("starts no refresh while the controller is frozen, and ends the call as one that may have run", async () => {
-    await withReadyServer(
-      async ({ controller, connectionId, fake, provider, call }) => {
-        const { promotion } = controller.harness;
-        const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
-        provider.answers.token = refreshedToken;
-        fake.intercept = ({ method }) => (method === "tools/call" ? askServerRequest() : undefined);
-        const release = fake.hold("tools/call");
-        const pending = call({}, Duration.seconds(5));
-        await eventually(
-          () => Promise.resolve(requestsOf(fake, "tools/call").length),
-          (count) => count === 1,
-        );
-        // The token went stale while the tool ran, and a freeze waits for the call.
-        await storeOauthTokens(
-          controller,
-          connectionId,
-          { accessToken: "stored-token", refreshToken: "refresh-1" },
-          -1000,
-        );
-        const freezing = Effect.runPromise(
-          promotion.freeze(tokenId, new Date(Date.now() + 60_000)),
-        );
-        await eventually(
-          () => Effect.runPromise(promotion.phase),
-          (phase) => phase._tag === "Frozen",
-        );
-        release();
+  it.each([[false], [true]])(
+    "sends the stored token and starts no refresh when the token went stale while the tool ran (controller frozen: %s)",
+    async (freezes) => {
+      await withReadyServer(
+        async ({ controller, connectionId, fake, provider, call }) => {
+          const { promotion } = controller.harness;
+          const tokenId = "0199f0b7-0000-7000-8000-00000000dddd";
+          provider.answers.token = refreshedToken;
+          fake.intercept = ({ method }) =>
+            method === "tools/call"
+              ? askServerRequest()
+              : method === "?"
+                ? new Response(null, { status: 202 })
+                : undefined;
+          const repliesBefore = requestsOf(fake, "?").length;
+          const release = fake.hold("tools/call");
+          const pending = call({}, Duration.seconds(5));
+          await eventually(
+            () => Promise.resolve(requestsOf(fake, "tools/call").length),
+            (count) => count === 1,
+          );
+          // The token went stale while the tool ran, and a freeze may wait for the call.
+          await storeOauthTokens(
+            controller,
+            connectionId,
+            { accessToken: "stale-token", refreshToken: "refresh-1" },
+            -1000,
+          );
+          const freezing = freezes
+            ? Effect.runPromise(promotion.freeze(tokenId, new Date(Date.now() + 60_000)))
+            : undefined;
+          if (freezing !== undefined) {
+            await eventually(
+              () => Effect.runPromise(promotion.phase),
+              (phase) => phase._tag === "Frozen",
+            );
+          }
+          release();
 
-        const result = await pending;
-        await freezing;
-        await Effect.runPromise(promotion.thaw(tokenId));
+          await pending;
+          await freezing;
+          if (freezes) await Effect.runPromise(promotion.thaw(tokenId));
 
-        expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "error" } });
-        if (result._tag !== "Failure") return;
-        expect(result.failure.message).toContain("may have run");
-        expect(provider.tokenRequests).toHaveLength(0);
-      },
-      { oauth: true, legacy: true },
-    );
-  });
+          expect(
+            requestsOf(fake, "?")
+              .slice(repliesBefore)
+              .map((request) => request.authorization),
+          ).toEqual(["Bearer stale-token"]);
+          expect(provider.tokenRequests).toHaveLength(0);
+        },
+        { oauth: true, legacy: true },
+      );
+    },
+  );
 
   it.each([[401], [404]])(
     "that the server refuses with HTTP %i never sends the tool again, refreshes nothing and changes no status",
@@ -1445,6 +1535,59 @@ describe("what is removed from an answer", () => {
         if (result._tag !== "Success") return;
         expect(requestsOf(fake, "tools/call").at(-1)?.authorization).toBe("Bearer rotated-token");
         expect(textOf(result.success)).toBe("the first attempt carried [removed]");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+});
+
+describe("what is removed from an answer after a session was replaced", () => {
+  const answerWith = (text: string, id: unknown) =>
+    new Response(
+      JSON.stringify({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  it("includes a credential only the handshake of an expired session carried", async () => {
+    await withReadyServer(
+      async ({ controller, connectionId, fake, call }) => {
+        // The handshake of the first session carries the stored token.
+        await call();
+        const expired = requestsOf(fake, "tools/call")[0]?.sessionId;
+        await storeOauthTokens(controller, connectionId, {
+          accessToken: "rotated-token",
+          refreshToken: "refresh-2",
+        });
+        fake.intercept = ({ method, id, sessionId }) =>
+          method !== "tools/call"
+            ? undefined
+            : sessionId === expired
+              ? new Response(null, { status: 404 })
+              : answerWith("the old handshake carried stored-token", id);
+
+        const result = await call();
+
+        expect(result._tag).toBe("Success");
+        if (result._tag !== "Success") return;
+        expect(textOf(result.success)).toBe("the old handshake carried [removed]");
+      },
+      { oauth: true, legacy: true },
+    );
+  });
+
+  it("includes a credential only the failed opening of an upstream session carried", async () => {
+    await withReadyServer(
+      async ({ fake, provider, call }) => {
+        provider.answers.token = refreshedToken;
+        fake.authorize = (authorization) => authorization === "Bearer refreshed-token";
+        fake.intercept = ({ method, id }) =>
+          method === "tools/call" ? answerWith("the opening carried stored-token", id) : undefined;
+
+        const result = await call({ upstreamScope: SCOPE_B });
+
+        expect(result._tag).toBe("Success");
+        if (result._tag !== "Success") return;
+        expect(textOf(result.success)).toBe("the opening carried [removed]");
       },
       { oauth: true, legacy: true },
     );

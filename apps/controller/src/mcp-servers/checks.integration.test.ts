@@ -53,8 +53,10 @@ import {
   refreshedToken,
   requestCheck,
   requestUpdate,
+  readRunningWork,
   runSql,
   startFakeUpstream,
+  storeOauthTokens,
   waitForResult,
   withRig,
   type McpServerRow,
@@ -755,6 +757,71 @@ describe("a result that is out of date", () => {
           "connected",
         );
         expect(await countNotifications(controller, "core.connection-error")).toBe(0);
+      },
+      { oauth: true },
+    );
+  });
+
+  it("never refreshes a stale token for a check that was superseded while it waited for the refresh permit", async () => {
+    await withRig(
+      async ({ controller, provider, connect }) => {
+        const { promotion, mcpServerCalls } = controller.harness;
+        const connectionId = await connect();
+        const server = await createServer(controller, { connectionId });
+        await eventually(
+          () => readRow(controller),
+          (found) => found.status === "ready",
+        );
+        await storeOauthTokens(
+          controller,
+          connectionId,
+          { accessToken: "stored-token", refreshToken: "refresh-1" },
+          -1000,
+        );
+        // A call takes the permit, and its request to the provider waits. It
+        // fails, so the token is still stale when the permit goes on.
+        let letRefreshAnswer: () => void = () => undefined;
+        const refreshAnswers = new Promise<void>((resolve) => {
+          letRefreshAnswer = resolve;
+        });
+        provider.answers.token = async () => {
+          await refreshAnswers;
+          return buildJsonResponse({}, 500);
+        };
+        const holder = Effect.runPromise(
+          Effect.result(
+            mcpServerCalls.callTool({
+              upstreamScope: "scope",
+              serverId: server.id,
+              tool: "echo",
+              arguments: undefined,
+              authorize: Effect.void,
+            }),
+          ),
+        );
+        await eventually(
+          () => Promise.resolve(provider.tokenRequests.length),
+          (count) => count === 1,
+        );
+        const runningBefore = await readRunningWork(promotion);
+        await requestCheck(controller, server.id);
+        await eventually(
+          () => readRunningWork(promotion),
+          (running) => running > runningBefore,
+        );
+        // The check reads the server and its Connection and then waits for the
+        // permit. Nothing shows that it got that far, so give it the time.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await requestUpdate(controller, server.id, { enabled: false });
+        letRefreshAnswer();
+
+        await holder;
+        await eventually(
+          () => readRunningWork(promotion),
+          (running) => running === 0,
+        );
+
+        expect(provider.tokenRequests).toHaveLength(1);
       },
       { oauth: true },
     );

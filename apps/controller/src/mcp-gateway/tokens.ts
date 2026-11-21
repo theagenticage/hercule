@@ -115,28 +115,44 @@ export const makeTokenStates = Effect.gen(function* () {
       { discard: true },
     );
 
+  /**
+   * Removes an MCP session from its token at once, and returns the effect
+   * that closes its streams and stops its running calls. The caller runs that
+   * effect after it has done what must happen in the same step as the removal.
+   * Returns an effect that does nothing for a session the token does not keep.
+   */
+  const removeMcpSession = (state: TokenState, mcpSessionId: string): Effect.Effect<void> => {
+    const session = state.mcpSessions.get(mcpSessionId);
+    if (session === undefined) return Effect.void;
+    state.mcpSessions.delete(mcpSessionId);
+    return Effect.andThen(
+      endStreams(state, mcpSessionId),
+      Effect.forEach([...session.calls.values()], (call) => Fiber.interrupt(call), {
+        discard: true,
+      }),
+    );
+  };
+
   /** Ends one MCP session: its streams close and its running calls stop. */
   const endMcpSession = (state: TokenState, mcpSessionId: string): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const session = state.mcpSessions.get(mcpSessionId);
-      if (session === undefined) return;
-      state.mcpSessions.delete(mcpSessionId);
-      yield* endStreams(state, mcpSessionId);
-      yield* Effect.forEach([...session.calls.values()], (call) => Fiber.interrupt(call), {
-        discard: true,
-      });
-    });
+    Effect.suspend(() => removeMcpSession(state, mcpSessionId));
 
-  /** Opens an MCP session at `revision`. A token that already keeps 16 loses its oldest. */
+  /**
+   * Opens an MCP session at `revision`. A token that already keeps 16 loses its
+   * oldest. The oldest leaves and the new session joins in one synchronous
+   * step, so two `initialize` requests that arrive together never both find
+   * room. The oldest session's streams and calls end after that.
+   */
   const openMcpSession = (state: TokenState, revision: string): Effect.Effect<McpSession> =>
-    Effect.gen(function* () {
-      if (state.mcpSessions.size >= MAX_MCP_SESSIONS_PER_TOKEN) {
-        const [oldest] = state.mcpSessions.keys();
-        if (oldest !== undefined) yield* endMcpSession(state, oldest);
-      }
+    Effect.suspend(() => {
+      const [oldest] = state.mcpSessions.keys();
+      const ending =
+        state.mcpSessions.size >= MAX_MCP_SESSIONS_PER_TOKEN && oldest !== undefined
+          ? removeMcpSession(state, oldest)
+          : Effect.void;
       const session: McpSession = { id: crypto.randomUUID(), revision, calls: new Map() };
       state.mcpSessions.set(session.id, session);
-      return session;
+      return Effect.as(ending, session);
     });
 
   /**

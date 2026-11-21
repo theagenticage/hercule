@@ -20,8 +20,9 @@
  *   request goes out, so a wait for credentials never lets an old check
  *   stand. A request that only continues an exchange that was already sent,
  *   such as the reply to a request of the server, is let through, so that
- *   exchange settles. It reads the credentials stored now, and starts no
- *   refresh of them while the controller is not serving.
+ *   exchange settles. It reads the credentials stored now, and never starts a
+ *   refresh of them: a refresh is a new request to the provider, and no call
+ *   has the right to make one for an exchange that already went out.
  * - The HTTP client creates no trace spans, so no URL or error text reaches a
  *   trace, and no trace headers go to the outside server.
  * - No failure carries the server's answer, its headers, the request or a
@@ -188,10 +189,12 @@ export interface SessionExpired {
  * A call's tool request went out and may have run, and then the exchange
  * failed in a way that must not send the tool again: a 401 or an ended MCP
  * session on the reply to a request of the server, not on the tool's own
- * request.
+ * request. `sessionExpired` tells whether the upstream MCP session is gone, so
+ * the caller stops using it although it does not send the tool again.
  */
 export interface ExchangeBroken {
   readonly _tag: "ExchangeBroken";
+  readonly sessionExpired: boolean;
 }
 
 /** Tells whether the request's body is a JSON-RPC request for `tools/call`. */
@@ -447,11 +450,18 @@ export interface UpstreamTarget {
    * Reads the credentials as they are stored now, for a request that only
    * continues an exchange that already went out (such as the reply to a
    * request of the server) and for the request that ends the upstream
-   * session. It runs no check of a caller, and should start no refresh while
-   * the controller is not serving. Without it, those requests carry what the
-   * client sent last. When it fails, the request is not sent.
+   * session. It runs no check of a caller, and must never start a refresh.
+   * Without it, those requests carry what the client sent last. When it
+   * fails, the request is not sent.
    */
   readonly readCurrentCredentials?: PrepareSend;
+  /**
+   * Collects every credential value, longer than `MIN_SECRET_LENGTH`, that a
+   * request of this session sent. The caller keeps the set, so it still has
+   * the values of a session that failed to open or expired and is replaced.
+   * Without it, the session keeps a set of its own.
+   */
+  readonly sentValues?: Set<string>;
 }
 
 /**
@@ -484,7 +494,7 @@ export const openUpstream = (
     const baseClient = yield* HttpClient.HttpClient;
     const outer = yield* Scope.Scope;
 
-    const sentValues = new Set<string>();
+    const sentValues = target.sentValues ?? new Set<string>();
     // The state of the requests that belong to no call.
     const sessionState: UpstreamCallState = {
       prepareSend: target.prepareSend,
@@ -633,9 +643,10 @@ export const openUpstream = (
      * Sends the DELETE that ends the upstream MCP session. The server ends
      * the session by itself in time, so a DELETE is never worth waiting for a
      * thaw, or sending after one: it is not sent unless the controller is
-     * serving. It carries the credentials stored now, or the ones the client
-     * sent last when the target reads none, and runs no check of a call,
-     * because it happens when a call's token has ended.
+     * serving, which is checked again after the credentials were read, right
+     * before the request goes out. It carries the credentials stored now, or
+     * the ones the client sent last when the target reads none, and runs no
+     * check of a call, because it happens when a call's token has ended.
      */
     const sendSessionEnd = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.flatMap(promotion.phase, (phase) =>
@@ -643,7 +654,12 @@ export const openUpstream = (
           ? promotion
               .whenServing(
                 Effect.flatMap(readCurrentCredentials, (used) =>
-                  sendWith(request, used, sessionState, false),
+                  Effect.andThen(
+                    Effect.mapError(promotion.refuseUnlessServing, (error) =>
+                      buildFailure("not-serving", { message: error.error.message }),
+                    ),
+                    sendWith(request, used, sessionState, false),
+                  ),
                 ),
               )
               .pipe(
@@ -690,7 +706,7 @@ export const openUpstream = (
         // other request of this call, sent after the tool, says nothing.
         return Effect.fail(
           call.toolPostSent && call.toolPostStatus !== 404
-            ? { _tag: "ExchangeBroken" }
+            ? { _tag: "ExchangeBroken", sessionExpired: true }
             : { _tag: "SessionExpired" },
         );
       }
@@ -712,11 +728,11 @@ export const openUpstream = (
       // The tool went out, and then a request that continues its exchange was
       // refused before it was sent, so the call may have run.
       if (call.toolPostSent && call.refusal !== undefined) {
-        return Effect.fail({ _tag: "ExchangeBroken" });
+        return Effect.fail({ _tag: "ExchangeBroken", sessionExpired: false });
       }
       const failure = describeFailure(error, call);
       return failure.reason === "unauthorized" && call.toolPostStatus !== 401
-        ? Effect.fail({ _tag: "ExchangeBroken" })
+        ? Effect.fail({ _tag: "ExchangeBroken", sessionExpired: false })
         : Effect.fail(failure);
     };
 

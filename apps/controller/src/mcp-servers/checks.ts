@@ -31,7 +31,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { McpSchema } from "effect/ai";
 import { absorbFailures } from "../absorbing";
-import { ConnectionTypes, type ConnectionCredentialsForUse } from "../connections";
+import {
+  ConnectionCredentialsUnavailable,
+  ConnectionTypes,
+  type ConnectionCredentialsForUse,
+  type RefreshGuard,
+} from "../connections";
 import { nowIso } from "../db";
 import type { Notifier } from "../notifications";
 import type { PluginHost, RegisteredMcpServer } from "../plugins";
@@ -191,8 +196,11 @@ const make = Effect.gen(function* () {
    * When the server refuses the credentials, they are refreshed and the
    * listing is tried once more (`runWithCredentials`). A refresh changes the
    * Connection, so it starts only if the server, its revision and its
-   * Connection are still as the check found them. Otherwise the outcome is
-   * `discarded`, and the Connection is left alone.
+   * Connection are still as the check found them. That is checked before the
+   * refresh after a rejection, and again under the Connection's refresh
+   * permit, right before every request to the provider, because the check may
+   * wait a long time for the permit. Otherwise the outcome is `discarded`, and
+   * the Connection is left alone.
    */
   const evaluate = (
     server: StoredMcpServer,
@@ -213,16 +221,38 @@ const make = Effect.gen(function* () {
         );
       }
 
+      const checkBasisHolds = Effect.flatMap(
+        state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
+        Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
+      );
+      // The guard can only fail with the Connection's error, so a superseded
+      // check is kept aside here for the code that discards it.
+      let superseded = false;
+      const guardRefresh: RefreshGuard = checkBasisHolds.pipe(
+        Effect.catchTag("CheckSuperseded", () =>
+          Effect.andThen(
+            Effect.sync(() => {
+              superseded = true;
+            }),
+            Effect.fail(
+              new ConnectionCredentialsUnavailable({
+                reason: "refused",
+                message: "The check was superseded",
+              }),
+            ),
+          ),
+        ),
+        Effect.catchTag("SqlError", Effect.die),
+      );
+
       return yield* runWithCredentials({
         connections: connectionTypes,
         connectionId: server.connectionId,
         // The retry after a refresh starts with the revision that worked.
         action: (credentials) =>
           listTools(contribution, credentials, worked, worked.current ?? server.protocolVersion),
-        checkRefreshAllowed: Effect.flatMap(
-          state.readServerWhileBasisHolds(server.id, { revision: server.revision, dependencies }),
-          Option.match({ onNone: () => Effect.fail(CHECK_SUPERSEDED), onSome: () => Effect.void }),
-        ),
+        checkRefreshAllowed: checkBasisHolds,
+        guardRefresh,
       }).pipe(
         Effect.map(({ tools, revision }): CheckResult => {
           const stored = tools.map(toStoredTool);
@@ -237,6 +267,7 @@ const make = Effect.gen(function* () {
             return Effect.succeed(buildFailedResult(status, detail));
           },
           ConnectionCredentialsUnavailable: (error) => {
+            if (superseded) return Effect.succeed<CheckResult>({ _tag: "discarded" });
             const { status, detail, cause } = buildStatusFromUnavailable(
               error,
               connection,

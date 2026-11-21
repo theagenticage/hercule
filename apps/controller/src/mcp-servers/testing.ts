@@ -28,7 +28,9 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as SqlClient from "effect/sql/SqlClient";
 import { McpProtocol, McpSchema, McpServer } from "effect/ai";
@@ -780,3 +782,9 @@ export const buildMcpServerView = ({
     },
   };
 };
+
+/** Returns how many units of admitted work the promotion gate counts as running now. */
+export const readRunningWork = (promotion: ServerHarness["promotion"]) =>
+  Effect.runPromise(
+    Effect.map(Stream.runHead(promotion.gateChanges), (state) => Option.getOrThrow(state).running),
+  );

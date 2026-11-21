@@ -648,6 +648,67 @@ describe("MCP sessions", () => {
     ).toBe(200);
   });
 
+  it("keeps 16 MCP sessions per token when two initialize requests arrive while the oldest one still has a call running", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const opened: Array<string> = [];
+    for (let count = 0; count < 16; count += 1) {
+      opened.push((await initialize(thread.token)).sessionId);
+    }
+    const [oldest, secondOldest, thirdOldest] = opened;
+    // The oldest session has a call that the server holds, which ends only when
+    // the oldest session is retired.
+    await listToolNames(thread.token, oldest!);
+    const release = upstream.hold("tools/call");
+    try {
+      const running = callEcho(thread.token, "alpha__echo", oldest);
+      await eventually(
+        () => Promise.resolve(upstream.requests.some((one) => one.method === "tools/call")),
+        Boolean,
+      );
+
+      // Both go through the gateway in one step, so neither waits for the other.
+      const tokenHash = hashToken(thread.token);
+      const actor = Option.getOrThrow(
+        await Effect.runPromise(
+          Effect.orDie(arranged.harness.sessionTokens.resolveUncached(tokenHash)),
+        ),
+      );
+      const initializeDirectly = () =>
+        arranged.harness.mcpGateway.handle(
+          HttpServerRequest.fromWeb(
+            new Request(`${base()}/mcp`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+              },
+              body: JSON.stringify(
+                request("initialize", {
+                  protocolVersion: "2025-06-18",
+                  capabilities: {},
+                  clientInfo: { name: "test", version: "1" },
+                }),
+              ),
+            }),
+          ),
+          { tokenHash, actor },
+        );
+      const answers = await Effect.runPromise(
+        Effect.all([initializeDirectly(), initializeDirectly()], { concurrency: "unbounded" }),
+      );
+      expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+      await running;
+    } finally {
+      release();
+    }
+
+    const ping = async (sessionId: string | undefined) =>
+      (await sendMcp(thread.token, request("ping"), { "mcp-session-id": sessionId! })).status;
+    expect(await ping(oldest)).toBe(404);
+    expect(await ping(secondOldest)).toBe(404);
+    expect(await ping(thirdOldest)).toBe(200);
+  });
+
   it("ends only the MCP session that DELETE names, never the Thread or its token", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     const first = await initialize(thread.token);

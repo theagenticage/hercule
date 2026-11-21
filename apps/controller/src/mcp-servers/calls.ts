@@ -70,6 +70,7 @@ import {
   openUpstream,
   runWithCredentials,
   UpstreamError,
+  type ExchangeBroken,
   type OpenedUpstream,
   type PrepareSend,
 } from "./upstream";
@@ -134,6 +135,8 @@ interface UpstreamSlot {
   /** Completing it cancels an opening that has not ended. */
   readonly cancelOpening: Deferred.Deferred<void>;
   readonly scope: Scope.Closeable;
+  /** The credential values the session's requests sent, also when it failed to open or expired. */
+  readonly sentValues: Set<string>;
   /** How many calls hold the slot, from before they wait for it to open until they end. */
   users: number;
   /** The session opened. */
@@ -179,36 +182,20 @@ const make = Effect.gen(function* () {
   /**
    * Reads a Connection's credentials as they are stored now, for a request
    * that only continues an exchange that already went out, and for the DELETE
-   * that ends an upstream session. It never starts a refresh while the
-   * controller is not serving, and it runs no check of a caller. Fails with an
-   * `UpstreamError` that has reason `not-serving` for that case, and `refused`
-   * when the credentials cannot be read.
+   * that ends an upstream session. It never refreshes them, because neither
+   * request belongs to a call that may still ask the provider for anything,
+   * and it runs no check of a caller. Fails with an `UpstreamError` that has
+   * reason `refused` when the credentials cannot be read.
    */
   const readCurrentCredentials = (connectionId: string): PrepareSend =>
-    connectionTypes
-      .readCredentialsForUse(
-        connectionId,
-        Effect.mapError(
-          promotion.refuseUnlessServing,
-          (error) =>
-            new ConnectionCredentialsUnavailable({
-              reason: "not-serving",
-              message: error.error.message,
-            }),
-        ),
-      )
-      .pipe(
-        Effect.mapError(
-          (error) =>
-            new UpstreamError({
-              reason: error.reason === "not-serving" ? "not-serving" : "refused",
-              message:
-                error.reason === "not-serving"
-                  ? error.message
-                  : "The Connection's credentials could not be read",
-            }),
-        ),
-      );
+    Effect.mapError(
+      connectionTypes.readCredentialsWithoutRefresh(connectionId),
+      () =>
+        new UpstreamError({
+          reason: "refused",
+          message: "The Connection's credentials could not be read",
+        }),
+    );
 
   // The upstream MCP sessions: Session Token hash, then server id.
   const slots = new Map<string, Map<string, UpstreamSlot>>();
@@ -249,6 +236,7 @@ const make = Effect.gen(function* () {
       firstRevision,
       prepareSend,
       readCurrentCredentials: readCurrentCredentials(slot.connectionId),
+      sentValues: slot.sentValues,
     }).pipe(
       Effect.provideService(Scope.Scope, slot.scope),
       Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -304,6 +292,7 @@ const make = Effect.gen(function* () {
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),
+        sentValues: new Set(),
         users: 1,
         opened: false,
         removed: false,
@@ -629,25 +618,48 @@ const make = Effect.gen(function* () {
                   sentValues,
                 })
                 .pipe(
-                  // Nothing else may use this session; the next call opens a new one.
-                  Effect.tapErrorTag("SessionExpired", () => Effect.sync(() => forgetSlot(slot))),
+                  // Nothing else may use this session, whether or not the tool
+                  // can be sent again; the next call opens a new one.
+                  Effect.tapError((error) =>
+                    error._tag === "SessionExpired" ||
+                    (error._tag === "ExchangeBroken" && error.sessionExpired)
+                      ? Effect.sync(() => forgetSlot(slot))
+                      : Effect.void,
+                  ),
                 ),
             ),
-          releaseSlot,
+          // The values this session sent go on with the call, so an answer of a
+          // session that replaces it is cleaned of them too.
+          (slot) =>
+            Effect.andThen(
+              Effect.sync(() => {
+                for (const value of slot.sentValues) sentValues.add(value);
+              }),
+              releaseSlot(slot),
+            ),
         );
 
+      // A call replaces an upstream session the server expired once, however
+      // many times it sends again after a refresh.
+      let replacedSession = false;
+
       /** Sends the call, and once more on a new session when the server expired the one it used. */
-      const sendReplacingExpiredSession = (credentials: ConnectionCredentialsForUse) =>
+      const sendReplacingExpiredSession = (
+        credentials: ConnectionCredentialsForUse,
+      ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | ExchangeBroken> =>
         attempt(credentials).pipe(
-          Effect.catchTag("SessionExpired", () => attempt(credentials)),
-          Effect.catchTag("SessionExpired", () =>
-            Effect.fail(
-              new UpstreamError({
-                reason: "protocol",
-                message: "The server ended the MCP session",
-              }),
-            ),
-          ),
+          Effect.catchTag("SessionExpired", () => {
+            if (replacedSession) {
+              return Effect.fail(
+                new UpstreamError({
+                  reason: "protocol",
+                  message: "The server ended the MCP session",
+                }),
+              );
+            }
+            replacedSession = true;
+            return sendReplacingExpiredSession(credentials);
+          }),
         );
 
       /** Refuses the call, and writes the status when the failure is about the whole server. */
