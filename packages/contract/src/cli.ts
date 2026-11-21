@@ -122,6 +122,13 @@ export type FieldRow =
        * only way to pass the value.
        */
       readonly required?: true;
+      /**
+       * Marks a value that must stay off every command line, such as a token
+       * or a password. Its help examples and the refusal shown at a terminal
+       * read it from a file (`hercule ... < token.txt`), never `echo <value> |`,
+       * because the shell keeps an echoed value in its history.
+       */
+      readonly secret?: true;
     }
   | {
       /**
@@ -236,6 +243,8 @@ export interface ObjectKeyRow {
    * the read when the key is optional.
    */
   readonly stdin?: true;
+  /** Marks a value that must stay off every command line, as `secret` does on a `stdin` row. */
+  readonly secret?: true;
 }
 
 /**
@@ -351,6 +360,7 @@ export const CLI = {
       username: { flag: "username", help: "The user name to create." },
       password: {
         stdin: true,
+        secret: true,
         flag: "password",
         help: "The password to set; it never reaches the process list or the shell history.",
       },
@@ -419,10 +429,11 @@ export const CLI = {
     fields: {
       current: {
         stdin: true,
+        secret: true,
         flag: "current",
         help: "The current password.",
       },
-      next: { stdin: true, flag: "next", help: "The password to set." },
+      next: { stdin: true, secret: true, flag: "next", help: "The password to set." },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
@@ -614,7 +625,7 @@ export const CLI = {
         positional: true,
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
-      value: { stdin: true, flag: "value", help: "The secret value." },
+      value: { stdin: true, secret: true, flag: "value", help: "The secret value." },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
@@ -4663,6 +4674,7 @@ export const CLI = {
               token: {
                 flag: "token",
                 stdin: true,
+                secret: true,
                 help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
               },
             },
@@ -4753,7 +4765,7 @@ export const CLI = {
   },
   "mcpServer.setToken": {
     command: "mcp-server set-token",
-    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. The server goes back to `checking`. A server that is on lists its tools again with the token; run `hercule mcp-server read` later to see the result. A server that is switched off is checked with the token when you switch it on with `hercule mcp-server update`. The token is read from stdin, so it never shows in your shell history.",
+    help: "Gives a server added by address the token you pasted for it, replacing any sign-in it holds. The server goes back to `checking`. A server that is on lists its tools again with the token; run `hercule mcp-server read` later to see the result. A server that is switched off is checked with the token when you switch it on with `hercule mcp-server update`. The token is read from stdin, so give it from a file (`< token.txt`) or from a password manager: a token typed on the command line stays in your shell history.",
     examples: [{ args: ["1f3a9c2e"], stdin: "the_token_the_server_expects" }],
     fields: {
       id: {
@@ -4763,6 +4775,7 @@ export const CLI = {
       },
       token: {
         stdin: true,
+        secret: true,
         required: true,
         flag: "token",
         help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces.",

@@ -132,6 +132,12 @@ describe("an example", () => {
     const lines = buildCommandHelp(readCommand("skill.import"));
     expect(lines).toContain("  hercule skill import ~/.agents/skills");
   });
+
+  it("reads a secret from a file, never from an echo that the shell keeps in its history", () => {
+    const lines = buildCommandHelp(readCommand("mcpServer.setToken"));
+    expect(lines).toContain("  hercule mcp-server set-token 1f3a9c2e < token.txt");
+    expect(lines.some((line) => line.includes("echo"))).toBe(false);
+  });
 });
 
 describe("a command whose field of several shapes is filled from flags", () => {

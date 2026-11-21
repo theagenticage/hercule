@@ -143,6 +143,9 @@ const quoteShellArg = (text: string): string => {
  * examples, and by the error shown when a command would read stdin from a
  * terminal. The stdin value decides the form:
  *
+ * - a command with a secret stdin field reads it from a file, whatever the
+ *   example's value is, because the shell keeps an echoed value in its
+ *   history. The file is named after the field, such as `token.txt`;
  * - a one-line value is piped in with `echo`;
  * - a value with a newline needs a heredoc. Its body and terminator stay at
  *   the left margin, because a shell takes the body literally and ends it
@@ -155,6 +158,8 @@ export const buildShellExample = (
 ): ReadonlyArray<string> => {
   const invocation = ["hercule", ...command.words, ...args.map(quoteShellArg)].join(" ");
   if (stdin === undefined) return [`  ${invocation}`];
+  const secret = command.payload.find((field) => field.stdin && field.secret);
+  if (secret !== undefined) return [`  ${invocation} < ${secret.name}.txt`];
   if (!stdin.includes("\n")) return [`  echo ${quoteShellArg(stdin)} | ${invocation}`];
   return [`  ${invocation} <<'EOF'`, ...stdin.split("\n"), "EOF"];
 };

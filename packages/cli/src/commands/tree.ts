@@ -97,6 +97,11 @@ export interface Field {
   /** Whether the value is read from stdin; there is no flag that takes it inline. */
   readonly stdin: boolean;
   /**
+   * Whether the value is a secret that must stay off every command line. Set
+   * by the row's `secret` marker.
+   */
+  readonly secret: boolean;
+  /**
    * Whether each value given is the path of an image file, which the CLI
    * uploads before the call and replaces with the returned attachment id.
    */
@@ -431,6 +436,7 @@ const buildField = (
     defaultText: "default" in row ? row.default : undefined,
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
+    secret: "secret" in row && row.secret === true,
     uploads: "upload" in row && row.upload === true,
     standsInForStdin: "standsInForStdin" in row && row.standsInForStdin === true,
     readsSkillFolder,
