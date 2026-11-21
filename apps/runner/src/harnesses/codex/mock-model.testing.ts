@@ -329,6 +329,8 @@ export interface ScriptedModelRequest {
   readonly body: {
     readonly input: ReadonlyArray<Record<string, unknown>>;
     readonly tools: ReadonlyArray<Record<string, unknown>>;
+    /** Set on a request of Codex's automatic reviewer: a JSON output schema with a name. */
+    readonly text?: { readonly format?: { readonly name?: string } };
   };
 }
 
@@ -401,4 +403,66 @@ export const startScriptedModel = (
     ].join("\n"),
     stop: () => server.stop(true),
   };
+};
+
+/**
+ * Returns the tool a user message asks the model to call: the message
+ * `call <tool>` asks for that tool of the MCP Gateway entry. Returns
+ * `undefined` when the last input item is not such a message.
+ */
+const readCalledTool = (input: ReadonlyArray<Record<string, unknown>>): string | undefined => {
+  const last = input.at(-1);
+  if (last?.["role"] !== "user") return undefined;
+  const parts = last["content"] as ReadonlyArray<{ readonly text?: string }>;
+  return parts.flatMap((part) => /^call (\S+)$/.exec(part.text ?? "")?.[1] ?? [])[0];
+};
+
+/**
+ * Runs a scripted model fixture whose model calls an MCP tool when the user
+ * says `call <tool>`, and answers every other request with a short text. The
+ * tool belongs to the MCP Gateway entry, named `tools`, so Codex shows it to
+ * the model in the namespace `mcp__tools`.
+ *
+ * Codex's automatic reviewer asks the model too, with a JSON output schema.
+ * The fixture answers it with `reviewer.outcome`, which a test may change at
+ * any time.
+ */
+export const startMcpCallModel = () => {
+  let calls = 0;
+  const reviewer = { outcome: "allow" as "allow" | "deny" };
+  const model = startScriptedModel((request) => {
+    if (request.body.text?.format?.name === "codex_output_schema") {
+      return [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-review-${request.threadId}`,
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                outcome: reviewer.outcome,
+                risk_level: "low",
+                user_authorization: "high",
+                rationale: "The fixture reviewer decides.",
+              }),
+            },
+          ],
+        },
+      ];
+    }
+    const tool = readCalledTool(request.body.input);
+    return tool === undefined
+      ? undefined
+      : [
+          {
+            type: "function_call",
+            namespace: "mcp__tools",
+            name: tool,
+            call_id: `call-${++calls}`,
+            arguments: "{}",
+          },
+        ];
+  });
+  return { ...model, reviewer };
 };
