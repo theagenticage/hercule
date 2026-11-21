@@ -354,7 +354,10 @@ const make = Effect.gen(function* () {
         .flatMap((byServer) => [...byServer.values()])
         .filter((slot) => changed.has(slot.serverId) || changed.has(slot.connectionId));
       if (touched.length === 0) return;
-      const views = yield* catalogue.readViews(touched.map((slot) => slot.serverId));
+      const views = yield* catalogue.readViews(
+        touched.map((slot) => slot.serverId),
+        "without-tools",
+      );
       for (const slot of touched) {
         const view = views.get(slot.serverId);
         const lost =

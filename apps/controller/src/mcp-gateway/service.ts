@@ -200,7 +200,9 @@ const make = Effect.gen(function* () {
 
   /** Reads the instructions the session gets. They need the served servers but no tool names. */
   const readInstructions = (actor: SessionActor): Effect.Effect<string> =>
-    Effect.map(reads.readServed(actor), (served) => buildServedInstructions(served, actor));
+    Effect.map(reads.readServedAvailability(actor), (served) =>
+      buildServedInstructions(served, actor),
+    );
 
   const initialize = (
     caller: McpCaller,

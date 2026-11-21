@@ -7,7 +7,13 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { SessionActor } from "../actor";
-import { isServable, mcpServerCatalogue, type McpServerView } from "../mcp-servers";
+import {
+  isServable,
+  mcpServerCatalogue,
+  type McpServerAvailabilityView,
+  type McpServerView,
+  type StoredMcpTool,
+} from "../mcp-servers";
 import { SessionTokens } from "../permissions";
 import { sessionRepository } from "../sessions";
 import { holdsMcpUse } from "./served";
@@ -22,11 +28,34 @@ export const makeFreshReads = Effect.gen(function* () {
   const readListedServerIds = (sessionId: string): Effect.Effect<ReadonlyArray<string>> =>
     Effect.orDie(sessions.readMcpServerIds(sessionId));
 
-  /** Reads the servers of the session's list as the catalogue holds them now, served or not. */
+  /**
+   * Reads the servers of the session's list as the catalogue holds them now,
+   * served or not, without their stored tool definitions. For a reader that
+   * only judges whether a server may be used.
+   */
+  const readListedAvailability = (
+    sessionId: string,
+  ): Effect.Effect<ReadonlyArray<McpServerAvailabilityView>> =>
+    Effect.flatMap(readListedServerIds(sessionId), (ids) =>
+      Effect.map(Effect.orDie(catalogue.readViews(ids, "without-tools")), (views) => [
+        ...views.values(),
+      ]),
+    );
+
+  /** Reads the servers of the session's list as the catalogue holds them now, with their tools. */
   const readListedViews = (sessionId: string): Effect.Effect<ReadonlyArray<McpServerView>> =>
     Effect.flatMap(readListedServerIds(sessionId), (ids) =>
       Effect.map(Effect.orDie(catalogue.readViews(ids)), (views) => [...views.values()]),
     );
+
+  /** Keeps the servers `tools/list` shows, and none for a session without `mcp.use`. */
+  const keepServed = <View extends McpServerAvailabilityView>(
+    actor: SessionActor,
+    views: Effect.Effect<ReadonlyArray<View>>,
+  ): Effect.Effect<ReadonlyArray<View>> =>
+    holdsMcpUse(actor)
+      ? Effect.map(views, (listed) => listed.filter(isServable))
+      : Effect.succeed([]);
 
   return {
     /** Resolves a Session Token from the database. Returns none once its session has ended. */
@@ -34,12 +63,23 @@ export const makeFreshReads = Effect.gen(function* () {
       Effect.orDie(tokens.resolveUncached(tokenHash)),
 
     readListedServerIds,
-    readListedViews,
+    readListedAvailability,
 
-    /** Reads the servers the session is served now: none without `mcp.use`. */
+    /** Reads the stored tools of one server now. Returns an empty list for a server that no longer exists. */
+    readServerTools: (serverId: string): Effect.Effect<ReadonlyArray<StoredMcpTool>> =>
+      Effect.map(
+        Effect.orDie(catalogue.readViews([serverId])),
+        (views) => views.get(serverId)?.server.tools ?? [],
+      ),
+
+    /** Reads the servers the session is served now, with their tools: none without `mcp.use`. */
     readServed: (actor: SessionActor): Effect.Effect<ReadonlyArray<McpServerView>> =>
-      holdsMcpUse(actor)
-        ? Effect.map(readListedViews(actor.sessionId), (views) => views.filter(isServable))
-        : Effect.succeed([]),
+      keepServed(actor, readListedViews(actor.sessionId)),
+
+    /** Reads the servers the session is served now, without their tools. */
+    readServedAvailability: (
+      actor: SessionActor,
+    ): Effect.Effect<ReadonlyArray<McpServerAvailabilityView>> =>
+      keepServed(actor, readListedAvailability(actor.sessionId)),
   };
 });

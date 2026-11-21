@@ -16,6 +16,7 @@ export {
   isServable,
   mcpServerCatalogue,
   type CallRefusal,
+  type McpServerAvailabilityView,
   type McpServerView,
 } from "./catalogue";
 export { McpServerChecks, McpServerChecksLayer } from "./checks";

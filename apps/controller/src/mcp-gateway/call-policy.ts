@@ -102,7 +102,7 @@ export const makeCallPolicy = Effect.gen(function* () {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
-      const views = yield* reads.readListedViews(actor.sessionId);
+      const views = yield* reads.readListedAvailability(actor.sessionId);
       const view = views.find(({ server }) => server.name === meaning.serverName);
       if (view === undefined) {
         return {
@@ -126,7 +126,9 @@ export const makeCallPolicy = Effect.gen(function* () {
           },
         };
       }
-      if (!server.tools.some((tool) => tool.name === meaning.tool)) {
+      // Only the server being called has its stored tools read.
+      const tools = yield* reads.readServerTools(server.id);
+      if (!tools.some((tool) => tool.name === meaning.tool)) {
         return { _tag: "refused", refusal: buildToolGoneRefusal(server, meaning.tool) };
       }
       return { _tag: "call", serverId: server.id, serverName: server.name, tool: meaning.tool };

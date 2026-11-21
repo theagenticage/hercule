@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import type { SessionActor } from "../actor";
-import type { McpServerView, StoredMcpTool } from "../mcp-servers";
+import type { McpServerAvailabilityView, McpServerView, StoredMcpTool } from "../mcp-servers";
 import { buildInstructions } from "./instructions";
 import type { NameLedger, ToolKey } from "./tool-names";
 
@@ -30,7 +30,7 @@ export const holdsMcpUse = (actor: SessionActor): boolean =>
  * servers, or say why there are none. Needs no tool names.
  */
 export const buildServedInstructions = (
-  served: ReadonlyArray<McpServerView>,
+  served: ReadonlyArray<McpServerAvailabilityView>,
   actor: SessionActor,
 ): string =>
   buildInstructions(
