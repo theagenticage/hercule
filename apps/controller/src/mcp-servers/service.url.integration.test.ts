@@ -14,8 +14,8 @@
  *   session opened with the old sign-in, and is refused for a plugin server;
  * - a delete removes the sign-in secrets, and the token is in no answer, no
  *   audit entry, no Notification and no row of the database;
- * - a URL server that needs sign-in raises one Notification per episode,
- *   also on its first check.
+ * - a URL server that needs sign-in raises no Notification before it has
+ *   worked, and one per episode after that.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -657,14 +657,28 @@ describe("a server added by its address that needs sign-in", () => {
         SELECT title, body FROM notifications WHERE kind = 'core.mcp-server-failed'`,
     );
 
-  it("raises one Notification per episode, on its first check too", async () => {
+  it("raises none while it has never worked, and one per episode after that", async () => {
     await withUrlRig(async ({ controller, fake }) => {
       fake.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
       const created = await readRecord(
         await createByAddress(controller, { url: fake.url, name: "remote" }),
       );
-      await waitForStatus(controller, "needs-sign-in");
 
+      // Added with no token, the first check gets a 401: whoever adds the
+      // server sees that, so it raises no Notification, and a wrong token
+      // is another refusal of a server that never worked.
+      await waitForStatus(controller, "needs-sign-in");
+      expect(await countNotifications(controller)).toBe(0);
+      await sendToken(controller, created.id, "wrong-token");
+      await waitForStatus(controller, "needs-sign-in");
+      expect(await countNotifications(controller)).toBe(0);
+
+      // Once it has worked, its next refusal opens an episode.
+      await sendToken(controller, created.id, TOKEN);
+      await waitForStatus(controller, "ready");
+      fake.authorize = () => false;
+      await post(controller.base, `/api/v1/mcp-servers/${created.id}/check`, {}, controller.token);
+      await waitForStatus(controller, "needs-sign-in");
       expect(await countNotifications(controller)).toBe(1);
       expect((await readNotificationBodies(controller))[0]?.title).toBe(
         "MCP server remote needs a sign-in",
@@ -676,6 +690,7 @@ describe("a server added by its address that needs sign-in", () => {
       expect(await countNotifications(controller)).toBe(1);
 
       // Recovering ends the episode, and the next refusal opens a new one.
+      fake.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
       await sendToken(controller, created.id, TOKEN);
       await waitForStatus(controller, "ready");
       fake.authorize = () => false;

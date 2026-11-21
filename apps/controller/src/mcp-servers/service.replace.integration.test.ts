@@ -249,8 +249,13 @@ describe("a Replace of a server whose Notification is open", () => {
   it("raises no second Notification while the server fails, and a new one after it was ready", async () => {
     await withRig(async ({ controller, fake, connect }) => {
       const connectionId = await connect();
-      fake.authorize = () => false;
       const id = await insertUrlServerAt(controller, fake.url);
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "ready",
+      );
+      fake.authorize = () => false;
       expect((await requestCheck(controller, id)).status).toBe(200);
       await eventually(
         () => readRow(controller),
@@ -283,6 +288,44 @@ describe("a Replace of a server whose Notification is open", () => {
         (row) => row.status === "unreachable",
       );
       expect(await countNotifications(controller)).toBe(2);
+    });
+  });
+});
+
+describe("a Replace of a server that never worked", () => {
+  it("raises no Notification until the server has worked", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const connectionId = await connect();
+      fake.authorize = () => false;
+      const id = await insertUrlServerAt(controller, fake.url);
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "needs-sign-in",
+      );
+
+      fake.authorize = () => true;
+      fake.refuseWithStatus = 503;
+      await readRecord(await requestUpdate(controller, id, replaceSource(connectionId)));
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "unreachable",
+      );
+      expect(await countNotifications(controller)).toBe(0);
+
+      fake.refuseWithStatus = undefined;
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "ready",
+      );
+      fake.refuseWithStatus = 503;
+      expect((await requestCheck(controller, id)).status).toBe(200);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.status === "unreachable",
+      );
+      expect(await countNotifications(controller)).toBe(1);
     });
   });
 });

@@ -24,7 +24,7 @@
  *   while the check ran, whatever the order of the writes, and a dropped check
  *   of a server that can still be served makes the scheduler check it again;
  * - a check that was superseded never refreshes the Connection;
- * - one Notification per episode of trouble;
+ * - one Notification per episode of trouble, and none before the server has worked;
  * - the scheduler checks the servers that are due, and nothing leaves the
  *   controller while it is frozen;
  * - a request that comes during a check makes it run once more.
@@ -195,9 +195,10 @@ describe("checking a server", () => {
           status: "error",
           status_detail: "The server speaks no MCP revision that Hercule can use",
           status_cause: null,
-          notified_status: "error",
+          notified_status: null,
         });
-        expect(await countNotifications(controller)).toBe(1);
+        // The server never worked, so its failure is for whoever adds it to see.
+        expect(await countNotifications(controller)).toBe(0);
       },
       { fake: { protocols: [McpProtocol.v2024_11_05] } },
     );
@@ -474,8 +475,8 @@ describe("a server that cannot be reached", () => {
         expect(row.checked_at).toBeNull();
         // A repeat failure changes nothing the record shows.
         expect(row.updated_at).toBe(shownAt);
-        // One Notification for the whole episode.
-        expect(await countNotifications(controller)).toBe(1);
+        // The server never worked, so none of its failures raises a Notification.
+        expect(await countNotifications(controller)).toBe(0);
       },
       { checkInterval: 20 },
     );
@@ -654,7 +655,8 @@ describe("a result that is out of date", () => {
         tools: "[]",
         checked_at: null,
       });
-      expect(await countNotifications(controller)).toBe(1);
+      // The server never worked, so this failure raises none.
+      expect(await countNotifications(controller)).toBe(0);
     });
   });
 
@@ -885,36 +887,82 @@ describe("a result that is out of date", () => {
 });
 
 describe("the Notification of an episode", () => {
+  /**
+   * Checks the server now and waits until the check ends. Check now marks the
+   * next check as due, and the check that ends plans the next one a day later:
+   * that is how the end of a check shows.
+   */
+  const check = async (controller: SetUpController, id: string): Promise<McpServerRow> => {
+    await requestCheck(controller, id);
+    return eventually(
+      () => readRow(controller),
+      (next) => Date.parse(next.next_check_at!) - Date.now() > 12 * 60 * MINUTE,
+    );
+  };
+
   it("is raised once while the trouble lasts, and again after the server was ready in between", async () => {
     await withRig(async ({ controller, fake, connect }) => {
-      fake.authorize = () => false;
+      // The server works first: only trouble after that is raised.
       const server = await createServer(controller, { connectionId: await connect() });
       let row = await waitForResult(controller);
+      expect(row.status).toBe("ready");
+
+      fake.authorize = () => false;
+      row = await check(controller, server.id);
       expect(row.status).toBe("error");
       expect(await countNotifications(controller)).toBe(1);
 
-      // Check now marks the next check as due, and the check that ends plans
-      // the next one a day later: that is how the end of a check shows.
-      const check = async (): Promise<McpServerRow> => {
-        await requestCheck(controller, server.id);
-        return eventually(
-          () => readRow(controller),
-          (next) => Date.parse(next.next_check_at!) - Date.now() > 12 * 60 * MINUTE,
-        );
-      };
-
-      row = await check();
+      row = await check(controller, server.id);
       expect(row.status).toBe("error");
       expect(await countNotifications(controller)).toBe(1);
 
       fake.authorize = () => true;
-      row = await check();
+      row = await check(controller, server.id);
       expect(row).toMatchObject({ status: "ready", notified_status: null });
 
       fake.authorize = () => false;
-      row = await check();
+      row = await check(controller, server.id);
       expect(row.status).toBe("error");
       expect(await countNotifications(controller)).toBe(2);
+    });
+  });
+
+  it("is not raised for a server that never worked, and is for its first failure after it did", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      fake.authorize = () => false;
+      const server = await createServer(controller, { connectionId: await connect() });
+      let row = await waitForResult(controller);
+      expect(row).toMatchObject({ status: "error", notified_status: null });
+
+      row = await check(controller, server.id);
+      expect(row).toMatchObject({ status: "error", notified_status: null });
+      expect(await countNotifications(controller)).toBe(0);
+
+      fake.authorize = () => true;
+      row = await check(controller, server.id);
+      expect(row.status).toBe("ready");
+
+      fake.authorize = () => false;
+      row = await check(controller, server.id);
+      expect(row).toMatchObject({ status: "error", notified_status: "error" });
+      expect(await countNotifications(controller)).toBe(1);
+    });
+  });
+
+  it("is raised for a plugin server that worked and then cannot be reached, and not before", async () => {
+    await withRig(async ({ controller, fake, connect }) => {
+      const server = await createServer(controller, { connectionId: await connect() });
+      expect((await waitForResult(controller)).status).toBe("ready");
+      await fake.stop();
+
+      await requestCheck(controller, server.id);
+      const row = await eventually(
+        () => readRow(controller),
+        (next) => next.status === "unreachable",
+      );
+
+      expect(row.notified_status).toBe("unreachable");
+      expect(await countNotifications(controller)).toBe(1);
     });
   });
 });

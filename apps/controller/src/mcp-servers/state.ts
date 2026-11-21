@@ -148,8 +148,10 @@ const make = Effect.gen(function* () {
    * Notification episode (`notified_status`) in the same transaction:
    *
    * - entering a status that `raisesNotification` for this kind of server,
-   *   with no episode open, raises one `core.mcp-server-failed` Notification
-   *   and opens the episode;
+   *   with no episode open, on a server that has been `ready` at least once
+   *   (`checkedAt` is set), raises one `core.mcp-server-failed` Notification
+   *   and opens the episode. A server that has never worked raises none: see
+   *   the comment in the body;
    * - going to `ready` ends the episode;
    * - every other status leaves it as it is, so one episode raises one
    *   Notification however its status moves between the statuses that raise.
@@ -174,7 +176,15 @@ const make = Effect.gen(function* () {
       } else if (
         status !== undefined &&
         raisesNotification(current.source.kind, status) &&
-        current.notifiedStatus === null
+        current.notifiedStatus === null &&
+        // A Notification is for trouble the user would not have seen
+        // otherwise. A server that has never worked is still being set up: the
+        // person adding it (the Add dialog, `hercule mcp-servers read`) sees
+        // its failed first checks for themselves. `checkedAt` is set by the
+        // first successful check only, so the first failure after the server
+        // has worked is the first one that can raise a Notification. Nothing
+        // is stored for the failures before it, so no episode is open then.
+        current.checkedAt !== null
       ) {
         notifiedStatus = status;
         yield* notifier.createCoreNotification({
