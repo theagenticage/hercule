@@ -4739,6 +4739,10 @@ describe("the MCP servers a Codex session is given", () => {
         expect.objectContaining({
           config: {
             "mcp_servers.tools.url": GATEWAY.url,
+            // A trusted project's config is merged into this table, so the
+            // keys that could switch the gateway off are set explicitly.
+            "mcp_servers.tools.enabled": true,
+            "mcp_servers.tools.disabled_tools": [],
             "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
             "mcp_servers.tools.default_tools_approval_mode": "prompt",
             "features.mcp_tool_list_changed": true,

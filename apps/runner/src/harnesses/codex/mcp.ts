@@ -64,6 +64,13 @@ export const buildNoToolListChangedWarning = (version: string | null): string =>
  *   session's token, never the token: Codex reads the variable itself when it
  *   connects and sends the token as a bearer token.
  * - Each server gets the approval mode of the session's Access Mode.
+ * - Each server is also set `enabled = true` and `disabled_tools = []`. A
+ *   trusted workspace's `.codex/config.toml` is merged into the same table, so
+ *   a project that defines a server of this name with `enabled = false` or a
+ *   list of disabled tools would silently switch the gateway off. These two
+ *   keys undo that. They cannot undo a project's `enabled_tools`, or a per-tool
+ *   `approval_mode` under `[mcp_servers.<name>.tools.<tool>]`: Codex has no way
+ *   to clear those for tool names that are not known in advance.
  * - The tool list feature is set only when the running Codex has it.
  *
  * Exported so the real-binary test starts Codex with exactly this config.
@@ -79,6 +86,8 @@ export const buildMcpServerConfig = (
         ...Object.fromEntries(
           servers.flatMap((server) => [
             [`mcp_servers.${server.name}.url`, server.url],
+            [`mcp_servers.${server.name}.enabled`, true],
+            [`mcp_servers.${server.name}.disabled_tools`, []],
             [`mcp_servers.${server.name}.bearer_token_env_var`, SESSION_TOKEN_VARIABLE],
             [`mcp_servers.${server.name}.default_tools_approval_mode`, approvalMode],
           ]),
