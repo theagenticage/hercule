@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { NotificationFrame } from "./rpc";
 import { removeMediaBytes } from "./tool-result-media";
 
-const IMAGE = Buffer.from("not really a picture, but long enough").toString("base64");
-const AUDIO = Buffer.from("not really a sound, but long enough").toString("base64");
-const BLOB = Buffer.from("not really a document, but long enough").toString("base64");
+const IMAGE = Buffer.from(
+  "not really a picture, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
+const AUDIO = Buffer.from(
+  "not really a sound, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
+const BLOB = Buffer.from(
+  "not really a document, but long enough to count as bytes, ".repeat(3),
+).toString("base64");
 
 const NOT_KEPT = "[bytes not kept]";
 
@@ -126,8 +132,34 @@ describe("removing the media bytes of a notification frame", () => {
       expect(JSON.stringify(frame)).not.toContain(IMAGE);
     });
 
+    it.each([
+      ["a short word", "Completed"],
+      ["text that is long but not base64", "Snapshot of the issue, taken just now by the tool"],
+      ["base64 shorter than any real payload", "aGVsbG8gd29ybGQ="],
+    ])("does not scrub a text that a server reuses as an image's data: %s", (_name, text) => {
+      const frame = buildFrame({
+        content: [
+          { type: "text", text },
+          { type: "image", data: text, mimeType: "image/png" },
+        ],
+        structuredContent: { summary: text },
+        _meta: null,
+      });
+
+      removeMediaBytes(frame);
+
+      expect(readResults(frame)).toMatchObject([
+        {
+          content: [{ type: "text", text }, { type: "image" }],
+          structuredContent: { summary: text },
+        },
+      ]);
+    });
+
     it("numbers a key that collides with another after the rewrite, so no field is lost", () => {
-      const other = Buffer.from("another picture, long enough too").toString("base64");
+      const other = Buffer.from(
+        "another picture, long enough too, to count as bytes".repeat(3),
+      ).toString("base64");
       const frame = buildFrame({
         content: [
           { type: "image", data: IMAGE, mimeType: "image/png" },

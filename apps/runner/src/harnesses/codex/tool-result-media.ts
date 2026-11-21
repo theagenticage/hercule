@@ -71,6 +71,27 @@ const scrubMediaCopies = (value: unknown, copies: ReadonlyArray<string>): unknow
   return value;
 };
 
+/**
+ * The shortest value whose copies are scrubbed. A real image, sound or file is
+ * hundreds of characters of base64 at least (the smallest PNG is about 90),
+ * while a short value, such as a word a server also sends as text, is more
+ * likely text than bytes. 64 characters sits below every real payload and
+ * above any ordinary word.
+ */
+const MIN_SCRUBBED_LENGTH = 64;
+
+/** Base64 as MCP carries it: the standard alphabet, with optional `=` padding. */
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * Checks that `value` is worth scrubbing wherever it is copied: it looks like
+ * base64 and is at least `MIN_SCRUBBED_LENGTH` long. A server controls the
+ * `data` of its blocks, so without this check it could repeat a piece of its
+ * own text as an image's `data` and make the scrub erase that text elsewhere.
+ */
+const looksLikeMediaBytes = (value: string): boolean =>
+  value.length >= MIN_SCRUBBED_LENGTH && BASE64_PATTERN.test(value);
+
 /** The parts of an MCP content block that can hold base64. */
 interface MediaBlock {
   readonly type?: unknown;
@@ -91,7 +112,9 @@ interface MediaBlock {
  *   The base64 of an audio block's `data` and of an embedded resource's `blob`
  *   is replaced by a placeholder, and its `mimeType` and `uri` stay. Every
  *   other copy of that base64 in the result, such as one in
- *   `structuredContent` or `_meta`, is replaced too. Text blocks stay.
+ *   `structuredContent` or `_meta`, is replaced too. Text blocks stay. Only a
+ *   value that looks like base64 and is long enough counts as bytes (see
+ *   `looksLikeMediaBytes`), so a short text is never erased.
  *
  * A result too deeply nested to walk is dropped whole, so no bytes stay.
  */
@@ -105,13 +128,15 @@ export const removeMediaBytes = (frame: NotificationFrame): void => {
     for (const [index, block] of content.entries()) {
       const media = block as MediaBlock | null;
       if (media?.type === "image") {
-        if (typeof media.data === "string" && media.data !== "") copies.add(media.data);
+        if (typeof media.data === "string" && looksLikeMediaBytes(media.data)) {
+          copies.add(media.data);
+        }
         content[index] = { type: "image", unavailable: IMAGE_NOT_KEPT };
       } else if (media?.type === "audio" && typeof media.data === "string") {
-        if (media.data !== "") copies.add(media.data);
+        if (looksLikeMediaBytes(media.data)) copies.add(media.data);
         media.data = BYTES_NOT_KEPT;
       } else if (media?.type === "resource" && typeof media.resource?.blob === "string") {
-        if (media.resource.blob !== "") copies.add(media.resource.blob);
+        if (looksLikeMediaBytes(media.resource.blob)) copies.add(media.resource.blob);
         media.resource.blob = BYTES_NOT_KEPT;
       }
     }
