@@ -41,7 +41,7 @@
  * developer's machine only.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { MCP_GATEWAY_ENTRY_NAME, type SessionSpec } from "@hercule/protocol";
 import { findPiTestBinary } from "../../../runner/src/harnesses/pi/pi-binary.testing";
 import {
   buildMcpCallScript,
@@ -51,7 +51,7 @@ import {
   startRealPiSession,
   type RealPiSession,
 } from "../../../runner/src/harnesses/pi/real-pi-session.testing";
-import { cleanupHomes } from "../../../runner/src/harnesses/pi/testing";
+import { cleanupHomes, filterByTag } from "../../../runner/src/harnesses/pi/testing";
 import {
   readRequestMessageText,
   startScriptedModelServer,
@@ -207,14 +207,17 @@ const withGateway = async (
   }
 };
 
-/** Starts a pi session on the gateway of `gateway`, in full-access so that no call waits for an approval. */
-const startPiOnGateway = (gateway: Gateway): Promise<RealPiSession> =>
+/** Starts a pi session on the gateway of `gateway`. In full-access, the default, no call waits for an approval. */
+const startPiOnGateway = (
+  gateway: Gateway,
+  accessMode: SessionSpec["accessMode"] = "full-access",
+): Promise<RealPiSession> =>
   startRealPiSession({
     binary: piBinary!,
     mcpUrl: `${gateway.gatewayUrl}/mcp`,
     sessionToken: gateway.sessionToken,
     model: gateway.model,
-    accessMode: "full-access",
+    accessMode,
   });
 
 /**
@@ -229,11 +232,12 @@ const withPiOnGateway = (
     readonly listed: boolean;
     readonly tools?: ReadonlyArray<FakeTool>;
     readonly script?: FakeModelScript;
+    readonly accessMode?: SessionSpec["accessMode"];
   },
   body: (gateway: Gateway, running: RealPiSession) => Promise<void>,
 ): Promise<void> =>
   withGateway(options, async (gateway) => {
-    const running = await startPiOnGateway(gateway);
+    const running = await startPiOnGateway(gateway, options.accessMode);
     try {
       expect(
         await waitWithin(STEP_MS, () => requestsOf(gateway.proxy.seen, "tools/list").length > 0),
@@ -435,6 +439,66 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
                 .map((one) => one.tool),
               name,
             ).toEqual([tool]);
+          }
+        },
+      );
+    },
+    TEST_MS,
+  );
+
+  it(
+    "asks about a call on the call's own item, and shows the gateway's name for the call once it has run",
+    async () => {
+      const owners: ReadonlyArray<readonly [string, string]> = [
+        [`${SERVER_NAME}__search_pages`, "search_pages"],
+        [`${SERVER_NAME}__search-pages`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
+      ];
+      await withPiOnGateway(
+        {
+          listed: true,
+          accessMode: "approval-required",
+          script: buildCallByDescriptionScript(),
+          tools: owners.map(([name, tool]) => ({
+            name: tool,
+            description: `Searches the pages [${name}]`,
+          })),
+        },
+        async (rig, running) => {
+          for (const [name] of owners) {
+            const asked = running.listOpened().length;
+            await running.sendInput(`call ${name}`);
+            await running.waitReporting(
+              `the call of ${name} was asked about`,
+              () => running.listOpened().length > asked,
+            );
+            const opened = running.listOpened().at(-1)!;
+            const started = filterByTag(running.seen, "item.started").at(-1)!;
+            // The card is on the item of the call it asks about. It names the tool as pi does:
+            // pi gives no other name before the call has run, and tells the tools apart by a suffix of its own.
+            expect(opened.request.itemId).toBe(started.itemId);
+            expect(opened.request.detail).toEqual({
+              toolName: `mcp__${MCP_GATEWAY_ENTRY_NAME}__${SERVER_NAME}__${(started.detail as { name: string }).name}`,
+            });
+            expect(readDeclaredGatewayTools(rig.model)).toContain(
+              (opened.request.detail as { toolName: string }).toolName,
+            );
+
+            await running.answer(opened, "allow");
+
+            // The result of the call carries the gateway's own name, and the item shows it.
+            expect(
+              filterByTag(running.seen, "item.completed").find(
+                (event) => event.itemId === started.itemId,
+              ),
+            ).toMatchObject({
+              status: "completed",
+              detail: {
+                name: name.slice(SERVER_NAME.length + 2),
+                server: SERVER_NAME,
+                kind: "mcp",
+              },
+            });
           }
         },
       );
