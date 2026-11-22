@@ -108,22 +108,23 @@ const QualifiedContributionId = Schema.String.check(
 );
 
 /**
- * The token a user pastes for an MCP server added by address: an RFC 6750
- * bearer token, which is letters, digits and `-._~+/`, optionally ending in
- * `=`, at least 8 characters long.
+ * A token an MCP server added by address is reached with: one a user pastes,
+ * or the access token of an OAuth sign-in. It is at least 8 printable ASCII
+ * characters with no space, and not a part of `[removed]`.
  *
  * The limits are not only manners. Hercule replaces a secret it finds in what
- * a server sends with `[removed]`, and a token of 7 characters or fewer could
- * be a part of that marker, so the marker would be taken for the secret. A
- * token with spaces could be trimmed by `fetch` in the `Authorization` header
- * while Hercule looks for the untrimmed text, so the secret would not be
- * found.
+ * a server sends with `[removed]`, so a token that is a part of that marker
+ * would make the marker look like the secret. A token with spaces could be
+ * trimmed by `fetch` in the `Authorization` header while Hercule looks for the
+ * untrimmed text, so the secret would not be found. RFC 6750's stricter
+ * `b64token` is not required: real servers issue tokens outside it (Notion's
+ * hold `:`), and any printable character goes in a header as it is.
  */
 export const McpServerToken = Schema.String.check(
   Schema.makeFilter((token) =>
-    /^[A-Za-z0-9\-._~+/]+=*$/.test(token) && token.length >= 8
+    /^[\x21-\x7E]+$/.test(token) && token.length >= 8 && !"[removed]".includes(token)
       ? undefined
-      : "A token is at least 8 characters of letters, digits and - . _ ~ + /, optionally ending in =. Paste the token alone, without `Bearer ` in front of it and without spaces.",
+      : "A token is at least 8 printable characters with no spaces. Paste the token alone, without `Bearer ` in front of it.",
   ),
 );
 

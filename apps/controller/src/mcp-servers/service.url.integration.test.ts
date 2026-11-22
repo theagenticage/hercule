@@ -571,11 +571,23 @@ describe("a pasted token", () => {
     ["with Bearer in front", "Bearer abc12345"],
     ["with a space inside", "abc 12345678"],
     ["with a newline at the end", "abc12345678\n"],
-    ["with a character a bearer token has not", "abc12345\u00e9"],
+    ["with a character outside printable ASCII", "abc12345\u00e9"],
     ["of 7 characters, which could be a part of the marker that replaces a secret", "removed"],
-    ["with = before its end", "abc=12345"],
+    ["a part of the marker that replaces a secret", "[removed"],
     ["that is empty", ""],
   ];
+
+  it("accepts a token with characters outside RFC 6750's b64token, as Notion's access tokens have", async () => {
+    await withUrlRig(async ({ controller, fake }) => {
+      const created = await readRecord(
+        await createByAddress(controller, { url: fake.url, name: "remote" }),
+      );
+      const updated = await readRecord(
+        await sendToken(controller, created.id, "6f1c2a9e-1b2c:ab12cd34:EF56_gh78"),
+      );
+      expect(updated.source).toMatchObject({ kind: "url", signIn: "token" });
+    });
+  });
 
   it.each(refusedTokens)(
     "is refused as validation when it is %s, without repeating it",
@@ -598,7 +610,7 @@ describe("a pasted token", () => {
           expect(refusal.code).toBe("validation");
           expect(refusal.details).toMatchObject({ issues: [{ path }] });
           const shown = JSON.stringify(refusal);
-          expect(shown).toContain("without `Bearer ` in front of it and without spaces");
+          expect(shown).toContain("without `Bearer ` in front of it");
           // A token that is not valid is never repeated, so nothing that holds
           // a secret by mistake echoes it back.
           if (token !== "") expect(shown).not.toContain(token);
