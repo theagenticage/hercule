@@ -171,6 +171,7 @@ export { appendPromptContext, splitPromptContext } from "./prompt-context";
 
 export {
   parseCallbackQuery,
+  readApprovalHost,
   readAuthorizationState,
   type ParsedCallback,
   type RefusedCallback,

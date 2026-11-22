@@ -522,6 +522,20 @@ describe("registerClient", () => {
     ).not.toHaveProperty("secretExpiresAtMillis");
   });
 
+  it("reads a secret expiry more than ten years away, or too large to convert, as no expiry", async () => {
+    const answer = {
+      client_id: "c1",
+      client_secret: "s",
+      token_endpoint_auth_method: "client_secret_post",
+    };
+    for (const farAway of [4_000_000_000, 1e306]) {
+      const outcome = (await register({ ...answer, client_secret_expires_at: farAway })) as {
+        success: object;
+      };
+      expect(outcome.success).not.toHaveProperty("secretExpiresAtMillis");
+    }
+  });
+
   it("accepts redirect addresses that include the registered one", async () => {
     expect(
       await register({

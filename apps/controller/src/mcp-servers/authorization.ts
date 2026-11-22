@@ -26,6 +26,7 @@
  * not be reached or answered what OAuth does not allow, so the user tries
  * again later.
  */
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -42,6 +43,9 @@ const MAX_METADATA_BYTES = 1024 * 1024;
 
 /** How long one request has to be answered, body included. */
 const REQUEST_TIMEOUT_SECONDS = 30;
+
+/** The furthest expiry of a client secret that is kept: ten years. A later one is read as no expiry. */
+const MAX_SECRET_LIFETIME_MILLIS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 /** The MCP revision the unauthenticated probe says it speaks. */
 const PROBE_PROTOCOL_VERSION = "2025-11-25";
@@ -110,10 +114,10 @@ export interface DiscoveredAuthorization extends AuthorizationServer {
   readonly scope: string | undefined;
 }
 
-/** A client registered with an authorization server. `authMethod` says how it signs its token requests. */
+/** A client registered with an authorization server. `authMethod` is how it signs its token requests. */
 export interface RegisteredClient extends OAuthClient {
   readonly authMethod: ClientAuthMethod;
-  /** When the client's secret stops working, as the registration said (RFC 7591), or `undefined` when it never does. */
+  /** When the client's secret stops working, as the registration answer states (RFC 7591), or `undefined` when it never does. */
   readonly secretExpiresAtMillis?: number;
 }
 
@@ -459,7 +463,8 @@ const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
  * (a sign-in would then be refused at the browser), when it gives a client
  * authentication method Hercule does not speak, or when it gives a method that
  * needs a secret and no secret. A secret's `client_secret_expires_at` is kept
- * as `secretExpiresAtMillis`.
+ * as `secretExpiresAtMillis`, unless it is 0 or more than ten years away,
+ * which both mean the secret never expires.
  *
  * A client that got a secret signs its token requests with the method the
  * answer names. When the answer names none, the method is
@@ -504,12 +509,18 @@ const readRegisteredClient = (
       return yield* failUnreadable("the client registration answer has no client secret");
     }
     // The time is in seconds since the epoch, and 0 means it never expires.
-    const expiresAt = answer.client_secret_expires_at ?? 0;
+    // A time more than ten years away is read as never expiring too: a huge
+    // one would become infinite in milliseconds, which JSON stores as `null`
+    // and the stored sign-in then fails to read.
+    const expiresAtMillis = (answer.client_secret_expires_at ?? 0) * 1000;
+    const nowMillis = yield* Clock.currentTimeMillis;
     return {
       clientId,
       clientSecret,
       authMethod,
-      ...(expiresAt > 0 ? { secretExpiresAtMillis: expiresAt * 1000 } : {}),
+      ...(expiresAtMillis > 0 && expiresAtMillis <= nowMillis + MAX_SECRET_LIFETIME_MILLIS
+        ? { secretExpiresAtMillis: expiresAtMillis }
+        : {}),
     };
   });
 
@@ -718,8 +729,8 @@ const probeServer = (
  * - `AuthorizationUnsupported` when the server publishes no protected
  *   resource metadata at all, or its authorization server does not offer PKCE
  *   with S256;
- * - `AuthorizationUnreadable` for everything else that goes wrong, as the
- *   rules at the top of this file say.
+ * - `AuthorizationUnreadable` for everything else that goes wrong, by the
+ *   rules at the top of this file.
  */
 export const discoverAuthorization = (
   serverUrl: string,

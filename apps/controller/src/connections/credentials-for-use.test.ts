@@ -291,6 +291,34 @@ describe("the credentials the core reads to call an outside server", () => {
     expect(refreshRequests()).toHaveLength(1);
   });
 
+  it("keeps the old refresh token when a refresh answers with a null one, and reads an expires_in sent as text", async () => {
+    await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        provider.answers.token = () =>
+          buildJsonResponse({
+            access_token: "refreshed-token",
+            refresh_token: null,
+            token_type: "bearer",
+            expires_in: "3600",
+          });
+        const first = yield* readForUse(id);
+        expect(first.credentials).toEqual({ accessToken: "refreshed-token" });
+        // Had the text lifetime been read as no lifetime, the token would never go stale.
+        yield* TestClock.adjust(55 * MINUTE);
+        provider.answers.token = () =>
+          buildJsonResponse({ access_token: "second-token", token_type: "bearer" });
+        const second = yield* readForUse(id);
+        expect(second.credentials).toEqual({ accessToken: "second-token" });
+      }),
+    );
+
+    expect(refreshRequests().map((form) => form["refresh_token"])).toEqual([
+      "refresh-1",
+      "refresh-1",
+    ]);
+  });
+
   it("does not refresh a token that lives 5 minutes while it is new, and refreshes it once half its lifetime has passed", async () => {
     const shortLived: TokenSet = {
       ...FRESH_TOKENS,

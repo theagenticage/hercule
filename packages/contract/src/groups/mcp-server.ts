@@ -376,6 +376,8 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     // - `invalid_state`: the details say which. No details: the server is a
     //   plugin server, which is reached with its Connection's credential.
     //   `sign-in-unsupported`: the server offers no sign-in through the browser.
+    //   `sign-in-expired`: a newer start or another sign-in for this server
+    //   overtook this start while it was discovering; start again.
     //   `source-unreadable`: the server or its authorization server could not be
     //   reached, or answered what OAuth does not allow; trying again later may
     //   work.
@@ -396,9 +398,11 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     //   of this server waits for that `state` (it ran out, was replaced, or the
     //   server's sign-in changed); start again. `sign-in-refused`: the user or
     //   the provider said no, the provider refused the code, or the answer came
-    //   from another issuer. `source-unreadable`: the token endpoint could not
-    //   be reached; the sign-in is used up, so start again. No details: the
-    //   server is a plugin server.
+    //   from another issuer. `sign-in-unsupported`: the authorization server
+    //   issued an access token that is not a bearer token, so only a pasted
+    //   token works for this server. `source-unreadable`: the token endpoint
+    //   could not be reached; the sign-in is used up, so start again. No
+    //   details: the server is a plugin server.
     HttpApiEndpoint.post("finishSignIn", "/mcp-servers/:id/sign-in/finish", {
       params,
       payload: McpServerFinishSignInInput,

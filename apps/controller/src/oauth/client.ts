@@ -108,6 +108,18 @@ export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>
 ) {}
 
 /**
+ * The provider answered with tokens, and the access token cannot be sent as an
+ * `Authorization: Bearer` token (its `token_type` is another type, or its
+ * syntax is not a bearer token's). The credential is not wrong and the
+ * provider is reachable, so neither signing in again nor trying again later
+ * helps. The message is fixed and never holds text the provider sent.
+ */
+export class ProviderTokenUnusable extends Schema.TaggedError<ProviderTokenUnusable>()(
+  "ProviderTokenUnusable",
+  { message: Schema.String },
+) {}
+
+/**
  * The error codes a `ProviderRefused` may carry: the ones RFC 6749 section 5.2
  * defines, the ones RFC 8628 section 3.5 adds for the device flow, and the two
  * GitHub's device flow adds. Any other code is provider text and is dropped.
@@ -140,14 +152,16 @@ const MAX_EXPIRES_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
 /**
  * The standard token response. Any other fields the provider adds are
  * ignored. `token_type` is left undecoded: only a caller that sends the token
- * as a bearer token reads it (`requestTokens` with `bearerOnly`), and a
+ * as a bearer token reads it (`exchangeCode` or `refreshAccess` with `bearerOnly`), and a
  * provider that sends it as `null` must still work for every other caller.
  * `expires_in` is left undecoded too, because an odd one never refuses an
- * answer that holds tokens (`readLifetimeSeconds`).
+ * answer that holds tokens (`readLifetimeSeconds`). `refresh_token` is left
+ * undecoded because `null` means the provider sends none, which is not a
+ * refusal (`requestTokenAnswer` reads it).
  */
 const TokenResponse = Schema.Struct({
   access_token: Schema.String,
-  refresh_token: Schema.optionalKey(Schema.String),
+  refresh_token: Schema.optionalKey(Schema.Unknown),
   expires_in: Schema.optionalKey(Schema.Unknown),
   token_type: Schema.optionalKey(Schema.Unknown),
 });
@@ -157,13 +171,20 @@ const TokenResponse = Schema.Struct({
  * or `undefined` when it states none. An odd value never fails the answer,
  * because the answer holds tokens, and a rotating provider has already
  * invalidated the old refresh token. So a fraction is rounded down, a value
- * above `MAX_EXPIRES_IN_SECONDS` is cut to it, and a negative value or one
- * that is not a number is an unknown lifetime.
+ * above `MAX_EXPIRES_IN_SECONDS` is cut to it, and a negative value, `null`
+ * or anything else that is not a number is an unknown lifetime. Some
+ * providers send the number as text (`"3600"`), and that is read as the
+ * number.
  */
-const readLifetimeSeconds = (expiresIn: unknown): number | undefined =>
-  typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn >= 0
-    ? Math.min(Math.floor(expiresIn), MAX_EXPIRES_IN_SECONDS)
+const readLifetimeSeconds = (expiresIn: unknown): number | undefined => {
+  const seconds =
+    typeof expiresIn === "string" && /^\d+(\.\d+)?$/.test(expiresIn)
+      ? Number(expiresIn)
+      : expiresIn;
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+    ? Math.min(Math.floor(seconds), MAX_EXPIRES_IN_SECONDS)
     : undefined;
+};
 
 /** Whether an access token fits the syntax of a bearer token (RFC 6750), as an MCP server's token must (see `McpServerToken`). */
 const isBearerToken = Schema.is(McpServerToken);
@@ -406,7 +427,7 @@ export const TOKEN_REQUEST_TIMEOUT_SECONDS = 30;
 /**
  * What a token endpoint answered: the token set, and, for a caller that sends
  * the token as a bearer token, why the answer cannot be used (`bearerOnly` of
- * `requestTokens`). `unusableReason` is absent when it can.
+ * `exchangeCode` and `refreshAccess`). `unusableReason` is absent when it can.
  */
 export interface TokenAnswer {
   readonly tokens: TokenSet;
@@ -456,11 +477,21 @@ const requestTokenAnswer = (
         ),
       ),
     );
+    // `null` means the provider sends no refresh token, as an absent field does.
+    if (
+      body.refresh_token !== undefined &&
+      body.refresh_token !== null &&
+      typeof body.refresh_token !== "string"
+    ) {
+      return yield* failProviderUnreachable(
+        "the token endpoint's response has a refresh token that is not text",
+      );
+    }
     const millis = yield* Clock.currentTimeMillis;
     const lifetime = readLifetimeSeconds(body.expires_in);
     const tokens: TokenSet = {
       accessToken: body.access_token,
-      ...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
+      ...(typeof body.refresh_token === "string" ? { refreshToken: body.refresh_token } : {}),
       ...(lifetime === undefined
         ? {}
         : {
@@ -500,24 +531,16 @@ const requestTokenAnswer = (
 
 /**
  * Sends a form-encoded request to the token endpoint, and returns the token
- * set. It fails as `requestTokenAnswer` does, and with `ProviderUnreachable`
- * when `bearerOnly` is set and the answer cannot be sent as a bearer token.
- * `bearerOnly` is for a caller that sends the token as `Authorization:
- * Bearer` and would otherwise send a token of another type as if it were a
- * bearer one. Not for a refresh, which stores its answer first
- * (`refreshAccess`).
+ * set. It fails as `requestTokenAnswer` does. It never judges the token type,
+ * so a caller that sends the token as `Authorization: Bearer` uses
+ * `exchangeCode` with `bearerOnly`, or `refreshAccess`.
  */
 export const requestTokens = (
   tokenUrl: string,
   form: Record<string, string>,
   headers: Record<string, string> = {},
-  { bearerOnly = false }: { readonly bearerOnly?: boolean } = {},
 ): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
-  Effect.flatMap(requestTokenAnswer(tokenUrl, form, headers, bearerOnly), (answer) =>
-    answer.unusableReason === undefined
-      ? Effect.succeed(answer.tokens)
-      : failProviderUnreachable(answer.unusableReason),
-  );
+  Effect.map(requestTokenAnswer(tokenUrl, form, headers, false), (answer) => answer.tokens);
 
 /** Encodes a value as `application/x-www-form-urlencoded` does (RFC 6749 appendix B). */
 const encodeFormComponent = (value: string): string =>
@@ -550,8 +573,12 @@ const buildClientAuthentication = (
  * Exchanges the authorization code for a token set, sending the PKCE verifier
  * as proof. The client authenticates as its `authMethod` says, so a public
  * client sends no secret. `resource` is the address of the server the token is
- * for (RFC 8707), and is sent only when given. `bearerOnly` is as in
- * `requestTokens`.
+ * for (RFC 8707), and is sent only when given.
+ *
+ * Fails as `requestTokenAnswer` does, and with `ProviderTokenUnusable` when
+ * `bearerOnly` is set and the answer cannot be sent as a bearer token. A
+ * caller sets `bearerOnly` when it sends the token as `Authorization: Bearer`,
+ * and would otherwise send a token of another type as if it were a bearer one.
  */
 export const exchangeCode = (request: {
   readonly tokenUrl: string;
@@ -561,9 +588,13 @@ export const exchangeCode = (request: {
   readonly codeVerifier: string;
   readonly resource?: string;
   readonly bearerOnly?: boolean;
-}): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> => {
+}): Effect.Effect<
+  TokenSet,
+  ProviderRefused | ProviderUnreachable | ProviderTokenUnusable,
+  HttpClient.HttpClient
+> => {
   const authentication = buildClientAuthentication(request.client);
-  return requestTokens(
+  return requestTokenAnswer(
     request.tokenUrl,
     {
       grant_type: "authorization_code",
@@ -574,7 +605,13 @@ export const exchangeCode = (request: {
       ...(request.resource === undefined ? {} : { resource: request.resource }),
     },
     authentication.headers,
-    { bearerOnly: request.bearerOnly === true },
+    request.bearerOnly === true,
+  ).pipe(
+    Effect.flatMap((answer) =>
+      answer.unusableReason === undefined
+        ? Effect.succeed(answer.tokens)
+        : Effect.fail(new ProviderTokenUnusable({ message: answer.unusableReason })),
+    ),
   );
 };
 

@@ -13,6 +13,7 @@ export {
   postForm,
   readBoundedText,
   ProviderRefused,
+  ProviderTokenUnusable,
   ProviderUnreachable,
   refreshAccess,
   requestTokens,

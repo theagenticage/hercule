@@ -184,12 +184,15 @@ export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
  *   answered something this contract does not accept. Trying again later may
  *   work. The message is safe to show.
  * - `sign-in-unsupported`: an MCP server added by address offers no sign-in
- *   through the browser (it publishes no OAuth metadata). A client offers the
- *   token field instead.
+ *   through the browser (it publishes no OAuth metadata), or its authorization
+ *   server issued an access token that cannot be sent as a bearer token. A
+ *   client offers the token field instead.
  * - `sign-in-expired`: a sign-in that was started cannot be finished, because
  *   it ran out (it lives ten minutes), a newer sign-in replaced it, the server
- *   was given another sign-in meanwhile, or the controller restarted. A client
- *   starts the sign-in again and does not retry the same answer.
+ *   was given another sign-in meanwhile, or the controller restarted. A start
+ *   that a newer start or another sign-in overtook while it was discovering
+ *   fails with it too. A client starts the sign-in again and does not retry
+ *   the same answer.
  * - `sign-in-refused`: the answer of the browser or of the provider says the
  *   sign-in did not happen: the user said no, the provider refused the code,
  *   or the answer was not the one the sign-in waits for. The message names

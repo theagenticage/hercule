@@ -296,12 +296,25 @@ describe("a token endpoint's answer", () => {
     expect(failure.message).toBe("the token endpoint's response has no access token");
   });
 
-  it("reports an access token that is there but a refresh token that is not text as an invalid answer", async () => {
+  it("reports an access token that is there but a refresh token that is not text as such", async () => {
     const failure = await failWith(
       () => new Response(JSON.stringify({ access_token: "a", refresh_token: 5 }), { status: 200 }),
     );
 
-    expect(failure.message).toBe("the token endpoint's response is not a valid token response");
+    expect(failure.message).toBe(
+      "the token endpoint's response has a refresh token that is not text",
+    );
+  });
+
+  it("reads a refresh token that is null as no refresh token, not as a refusal", async () => {
+    const tokens = await exchange(
+      fakeTokenEndpoint(
+        () => new Response(JSON.stringify({ access_token: "a", refresh_token: null })),
+      ),
+      { client: { clientId: "id" } },
+    );
+
+    expect(tokens).toEqual({ accessToken: "a" });
   });
 
   it("reads an answer that starts with a UTF-8 byte order mark", async () => {
@@ -408,8 +421,20 @@ describe("the lifetime and the type of a token", () => {
   });
 
   it.each([
+    ["text with a whole number", "3600", 3600 * 1000],
+    ["text with a fraction, rounded down", "3599.5", 3599 * 1000],
+    [
+      "text with more than ten years, cut to ten years",
+      `${TEN_YEARS_SECONDS + 1}`,
+      TEN_YEARS_SECONDS * 1000,
+    ],
+  ])("reads an expires_in that is %s as its number", async (_name, expires, millis) => {
+    expect(await lifetimeOf(expires)).toBe(millis);
+  });
+
+  it.each([
     ["negative", -1],
-    ["text", "3600"],
+    ["text that is not a number", "soon"],
     ["null", null],
     ["a list", [1]],
   ])(
@@ -427,7 +452,7 @@ describe("the lifetime and the type of a token", () => {
     );
 
     expect(failure).toMatchObject({
-      _tag: "ProviderUnreachable",
+      _tag: "ProviderTokenUnusable",
       message: "the token endpoint's response holds an access token that is not a bearer token",
     });
     expect(accepted.accessToken).toBe("has spaces in it");
@@ -526,7 +551,7 @@ describe("the lifetime and the type of a token", () => {
 
   it("refuses a token type that is not text when only bearer is", async () => {
     expect(await tryExchange({ token_type: 5 }, true)).toMatchObject({
-      _tag: "ProviderUnreachable",
+      _tag: "ProviderTokenUnusable",
       message: "the token endpoint's response holds a token that is not a bearer token",
     });
   });
@@ -538,7 +563,7 @@ describe("the lifetime and the type of a token", () => {
     });
 
     expect(failure).toMatchObject({
-      _tag: "ProviderUnreachable",
+      _tag: "ProviderTokenUnusable",
       message: "the token endpoint's response holds a token that is not a bearer token",
     });
     expect(accepted.accessToken).toBe("bearer-token-1");

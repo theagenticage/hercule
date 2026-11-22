@@ -128,6 +128,13 @@ const isClosed = async (redirectUri: string): Promise<boolean> =>
     () => true,
   );
 
+/**
+ * The message the controller refuses an expired sign-in with, copied from
+ * `createExpiredSignInError` in `apps/controller/src/mcp-servers/oauth-sign-in.ts`
+ * (the CLI never links the controller, so the text cannot be imported).
+ */
+const EXPIRED_MESSAGE = `This sign-in can no longer be finished: it ran out (it lasts ten minutes), a newer sign-in replaced it, or the server's sign-in changed. Start it again: hercule mcp-server sign-in ${SERVER_ID}`;
+
 describe("hercule mcp-server sign-in", () => {
   it("catches the browser's return on a listener, finishes the sign-in with its query and closes the listener", async () => {
     const controller = stubController({
@@ -217,18 +224,17 @@ describe("hercule mcp-server sign-in", () => {
   });
 
   it("prints the controller's expired message as it is, which already says how to start again", async () => {
-    const message = `This sign-in can no longer be finished. Start it again: hercule mcp-server sign-in ${SERVER_ID}`;
     const controller = stubController({
       whenStarted: (redirectUri) =>
         visit(controller.browser, redirectUri, `/callback?code=c&state=${STATE}`),
       finish: () =>
-        buildErrorEnvelope("invalid_state", 409, message, { reason: "sign-in-expired" }),
+        buildErrorEnvelope("invalid_state", 409, EXPIRED_MESSAGE, { reason: "sign-in-expired" }),
     });
     const io = ioFor(controller.fetch);
 
     expect(await run(io, SERVER_ID)).toBe(1);
 
-    expect(io.stderr).toEqual([`hercule: ${message}`]);
+    expect(io.stderr).toEqual([`hercule: ${EXPIRED_MESSAGE}`]);
   });
 
   it("resolves a tail of the id through the server list", async () => {
@@ -274,18 +280,17 @@ describe("hercule mcp-server sign-in --paste", () => {
   });
 
   it("sends an address pasted after the attempt expired, and prints the controller's refusal as it is", async () => {
-    const message = `This sign-in can no longer be finished. Start it again: hercule mcp-server sign-in ${SERVER_ID}`;
     const controller = stubController({
       expiresInMs: 0,
       finish: () =>
-        buildErrorEnvelope("invalid_state", 409, message, { reason: "sign-in-expired" }),
+        buildErrorEnvelope("invalid_state", 409, EXPIRED_MESSAGE, { reason: "sign-in-expired" }),
     });
     const io = ioFor(controller.fetch, { stdin: "code=c&state=s\n" });
 
     expect(await run(io, SERVER_ID, "--paste")).toBe(1);
 
     expect(controller.fetch.calls.some((call) => call.path.endsWith("/finish"))).toBe(true);
-    expect(io.stderr).toEqual([`hercule: ${message}`]);
+    expect(io.stderr).toEqual([`hercule: ${EXPIRED_MESSAGE}`]);
   });
 
   it("refuses at a terminal before anything is sent, never prompting", async () => {

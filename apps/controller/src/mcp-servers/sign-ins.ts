@@ -121,6 +121,20 @@ const make = Effect.gen(function* () {
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
   const refreshPermits = makeKeyedLocks();
+  /**
+   * The client id that the authorization server last rejected for each
+   * server. A start does not reuse a rejected client, and registers a new one.
+   * It lives in memory, because after a restart the next refresh is refused
+   * again and marks the client again.
+   *
+   * Two things add an entry: a refresh that the token endpoint refuses with
+   * `invalid_client` (`readTokens`), and a sign-in that fails with that error
+   * (`markClientRejected`). There is at most one entry per server, and the
+   * entry goes with `deleteAll`, which runs when the server's sign-in is
+   * replaced or finished or the server is deleted. So the map never holds more
+   * than one entry for each server that exists.
+   */
+  const rejectedClientIds = new Map<string, string>();
 
   /**
    * Returns the token a request to the server carries, or `undefined` when
@@ -264,6 +278,7 @@ const make = Effect.gen(function* () {
               });
             }
             yield* guard;
+            const clientId = signIn.client.clientId;
             return yield* renewTokenSet({
               refreshToken,
               endpoint: {
@@ -278,6 +293,15 @@ const make = Effect.gen(function* () {
               // No span at all: a client span records the address, and a failed
               // one records the error text.
               Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+              // The authorization server does not know this client any more, so
+              // the user signs in again, and that start must register another.
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  if (error._tag === "ProviderRefused" && error.code === "invalid_client") {
+                    rejectedClientIds.set(serverId, clientId);
+                  }
+                }),
+              ),
             );
           }),
         ),
@@ -302,6 +326,19 @@ const make = Effect.gen(function* () {
         readStoredOAuth(serverId),
         Option.map((stored) => stored.signIn),
       ),
+
+    /**
+     * Remembers that the authorization server rejected the client with
+     * `clientId` for the server, so that `isClientRejected` says so until the
+     * server's sign-in is replaced or deleted.
+     */
+    markClientRejected: (serverId: string, clientId: string): void => {
+      rejectedClientIds.set(serverId, clientId);
+    },
+
+    /** Checks whether the authorization server rejected the client with `clientId` for the server. */
+    isClientRejected: (serverId: string, clientId: string): boolean =>
+      rejectedClientIds.get(serverId) === clientId,
 
     /**
      * Returns the OAuth tokens for a request that starts an exchange, renewing
@@ -392,11 +429,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Deletes every sign-in secret the server holds. Must run inside a
+     * Deletes every sign-in secret the server holds, and forgets the client
+     * the authorization server rejected for it. Must run inside a
      * transaction, the one that deletes or replaces the server.
      */
     deleteAll: (serverId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        rejectedClientIds.delete(serverId);
         const refs = yield* secrets.refs("mcp-server", [serverId]);
         for (const { name } of refs.get(serverId) ?? []) {
           yield* Effect.catchTag(

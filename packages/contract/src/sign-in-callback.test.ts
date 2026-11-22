@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCallbackQuery, readAuthorizationState } from "./sign-in-callback";
+import { parseCallbackQuery, readApprovalHost, readAuthorizationState } from "./sign-in-callback";
 
 /** Parses text that must be refused, and returns the reason. */
 const refusal = (text: string): string => {
@@ -68,5 +68,12 @@ describe("readAuthorizationState", () => {
   it("returns undefined when the state is missing or empty", () => {
     expect(readAuthorizationState("https://a.example/authorize?x=1")).toBeUndefined();
     expect(readAuthorizationState("https://a.example/authorize?state=")).toBeUndefined();
+  });
+});
+
+describe("readApprovalHost", () => {
+  it("returns the host of an authorization address, with its port when it has one", () => {
+    expect(readApprovalHost("https://auth.example/authorize?state=abc")).toBe("auth.example");
+    expect(readApprovalHost("http://auth.example:8080/authorize")).toBe("auth.example:8080");
   });
 });

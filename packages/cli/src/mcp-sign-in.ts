@@ -26,7 +26,12 @@ import {
   createClient,
   type HerculeClient,
 } from "@hercule/client-core";
-import { parseCallbackQuery, readAuthorizationState, type McpServer } from "@hercule/contract";
+import {
+  parseCallbackQuery,
+  readApprovalHost,
+  readAuthorizationState,
+  type McpServer,
+} from "@hercule/contract";
 import { coerceFieldValue, parseArguments } from "./commands/args";
 import { resolveTails } from "./commands/execute";
 import type { HandWrittenHelp } from "./commands/help";
@@ -236,7 +241,7 @@ export const signInMcpServer = async (
     say(`  ${started.authorizationUrl}`);
     // The page that asks for the approval belongs to this host, which the
     // user may not know the server by.
-    say(`You will approve on ${new URL(started.authorizationUrl).host}.`);
+    say(`You will approve on ${readApprovalHost(started.authorizationUrl)}.`);
     say("");
 
     let callbackQuery: string;

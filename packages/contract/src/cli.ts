@@ -4713,7 +4713,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the server is a plugin server, which is reached with its Connection: reconnect that Connection in Settings > Connections. Or the server offers no sign-in through the browser: paste a token with `hercule mcp-server set-token`. Or the server or its authorization server could not be reached, or answered what OAuth does not allow: try again later",
+        "the server is a plugin server, which is reached with its Connection: reconnect that Connection in Settings > Connections. Or the server offers no sign-in through the browser: paste a token with `hercule mcp-server set-token`. Or the server or its authorization server could not be reached, or answered what OAuth does not allow: try again later. Or another sign-in or start for this server overtook this one while it was starting: run the command again",
     },
   },
   // Takes what the browser came back with. `hercule mcp-server sign-in` calls

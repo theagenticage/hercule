@@ -90,3 +90,13 @@ export const readAuthorizationState = (authorizationUrl: string): string | undef
   const state = new URL(authorizationUrl).searchParams.get("state");
   return state === null || state === "" ? undefined : state;
 };
+
+/**
+ * Returns the host (with its port, when it has one) of an authorization
+ * address: the host whose page asks the user to approve the sign-in. A client
+ * shows it beside the address, because the user may not know the server by
+ * that host. Throws when `authorizationUrl` is not an address, which the
+ * controller never sends.
+ */
+export const readApprovalHost = (authorizationUrl: string): string =>
+  new URL(authorizationUrl).host;

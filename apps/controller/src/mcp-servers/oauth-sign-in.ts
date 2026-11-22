@@ -25,6 +25,7 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -115,8 +116,8 @@ interface StartingAttempt {
 
 /**
  * A sign-in that was started and not finished. It holds everything `finish`
- * needs, so `finish` repeats no discovery: what the server's metadata said at
- * the start is what the answer is checked against.
+ * needs, so `finish` repeats no discovery: the answer is checked against the
+ * server's metadata as it was read at the start.
  */
 interface Attempt {
   readonly _tag: "Waiting";
@@ -152,27 +153,65 @@ const make = Effect.gen(function* () {
   const signIns = yield* McpServerSignIns;
   const audit = yield* AuditLog;
   const httpClient = yield* HttpClient.HttpClient;
+  const serviceScope = yield* Effect.scope;
 
   /** The attempts that were started and not finished, by server id: at most one per server. */
   const attempts = new Map<string, Attempt | StartingAttempt>();
   /**
    * The client each server's latest start registered, until a sign-in commits
    * and stores one, so that a second start before that registers nothing again.
-   * It holds the authorization server it is for, which a start compares.
+   * It holds the authorization server it is for, which a start compares, and
+   * when a start last used the client.
+   *
+   * Only `start` adds an entry, one per server (a later start replaces it). An
+   * entry goes when the server's sign-in commits, when the authorization server
+   * rejects the client (`forgetClient`), and, on every start and finish, when no
+   * start used it for longer than an attempt lasts. So the map holds at most
+   * one entry for each server that was started recently. A server that is
+   * deleted or replaced has its entry swept the same way, which is why this
+   * module does not need to hear of a delete.
    */
   const unstoredClients = new Map<
     string,
-    { readonly discovery: DiscoveredAuthorization; readonly client: RegisteredClient }
+    {
+      readonly discovery: DiscoveredAuthorization;
+      readonly client: RegisteredClient;
+      readonly lastUsedAtMillis: number;
+    }
   >();
-  /** The client id that the authorization server last rejected for each server, which no start reuses. */
-  const rejectedClientIds = new Map<string, string>();
 
-  /** Forgets every attempt that ran out. Placeholders have no deadline. */
+  /**
+   * Forgets every attempt that ran out, and every unstored client that no
+   * start used for as long as an attempt lasts. Placeholders have no deadline.
+   * Runs on every start and finish. Each attempt is also forgotten at its own
+   * deadline (`forgetAttemptAtDeadline`), so a verifier does not stay in memory
+   * when no one starts or finishes again.
+   */
   const sweepExpired = (nowMillis: number): void => {
     for (const [serverId, entry] of attempts) {
       if (entry._tag === "Waiting" && entry.expiresAtMillis <= nowMillis) attempts.delete(serverId);
     }
+    for (const [serverId, unstored] of unstoredClients) {
+      if (unstored.lastUsedAtMillis + SIGN_IN_LIFETIME_MILLIS <= nowMillis) {
+        unstoredClients.delete(serverId);
+      }
+    }
   };
+
+  /**
+   * Forgets the server's attempt with this `state` once the sign-in lifetime
+   * is over, and then returns. It holds the `state` and not the attempt, so the
+   * attempt's verifier is not kept alive by a finished attempt's timer.
+   */
+  const forgetAttemptAtDeadline = (serverId: string, state: string): Effect.Effect<void> =>
+    Effect.sleep(Duration.millis(SIGN_IN_LIFETIME_MILLIS)).pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          const entry = attempts.get(serverId);
+          if (entry?._tag === "Waiting" && entry.state === state) attempts.delete(serverId);
+        }),
+      ),
+    );
 
   /** Forgets `entry` when it is still the server's current one, so a newer entry stays. */
   const forgetEntry = (serverId: string, entry: Attempt | StartingAttempt): void => {
@@ -185,16 +224,18 @@ const make = Effect.gen(function* () {
    */
   const forgetClient = (attempt: Attempt): void => {
     unstoredClients.delete(attempt.serverId);
-    rejectedClientIds.set(attempt.serverId, attempt.client.clientId);
+    signIns.markClientRejected(attempt.serverId, attempt.client.clientId);
   };
 
   /**
    * Returns the client a start may use again for `discovery`, or `undefined`
-   * when it must register one: the client the server's last start registered
+   * when it must register one. Using an unstored client renews its time of use.
+   * The client is: the client the server's last start registered
    * and no sign-in stored yet, or else the client of the sign-in the server
    * holds. It is reused only for the same issuer, token endpoint and
    * authorization endpoint, while its secret has not expired, and unless the
-   * authorization server rejected it.
+   * authorization server rejected it (a refused code exchange, a refused
+   * refresh, or a browser sent back with `invalid_client`).
    */
   const findReusableClient = (
     serverId: string,
@@ -212,13 +253,15 @@ const make = Effect.gen(function* () {
         isSameServer(unstored.discovery) &&
         (unstored.client.secretExpiresAtMillis ?? Infinity) > nowMillis
       ) {
+        // Using the client keeps it for another ten minutes (`sweepExpired`).
+        unstoredClients.set(serverId, { ...unstored, lastUsedAtMillis: nowMillis });
         return unstored.client;
       }
       const stored = yield* signIns.readOAuth(serverId);
       return Option.isSome(stored) &&
         isSameServer(stored.value) &&
         (stored.value.client.secretExpiresAtMillis ?? Infinity) > nowMillis &&
-        stored.value.client.clientId !== rejectedClientIds.get(serverId)
+        !signIns.isClientRejected(serverId, stored.value.client.clientId)
         ? stored.value.client
         : undefined;
     });
@@ -335,9 +378,11 @@ const make = Effect.gen(function* () {
   /**
    * Exchanges the code for tokens and returns them. Fails with
    * `InvalidState`: `sign-in-refused` when the authorization server refuses the
-   * code, and `source-unreadable` when it cannot be reached or answers with an
-   * access token that cannot be used as a bearer token. The messages name only
-   * a standard error code, never provider text.
+   * code, `sign-in-unsupported` when it answers with an access token that
+   * cannot be used as a bearer token (this server cannot be signed in to by
+   * OAuth, and a pasted token may work), and `source-unreadable` when it cannot
+   * be reached. The messages name only a standard error code, never provider
+   * text.
    */
   const exchangeForTokens = (
     attempt: Attempt,
@@ -355,6 +400,14 @@ const make = Effect.gen(function* () {
             ),
           );
         }),
+      ),
+      Effect.catchTag("ProviderTokenUnusable", () =>
+        Effect.fail(
+          createInvalidStateError(
+            `The authorization server issued an access token that is not a bearer token, so this server cannot be signed in to through the browser. Paste a token instead: hercule mcp-server set-token ${attempt.serverId}`,
+            { reason: "sign-in-unsupported" },
+          ),
+        ),
       ),
       Effect.catchTag("ProviderUnreachable", () =>
         Effect.fail(
@@ -374,7 +427,7 @@ const make = Effect.gen(function* () {
    * (`sign-in-expired`): the user pasted a token, replaced the server, or
    * started another sign-in while the browser and the token endpoint were
    * busy. The server goes back to `checking`, as `setToken` does, and the
-   * audit entry says only that the sign-in is now OAuth.
+   * audit entry records only that the sign-in is now OAuth.
    *
    * When the attempt lost, the tokens that the exchange already obtained are
    * dropped without being revoked: OAuth and MCP require no revocation
@@ -439,7 +492,7 @@ const make = Effect.gen(function* () {
      * open in a browser, and when the sign-in runs out. It discovers the
      * server's authorization server, finds a client for it (the one the
      * server's last start registered, the one its sign-in holds, or a new
-     * registration, in this order, as `findReusableClient` says), and keeps the
+     * registration, tried in this order by `findReusableClient`), and keeps the
      * attempt in memory, replacing any attempt the server had. It writes
      * nothing to the database, so a start that is slow cannot bring back a
      * secret that a delete, a Replace or a pasted token removed meanwhile.
@@ -455,7 +508,8 @@ const make = Effect.gen(function* () {
      * Fails with `InvalidState`: `sign-in-unsupported` when the server offers
      * no sign-in through the browser that Hercule can use, `source-unreadable`
      * when the server or its authorization server cannot be reached or answers
-     * what OAuth does not allow, and `sign-in-expired` as said above.
+     * what OAuth does not allow, and `sign-in-expired` when the start was voided
+     * or lost, as described above.
      */
     start: (
       server: SignInTarget,
@@ -467,13 +521,13 @@ const make = Effect.gen(function* () {
         attempts.set(server.id, starting);
         return Effect.gen(function* () {
           const discovery = yield* provideOutboundHttp(discoverAuthorization(server.url));
-          const reused = yield* findReusableClient(
-            server.id,
-            discovery,
-            yield* Clock.currentTimeMillis,
-          );
+          const reuseMillis = yield* Clock.currentTimeMillis;
+          sweepExpired(reuseMillis);
+          const reused = yield* findReusableClient(server.id, discovery, reuseMillis);
           const client = reused ?? (yield* provideOutboundHttp(registerClient(discovery)));
-          if (reused === undefined) unstoredClients.set(server.id, { discovery, client });
+          if (reused === undefined) {
+            unstoredClients.set(server.id, { discovery, client, lastUsedAtMillis: reuseMillis });
+          }
           const codeVerifier = buildRandomToken();
           const state = buildRandomToken();
           const isSameSignIn = yield* isStillSameSignIn(server.id, signInGeneration);
@@ -496,6 +550,7 @@ const make = Effect.gen(function* () {
             expiresAtMillis,
             claimed: false,
           });
+          yield* Effect.forkIn(forgetAttemptAtDeadline(server.id, state), serviceScope);
           return {
             authorizationUrl: buildAuthorizationUrl({
               authorizationEndpoint: discovery.authorizationEndpoint,

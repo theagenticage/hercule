@@ -68,7 +68,7 @@ export const makeKeyedLocks = (): KeyedLocks => {
 
 /**
  * Where and as whom a refresh goes: the token endpoint, the client, the
- * optional RFC 8707 `resource`, and `bearerOnly` (see `requestTokens`).
+ * optional RFC 8707 `resource`, and `bearerOnly` (see `exchangeCode`).
  */
 export interface RefreshEndpoint {
   readonly tokenUrl: string;
@@ -92,7 +92,7 @@ export interface RefreshEndpoint {
  * The request and the write are uninterruptible together. A provider that
  * rotates its refresh token invalidates the old one the moment it answers, so
  * a caller cancelled between the answer and the write (a timeout, a cancelled
- * run) would lose the only tokens that still work. `requestTokens` bounds the
+ * run) would lose the only tokens that still work. `refreshAccess` bounds the
  * request with its own timeout, so this cannot hold the caller or its permit
  * for long.
  *

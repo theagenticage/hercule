@@ -308,6 +308,26 @@ describe("a client of the authorization server that no sign-in stored yet", () =
     });
   });
 
+  it("is registered again after a refresh of the stored sign-in was refused with invalid_client", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+
+      // The authorization server purges its clients, so the refresh is refused with invalid_client.
+      authorizationServer.forgetClients();
+      authorizationServer.revokeAccessTokens();
+      await requestCheck(controller, serverId);
+      await waitForStatus(controller, "needs-sign-in");
+
+      const second = await startSignIn(controller, serverId);
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(new URL(second.authorizationUrl).searchParams.get("client_id")).toBe("client-2");
+    });
+  });
+
   it("is registered again after the authorization endpoint sent the browser back with invalid_client", async () => {
     await withOAuthRig(async (rig) => {
       const { authorizationServer } = rig;
@@ -970,21 +990,21 @@ describe("finishing a sign-in", () => {
     });
   });
 
-  it.each([["a token that is not a bearer token", { tokenType: "MAC" }]])(
-    "is refused as unreadable for %s, and signs nothing in",
-    async (_name, issued) => {
-      await withOAuthRig(async (rig) => {
-        Object.assign(rig.authorizationServer, issued);
-        const serverId = await addServerThatNeedsSignIn(rig);
-        const callback = await startAndApprove(rig, serverId);
+  it("is refused as unsupported for a token that is not a bearer token, says to paste one, and signs nothing in", async () => {
+    await withOAuthRig(async (rig) => {
+      rig.authorizationServer.tokenType = "MAC";
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId);
 
-        const error = await refusal(rig, serverId, callback, 409);
+      const error = await refusal(rig, serverId, callback, 409);
 
-        expect(error).toMatchObject({ details: { reason: "source-unreadable" } });
-        await expectNotSignedIn(rig, serverId);
-      });
-    },
-  );
+      expect(error).toMatchObject({ details: { reason: "sign-in-unsupported" } });
+      expect(error.message).toContain("not a bearer token");
+      expect(error.message).toContain(`hercule mcp-server set-token ${serverId}`);
+      expect(error.message).not.toContain("reached");
+      await expectNotSignedIn(rig, serverId);
+    });
+  });
 
   it("is refused as unreadable when the token endpoint cannot be reached", async () => {
     await withOAuthRig(async (rig) => {
