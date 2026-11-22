@@ -124,4 +124,53 @@ describe("the MCP Server repository", () => {
     expect(Option.isNone(found.unknown)).toBe(true);
     expect(found.second.reason._tag).toBe("UniqueViolation");
   });
+
+  it("raises the sign-in generation for each new sign-in and for Replace, and for nothing else", async () => {
+    const generations = await Effect.runPromise(
+      Effect.gen(function* () {
+        const servers = yield* arrange;
+        const read = servers
+          .readSignInGeneration(URL_SERVER_ID)
+          .pipe(Effect.map(Option.getOrThrow));
+        const steps: Array<number> = [yield* read];
+        yield* inTransaction(servers.writeEnabled(URL_SERVER_ID, false, AT));
+        yield* inTransaction(servers.resetSchedule(URL_SERVER_ID, AT));
+        steps.push(yield* read);
+        yield* inTransaction(servers.writeTokenSignIn(URL_SERVER_ID, AT));
+        steps.push(yield* read);
+        yield* inTransaction(servers.writeOAuthSignIn(URL_SERVER_ID, AT));
+        steps.push(yield* read);
+        yield* inTransaction(
+          servers.writePluginSource(URL_SERVER_ID, {
+            contributionId: "acme/other",
+            connectionId: CONNECTION_ID,
+            accountId: "desk-2",
+            connectionGeneration: 0,
+            enabled: true,
+            at: AT,
+          }),
+        );
+        steps.push(yield* read);
+        const unknown = yield* servers.readSignInGeneration("0199e0e7-7b21-7000-8000-0000000000ff");
+        return { steps, unknown };
+      }).pipe(Effect.provide(TestDatabase), Effect.scoped, Effect.orDie),
+    );
+
+    expect(generations.steps).toEqual([0, 0, 1, 2, 3]);
+    expect(Option.isNone(generations.unknown)).toBe(true);
+  });
+
+  it("marks a server signed in with OAuth, back to checking, with its revision raised", async () => {
+    const server = await Effect.runPromise(
+      Effect.gen(function* () {
+        const servers = yield* arrange;
+        yield* inTransaction(servers.update(URL_SERVER_ID, { status: "ready", checkedAt: AT }, AT));
+        yield* inTransaction(servers.writeOAuthSignIn(URL_SERVER_ID, AT));
+        return Option.getOrThrow(yield* servers.readById(URL_SERVER_ID));
+      }).pipe(Effect.provide(TestDatabase), Effect.scoped, Effect.orDie),
+    );
+
+    expect(server).toMatchObject({ status: "checking", revision: 1, nextCheckAt: AT });
+    expect(server.source).toMatchObject({ kind: "url", signIn: "oauth" });
+  });
 });
