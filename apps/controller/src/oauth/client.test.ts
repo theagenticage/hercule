@@ -283,6 +283,14 @@ describe("a token endpoint's answer", () => {
     expect(failure.message).toBe("the token endpoint refused the request");
   });
 
+  it("reports a missing access token as such, never as a token type problem", async () => {
+    const failure = await failWith(
+      () => new Response(JSON.stringify({ token_type: null }), { status: 200 }),
+    );
+
+    expect(failure.message).toBe("the token endpoint's response is not a valid token response");
+  });
+
   it("quotes no text of the provider when the answer is not JSON or has no access token", async () => {
     const notJson = await failWith(() => new Response("SECRET-BODY", { status: 200 }));
     const noToken = await failWith(
@@ -364,6 +372,32 @@ describe("the lifetime and the type of a token", () => {
     });
 
     expect(tokens.accessToken).toBe("a");
+  });
+
+  it("ignores a missing, null or odd token type for a caller that is not bearer only", async () => {
+    for (const fields of [{ token_type: null }, { token_type: 5 }, {}]) {
+      const tokens = await exchange(fakeTokenEndpoint(answerWith(fields)), {
+        client: { clientId: "id" },
+      });
+
+      expect(tokens.accessToken).toBe("a");
+    }
+  });
+
+  it("accepts a null token type when only bearer is, as if it had none", async () => {
+    const tokens = await exchange(fakeTokenEndpoint(answerWith({ token_type: null })), {
+      client: { clientId: "id" },
+      bearerOnly: true,
+    });
+
+    expect(tokens.accessToken).toBe("a");
+  });
+
+  it("refuses a token type that is not text when only bearer is", async () => {
+    expect(await tryExchange({ token_type: 5 }, true)).toMatchObject({
+      _tag: "ProviderUnreachable",
+      message: "the token endpoint's response holds a token that is not a bearer token",
+    });
   });
 
   it("refuses another token type when only bearer is, and accepts it otherwise", async () => {

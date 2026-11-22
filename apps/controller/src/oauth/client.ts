@@ -136,12 +136,17 @@ const STANDARD_ERROR_CODES: ReadonlySet<string> = new Set([
  */
 const MAX_EXPIRES_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
 
-/** The standard token response. Any other fields the provider adds are ignored. */
+/**
+ * The standard token response. Any other fields the provider adds are
+ * ignored. `token_type` is left undecoded: only a caller that sends the token
+ * as a bearer token reads it (`requestTokens` with `bearerOnly`), and a
+ * provider that sends it as `null` must still work for every other caller.
+ */
 const TokenResponse = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.optionalKey(Schema.String),
   expires_in: Schema.optionalKey(Schema.Number),
-  token_type: Schema.optionalKey(Schema.String),
+  token_type: Schema.optionalKey(Schema.Unknown),
 });
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
@@ -368,9 +373,11 @@ export const postForm = (
  * does, and returns the token set.
  *
  * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
- * neither tokens nor an error, when its `expires_in` is not a whole number of
+ * neither tokens nor an error (an `access_token` that is missing or not a
+ * string, or a `refresh_token` or `expires_in` of another type), when its `expires_in` is not a whole number of
  * seconds from 0 to ten years, or, with `bearerOnly`, when its `token_type` is
- * present and is not `Bearer` (any letter case). `expires_in` is converted to
+ * present and is not `Bearer` (any letter case). Without `bearerOnly`,
+ * `token_type` is ignored, whatever it holds. `expires_in` is converted to
  * a timestamp here, because it counts from the moment of the response, and
  * that moment is stored as `obtainedAt`. A token without `expires_in` never
  * expires, and is stored with neither. A provider whose tokens do not expire
@@ -378,8 +385,8 @@ export const postForm = (
  *
  * `bearerOnly` is for a caller that sends the token as `Authorization: Bearer`
  * and would otherwise send a token of another type as if it were a bearer one.
- * An answer with no `token_type` is accepted, because many providers leave it
- * out.
+ * An answer with no `token_type`, or a `null` one, is accepted, because many
+ * providers leave it out.
  */
 export const requestTokens = (
   tokenUrl: string,
@@ -392,7 +399,7 @@ export const requestTokens = (
       yield* postForm(tokenUrl, form, "token endpoint", headers),
     ).pipe(
       Effect.catchTag("SchemaError", () =>
-        failProviderUnreachable("the token endpoint's response has no access token"),
+        failProviderUnreachable("the token endpoint's response is not a valid token response"),
       ),
     );
     if (
@@ -407,7 +414,12 @@ export const requestTokens = (
         "the token endpoint's response has an expires_in that is not a lifetime in seconds",
       );
     }
-    if (bearerOnly && body.token_type !== undefined && body.token_type.toLowerCase() !== "bearer") {
+    if (
+      bearerOnly &&
+      body.token_type !== undefined &&
+      body.token_type !== null &&
+      !(typeof body.token_type === "string" && body.token_type.toLowerCase() === "bearer")
+    ) {
       return yield* failProviderUnreachable(
         "the token endpoint's response holds a token that is not a bearer token",
       );
