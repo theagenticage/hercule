@@ -656,6 +656,23 @@ describe("finishing a sign-in", () => {
     });
   });
 
+  it.each([
+    ["a token that is not a bearer token", { tokenType: "MAC" }],
+    ["a negative lifetime", { expiresIn: -1 }],
+    ["a lifetime of a hundred years", { expiresIn: 100 * 365 * 24 * 60 * 60 }],
+  ])("is refused as unreadable for %s, and signs nothing in", async (_name, issued) => {
+    await withOAuthRig(async (rig) => {
+      Object.assign(rig.authorizationServer, issued);
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId);
+
+      const error = await refusal(rig, serverId, callback, 409);
+
+      expect(error).toMatchObject({ details: { reason: "source-unreadable" } });
+      await expectNotSignedIn(rig, serverId);
+    });
+  });
+
   it("is refused as unreadable when the token endpoint cannot be reached", async () => {
     await withOAuthRig(async (rig) => {
       const serverId = await addServerThatNeedsSignIn(rig);

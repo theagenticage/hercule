@@ -295,6 +295,7 @@ const make = Effect.gen(function* () {
                 tokenUrl: signIn.tokenEndpoint,
                 client: signIn.client,
                 resource: signIn.resource,
+                bearerOnly: true,
               },
               writeIfHeld: (next) =>
                 writeTokensIfHeld(serverId, held.value, generation.value, next),

@@ -251,7 +251,8 @@ describe("the start frame of a session with a GitHub Connection", () => {
 
   it("carries the Connection and the git identity but no token or expiry when the token has expired", async () => {
     await withGithubFleet(async (arranged, provider) => {
-      answerTokens(provider, -MINUTE_SECONDS);
+      // A token with no lifetime left has expired the moment it arrives.
+      answerTokens(provider, 0);
       const connectionId = await signIn(arranged);
       await setDefaultConnection(arranged, connectionId);
 
@@ -389,9 +390,9 @@ describe("a runner's request for a session's GitHub token", () => {
     await withGithubFleet(async (arranged, provider) => {
       let finishRefresh = (): void => {};
       let gate: Promise<void> = Promise.resolve();
-      // The token is inside the refresh margin, so a request refreshes it, and
-      // that refresh waits for `gate`.
-      answerTokens(provider, 5 * MINUTE_SECONDS, { beforeRefresh: () => gate });
+      // The token has no lifetime left, so a request refreshes it, and that
+      // refresh waits for `gate`.
+      answerTokens(provider, 0, { beforeRefresh: () => gate });
       await setDefaultConnection(arranged, await signIn(arranged));
       const start = await spawnAndAwaitStart(arranged);
       gate = new Promise<void>((resolve) => {

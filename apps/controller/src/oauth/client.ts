@@ -129,11 +129,19 @@ const STANDARD_ERROR_CODES: ReadonlySet<string> = new Set([
   "incorrect_device_code",
 ]);
 
+/**
+ * The longest `expires_in` a token endpoint may answer with: ten years, in
+ * seconds. A larger value is a mistake or an attack, and it would not even
+ * convert to a date.
+ */
+const MAX_EXPIRES_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
+
 /** The standard token response. Any other fields the provider adds are ignored. */
 const TokenResponse = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.optionalKey(Schema.String),
   expires_in: Schema.optionalKey(Schema.Number),
+  token_type: Schema.optionalKey(Schema.String),
 });
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
@@ -351,15 +359,24 @@ export const postForm = (
  * does, and returns the token set.
  *
  * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
- * neither tokens nor an error. `expires_in` is converted to a timestamp here,
- * because it counts from the moment of the response, and that moment is
- * stored as `obtainedAt`. A token without `expires_in` never expires, and is
- * stored with neither. A provider whose tokens do not expire sends none.
+ * neither tokens nor an error, when its `expires_in` is not a whole number of
+ * seconds from 0 to ten years, or, with `bearerOnly`, when its `token_type` is
+ * present and is not `Bearer` (any letter case). `expires_in` is converted to
+ * a timestamp here, because it counts from the moment of the response, and
+ * that moment is stored as `obtainedAt`. A token without `expires_in` never
+ * expires, and is stored with neither. A provider whose tokens do not expire
+ * sends none.
+ *
+ * `bearerOnly` is for a caller that sends the token as `Authorization: Bearer`
+ * and would otherwise send a token of another type as if it were a bearer one.
+ * An answer with no `token_type` is accepted, because many providers leave it
+ * out.
  */
 export const requestTokens = (
   tokenUrl: string,
   form: Record<string, string>,
   headers: Record<string, string> = {},
+  { bearerOnly = false }: { readonly bearerOnly?: boolean } = {},
 ): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const body = yield* decodeTokenResponse(
@@ -369,6 +386,23 @@ export const requestTokens = (
         failProviderUnreachable("the token endpoint's response has no access token"),
       ),
     );
+    if (
+      body.expires_in !== undefined &&
+      !(
+        Number.isInteger(body.expires_in) &&
+        body.expires_in >= 0 &&
+        body.expires_in <= MAX_EXPIRES_IN_SECONDS
+      )
+    ) {
+      return yield* failProviderUnreachable(
+        "the token endpoint's response has an expires_in that is not a lifetime in seconds",
+      );
+    }
+    if (bearerOnly && body.token_type !== undefined && body.token_type.toLowerCase() !== "bearer") {
+      return yield* failProviderUnreachable(
+        "the token endpoint's response holds a token that is not a bearer token",
+      );
+    }
     const millis = yield* Clock.currentTimeMillis;
     return {
       accessToken: body.access_token,
@@ -413,7 +447,8 @@ const buildClientAuthentication = (
  * Exchanges the authorization code for a token set, sending the PKCE verifier
  * as proof. The client authenticates as its `authMethod` says, so a public
  * client sends no secret. `resource` is the address of the server the token is
- * for (RFC 8707), and is sent only when given.
+ * for (RFC 8707), and is sent only when given. `bearerOnly` is as in
+ * `requestTokens`.
  */
 export const exchangeCode = (request: {
   readonly tokenUrl: string;
@@ -422,6 +457,7 @@ export const exchangeCode = (request: {
   readonly redirectUri: string;
   readonly codeVerifier: string;
   readonly resource?: string;
+  readonly bearerOnly?: boolean;
 }): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> => {
   const authentication = buildClientAuthentication(request.client);
   return requestTokens(
@@ -435,6 +471,7 @@ export const exchangeCode = (request: {
       ...(request.resource === undefined ? {} : { resource: request.resource }),
     },
     authentication.headers,
+    { bearerOnly: request.bearerOnly === true },
   );
 };
 
@@ -448,8 +485,8 @@ export const REFRESH_TIMEOUT_SECONDS = 30;
 
 /**
  * Exchanges the refresh token for a new token set. The client authenticates as
- * its `authMethod` says, so a public client sends no secret. `resource` is as
- * in `exchangeCode`. When the response has no new refresh token, the old one
+ * its `authMethod` says, so a public client sends no secret. `resource` and
+ * `bearerOnly` are as in `exchangeCode`. When the response has no new refresh token, the old one
  * is still valid, and the caller keeps it.
  *
  * Fails with `ProviderUnreachable` when the endpoint has not answered within
@@ -461,6 +498,7 @@ export const refreshAccess = (request: {
   readonly client: OAuthClient;
   readonly refreshToken: string;
   readonly resource?: string;
+  readonly bearerOnly?: boolean;
 }): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> => {
   const authentication = buildClientAuthentication(request.client);
   return requestTokens(
@@ -472,6 +510,7 @@ export const refreshAccess = (request: {
       ...(request.resource === undefined ? {} : { resource: request.resource }),
     },
     authentication.headers,
+    { bearerOnly: request.bearerOnly === true },
   ).pipe(
     Effect.interruptible,
     Effect.timeoutOrElse({

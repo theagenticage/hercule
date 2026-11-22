@@ -273,6 +273,7 @@ const make = Effect.gen(function* () {
         redirectUri: attempt.redirectUri,
         codeVerifier: attempt.codeVerifier,
         resource: attempt.discovery.resource,
+        bearerOnly: true,
       }).pipe(
         Effect.timeoutOrElse({
           duration: Duration.seconds(REFRESH_TIMEOUT_SECONDS),

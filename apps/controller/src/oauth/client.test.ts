@@ -300,3 +300,80 @@ describe("a token endpoint's answer", () => {
     }
   });
 });
+
+describe("the lifetime and the type of a token", () => {
+  const answerWith = (fields: Record<string, unknown>) => () =>
+    new Response(JSON.stringify({ access_token: "a", ...fields }), { status: 200 });
+
+  const tryExchange = (fields: Record<string, unknown>, bearerOnly = false) =>
+    Effect.runPromise(
+      Effect.flip(
+        exchangeCode({
+          tokenUrl: TOKEN_URL,
+          client: { clientId: "id" },
+          code: "c",
+          redirectUri: "http://127.0.0.1:1/callback",
+          codeVerifier: "v",
+          bearerOnly,
+        }),
+      ).pipe(Effect.provide(fakeTokenEndpoint(answerWith(fields)).layer)),
+    );
+
+  it.each([
+    ["a negative number", -1],
+    ["a fraction", 3600.5],
+    ["more than ten years", 10 * 365 * 24 * 60 * 60 + 1],
+    ["a number too large for a date", 1e308],
+  ])("refuses expires_in of %s with a typed failure and fixed text", async (_name, expires) => {
+    const failure = await tryExchange({ expires_in: expires });
+
+    expect(failure).toMatchObject({
+      _tag: "ProviderUnreachable",
+      message: "the token endpoint's response has an expires_in that is not a lifetime in seconds",
+    });
+  });
+
+  it.each([0, 1, 10 * 365 * 24 * 60 * 60])("accepts expires_in of %i", async (expires) => {
+    const tokens = await exchange(fakeTokenEndpoint(answerWith({ expires_in: expires })), {
+      client: { clientId: "id" },
+    });
+
+    expect(Date.parse(tokens.expiresAt ?? "") - Date.parse(tokens.obtainedAt ?? "")).toBe(
+      expires * 1000,
+    );
+  });
+
+  it.each(["Bearer", "bearer", "BEARER"])(
+    "accepts the token type %s when only bearer is",
+    async (type) => {
+      const tokens = await exchange(fakeTokenEndpoint(answerWith({ token_type: type })), {
+        client: { clientId: "id" },
+        bearerOnly: true,
+      });
+
+      expect(tokens.accessToken).toBe("a");
+    },
+  );
+
+  it("accepts an answer with no token type when only bearer is", async () => {
+    const tokens = await exchange(fakeTokenEndpoint(answerWith({})), {
+      client: { clientId: "id" },
+      bearerOnly: true,
+    });
+
+    expect(tokens.accessToken).toBe("a");
+  });
+
+  it("refuses another token type when only bearer is, and accepts it otherwise", async () => {
+    const failure = await tryExchange({ token_type: "MAC" }, true);
+    const accepted = await exchange(fakeTokenEndpoint(answerWith({ token_type: "MAC" })), {
+      client: { clientId: "id" },
+    });
+
+    expect(failure).toMatchObject({
+      _tag: "ProviderUnreachable",
+      message: "the token endpoint's response holds a token that is not a bearer token",
+    });
+    expect(accepted.accessToken).toBe("a");
+  });
+});

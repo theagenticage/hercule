@@ -943,6 +943,8 @@ export interface FakeAuthorizationServer {
   sendsIssuer: boolean;
   /** The `expires_in`, in seconds, of every access token it issues. */
   expiresIn: number;
+  /** The `token_type` of every access token it issues. */
+  tokenType: string;
   /**
    * The `expires_in` of the access token that the code exchange issues, when
    * it differs from `expiresIn`. A test makes it 0 to get a token that is stale
@@ -1012,7 +1014,7 @@ export const startFakeAuthorizationServer = (
     return Response.json({
       access_token: lastAccessToken,
       refresh_token: refreshToken,
-      token_type: "Bearer",
+      token_type: fake.tokenType,
       expires_in: issued === 1 ? (fake.firstExpiresIn ?? fake.expiresIn) : fake.expiresIn,
     });
   };
@@ -1109,6 +1111,7 @@ export const startFakeAuthorizationServer = (
     tokenPath: "/token",
     sendsIssuer: true,
     expiresIn: 3600,
+    tokenType: "Bearer",
     firstExpiresIn: undefined,
     refuseRefresh: false,
     redirectMetadataTo: undefined,

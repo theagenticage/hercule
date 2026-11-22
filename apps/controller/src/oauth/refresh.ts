@@ -62,11 +62,15 @@ export const makeRefreshPermits = (): RefreshPermits => {
   };
 };
 
-/** Where and as whom a refresh goes: the token endpoint, the client, and the optional RFC 8707 `resource`. */
+/**
+ * Where and as whom a refresh goes: the token endpoint, the client, the
+ * optional RFC 8707 `resource`, and `bearerOnly` (see `requestTokens`).
+ */
 export interface RefreshEndpoint {
   readonly tokenUrl: string;
   readonly client: OAuthClient;
   readonly resource?: string;
+  readonly bearerOnly?: boolean;
 }
 
 /**
