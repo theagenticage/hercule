@@ -4,7 +4,7 @@
  * rules on an address, and validating the three documents (protected resource
  * metadata, authorization server metadata, a client registration answer). The
  * requests themselves are tested against a fake authorization server in
- * `sign-in.integration.test.ts`.
+ * `oauth-sign-in.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";

@@ -55,7 +55,7 @@ import {
   type StoredMcpServer,
   type StoredMcpServerAvailability,
 } from "./repository";
-import { mcpServerOAuthSignIn, type SignInTarget } from "./sign-in";
+import { mcpServerOAuthSignIn, type SignInTarget } from "./oauth-sign-in";
 import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 
 /** What the plugin that offers an address's server is doing, as the refusal reports it. */
