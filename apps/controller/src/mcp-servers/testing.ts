@@ -931,6 +931,8 @@ export interface FakeApproval {
   readonly iss?: string | null;
   /** The `state` the redirect carries, instead of the one the request had. */
   readonly state?: string;
+  /** The `error` the redirect carries instead of a code, as `deny` does with `access_denied`. */
+  readonly error?: string;
 }
 
 /** What the fake authorization server was asked to do, for a test to check. */
@@ -965,6 +967,19 @@ export interface FakeAuthorizationServer {
   refuseRefresh: boolean;
   /** When set, every metadata request gets a 302 to this address. */
   redirectMetadataTo: string | undefined;
+  /**
+   * The `client_secret_expires_at` (seconds since the epoch) that registration
+   * gives a client with a secret. By default the secret never expires.
+   */
+  secretExpiresAt: number | undefined;
+  /** Makes the fake forget every client it registered, as an authorization server that purged them. */
+  forgetClients: () => void;
+  /**
+   * Makes the token endpoint hold the answer to every code exchange from now
+   * on, once it has received the request, until the returned function is
+   * called. The test waits for the request in `tokenRequests`.
+   */
+  holdCodeExchange: () => () => void;
   /** The forms the token endpoint received. */
   readonly tokenRequests: ReadonlyArray<Record<string, string>>;
   /** The JSON bodies the registration endpoint received. */
@@ -1012,6 +1027,7 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
   let accessTokens = new Set<string>();
   let issued = 0;
   let lastAccessToken = "";
+  let heldExchange: Promise<void> | undefined;
   const tokenRequests: Array<Record<string, string>> = [];
   const registrations: Array<Record<string, unknown>> = [];
   const authorizationRequests: Array<URL> = [];
@@ -1077,6 +1093,9 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
             ...body,
             client_id: clientId,
             client_secret: secret,
+            ...(fake.secretExpiresAt === undefined
+              ? {}
+              : { client_secret_expires_at: fake.secretExpiresAt }),
             token_endpoint_auth_method: "client_secret_post",
           },
           { status: 201 },
@@ -1122,6 +1141,7 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
         refreshTokens.delete(token);
         return issueTokens();
       }
+      await heldExchange;
       const code = codes.get(form.code ?? "");
       if (form.grant_type !== "authorization_code" || code === undefined)
         return refuse("invalid_grant");
@@ -1148,6 +1168,18 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
     issuesClientSecrets: false,
     clientSecrets,
     firstExpiresIn: undefined,
+    secretExpiresAt: undefined,
+    forgetClients: () => clients.clear(),
+    holdCodeExchange: () => {
+      let release = () => {};
+      heldExchange = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        heldExchange = undefined;
+        release();
+      };
+    },
     refuseRefresh: false,
     redirectMetadataTo: undefined,
     tokenRequests,
@@ -1166,8 +1198,8 @@ export const startFakeAuthorizationServer = (upstream: FakeUpstream): FakeAuthor
         "state",
         approval.state ?? (request.searchParams.get("state") as string),
       );
-      if (approval.deny === true) {
-        callback.searchParams.set("error", "access_denied");
+      if (approval.deny === true || approval.error !== undefined) {
+        callback.searchParams.set("error", approval.error ?? "access_denied");
         callback.searchParams.set("error_description", "the user said SECRET-DESCRIPTION");
       } else {
         callback.searchParams.set("code", code);

@@ -234,6 +234,79 @@ describe("a client of the authorization server", () => {
   });
 });
 
+describe("a client of the authorization server that no sign-in stored yet", () => {
+  it("is used again by the next start, so a start that is never finished registers one client", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+
+      const first = await startSignIn(rig.controller, serverId);
+      const second = await startSignIn(rig.controller, serverId);
+
+      expect(rig.authorizationServer.registrations).toHaveLength(1);
+      expect(new URL(first.authorizationUrl).searchParams.get("client_id")).toBe("client-1");
+      expect(new URL(second.authorizationUrl).searchParams.get("client_id")).toBe("client-1");
+    });
+  });
+
+  it("is registered again once its secret expired", async () => {
+    await withOAuthRig(async (rig) => {
+      const { authorizationServer } = rig;
+      authorizationServer.issuesClientSecrets = true;
+      authorizationServer.secretExpiresAt = Math.floor(Date.now() / 1000) + 60;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await startSignIn(rig.controller, serverId);
+      await startSignIn(rig.controller, serverId);
+      expect(authorizationServer.registrations).toHaveLength(1);
+
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 1000 });
+      const third = await startSignIn(rig.controller, serverId);
+      vi.useRealTimers();
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(new URL(third.authorizationUrl).searchParams.get("client_id")).toBe("client-2");
+    });
+  });
+
+  it("is registered again after the token endpoint did not accept it, and the next sign-in works", async () => {
+    await withOAuthRig(async (rig) => {
+      const { authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId);
+      authorizationServer.forgetClients();
+
+      const error = await readRefusal(
+        await requestFinishSignIn(rig.controller, serverId, callback),
+        409,
+      );
+      expect(error.details).toEqual({ reason: "sign-in-refused" });
+      expect(error.message).toContain("invalid_client");
+
+      const finished = await signInWithBrowser(rig, serverId);
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(finished.source).toMatchObject({ signIn: "oauth" });
+    });
+  });
+
+  it("is registered again after the authorization endpoint sent the browser back with invalid_client", async () => {
+    await withOAuthRig(async (rig) => {
+      const { authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId, { error: "invalid_client" });
+      authorizationServer.forgetClients();
+
+      expect(
+        (await readRefusal(await requestFinishSignIn(rig.controller, serverId, callback), 409))
+          .details,
+      ).toEqual({ reason: "sign-in-refused" });
+      const finished = await signInWithBrowser(rig, serverId);
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(finished.source).toMatchObject({ signIn: "oauth" });
+    });
+  });
+});
+
 describe("a client of the authorization server, when its authorization endpoint moved", () => {
   it("is replaced by a new one", async () => {
     await withOAuthRig(async (rig) => {
@@ -328,20 +401,18 @@ describe("the tokens of a sign-in", () => {
         authorizationServer.tokenRequests.filter((form) => form.grant_type === "refresh_token")
           .length;
       const before = refreshes();
+      const checkedBefore = (await readRow(controller)).checked_at;
 
       await requestCheck(controller, serverId);
       await eventually(
-        () => Promise.resolve(refreshes()),
-        (count) => count > before,
+        () => readRow(controller),
+        (row) => row.checked_at !== checkedBefore,
       );
-      // A loop would keep asking the provider; give it time to show. Each
-      // request of the check renews once, because each finds a token that is
-      // stale again, and then the asking stops.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const afterCheck = refreshes();
-      await new Promise((resolve) => setTimeout(resolve, 500));
 
-      expect(refreshes()).toBe(afterCheck);
+      // A loop of renewals never lets the check end, so the check ending is
+      // the proof. The bound only guards a loop that happens to end late.
+      expect(refreshes() - before).toBeGreaterThan(0);
+      expect(refreshes() - before).toBeLessThan(10);
       expect((await readRow(controller)).status).toBe("ready");
     });
   });
@@ -691,6 +762,72 @@ describe("finishing a sign-in", () => {
       // The void attempt sent neither its code nor its verifier.
       expect(rig.authorizationServer.tokenRequests).toEqual([]);
       expect(await readSignInColumns(rig.controller, serverId)).toMatchObject({ sign_in: "token" });
+    });
+  });
+
+  describe("that is overtaken while the token endpoint answers", () => {
+    /**
+     * Starts a finish whose token request the fake holds, and returns the
+     * means to let it go and to read how it ended. The finish already passed
+     * every check that came before the exchange.
+     */
+    const finishWhileExchangeIsHeld = async (rig: OAuthRig, serverId: string) => {
+      const callback = await startAndApprove(rig, serverId);
+      const release = rig.authorizationServer.holdCodeExchange();
+      const finishing = requestFinishSignIn(rig.controller, serverId, callback);
+      await eventually(
+        () => Promise.resolve(rig.authorizationServer.tokenRequests.length),
+        (count) => count === 1,
+      );
+      return { release, finishing };
+    };
+
+    /** Lets the exchange go, and checks that the finish failed as an attempt that is gone and that no token was stored. */
+    const expectGone = async (
+      rig: OAuthRig,
+      held: Awaited<ReturnType<typeof finishWhileExchangeIsHeld>>,
+    ) => {
+      held.release();
+      expect((await readRefusal(await held.finishing, 409)).details).toEqual({
+        reason: "sign-in-expired",
+      });
+      expect(await dumpDatabase(rig.controller)).not.toContain("access-token-1");
+    };
+
+    it("is refused when a newer start replaced the attempt", async () => {
+      await withOAuthRig(async (rig) => {
+        const serverId = await addServerThatNeedsSignIn(rig);
+        const held = await finishWhileExchangeIsHeld(rig, serverId);
+        await startSignIn(rig.controller, serverId);
+
+        await expectGone(rig, held);
+
+        await expectNotSignedIn(rig, serverId);
+      });
+    });
+
+    it("is refused when a token was pasted, and keeps the pasted token", async () => {
+      await withOAuthRig(async (rig) => {
+        const serverId = await addServerThatNeedsSignIn(rig);
+        const held = await finishWhileExchangeIsHeld(rig, serverId);
+        await readRecord(await sendToken(rig.controller, serverId, "pasted-token-1"));
+
+        await expectGone(rig, held);
+
+        expect(await readSignInColumns(rig.controller, serverId)).toMatchObject({
+          sign_in: "token",
+        });
+      });
+    });
+
+    it("is refused when the server was deleted", async () => {
+      await withOAuthRig(async (rig) => {
+        const serverId = await addServerThatNeedsSignIn(rig);
+        const held = await finishWhileExchangeIsHeld(rig, serverId);
+        await del(rig.controller.base, `/api/v1/mcp-servers/${serverId}`, rig.controller.token);
+
+        await expectGone(rig, held);
+      });
     });
   });
 
@@ -1081,10 +1218,10 @@ describe("what a sign-in leaves behind", () => {
       // What the provider really saw, not what the test assumes it saw.
       const exchanged = authorizationServer.tokenRequests.find((form) => form.code === code);
       const verifier = exchanged?.code_verifier;
-      // Each start that finds no stored client registers one.
+      // The second start reuses the client the first one registered.
       const clientSecrets = [...authorizationServer.clientSecrets.values()];
       expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
-      expect(clientSecrets).toHaveLength(2);
+      expect(clientSecrets).toHaveLength(1);
       expect(clientSecrets).toContain(exchanged?.client_secret);
 
       const secrets = [

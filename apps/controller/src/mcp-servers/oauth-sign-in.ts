@@ -13,9 +13,15 @@
  *   attempt, exchanges the code for tokens, and stores the sign-in in one
  *   transaction.
  *
- * A server has at most one attempt: a newer `start` replaces the older. A
- * per-server lock makes "start replaces the attempt" and "finish commits its
- * attempt" one after the other, never at once.
+ * A server has at most one attempt, kept in `attempts`. A `start` takes the
+ * server's place at once with a placeholder, which voids the older attempt, and
+ * replaces the placeholder with its attempt when its discovery is done. A
+ * start that fails removes its placeholder, so a failed start also leaves the
+ * server with no attempt. Every step of the map that decides who wins (take,
+ * claim, publish, drop) runs without waiting, so no lock is needed: the only
+ * wait that matters is the database write of `commit`, and the transaction
+ * checks there that the server's sign-in is still the one the attempt started
+ * from.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -40,7 +46,6 @@ import { AuditLog } from "../events";
 import {
   computeChallenge,
   exchangeCode,
-  makeRefreshPermits,
   ProviderRefused,
   ProviderUnreachable,
   REFRESH_TIMEOUT_SECONDS,
@@ -54,7 +59,7 @@ import {
   type RegisteredClient,
 } from "./authorization";
 import { mcpServerRepository } from "./repository";
-import { isBearerToken, McpServerSignIns } from "./sign-ins";
+import { isBearerToken, McpServerSignIns, type OAuthSignIn } from "./sign-ins";
 
 /** How long a started sign-in can be finished. */
 export const SIGN_IN_LIFETIME_MILLIS = 10 * 60 * 1000;
@@ -111,12 +116,18 @@ const isSameSecret = (a: string, b: string): boolean => {
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
+/** A start that is still discovering. It holds the server's place in `attempts`, so that the older attempt is void and nothing else is published meanwhile. */
+interface StartingAttempt {
+  readonly _tag: "Starting";
+}
+
 /**
  * A sign-in that was started and not finished. It holds everything `finish`
  * needs, so `finish` repeats no discovery: what the server's metadata said at
  * the start is what the answer is checked against.
  */
 interface Attempt {
+  readonly _tag: "Waiting";
   readonly serverId: string;
   /** The server's `sign_in_generation` when the attempt started. */
   readonly signInGeneration: number;
@@ -151,26 +162,73 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
 
   /** The attempts that were started and not finished, by server id: at most one per server. */
-  const attempts = new Map<string, Attempt>();
+  const attempts = new Map<string, Attempt | StartingAttempt>();
   /**
-   * The number of the newest `start` of each server. A start takes its number
-   * when it begins and publishes its attempt only while it is still the newest,
-   * so a slow start never replaces the attempt of a start that began later.
-   * It holds one small number per server that was ever started.
+   * The client each server's latest start registered, until a sign-in commits
+   * and stores one, so that a second start before that registers nothing again.
+   * It holds the authorization server it is for, which a start compares.
    */
-  const latestStarts = new Map<string, number>();
-  let startsBegun = 0;
-  // Its permits are plain per-key mutexes.
-  const locks = makeRefreshPermits();
-  const withServerLock = <A, E, R>(serverId: string, effect: Effect.Effect<A, E, R>) =>
-    locks.withPermit(`mcp-server-sign-in:${serverId}`, effect);
+  const unstoredClients = new Map<
+    string,
+    { readonly discovery: DiscoveredAuthorization; readonly client: RegisteredClient }
+  >();
+  /** The client id that the authorization server last rejected for each server, which no start reuses. */
+  const rejectedClientIds = new Map<string, string>();
 
-  /** Forgets every attempt that ran out. Runs inside the lock of the server it is called for. */
+  /** Forgets every attempt that ran out. Placeholders have no deadline. */
   const sweepExpired = (nowMillis: number): void => {
-    for (const [serverId, attempt] of attempts) {
-      if (attempt.expiresAtMillis <= nowMillis) attempts.delete(serverId);
+    for (const [serverId, entry] of attempts) {
+      if (entry._tag === "Waiting" && entry.expiresAtMillis <= nowMillis) attempts.delete(serverId);
     }
   };
+
+  /** Forgets `entry` when it is still the server's current one, so a newer entry stays. */
+  const forgetEntry = (serverId: string, entry: Attempt | StartingAttempt): void => {
+    if (attempts.get(serverId) === entry) attempts.delete(serverId);
+  };
+
+  /**
+   * Makes every later start register a new client for the server, because the
+   * authorization server no longer knows or accepts the one the attempt used.
+   */
+  const forgetClient = (attempt: Attempt): void => {
+    unstoredClients.delete(attempt.serverId);
+    rejectedClientIds.set(attempt.serverId, attempt.client.clientId);
+  };
+
+  /**
+   * Returns the client a start may use again for `discovery`, or `undefined`
+   * when it must register one: the client the server's last start registered
+   * and no sign-in stored yet, or else the client of the sign-in the server
+   * holds. It is reused only for the same issuer, token endpoint and
+   * authorization endpoint, while its secret has not expired, and unless the
+   * authorization server rejected it.
+   */
+  const findReusableClient = (
+    serverId: string,
+    discovery: DiscoveredAuthorization,
+    nowMillis: number,
+  ): Effect.Effect<RegisteredClient | undefined> =>
+    Effect.gen(function* () {
+      const isSameServer = (other: DiscoveredAuthorization | OAuthSignIn) =>
+        other.issuer === discovery.issuer &&
+        other.tokenEndpoint === discovery.tokenEndpoint &&
+        other.authorizationEndpoint === discovery.authorizationEndpoint;
+      const unstored = unstoredClients.get(serverId);
+      if (
+        unstored !== undefined &&
+        isSameServer(unstored.discovery) &&
+        (unstored.client.secretExpiresAtMillis ?? Infinity) > nowMillis
+      ) {
+        return unstored.client;
+      }
+      const stored = yield* signIns.readOAuth(serverId);
+      return Option.isSome(stored) &&
+        isSameServer(stored.value) &&
+        stored.value.client.clientId !== rejectedClientIds.get(serverId)
+        ? stored.value.client
+        : undefined;
+    });
 
   /**
    * Checks that the server still exists, is still added by URL, and still has
@@ -193,17 +251,17 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const expiredSignIn = (server: Pick<SignInTarget, "id">): InvalidState =>
+  const createExpiredSignInError = (server: Pick<SignInTarget, "id">): InvalidState =>
     createInvalidStateError(
       `This sign-in can no longer be finished: it ran out (it lasts ten minutes), a newer sign-in replaced it, or the server's sign-in changed. Start it again: hercule mcp-server sign-in ${server.id}`,
       { reason: "sign-in-expired" },
     );
 
-  const refusedSignIn = (what: string): InvalidState =>
+  const createRefusedSignInError = (what: string): InvalidState =>
     createInvalidStateError(`${what} Start the sign-in again.`, { reason: "sign-in-refused" });
 
   /** Runs `effect` with the HTTP client of this service, and no trace span (a span records the address and the error text). */
-  const outbound = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
+  const provideOutboundHttp = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
     effect.pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
@@ -216,7 +274,7 @@ const make = Effect.gen(function* () {
    * the user waits on it.
    */
   const exchange = (attempt: Attempt, code: string) =>
-    outbound(
+    provideOutboundHttp(
       exchangeCode({
         tokenUrl: attempt.discovery.tokenEndpoint,
         client: attempt.client,
@@ -242,9 +300,7 @@ const make = Effect.gen(function* () {
    * Takes the attempt the answer belongs to, so that no second answer with
    * the same `state` is used. Fails with `InvalidState` (`sign-in-expired`)
    * when the server has no attempt, the attempt ran out or is already taken,
-   * or the `state` is not the attempt's. The deadline is checked here, so an
-   * attempt that ran out is refused whether or not anything swept it away.
-   * Fails with `Validation` when the
+   * or the `state` is not the attempt's. Fails with `Validation` when the
    * client sent a whole address that is not the attempt's redirect address,
    * and then leaves the attempt as it is, so the user may paste the right one.
    */
@@ -252,42 +308,27 @@ const make = Effect.gen(function* () {
     server: Pick<SignInTarget, "id">,
     callback: ParsedCallback,
   ): Effect.Effect<Attempt, InvalidState | Validation> =>
-    withServerLock(
-      server.id,
-      Effect.gen(function* () {
-        const attempt = attempts.get(server.id);
-        if (attempt !== undefined && attempt.expiresAtMillis <= (yield* Clock.currentTimeMillis)) {
-          attempts.delete(server.id);
-          return yield* expiredSignIn(server);
-        }
-        if (
-          attempt === undefined ||
-          attempt.claimed ||
-          !isSameSecret(attempt.state, callback.state)
-        ) {
-          return yield* expiredSignIn(server);
-        }
-        if (
-          callback.address !== undefined &&
-          !isRedirectAddress(callback.address, attempt.redirectUri)
-        ) {
-          return yield* refuseCallback(
-            "this address is not the redirect address of the sign-in that waits: paste the address the browser ended on after you signed in to this server",
-          );
-        }
-        attempt.claimed = true;
-        return attempt;
-      }),
-    );
-
-  /** Forgets the attempt when it is still the server's current one. */
-  const dropAttempt = (attempt: Attempt) =>
-    withServerLock(
-      attempt.serverId,
-      Effect.sync(() => {
-        if (attempts.get(attempt.serverId) === attempt) attempts.delete(attempt.serverId);
-      }),
-    );
+    Effect.gen(function* () {
+      sweepExpired(yield* Clock.currentTimeMillis);
+      const attempt = attempts.get(server.id);
+      if (
+        attempt?._tag !== "Waiting" ||
+        attempt.claimed ||
+        !isSameSecret(attempt.state, callback.state)
+      ) {
+        return yield* createExpiredSignInError(server);
+      }
+      if (
+        callback.address !== undefined &&
+        !isRedirectAddress(callback.address, attempt.redirectUri)
+      ) {
+        return yield* refuseCallback(
+          "this address is not the redirect address of the sign-in that waits: paste the address the browser ended on after you signed in to this server",
+        );
+      }
+      attempt.claimed = true;
+      return attempt;
+    });
 
   /**
    * Checks the answer's `iss` parameter against the issuer the attempt started
@@ -303,7 +344,7 @@ const make = Effect.gen(function* () {
     (callback.iss === undefined && attempt.discovery.sendsIssuer) ||
     (callback.iss !== undefined && callback.iss !== attempt.discovery.issuer)
       ? Effect.fail(
-          refusedSignIn(
+          createRefusedSignInError(
             "The answer does not come from the authorization server that the sign-in started with, so it was refused.",
           ),
         )
@@ -322,13 +363,16 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<TokenSet, InvalidState> =>
     exchange(attempt, code).pipe(
       Effect.catchTag("ProviderRefused", (error: ProviderRefused) =>
-        Effect.fail(
-          refusedSignIn(
-            error.code === undefined
-              ? "The authorization server refused the code."
-              : `The authorization server refused the code (${error.code}).`,
-          ),
-        ),
+        Effect.suspend(() => {
+          if (error.code === "invalid_client") forgetClient(attempt);
+          return Effect.fail(
+            createRefusedSignInError(
+              error.code === undefined
+                ? "The authorization server refused the code."
+                : `The authorization server refused the code (${error.code}).`,
+            ),
+          );
+        }),
       ),
       Effect.catchTag("ProviderUnreachable", () =>
         Effect.fail(
@@ -351,83 +395,87 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Stores the sign-in in one transaction, under the server's lock, when the
-   * attempt is still the server's current one, it has not run out, the server
-   * still exists and is a server added by URL, and its `sign_in_generation` is
-   * the attempt's. Otherwise it writes nothing and fails with `InvalidState`
+   * Stores the sign-in in one transaction when the attempt is still the
+   * server's current one, it has not run out, the server still exists and is a
+   * server added by URL, and its `sign_in_generation` is the attempt's.
+   * Otherwise it writes nothing and fails with `InvalidState`
    * (`sign-in-expired`): the user pasted a token, replaced the server, or
    * started another sign-in while the browser and the token endpoint were
    * busy. The server goes back to `checking`, as `setToken` does, and the
    * audit entry says only that the sign-in is now OAuth.
+   *
+   * When the attempt lost, the tokens that the exchange already obtained are
+   * dropped without being revoked: OAuth and MCP require no revocation
+   * endpoint, and a server that has one is not asked for it.
+   *
+   * It takes no lock. A start that takes the server's place during the
+   * transaction cannot publish, because its own `sign_in_generation` check
+   * fails once this transaction has written.
    */
   const commit = (
     attempt: Attempt,
     tokens: TokenSet,
   ): Effect.Effect<void, InvalidState | SqlError> =>
-    withServerLock(
-      attempt.serverId,
-      Effect.gen(function* () {
-        const { serverId } = attempt;
-        if (
-          attempts.get(serverId) !== attempt ||
-          attempt.expiresAtMillis <= (yield* Clock.currentTimeMillis)
-        ) {
-          return yield* expiredSignIn({ id: serverId });
-        }
-        const stored = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            if (!(yield* isStillSameSignIn(serverId, attempt.signInGeneration))) return false;
-            const at = yield* nowIso;
-            const { discovery, client } = attempt;
-            yield* signIns.deleteAll(serverId);
-            yield* signIns.storeOAuth(serverId, {
-              issuer: discovery.issuer,
-              authorizationEndpoint: discovery.authorizationEndpoint,
-              tokenEndpoint: discovery.tokenEndpoint,
-              resource: discovery.resource,
-              ...(discovery.scope === undefined ? {} : { scope: discovery.scope }),
-              client: {
-                clientId: client.clientId,
-                ...(client.clientSecret === undefined ? {} : { clientSecret: client.clientSecret }),
-                authMethod: client.authMethod,
-              },
-              tokens,
-            });
-            yield* servers.writeOAuthSignIn(serverId, at);
-            yield* audit.append({
-              kind: "mcpServer.updated",
-              actor: yield* currentStamp,
-              record: { topic: "mcpServer", id: serverId },
-              payload: { mcpServerId: serverId, signIn: "oauth" },
-              at,
-            });
-            return true;
-          }),
-        );
-        attempts.delete(serverId);
-        if (!stored) return yield* expiredSignIn({ id: serverId });
-      }),
-    );
+    Effect.gen(function* () {
+      const { serverId } = attempt;
+      const nowMillis = yield* Clock.currentTimeMillis;
+      if (attempts.get(serverId) !== attempt || attempt.expiresAtMillis <= nowMillis) {
+        return yield* createExpiredSignInError({ id: serverId });
+      }
+      const stored = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (!(yield* isStillSameSignIn(serverId, attempt.signInGeneration))) return false;
+          const at = yield* nowIso;
+          const { discovery, client } = attempt;
+          yield* signIns.deleteAll(serverId);
+          yield* signIns.storeOAuth(serverId, {
+            issuer: discovery.issuer,
+            authorizationEndpoint: discovery.authorizationEndpoint,
+            tokenEndpoint: discovery.tokenEndpoint,
+            resource: discovery.resource,
+            ...(discovery.scope === undefined ? {} : { scope: discovery.scope }),
+            client: {
+              clientId: client.clientId,
+              ...(client.clientSecret === undefined ? {} : { clientSecret: client.clientSecret }),
+              authMethod: client.authMethod,
+            },
+            tokens,
+          });
+          yield* servers.writeOAuthSignIn(serverId, at);
+          yield* audit.append({
+            kind: "mcpServer.updated",
+            actor: yield* currentStamp,
+            record: { topic: "mcpServer", id: serverId },
+            payload: { mcpServerId: serverId, signIn: "oauth" },
+            at,
+          });
+          return true;
+        }),
+      );
+      forgetEntry(serverId, attempt);
+      if (!stored) return yield* createExpiredSignInError({ id: serverId });
+      unstoredClients.delete(serverId);
+    });
 
   return {
     /**
      * Starts a sign-in for a server added by URL and returns the address to
      * open in a browser, and when the sign-in runs out. It discovers the
-     * server's authorization server, registers a client for it (or keeps the
-     * one the server's last sign-in used, when that sign-in's issuer, token
-     * endpoint and authorization endpoint are the ones found now), and keeps
-     * the attempt in memory, replacing any attempt the server had. It writes
+     * server's authorization server, finds a client for it (the one the
+     * server's last start registered, the one its sign-in holds, or a new
+     * registration, in this order, as `findReusableClient` says), and keeps the
+     * attempt in memory, replacing any attempt the server had. It writes
      * nothing to the database, so a start that is slow cannot bring back a
      * secret that a delete, a Replace or a pasted token removed meanwhile.
      * `signInGeneration` is the server's `sign_in_generation`, read before this
      * call.
      *
-     * The discovery takes a while and runs outside the lock, so the attempt is
-     * published only when, under the lock, no newer start of this server has
-     * begun, the server is still a server added by URL, and its
-     * `sign_in_generation` is still `signInGeneration`. A start that lost one of
-     * these fails with `sign-in-expired` and leaves the newer attempt alone.
+     * The start takes the server's place when it begins, which voids the
+     * older attempt, and publishes its own attempt only if nothing took that
+     * place since and the server is still a server added by URL with the
+     * `sign_in_generation` it was given. A start that fails or loses leaves
+     * the server with no attempt, or with the newer start's.
      *
      * Fails with `InvalidState`: `sign-in-unsupported` when the server offers
      * no sign-in through the browser that Hercule can use, `source-unreadable`
@@ -439,64 +487,53 @@ const make = Effect.gen(function* () {
       signInGeneration: number,
       redirectUri: string,
     ): Effect.Effect<McpServerSignInStart, InvalidState | SqlError> =>
-      Effect.gen(function* () {
-        const startNumber = yield* withServerLock(
-          server.id,
-          Effect.sync(() => {
-            startsBegun += 1;
-            latestStarts.set(server.id, startsBegun);
-            return startsBegun;
-          }),
-        );
-        const discovery = yield* outbound(discoverAuthorization(server.url));
-        const stored = yield* signIns.readOAuth(server.id);
-        const client =
-          Option.isSome(stored) &&
-          stored.value.issuer === discovery.issuer &&
-          stored.value.tokenEndpoint === discovery.tokenEndpoint &&
-          stored.value.authorizationEndpoint === discovery.authorizationEndpoint
-            ? stored.value.client
-            : yield* outbound(registerClient(discovery));
-        const codeVerifier = buildRandomToken();
-        const state = buildRandomToken();
-        const expiresAtMillis = yield* withServerLock(
-          server.id,
-          Effect.gen(function* () {
-            const nowMillis = yield* Clock.currentTimeMillis;
-            sweepExpired(nowMillis);
-            if (
-              latestStarts.get(server.id) !== startNumber ||
-              !(yield* isStillSameSignIn(server.id, signInGeneration))
-            ) {
-              return yield* expiredSignIn(server);
-            }
-            const expiresAtMillis = nowMillis + SIGN_IN_LIFETIME_MILLIS;
-            attempts.set(server.id, {
-              serverId: server.id,
-              signInGeneration,
-              state,
-              codeVerifier,
-              redirectUri,
-              discovery,
-              client,
-              expiresAtMillis,
-              claimed: false,
-            });
-            return expiresAtMillis;
-          }),
-        );
-        return {
-          authorizationUrl: buildAuthorizationUrl({
-            authorizationEndpoint: discovery.authorizationEndpoint,
-            clientId: client.clientId,
-            redirectUri,
-            codeChallenge: computeChallenge(codeVerifier),
+      Effect.suspend(() => {
+        const starting: StartingAttempt = { _tag: "Starting" };
+        attempts.set(server.id, starting);
+        return Effect.gen(function* () {
+          const discovery = yield* provideOutboundHttp(discoverAuthorization(server.url));
+          const reused = yield* findReusableClient(
+            server.id,
+            discovery,
+            yield* Clock.currentTimeMillis,
+          );
+          const client = reused ?? (yield* provideOutboundHttp(registerClient(discovery)));
+          if (reused === undefined) unstoredClients.set(server.id, { discovery, client });
+          const codeVerifier = buildRandomToken();
+          const state = buildRandomToken();
+          const isSameSignIn = yield* isStillSameSignIn(server.id, signInGeneration);
+          const nowMillis = yield* Clock.currentTimeMillis;
+          // From here to the `set` nothing waits, so the placeholder cannot be replaced in between.
+          if (!isSameSignIn || attempts.get(server.id) !== starting) {
+            return yield* createExpiredSignInError(server);
+          }
+          sweepExpired(nowMillis);
+          const expiresAtMillis = nowMillis + SIGN_IN_LIFETIME_MILLIS;
+          attempts.set(server.id, {
+            _tag: "Waiting",
+            serverId: server.id,
+            signInGeneration,
             state,
-            resource: discovery.resource,
-            scope: discovery.scope,
-          }),
-          expiresAt: new Date(expiresAtMillis).toISOString(),
-        };
+            codeVerifier,
+            redirectUri,
+            discovery,
+            client,
+            expiresAtMillis,
+            claimed: false,
+          });
+          return {
+            authorizationUrl: buildAuthorizationUrl({
+              authorizationEndpoint: discovery.authorizationEndpoint,
+              clientId: client.clientId,
+              redirectUri,
+              codeChallenge: computeChallenge(codeVerifier),
+              state,
+              resource: discovery.resource,
+              scope: discovery.scope,
+            }),
+            expiresAt: new Date(expiresAtMillis).toISOString(),
+          };
+        }).pipe(Effect.onError(() => Effect.sync(() => forgetEntry(server.id, starting))));
       }).pipe(
         Effect.catchTag("AuthorizationUnsupported", (error) =>
           Effect.fail(
@@ -555,7 +592,10 @@ const make = Effect.gen(function* () {
           yield* checkIssuer(attempt, callback);
           if (callback.code === undefined) {
             const { error } = callback;
-            return yield* refusedSignIn(
+            // The authorization server does not accept the client, so the next start registers another.
+            if (error === "invalid_client" || error === "unauthorized_client")
+              forgetClient(attempt);
+            return yield* createRefusedSignInError(
               error !== undefined && STANDARD_AUTHORIZATION_ERRORS.has(error)
                 ? `The authorization server did not sign you in (${error}).`
                 : "The authorization server did not sign you in.",
@@ -565,11 +605,11 @@ const make = Effect.gen(function* () {
           // start makes the attempt void, and then the code and the verifier
           // must not leave this process.
           if (!(yield* isStillSameSignIn(attempt.serverId, attempt.signInGeneration))) {
-            return yield* expiredSignIn({ id: attempt.serverId });
+            return yield* createExpiredSignInError({ id: attempt.serverId });
           }
           const tokens = yield* exchangeForTokens(attempt, callback.code);
           yield* commit(attempt, tokens);
-        }).pipe(Effect.onError(() => dropAttempt(attempt)));
+        }).pipe(Effect.onError(() => Effect.sync(() => forgetEntry(attempt.serverId, attempt))));
       }),
   };
 });
