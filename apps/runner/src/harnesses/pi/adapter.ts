@@ -1,10 +1,10 @@
 /**
  * The pi adapter. It runs one pi process per session, plus one per running
- * subagent, and talks to each in pi's RPC mode. A session's processes share a
- * private agent folder built from the account's Harness Home when the session
- * starts (see `agent-folder.ts`), and the transcripts go to the home's own
- * `sessions` folder. If pi used the developer's own directory, Hercule's
- * sessions would mix with the user's login, skills and settings. Two
+ * subagent, and talks to each in pi's RPC mode. Each process runs in a private
+ * agent folder of its own, built from the account's Harness Home right before
+ * the process is spawned (see `agent-folder.ts`), and the transcripts go to
+ * the home's own `sessions` folder. If pi used the developer's own directory,
+ * Hercule's sessions would mix with the user's login, skills and settings. Two
  * exceptions are named on the command line:
  *
  * - a session with a library skills folder loads the skills in it, which
@@ -115,7 +115,13 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { createAgentFolder, makeModelFilesWriter, type AgentFolder } from "./agent-folder";
+import {
+  createAgentFolder,
+  makeModelFilesBuilder,
+  removeAgentFolder,
+  writeModelFiles,
+  type ModelFiles,
+} from "./agent-folder";
 import { writeFileAtomically } from "./atomic-file";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
@@ -417,11 +423,13 @@ interface Held {
   /** The subagents running now, by id. An ended subagent is removed. */
   readonly subagents: Map<SubagentId, Subagent>;
   /**
-   * The session's private agent folder. Every pi process of the session, the
-   * subagents' too, runs in it, so a subagent sees the same declared models as
-   * its parent. It is removed when the last of those processes has exited.
+   * The model files the session's launch computed. Each pi process of the
+   * session, the subagents' too, gets them written into an agent folder of its
+   * own, so a subagent loads the same declared models as its parent did at
+   * launch. They do not change during the session: a model change goes to pi
+   * as a command and touches no file.
    */
-  readonly folder: AgentFolder;
+  readonly modelFiles: ModelFiles;
   /**
    * How many subagent pi processes have not been released yet: those running,
    * and those stopped whose process has not exited or been cleaned up. The
@@ -650,8 +658,8 @@ const owesAnswer = (state: Normalizing): boolean =>
 const buildSessionsDir = (home: string): string => join(home, "sessions");
 
 /**
- * Returns the path of the copy of the extension one agent loads, in the
- * session's private agent folder, named after the agent: the session's id for
+ * Returns the path of the copy of the extension one agent loads, in that
+ * agent's private agent folder, named after the agent: the session's id for
  * the session's own agent, or the subagent's id (see `spawnAgent`).
  */
 const buildExtensionPath = (agentFolder: string, agentId: string): string =>
@@ -659,8 +667,9 @@ const buildExtensionPath = (agentFolder: string, agentId: string): string =>
 
 /**
  * Returns the path the Agent's instructions for one session are written to, in
- * the session's private agent folder. When the `--append-system-prompt` value names a file
- * pi can open, pi reads that file; otherwise it uses the value as the text.
+ * the private agent folder of the session's own agent. When the
+ * `--append-system-prompt` value names a file pi can open, pi reads that file;
+ * otherwise it uses the value as the text.
  * The adapter always passes a path, for two reasons:
  *
  * - instructions on the command line would be visible in the machine's
@@ -1189,12 +1198,15 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * refuses it or the process cannot start, and when the process starts on
    * another model than the session's.
    *
-   * The subagent's pi runs in the session's private agent folder, so it loads
-   * the same declared models as its parent and nothing here writes them again.
-   * The process is spawned before this returns. The launch then waits for the
-   * new pi's first answer, and the session can be stopped, or the call ended,
-   * during that wait. So it checks again before it sends the task, and closes
-   * the process when the subagent is no longer wanted.
+   * The subagent's pi runs in a private agent folder of its own, created here
+   * from the model files the session's launch computed and removed when that
+   * pi has exited. The folder is never the parent's, so nothing the parent
+   * writes into its folder (a `models.json` or an `mcp.json`, say) reaches the
+   * subagent, and the subagent loads the same declared models its parent did
+   * at launch. The process is spawned before this returns. The launch then
+   * waits for the new pi's first answer, and the session can be stopped, or the
+   * call ended, during that wait. So it checks again before it sends the task,
+   * and closes the process when the subagent is no longer wanted.
    */
   const startSubagent = (
     held: Held,
@@ -1217,32 +1229,35 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     }
     const subagentId = crypto.randomUUID();
     const depth = parent.depth + 1;
-    const extensionFile = buildExtensionPath(held.folder.path, subagentId);
     let child: PiChild;
-    let releaseFolder = (): void => undefined;
     try {
-      releaseFolder = held.folder.borrow();
-      child = spawnAgent(
-        [
-          held.binary,
-          ...buildArgv(
-            held.spec,
-            held.ctx,
-            held.modelSelection,
-            { kind: "subagent" },
-            extensionFile,
-          ),
-        ],
-        buildAgentEnv(held.ctx, held.spec, depth, extensionFile, held.folder.path),
-        held.ctx.cwd,
-        extensionFile,
-        () => {
-          held.subagentProcesses -= 1;
-          releaseFolder();
-        },
-      );
+      const folder = createAgentFolder(held.modelFiles);
+      const extensionFile = buildExtensionPath(folder, subagentId);
+      try {
+        child = spawnAgent(
+          [
+            held.binary,
+            ...buildArgv(
+              held.spec,
+              held.ctx,
+              held.modelSelection,
+              { kind: "subagent" },
+              extensionFile,
+            ),
+          ],
+          buildAgentEnv(held.ctx, held.spec, depth, extensionFile, folder),
+          held.ctx.cwd,
+          extensionFile,
+          () => {
+            held.subagentProcesses -= 1;
+            removeAgentFolder(folder);
+          },
+        );
+      } catch (error) {
+        removeAgentFolder(folder);
+        throw error;
+      }
     } catch (error) {
-      releaseFolder();
       const message = error instanceof Error ? error.message : String(error);
       refuse(`The subagent could not start: ${message}`);
       warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
@@ -1565,7 +1580,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     };
   };
 
-  const writeModelFiles = makeModelFilesWriter(seam.spawn);
+  const buildModelFiles = makeModelFilesBuilder(seam.spawn);
 
   /**
    * Starts one agent's pi process with `argv`, on its own copy of the
@@ -1647,8 +1662,8 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * controller rotates the session, not its subagents, so a subagent that could
    * not compact would have no way to free its context. `extensionFile` is the
    * agent's own copy of the extension. When the session has an edit watch,
-   * every agent gets the marks directory. `agentFolder` is the session's private
-   * agent folder, which becomes pi's agent directory.
+   * every agent gets the marks directory. `agentFolder` is the agent's own
+   * private agent folder, which becomes pi's agent directory.
    */
   const buildAgentEnv = (
     ctx: HarnessRunnerContext,
@@ -1747,13 +1762,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   ): Effect.Effect<TextGenerationOutcome, string> =>
     Effect.acquireUseRelease(
       // The scratch directory is pi's agent directory for this call: the
-      // account's model files are copied into it, with the models the request
-      // carries declared (see `makeModelFilesWriter`).
-      writeModelFiles(ctx.cwd, ctx.binary, ctx, buildEnv(ctx)).pipe(
+      // account's model files are written into it, with the models the request
+      // carries declared (see `makeModelFilesBuilder`).
+      buildModelFiles(ctx.binary, ctx, buildEnv(ctx)).pipe(
         Effect.mapError(describeError),
-        Effect.andThen(
+        Effect.andThen((files) =>
           Effect.try({
             try: () => {
+              writeModelFiles(ctx.cwd, files);
               const extensionFile = join(ctx.cwd, "extension.ts");
               const instructionsFile = join(ctx.cwd, "instructions.txt");
               writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
@@ -1944,62 +1960,58 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           );
         }
         const instructions = buildSessionInstructions(ctx.herculeTool.orientation, spec);
-        // The session's pi processes all run in one private agent folder
-        // (see `AgentFolder`), which also holds the files only they read:
-        // the extension and the instructions.
-        const folder = yield* Effect.try({
-          try: () => {
-            mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-            return createAgentFolder();
-          },
-          catch: (error) => buildPrepareFailure(error),
+        yield* Effect.try({
+          try: () => mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 }),
+          catch: buildPrepareFailure,
         });
+        // Computed once, before any folder exists. The session's own pi and
+        // each subagent's get these files written into a folder of their own.
+        const modelFiles = yield* buildModelFiles(binary, ctx, buildEnv(ctx)).pipe(
+          Effect.mapError(buildPrepareFailure),
+        );
+        // The session's own agent gets a private agent folder of its own,
+        // which also holds the files only its pi reads: the extension and the
+        // instructions. Each subagent gets another one (see `startSubagent`).
+        const folder = yield* Effect.try({
+          try: () => createAgentFolder(modelFiles),
+          catch: buildPrepareFailure,
+        });
+        // A launch that fails or is interrupted before its pi starts has no
+        // process to remove the folder.
+        const removeFolder = Effect.sync(() => removeAgentFolder(folder));
         const systemPromptFile =
-          instructions === undefined ? undefined : buildSystemPromptPath(folder.path);
-        const extensionFile = buildExtensionPath(folder.path, sessionId);
+          instructions === undefined ? undefined : buildSystemPromptPath(folder);
+        const extensionFile = buildExtensionPath(folder, sessionId);
         yield* Effect.try({
           try: () => {
             if (systemPromptFile !== undefined && instructions !== undefined) {
               writeFileAtomically(systemPromptFile, instructions);
             }
           },
-          catch: (error) => error,
-        }).pipe(
-          Effect.andThen(writeModelFiles(folder.path, binary, ctx, buildEnv(ctx))),
-          Effect.mapError(buildPrepareFailure),
-          // A launch that fails or is interrupted before its pi starts has
-          // no process to remove the folder.
-          Effect.onError(() => Effect.sync(folder.discard)),
-        );
+          catch: buildPrepareFailure,
+        }).pipe(Effect.onError(() => removeFolder));
         const child = yield* Effect.try({
-          try: () => {
-            const releaseFolder = folder.borrow();
-            try {
-              return spawnAgent(
-                [
-                  binary,
-                  ...buildArgv(
-                    spec,
-                    ctx,
-                    spec.modelSelection,
-                    { kind: "session", sessionId, transcript, systemPromptFile },
-                    extensionFile,
-                  ),
-                ],
-                buildAgentEnv(ctx, spec, 0, extensionFile, folder.path),
-                // The session's working directory. pi resolves every relative
-                // path against the directory it starts in, so a child that
-                // inherited the runner's directory would write the user's work
-                // into whatever directory the runner was started from.
-                ctx.cwd,
-                extensionFile,
-                releaseFolder,
-              );
-            } catch (error) {
-              releaseFolder();
-              throw error;
-            }
-          },
+          try: () =>
+            spawnAgent(
+              [
+                binary,
+                ...buildArgv(
+                  spec,
+                  ctx,
+                  spec.modelSelection,
+                  { kind: "session", sessionId, transcript, systemPromptFile },
+                  extensionFile,
+                ),
+              ],
+              buildAgentEnv(ctx, spec, 0, extensionFile, folder),
+              // The session's working directory. pi resolves every relative
+              // path against the directory it starts in, so a child that
+              // inherited the runner's directory would write the user's work
+              // into whatever directory the runner was started from.
+              ctx.cwd,
+              extensionFile,
+              () => removeAgentFolder(folder),
+            ),
           catch: (error) => {
             if (!(error instanceof SpawnFailed)) {
               // A failed file write before the spawn.
@@ -2012,7 +2024,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               ? buildHarnessNotInstalled(PI_NAME)
               : buildHarnessNotRunnable(PI_NAME, describeError(error));
           },
-        });
+        }).pipe(Effect.onError(() => removeFolder));
         // A resumed session continues the native session. A fork is a new
         // native session, created under this session's id.
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
@@ -2043,7 +2055,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           binary,
           root,
           subagents: new Map(),
-          folder,
+          modelFiles,
           subagentProcesses: 0,
           parks: new Map(),
           modelSelection: spec.modelSelection,
