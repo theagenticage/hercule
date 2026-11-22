@@ -436,8 +436,8 @@ const textOf = (answer: Answer): string => answer.body.result.content[0]!.text;
 /** How the Thread's line about a refused call starts. A start's own warning about servers it left out does not. */
 const REFUSAL_WARNING_PREFIX = "A tool call was refused.";
 
-/** The `runtime.warning` events a refused call wrote to a session, in order. */
-const readWarnings = async (sessionId: string) => {
+/** The `runtime.warning` events of a session whose message starts with `prefix`, in order. By default, those a refused call wrote. */
+const readWarnings = async (sessionId: string, prefix = REFUSAL_WARNING_PREFIX) => {
   const rows = await Effect.runPromise(
     Effect.orDie(
       arranged.harness.sql<{ readonly event: string }>`
@@ -455,7 +455,7 @@ const readWarnings = async (sessionId: string) => {
           readonly mcpServers?: ReadonlyArray<{ mcpServerId: string; reason: string }>;
         },
     )
-    .filter((warning) => warning.message.startsWith(REFUSAL_WARNING_PREFIX));
+    .filter((warning) => warning.message.startsWith(prefix));
 };
 
 /** Waits until the controller has stored a turn event of the session, so the gateway sees the turn it opened or closed. */
@@ -1538,6 +1538,48 @@ describe("tool names that no list and no restart can change", () => {
           .isError,
       ).toBeUndefined();
       expect(readUpstreamTools(mark)).toEqual(["search-pages"]);
+    });
+  });
+});
+
+describe("tools a server lists that clash on their names", () => {
+  /** Two original names that share a cut prefix and the first 24 bits of their hashes, so one server's tools clash. */
+  const CLASHING_TOOLS = [
+    { name: `${"a".repeat(80)}.1780`, description: "Clashes with its sibling" },
+    { name: `${"a".repeat(80)}.3667`, description: "Clashes with its sibling" },
+  ];
+  const ECHO = { name: "echo", description: "Echoes its text" };
+  const NOT_OFFERED_WARNING_PREFIX = 'The MCP server "notion" lists';
+
+  it("offers neither of them, tells the Thread once with the server and the count and no tool name, and tells it again when the set changes", async () => {
+    await withNotion([ECHO, ...CLASHING_TOOLS], async (notion, replaceTools) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const { sessionId } = await initialize(thread.token);
+      const readNotOfferedWarnings = () =>
+        readWarnings(thread.session.id, NOT_OFFERED_WARNING_PREFIX);
+
+      expect(await listToolNames(thread.token, sessionId)).toEqual(["notion__echo"]);
+      const [warning, ...others] = await eventually(
+        readNotOfferedWarnings,
+        (warnings) => warnings.length >= 1,
+      );
+      expect(others).toEqual([]);
+      expect(warning?.message).toContain("2 tools that are not offered to this Thread");
+      expect(warning?.message).not.toContain("aaaa");
+
+      // The same set listed again, on another client, is told no more.
+      const other = await initialize(thread.token);
+      await listToolNames(thread.token, other.sessionId);
+      await listToolNames(thread.token, sessionId);
+      expect(await readNotOfferedWarnings()).toHaveLength(1);
+
+      // The server drops one of them, so the other is offered. When both come back, the Thread is told again.
+      await replaceTools([ECHO, CLASHING_TOOLS[0]!]);
+      expect(await listToolNames(thread.token, sessionId)).toHaveLength(2);
+      expect(await readNotOfferedWarnings()).toHaveLength(1);
+      await replaceTools([ECHO, ...CLASHING_TOOLS]);
+      await listToolNames(thread.token, sessionId);
+      expect(await readNotOfferedWarnings()).toHaveLength(2);
     });
   });
 });

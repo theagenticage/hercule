@@ -85,6 +85,8 @@ export interface McpSession {
 export interface WarningState {
   /** When the Thread was last told about each refusal. */
   readonly seen: Map<string, SeenWarning>;
+  /** For each server name, the set of its tools the Thread was last told are not offered (`claimLeftOutWarnings`). */
+  readonly leftOutTold: Map<string, string>;
   /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
   readonly writing: Semaphore.Semaphore;
 }
@@ -189,7 +191,7 @@ export const makeTokenStates = Effect.gen(function* () {
       runningCalls: new Set(),
       offeredWithoutSession: new Map(),
       admission: Semaphore.makeUnsafe(1),
-      warnings: { seen: new Map(), writing: Semaphore.makeUnsafe(1) },
+      warnings: { seen: new Map(), leftOutTold: new Map(), writing: Semaphore.makeUnsafe(1) },
     };
     states.set(tokenHash, created);
     return created;

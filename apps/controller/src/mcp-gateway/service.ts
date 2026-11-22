@@ -20,7 +20,9 @@ import * as Stream from "effect/Stream";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpSchema } from "effect/ai";
+import { absorbFailures } from "../absorbing";
 import type { SessionActor } from "../actor";
+import { SessionService } from "../sessions";
 import { makeCallPolicy } from "./call-policy";
 import {
   buildDiscoverResult,
@@ -51,10 +53,12 @@ import {
   type RequestId,
   type RequestRefusal,
 } from "./protocol";
+import { buildLeftOutToolsWarning, claimLeftOutWarnings } from "./left-out-tools";
 import { makeFreshReads } from "./reads";
 import { buildTooManyCallsRefusal } from "./refusals";
 import { buildServedInstructions, buildToolDefinition, projectTools } from "./served";
 import { buildServerSentBody } from "./streams";
+import type { ToolKey } from "./tool-names";
 import {
   cancelCall,
   hasRoomForListenStream,
@@ -202,11 +206,33 @@ const make = Effect.gen(function* () {
   const reads = yield* makeFreshReads;
   const tokenStates = yield* makeTokenStates;
   const callPolicy = yield* makeCallPolicy;
+  const sessionService = yield* SessionService;
 
   /** Reads the instructions the session gets. They need the served servers but no tool names. */
   const readInstructions = (actor: SessionActor): Effect.Effect<string> =>
     Effect.map(reads.readServedAvailability(actor), (served) =>
       buildServedInstructions(served, actor),
+    );
+
+  /**
+   * Tells the Thread about the servers whose tools are left out of a list,
+   * once per token and server until the set of left-out tools changes. A
+   * failed write is logged and changes nothing for the agent.
+   */
+  const warnThreadOfLeftOutTools = (
+    state: TokenState,
+    leftOut: ReadonlyArray<ToolKey>,
+  ): Effect.Effect<void> =>
+    absorbFailures(
+      "Writing the warning about tools that are not offered failed",
+      state.warnings.writing.withPermits(1)(
+        Effect.forEach(
+          claimLeftOutWarnings(state.warnings.leftOutTold, leftOut),
+          (server) =>
+            sessionService.writeRuntimeWarning(state.sessionId, buildLeftOutToolsWarning(server)),
+          { discard: true },
+        ),
+      ),
     );
 
   const initialize = (
@@ -241,13 +267,14 @@ const make = Effect.gen(function* () {
       for (const { name, serverId, serverName, tool } of tools) {
         recordOffer(state, session, name, { serverId, serverName, tool });
       }
-      // One line per list, with a count and no tool name: the names come from
-      // outside servers and one list can leave out many tools.
+      // The log gets one line per list, with a count and no tool name: the
+      // names come from outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
         yield* Effect.logWarning(
           `MCP gateway: ${leftOut.length} tool(s) have a name that is not valid text or is another tool's name on their server, and are not offered to session ${actor.sessionId}`,
         );
       }
+      yield* warnThreadOfLeftOutTools(state, leftOut);
       return respondJson(
         buildRpcResult(id, buildToolsListResult(era, tools.map(buildToolDefinition))),
       );
