@@ -9,13 +9,19 @@
  * case the screens exist to handle: a list holds only one of them.
  */
 import { describe, expect, it } from "vitest";
+import type { McpServer } from "@hercule/contract";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  buildMcpControllerHandlers,
+  buildMcpWorld,
+} from "@hercule/client-core/mcp-servers/testing";
 import {
   buildErrorBody,
   readPageText,
   renderApp,
   stubApi,
+  type Call,
   type Handler,
 } from "../../../../app/testing";
 
@@ -24,18 +30,7 @@ const makeId = (kind: string, n: number): string =>
 
 const AT = "2026-11-20T09:00:00.000Z";
 
-interface ServerFixture {
-  readonly id: string;
-  readonly name: string;
-  readonly source: { kind: "plugin"; contributionId: string; connectionId: string };
-  readonly enabled: boolean;
-  readonly status: string;
-  readonly statusDetail: string | null;
-  readonly tools: readonly { name: string; description: string }[];
-  readonly checkedAt: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
+type ServerFixture = McpServer;
 
 interface ProjectFixture {
   readonly id: string;
@@ -157,18 +152,7 @@ const S_CONTEXT = buildServer(6, "context7", C_CONTEXT, {
   checkedAt: null,
   tools: [],
 });
-/** Every server a test may read by id. A server a test removes from `world` answers `not_found`. */
-const ALL_SERVERS = [S_WORK, S_HOBBY, S_LINEAR, S_NOTION, S_GITHUB, S_CONTEXT];
 const NEW_SERVER_ID = makeId("5", 90);
-
-/** Returns the server the controller creates when a Connection's switch is turned on: Grafana, still checking. */
-const buildCreatedServer = (source: ServerFixture["source"]): ServerFixture =>
-  buildServer(90, "grafana", source.connectionId, {
-    id: NEW_SERVER_ID,
-    status: "checking",
-    checkedAt: null,
-    tools: [],
-  });
 
 const P_WEBSHOP = makeId("a", 1);
 const P_PAYMENTS = makeId("a", 2);
@@ -185,91 +169,47 @@ const buildProject = (
   updatedAt: AT,
 });
 
-/** What the stub controller holds. A test changes it to play a change made elsewhere. */
-interface World {
-  servers: ServerFixture[];
-  projects: ProjectFixture[];
-  defaultIds: string[];
-}
+const buildWorld = () =>
+  buildMcpWorld<ProjectFixture>({
+    servers: [S_WORK, S_HOBBY, S_LINEAR, S_NOTION, S_GITHUB, S_CONTEXT],
+    // The webshop project also names Linear, so a change to its Sentry choice
+    // must keep it.
+    projects: [
+      buildProject(P_WEBSHOP, "webshop", [S_WORK.id, S_LINEAR.id]),
+      buildProject(P_PAYMENTS, "payments", []),
+      buildProject(P_OPS, "ops", [S_HOBBY.id]),
+    ],
+    defaultIds: [S_GITHUB.id],
+  });
 
-const buildWorld = (): World => ({
-  servers: [S_WORK, S_HOBBY, S_LINEAR, S_NOTION, S_GITHUB, S_CONTEXT],
-  // The webshop project also names Linear, so a change to its Sentry choice
-  // must keep it.
-  projects: [
-    buildProject(P_WEBSHOP, "webshop", [S_WORK.id, S_LINEAR.id]),
-    buildProject(P_PAYMENTS, "payments", []),
-    buildProject(P_OPS, "ops", [S_HOBBY.id]),
-  ],
-  defaultIds: [S_GITHUB.id],
-});
+type World = ReturnType<typeof buildWorld>;
 
-const readSettings = (world: World) => ({
-  controller: {},
-  user: {
+const FAKE_OPTIONS = {
+  createdIds: [NEW_SERVER_ID],
+  // The app shows its first-run steps unless these are set.
+  otherUserSettings: {
     "onboarding.completedSteps": ["timezone", "assistant"],
     timezone: "Europe/Amsterdam",
-    "thread.mcpServerIds": world.defaultIds,
   },
-});
+};
 
-/** Builds a stub controller over `world` that accepts every write and applies it to `world`. */
+/** Returns the answer the shared fake controller gives `call`, for a test that holds the request first. */
+const answerAsFake = (world: World, route: string, call: Call) => {
+  const handler = buildMcpControllerHandlers(world, FAKE_OPTIONS)[route]!;
+  return typeof handler === "function" ? handler(call) : handler;
+};
+
+/** Builds a stub controller over `world`: the shared fake, and the setup state, the plugins and the Connections. */
 const buildController = (
   world: World,
   extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> => {
-  const handlers: Record<string, Handler> = {
-    "GET /api/v1/setup": { body: { complete: true } },
-    "GET /api/v1/settings": () => ({ body: readSettings(world) }),
-    "PATCH /api/v1/settings": (call) => {
-      const patch = call.body as { user: { "thread.mcpServerIds": string[] } };
-      world.defaultIds = patch.user["thread.mcpServerIds"];
-      return { body: readSettings(world) };
-    },
-    "GET /api/v1/plugins": { body: PLUGINS },
-    "GET /api/v1/connections": { body: { items: CONNECTIONS } },
-    "GET /api/v1/projects": () => ({ body: { items: world.projects } }),
-    "GET /api/v1/mcp-servers": () => ({ body: { items: world.servers } }),
-    "POST /api/v1/mcp-servers": (call) => {
-      const created = buildCreatedServer((call.body as { source: ServerFixture["source"] }).source);
-      world.servers.push(created);
-      return { body: created };
-    },
-  };
-  for (const project of world.projects) {
-    handlers[`PATCH /api/v1/projects/${project.id}`] = (call) => {
-      const { mcpServerIds } = call.body as { mcpServerIds: string[] };
-      const index = world.projects.findIndex((each) => each.id === project.id);
-      world.projects[index] = { ...world.projects[index]!, mcpServerIds };
-      return { body: world.projects[index] };
-    };
-  }
-  for (const server of ALL_SERVERS) {
-    const path = `/api/v1/mcp-servers/${server.id}`;
-    handlers[`GET ${path}`] = () => {
-      const found = world.servers.find((each) => each.id === server.id);
-      return found === undefined
-        ? { status: 404, body: buildErrorBody("not_found", "no such server") }
-        : { body: found };
-    };
-    handlers[`PATCH ${path}`] = (call) => {
-      const { enabled } = call.body as { enabled: boolean };
-      const index = world.servers.findIndex((each) => each.id === server.id);
-      world.servers[index] = { ...world.servers[index]!, enabled };
-      return { body: world.servers[index] };
-    };
-    handlers[`POST ${path}/check`] = { body: {} };
-    handlers[`DELETE ${path}`] = () => {
-      world.servers = world.servers.filter((each) => each.id !== server.id);
-      world.projects = world.projects.map((project) => ({
-        ...project,
-        mcpServerIds: project.mcpServerIds.filter((id) => id !== server.id),
-      }));
-      return { body: {} };
-    };
-  }
-  return { ...handlers, ...extra };
-};
+): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/setup": { body: { complete: true } },
+  "GET /api/v1/plugins": { body: PLUGINS },
+  "GET /api/v1/connections": { body: { items: CONNECTIONS } },
+  ...buildMcpControllerHandlers(world, FAKE_OPTIONS),
+  ...extra,
+});
 
 const openApp = async (
   path: string,
@@ -404,11 +344,7 @@ describe("Settings > MCP servers > the list", () => {
       extra: {
         "POST /api/v1/mcp-servers": async (call) => {
           await gate.opened;
-          const created = buildCreatedServer(
-            (call.body as { source: ServerFixture["source"] }).source,
-          );
-          world.servers.push(created);
-          return { body: created };
+          return answerAsFake(world, "POST /api/v1/mcp-servers", call);
         },
       },
     });
@@ -561,7 +497,7 @@ describe("Settings > MCP servers > threads without a project", () => {
     );
     // Two Sentry accounts are one row, with a choice of account.
     const sentry = within(dialog).getByRole("checkbox", { name: "sentry" });
-    expect(readPageText(dialog)).toContain("Sentry Connection, 2 accounts");
+    expect(readPageText(dialog)).toContain("Sentry Connection · 2 accounts");
     expect(within(dialog).getAllByRole("checkbox")).toHaveLength(5);
 
     await user.click(sentry);
@@ -1083,6 +1019,19 @@ describe("Settings > MCP servers > one server's page > Remove", () => {
     expect(listWrites(api)).toEqual([]);
   });
 
+  it("names the threads without a project when the default list names the server", async () => {
+    const user = userEvent.setup();
+    const world = buildWorld();
+    world.defaultIds = [S_WORK.id];
+    await openPage(S_WORK, { world });
+
+    await user.click(await screen.findByRole("button", { name: "Remove server…" }));
+
+    expect(readPageText(screen.getByRole("group", { name: "Remove sentry work?" }))).toContain(
+      "webshop and threads without a project name it.",
+    );
+  });
+
   it("deletes the server and goes back to the list", async () => {
     const user = userEvent.setup();
     const { api, router } = await openPage(S_WORK);
@@ -1137,13 +1086,10 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
     refusal?: unknown,
   ) =>
     ({
-      "PATCH /api/v1/settings": async (call: { body: unknown }) => {
+      "PATCH /api/v1/settings": async (call: Call) => {
         await gate.opened;
         if (refusal !== undefined) return refusal as never;
-        world.defaultIds = (call.body as { user: { "thread.mcpServerIds": string[] } }).user[
-          "thread.mcpServerIds"
-        ];
-        return { body: readSettings(world) };
+        return answerAsFake(world, "PATCH /api/v1/settings", call);
       },
     }) satisfies Record<string, Handler>;
 
@@ -1155,16 +1101,13 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
       world,
       extra: {
         "PATCH /api/v1/settings": (call) => {
-          world.defaultIds = (call.body as { user: { "thread.mcpServerIds": string[] } }).user[
-            "thread.mcpServerIds"
-          ];
           reads.fail = true;
-          return { body: readSettings(world) };
+          return answerAsFake(world, "PATCH /api/v1/settings", call);
         },
-        "GET /api/v1/settings": () =>
+        "GET /api/v1/settings": (call) =>
           reads.fail
             ? { status: 500, body: buildErrorBody("internal", "The settings could not be read.") }
-            : { body: readSettings(world) },
+            : answerAsFake(world, "GET /api/v1/settings", call),
       },
     });
 
@@ -1179,6 +1122,34 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
     const notion = within(picker).getByRole("checkbox", { name: "notion" });
     expect(notion.getAttribute("aria-disabled")).toBe("true");
     await user.click(notion);
+    expect(listWrites(api)).toHaveLength(1);
+  });
+
+  it("keeps the picker's rows and account choice aria-disabled while a write runs, and ignores presses on them", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const world = buildWorld();
+    world.defaultIds = [S_WORK.id];
+    const { api } = await openList({ world, extra: holdDefaultListWrite(world, gate) });
+
+    await user.click(await screen.findByRole("button", { name: "Change…" }));
+    const picker = await screen.findByRole("dialog");
+    await user.click(within(picker).getByRole("checkbox", { name: "linear" }));
+
+    const account = within(picker).getByRole("combobox", { name: "Account of sentry" });
+    await waitFor(() => {
+      expect(account.getAttribute("aria-disabled")).toBe("true");
+    });
+    const notion = within(picker).getByRole("checkbox", { name: "notion" });
+    expect(notion.getAttribute("aria-disabled")).toBe("true");
+    await user.click(notion);
+    await user.selectOptions(account, S_HOBBY.id);
+    expect(listWrites(api)).toHaveLength(1);
+
+    gate.release();
+    await waitFor(() => {
+      expect(notion.getAttribute("aria-disabled")).not.toBe("true");
+    });
     expect(listWrites(api)).toHaveLength(1);
   });
 
@@ -1389,7 +1360,7 @@ describe("Settings > MCP servers > one server's page > a click is decided on the
     const user = userEvent.setup();
     const world = buildWorld();
     world.servers.push(S_THIRD);
-    const { api } = await openPage(S_HOBBY, {
+    const { api, live } = await openPage(S_HOBBY, {
       world,
       extra: {
         "GET /api/v1/connections": {
@@ -1399,13 +1370,21 @@ describe("Settings > MCP servers > one server's page > a click is decided on the
     });
 
     const webshop = await findBox("webshop");
+    // The page's own subscription reads everything again once, as it joins.
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    await waitFor(() => {
+      expect(readCalls(api, "/api/v1/projects")).toBeGreaterThan(1);
+    });
+    const settled = readCalls(api, "/api/v1/projects");
     // The controller's list changes after the page was drawn, before the click.
     world.projects[0] = { ...world.projects[0]!, mcpServerIds: [S_THIRD.id, S_LINEAR.id] };
     await user.click(within(webshop).getByRole("checkbox"));
     expect(readPageText(webshop)).toContain("webshop already uses sentry work.");
     // The refusal reads the project list again, which now names the third server.
     await waitFor(() => {
-      expect(readCalls(api, "/api/v1/projects")).toBeGreaterThan(1);
+      expect(readCalls(api, "/api/v1/projects")).toBeGreaterThan(settled);
     });
 
     await user.click(within(webshop).getByRole("button", { name: "Use sentry hobby" }));

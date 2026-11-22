@@ -1,7 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { ThreadBlock } from "@hercule/client-core";
 import { useHasMcpLine } from "./use-has-mcp-line";
+
+// Counts the blocks the hook examines, by wrapping the check it calls.
+const examined = vi.hoisted(() => ({ blocks: 0 }));
+vi.mock("@hercule/client-core/mcp-servers/first-screen", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@hercule/client-core/mcp-servers/first-screen")>();
+  return {
+    ...original,
+    hasMcpServerBlock: (blocks: readonly ThreadBlock[]) => {
+      examined.blocks += blocks.length;
+      return original.hasMcpServerBlock(blocks);
+    },
+  };
+});
+
+beforeEach(() => {
+  examined.blocks = 0;
+});
 
 const PLAIN: ThreadBlock = {
   kind: "warning",
@@ -25,6 +43,23 @@ describe("useHasMcpLine", () => {
     rerender({ blocks: [PLAIN, ABOUT_SERVERS] });
 
     expect(result.current).toBe(true);
+  });
+
+  it("examines each block once across renders of a thread with no line about servers", () => {
+    const plain = (n: number): ThreadBlock => ({ ...PLAIN, key: `warning:plain-${n}` });
+    const { rerender } = renderHook(({ blocks }) => useHasMcpLine("session-1", blocks), {
+      initialProps: { blocks: [plain(1), plain(2)] },
+    });
+    expect(examined.blocks).toBe(2);
+
+    rerender({ blocks: [plain(1), plain(2)] });
+    expect(examined.blocks).toBe(2);
+
+    rerender({ blocks: [plain(1), plain(2), plain(3), plain(4), plain(5)] });
+    expect(examined.blocks).toBe(5);
+
+    rerender({ blocks: [plain(1), plain(2), plain(3), plain(4), plain(5)] });
+    expect(examined.blocks).toBe(5);
   });
 
   it("stays true for its thread without looking at the blocks again", () => {

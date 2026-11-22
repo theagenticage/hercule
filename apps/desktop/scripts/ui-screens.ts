@@ -335,7 +335,9 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   // Settings > MCP servers: the list with a server in each state, a server that needs sign-in, a
-  // server's Projects section with its refusal open, and the picker of the default list.
+  // server's Projects section with its refusal open, and the picker of the default list; then a
+  // server's page while it is checking, switched off, unreachable and in error, the list with no
+  // Connection that offers a server, and the list when the read of the servers fails.
   {
     name: "settings-mcp-servers",
     path: "settings-mcp-servers.html",
@@ -369,6 +371,54 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
       { selector: ".mcp-pick-row .choice-box", kind: "boundary" },
       { selector: ".mcp-pick-mark svg", kind: "mark" },
     ],
+  },
+  {
+    name: "settings-mcp-server-checking",
+    path: "settings-mcp-servers.html?state=checking",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-off",
+    path: "settings-mcp-servers.html?state=off",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-unreachable",
+    path: "settings-mcp-servers.html?state=unreachable",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-server-error",
+    path: "settings-mcp-servers.html?state=error",
+    contentSelector: ".mcp-record .mcp-band",
+    nonTextParts: [
+      { selector: ".mcp-record .toggle", kind: "boundary" },
+      { selector: ".mcp-head-mark svg", kind: "mark" },
+    ],
+  },
+  {
+    name: "settings-mcp-servers-empty",
+    path: "settings-mcp-servers.html?state=empty",
+    contentSelector: ".mcp-group .set-empty",
+    nonTextParts: [],
+  },
+  {
+    name: "settings-mcp-servers-failed",
+    path: "settings-mcp-servers.html?state=failed",
+    contentSelector: ".render-failure-headline",
+    nonTextParts: [],
   },
   // The "agent tools" note of each Connection whose plugin offers an MCP server: on, off, and needs sign-in.
   {

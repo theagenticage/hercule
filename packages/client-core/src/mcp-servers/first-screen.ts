@@ -12,6 +12,7 @@
  * checks the imports.
  */
 export { hasMcpServerBlock, hasMcpServerLine } from "./mcp-line-presence";
+export { buildStartRecord } from "./start-record";
 export type { StartProjectRecord, StartRecord, ThreadStartDecision } from "./start-list";
 export {
   decideThreadServersDemand,

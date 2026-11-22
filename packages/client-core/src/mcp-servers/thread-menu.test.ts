@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildServerPicker, buildThreadServerMenu, orderMenuNames } from "./thread-menu";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
 
-const menuOf = (
+const buildMenu = (
   views: ReturnType<typeof buildViews>,
   mcpServerIds: string[],
   order = orderMenuNames(views, mcpServerIds),
@@ -47,7 +47,7 @@ describe("buildThreadServerMenu", () => {
   const VIEWS = buildViews([LINEAR, SENTRY_WORK, SENTRY_HOBBY]);
 
   it("shows one row for two accounts of a name, on with the thread's own account", () => {
-    const { rows } = menuOf(VIEWS, ["s-work"]);
+    const { rows } = buildMenu(VIEWS, ["s-work"]);
 
     expect(rows.map((row) => row.name)).toEqual(["sentry", "linear"]);
     expect(rows[0]).toMatchObject({ on: true, note: null, reconnect: null });
@@ -57,7 +57,7 @@ describe("buildThreadServerMenu", () => {
 
   it("shows the remembered account of a name that is off, else the first", () => {
     const sentry = (remembered: Record<string, string>) =>
-      menuOf(VIEWS, [], undefined, remembered).rows.find((row) => row.name === "sentry");
+      buildMenu(VIEWS, [], undefined, remembered).rows.find((row) => row.name === "sentry");
 
     expect(sentry({})).toMatchObject({ on: false });
     expect(sentry({})?.shown.server.id).toBe("s-hobby");
@@ -69,12 +69,12 @@ describe("buildThreadServerMenu", () => {
       buildServer("s-work", "sentry", "c-work", { status: "needs-sign-in" }),
     ]);
 
-    expect(menuOf(views, ["s-work"]).rows[0]).toMatchObject({
+    expect(buildMenu(views, ["s-work"]).rows[0]).toMatchObject({
       on: true,
       note: "on, joins once you sign in",
       reconnect: { connectionId: "c-work", label: "Reconnect Sentry · work" },
     });
-    expect(menuOf(views, []).rows[0]).toMatchObject({ on: false, note: "needs sign-in" });
+    expect(buildMenu(views, []).rows[0]).toMatchObject({ on: false, note: "needs sign-in" });
   });
 
   it("offers a server switched off in Settings only to a thread that has it", () => {
@@ -84,8 +84,8 @@ describe("buildThreadServerMenu", () => {
     ]);
     const order = ["sentry", "linear"];
 
-    expect(menuOf(views, [], order).rows.map((row) => row.name)).toEqual(["linear"]);
-    expect(menuOf(views, ["s-work"], order).rows.map((row) => row.name)).toEqual([
+    expect(buildMenu(views, [], order).rows.map((row) => row.name)).toEqual(["linear"]);
+    expect(buildMenu(views, ["s-work"], order).rows.map((row) => row.name)).toEqual([
       "sentry",
       "linear",
     ]);
@@ -97,7 +97,7 @@ describe("buildThreadServerMenu", () => {
       buildServer("s-off", "zulu", "c-linear", { enabled: false }),
     ]);
 
-    const menu = menuOf(views, []);
+    const menu = buildMenu(views, []);
 
     expect(menu.rows).toHaveLength(8);
     expect(menu.moreCount).toBe(2);
@@ -108,7 +108,7 @@ describe("buildThreadServerMenu", () => {
     const views = buildViews(servers);
     const nine = servers.slice(0, 9).map((server) => server.id);
 
-    const menu = menuOf(views, nine);
+    const menu = buildMenu(views, nine);
 
     expect(menu.rows).toHaveLength(9);
     expect(menu.moreCount).toBe(1);
@@ -120,7 +120,7 @@ describe("buildThreadServerMenu", () => {
     const nine = servers.slice(0, 9).map((server) => server.id);
     const order = orderMenuNames(views, nine);
 
-    const afterSwitchingOff = menuOf(
+    const afterSwitchingOff = buildMenu(
       views,
       nine.filter((id) => id !== "s-tool03"),
       order,
@@ -136,7 +136,7 @@ describe("buildThreadServerMenu", () => {
     const views = buildViews([LINEAR, SENTRY_WORK, buildServer("s-new", "zulu", "c-linear")]);
     const order = ["sentry", "linear"];
 
-    const menu = menuOf(views, ["s-new"], order);
+    const menu = buildMenu(views, ["s-new"], order);
 
     expect(menu.rows.map((row) => row.name)).toEqual(["sentry", "linear", "zulu"]);
     expect(menu.rows.at(-1)?.on).toBe(true);
@@ -146,7 +146,7 @@ describe("buildThreadServerMenu", () => {
     const views = buildViews(buildManyServers(10));
     const order = orderMenuNames(views, []);
 
-    const menu = menuOf(views, ["s-tool10"], order);
+    const menu = buildMenu(views, ["s-tool10"], order);
 
     expect(menu.rows.map((row) => row.name)).toContain("tool10");
   });
@@ -155,7 +155,7 @@ describe("buildThreadServerMenu", () => {
     const views = buildViews(buildManyServers(10));
     const order = orderMenuNames(views, []);
 
-    const menu = menuOf(views, ["s-tool10"], order);
+    const menu = buildMenu(views, ["s-tool10"], order);
 
     expect(menu.rows).toHaveLength(8);
     expect(menu.moreCount).toBe(2);
@@ -165,7 +165,7 @@ describe("buildThreadServerMenu", () => {
     const views = buildViews([...buildManyServers(8), buildServer("s-new", "zulu", "c-linear")]);
     const order = orderMenuNames(views, []).filter((name) => name !== "zulu");
 
-    const menu = menuOf(views, ["s-new"], order);
+    const menu = buildMenu(views, ["s-new"], order);
 
     expect(menu.rows).toHaveLength(8);
     expect(menu.rows.map((row) => row.name)).toContain("zulu");
@@ -174,7 +174,9 @@ describe("buildThreadServerMenu", () => {
   it("drops the row of a name whose servers were all deleted since the menu opened", () => {
     const order = orderMenuNames(buildViews([LINEAR, SENTRY_WORK]), []);
 
-    expect(menuOf(buildViews([LINEAR]), [], order).rows.map((row) => row.name)).toEqual(["linear"]);
+    expect(buildMenu(buildViews([LINEAR]), [], order).rows.map((row) => row.name)).toEqual([
+      "linear",
+    ]);
   });
 });
 
@@ -208,7 +210,7 @@ describe("buildServerPicker", () => {
 
     expect(rows.map((row) => [row.name, row.secondLine, row.statusWord])).toEqual([
       ["linear", "Linear Connection", null],
-      ["sentry", "Sentry Connection, 2 accounts", null],
+      ["sentry", "Sentry Connection · 2 accounts", null],
       ["alpha", "Linear Connection", "off"],
     ]);
   });

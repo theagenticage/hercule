@@ -516,7 +516,12 @@ describe("skill pushes", () => {
 describe("MCP server pushes", () => {
   it("invalidates the list and the named servers' pages, never another server's", () => {
     const keys = buildQueryKeys("mcpServer", ["a"]);
-    assert.deepStrictEqual(keys, [queryKeys.mcpServers(), queryKeys.mcpServer("a")]);
+    assert.deepStrictEqual(keys, [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer("a"),
+      queryKeys.projects(),
+      queryKeys.settings(),
+    ]);
     assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.mcpServer("b"))));
   });
 
@@ -524,7 +529,15 @@ describe("MCP server pushes", () => {
     assert.deepStrictEqual(buildQueryKeys("mcpServer", []), [
       queryKeys.mcpServers(),
       queryKeys.mcpServer(),
+      queryKeys.projects(),
+      queryKeys.settings(),
     ]);
+  });
+
+  it("reads the projects and the settings again, since a deleted server leaves their lists", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
   });
 });
 

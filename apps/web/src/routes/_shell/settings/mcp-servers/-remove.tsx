@@ -1,16 +1,10 @@
 import { useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  formatNameList,
-  isNotFound,
-  queryKeys,
-  readErrorMessage,
-  type HerculeClient,
-} from "@hercule/client-core";
-import type { Project } from "@hercule/contract";
-import type { McpServerView } from "@hercule/client-core/mcp-servers";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { isNotFound, queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import { describeServerRemoval, type McpServerView } from "@hercule/client-core/mcp-servers";
 import { Button, FormCard } from "@hercule/ui";
+import { projectsQuery, settingsQuery } from "../../../../app/queries";
 import { InPlaceQuestion } from "../../../../screens/in-place-question";
 import { SaveStatus } from "../../../../screens/save-status";
 import { CardHeading } from "./-card-heading";
@@ -27,16 +21,15 @@ import { CardHeading } from "./-card-heading";
 export function Remove({
   client,
   view,
-  projects,
 }: {
   readonly client: HerculeClient;
   readonly view: McpServerView;
-  /** Every project, of which the question names those whose list names the server. */
-  readonly projects: readonly Project[];
 }): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [asking, setAsking] = useState(false);
+  const projects = useSuspenseQuery(projectsQuery(client)).data.items;
+  const settings = useSuspenseQuery(settingsQuery(client)).data;
   const { server, connection } = view;
 
   const leave = async (): Promise<void> => {
@@ -62,7 +55,11 @@ export function Remove({
     },
   });
 
-  const naming = projects.filter((project) => project.mcpServerIds.includes(server.id));
+  const wording = describeServerRemoval(
+    server.id,
+    projects,
+    settings.user["thread.mcpServerIds"] ?? [],
+  );
   const who = view.account === undefined ? server.name : `${server.name} ${view.account}`;
 
   return (
@@ -87,14 +84,7 @@ export function Remove({
           }}
         >
           <p className="text-fine text-muted">
-            {naming.length === 0
-              ? "No project names it."
-              : `${formatNameList(
-                  naming.map((project) => project.name),
-                  "and",
-                )} name${naming.length === 1 ? "s" : ""} it.`}{" "}
-            Every project's list and every thread's list drops it, and a running thread loses its
-            tools at once.
+            {wording.naming} {wording.effect}
           </p>
         </InPlaceQuestion>
       ) : (

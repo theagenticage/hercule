@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildProject } from "../threads/workspaces.testing";
-import { buildProjectBoxes, decideProjectBoxWrite, describeProjectRefusal } from "./project-boxes";
+import {
+  buildProjectBoxes,
+  decideProjectBoxWrite,
+  describeProjectRefusal,
+  describeServerRemoval,
+  describeTickedBoxes,
+} from "./project-boxes";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildServer, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
@@ -137,5 +143,38 @@ describe("decideProjectBoxWrite", () => {
       kind: "write",
       mcpServerIds: ["s-linear", "s-hobby"],
     });
+  });
+});
+
+describe("describeTickedBoxes", () => {
+  it("counts the ticked boxes against all of them, the default list's box included", () => {
+    const boxes = buildProjectBoxes(WORK!, VIEWS, [WEBSHOP, BLOG], ["s-work"]);
+
+    expect(describeTickedBoxes(boxes)).toBe("2 of 3");
+  });
+});
+
+describe("describeServerRemoval", () => {
+  it("names no project when no list names the server", () => {
+    expect(describeServerRemoval("s-work", [BLOG], []).naming).toBe("No project names it.");
+  });
+
+  it("names the one project whose list names the server, in the singular", () => {
+    expect(describeServerRemoval("s-work", [WEBSHOP, BLOG], []).naming).toBe("webshop names it.");
+  });
+
+  it("names the threads without a project when the default list names the server", () => {
+    expect(describeServerRemoval("s-work", [WEBSHOP, BLOG], ["s-work"]).naming).toBe(
+      "webshop and threads without a project name it.",
+    );
+    expect(describeServerRemoval("s-work", [BLOG], ["s-work"]).naming).toBe(
+      "threads without a project names it.",
+    );
+  });
+
+  it("says what removing does to every list", () => {
+    expect(describeServerRemoval("s-work", [], []).effect).toBe(
+      "Every project's list and every thread's list drops it, and a running thread loses its tools at once.",
+    );
   });
 });

@@ -1,9 +1,5 @@
-/**
- * How a thread's start list reads a query: the one rule for the provider that
- * draws it and the edits that write it.
- */
-import { readErrorMessage } from "@hercule/client-core";
-import type { StartRecord } from "@hercule/client-core/mcp-servers";
+import { readErrorMessage } from "../errors";
+import type { StartRecord } from "./start-list";
 
 /**
  * Returns what a query holds as a start record: `failed` when its last read

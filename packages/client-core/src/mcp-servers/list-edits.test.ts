@@ -273,16 +273,17 @@ describe("what a write puts in the cache", () => {
 
   it("drops a read that started before the write ended, so the cache never keeps the old list", async () => {
     const { world, client, queryClient, edits, settle } = await setup();
-    // A read that began before the write answers with the old list, late.
+    // A read that began before the write answers with the old list, late: when the test says.
+    let answerOldList: () => void = () => undefined;
     client.settings.read.mockImplementationOnce(
       () =>
-        new Promise((resolve) =>
-          setTimeout(() => {
+        new Promise((resolve) => {
+          answerOldList = () => {
             resolve({ user: { "thread.mcpServerIds": ["s-linear"] } });
-          }, 30),
-        ),
+          };
+        }),
     );
-    void queryClient.fetchQuery({
+    const oldRead = queryClient.fetchQuery({
       queryKey: SETTINGS_KEY,
       queryFn: () => client.settings.read(),
       staleTime: 0,
@@ -290,7 +291,10 @@ describe("what a write puts in the cache", () => {
 
     edits.apply(DEFAULT, choose("sentry", "s-work", "s-work"));
     await settle(DEFAULT);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    answerOldList();
+    // The write cancelled the old read, so it may settle either way.
+    await Promise.allSettled([oldRead]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(queryClient.getQueryData(SETTINGS_KEY)).toEqual({
       user: { "thread.mcpServerIds": world.defaultIds },

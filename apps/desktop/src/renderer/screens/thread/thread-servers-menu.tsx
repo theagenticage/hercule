@@ -45,7 +45,7 @@ export default function ThreadServersMenu({
   return (
     <WithThreadServerEdits target={target}>
       {(edits) => (
-        <ServersOfThread
+        <ThreadServersPanel
           edits={edits}
           onOpenPicker={onOpenPicker}
           onReconnect={onReconnect}
@@ -57,7 +57,7 @@ export default function ThreadServersMenu({
 }
 
 /** Renders the submenu's panel: a note while the servers are read, the rows after. */
-function ServersOfThread({
+function ThreadServersPanel({
   edits,
   onOpenPicker,
   onReconnect,

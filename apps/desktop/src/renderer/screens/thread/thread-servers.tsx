@@ -20,6 +20,7 @@ import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-quer
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage, type DraftView } from "@hercule/client-core";
 import {
+  buildStartRecord,
   decideThreadServersDemand,
   describeThreadServers,
   type StartProjectRecord,
@@ -30,7 +31,6 @@ import {
 } from "@hercule/client-core/mcp-servers/first-screen";
 import type { McpServerView } from "@hercule/client-core/mcp-servers";
 import type { McpServer, MutableLiveTopic, PluginDetail, Session } from "@hercule/contract";
-import { buildStartRecord } from "../../app/start-record";
 import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "../../app/live";
 import { mcpServersQuery, projectsQuery, settingsQuery } from "../../app/queries";
 import { LazyThreadServersJoin } from "./lazy-thread-servers";

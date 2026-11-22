@@ -5938,6 +5938,69 @@ describe("Thread: the MCP servers of the + menu", () => {
     expect(readUpdates(api)[0]!.body).toEqual({ mcpServerIds: [S_NOTION.id, S_GITHUB.id] });
   });
 
+  it("keeps the account choice, the switches and the way back aria-disabled while a write runs, and ignores presses on them", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_SENTRY_WORK]),
+      }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": {
+        body: { items: [{ ...WEBSHOP, mcpServerIds: [S_NOTION.id] }] },
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: async () => {
+        await held;
+        return { body: state.session };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    const account = () =>
+      within(submenu).getByRole<HTMLSelectElement>("combobox", { name: "Account of sentry" });
+    const wayBack = () => within(submenu).getByRole("button", { name: "Back to webshop's list" });
+    const notion = () => within(submenu).getByRole("switch", { name: "notion in this thread" });
+
+    await user.selectOptions(account(), S_SENTRY_HOBBY.id);
+
+    await waitFor(() => {
+      expect(account().getAttribute("aria-disabled")).toBe("true");
+    });
+    expect(notion().getAttribute("aria-disabled")).toBe("true");
+    expect(wayBack().getAttribute("aria-disabled")).toBe("true");
+    await user.click(wayBack());
+    await user.click(notion());
+    expect(readUpdates(api)).toHaveLength(1);
+    // The picker, which opens from the menu, holds the same list and is held too.
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect(
+      within(picker)
+        .getByRole("button", { name: "Back to webshop's list" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(
+      within(picker).getByRole("checkbox", { name: "notion" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+
+    release();
+    await waitFor(() => {
+      expect(
+        within(picker)
+          .getByRole("button", { name: "Back to webshop's list" })
+          .getAttribute("aria-disabled"),
+      ).not.toBe("true");
+    });
+    expect(readUpdates(api)).toHaveLength(1);
+  });
+
   it("reads a project that is not on the first page by its id, and starts from its list", async () => {
     const user = userEvent.setup();
     const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };

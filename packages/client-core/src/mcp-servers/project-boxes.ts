@@ -4,6 +4,7 @@
  * server (spec 17, Settings > MCP servers).
  */
 import type { Project } from "@hercule/contract";
+import { formatNameList } from "../name-list";
 import { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
 import type { McpServerView } from "./views";
 
@@ -54,6 +55,43 @@ export const buildProjectBoxes = (
     ...projects.map((project) => buildBox({ kind: "project", project }, project.mcpServerIds)),
     buildBox({ kind: "default" }, defaultIds),
   ];
+};
+
+/** Returns how many of the boxes are ticked, such as "2 of 5", for the heading of the Projects section. */
+export const describeTickedBoxes = (boxes: readonly ProjectBox[]): string =>
+  `${String(boxes.filter((box) => box.ticked).length)} of ${String(boxes.length)}`;
+
+/** The words of the question asked before a server is removed. */
+export interface ServerRemovalWording {
+  /** Which lists name the server, such as "webshop and threads without a project name it." */
+  readonly naming: string;
+  /** What the removal does to every list. */
+  readonly effect: string;
+}
+
+/**
+ * Returns the words of the removal question for the server `serverId`: which
+ * of `projects` name it, and whether the default list `defaultIds` does. The
+ * default list is the list of the threads without a project, and is named as
+ * such. The two parts are meant to be drawn one after the other.
+ */
+export const describeServerRemoval = (
+  serverId: string,
+  projects: readonly Project[],
+  defaultIds: readonly string[],
+): ServerRemovalWording => {
+  const names = [
+    ...projects.filter((project) => project.mcpServerIds.includes(serverId)).map((p) => p.name),
+    ...(defaultIds.includes(serverId) ? ["threads without a project"] : []),
+  ];
+  return {
+    naming:
+      names.length === 0
+        ? "No project names it."
+        : `${formatNameList(names, "and")} ${names.length === 1 ? "names" : "name"} it.`,
+    effect:
+      "Every project's list and every thread's list drops it, and a running thread loses its tools at once.",
+  };
 };
 
 /** What a click on a box asks for, on the page of one server. */

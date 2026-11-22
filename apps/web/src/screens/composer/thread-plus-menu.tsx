@@ -65,10 +65,16 @@ export function ThreadPlusMenu({
   const { described, start, views, plugins, readFailure, setEditing } = useThreadServers();
   // Whether the picker is open. It opens from the `+` menu, which closes.
   const [picking, setPicking] = useState(false);
-  // Whether the MCP row has opened its submenu. It closes with the menu,
-  // however the menu closes: the composer closes it when one of its selectors opens.
-  const [showsServers, setShowsServers] = useState(false);
-  if (!open && showsServers) setShowsServers(false);
+  // Whether the MCP row was pressed since the menu last opened. The submenu
+  // shows only while the menu does, which is how it closes with the menu,
+  // however the menu closes: the composer closes it when one of its selectors
+  // opens. Opening the menu forgets the press.
+  const [serversPressed, setServersPressed] = useState(false);
+  const showsServers = open && serversPressed;
+  const changeOpen = (next: boolean): void => {
+    if (next) setServersPressed(false);
+    onOpenChange(next);
+  };
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
   const editing = showsServers || picking;
   useEffect(() => {
@@ -106,13 +112,13 @@ export function ThreadPlusMenu({
     <>
       <PlusMenu
         open={open}
-        onOpenChange={onOpenChange}
+        onOpenChange={changeOpen}
         attachDisabledReason={attachDisabledReason}
         serversOffReason={serversOffReason}
         onFiles={onFiles}
         serversRow={described.row}
         serversOpen={showsServers}
-        onServersOpenChange={setShowsServers}
+        onServersOpenChange={setServersPressed}
         submenu={
           views !== undefined && plugins !== undefined && start !== undefined ? (
             <ThreadServersMenu

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -55,13 +55,15 @@ describe("findValueImports", () => {
 describe("the first screen's import of the MCP server models", () => {
   it("reaches only files that join no servers with Connections, build no line's buttons and edit no list", () => {
     const reached = [...collectReachedFiles(resolve(__dirname, "first-screen.ts"))]
-      .map((file) => file.slice(__dirname.length + 1))
+      .map((file) => relative(__dirname, file))
       .toSorted();
 
     expect(reached).toEqual([
+      "../errors.ts",
       "display-status.ts",
       "first-screen.ts",
       "mcp-line-presence.ts",
+      "start-record.ts",
       "thread-servers-row.ts",
       "thread-servers.ts",
     ]);

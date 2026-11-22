@@ -3,7 +3,7 @@ import type { McpServer } from "@hercule/contract";
 import { describeAgentToolsNote, describeUnavailableAgentToolsNote } from "./agent-tools-note";
 import { SENTRY_WORK } from "./testing";
 
-const noteOf = (overrides: Partial<McpServer>) =>
+const describeNote = (overrides: Partial<McpServer>) =>
   describeAgentToolsNote({ ...SENTRY_WORK, ...overrides });
 
 describe("describeAgentToolsNote", () => {
@@ -12,18 +12,18 @@ describe("describeAgentToolsNote", () => {
   });
 
   it("says off for a server switched off, whatever its status was", () => {
-    expect(noteOf({ enabled: false, status: "needs-sign-in" })).toEqual({
+    expect(describeNote({ enabled: false, status: "needs-sign-in" })).toEqual({
       words: "agent tools off",
       failing: false,
     });
   });
 
   it("says on for a ready server", () => {
-    expect(noteOf({ status: "ready" })).toEqual({ words: "agent tools on", failing: false });
+    expect(describeNote({ status: "ready" })).toEqual({ words: "agent tools on", failing: false });
   });
 
   it("says checking, not failing, while the server is being checked", () => {
-    expect(noteOf({ status: "checking" })).toEqual({
+    expect(describeNote({ status: "checking" })).toEqual({
       words: "agent tools: checking",
       failing: false,
     });
@@ -34,7 +34,7 @@ describe("describeAgentToolsNote", () => {
     ["unreachable", "agent tools: unreachable"],
     ["error", "agent tools: error"],
   ] as const)("says the status of a server that is %s, and marks it failing", (status, words) => {
-    expect(noteOf({ status })).toEqual({ words, failing: true });
+    expect(describeNote({ status })).toEqual({ words, failing: true });
   });
 });
 

@@ -15,6 +15,7 @@ import {
   type ThreadStartDecision,
 } from "@hercule/client-core/mcp-servers";
 import {
+  buildStartRecord,
   decideThreadServersDemand,
   describeThreadServers,
   type StartProjectRecord,
@@ -25,7 +26,7 @@ import {
 import type { PluginDetail, Session } from "@hercule/contract";
 import { useRouteContext } from "@tanstack/react-router";
 import { useLiveInvalidation } from "../app/live-invalidation";
-import { buildStartRecord, readListedProject } from "../app/start-record";
+import { readListedProject } from "../app/start-record";
 import {
   connectionsQuery,
   mcpServersQuery,

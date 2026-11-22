@@ -57,8 +57,11 @@ export {
   buildProjectBoxes,
   decideProjectBoxWrite,
   describeProjectRefusal,
+  describeServerRemoval,
+  describeTickedBoxes,
   type ProjectBox,
   type ProjectBoxAction,
+  type ServerRemovalWording,
   type TextPart,
 } from "./project-boxes";
 export {
@@ -69,6 +72,7 @@ export {
 } from "./settings-list";
 export { resolveDraftMcpServerIds } from "./draft-pick";
 export { decideDraftServersPick } from "./draft-servers-pick";
+export { buildStartRecord } from "./start-record";
 export {
   canResetToStart,
   decideThreadStart,

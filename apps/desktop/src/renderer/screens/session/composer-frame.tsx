@@ -158,7 +158,7 @@ export function ComposerCard({
   onSend,
   stop,
   error,
-  notice = null,
+  notice,
   attachments,
   aboveField,
   replaceMessageRef,
@@ -173,7 +173,7 @@ export function ComposerCard({
   historyKey,
   onFieldBlur,
   onComposingChange,
-  sendTitle = "Send",
+  sendTitle,
   renderPlus,
 }: {
   readonly text: string;
@@ -348,7 +348,7 @@ export function ComposerCard({
             <button
               type="button"
               className={canSend ? "send" : "send send--off"}
-              title={sendTitle}
+              title={sendTitle ?? "Send"}
               aria-disabled={!canSend || undefined}
               onClick={onSend}
             >
@@ -360,7 +360,7 @@ export function ComposerCard({
           <p className="composer-error" role="alert" title={error}>
             {error}
           </p>
-        ) : notice !== null ? (
+        ) : notice !== undefined && notice !== null ? (
           <p className="composer-error composer-notice">{notice}</p>
         ) : null}
       </div>
@@ -406,7 +406,7 @@ export function ComposerFrame({
   onSend,
   stop,
   error,
-  notice = null,
+  notice,
   attachments,
   skills,
   step,
@@ -505,7 +505,7 @@ export function ComposerFrame({
           onSend={onSend}
           stop={stop}
           error={error}
-          notice={notice}
+          notice={notice ?? null}
           attachments={attachments}
           skills={skills}
           step={step}

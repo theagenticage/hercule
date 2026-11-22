@@ -1,8 +1,8 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { formatNameList, isNotFound, readErrorMessage } from "@hercule/client-core";
-import type { McpServerView } from "@hercule/client-core/mcp-servers";
+import { isNotFound, readErrorMessage } from "@hercule/client-core";
+import { describeServerRemoval, type McpServerView } from "@hercule/client-core/mcp-servers";
 import {
   mcpServerQuery,
   mcpServersQuery,
@@ -104,21 +104,14 @@ function NamingProjects({ view }: { readonly view: McpServerView }): JSX.Element
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const names = [
-    ...projects
-      .filter((project) => project.mcpServerIds.includes(view.server.id))
-      .map((project) => project.name),
-    ...((settings.user["thread.mcpServerIds"] ?? []).includes(view.server.id)
-      ? ["threads without a project"]
-      : []),
-  ];
+  const wording = describeServerRemoval(
+    view.server.id,
+    projects,
+    settings.user["thread.mcpServerIds"] ?? [],
+  );
   return (
     <p>
-      {names.length === 0
-        ? "No project names it. "
-        : `${formatNameList(names, "and")} ${names.length === 1 ? "names" : "name"} it. `}
-      Every project's list and every thread's list drops it, and a running thread loses its tools at
-      once.
+      {wording.naming} {wording.effect}
     </p>
   );
 }

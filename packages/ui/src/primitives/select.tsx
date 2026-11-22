@@ -18,7 +18,7 @@ export function Select({ className, children, ...props }: ComponentProps<"select
           "w-full cursor-pointer appearance-none rounded-control border border-line bg-raised",
           "py-1.5 pr-8 pl-2.5 text-body text-ink",
           "focus-visible:border-live focus-visible:outline-none",
-          "disabled:cursor-default disabled:opacity-50",
+          "disabled:cursor-default disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-50",
           className,
         )}
         {...props}

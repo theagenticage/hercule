@@ -59,6 +59,10 @@
 .plus-row > .mcp-account-select {
   flex: none;
 }
+/* The way back to where the list started, while a write of the list runs. */
+.plus-foot .link[aria-disabled="true"] {
+  opacity: 0.5;
+}
 /* The row under the list that opens the picker with every server. */
 .plus-more {
   flex: none;

@@ -355,7 +355,7 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     );
     expect(names).toEqual(["sentry", "linear"]);
     const sentry = findPickRow("sentry");
-    expect(sentry.querySelector("small")?.textContent).toBe("Sentry Connection, 2 accounts");
+    expect(sentry.querySelector("small")?.textContent).toBe("Sentry Connection · 2 accounts");
     // A name with a choice of account shows the name alone.
     expect(sentry.querySelector(".mcp-account")).toBeNull();
     const account = within(sentry).getByRole("combobox", { name: "Account of sentry" });
@@ -458,6 +458,34 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     });
     expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
     expect((sentry as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("keeps the account choice aria-disabled while a write runs, and ignores a change of it", async () => {
+    const held = holdAnswer();
+    const { calls } = await openList({
+      servers: [SENTRY_WORK, SENTRY_HOBBY],
+      defaultIds: [SENTRY_WORK_ID],
+      handlers: { [`PATCH ${SETTINGS_PATH}`]: held.handler },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    const account = within(findPickRow("sentry")).getByRole("combobox", {
+      name: "Account of sentry",
+    });
+
+    await userEvent.selectOptions(account, "hobby");
+    await waitFor(() => {
+      expect(account.getAttribute("aria-disabled")).toBe("true");
+    });
+    await userEvent.selectOptions(account, "work");
+    held.answer({
+      body: { controller: {}, user: { "thread.mcpServerIds": [SENTRY_HOBBY_ID] } },
+    });
+
+    await waitFor(() => {
+      expect(account.getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(findCalls(calls, "PATCH", SETTINGS_PATH)).toHaveLength(1);
   });
 
   it("shows the controller's refusal under the rows and leaves the list as the controller holds it", async () => {
@@ -696,7 +724,8 @@ describe("Settings > MCP servers, the section", () => {
     await act(() => router.navigate({ to: LIST_PATH }));
 
     await waitFor(() => {
-      expect(findCalls(calls, "GET", SETTINGS_PATH)).toHaveLength(before + 1);
+      // The section's read on opening, and the read the first push on the `mcpServer` topic causes.
+      expect(findCalls(calls, "GET", SETTINGS_PATH).length).toBeGreaterThan(before);
     });
     const group = screen.getByRole("region", { name: "Threads without a project" });
     await waitFor(() => {

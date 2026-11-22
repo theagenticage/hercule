@@ -66,6 +66,11 @@
   position: relative;
   z-index: 1;
 }
+/* While its write runs, a switch is drawn at half opacity like the app's other
+   controls that cannot act. It stays focusable, so it is `aria-disabled`. */
+.mcp-switch[aria-disabled="true"] {
+  opacity: 0.5;
+}
 
 /* ---------- The list ---------- */
 
@@ -452,9 +457,20 @@
   border-radius: var(--r-sm);
   font-size: var(--t-12);
 }
-/* A choice that cannot be changed yet, at half opacity like the app's other
-   controls that cannot act. */
-.mcp-account-select:has(> select:disabled) {
+/* A choice that cannot be changed yet, or while its write runs, drawn in the
+   faint ink and not at half opacity: text dimmed by opacity cannot be
+   measured for contrast, and the faint ink is a colour the app checks. */
+.mcp-account-select:has(> select:disabled),
+.mcp-account-select:has(> select[aria-disabled="true"]) {
+  color: var(--faint);
+}
+/* The browser dims a disabled select to 70 % by itself, on top of the faint ink. */
+.mcp-account-select > select:disabled {
+  opacity: 1;
+}
+/* The buttons of the default list and the picker, while a write of the list runs. */
+.mcp-group-top > .btn[aria-disabled="true"],
+.mcp-picker-foot > .btn[aria-disabled="true"] {
   opacity: 0.5;
 }
 .mcp-account-select > select {

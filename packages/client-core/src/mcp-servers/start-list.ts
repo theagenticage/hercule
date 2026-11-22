@@ -154,8 +154,8 @@ export const describeStartLine = (
 };
 
 /** Checks that two lists hold the same ids, whatever their order. */
-const holdSameIds = (one: readonly string[], other: readonly string[]): boolean =>
-  one.length === other.length && one.every((id) => other.includes(id));
+const holdsSameIds = (list: readonly string[], other: readonly string[]): boolean =>
+  list.length === other.length && list.every((id) => other.includes(id));
 
 /**
  * Checks whether going back to `start` would change the list `ids`: `start`
@@ -164,7 +164,7 @@ const holdSameIds = (one: readonly string[], other: readonly string[]): boolean 
  * pressing it writes exactly then, so the two never disagree.
  */
 export const canResetToStart = (start: ThreadStartList, ids: readonly string[]): boolean =>
-  start.complete && !holdSameIds(ids, start.mcpServerIds);
+  start.complete && !holdsSameIds(ids, start.mcpServerIds);
 
 /**
  * Returns the line at the foot of the submenu and the picker of a Thread

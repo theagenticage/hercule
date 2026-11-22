@@ -45,7 +45,7 @@ import { ThreadServersProvider } from "./thread-servers";
  * thread's page does. It reads the session itself, so `children` keep their
  * identity and are not drawn again when the session changes.
  */
-function ServersOfThread({
+function ProvideThreadServers({
   sessionId,
   client,
   children,
@@ -169,9 +169,9 @@ export const renderThreadPart = async (
       return withoutServers ? (
         <Part sessionId={sessionId} />
       ) : (
-        <ServersOfThread sessionId={sessionId} client={client}>
+        <ProvideThreadServers sessionId={sessionId} client={client}>
           <Part sessionId={sessionId} />
-        </ServersOfThread>
+        </ProvideThreadServers>
       );
     },
   });

@@ -4,6 +4,7 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   buildMcpServerViews,
   buildProjectBoxes,
+  describeTickedBoxes,
   listKnownServerIds,
   type McpServerView,
 } from "@hercule/client-core/mcp-servers";
@@ -51,14 +52,7 @@ export function Projects({
   const boxes = buildProjectBoxes(view, views, projects, defaultIds);
 
   return (
-    <FormCard
-      label={
-        <CardHeading
-          title="Projects"
-          aside={`${String(boxes.filter((box) => box.ticked).length)} of ${String(boxes.length)}`}
-        />
-      }
-    >
+    <FormCard label={<CardHeading title="Projects" aside={describeTickedBoxes(boxes)} />}>
       <p className="text-fine text-faint">
         A thread starts with this server when its project names it. A thread can still change its
         own list, under the plus of its composer.

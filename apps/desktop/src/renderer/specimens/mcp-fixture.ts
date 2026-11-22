@@ -201,6 +201,54 @@ export const MCP_HOBBY_SERVER_ID = SENTRY_HOBBY_ID;
 /** The id of the Linear server, which needs sign-in. */
 export const MCP_LINEAR_SERVER_ID = LINEAR_ID;
 
+/** The id of the Stripe server, which is checking for the first time. */
+export const MCP_STRIPE_SERVER_ID = STRIPE_ID;
+
+/** The id of the Grafana server, which is switched off. */
+export const MCP_GRAFANA_SERVER_ID = GRAFANA_ID;
+
+/** The id of the GitHub server. */
+export const MCP_GITHUB_SERVER_ID = GITHUB_ID;
+
+/** The servers with Grafana switched on and unreachable, as the controller records a check that got no answer. */
+export const MCP_RECORDS_GRAFANA_UNREACHABLE: McpServersRecords = changeServers({
+  [GRAFANA_ID]: {
+    enabled: true,
+    status: "unreachable",
+    statusDetail: "mcp.grafana.example did not answer within 10 seconds, last tried at 09:35.",
+  },
+});
+
+/** The servers with GitHub's refused by the server, as a check that was answered with an error records it. */
+export const MCP_RECORDS_GITHUB_ERROR: McpServersRecords = changeServers({
+  [GITHUB_ID]: {
+    status: "error",
+    statusDetail: "GitHub's MCP server answered 500 to the tools request at 09:31.",
+  },
+});
+
+/**
+ * The shell's lists and the servers of a world where no Connection has a
+ * plugin that offers an MCP server and no server exists: the list has no row
+ * to draw.
+ */
+export const MCP_NO_OFFERS: {
+  readonly records: SidebarRecords;
+  readonly mcp: McpServersRecords;
+} = {
+  records: {
+    ...MCP_SETTINGS_PAGE_RECORDS,
+    projects: MCP_PROJECTS.map((project) => ({ ...project, mcpServerIds: [] })),
+    plugins: CONNECTIONS_PLUGINS.map((plugin) => ({
+      ...plugin,
+      contributions: plugin.contributions.filter(
+        (contribution) => contribution.extensionPoint !== "mcp-server",
+      ),
+    })),
+  },
+  mcp: { servers: [], defaultServerIds: [] },
+};
+
 /** The thread's servers, each as the session's list holds one. `leftOut` marks a server the last start left out. */
 const buildSessionServers = (
   ids: ReadonlyArray<string>,
@@ -262,13 +310,7 @@ export const MCP_THREAD_LINES: {
   readonly thread: ThreadScreenRecords;
   readonly servers: McpServersRecords;
 } = (() => {
-  const servers = changeServers({
-    [GRAFANA_ID]: {
-      enabled: true,
-      status: "unreachable",
-      statusDetail: "mcp.grafana.example did not answer within 10 seconds, last tried at 09:35.",
-    },
-  });
+  const servers = MCP_RECORDS_GRAFANA_UNREACHABLE;
   const session: Session = {
     ...FIX_SESSION,
     status: "idle",

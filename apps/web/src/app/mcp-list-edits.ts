@@ -8,6 +8,7 @@ import { useQueryClient, type DataTag, type QueryClient } from "@tanstack/react-
 import type { HerculeClient } from "@hercule/client-core";
 import {
   buildMcpServerViews,
+  buildStartRecord,
   describeMcpListProblem,
   buildMcpListQuery,
   findOrCreateMcpListEdits,
@@ -20,7 +21,7 @@ import {
   type StartProjectRecord,
   type StartRecord,
 } from "@hercule/client-core/mcp-servers";
-import { buildStartRecord, readListedProject } from "./start-record";
+import { readListedProject } from "./start-record";
 import {
   connectionsQuery,
   mcpServersQuery,

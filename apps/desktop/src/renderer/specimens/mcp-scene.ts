@@ -34,6 +34,8 @@ export interface McpScene {
   readonly thread?: ThreadScreenRecords;
   /** The Draft Thread the scene opens. */
   readonly draft?: DraftScreenRecords;
+  /** Handlers that answer in place of the scene's own, such as a read that fails. */
+  readonly handlers?: Readonly<Record<string, Handler>>;
 }
 
 /** Converts the shell's lists to the records the fake controller answers from. */
@@ -56,7 +58,7 @@ const buildControllerRecords = (records: SidebarRecords): ControllerRecords => (
 
 /** Returns the handlers that answer every read of `scene`. */
 export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> {
-  const { records, mcp, eventCounts, thread, draft } = scene;
+  const { records, mcp, eventCounts, thread, draft, handlers: replacements } = scene;
   const handlers: Record<string, Handler> = {
     ...BOOT_HANDLERS,
     ...buildSidebarHandlers(buildControllerRecords(records)),
@@ -83,7 +85,7 @@ export function buildMcpSceneHandlers(scene: McpScene): Record<string, Handler> 
     handlers[`GET ${path}/skills`] = { body: { items: [], skipped: [] } };
   }
   if (draft !== undefined) handlers["GET /api/v1/tasks"] = { body: { items: draft.startTasks } };
-  return handlers;
+  return { ...handlers, ...replacements };
 }
 
 /**

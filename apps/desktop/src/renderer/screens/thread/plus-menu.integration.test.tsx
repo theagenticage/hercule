@@ -412,6 +412,43 @@ describe("the + menu on a started thread", () => {
     expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
   });
 
+  it("keeps the account choice, the switches and the way back off while a write runs, and ignores presses on them", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    const held = holdAnswer();
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, SENTRY_HOBBY, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+      holdWrite: held.handler,
+    });
+    const popover = await openServersSubmenu();
+    const account = () =>
+      screen.getByRole<HTMLSelectElement>("combobox", { name: "Account of sentry", hidden: true });
+    const wayBack = () =>
+      within(popover).getByRole("button", { name: "Back to webshop's list", hidden: true });
+
+    fireEvent.change(account(), { target: { value: SENTRY_HOBBY_ID } });
+
+    await waitFor(() => {
+      expect(account().getAttribute("aria-disabled")).toBe("true");
+    });
+    expect(findSwitch("sentry").getAttribute("aria-disabled")).toBe("true");
+    expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("true");
+    expect(wayBack().getAttribute("aria-disabled")).toBe("true");
+    fireEvent.change(account(), { target: { value: SENTRY_WORK_ID } });
+    fireEvent.click(wayBack());
+    fireEvent.click(findSwitch("linear"));
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+
+    held.answer({ body: {} });
+
+    await waitFor(() => {
+      expect(account().getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(wayBack().getAttribute("aria-disabled")).toBe("false");
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+  });
+
   it("swaps the account of a name in one write", async () => {
     const thread = threadWith([SENTRY_WORK]);
     const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
@@ -733,6 +770,44 @@ describe("the + menu's writes that end badly", () => {
     await openServersSubmenu();
 
     expect((await within(popover).findByRole("alert", { hidden: true })).textContent).toBe(REFUSAL);
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+  });
+
+  it("keeps the picker's rows, account choice and way back off while a write runs, and ignores presses on them", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    const held = holdAnswer();
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, SENTRY_HOBBY, LINEAR, ...buildManyServers(9)],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+      holdWrite: held.handler,
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(
+      within(popover).getByRole("menuitem", { name: /more servers?…$/, hidden: true }),
+    );
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    const account = () =>
+      within(picker).getByRole<HTMLSelectElement>("combobox", { name: "Account of sentry" });
+    const wayBack = () => within(picker).getByRole("button", { name: "Back to webshop's list" });
+    const linear = () => within(picker).getByRole("checkbox", { name: /linear/ });
+
+    fireEvent.change(account(), { target: { value: SENTRY_HOBBY_ID } });
+
+    await waitFor(() => {
+      expect(account().getAttribute("aria-disabled")).toBe("true");
+    });
+    expect(linear().getAttribute("aria-disabled")).toBe("true");
+    expect(wayBack().getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(linear());
+    fireEvent.click(wayBack());
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
+
+    held.answer({ body: {} });
+
+    await waitFor(() => {
+      expect(wayBack().getAttribute("aria-disabled")).toBe("false");
+    });
     expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
   });
 });

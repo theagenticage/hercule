@@ -251,6 +251,27 @@ describe("a server's page, Check now and the switch", () => {
     expect(findCalls(calls, "POST", `${WORK_URL}/check`)).toHaveLength(1);
   });
 
+  it("keeps the switch aria-disabled while its own write runs, and ignores a second press", async () => {
+    const held = holdAnswer();
+    const { calls } = await openPage(SENTRY_WORK, {
+      handlers: { [`PATCH ${WORK_URL}`]: held.handler },
+    });
+    const flip = () =>
+      within(findSection("Server")).getByRole("switch", { name: "Offered to threads" });
+
+    await userEvent.click(flip());
+    await waitFor(() => {
+      expect(flip().getAttribute("aria-disabled")).toBe("true");
+    });
+    await userEvent.click(flip());
+    held.answer({ body: { ...SENTRY_WORK, enabled: false } });
+
+    await waitFor(() => {
+      expect(flip().getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(findCalls(calls, "PATCH", WORK_URL)).toHaveLength(1);
+  });
+
   it("shows a refused check under its row", async () => {
     await openPage(SENTRY_WORK, {
       handlers: {

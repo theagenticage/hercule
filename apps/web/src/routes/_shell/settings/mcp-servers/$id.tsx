@@ -76,7 +76,6 @@ function McpServerPage(): JSX.Element | null {
 
   const connections = useSuspenseQuery(connectionsQuery(client)).data.items;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const projects = useSuspenseQuery(projectsQuery(client)).data.items;
 
   const check = useMutation({
     mutationFn: () => client.mcpServer.check({ params: { id } }),
@@ -153,7 +152,7 @@ function McpServerPage(): JSX.Element | null {
       />
       <Tools tools={server.tools} />
       <Projects client={client} view={view} />
-      <Remove client={client} view={view} projects={projects} />
+      <Remove client={client} view={view} />
     </div>
   );
 }

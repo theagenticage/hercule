@@ -7,6 +7,7 @@
 import type { JSX, ReactNode } from "react";
 import {
   describeProjectRefusal,
+  describeTickedBoxes,
   type McpServerView,
   type ProjectBox,
 } from "@hercule/client-core/mcp-servers";
@@ -28,12 +29,11 @@ export function ProjectsSection({
   readonly boxes: readonly ProjectBox[];
   readonly children: ReactNode;
 }): JSX.Element {
-  const ticked = boxes.filter((box) => box.ticked).length;
   return (
     <section className="set-sec">
       <h2>
         Projects
-        <small>{`${String(ticked)} of ${String(boxes.length)}`}</small>
+        <small>{describeTickedBoxes(boxes)}</small>
       </h2>
       <p>
         A thread starts with this server when its project names it. A thread can still change its

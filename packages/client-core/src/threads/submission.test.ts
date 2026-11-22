@@ -241,7 +241,10 @@ describe("buildSubmission: a draft thread", () => {
 
 describe("buildSubmission: the draft's list of MCP Servers", () => {
   const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks =>
-    applyThreadChoice({}, { kind: "mcpServers", projectId, mcpServerIds });
+    applyThreadChoice(
+      {},
+      { kind: "mcpServers", projectId, decideMcpServerIds: () => mcpServerIds },
+    );
   const KNOWN = new Set(["s-linear"]);
   const send = (picks: ThreadPicks, projectId: string | null = null, known = KNOWN) =>
     buildSubmission(

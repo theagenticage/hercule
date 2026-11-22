@@ -151,7 +151,7 @@ export interface ServerPickerRow {
   /** The account the row stands for: the chosen one, else the remembered one, else the first. */
   readonly shown: McpServerView;
   readonly chosen: boolean;
-  /** Such as "Sentry Connection" or "Sentry Connection, 2 accounts". */
+  /** Such as "Sentry Connection" or "Sentry Connection · 2 accounts". */
   readonly secondLine: string;
   /** The status word of the shown account when it needs sign-in, is unreachable, in error or off. `null` otherwise. */
   readonly statusWord: string | null;
@@ -204,7 +204,7 @@ export const buildServerPicker = ({
       chosen: group.views.some((view) => mcpServerIds.includes(view.server.id)),
       secondLine:
         accountCount > 1
-          ? `${shown.typeName} Connection, ${String(accountCount)} accounts`
+          ? `${shown.typeName} Connection · ${String(accountCount)} accounts`
           : `${shown.typeName} Connection`,
       statusWord: MCP_SERVER_STATUS_FACTS[shown.displayStatus].showsWordInPicker
         ? shown.statusWord

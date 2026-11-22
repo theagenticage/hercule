@@ -777,10 +777,13 @@ export const buildQueryKeys = (
   }
   // Any MCP Server change refetches the list. A server's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
+  // The projects and the settings are refetched too: deleting a server takes
+  // it out of every project's list, and a box that still named it would send
+  // it and be refused.
   if (topic === "mcpServer") {
-    return ids.length === 0
-      ? [queryKeys.mcpServers(), queryKeys.mcpServer()]
-      : [queryKeys.mcpServers(), ...ids.map((id) => queryKeys.mcpServer(id))];
+    const own =
+      ids.length === 0 ? [queryKeys.mcpServer()] : ids.map((id) => queryKeys.mcpServer(id));
+    return [queryKeys.mcpServers(), ...own, queryKeys.projects(), queryKeys.settings()];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is
