@@ -234,6 +234,38 @@ describe("an open thread's start list", () => {
     expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
   });
 
+  it("offers no way back to the project's list once a refresh of the projects failed, though an earlier read listed it", async () => {
+    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
+    let failing = false;
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR, SENTRY_WORK],
+      projects: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS],
+      handlers: {
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", READ_FAILURE) }
+            : { body: { items: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS] } },
+      },
+    });
+    const popover = await openServersSubmenu();
+    const readFoot = (): string =>
+      popover.querySelector(".plus-foot .menu-note")?.textContent ?? "";
+    await waitFor(() => {
+      expect(readFoot()).toContain("Back to webshop's list");
+    });
+
+    failing = true;
+    await act(() => app.context.queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+
+    await waitFor(() => {
+      expect(readFoot()).toContain(`could not be read (${READ_FAILURE})`);
+    });
+    expect(readFoot()).not.toContain("Back to webshop's list");
+    // The thread's own switches keep working.
+    expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+  });
+
   it("says why the servers could not be read when a record they are joined with fails, with nothing cached", async () => {
     const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
     let failing = false;

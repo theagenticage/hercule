@@ -23,6 +23,8 @@ import {
   queryKeys,
   TYPING_PAUSE_MS,
 } from "@hercule/client-core";
+import { buildMcpServerViews } from "@hercule/client-core/mcp-servers";
+import { describeThreadServers } from "@hercule/client-core/mcp-servers/first-screen";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import type {
   Assistant,
@@ -85,6 +87,19 @@ import {
   buildSession,
   buildSubagent,
 } from "./-fixtures";
+
+// Count the thread's description and the join of its servers without changing what they return:
+// the provider builds each again only when its records change, so the counts show whether a
+// transcript-only update makes the context it shares new.
+vi.mock("@hercule/client-core/mcp-servers/first-screen", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@hercule/client-core/mcp-servers/first-screen")>();
+  return { ...original, describeThreadServers: vi.fn(original.describeThreadServers) };
+});
+vi.mock("@hercule/client-core/mcp-servers", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@hercule/client-core/mcp-servers")>();
+  return { ...original, buildMcpServerViews: vi.fn(original.buildMcpServerViews) };
+});
 
 /**
  * Fixtures for the composer tests:
@@ -5980,6 +5995,42 @@ describe("Thread: the MCP servers of the + menu", () => {
     ).not.toBe("true");
   });
 
+  it("offers no reset once a refresh of the projects failed, though an earlier read listed the project", async () => {
+    const user = userEvent.setup();
+    const listed: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The projects could not be read.") }
+            : { body: { items: [listed] } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    await within(submenu).findByRole("button", { name: "Back to webshop's list" });
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The projects could not be read.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+  });
+
   it("keeps the subscription and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {
     // The list is empty, so only the open menu or picker holds the topic: a flag that dropped
     // during the handoff would drop the subscription and make it again.
@@ -6234,6 +6285,68 @@ describe("Thread: the lines about MCP servers", () => {
     });
     await settle();
     expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(2);
+  });
+
+  describe("while the transcript grows", () => {
+    /** Pushes a warning about nothing else as a new row of the thread, and waits for it to show. */
+    const pushWarning = async (
+      live: LiveStub,
+      position: number,
+      message: string,
+    ): Promise<void> => {
+      await waitFor(() => {
+        expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+      });
+      act(() => {
+        live.push(buildSessionStreamTopic(SESSION_ID), {
+          _tag: "delta",
+          items: [
+            buildTranscriptRow(position, {
+              _tag: "runtime.warning",
+              eventId: `e${position}`,
+              sessionId: SESSION_ID,
+              at: AT,
+              turnId: "t1",
+              message,
+            }),
+          ],
+          cursor: String(position),
+        });
+      });
+      await screen.findByText(message);
+    };
+
+    const countBuilds = () => ({
+      described: vi.mocked(describeThreadServers).mock.calls.length,
+      joined: vi.mocked(buildMcpServerViews).mock.calls.length,
+    });
+
+    it("describes the thread and joins the servers once for a line about them, not again for each row", async () => {
+      const { live } = await openWarning([{ mcpServerId: S_LINEAR.id, reason: "needs-sign-in" }]);
+      await screen.findByRole("link", { name: "Reconnect Linear · acme" });
+      const before = countBuilds();
+
+      await pushWarning(live, 100, "First.");
+      await pushWarning(live, 101, "Second.");
+
+      expect(countBuilds()).toEqual(before);
+    });
+
+    it("describes the thread and joins the servers once for the open submenu, not again for each row", async () => {
+      const user = userEvent.setup();
+      const { live } = await openApp(
+        buildSession({ status: "idle", mcpServers: buildSessionServers([S_NOTION]) }),
+        buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), []),
+        buildMcpServerRoutes(),
+      );
+      await openServersSubmenu(user);
+      const before = countBuilds();
+
+      await pushWarning(live, 100, "First.");
+      await pushWarning(live, 101, "Second.");
+
+      expect(countBuilds()).toEqual(before);
+    });
   });
 
   it("reads no servers for a thread whose only warning is about something else", async () => {

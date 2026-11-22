@@ -291,6 +291,8 @@ export const createMcpListEdits = ({
    * - The other queries of the list are only marked stale.
    * - A server deleted since the list was read makes the controller refuse the
    *   list as invalid, so the servers are read again too, after the refusal.
+   *   That read runs on its own: the target is released and the refusal is
+   *   shown when the base was read, without waiting for the servers.
    */
   const run = async (
     key: string,
@@ -306,13 +308,11 @@ export const createMcpListEdits = ({
       failure = error;
     }
     markQueriesStale(queryClient, cache.readOtherKeys(target));
-    const catalogue =
-      failure instanceof ApiError && failure.code === "validation"
-        ? readCatalogueAfterRefusal(queryClient, cache.readCatalogue())
-        : undefined;
+    if (failure instanceof ApiError && failure.code === "validation") {
+      // Never fails, so nothing waits for it and nothing can reject unhandled.
+      void readCatalogueAfterRefusal(queryClient, cache.readCatalogue());
+    }
     const read = await readBaseAfterWrite(queryClient, cache.readBase(target));
-    await catalogue;
-    // Asked only now: a read that succeeded while the servers were read still counts.
     const wasRead = read.hasSucceeded();
     if (wasRead) read.stop();
     guard.finish(key, {

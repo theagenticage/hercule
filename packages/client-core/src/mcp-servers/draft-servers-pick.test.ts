@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { buildProject } from "../threads/workspaces.testing";
 import { decideDraftServersPick } from "./draft-servers-pick";
-import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
+import { LINEAR, SENTRY_HOBBY, SENTRY_WORK } from "./testing";
 
-const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
+// Raw records only: no Connection, plugin or display data is joined to them.
+const SERVERS = [SENTRY_WORK, SENTRY_HOBBY, LINEAR];
 const WEBSHOP = { ...buildProject("p-shop", "webshop"), mcpServerIds: ["s-work"] };
 const DECIDE = {
   projectId: "p-shop",
   ids: ["s-linear"],
-  views: VIEWS,
+  servers: SERVERS,
   project: { kind: "read", value: WEBSHOP },
   defaultIds: { kind: "read", value: [] },
 } as const;

@@ -23,6 +23,7 @@ import {
   LINEAR,
   LINEAR_CONNECTION,
   LINEAR_ID,
+  OFFERING_CONNECTIONS,
   SENTRY_HOBBY,
   SENTRY_HOBBY_ID,
   SENTRY_WORK,
@@ -222,6 +223,32 @@ describe("the + menu on a Draft Thread", () => {
       projects: [webshopWith([LINEAR_ID]), OPS],
     });
     await openServersSubmenu();
+
+    fireEvent.click(findSwitch("sentry"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]!.body).toMatchObject({ mcpServerIds: [LINEAR_ID, SENTRY_WORK_ID] });
+  });
+
+  it("takes a choice from the servers the cache holds, with no Connection records to join them with", async () => {
+    let connectionsFail = false;
+    const { calls, context } = await openComposerApp(`/?project=${WEBSHOP.id}`, {
+      servers: [SENTRY_WORK, LINEAR],
+      projects: [webshopWith([LINEAR_ID]), OPS],
+      handlers: {
+        "GET /api/v1/connections": () =>
+          connectionsFail
+            ? { status: 500, body: buildErrorBody("internal", "The controller fell over.") }
+            : { body: { items: OFFERING_CONNECTIONS } },
+      },
+    });
+    await openServersSubmenu();
+    // The menu is drawn. Its display records leave the cache, and cannot be read again.
+    connectionsFail = true;
+    context.queryClient.removeQueries({ queryKey: queryKeys.connections() });
 
     fireEvent.click(findSwitch("sentry"));
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "First{Enter}");

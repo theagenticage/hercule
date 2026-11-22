@@ -5,7 +5,7 @@
  * picker, and the thread's lines about servers never read or subscribe on
  * their own.
  */
-import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readErrorMessage } from "@hercule/client-core";
 import { buildMcpServerViews, type McpServerView } from "@hercule/client-core/mcp-servers";
@@ -17,10 +17,10 @@ import {
   type ThreadServersDescription,
   type ThreadServersRecords,
 } from "@hercule/client-core/mcp-servers/first-screen";
-import type { Session } from "@hercule/contract";
+import type { PluginDetail, Session } from "@hercule/contract";
 import { useRouteContext } from "@tanstack/react-router";
 import { useLiveInvalidation } from "../app/live-invalidation";
-import { buildStartRecord } from "../app/start-record";
+import { buildStartRecord, readListedProject } from "../app/start-record";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -40,6 +40,11 @@ export interface ThreadServers {
    * for them and they are read.
    */
   readonly views: readonly McpServerView[] | undefined;
+  /**
+   * The plugins the servers were joined with, for the marks of the menu and
+   * the picker. `undefined` exactly when `views` is.
+   */
+  readonly plugins: readonly PluginDetail[] | undefined;
   /** Why the servers could not be read, such as a token without `mcp.read`, or `null`. */
   readonly readFailure: string | null;
   /**
@@ -76,25 +81,38 @@ export type OpenThread =
  * project already. The settings are the ones the app holds.
  */
 function useStartRecords(
-  thread: OpenThread,
+  isStarted: boolean,
   projectId: string | null,
   editing: boolean,
 ): Pick<ThreadServersRecords, "project" | "defaultIds"> {
   const { client } = useRouteContext({ from: "/_shell" });
-  const listed = useQuery({ ...projectsQuery(client), enabled: false }).data?.items;
+  const projects = useQuery({ ...projectsQuery(client), enabled: false });
   const settings = useQuery({ ...settingsQuery(client), enabled: false });
-  const found = listed?.find((each) => each.id === projectId);
+  // Each record is built from the query's fields and kept while they stay the
+  // same, so a render that only the transcript caused shares the same records.
+  const listed = useMemo(
+    () =>
+      projectId === null
+        ? null
+        : readListedProject({ data: projects.data, error: projects.error }, projectId),
+    [projects.data, projects.error, projectId],
+  );
   const addressed = useQuery({
     ...projectQuery(client, projectId ?? ""),
-    enabled: editing && thread.kind === "started" && projectId !== null && found === undefined,
+    enabled: editing && isStarted && projectId !== null && listed === null,
   });
-  const project: StartProjectRecord =
-    found === undefined
-      ? buildStartRecord(addressed, (data) => data)
-      : { kind: "read", value: found };
-  const defaultIds: StartRecord<readonly string[]> = buildStartRecord(
-    settings,
-    (data) => data.user["thread.mcpServerIds"] ?? [],
+  const project = useMemo<StartProjectRecord>(
+    () =>
+      listed ?? buildStartRecord({ data: addressed.data, error: addressed.error }, (data) => data),
+    [listed, addressed.data, addressed.error],
+  );
+  const defaultIds = useMemo<StartRecord<readonly string[]>>(
+    () =>
+      buildStartRecord(
+        { data: settings.data, error: settings.error },
+        (data) => data.user["thread.mcpServerIds"] ?? [],
+      ),
+    [settings.data, settings.error],
   );
   return { project, defaultIds };
 }
@@ -123,33 +141,52 @@ export function ThreadServersProvider({
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const projectId = thread.kind === "started" ? thread.session.projectId : thread.projectId;
-  const startRecords = useStartRecords(thread, projectId, editing);
-  const records: ThreadServersRecords = {
-    thread:
-      thread.kind === "started"
-        ? { kind: "started", session: thread.session }
-        : { kind: "draft", projectId, pickedIds: thread.pickedIds },
-    ...startRecords,
-    hasMcpLine: thread.kind === "started" && thread.hasMcpLine,
-    editing,
-  };
+  const session = thread.kind === "started" ? thread.session : null;
+  const hasMcpLine = thread.kind === "started" && thread.hasMcpLine;
+  const pickedIds = thread.kind === "draft" ? thread.pickedIds : undefined;
+  const { project, defaultIds } = useStartRecords(session !== null, projectId, editing);
+  // Kept as it is while the records it holds do not change, so a streamed row
+  // does not describe the thread again.
+  const records = useMemo<ThreadServersRecords>(
+    () => ({
+      thread:
+        session === null ? { kind: "draft", projectId, pickedIds } : { kind: "started", session },
+      project,
+      defaultIds,
+      hasMcpLine,
+      editing,
+    }),
+    [session, projectId, pickedIds, project, defaultIds, hasMcpLine, editing],
+  );
   const demand = decideThreadServersDemand(records);
   useLiveInvalidation(live, queryClient, "mcpServer", demand.catalogue);
   const servers = useQuery({ ...mcpServersQuery(client), enabled: demand.catalogue });
   const connections = useQuery({ ...connectionsQuery(client), enabled: demand.views });
   const plugins = useQuery({ ...pluginsQuery(client), enabled: demand.views });
-  // The React Compiler keeps `views` and `shared` as they are while their records do not change.
-  const views =
-    demand.views &&
-    servers.data !== undefined &&
-    connections.data !== undefined &&
-    plugins.data !== undefined
-      ? buildMcpServerViews(servers.data.items, connections.data.items, plugins.data)
-      : undefined;
-  const described = describeThreadServers(records, servers.data?.items);
+  const serverRecords = servers.data?.items;
+  const connectionRecords = connections.data?.items;
+  const views = useMemo(
+    () =>
+      demand.views &&
+      serverRecords !== undefined &&
+      connectionRecords !== undefined &&
+      plugins.data !== undefined
+        ? buildMcpServerViews(serverRecords, connectionRecords, plugins.data)
+        : undefined,
+    [demand.views, serverRecords, connectionRecords, plugins.data],
+  );
+  const described = useMemo(
+    () => describeThreadServers(records, serverRecords),
+    [records, serverRecords],
+  );
   const failure = servers.error ?? connections.error ?? plugins.error;
   const readFailure = failure === null ? null : readErrorMessage(failure);
-  const shared: ThreadServers = { described, views, readFailure, setEditing };
+  // The plugins are those the views were joined with, so they are `undefined` together.
+  const joinedPlugins = views === undefined ? undefined : plugins.data;
+  const shared = useMemo<ThreadServers>(
+    () => ({ described, views, plugins: joinedPlugins, readFailure, setEditing }),
+    [described, views, joinedPlugins, readFailure],
+  );
   return <ThreadServersContext value={shared}>{children}</ThreadServersContext>;
 }
 

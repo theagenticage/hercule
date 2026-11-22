@@ -7,7 +7,7 @@ import { describeConnectionTypeName } from "../connection-settings";
 import { listConnectionTypes } from "../connection-types";
 import { formatNameList } from "../name-list";
 import { joinOffersToServers, readMcpServerOffers, type McpServerOffer } from "./offers";
-import { buildMcpServerViewsFromOffers, type McpServerView } from "./views";
+import { buildMcpServerView, type McpServerView } from "./views";
 
 /** One row of the group "From your Connections". */
 export interface McpServerSettingsRow {
@@ -52,21 +52,13 @@ export const buildMcpServerSettingsRows = ({
   // The offers are decoded once, and only the servers that belong to an offer get a view.
   const offers = readMcpServerOffers(plugins);
   const offered = joinOffersToServers(offers, servers, connections);
-  const viewsByServer = new Map(
-    buildMcpServerViewsFromOffers({
-      servers: offered.flatMap(({ server }) => (server === null ? [] : [server])),
-      connections,
-      offers,
-      types,
-    }).map((view) => [view.server, view]),
-  );
   return offered
     .map(({ offer, connection, server }) => {
-      const view = server === null ? null : viewsByServer.get(server)!;
-      const typeName = describeConnectionTypeName(
-        connection,
-        types.find((type) => type.type === connection.type),
-      );
+      const type = types.find((each) => each.type === connection.type);
+      // The view is built from the pair this row already holds, and its type
+      // name is the row's, so nothing is matched or worked out a second time.
+      const view = server === null ? null : buildMcpServerView(server, { connection, type });
+      const typeName = view?.typeName ?? describeConnectionTypeName(connection, type);
       return {
         offer,
         connection,

@@ -82,53 +82,80 @@ export const buildMcpServerViewsFromOffers = ({
 }): McpServerView[] =>
   servers.map((server) => {
     const { source } = server;
-    const displayStatus = decideDisplayStatus(server);
-    const { word: statusWord, failing } = MCP_SERVER_STATUS_FACTS[displayStatus];
-    if (source.kind === "url") {
-      const host = new URL(source.url).host;
-      return {
-        server,
-        pluginId: null,
-        connection: undefined,
-        account: host,
-        typeName: "",
-        secondLine:
-          server.checkedAt === null
-            ? host
-            : `${host} · ${formatCount(server.tools.length, "tool")}`,
-        displayStatus,
-        statusWord,
-        failing,
-        statusDetail: failing ? server.statusDetail : null,
-      };
-    }
-    const connection = connections.find((each) => each.id === source.connectionId);
-    const offer = offers.find((each) => each.contributionId === source.contributionId);
-    const pluginId = parsePluginId(source.contributionId) ?? source.contributionId;
-    const type = types.find((each) => each.type === (connection?.type ?? offer?.connectionType));
-    const typeName =
-      connection === undefined
-        ? (type?.displayName ?? pluginId)
-        : describeConnectionTypeName(connection, type);
-    // Before the first check there is no tool count to give. A server whose
-    // check found no tools has been checked, and says "0 tools".
-    const secondLine =
-      server.checkedAt === null
-        ? `${typeName} Connection`
-        : `${typeName} Connection · ${formatCount(server.tools.length, "tool")}`;
+    const connection =
+      source.kind === "plugin"
+        ? connections.find((each) => each.id === source.connectionId)
+        : undefined;
+    const offer =
+      source.kind === "plugin"
+        ? offers.find((each) => each.contributionId === source.contributionId)
+        : undefined;
+    return buildMcpServerView(server, {
+      connection,
+      type: types.find((each) => each.type === (connection?.type ?? offer?.connectionType)),
+    });
+  });
+
+/**
+ * Returns the view of one server from the Connection it is reached with and
+ * that Connection's type, which a caller that already matched them (Settings,
+ * from its offer and Connection pair) passes in instead of matching again.
+ * Both are `undefined` for a server added by URL, and where the list read has
+ * no such Connection or the type is unknown.
+ */
+export const buildMcpServerView = (
+  server: McpServer,
+  {
+    connection,
+    type,
+  }: {
+    readonly connection: Connection | undefined;
+    readonly type: ConnectionType | undefined;
+  },
+): McpServerView => {
+  const { source } = server;
+  const displayStatus = decideDisplayStatus(server);
+  const { word: statusWord, failing } = MCP_SERVER_STATUS_FACTS[displayStatus];
+  if (source.kind === "url") {
+    const host = new URL(source.url).host;
     return {
       server,
-      pluginId,
-      connection,
-      account: connection?.label,
-      typeName,
-      secondLine,
+      pluginId: null,
+      connection: undefined,
+      account: host,
+      typeName: "",
+      secondLine:
+        server.checkedAt === null ? host : `${host} · ${formatCount(server.tools.length, "tool")}`,
       displayStatus,
       statusWord,
       failing,
       statusDetail: failing ? server.statusDetail : null,
     };
-  });
+  }
+  const pluginId = parsePluginId(source.contributionId) ?? source.contributionId;
+  const typeName =
+    connection === undefined
+      ? (type?.displayName ?? pluginId)
+      : describeConnectionTypeName(connection, type);
+  // Before the first check there is no tool count to give. A server whose
+  // check found no tools has been checked, and says "0 tools".
+  const secondLine =
+    server.checkedAt === null
+      ? `${typeName} Connection`
+      : `${typeName} Connection · ${formatCount(server.tools.length, "tool")}`;
+  return {
+    server,
+    pluginId,
+    connection,
+    account: connection?.label,
+    typeName,
+    secondLine,
+    displayStatus,
+    statusWord,
+    failing,
+    statusDetail: failing ? server.statusDetail : null,
+  };
+};
 
 /** The Connection to reconnect to bring a server back, and the label of the button that does it. */
 export interface ReconnectTarget {

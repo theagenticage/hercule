@@ -1274,6 +1274,45 @@ describe("Settings > MCP servers > a write's guard and its refusal belong to the
   });
 });
 
+describe("Settings > MCP servers > one server's page > the switch while the page's own read is behind the list", () => {
+  it("shows the list's value, stays unavailable with the reason, and sends nothing on a second click", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const world = buildWorld();
+    let holding = false;
+    const { api } = await openPage(S_WORK, {
+      world,
+      extra: {
+        [`GET /api/v1/mcp-servers/${S_WORK.id}`]: async () => {
+          if (holding) await gate.opened;
+          return { body: world.servers.find((each) => each.id === S_WORK.id) };
+        },
+      },
+    });
+    const offered = await screen.findByRole("switch", { name: "Offered to threads" });
+    holding = true;
+
+    await user.click(offered);
+
+    // The list has the saved value, and the page's own read of the server does not yet.
+    await waitFor(() => {
+      expect(offered.getAttribute("aria-checked")).toBe("false");
+    });
+    expect(offered.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      await screen.findByText("This page is reading the server again, so the switch waits."),
+    ).toBeDefined();
+    await user.click(offered);
+    expect(listWrites(api)).toHaveLength(1);
+
+    gate.release();
+    await waitFor(() => {
+      expect(offered.getAttribute("aria-disabled")).not.toBe("true");
+    });
+    expect(screen.queryByText(/so the switch waits/)).toBeNull();
+  });
+});
+
 describe("Settings > MCP servers > the lists are read again when the section opens", () => {
   it("shows a default list changed while the section was closed", async () => {
     const { api, world, router } = await openList();

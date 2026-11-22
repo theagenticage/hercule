@@ -415,10 +415,45 @@ describe("what releases a list that could not be read again", () => {
       staleTime: 0,
     });
 
+    // The target is released, and the refusal is shown, while the servers' read is still held.
+    await vi.waitFor(() => {
+      expect(edits.readState(THREAD)).toMatchObject({
+        blocked: false,
+        unread: null,
+        refusal: { kind: "refused", message: "The list names a server that no longer exists." },
+      });
+    });
+
     releaseServers();
     await settle(THREAD);
 
     expect(edits.readState(THREAD)).toMatchObject({ blocked: false, unread: null });
+  });
+
+  it("shows a refusal as soon as the list was read again, without waiting for the servers' read", async () => {
+    const { world, client, queryClient, edits, settle } = await setup();
+    let releaseServers!: () => void;
+    client.mcpServer.query.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseServers = () => {
+            resolve(VIEWS.map((view) => view.server));
+          };
+        }),
+    );
+    world.refuseWith = new ApiError("validation", "The list names a server that no longer exists.");
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+
+    await vi.waitFor(() => {
+      expect(edits.readState(THREAD)).toMatchObject({
+        blocked: false,
+        refusal: { kind: "refused" },
+      });
+    });
+    expect(queryClient.isFetching({ queryKey: SERVERS_KEY })).toBe(1);
+
+    releaseServers();
+    await settle(THREAD);
   });
 
   it("marks another read of the list stale without reading it", async () => {

@@ -2,7 +2,6 @@ import { useEffect, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Thread, ThreadChoice } from "@hercule/client-core";
 import { decideDraftServersPick, type McpListChoice } from "@hercule/client-core/mcp-servers";
-import type { PluginDetail } from "@hercule/contract";
 import { buildMcpListCache, useMcpListEdit } from "../../app/mcp-list-edits";
 import { useThreadServers } from "../thread-servers";
 import { PlusMenu } from "./plus-menu";
@@ -43,7 +42,6 @@ export function ThreadPlusMenu({
   thread,
   projectId,
   recordThreadChoice,
-  plugins,
   open,
   onOpenChange,
   attachDisabledReason,
@@ -55,7 +53,6 @@ export function ThreadPlusMenu({
   /** The project the thread is in (`null` for none), as the composer resolved it. */
   readonly projectId: string | null;
   readonly recordThreadChoice: (choice: ThreadChoice) => void;
-  readonly plugins: readonly PluginDetail[];
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   /** Why no image can be attached, or `null` when one can. */
@@ -65,7 +62,7 @@ export function ThreadPlusMenu({
   readonly onFiles: (files: readonly File[]) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const { described, views, readFailure, setEditing } = useThreadServers();
+  const { described, views, plugins, readFailure, setEditing } = useThreadServers();
   // Whether the picker is open. It opens from the `+` menu, which closes.
   const [picking, setPicking] = useState(false);
   // Whether the MCP row has opened its submenu. It closes with the menu,
@@ -91,12 +88,12 @@ export function ThreadPlusMenu({
   // draft's other picks.
   const applyToDraft = (choice: McpListChoice): void => {
     const cache = buildMcpListCache(queryClient, client);
-    const cachedViews = cache.readViews();
-    if (cachedViews === undefined) return;
+    const servers = cache.readServers();
+    if (servers === undefined) return;
     const picked = decideDraftServersPick({
       projectId,
       ids: described.mcpServerIds,
-      views: cachedViews,
+      servers,
       ...cache.readStartRecords(projectId),
       choice,
     });
@@ -117,7 +114,7 @@ export function ThreadPlusMenu({
         serversOpen={showsServers}
         onServersOpenChange={setShowsServers}
         submenu={
-          views !== undefined && described.start !== undefined ? (
+          views !== undefined && plugins !== undefined && described.start !== undefined ? (
             <ThreadServersMenu
               views={views}
               plugins={plugins}
@@ -141,7 +138,7 @@ export function ThreadPlusMenu({
           )
         }
       />
-      {picking && views !== undefined && described.start !== undefined ? (
+      {picking && views !== undefined && plugins !== undefined && described.start !== undefined ? (
         <ThreadServerPicker
           views={views}
           plugins={plugins}

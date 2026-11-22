@@ -20,7 +20,7 @@ import {
   type StartProjectRecord,
   type StartRecord,
 } from "@hercule/client-core/mcp-servers";
-import { buildStartRecord } from "./start-record";
+import { buildStartRecord, readListedProject } from "./start-record";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -59,7 +59,7 @@ export const readCachedMcpServerViews = (
 
 /**
  * Returns the record of the project `projectId` for a start list: the page
- * of projects when it holds it, else the project's own read. The page stops
+ * of projects when it decides it, else the project's own read. The page stops
  * at its first page, so a project may be missing from it without being gone.
  */
 const readProjectRecord = (
@@ -67,12 +67,11 @@ const readProjectRecord = (
   client: HerculeClient,
   projectId: string,
 ): StartProjectRecord => {
-  const listed = queryClient
-    .getQueryData(projectsQuery(client).queryKey)
-    ?.items.find((each) => each.id === projectId);
-  return listed === undefined
-    ? readStartRecord(queryClient, projectQuery(client, projectId), (project) => project)
-    : { kind: "read", value: listed };
+  const state = queryClient.getQueryState(projectsQuery(client).queryKey);
+  return (
+    readListedProject({ data: state?.data, error: state?.error ?? null }, projectId) ??
+    readStartRecord(queryClient, projectQuery(client, projectId), (project) => project)
+  );
 };
 
 /** Returns how this app's query cache holds the lists of MCP servers. */

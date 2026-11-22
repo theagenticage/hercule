@@ -99,7 +99,9 @@ function CheckedAge({ at }: { readonly at: string }): JSX.Element {
  * threads, its name, the Connection it is reached with, and when it was last
  * checked, with Check now.
  *
- * - The switch is the server's `enabled`. While `switchBusy`, its write runs.
+ * - The switch shows `switchOn`, the server's `enabled` in the list of servers.
+ *   While `switchBusy`, it is unavailable: its write runs, or this page's own
+ *   read of the server is behind the list.
  * - The Connection row shows the Connection and Open, which leads to
  *   Settings > Connections. While the server needs sign-in it shows what is
  *   wrong instead, in `--fail`, and no button: the band holds the page's one
@@ -112,6 +114,7 @@ function CheckedAge({ at }: { readonly at: string }): JSX.Element {
 export function ServerSection({
   view,
   plugins,
+  switchOn,
   switchBusy,
   switchError,
   checkBusy,
@@ -121,6 +124,7 @@ export function ServerSection({
 }: {
   readonly view: McpServerView;
   readonly plugins: readonly PluginIdentity[];
+  readonly switchOn: boolean;
   readonly switchBusy: boolean;
   readonly switchError: string | null;
   readonly checkBusy: boolean;
@@ -140,7 +144,7 @@ export function ServerSection({
           <span>Off keeps the name, the sign-in and the projects that name it.</span>
         </div>
         <ServerSwitch
-          on={server.enabled}
+          on={switchOn}
           label="Offered to threads"
           busy={switchBusy}
           onFlip={onFlipSwitch}

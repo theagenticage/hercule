@@ -70,12 +70,12 @@ export function useDraftEdits({
   return {
     apply: (choice) => {
       const cache = buildMcpListCache(queryClient, client);
-      const views = cache.readViews();
-      if (views === undefined) return;
+      const servers = cache.readServers();
+      if (servers === undefined) return;
       const picked = decideDraftServersPick({
         projectId,
         ids: described.mcpServerIds,
-        views,
+        servers,
         ...cache.readStartRecords(projectId),
         choice,
       });

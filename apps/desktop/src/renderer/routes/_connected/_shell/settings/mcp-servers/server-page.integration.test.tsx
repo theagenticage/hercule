@@ -288,6 +288,40 @@ describe("a server's page, Check now and the switch", () => {
   });
 });
 
+describe("a server's page, the switch while the page's own read is behind the list", () => {
+  it("shows the list's value, keeps the switch unavailable with the reason, and sends nothing on a second press", async () => {
+    const held = holdAnswer();
+    let holding = false;
+    const { calls } = await openPage(SENTRY_WORK, {
+      handlers: {
+        [`GET ${WORK_URL}`]: () => (holding ? held.handler() : { body: SENTRY_WORK }),
+      },
+    });
+    const flip = () =>
+      within(findSection("Server")).getByRole("switch", { name: "Offered to threads" });
+    holding = true;
+
+    await userEvent.click(flip());
+
+    // The list has the saved value, and the page's own read of the server does not yet.
+    await waitFor(() => {
+      expect(flip().getAttribute("aria-checked")).toBe("false");
+    });
+    expect(flip().getAttribute("aria-disabled")).toBe("true");
+    expect(within(findSection("Server")).getByRole("alert").textContent).toBe(
+      "This page is reading the server again, so the switch waits.",
+    );
+    await userEvent.click(flip());
+    expect(findCalls(calls, "PATCH", WORK_URL)).toHaveLength(1);
+
+    held.answer({ body: { ...SENTRY_WORK, enabled: false } });
+    await waitFor(() => {
+      expect(flip().getAttribute("aria-disabled")).toBe("false");
+    });
+    expect(within(findSection("Server")).queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("a server's page, Projects", () => {
   it("ticks a project's box with a write of its list, and unticks it", async () => {
     const { world, calls } = await openPage(SENTRY_WORK);

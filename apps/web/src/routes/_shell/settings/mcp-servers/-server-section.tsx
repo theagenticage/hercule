@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { describeAge, showsAccountBesideLabel, type HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
@@ -10,12 +11,18 @@ import {
 } from "@hercule/client-core/mcp-servers";
 import { Button, FormCard, Row, Switch, useMinuteClock } from "@hercule/ui";
 import { useMcpServerSwitch } from "../../../../app/mcp-server-switch";
+import { mcpServerQuery, mcpServersQuery } from "../../../../app/queries";
 import { ProviderMark } from "../../../../screens/provider-mark";
 
 /**
  * The "Server" card of a server's page: the switch that offers it to threads,
  * its read-only name, the Connection it is reached with, and when it was last
  * checked. The card owns the switch's write, which changes only this server.
+ *
+ * The switch shows the server's record in the list of servers, the value a
+ * press is decided on. While the page's own read of the server shows another
+ * value, because it is still being read again or the read failed, the switch
+ * is unavailable and says why, so it is never pressed on an old value.
  *
  * Check now is the page's, because the status band asks for the same check,
  * so `onCheck` and `checkPending` come from the page. It is unavailable while
@@ -39,6 +46,19 @@ export function ServerSection({
 
   // The same target as the server's row in the list, so the two share one guard.
   const switchServer = useMcpServerSwitch(client, buildServerSwitchTarget(server));
+  const catalogued = useSuspenseQuery(mcpServersQuery(client)).data.items.find(
+    ({ id }) => id === server.id,
+  );
+  const pageFailed = useQuery(mcpServerQuery(client, server.id)).isError;
+  const pageLags = catalogued !== undefined && catalogued.enabled !== server.enabled;
+  const switchWaits = switchServer.blocked || pageLags;
+  const switchProblem =
+    switchServer.problem ??
+    (pageLags
+      ? pageFailed
+        ? "This page could not read the server again, so the switch waits. Reload the page to try again."
+        : "This page is reading the server again, so the switch waits."
+      : null);
 
   const cannotCheck = checkPending || isCheckDisabled(view);
   const connectionProblem = describeConnectionRowProblem(view);
@@ -49,16 +69,16 @@ export function ServerSection({
         <div className="flex flex-col gap-1">
           <Switch
             id="mcp-server-offered"
-            aria-disabled={switchServer.blocked}
-            checked={server.enabled}
+            aria-disabled={switchWaits}
+            checked={catalogued?.enabled ?? server.enabled}
             onCheckedChange={switchServer.press}
           />
           <p className="text-fine text-faint">
             Off keeps the name, the sign-in and the projects that name it.
           </p>
-          {switchServer.problem === null ? null : (
+          {switchProblem === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {switchServer.problem}
+              {switchProblem}
             </p>
           )}
         </div>

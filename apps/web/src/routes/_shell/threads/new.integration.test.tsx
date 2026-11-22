@@ -30,6 +30,7 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
+import { queryKeys } from "@hercule/client-core";
 import { HARNESSES } from "@hercule/client-core/testing";
 import { buildRunner, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -44,6 +45,7 @@ import {
   type Handler,
 } from "../../../app/testing";
 import {
+  MCP_CONNECTIONS,
   MCP_SERVERS,
   S_DATADOG,
   S_FIGMA,
@@ -3289,6 +3291,33 @@ describe("Composer: the MCP servers of a Draft Thread", () => {
     await send(user);
 
     expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_DATADOG.id] });
+  });
+
+  it("takes a choice from the servers the cache holds, with no Connection records to join them with", async () => {
+    const user = userEvent.setup();
+    let connectionsFail = false;
+    const { api, queryClient } = await openServersDraft(
+      "/threads/new",
+      { "thread.mcpServerIds": [S_NOTION.id] },
+      {
+        "GET /api/v1/connections": () =>
+          connectionsFail
+            ? { status: 500, body: buildErrorBody("internal", "The controller fell over.") }
+            : { body: { items: MCP_CONNECTIONS } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    const datadog = within(submenu).getByRole("switch", { name: "datadog in this thread" });
+    // The menu is drawn. Its Connection records leave the cache, and cannot be read again.
+    connectionsFail = true;
+    queryClient.removeQueries({ queryKey: queryKeys.connections() });
+
+    fireEvent.click(datadog);
+    // The first Escape closes the submenu, and the second the menu.
+    await user.keyboard("{Escape}{Escape}");
+    await send(user);
+
+    expect(await readSpawn(api)).toMatchObject({ mcpServerIds: [S_NOTION.id, S_DATADOG.id] });
   });
 
   it("does not send a picked server that was deleted while the draft was open", async () => {

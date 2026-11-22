@@ -6,6 +6,7 @@ import {
   LINEAR,
   OFFERING_PLUGINS,
   SENTRY_HOBBY,
+  SENTRY_HOBBY_CONNECTION,
   SENTRY_PLUGIN,
   buildConnection,
 } from "./testing";
@@ -94,6 +95,28 @@ describe("buildMcpServerSettingsRows", () => {
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.view !== null)?.view?.server.id).toBe("s-hobby");
     expect(decoded).toBe(1);
+  });
+
+  it("builds a switched-on server's view from the row's own pair, without matching the Connection again", () => {
+    let searches = 0;
+    const connections = [...CONNECTIONS];
+    // The view builder finds a server's Connection by id with `find`; a row's pair is already joined.
+    connections.find = () => {
+      searches += 1;
+      return undefined;
+    };
+
+    const rows = buildMcpServerSettingsRows({
+      servers: [SENTRY_HOBBY],
+      connections,
+      plugins: OFFERING_PLUGINS,
+      projects: [],
+    });
+
+    const hobby = rows.find((row) => row.connection.label === "hobby");
+    expect(searches).toBe(0);
+    expect(hobby?.view).toMatchObject({ connection: SENTRY_HOBBY_CONNECTION, account: "hobby" });
+    expect(hobby?.typeName).toBe(hobby?.view?.typeName);
   });
 
   it("gives no row to a Connection of a type no plugin offers a server for", () => {

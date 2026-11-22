@@ -87,15 +87,21 @@ function useStartRecords(
   editing: boolean,
 ): Pick<ThreadServersRecords, "project" | "defaultIds"> {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const projects = useSuspenseQuery(projectsQuery(client)).data;
+  const projects = useSuspenseQuery(projectsQuery(client));
   const settings = useQuery({ ...settingsQuery(client), enabled: editing && projectId === null });
-  const found = projects.find((each) => each.id === projectId);
+  // The same rule as the edits' dispatch: after a failed refresh of the
+  // projects the cached ones may be obsolete, so the project is `failed`.
+  const listed = buildStartRecord({ data: projects.data, error: projects.error }, (items) =>
+    items.find((each) => each.id === projectId),
+  );
   const project: StartProjectRecord =
     projectId === null
       ? { kind: "pending" }
-      : found === undefined
-        ? { kind: "missing" }
-        : { kind: "read", value: found };
+      : listed.kind !== "read"
+        ? listed
+        : listed.value === undefined
+          ? { kind: "missing" }
+          : { kind: "read", value: listed.value };
   // The fields, not the query's result, which is a new object on every render.
   const defaultIds: StartRecord<readonly string[]> = buildStartRecord(
     { data: settings.data, error: settings.error },

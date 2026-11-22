@@ -106,6 +106,14 @@ function McpServerPage(): JSX.Element {
       ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
       : undefined;
   const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data));
+  // The switch shows the server's record in the list of servers, the value a
+  // press is decided on. While this page's own read shows another value, it
+  // waits, so a press never lands on an old value.
+  const catalogued = useSuspenseQuery(mcpServersQuery(client)).data.find((each) => each.id === id);
+  const pageLags = catalogued !== undefined && catalogued.enabled !== query.data.enabled;
+  const lagReason = query.isError
+    ? "This page could not read the server again, so the switch waits. Reopen the page to try again."
+    : "This page is reading the server again, so the switch waits.";
   const check = useMutation({
     mutationFn: () => client.mcpServer.check({ params: { id } }),
     onSettled: async () => {
@@ -146,12 +154,13 @@ function McpServerPage(): JSX.Element {
       <ServerSection
         view={view}
         plugins={plugins}
-        switchBusy={flip.blocked}
-        switchError={flip.problem}
+        switchOn={catalogued?.enabled ?? view.server.enabled}
+        switchBusy={flip.blocked || pageLags}
+        switchError={flip.problem ?? (pageLags ? lagReason : null)}
         checkBusy={check.isPending}
         checkError={check.error === null ? null : readErrorMessage(check.error)}
         onFlipSwitch={() => {
-          flip.press(!view.server.enabled);
+          flip.press(!(catalogued?.enabled ?? view.server.enabled));
         }}
         onCheck={startCheck}
       />

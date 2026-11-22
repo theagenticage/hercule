@@ -317,7 +317,6 @@ export function Composer({
                 thread={thread}
                 projectId={projectId}
                 recordThreadChoice={model.recordThreadChoice}
-                plugins={plugins}
                 open={open === "plus"}
                 onOpenChange={(next) => {
                   handleOpenChange("plus", next);
