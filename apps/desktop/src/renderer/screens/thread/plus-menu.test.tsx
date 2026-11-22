@@ -18,7 +18,7 @@ const SERVERS: ThreadServers = {
     start: undefined,
     row: { words: "none", failing: false },
   },
-  views: undefined,
+  plugins: undefined,
   readFailure: null,
   setEditing: () => undefined,
 };

@@ -56,7 +56,7 @@ function ServersOfThread({
 }): JSX.Element {
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   return (
-    <ThreadServersProvider thread={{ kind: "started", session, blocks: [] }}>
+    <ThreadServersProvider thread={{ kind: "started", session, hasMcpLine: false }}>
       {children}
     </ThreadServersProvider>
   );
@@ -107,7 +107,16 @@ export const renderThreadPart = async (
   {
     thread,
     handlers = {},
-  }: { readonly thread: ThreadRecords; readonly handlers?: Readonly<Record<string, Handler>> },
+    withoutServers = false,
+  }: {
+    readonly thread: ThreadRecords;
+    readonly handlers?: Readonly<Record<string, Handler>>;
+    /**
+     * Leaves out the thread's servers, as where a transcript is drawn outside the thread's page,
+     * such as the first moments of a thread in the Inbox.
+     */
+    readonly withoutServers?: boolean;
+  },
 ): Promise<RenderedThreadPart> => {
   const sessionId = thread.session.id;
   const calls = stubApi({
@@ -157,7 +166,9 @@ export const renderThreadPart = async (
     component: function ThreadRoute() {
       useKeepRequestDrafts(sessionId);
       // The thread's page shares its servers with the composer's `+` and its lines.
-      return (
+      return withoutServers ? (
+        <Part sessionId={sessionId} />
+      ) : (
         <ServersOfThread sessionId={sessionId} client={client}>
           <Part sessionId={sessionId} />
         </ServersOfThread>

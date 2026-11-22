@@ -8,7 +8,7 @@
  * dialog does not release it. The guard has no React in it: a control
  * subscribes to `readState`.
  */
-import type { QueryClient, QueryKey } from "@tanstack/query-core";
+import type { BaseReadWatch } from "./reconcile";
 import type { McpServerView } from "./views";
 
 /** Why a write was not made. */
@@ -34,42 +34,19 @@ export interface McpListEditState {
   readonly unread: McpListUnread | null;
 }
 
-/** Where a query was when a write ended: a read of it after that releases an unread target. */
-export interface ReadMark {
-  readonly query: unknown;
-  readonly updates: number;
-}
-
-/** Returns where the query `queryKey` is now, to compare a later read with. */
-export const readMarkOf = (queryClient: QueryClient, queryKey: QueryKey): ReadMark => {
-  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-  return { query, updates: query?.state.dataUpdateCount ?? 0 };
-};
-
-/** Returns true when the query `queryKey` holds data that a read made after `mark` fetched. */
-export const hasReadSince = (
-  queryClient: QueryClient,
-  queryKey: QueryKey,
-  mark: ReadMark,
-): boolean => {
-  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-  return (
-    query?.state.status === "success" &&
-    (query !== mark.query || query.state.dataUpdateCount > mark.updates)
-  );
-};
-
 /** What a write that ended leaves on its target. */
 export interface WriteOutcome {
   /** Why the write failed, or `null` when it was acknowledged. */
   readonly refusal: McpListRefusal | null;
-  /** Set when the query `baseKey` could not be read again: the target stays blocked until a read of it succeeds after `mark`. */
-  readonly unread: {
-    readonly saved: boolean;
-    readonly baseKey: QueryKey;
-    readonly mark: ReadMark;
-  } | null;
+  /**
+   * Set when the edit base could not be read again: the target stays blocked
+   * until `read` sees a fetch of it succeed. The guard stops `read` then.
+   */
+  readonly unread: { readonly saved: boolean; readonly read: BaseReadWatch } | null;
 }
+
+/** How long a refusal that no control shows stays, in milliseconds. A control that attaches later still finds it. */
+export const DETACHED_REFUSAL_LIFETIME_MS = 5 * 60 * 1000;
 
 /** The guard of the targets of one query client. */
 export interface EditGuard {
@@ -85,6 +62,13 @@ export interface EditGuard {
   readonly readState: (key: string) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
   readonly clearRefusal: (key: string) => void;
+  /**
+   * Counts the caller as a control that shows the target. While at least one
+   * does, a refusal stays. When none does, the refusal is dropped after
+   * `DETACHED_REFUSAL_LIFETIME_MS`, so state of a control that left cannot
+   * pile up. Returns the function that detaches.
+   */
+  readonly attach: (key: string) => () => void;
   /** Calls `listener` whenever the state of any target changes. Returns the function that stops it. */
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -96,24 +80,33 @@ interface Held {
   running: boolean;
   refusal: McpListRefusal | null;
   unread: WriteOutcome["unread"];
+  /** Drops the refusal when no control shows the target for long enough, or `null` while none is set. */
+  expiry: ReturnType<typeof setTimeout> | null;
   snapshot: McpListEditState;
 }
 
-/** Creates the guard of the targets of `queryClient`. */
-export const createEditGuard = (queryClient: QueryClient): EditGuard => {
+/** Creates a guard with no target held. */
+export const createEditGuard = (): EditGuard => {
   const held = new Map<string, Held>();
+  const attached = new Map<string, number>();
   const listeners = new Set<() => void>();
-  let stopWatching: (() => void) | null = null;
 
-  const releaseReadTargets = (): void => {
-    for (const [key, each] of held) {
-      if (
-        each.unread !== null &&
-        hasReadSince(queryClient, each.unread.baseKey, each.unread.mark)
-      ) {
-        each.unread = null;
+  const stopExpiry = (each: Held): void => {
+    if (each.expiry !== null) clearTimeout(each.expiry);
+    each.expiry = null;
+  };
+
+  /** Starts or stops the countdown that drops the target's refusal, from whether a control shows it. */
+  const syncExpiry = (key: string, each: Held): void => {
+    const shown = (attached.get(key) ?? 0) > 0;
+    if (each.refusal === null || shown) {
+      stopExpiry(each);
+    } else if (each.expiry === null) {
+      each.expiry = setTimeout(() => {
+        each.expiry = null;
+        each.refusal = null;
         commit(key);
-      }
+      }, DETACHED_REFUSAL_LIFETIME_MS);
     }
   };
 
@@ -121,6 +114,7 @@ export const createEditGuard = (queryClient: QueryClient): EditGuard => {
   function commit(key: string): void {
     const each = held.get(key);
     if (each !== undefined) {
+      syncExpiry(key, each);
       if (!each.running && each.refusal === null && each.unread === null) held.delete(key);
       else {
         each.snapshot = {
@@ -130,24 +124,21 @@ export const createEditGuard = (queryClient: QueryClient): EditGuard => {
         };
       }
     }
-    // A read of the base that succeeds releases an unread target, so the guard watches the cache only while one exists.
-    const hasUnread = [...held.values()].some((other) => other.unread !== null);
-    if (hasUnread && stopWatching === null) {
-      stopWatching = queryClient.getQueryCache().subscribe(releaseReadTargets);
-    } else if (!hasUnread && stopWatching !== null) {
-      stopWatching();
-      stopWatching = null;
-    }
     for (const listener of listeners) listener();
   }
 
   const hold = (key: string): Held => {
     let each = held.get(key);
     if (each === undefined) {
-      each = { running: false, refusal: null, unread: null, snapshot: IDLE };
+      each = { running: false, refusal: null, unread: null, expiry: null, snapshot: IDLE };
       held.set(key, each);
     }
     return each;
+  };
+
+  const setRefusal = (each: Held, refusal: McpListRefusal | null): void => {
+    stopExpiry(each);
+    each.refusal = refusal;
   };
 
   return {
@@ -158,26 +149,52 @@ export const createEditGuard = (queryClient: QueryClient): EditGuard => {
     start: (key) => {
       const each = hold(key);
       each.running = true;
-      each.refusal = null;
+      setRefusal(each, null);
       commit(key);
     },
     refuse: (key, refusal) => {
-      hold(key).refusal = refusal;
+      setRefusal(hold(key), refusal);
       commit(key);
     },
     finish: (key, outcome) => {
       const each = hold(key);
       each.running = false;
-      each.refusal = outcome.refusal;
-      each.unread = outcome.unread;
+      setRefusal(each, outcome.refusal);
+      if (outcome.unread !== null) {
+        const { read } = outcome.unread;
+        const unread = outcome.unread;
+        each.unread = unread;
+        // The first fetch of the edit base that succeeds releases the target, whenever it comes.
+        read.whenSucceeded(() => {
+          if (each.unread !== unread) return;
+          each.unread = null;
+          read.stop();
+          commit(key);
+        });
+      }
       commit(key);
     },
     readState: (key) => held.get(key)?.snapshot ?? IDLE,
     clearRefusal: (key) => {
       const each = held.get(key);
       if (each === undefined || each.refusal === null) return;
-      each.refusal = null;
+      setRefusal(each, null);
       commit(key);
+    },
+    attach: (key) => {
+      attached.set(key, (attached.get(key) ?? 0) + 1);
+      const each = held.get(key);
+      if (each !== undefined) syncExpiry(key, each);
+      let attachedNow = true;
+      return () => {
+        if (!attachedNow) return;
+        attachedNow = false;
+        const count = (attached.get(key) ?? 1) - 1;
+        if (count === 0) attached.delete(key);
+        else attached.set(key, count);
+        const found = held.get(key);
+        if (found !== undefined) syncExpiry(key, found);
+      };
     },
     subscribe: (listener) => {
       listeners.add(listener);

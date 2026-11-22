@@ -7,11 +7,11 @@
  */
 import type { Connection, McpServer, PluginDetail } from "@hercule/contract";
 import { describeConnectionTypeName } from "../connection-settings";
-import { listConnectionTypes } from "../connection-types";
+import { listConnectionTypes, type ConnectionType } from "../connection-types";
 import { parsePluginId } from "../plugin-id";
 import { formatCount } from "../threads/work-summary";
 import { decideDisplayStatus } from "./display-status";
-import { readMcpServerOffers } from "./offers";
+import { readMcpServerOffers, type McpServerOffer } from "./offers";
 import { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
 
 /** One MCP Server, joined with what a screen needs to draw it. */
@@ -55,10 +55,32 @@ export const buildMcpServerViews = (
   servers: readonly McpServer[],
   connections: readonly Connection[],
   plugins: readonly PluginDetail[],
-): McpServerView[] => {
-  const offers = readMcpServerOffers(plugins);
-  const types = listConnectionTypes(plugins);
-  return servers.map((server) => {
+): McpServerView[] =>
+  buildMcpServerViewsFromOffers({
+    servers,
+    connections,
+    offers: readMcpServerOffers(plugins),
+    types: listConnectionTypes(plugins),
+  });
+
+/**
+ * Returns what `buildMcpServerViews` returns, from the offers
+ * (`readMcpServerOffers`) and the Connection types (`listConnectionTypes`)
+ * the plugins give, which a caller that already decoded them passes in
+ * instead of decoding them again.
+ */
+export const buildMcpServerViewsFromOffers = ({
+  servers,
+  connections,
+  offers,
+  types,
+}: {
+  readonly servers: readonly McpServer[];
+  readonly connections: readonly Connection[];
+  readonly offers: readonly McpServerOffer[];
+  readonly types: readonly ConnectionType[];
+}): McpServerView[] =>
+  servers.map((server) => {
     const { source } = server;
     const displayStatus = decideDisplayStatus(server);
     const { word: statusWord, failing } = MCP_SERVER_STATUS_FACTS[displayStatus];
@@ -107,7 +129,6 @@ export const buildMcpServerViews = (
       statusDetail: failing ? server.statusDetail : null,
     };
   });
-};
 
 /** The Connection to reconnect to bring a server back, and the label of the button that does it. */
 export interface ReconnectTarget {

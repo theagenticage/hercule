@@ -29,8 +29,8 @@ export interface McpServerSwitch {
  * Returns the switch of `target`, shared by every control of the app that
  * switches it. The guard and the refusal belong to the target, not to the
  * control, so a row and the page of the same server never write at once. The
- * refusal is dropped when the component that calls this hook unmounts, which
- * is the row or the page.
+ * refusal stays while a control shows the target and for a while after the
+ * last one is gone.
  */
 export function useMcpServerSwitch(target: McpServerSwitchTarget): McpServerSwitch {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -45,12 +45,11 @@ export function useMcpServerSwitch(target: McpServerSwitchTarget): McpServerSwit
     },
   });
   const state = useSyncExternalStore(switches.subscribe, () => switches.readState(target));
+  // A refusal stays while a control shows the target, and expires some time after the last one left.
   const key = JSON.stringify(target);
   useEffect(() => {
     const mine = JSON.parse(key) as McpServerSwitchTarget;
-    return () => {
-      switches.clearRefusal(mine);
-    };
+    return switches.attach(mine);
   }, [switches, key]);
   return {
     press: (on) => {

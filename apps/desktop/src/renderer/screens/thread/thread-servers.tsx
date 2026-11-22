@@ -10,19 +10,19 @@
 import { createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage, type DraftView, type ThreadBlock } from "@hercule/client-core";
+import { readErrorMessage, type DraftView } from "@hercule/client-core";
 import {
   decideThreadServersDemand,
   describeThreadServers,
-  hasMcpServerBlock,
-  type McpServerView,
   type StartProjectRecord,
   type StartRecord,
   type ThreadServersDescription,
   type ThreadServersRecords,
-} from "@hercule/client-core/mcp-servers";
-import type { MutableLiveTopic, Session } from "@hercule/contract";
+} from "@hercule/client-core/mcp-servers/first-screen";
+import type { McpServerView } from "@hercule/client-core/mcp-servers";
+import type { MutableLiveTopic, PluginDetail, Session } from "@hercule/contract";
 import { useMcpServerViews } from "../../app/mcp-server-views";
+import { buildStartRecord } from "../../app/start-record";
 import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "../../app/live";
 import {
   connectionsQuery,
@@ -39,12 +39,12 @@ export interface ThreadServers {
   /** The thread's list, where it started, and the words of the `+` menu's row. */
   readonly described: ThreadServersDescription;
   /**
-   * The servers joined with their Connections, built once for the thread.
-   * `undefined` until a line about servers or the open menu or picker asks
-   * for them and they are read.
+   * The plugins the servers were joined with, for the marks of the menu and
+   * the picker. `undefined` exactly when `useThreadViews` returns
+   * `undefined`: the provider reads both once, for the thread.
    */
-  readonly views: readonly McpServerView[] | undefined;
-  /** Why the list of servers could not be read, such as a token without `mcp.read`, or `null`. */
+  readonly plugins: readonly PluginDetail[] | undefined;
+  /** Why the servers could not be read, such as a token without `mcp.read`, or `null`. */
   readonly readFailure: string | null;
   /**
    * Tells the provider whether the MCP row of the `+` menu or the picker is
@@ -61,30 +61,20 @@ export interface ThreadServers {
  */
 export const ThreadServersContext = createContext<ThreadServers | null>(null);
 
-/** What the provider describes: a started thread, with its transcript's blocks, or a Draft Thread. */
-export type OpenThread =
-  | { readonly kind: "started"; readonly session: Session; readonly blocks: readonly ThreadBlock[] }
-  | { readonly kind: "draft"; readonly view: DraftView };
+/**
+ * The servers joined with their Connections, which a line about servers, the
+ * open menu and the picker draw. Filled by `ThreadServersProvider`, and by
+ * `CachedThreadViews` for a transcript that has no provider.
+ */
+const ThreadViewsContext = createContext<readonly McpServerView[] | undefined>(undefined);
 
 /**
- * Returns whether the thread `sessionId` has shown a line about MCP servers.
- *
- * The answer only goes from false to true, because a transcript only grows.
- * So the blocks are scanned until a line is found, and never again after
- * that: a thread that streams a long answer does not pay a scan for every row
- * the stream delivers, and what the provider shares does not change per
- * token. The latch names its thread, since the page that holds it is drawn
- * again with the next thread's blocks.
+ * What the provider describes: a started thread, with whether its transcript
+ * holds a line about servers (see `useHasMcpLine`), or a Draft Thread.
  */
-function useHasMcpLine(sessionId: string | null, blocks: readonly ThreadBlock[]): boolean {
-  const [foundIn, setFoundIn] = useState<string | null>(null);
-  if (sessionId === null) return false;
-  if (foundIn === sessionId) return true;
-  const found = hasMcpServerBlock(blocks);
-  // Written during the render, so the latch holds from the next one.
-  if (found) setFoundIn(sessionId);
-  return found;
-}
+export type OpenThread =
+  | { readonly kind: "started"; readonly session: Session; readonly hasMcpLine: boolean }
+  | { readonly kind: "draft"; readonly view: DraftView };
 
 /**
  * Returns the records of the thread's list: its project's and the default
@@ -106,12 +96,11 @@ function useStartRecords(
       : found === undefined
         ? { kind: "missing" }
         : { kind: "read", value: found };
-  const defaultIds: StartRecord<readonly string[]> =
-    settings.data !== undefined
-      ? { kind: "read", value: settings.data.user["thread.mcpServerIds"] ?? [] }
-      : settings.error === null
-        ? { kind: "pending" }
-        : { kind: "failed", message: readErrorMessage(settings.error) };
+  // The fields, not the query's result, which is a new object on every render.
+  const defaultIds: StartRecord<readonly string[]> = buildStartRecord(
+    { data: settings.data, error: settings.error },
+    (data) => data.user["thread.mcpServerIds"] ?? [],
+  );
   return { project, defaultIds };
 }
 
@@ -141,37 +130,49 @@ export function ThreadServersProvider({
   const { client, live } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
-  const hasMcpLine = useHasMcpLine(
-    thread.kind === "started" ? thread.session.id : null,
-    thread.kind === "started" ? thread.blocks : [],
-  );
   const projectId =
     thread.kind === "started"
       ? thread.session.projectId
       : (thread.view.resolved.config.projectId ?? null);
-  const startRecords = useStartRecords(projectId, editing);
-  const records: ThreadServersRecords = {
-    thread:
-      thread.kind === "started"
-        ? { kind: "started", session: thread.session }
-        : { kind: "draft", projectId, pickedIds: thread.view.resolved.mcpServerIds },
-    ...startRecords,
-    hasMcpLine,
-    editing,
-  };
+  const { project, defaultIds } = useStartRecords(projectId, editing);
+  // Kept as it is while the records it holds do not change, so a streamed row
+  // does not describe the thread again.
+  const records = useMemo<ThreadServersRecords>(
+    () => ({
+      thread:
+        thread.kind === "started"
+          ? { kind: "started", session: thread.session }
+          : { kind: "draft", projectId, pickedIds: thread.view.resolved.mcpServerIds },
+      project,
+      defaultIds,
+      hasMcpLine: thread.kind === "started" && thread.hasMcpLine,
+      editing,
+    }),
+    [thread, projectId, project, defaultIds, editing],
+  );
   const demand = decideThreadServersDemand(records);
   useScreenTopicsLive(live, queryClient, demand.catalogue ? MCP_SERVER_TOPICS : NO_TOPICS);
   const servers = useQuery({ ...mcpServersQuery(client), enabled: demand.catalogue });
   const connections = useQuery({ ...connectionsQuery(client), enabled: demand.views });
   const plugins = useQuery({ ...pluginsQuery(client), enabled: demand.views });
   const views = useMcpServerViews(demand.views, servers.data, connections.data, plugins.data);
-  const described = describeThreadServers(records, servers.data);
-  const readFailure = servers.error === null ? null : readErrorMessage(servers.error);
-  const shared = useMemo(
-    () => ({ described, views, readFailure, setEditing }),
-    [described, views, readFailure],
+  const described = useMemo(
+    () => describeThreadServers(records, servers.data),
+    [records, servers.data],
   );
-  return <ThreadServersContext value={shared}>{children}</ThreadServersContext>;
+  const failure = servers.error ?? connections.error ?? plugins.error;
+  const readFailure = failure === null ? null : readErrorMessage(failure);
+  // The plugins are those the views were joined with, so they are `undefined` together.
+  const joinedPlugins = views === undefined ? undefined : plugins.data;
+  const shared = useMemo(
+    () => ({ described, plugins: joinedPlugins, readFailure, setEditing }),
+    [described, joinedPlugins, readFailure],
+  );
+  return (
+    <ThreadServersContext value={shared}>
+      <ThreadViewsContext value={views}>{children}</ThreadViewsContext>
+    </ThreadServersContext>
+  );
 }
 
 /**
@@ -188,10 +189,32 @@ export function useThreadServers(): ThreadServers {
 }
 
 /**
- * Returns the servers joined with their Connections for a line about servers,
- * or `undefined` until they are read, and on a page with no provider, such as
- * a subagent's, which reads no servers.
+ * Returns the servers joined with their Connections, or `undefined` until
+ * they are read, and where no provider reads them, such as a subagent's page.
  */
 export function useThreadViews(): readonly McpServerView[] | undefined {
-  return useContext(ThreadServersContext)?.views;
+  return useContext(ThreadViewsContext);
+}
+
+/**
+ * Renders `children` with the servers joined from what the cache holds, for a
+ * transcript outside any thread's page, such as the first moments of a thread
+ * in the Inbox. It reads and subscribes to nothing, so its lines draw their
+ * fix buttons only when the servers are cached already. `hasMcpLine` is
+ * whether the transcript holds a line about servers (see `useHasMcpLine`):
+ * the code that joins them loads only then.
+ */
+export function CachedThreadViews({
+  hasMcpLine,
+  children,
+}: {
+  readonly hasMcpLine: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const servers = useQuery({ ...mcpServersQuery(client), enabled: false });
+  const connections = useQuery({ ...connectionsQuery(client), enabled: false });
+  const plugins = useQuery({ ...pluginsQuery(client), enabled: false });
+  const views = useMcpServerViews(hasMcpLine, servers.data, connections.data, plugins.data);
+  return <ThreadViewsContext value={views}>{children}</ThreadViewsContext>;
 }

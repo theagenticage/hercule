@@ -4,6 +4,7 @@ import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
 import { buildMcpListQuery } from "./list-edits";
+import { DETACHED_REFUSAL_LIFETIME_MS } from "./edit-guard";
 import {
   buildOfferSwitchTarget,
   buildServerSwitchTarget,
@@ -154,26 +155,34 @@ describe("a press on the switch", () => {
     const { world, client, queryClient, switches, settle } = await setup();
     switches.apply(WORK, true);
 
-    // Another client created the server, and a read of the list shows it.
-    queryClient.setQueryData(SERVERS_KEY, [SENTRY_WORK]);
-    switches.apply(WORK, false);
+    // Another client created the server, and a real read of the list brings its record in.
+    world.servers = [SENTRY_WORK];
+    await queryClient.fetchQuery({
+      queryKey: SERVERS_KEY,
+      queryFn: () => client.mcpServer.query(),
+      staleTime: 0,
+    });
+    const [arrived] = queryClient.getQueryData<McpServer[]>(SERVERS_KEY)!;
+    // The press names its target from the stored source of the record that arrived, as the server's page does.
+    const target = buildServerSwitchTarget(arrived!);
+    switches.apply(target, false);
 
-    expect(switches.readState(WORK).blocked).toBe(true);
+    expect(target).toEqual(WORK);
+    expect(switches.readState(target).blocked).toBe(true);
     expect(client.mcpServer.update).not.toHaveBeenCalled();
 
     // The controller refuses the create, as the server exists already.
-    world.servers = [SENTRY_WORK];
     world.finishCreate!(new ApiError("conflict", "A server of this Connection exists."));
-    await settle(WORK);
+    await settle(target);
 
-    switches.apply(WORK, false);
-    await settle(WORK);
+    switches.apply(target, false);
+    await settle(target);
     expect(client.mcpServer.create).toHaveBeenCalledTimes(1);
     expect(client.mcpServer.update).toHaveBeenCalledExactlyOnceWith({
       params: { id: "s-work" },
       payload: { enabled: false },
     });
-    expect(switches.readState(WORK).refusal).toBeNull();
+    expect(switches.readState(target).refusal).toBeNull();
   });
 
   it("shows the controller's reason until another record shows for the target, such as a server another client created", async () => {
@@ -234,6 +243,48 @@ describe("a press on the switch", () => {
       staleTime: 0,
     });
     await settle(WORK);
+  });
+
+  it("is not released by a patch of the cache by hand, only by a fetch of the list", async () => {
+    const { world, client, queryClient, switches, settle } = await setup([SENTRY_WORK]);
+    world.readsFail = true;
+    switches.apply(WORK, false);
+    await vi.waitFor(() => {
+      expect(switches.readState(WORK).unread).toEqual({ saved: true });
+    });
+
+    queryClient.setQueryData(SERVERS_KEY, [SENTRY_WORK]);
+    switches.apply(WORK, true);
+
+    expect(switches.readState(WORK).blocked).toBe(true);
+    expect(client.mcpServer.update).toHaveBeenCalledTimes(1);
+    world.readsFail = false;
+    await queryClient.fetchQuery({
+      queryKey: SERVERS_KEY,
+      queryFn: () => client.mcpServer.query(),
+      staleTime: 0,
+    });
+    await settle(WORK);
+  });
+
+  it("drops a refusal that no control shows after its lifetime", async () => {
+    vi.useFakeTimers();
+    try {
+      const { world, switches, settle } = await setup();
+      const detach = switches.attach(WORK);
+      switches.apply(WORK, true);
+      world.finishCreate!(new ApiError("conflict", "A server of this Connection exists."));
+      await settle(WORK);
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS * 2);
+      expect(switches.readState(WORK).refusal).not.toBeNull();
+
+      detach();
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS);
+
+      expect(switches.readState(WORK).refusal).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses, with a reason, while the list of servers is not cached", () => {

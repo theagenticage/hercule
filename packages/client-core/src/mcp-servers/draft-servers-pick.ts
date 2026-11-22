@@ -34,15 +34,16 @@ export const decideDraftServersPick = ({
   readonly defaultIds: StartRecord<readonly string[]>;
   readonly choice: McpListChoice;
 }): ThreadChoice | undefined => {
+  const servers = views.map((view) => view.server);
   const source = decideThreadStartSource({
     projectId,
     project,
     defaultIds,
-    knownServerIds: new Set(views.map((view) => view.server.id)),
+    knownServerIds: new Set(servers.map((server) => server.id)),
   });
   const decided = decideMcpListChoice({
     ids,
-    views,
+    servers,
     choice,
     start: source.kind === "start" ? source.start : undefined,
   });

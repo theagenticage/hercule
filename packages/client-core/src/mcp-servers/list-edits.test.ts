@@ -1,4 +1,4 @@
-import { QueryClient, type QueryKey } from "@tanstack/query-core";
+import { QueryClient, QueryObserver, type QueryKey } from "@tanstack/query-core";
 import { describe, expect, it, vi } from "vitest";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
@@ -13,9 +13,12 @@ import {
   type McpListChoice,
   type McpListTarget,
 } from "./list-edits";
+import { DETACHED_REFUSAL_LIFETIME_MS } from "./edit-guard";
+import { describeThreadStartFoot } from "./start-list";
 import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
+const SERVERS = VIEWS.map((view) => view.server);
 const THREAD: McpListTarget = { kind: "thread", sessionId: "se-1", projectId: "p-shop" };
 const PROJECT: McpListTarget = { kind: "project", projectId: "p-shop" };
 const DEFAULT: McpListTarget = { kind: "default" };
@@ -136,6 +139,7 @@ const setup = async (lists: Lists = {}, cacheOverrides: Partial<McpListCache> = 
     },
     readBase: (target) => reads[target.kind],
     readOtherKeys: (target) => (target.kind === "project" ? [PROJECT_KEY] : []),
+    readServers: () => VIEWS.map((view) => view.server),
     readViews: () => VIEWS,
     readCatalogue: () =>
       buildMcpListQuery(queryClient, {
@@ -160,7 +164,7 @@ const setup = async (lists: Lists = {}, cacheOverrides: Partial<McpListCache> = 
     vi.waitFor(() => {
       expect(edits.readState(target).blocked).toBe(false);
     });
-  return { world, client, queryClient, edits, settle };
+  return { world, client, queryClient, cache, edits, settle };
 };
 
 describe("one edit at a time for a list", () => {
@@ -198,18 +202,21 @@ describe("one edit at a time for a list", () => {
     await settle(DEFAULT);
   });
 
-  it("keeps the guard for every consumer: two instances for one query client are one, however often a control closes and opens", async () => {
-    const { client, queryClient, edits, settle } = await setup();
-    const cache = {} as McpListCache;
-    const first = findOrCreateMcpListEdits({ queryClient, client: client as never, cache });
-    const second = findOrCreateMcpListEdits({ queryClient, client: client as never, cache });
+  it("keeps the guard for every consumer: two lookups for one query client are one instance, and a second control in the same tick sees the first one's edit", async () => {
+    const { client, queryClient, cache } = await setup();
+    const options = { queryClient, client: client as never, cache };
+    const first = findOrCreateMcpListEdits(options);
+    const second = findOrCreateMcpListEdits(options);
 
     expect(second).toBe(first);
-    expect(edits).not.toBe(first);
-    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
-    // A control that subscribes after the edit started sees it running.
-    expect(edits.readState(THREAD).blocked).toBe(true);
-    await settle(THREAD);
+    // Two controls of one list press in the same tick, one on each handle.
+    first.apply(THREAD, choose("sentry", "s-work", "s-work"));
+    second.apply(THREAD, choose("sentry", "s-hobby", "s-work"));
+    expect(client.session.update).toHaveBeenCalledTimes(1);
+    expect(second.readState(THREAD).blocked).toBe(true);
+    await vi.waitFor(() => {
+      expect(first.readState(THREAD).blocked).toBe(false);
+    });
   });
 
   it("returns the same state object until the target changes", async () => {
@@ -355,6 +362,170 @@ describe("a list that could not be read again", () => {
   });
 });
 
+describe("what releases a list that could not be read again", () => {
+  it("is not released by a patch of the cache by hand, only by a fetch of the list", async () => {
+    const { world, client, queryClient, edits, settle } = await setup();
+    world.readsFail = true;
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+    await vi.waitFor(() => {
+      expect(edits.readState(THREAD).unread).toEqual({ saved: true });
+    });
+
+    // Something else patches the cached Session, and leaves its list as it was before the write.
+    queryClient.setQueryData(SESSION_KEY, {
+      id: "se-1",
+      mcpServers: [{ mcpServerId: "s-linear" }],
+      title: "patched",
+    });
+    edits.apply(THREAD, choose("sentry", "s-hobby", "s-work"));
+
+    expect(edits.readState(THREAD).blocked).toBe(true);
+    expect(client.session.update).toHaveBeenCalledTimes(1);
+    world.readsFail = false;
+    await queryClient.fetchQuery({
+      queryKey: SESSION_KEY,
+      queryFn: () => client.session.read(),
+      staleTime: 0,
+    });
+    await settle(THREAD);
+  });
+
+  it("is released by a read that succeeded while the servers were still being read, even though the list's own read failed", async () => {
+    const { world, client, queryClient, edits, settle } = await setup();
+    let releaseServers!: () => void;
+    client.mcpServer.query.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseServers = () => {
+            resolve(VIEWS.map((view) => view.server));
+          };
+        }),
+    );
+    world.readsFail = true;
+    world.refuseWith = new ApiError("validation", "The list names a server that no longer exists.");
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+    // The list's own read fails, and the servers' read is held.
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryState(SESSION_KEY)?.status).toBe("error");
+    });
+    world.readsFail = false;
+    await queryClient.fetchQuery({
+      queryKey: SESSION_KEY,
+      queryFn: () => client.session.read(),
+      staleTime: 0,
+    });
+
+    releaseServers();
+    await settle(THREAD);
+
+    expect(edits.readState(THREAD)).toMatchObject({ blocked: false, unread: null });
+  });
+
+  it("marks another read of the list stale without reading it", async () => {
+    const { client, queryClient, edits, settle } = await setup({ projectIds: ["s-linear"] });
+    const observer = new QueryObserver(queryClient, {
+      queryKey: PROJECT_KEY,
+      queryFn: () => client.project.read(),
+    });
+    const stop = observer.subscribe(() => {});
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryState(PROJECT_KEY)?.status).toBe("success");
+    });
+    const readsBefore = client.project.read.mock.calls.length;
+
+    edits.apply(PROJECT, { kind: "box", serverId: "s-work", action: "tick" });
+    await settle(PROJECT);
+
+    expect(queryClient.getQueryState(PROJECT_KEY)?.isInvalidated).toBe(true);
+    expect(client.project.read.mock.calls.length).toBe(readsBefore);
+    stop();
+  });
+});
+
+describe("how long a refusal stays", () => {
+  const refuse = async () => {
+    const world = await setup();
+    world.world.refuseWith = new ApiError("forbidden", "No grant mcp.manage");
+    return world;
+  };
+
+  it("keeps a refusal as long as a control shows the target", async () => {
+    vi.useFakeTimers();
+    try {
+      const { edits, settle } = await refuse();
+      const detach = edits.attach(THREAD);
+
+      edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+      await settle(THREAD);
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS * 2);
+
+      expect(edits.readState(THREAD).refusal).not.toBeNull();
+      detach();
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS);
+      expect(edits.readState(THREAD).refusal).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a refusal that came after the last control left, once its lifetime is over", async () => {
+    vi.useFakeTimers();
+    try {
+      const { edits, settle } = await refuse();
+      const detach = edits.attach(THREAD);
+
+      edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+      detach();
+      await settle(THREAD);
+
+      expect(edits.readState(THREAD).refusal).toMatchObject({ kind: "refused" });
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS / 2);
+      expect(edits.readState(THREAD).refusal).not.toBeNull();
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS / 2);
+      expect(edits.readState(THREAD).refusal).toBeNull();
+      expect(edits.readState(THREAD)).toEqual({ blocked: false, refusal: null, unread: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a refusal that a control attached to before its lifetime ended, and keeps what is unread", async () => {
+    vi.useFakeTimers();
+    try {
+      const { world, edits, queryClient, client } = await refuse();
+      world.readsFail = true;
+
+      edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+      await vi.waitFor(() => {
+        expect(edits.readState(THREAD).unread).toEqual({ saved: false });
+      });
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS / 2);
+      const detach = edits.attach(THREAD);
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS * 2);
+      expect(edits.readState(THREAD).refusal).not.toBeNull();
+
+      detach();
+      vi.advanceTimersByTime(DETACHED_REFUSAL_LIFETIME_MS);
+
+      // The refusal is gone, the obligation to read the list again is not.
+      expect(edits.readState(THREAD)).toMatchObject({
+        blocked: true,
+        refusal: null,
+        unread: { saved: false },
+      });
+      world.readsFail = false;
+      await queryClient.fetchQuery({
+        queryKey: SESSION_KEY,
+        queryFn: () => client.session.read(),
+        staleTime: 0,
+      });
+      expect(edits.readState(THREAD).blocked).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("a refused write", () => {
   it("keeps the controller's reason until it is dismissed or a new edit is made", async () => {
     const { world, client, edits, settle } = await setup();
@@ -390,6 +561,36 @@ describe("a refused write", () => {
     await settle(THREAD);
 
     expect(world.catalogueReads).toBe(before + 1);
+  });
+
+  it("reads the servers after the refusal, not in a read that began before it", async () => {
+    const { world, client, queryClient, edits, settle } = await setup();
+    let releaseOld!: () => void;
+    // A read of the servers began before the write was refused. It still holds a server that is deleted now.
+    client.mcpServer.query.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseOld = () => {
+            resolve([...VIEWS.map((view) => view.server), { ...LINEAR, id: "s-deleted" }]);
+          };
+        }),
+    );
+    const old = queryClient
+      .fetchQuery({
+        queryKey: SERVERS_KEY,
+        queryFn: () => client.mcpServer.query(),
+        staleTime: 0,
+      })
+      .catch(() => {});
+    world.refuseWith = new ApiError("validation", "The list names a server that no longer exists.");
+
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+    await settle(THREAD);
+    releaseOld();
+    await old;
+
+    expect(queryClient.getQueryData(SERVERS_KEY)).toEqual(VIEWS.map((view) => view.server));
+    expect(edits.readState(THREAD).refusal).toMatchObject({ kind: "refused" });
   });
 
   it("leaves the servers alone when the refusal is another one", async () => {
@@ -437,6 +638,42 @@ describe("a choice of a name", () => {
       params: { id: "se-1" },
       payload: { mcpServerIds: ["s-hobby", "s-linear"] },
     });
+  });
+
+  it("decides from the catalogue's records alone, so it needs no Connections or plugins", async () => {
+    const { client, edits, settle } = await setup({}, { readViews: () => undefined });
+
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+    await settle(THREAD);
+
+    expect(client.session.update).toHaveBeenCalledWith({
+      params: { id: "se-1" },
+      payload: { mcpServerIds: ["s-linear", "s-work"] },
+    });
+  });
+
+  it("names the occupant by its record when the joined views are not read", async () => {
+    const { edits } = await setup({ threadIds: ["s-hobby"] }, { readViews: () => undefined });
+
+    edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
+
+    expect(edits.readState(THREAD).refusal).toMatchObject({
+      kind: "taken",
+      occupant: { server: { id: "s-hobby" } },
+    });
+    expect(describeMcpListProblem(edits.readState(THREAD))).toBe(
+      "The list already names sentry, so nothing was changed.",
+    );
+  });
+
+  it("skips an account that is gone before it looks at who holds the name, so it is not refused as taken", async () => {
+    const { client, edits } = await setup({ threadIds: ["s-linear", "s-hobby"] });
+
+    // The user asked for s-gone, and the list names s-hobby now: nothing to refuse, the account no longer exists.
+    edits.apply(THREAD, choose("sentry", "s-gone", "s-work"));
+
+    expect(client.session.update).not.toHaveBeenCalled();
+    expect(edits.readState(THREAD)).toEqual({ blocked: false, refusal: null, unread: null });
   });
 
   it("keeps the ids the catalogue does not know", async () => {
@@ -546,7 +783,7 @@ describe("the servers and the list not being read yet", () => {
   });
 
   it("refuses an edit while the servers are not read, with a problem a control can show", async () => {
-    const { client, edits } = await setup({}, { readViews: () => undefined });
+    const { client, edits } = await setup({}, { readServers: () => undefined });
 
     edits.apply(THREAD, choose("sentry", "s-work", "s-work"));
 
@@ -568,6 +805,27 @@ describe("going back to the start list", () => {
       params: { id: "se-1" },
       payload: { mcpServerIds: ["s-work"] },
     });
+  });
+
+  it("writes exactly when the foot of the menu offers the way back", async () => {
+    const start = {
+      mcpServerIds: ["s-work"],
+      source: { kind: "project", projectName: "webshop" },
+      complete: true,
+    } as const;
+    for (const [threadIds, offered] of [
+      [["s-work"], false],
+      [["s-linear"], true],
+    ] as const) {
+      const { client, edits } = await setup({ threadIds: [...threadIds] });
+
+      edits.apply(THREAD, { kind: "reset" });
+
+      expect(describeThreadStartFoot({ kind: "start", start }, threadIds).reset !== null).toBe(
+        offered,
+      );
+      expect(client.session.update.mock.calls.length > 0).toBe(offered);
+    }
   });
 
   it("does nothing while the start list holds a server the catalogue does not know, and says so", async () => {
@@ -632,7 +890,7 @@ describe("decideMcpListChoice", () => {
     expect(
       decideMcpListChoice({
         ids: ["s-linear"],
-        views: VIEWS,
+        servers: SERVERS,
         choice: choose("sentry", "s-work", "s-work"),
       }),
     ).toEqual({ kind: "write", mcpServerIds: ["s-linear", "s-work"] });
@@ -646,7 +904,7 @@ describe("decideMcpListChoice", () => {
     } as const;
 
     expect(
-      decideMcpListChoice({ ids: [], views: VIEWS, choice: { kind: "reset" }, start }),
+      decideMcpListChoice({ ids: [], servers: SERVERS, choice: { kind: "reset" }, start }),
     ).toEqual({
       kind: "write",
       mcpServerIds: ["s-work"],
@@ -654,12 +912,12 @@ describe("decideMcpListChoice", () => {
     expect(
       decideMcpListChoice({
         ids: [],
-        views: VIEWS,
+        servers: SERVERS,
         choice: { kind: "reset" },
         start: { ...start, complete: false },
       }),
     ).toEqual({ kind: "unchanged" });
-    expect(decideMcpListChoice({ ids: [], views: VIEWS, choice: { kind: "reset" } })).toEqual({
+    expect(decideMcpListChoice({ ids: [], servers: SERVERS, choice: { kind: "reset" } })).toEqual({
       kind: "unchanged",
     });
   });

@@ -5,13 +5,14 @@
  * subagents. A subagent takes no messages, so its page has no composer, and
  * neither has an archived Thread's page.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Navigate, notFound, useLocation } from "@tanstack/react-router";
 import type { Session, Subagent } from "@hercule/contract";
 import { isOpenedAtLaunch } from "../../app/last-screen";
 import { ArchivedNotice } from "./archived-notice";
 import { ThreadComposer } from "./composer";
 import { ThreadServersProvider } from "./thread-servers";
+import { useHasMcpLine } from "./use-has-mcp-line";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
@@ -115,6 +116,13 @@ export function AgentPage({
     attachOpenParagraph,
     isGone,
   } = useLiveThreadBlocks(sessionId, subagentId);
+  // A subagent's page reads no servers, so it looks for no line about them.
+  const hasMcpLine = useHasMcpLine(subagentId === undefined ? sessionId : null, blocks);
+  // Kept as it is while only the transcript changes, so what the provider shares does not change per streamed row.
+  const openThread = useMemo(
+    () => ({ kind: "started", session, hasMcpLine }) as const,
+    [session, hasMcpLine],
+  );
   // The transcript sizes its bottom padding from the composer's stack. The
   // stack is held as state, not a ref, because the composer mounts after the
   // transcript: its element exists only once the transcript's effects ran,
@@ -196,9 +204,7 @@ export function AgentPage({
   );
   // A subagent's page reads no servers: its lines draw no button.
   return subagentId === undefined ? (
-    <ThreadServersProvider thread={{ kind: "started", session, blocks }}>
-      {page}
-    </ThreadServersProvider>
+    <ThreadServersProvider thread={openThread}>{page}</ThreadServersProvider>
   ) : (
     page
   );

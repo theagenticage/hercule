@@ -4,7 +4,7 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   buildMcpServerViews,
   buildProjectBoxes,
-  decideThreadStartList,
+  listKnownServerIds,
   type McpServerView,
 } from "@hercule/client-core/mcp-servers";
 import { FormCard } from "@hercule/ui";
@@ -47,12 +47,7 @@ export function Projects({
   ];
   // The default list is never rewritten when a server is deleted, so the
   // start list of a thread in no project is what drops the ids no server has.
-  const defaultIds = decideThreadStartList(
-    null,
-    [],
-    settings.user["thread.mcpServerIds"] ?? [],
-    views,
-  ).mcpServerIds;
+  const defaultIds = listKnownServerIds(settings.user["thread.mcpServerIds"] ?? [], views);
   const boxes = buildProjectBoxes(view, views, projects, defaultIds);
 
   return (

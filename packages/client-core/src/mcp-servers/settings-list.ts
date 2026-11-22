@@ -6,8 +6,8 @@ import type { Connection, McpServer, PluginDetail, Project } from "@hercule/cont
 import { describeConnectionTypeName } from "../connection-settings";
 import { listConnectionTypes } from "../connection-types";
 import { formatNameList } from "../name-list";
-import { joinOfferedServers, type McpServerOffer } from "./offers";
-import { buildMcpServerViews, type McpServerView } from "./views";
+import { joinOffersToServers, readMcpServerOffers, type McpServerOffer } from "./offers";
+import { buildMcpServerViewsFromOffers, type McpServerView } from "./views";
 
 /** One row of the group "From your Connections". */
 export interface McpServerSettingsRow {
@@ -49,10 +49,18 @@ export const buildMcpServerSettingsRows = ({
   readonly projects: readonly Project[];
 }): McpServerSettingsRow[] => {
   const types = listConnectionTypes(plugins);
+  // The offers are decoded once, and only the servers that belong to an offer get a view.
+  const offers = readMcpServerOffers(plugins);
+  const offered = joinOffersToServers(offers, servers, connections);
   const viewsByServer = new Map(
-    buildMcpServerViews(servers, connections, plugins).map((view) => [view.server, view]),
+    buildMcpServerViewsFromOffers({
+      servers: offered.flatMap(({ server }) => (server === null ? [] : [server])),
+      connections,
+      offers,
+      types,
+    }).map((view) => [view.server, view]),
   );
-  return joinOfferedServers({ servers, connections, plugins })
+  return offered
     .map(({ offer, connection, server }) => {
       const view = server === null ? null : viewsByServer.get(server)!;
       const typeName = describeConnectionTypeName(

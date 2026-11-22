@@ -1892,6 +1892,41 @@ describe("Connections > the agent tools note", () => {
     expect(within(await findConnectionRow(PALLET)).queryByRole("switch")).toBeNull();
   });
 
+  it("says one note for each server the plugin offers on a Connection, when it offers two", async () => {
+    const offersTwo: Plugin = {
+      ...PALLET_PLUGIN,
+      contributions: [
+        ...PALLET_PLUGIN.contributions,
+        {
+          extensionPoint: "mcp-server",
+          id: "pallet/pallet-docs",
+          definition: {
+            displayName: "Pallet docs",
+            description: "The Pallet documentation server.",
+            connectionType: "pallet/pallet",
+            origin: "https://docs.pallet.example",
+          },
+        },
+      ],
+    };
+    await openApp([PAPER, PALLET], {
+      "GET /api/v1/plugins": { body: [...CATALOG, offersTwo] },
+      "GET /api/v1/mcp-servers": () => ({ body: { items: [buildPalletServer()] } }),
+    });
+
+    const row = await findConnectionRow(PALLET);
+    await waitFor(() => {
+      expect(within(row).getAllByRole("link", { name: /agent tools/ })).toHaveLength(2);
+    });
+    // The first offer has a record and is on. The docs offer has none, so it leads to the list.
+    const notes = within(row).getAllByRole("link", { name: /agent tools/ });
+    expect(notes.map((note) => note.textContent)).toEqual(["agent tools on", "agent tools off"]);
+    expect(notes.map((note) => note.getAttribute("href"))).toEqual([
+      `/settings/mcp-servers/${SERVER_ID}`,
+      "/settings/mcp-servers",
+    ]);
+  });
+
   it("says agent tools are on for a ready server, and leads to its page", async () => {
     await openWithServers(() => [buildPalletServer()]);
 

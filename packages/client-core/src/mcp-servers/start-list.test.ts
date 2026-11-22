@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildProject } from "../threads/workspaces.testing";
 import {
-  decideThreadStartList,
+  canResetToStart,
   decideThreadStartSource,
   describeStartLine,
   describeThreadStartFoot,
+  listKnownServerIds,
   type StartProjectRecord,
   type StartRecord,
 } from "./start-list";
@@ -12,54 +13,28 @@ import { LINEAR, SENTRY_HOBBY, SENTRY_WORK, buildViews } from "./testing";
 
 const VIEWS = buildViews([SENTRY_WORK, SENTRY_HOBBY, LINEAR]);
 const WEBSHOP = { ...buildProject("p-shop", "webshop"), mcpServerIds: ["s-work"] };
-const EMPTY = buildProject("p-empty", "empty");
 
-describe("decideThreadStartList", () => {
-  it("drops from a project's list the servers deleted since", () => {
-    const shop = { ...WEBSHOP, mcpServerIds: ["s-gone", "s-work"] };
+describe("listKnownServerIds", () => {
+  it("drops the ids no server has and keeps the order of the rest", () => {
+    expect(listKnownServerIds(["s-linear", "s-gone", "s-work"], VIEWS)).toEqual([
+      "s-linear",
+      "s-work",
+    ]);
+    expect(listKnownServerIds(["s-gone"], VIEWS)).toEqual([]);
+  });
+});
 
-    expect(decideThreadStartList("p-shop", [shop], [], VIEWS).mcpServerIds).toEqual(["s-work"]);
+describe("canResetToStart", () => {
+  const start = (mcpServerIds: string[], complete = true) => ({
+    mcpServerIds,
+    source: { kind: "default" } as const,
+    complete,
   });
 
-  it("starts from the project's list", () => {
-    expect(decideThreadStartList("p-shop", [WEBSHOP], ["s-linear"], VIEWS)).toEqual({
-      mcpServerIds: ["s-work"],
-      source: { kind: "project", projectName: "webshop" },
-      complete: true,
-    });
-  });
-
-  it("is incomplete while the source holds an id no view knows, in a project or in the default list", () => {
-    const shop = { ...WEBSHOP, mcpServerIds: ["s-gone", "s-work"] };
-
-    expect(decideThreadStartList("p-shop", [shop], [], VIEWS).complete).toBe(false);
-    expect(decideThreadStartList(null, [], ["s-gone", "s-linear"], VIEWS).complete).toBe(false);
-    expect(decideThreadStartList(null, [], ["s-linear"], VIEWS).complete).toBe(true);
-  });
-
-  it("starts from the project's list even when it is empty, and not from the default", () => {
-    expect(decideThreadStartList("p-empty", [EMPTY], ["s-linear"], VIEWS)).toEqual({
-      mcpServerIds: [],
-      source: { kind: "project", projectName: "empty" },
-      complete: true,
-    });
-  });
-
-  it("starts a thread in no project from the default list, without servers deleted since", () => {
-    expect(decideThreadStartList(null, [WEBSHOP], ["s-gone", "s-linear"], VIEWS)).toEqual({
-      mcpServerIds: ["s-linear"],
-      source: { kind: "default" },
-      complete: false,
-    });
-  });
-
-  it("has no source when a thread in no project has an empty default list", () => {
-    expect(decideThreadStartList(null, [WEBSHOP], [], VIEWS)).toEqual({
-      mcpServerIds: [],
-      source: { kind: "none" },
-      complete: true,
-    });
-    expect(decideThreadStartList(null, [], ["s-gone"], VIEWS).source).toEqual({ kind: "none" });
+  it("is true only for a complete start list that holds other ids, whatever their order", () => {
+    expect(canResetToStart(start(["s-linear", "s-work"]), ["s-work"])).toBe(true);
+    expect(canResetToStart(start(["s-linear", "s-work"]), ["s-work", "s-linear"])).toBe(false);
+    expect(canResetToStart(start(["s-linear"], false), [])).toBe(false);
   });
 });
 
@@ -113,6 +88,26 @@ describe("decideThreadStartSource", () => {
     expect(decide(null, read(WEBSHOP), { kind: "failed", message: "no token" })).toEqual({
       kind: "failed",
       message: "no token",
+    });
+  });
+
+  it("starts from a project's list even when it is empty, and not from the default", () => {
+    expect(decide("p-empty", read(buildProject("p-empty", "empty")), read(["s-linear"]))).toEqual({
+      kind: "start",
+      start: {
+        mcpServerIds: [],
+        source: { kind: "project", projectName: "empty" },
+        complete: true,
+      },
+    });
+  });
+
+  it("has no source for a thread in no project whose default list is empty, or names only deleted servers", () => {
+    expect(decide(null, { kind: "pending" }, read([]))).toMatchObject({
+      start: { source: { kind: "none" }, complete: true },
+    });
+    expect(decide(null, { kind: "pending" }, read(["s-gone"]))).toMatchObject({
+      start: { mcpServerIds: [], source: { kind: "none" }, complete: false },
     });
   });
 

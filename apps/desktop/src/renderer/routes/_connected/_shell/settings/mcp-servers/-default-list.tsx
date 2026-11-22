@@ -23,7 +23,7 @@ import { LazyServerPickerDialog } from "../../../../../screens/settings/mcp-serv
  * setting that was read again since the picker drew is never replaced by an
  * older list. One edit of the setting runs at a time, wherever it was started
  * from, and counts as running until the setting is read again. Closing and
- * opening the picker keeps that guard. A server that was deleted is already
+ * opening the picker keeps that guard, and a refusal until the next write. A server that was deleted is already
  * left out of the setting by the read.
  */
 export function DefaultList(): JSX.Element {
@@ -61,8 +61,7 @@ export function DefaultList(): JSX.Element {
             error={edit.problem("Could not save: ")}
             onChoose={edit.apply}
             onClose={() => {
-              // Closing the picker dismisses what it showed. A refusal that came after it closed stays.
-              edit.clearRefusal();
+              // A refusal stays through the close, and shows when the picker opens again.
               setPicking(false);
             }}
           />

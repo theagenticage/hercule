@@ -1,18 +1,10 @@
-import {
-  Suspense,
-  useEffect,
-  useRef,
-  useState,
-  type JSX,
-  type KeyboardEvent,
-  type RefObject,
-} from "react";
+import { Suspense, useEffect, useState, type JSX, type KeyboardEvent } from "react";
 import { ToolsIcon } from "../../icons/tools";
 import { FileIcon } from "../../icons/file";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { PlusAttach } from "../session/composer-frame";
 import { isMenuFocusKey, moveMenuFocus } from "../move-menu-focus";
-import type { ThreadServersRow } from "@hercule/client-core/mcp-servers";
+import type { ThreadServersRow } from "@hercule/client-core/mcp-servers/first-screen";
 import { PlusIcon } from "../../icons/plus";
 import { ComposerMenu } from "./composer-menu";
 import {
@@ -50,10 +42,10 @@ import type { ThreadServersTarget } from "./thread-server-edits";
  * `null` when it works. The menu opens on a thread that takes no message too:
  * its list can be edited, and `attach` says that Attach is off.
  *
- * A refusal of a write stays until the user dismisses it, by closing the
- * menu or the picker that showed it, or until the next write. Opening them
- * never clears it, so a write refused after they were closed still shows when
- * they open again.
+ * A refusal of a write belongs to the thread's list, so it stays until the
+ * next write: closing the menu or the picker, opening them again, and the
+ * handoff from the submenu to the picker never clear it, and a write refused
+ * after they were closed still shows when they open again.
  */
 export function PlusMenu({
   attach,
@@ -70,9 +62,6 @@ export function PlusMenu({
   // Whether the submenu is open. It closes with the menu, in `onClosed`.
   const [showsServers, setShowsServers] = useState(false);
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
-  // Set by the submenu or the picker while it is drawn. The menu cannot load the edits itself, so
-  // this is how it forgets a refusal when the user closes what showed it.
-  const clearRefusalRef = useRef<(() => void) | null>(null);
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
   const editing = showsServers || picking;
   useEffect(() => {
@@ -97,7 +86,6 @@ export function PlusMenu({
           </>
         }
         onClosed={() => {
-          clearRefusalRef.current?.();
           setShowsServers(false);
         }}
       >
@@ -110,7 +98,6 @@ export function PlusMenu({
               setShowsServers(true);
             }}
             target={target}
-            clearRefusalRef={clearRefusalRef}
             serversOff={serversOff}
             onAttach={() => {
               close();
@@ -133,9 +120,7 @@ export function PlusMenu({
         <Suspense fallback={null}>
           <LazyThreadServerPicker
             target={target}
-            clearRefusalRef={clearRefusalRef}
             onClose={() => {
-              clearRefusalRef.current?.();
               setPicking(false);
             }}
           />
@@ -167,7 +152,6 @@ function PlusMenuPanels({
   showsServers,
   onShowServers,
   target,
-  clearRefusalRef,
   serversOff,
   onAttach,
   onClose,
@@ -179,7 +163,6 @@ function PlusMenuPanels({
   readonly showsServers: boolean;
   readonly onShowServers: () => void;
   readonly target: ThreadServersTarget;
-  readonly clearRefusalRef: RefObject<(() => void) | null>;
   readonly serversOff: string | null;
   readonly onAttach: () => void;
   readonly onClose: () => void;
@@ -247,7 +230,6 @@ function PlusMenuPanels({
         <Suspense fallback={<div className="pop plus-sub" aria-busy="true" />}>
           <LazyThreadServersMenu
             target={target}
-            clearRefusalRef={clearRefusalRef}
             onOpenPicker={onOpenPicker}
             onReconnect={onReconnect}
             onClose={onClose}

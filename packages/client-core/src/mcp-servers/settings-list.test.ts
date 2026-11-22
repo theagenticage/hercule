@@ -65,6 +65,37 @@ describe("buildMcpServerSettingsRows", () => {
     expect(linear?.projects.map((project) => project.name)).toEqual(["webshop", "blog"]);
   });
 
+  it("decodes the plugins' offers once, however many rows and views it builds", () => {
+    let decoded = 0;
+    const [contribution] = SENTRY_PLUGIN.contributions.filter(
+      (each) => each.extensionPoint === "mcp-server",
+    );
+    const definition = { ...(contribution!.definition as object) };
+    // Reading the offer's display name is how a decode shows.
+    Object.defineProperty(definition, "displayName", {
+      enumerable: true,
+      get: () => {
+        decoded += 1;
+        return "Sentry";
+      },
+    });
+    const counted = {
+      ...SENTRY_PLUGIN,
+      contributions: [{ ...contribution!, definition }],
+    };
+
+    const rows = buildMcpServerSettingsRows({
+      servers: [SENTRY_HOBBY],
+      connections: CONNECTIONS,
+      plugins: [counted],
+      projects: [],
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.view !== null)?.view?.server.id).toBe("s-hobby");
+    expect(decoded).toBe(1);
+  });
+
   it("gives no row to a Connection of a type no plugin offers a server for", () => {
     const rows = buildMcpServerSettingsRows({
       servers: [],

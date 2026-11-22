@@ -26,8 +26,6 @@ export interface ThreadServerEdits {
   readonly busy: boolean;
   /** Why the last change was not made, such as a session without `mcp.manage`. `null` when it was. */
   readonly refusal: string | null;
-  /** Forgets a settled refusal, when the user dismisses the menu or the picker that showed it. */
-  readonly clearRefusal: () => void;
 }
 
 /**
@@ -36,7 +34,7 @@ export interface ThreadServerEdits {
  * thread, wherever its menu or picker was opened from, and it counts as
  * running until the session is read again, so a second switch never starts
  * from a list the first one replaced. Closing the menu or the picker keeps
- * the guard and the refusal.
+ * the guard and the refusal, which stays until the next write.
  */
 export function useStartedThreadEdits(session: Session): ThreadServerEdits {
   const edit = useMcpListEdit({
@@ -48,7 +46,6 @@ export function useStartedThreadEdits(session: Session): ThreadServerEdits {
     apply: edit.apply,
     busy: edit.blocked,
     refusal: edit.problem(),
-    clearRefusal: edit.clearRefusal,
   };
 }
 
@@ -86,6 +83,5 @@ export function useDraftEdits({
     },
     busy: false,
     refusal: null,
-    clearRefusal: () => undefined,
   };
 }

@@ -6,7 +6,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient, type DataTag, type QueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import type { Project } from "@hercule/contract";
 import {
   buildMcpServerViews,
@@ -22,6 +22,7 @@ import {
   type StartProjectRecord,
   type StartRecord,
 } from "@hercule/client-core/mcp-servers";
+import { buildStartRecord } from "./start-record";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -32,8 +33,9 @@ import {
 } from "./queries";
 
 /**
- * Returns what the cache holds of the query `options`, as a start record:
- * the value `pick` makes of its data, the reason it failed, or pending.
+ * Returns what the cache holds of the query `options`, as a start record: the
+ * same rule the thread's provider applies to the query it reads (see
+ * `buildStartRecord`).
  */
 const readStartRecord = <Data, Value>(
   queryClient: QueryClient,
@@ -41,10 +43,7 @@ const readStartRecord = <Data, Value>(
   pick: (data: Data) => Value,
 ): StartRecord<Value> => {
   const state = queryClient.getQueryState(options.queryKey);
-  if (state?.data !== undefined) return { kind: "read", value: pick(state.data) };
-  return state?.status === "error"
-    ? { kind: "failed", message: readErrorMessage(state.error) }
-    : { kind: "pending" };
+  return buildStartRecord({ data: state?.data, error: state?.error ?? null }, pick);
 };
 
 /** Returns the record of the project `projectId` among `projects`, which is every project, or `missing`. */
@@ -98,6 +97,7 @@ export const buildMcpListCache = (
     }
   },
   readOtherKeys: () => [],
+  readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey),
   readViews: () => readCachedMcpServerViews(queryClient, client),
   readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
   readStartRecords: (projectId) => {
@@ -152,21 +152,19 @@ export function useMcpListEdits(): McpListEdits {
 /**
  * Returns the edits of the list `target`, shared by every control of the app
  * that edits it. The guard and the refusal belong to the list, not to the
- * control, so closing and opening a menu or dialog keeps them. The refusal
- * is dropped when the component that calls this hook unmounts, which is the
- * screen or the composer, never the menu or dialog opened from it.
+ * control, so closing and opening a menu or dialog, or leaving the screen,
+ * keeps them. The refusal stays until `clearRefusal` or the next edit.
  */
 export function useMcpListEdit(target: McpListTarget): McpListEdit {
   const edits = useMcpListEdits();
   const state: McpListEditState = useSyncExternalStore(edits.subscribe, () =>
     edits.readState(target),
   );
+  // A refusal stays while a control shows the list, and expires some time after the last one left.
   const key = JSON.stringify(target);
   useEffect(() => {
     const mine = JSON.parse(key) as McpListTarget;
-    return () => {
-      edits.clearRefusal(mine);
-    };
+    return edits.attach(mine);
   }, [edits, key]);
   return {
     apply: (choice) => {

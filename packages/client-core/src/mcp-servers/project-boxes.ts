@@ -4,7 +4,7 @@
  * server (spec 17, Settings > MCP servers).
  */
 import type { Project } from "@hercule/contract";
-import { chooseNamedServer } from "./named-lists";
+import { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
 import type { McpServerView } from "./views";
 
 /** The list a box edits. */
@@ -41,17 +41,15 @@ export const buildProjectBoxes = (
   projects: readonly Project[],
   defaultIds: readonly string[],
 ): ProjectBox[] => {
-  const buildBox = (target: ProjectBoxTarget, ids: readonly string[]): ProjectBox => ({
-    target,
-    ticked: ids.includes(view.server.id),
-    takenBy:
-      views.find(
-        (other) =>
-          other.server.name === view.server.name &&
-          other.server.id !== view.server.id &&
-          ids.includes(other.server.id),
-      ) ?? null,
-  });
+  const servers = views.map((each) => each.server);
+  const buildBox = (target: ProjectBoxTarget, ids: readonly string[]): ProjectBox => {
+    const occupantId = findOtherOccupant(ids, servers, view.server.name, [view.server.id]);
+    return {
+      target,
+      ticked: ids.includes(view.server.id),
+      takenBy: views.find((each) => each.server.id === occupantId) ?? null,
+    };
+  };
   return [
     ...projects.map((project) => buildBox({ kind: "project", project }, project.mcpServerIds)),
     buildBox({ kind: "default" }, defaultIds),
@@ -72,17 +70,19 @@ export type ProjectBoxWrite =
   | { readonly kind: "write"; readonly mcpServerIds: readonly string[] }
   | {
       readonly kind: "refused";
-      /** The other server of the same name that the list holds now. */
-      readonly occupant: McpServerView;
+      /** The id of the other server of the same name that the list holds now. */
+      readonly occupantId: string;
     };
 
 /**
  * Returns the write for a click on a box, decided on `currentIds`, the
- * target's list as it is at the moment of the click:
+ * target's list as it is at the moment of the click, and on the ids and names
+ * of `servers`:
  *
  * - `"tick"` writes the list with `server`, or is refused with the server of
  *   the same name that the list already names;
- * - `"untick"` writes the list without `server`, and touches nothing else;
+ * - `"untick"` writes the list without `server`, and touches nothing else. It
+ *   goes by the id alone, because the box shows that one server;
  * - `{ swapFrom }` writes the swap only while the list's server of that name
  *   is still `swapFrom`. When the list names another one now, it is refused
  *   with that one, because the user confirmed a swap for a different server.
@@ -93,25 +93,19 @@ export type ProjectBoxWrite =
  */
 export const decideProjectBoxWrite = (
   currentIds: readonly string[],
-  views: readonly McpServerView[],
-  server: McpServerView,
+  servers: readonly NamedServer[],
+  server: NamedServer,
   action: ProjectBoxAction,
 ): ProjectBoxWrite => {
   if (action === "untick") {
-    return { kind: "write", mcpServerIds: currentIds.filter((id) => id !== server.server.id) };
+    return { kind: "write", mcpServerIds: currentIds.filter((id) => id !== server.id) };
   }
-  const occupant = views.find(
-    (other) =>
-      other.server.name === server.server.name &&
-      other.server.id !== server.server.id &&
-      currentIds.includes(other.server.id),
-  );
-  if (occupant !== undefined && (action === "tick" || occupant.server.id !== action.swapFrom)) {
-    return { kind: "refused", occupant };
-  }
+  const expectedIds = action === "tick" ? [server.id] : [server.id, action.swapFrom];
+  const occupantId = findOtherOccupant(currentIds, servers, server.name, expectedIds);
+  if (occupantId !== undefined) return { kind: "refused", occupantId };
   return {
     kind: "write",
-    mcpServerIds: chooseNamedServer(currentIds, views, server.server.name, server.server.id),
+    mcpServerIds: chooseNamedServer(currentIds, servers, server.name, server.id),
   };
 };
 

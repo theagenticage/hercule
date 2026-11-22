@@ -6,6 +6,8 @@
  */
 import type { JSX } from "react";
 import { Transcript } from "./transcript";
+import { CachedThreadViews } from "./thread-servers";
+import { useHasMcpLine } from "./use-has-mcp-line";
 import { useLiveThreadBlocks } from "./use-live-thread-blocks";
 import "../session/transcript.css";
 import "./thread.css";
@@ -19,6 +21,10 @@ const ignoreBottomChange = (): void => {};
  * must give it a height (such as a flex child with `min-height: 0`), and it
  * follows the bottom as the agent writes until the reader scrolls up.
  *
+ * It is the one owner of its servers: a line about MCP servers draws its fix
+ * buttons from the servers the cache holds, and this transcript reads and
+ * subscribes to none (see `CachedThreadViews`).
+ *
  * Suspends until the Thread's reads are loaded, so the caller wraps it in
  * Suspense. Mount it keyed by `sessionId`.
  */
@@ -27,17 +33,20 @@ export function ThreadFirstMoments({ sessionId }: { readonly sessionId: string }
     sessionId,
     undefined,
   );
+  const hasMcpLine = useHasMcpLine(sessionId, blocks);
   return (
-    <Transcript
-      sessionId={sessionId}
-      faceSeed={faceSeed}
-      blocks={blocks}
-      pose={pose}
-      describeAgent={describeAgent}
-      attachOpenParagraph={attachOpenParagraph}
-      composerStack={null}
-      onBottomChange={ignoreBottomChange}
-      layout="embedded"
-    />
+    <CachedThreadViews hasMcpLine={hasMcpLine}>
+      <Transcript
+        sessionId={sessionId}
+        faceSeed={faceSeed}
+        blocks={blocks}
+        pose={pose}
+        describeAgent={describeAgent}
+        attachOpenParagraph={attachOpenParagraph}
+        composerStack={null}
+        onBottomChange={ignoreBottomChange}
+        layout="embedded"
+      />
+    </CachedThreadViews>
   );
 }

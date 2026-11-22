@@ -4,7 +4,15 @@
  * because their tools would get the same names (spec 21 section 4.1). Two
  * Sentry accounts are both named `sentry`, so a list holds one of them.
  */
+import type { McpServer } from "@hercule/contract";
 import type { McpServerView } from "./views";
+
+/**
+ * A server as the rule of one name per list sees it: its id and its name.
+ * Both come from the server record, so a decision needs neither the
+ * Connections nor the plugins that a joined view carries.
+ */
+export type NamedServer = Pick<McpServer, "id" | "name">;
 
 /** The servers that share one name. A screen draws it as one row with a choice of account. */
 export interface ServerNameGroup {
@@ -32,6 +40,29 @@ export const groupServersByName = (views: readonly McpServerView[]): ServerNameG
 };
 
 /**
+ * Returns the id in `ids` of a server named `name` that the caller did not
+ * expect there, or `undefined` when the name's slot in the list is free or
+ * held by a server the caller expected. This is the one rule of the slot of a
+ * name, for a press on a name and for a press on a box alike.
+ *
+ * `expectedIds` are the servers the caller is placing or replacing: the
+ * server the user asked for, and the one the user saw in the slot. A list
+ * that names any other server of `name` holds the slot for someone the user
+ * did not decide about.
+ */
+export const findOtherOccupant = (
+  ids: readonly string[],
+  servers: readonly NamedServer[],
+  name: string,
+  expectedIds: readonly string[],
+): string | undefined =>
+  ids.find(
+    (id) =>
+      !expectedIds.includes(id) &&
+      servers.some((server) => server.id === id && server.name === name),
+  );
+
+/**
  * Returns `ids` with the servers named `name` replaced by `serverId`, or
  * with none of them when `serverId` is `null`. So one call switches a name
  * on with one account, switches it off, or swaps its account, and the result
@@ -40,7 +71,7 @@ export const groupServersByName = (views: readonly McpServerView[]): ServerNameG
  * A swap puts the new id where the old one was, so it does not reorder the
  * list. A name switched on with none before is appended.
  *
- * Ids that no view knows are kept as they are: a server the thread has but
+ * Ids that no server knows are kept as they are: a server the thread has but
  * the catalogue has not read yet must not be erased by an unrelated write. A
  * list that names a server since deleted is refused by the controller, which
  * the user sees. A `serverId` that is not a server of `name` returns the list
@@ -48,12 +79,12 @@ export const groupServersByName = (views: readonly McpServerView[]): ServerNameG
  */
 export const chooseNamedServer = (
   ids: readonly string[],
-  views: readonly McpServerView[],
+  servers: readonly NamedServer[],
   name: string,
   serverId: string | null,
 ): string[] => {
   const sameName = new Set(
-    views.filter((view) => view.server.name === name).map((view) => view.server.id),
+    servers.filter((server) => server.name === name).map((server) => server.id),
   );
   if (serverId === null) return ids.filter((id) => !sameName.has(id));
   if (!sameName.has(serverId)) return [...ids];

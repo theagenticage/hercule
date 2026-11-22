@@ -3,9 +3,9 @@
  * client-core): how this app's query cache holds the lists, and the hook every
  * control that edits one uses.
  */
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient, type DataTag, type QueryClient } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import {
   buildMcpServerViews,
   describeMcpListProblem,
@@ -20,6 +20,7 @@ import {
   type StartProjectRecord,
   type StartRecord,
 } from "@hercule/client-core/mcp-servers";
+import { buildStartRecord } from "./start-record";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -30,17 +31,17 @@ import {
   settingsQuery,
 } from "./queries";
 
-/** Returns what the cache holds of a query as a start record: the value `pick` makes of its data, the reason it failed, or pending. */
+/**
+ * Returns what the cache holds of a query as a start record: the same rule
+ * the thread's provider applies to the query it reads (see `buildStartRecord`).
+ */
 const readStartRecord = <Data, Value>(
   queryClient: QueryClient,
   options: { readonly queryKey: DataTag<readonly unknown[], Data, Error> },
   pick: (data: Data) => Value,
 ): StartRecord<Value> => {
   const state = queryClient.getQueryState(options.queryKey);
-  if (state?.data !== undefined) return { kind: "read", value: pick(state.data) };
-  return state?.status === "error"
-    ? { kind: "failed", message: readErrorMessage(state.error) }
-    : { kind: "pending" };
+  return buildStartRecord({ data: state?.data, error: state?.error ?? null }, pick);
 };
 
 /** Returns the views of every server as the cache holds them, or `undefined` while a read they need is missing. */
@@ -107,6 +108,7 @@ export const buildMcpListCache = (
   },
   readOtherKeys: (target) =>
     target.kind === "project" ? [projectQuery(client, target.projectId).queryKey] : [],
+  readServers: () => queryClient.getQueryData(mcpServersQuery(client).queryKey)?.items,
   readViews: () => readCachedMcpServerViews(queryClient, client),
   readCatalogue: () => buildMcpListQuery(queryClient, mcpServersQuery(client)),
   readStartRecords: (projectId) => ({
@@ -159,6 +161,12 @@ export function useMcpListEdit(client: HerculeClient, target: McpListTarget): Mc
   const state: McpListEditState = useSyncExternalStore(edits.subscribe, () =>
     edits.readState(target),
   );
+  // A refusal stays while a control shows the list, and expires some time after the last one left.
+  const key = JSON.stringify(target);
+  useEffect(() => {
+    const mine = JSON.parse(key) as McpListTarget;
+    return edits.attach(mine);
+  }, [edits, key]);
   return {
     apply: (choice) => {
       edits.apply(target, choice);

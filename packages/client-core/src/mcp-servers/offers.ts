@@ -97,8 +97,19 @@ export const joinOfferedServers = ({
   readonly servers: readonly McpServer[];
   readonly connections: readonly Connection[];
   readonly plugins: readonly PluginDetail[];
-}): OfferedServer[] =>
-  readMcpServerOffers(plugins).flatMap((offer) =>
+}): OfferedServer[] => joinOffersToServers(readMcpServerOffers(plugins), servers, connections);
+
+/**
+ * Returns what `joinOfferedServers` returns, from offers that are already
+ * decoded (`readMcpServerOffers`), so a caller that needs the offers for
+ * something else decodes them once.
+ */
+export const joinOffersToServers = (
+  offers: readonly McpServerOffer[],
+  servers: readonly McpServer[],
+  connections: readonly Connection[],
+): OfferedServer[] =>
+  offers.flatMap((offer) =>
     connections
       .filter((connection) => connection.type === offer.connectionType)
       .map((connection) => ({

@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
-import { buildMcpServerViews, decideThreadStartList } from "@hercule/client-core/mcp-servers";
+import { buildMcpServerViews, listKnownServerIds } from "@hercule/client-core/mcp-servers";
 import { Button, LaneLabel } from "@hercule/ui";
 import {
   connectionsQuery,
@@ -30,12 +30,7 @@ export function DefaultList({ client }: { readonly client: HerculeClient }): JSX
   const views = buildMcpServerViews(servers, connections, plugins);
   // The default list is never rewritten when a server is deleted, so the
   // start list of a thread in no project is what drops the ids no server has.
-  const { mcpServerIds } = decideThreadStartList(
-    null,
-    [],
-    settings.user["thread.mcpServerIds"] ?? [],
-    views,
-  );
+  const mcpServerIds = listKnownServerIds(settings.user["thread.mcpServerIds"] ?? [], views);
   const failure = edit.problem();
 
   return (

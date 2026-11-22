@@ -22,15 +22,9 @@ import type { QueryClient, QueryKey } from "@tanstack/query-core";
 import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { readErrorMessage } from "../errors";
-import {
-  createEditGuard,
-  hasReadSince,
-  readMarkOf,
-  type McpListEditState,
-  type ReadMark,
-} from "./edit-guard";
-import type { McpListQuery } from "./list-edits";
+import { createEditGuard, type McpListEditState } from "./edit-guard";
 import type { OfferedServer } from "./offers";
+import { readBaseAfterWrite, type McpListQuery } from "./reconcile";
 
 /** The server a switch turns on and off. */
 export type McpServerSwitchTarget =
@@ -94,6 +88,12 @@ export interface McpServerSwitches {
   readonly readState: (target: McpServerSwitchTarget) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
   readonly clearRefusal: (target: McpServerSwitchTarget) => void;
+  /**
+   * Counts the caller as a control that shows the target's state. A refusal
+   * stays while one does. After the last one has left, a refusal is dropped
+   * after `DETACHED_REFUSAL_LIFETIME_MS`. Returns the function that detaches.
+   */
+  readonly attach: (target: McpServerSwitchTarget) => () => void;
   /** Calls `listener` whenever the state of any target changes. Returns the function that stops it. */
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -129,38 +129,28 @@ export const createMcpServerSwitches = ({
   readonly client: HerculeClient;
   readonly cache: McpServerSwitchCache;
 }): McpServerSwitches => {
-  const guard = createEditGuard(queryClient);
-  /** The id of the record each target had when it was last pressed, `null` for none: the state its refusal was made from. */
+  const guard = createEditGuard();
+  /**
+   * The id of the record a target had when it was pressed, `null` for none: the
+   * state its refusal was made from. An entry lives as long as the refusal it
+   * belongs to, so it is dropped when the guard drops the refusal.
+   */
   const pressedAgainst = new Map<string, string | null>();
+  guard.subscribe(() => {
+    for (const key of pressedAgainst.keys()) {
+      const { refusal, blocked } = guard.readState(key);
+      if (refusal === null && !blocked) pressedAgainst.delete(key);
+    }
+  });
   const stateWithoutRefusal = new WeakMap<McpListEditState, McpListEditState>();
 
   /**
-   * Reads again what the write may have changed. Returns what keeps the
-   * target blocked when the list of servers could not be read, else `null`:
-   * the cache then still lacks the change, and a press built on it would undo
-   * it. The list is read with `fetchQuery`, ordered after the write, because
-   * an invalidation reads only queries somebody observes. A read already in
-   * flight started before the write ended, so it is cancelled first.
+   * Runs the write, then reads the list of servers again, on its own
+   * (`readBaseAfterWrite`), and releases the target when that read succeeded.
+   * The cache still lacks the change until then, and a press built on it would
+   * undo it. The server's page is marked stale and read again if somebody
+   * shows it, without holding the target.
    */
-  const readAgain = async (
-    record: McpServer | undefined,
-  ): Promise<{ readonly baseKey: QueryKey; readonly mark: ReadMark } | null> => {
-    const catalogue = cache.readCatalogue();
-    await queryClient.cancelQueries({ queryKey: catalogue.queryKey, exact: true });
-    const mark = readMarkOf(queryClient, catalogue.queryKey);
-    const page =
-      record === undefined
-        ? undefined
-        : queryClient.invalidateQueries({ queryKey: cache.readPageKey(record.id), exact: true });
-    const ok = await catalogue.fetch().then(
-      () => true,
-      // A read of the list that others made meanwhile counts too.
-      () => hasReadSince(queryClient, catalogue.queryKey, mark),
-    );
-    await page;
-    return ok ? null : { baseKey: catalogue.queryKey, mark };
-  };
-
   const run = async (
     key: string,
     record: McpServer | undefined,
@@ -174,11 +164,16 @@ export const createMcpServerSwitches = ({
     } catch (error) {
       failure = error;
     }
+    if (record !== undefined) {
+      void queryClient.invalidateQueries({ queryKey: cache.readPageKey(record.id), exact: true });
+    }
     // A refusal can mean the cache was out of date, such as the `conflict` of a second server for one Connection.
-    const unread = await readAgain(record);
+    const read = await readBaseAfterWrite(queryClient, cache.readCatalogue());
+    const wasRead = read.hasSucceeded();
+    if (wasRead) read.stop();
     guard.finish(key, {
       refusal: saved ? null : { kind: "refused", message: readErrorMessage(failure) },
-      unread: unread === null ? null : { saved, ...unread },
+      unread: wasRead ? null : { saved, read },
     });
   };
 
@@ -188,12 +183,13 @@ export const createMcpServerSwitches = ({
       if (guard.isBlocked(key)) return;
       const servers = cache.readServers();
       const record = servers === undefined ? undefined : findRecord(servers, target);
-      pressedAgainst.set(key, record?.id ?? null);
+      /** Records what the press was made against, just before it leaves a refusal or starts a write. */
+      const refuse = (message: string): void => {
+        pressedAgainst.set(key, record?.id ?? null);
+        guard.refuse(key, { kind: "refused", message });
+      };
       if (servers === undefined) {
-        guard.refuse(key, {
-          kind: "refused",
-          message: "The servers are not read yet, so nothing was changed. Try again.",
-        });
+        refuse("The servers are not read yet, so nothing was changed. Try again.");
         return;
       }
       let write: () => Promise<unknown>;
@@ -201,10 +197,7 @@ export const createMcpServerSwitches = ({
         write = () =>
           client.mcpServer.update({ params: { id: record.id }, payload: { enabled: on } });
       } else if (target.kind === "url") {
-        guard.refuse(key, {
-          kind: "refused",
-          message: "This server no longer exists, so nothing was changed.",
-        });
+        refuse("This server no longer exists, so nothing was changed.");
         return;
       } else if (!on) {
         // A server that was never switched on has nothing to switch off.
@@ -216,6 +209,7 @@ export const createMcpServerSwitches = ({
             payload: { source: { kind: "plugin", contributionId, connectionId } },
           });
       }
+      pressedAgainst.set(key, record?.id ?? null);
       guard.start(key);
       void run(key, record, write);
     },
@@ -237,6 +231,7 @@ export const createMcpServerSwitches = ({
     clearRefusal: (target) => {
       guard.clearRefusal(buildTargetKey(target));
     },
+    attach: (target) => guard.attach(buildTargetKey(target)),
     subscribe: guard.subscribe,
   };
 };

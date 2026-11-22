@@ -4,9 +4,8 @@
  * "MCP servers" row opens, so the first screen holds only the menu's two rows
  * (spec 17 §What MCP servers cost). Nothing outside the lazy file may import it.
  */
-import { useState, type JSX, type RefObject } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useState, type JSX } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   buildThreadServerMenu,
   describeThreadStartFoot,
@@ -15,11 +14,11 @@ import {
   type RememberedAccounts,
   type ServerMenuRow,
 } from "@hercule/client-core/mcp-servers";
-import { pluginsQuery } from "../../app/queries";
+import type { PluginDetail } from "@hercule/contract";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
-import { useThreadServers } from "./thread-servers";
+import { useThreadServers, useThreadViews } from "./thread-servers";
 import { WithThreadServerEdits, type ThreadServersTarget } from "./thread-server-edits";
 import type { ThreadServerEdits } from "./use-thread-edits";
 import "./thread-servers.css";
@@ -34,19 +33,17 @@ import "./thread-servers.css";
  */
 export default function ThreadServersMenu({
   target,
-  clearRefusalRef,
   onOpenPicker,
   onReconnect,
   onClose,
 }: {
   readonly target: ThreadServersTarget;
-  readonly clearRefusalRef: RefObject<(() => void) | null>;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   return (
-    <WithThreadServerEdits target={target} clearRefusalRef={clearRefusalRef}>
+    <WithThreadServerEdits target={target}>
       {(edits) => (
         <ServersOfThread
           edits={edits}
@@ -71,8 +68,9 @@ function ServersOfThread({
   readonly onReconnect: (connectionId: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { views, readFailure } = useThreadServers();
-  if (views === undefined) {
+  const views = useThreadViews();
+  const { plugins, readFailure } = useThreadServers();
+  if (views === undefined || plugins === undefined) {
     return (
       <div className="pop plus-sub" role="group" aria-label="Servers of this thread">
         <div className="q-h plus-sub-top">Servers of this thread</div>
@@ -87,6 +85,7 @@ function ServersOfThread({
   return (
     <SubmenuRows
       views={views}
+      plugins={plugins}
       edits={edits}
       onOpenPicker={onOpenPicker}
       onReconnect={onReconnect}
@@ -103,19 +102,19 @@ function ServersOfThread({
  */
 function SubmenuRows({
   views,
+  plugins,
   edits,
   onOpenPicker,
   onReconnect,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
+  readonly plugins: readonly PluginDetail[];
   readonly edits: ThreadServerEdits;
   readonly onOpenPicker: () => void;
   readonly onReconnect: (connectionId: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const navigate = useNavigate();
   const { described } = useThreadServers();
   const ids = described.mcpServerIds;

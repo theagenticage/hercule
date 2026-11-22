@@ -12,16 +12,22 @@
  * (`thread-servers.test.ts`). `plus-menu.integration.test.tsx` tests what the
  * menu writes.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { queryKeys } from "@hercule/client-core";
+import { describeThreadServers } from "@hercule/client-core/mcp-servers/first-screen";
+import { buildErrorBody } from "@hercule/client-core/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
+import type { McpServer } from "@hercule/contract";
 import { buildNextRows, THREAD_FIXTURES, type ThreadRecords } from "../../app/testing";
 import {
   buildServer,
   LINEAR,
   LINEAR_CONNECTION,
   LINEAR_ID,
+  OFFERING_CONNECTIONS,
   SENTRY_WORK,
+  SENTRY_WORK_ID,
 } from "../settings/mcp-servers/mcp-servers.testing";
 import {
   findCalls,
@@ -36,6 +42,14 @@ import {
   WEBSHOP,
   withServers,
 } from "./thread-servers.testing";
+
+// Counts the thread's descriptions without changing what they say: the provider describes the
+// thread each time its inputs change, so the count shows how often it redraws what it shares.
+vi.mock("@hercule/client-core/mcp-servers/first-screen", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@hercule/client-core/mcp-servers/first-screen")>();
+  return { ...original, describeThreadServers: vi.fn(original.describeThreadServers) };
+});
 
 const SERVER_LIST = "/api/v1/mcp-servers";
 
@@ -96,16 +110,17 @@ describe("an open thread's reads of MCP servers", () => {
     expect(findCalls(app.calls, "GET", SERVER_LIST)).toHaveLength(2);
   });
 
-  it("keeps the topic, and reads nothing more, from the submenu to the picker", async () => {
-    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
-    const nine = buildManyServers(9);
-    const app = await openComposerApp(`/threads/${thread.session.id}`, {
-      thread,
-      servers: [LINEAR, ...nine],
+  it("keeps the subscription, and reads nothing more, from the submenu to the picker of an empty thread", async () => {
+    // The list is empty, so only the open menu or picker holds the topic: a flag that dropped
+    // during the handoff would drop the subscription and make it again.
+    const app = await openComposerApp(`/threads/${THREAD_FIXTURES.finished.session.id}`, {
+      servers: [LINEAR, ...buildManyServers(9)],
     });
     const popover = await openServersSubmenu();
     await waitForTopicReads(app);
     const reads = findCalls(app.calls, "GET", SERVER_LIST).length;
+    const subscriptions = app.live.countSubscriptions("mcpServer");
+    expect(subscriptions).toBe(1);
 
     fireEvent.click(
       within(popover).getByRole("menuitem", { name: /more servers?…$/, hidden: true }),
@@ -113,8 +128,10 @@ describe("an open thread's reads of MCP servers", () => {
     const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
     // The browser reports the closed menu, which jsdom does not.
     toggleMenu(popover, "closed");
+    await waitForTopicReads(app);
 
     expect(app.live.readTopics()).toContain("mcpServer");
+    expect(app.live.countSubscriptions("mcpServer")).toBe(subscriptions);
     expect(findCalls(app.calls, "GET", SERVER_LIST)).toHaveLength(reads);
     expect(within(picker).getAllByRole("checkbox").length).toBeGreaterThan(8);
   });
@@ -175,5 +192,92 @@ describe("an open thread's reads of MCP servers", () => {
       "This thread's project no longer exists. Changes are for this thread only.",
     );
     expect(app.live.readTopics()).toContain("mcpServer");
+  });
+});
+
+describe("an open thread's start list", () => {
+  /** The idle fixture thread, in no project, holding `servers`. */
+  const threadInNoProject = (servers: readonly McpServer[]): ThreadRecords => {
+    const thread = withServers(THREAD_FIXTURES.finished, servers);
+    return { ...thread, session: { ...thread.session, projectId: null } };
+  };
+  const READ_FAILURE = "The controller fell over.";
+
+  it("offers no way back to the default list once a refresh of the settings failed, though an earlier read succeeded", async () => {
+    const thread = threadInNoProject([LINEAR]);
+    let failing = false;
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR, SENTRY_WORK],
+      handlers: {
+        "GET /api/v1/settings": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", READ_FAILURE) }
+            : { body: { controller: {}, user: { "thread.mcpServerIds": [SENTRY_WORK_ID] } } },
+      },
+    });
+    const popover = await openServersSubmenu();
+    const readFoot = (): string =>
+      popover.querySelector(".plus-foot .menu-note")?.textContent ?? "";
+    await waitFor(() => {
+      expect(readFoot()).toContain("Back to the default list");
+    });
+
+    failing = true;
+    await act(() => app.context.queryClient.invalidateQueries({ queryKey: queryKeys.settings() }));
+
+    await waitFor(() => {
+      expect(readFoot()).toContain(`could not be read (${READ_FAILURE})`);
+    });
+    expect(readFoot()).not.toContain("Back to the default list");
+    // The thread's own switches keep working.
+    expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("says why the servers could not be read when a record they are joined with fails, with nothing cached", async () => {
+    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
+    let failing = false;
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR],
+      handlers: {
+        "GET /api/v1/connections": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", READ_FAILURE) }
+            : { body: { items: OFFERING_CONNECTIONS } },
+      },
+    });
+    // The shell holds the Connections, so the cache is emptied to leave the read nothing to fall back on.
+    failing = true;
+    app.context.queryClient.removeQueries({ queryKey: queryKeys.connections() });
+    const popover = await findPlusPopover();
+    toggleMenu(popover, "open");
+
+    fireEvent.click(within(popover).getByRole("menuitem", { name: /^MCP servers/, hidden: true }));
+
+    const note = await within(popover).findByRole("alert", { hidden: true });
+    expect(note.textContent).toBe(`Could not read the servers: ${READ_FAILURE}`);
+  });
+});
+
+describe("what an open thread shares while its transcript grows", () => {
+  it("describes the thread once, not again for each row the transcript gets", async () => {
+    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
+    const { session } = thread;
+    const app = await openComposerApp(`/threads/${session.id}`, { thread, servers: [LINEAR] });
+    await waitForTopicReads(app);
+    const described = vi.mocked(describeThreadServers).mock.calls.length;
+
+    let transcript = thread.transcript;
+    for (const message of ["First.", "Second."]) {
+      const rows = buildNextRows(session.id, transcript, { _tag: "runtime.warning", message });
+      transcript = [...transcript, ...rows];
+      act(() => {
+        app.live.pushStreamRows(session.id, rows);
+      });
+      await screen.findByText(message);
+    }
+
+    expect(vi.mocked(describeThreadServers).mock.calls).toHaveLength(described);
   });
 });

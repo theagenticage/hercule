@@ -3,7 +3,7 @@
  * in client-core): how this app's query cache holds the servers, and the
  * hook the switch of a row and the switch of a server's page use.
  */
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import {
@@ -44,6 +44,12 @@ export function useMcpServerSwitch(
     },
   });
   const state = useSyncExternalStore(switches.subscribe, () => switches.readState(target));
+  // A refusal stays while a control shows the target, and expires some time after the last one left.
+  const key = JSON.stringify(target);
+  useEffect(() => {
+    const mine = JSON.parse(key) as McpServerSwitchTarget;
+    return switches.attach(mine);
+  }, [switches, key]);
   return {
     press: (on) => {
       switches.apply(target, on);

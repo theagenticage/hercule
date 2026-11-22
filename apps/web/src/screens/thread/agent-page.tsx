@@ -27,7 +27,6 @@ import {
   type Live,
   type RuntimeNote,
 } from "@hercule/client-core";
-import { hasMcpServerLine } from "@hercule/client-core/mcp-servers";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
 import { ThreadServersProvider } from "../thread-servers";
@@ -38,6 +37,7 @@ import { StatusCard } from "../subagents/status-card";
 import { TallyPill } from "../subagents/tally-pill";
 import { useStickToBottom } from "../use-stick-to-bottom";
 import { ConversationSessionNotice } from "./conversation-session-notice";
+import { useHasMcpLine } from "./use-has-mcp-line";
 import { QueuedInputs } from "./queued-inputs";
 import { SendingMessages } from "./sending-messages";
 import { RequestDock } from "./request-dock";
@@ -97,7 +97,10 @@ export function AgentPage({
   // A line about MCP servers draws its buttons from the servers as they are
   // now. The page's servers (see `ThreadServersProvider`) read them once for
   // every line and keep the live topic, and a page without a line does neither.
-  const hasMcpNote = hasMcpServerLine({ turns, outsideRuntimeNotes });
+  const hasMcpNote = useHasMcpLine(`${sessionId}/${subagentId ?? ""}`, {
+    turns,
+    outsideRuntimeNotes,
+  });
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);

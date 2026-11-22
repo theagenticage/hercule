@@ -13,14 +13,13 @@ export {
 export {
   buildMcpWarningLine,
   decideStatusBand,
-  hasMcpServerBlock,
-  hasMcpServerLine,
   type McpServerWarningEntry,
   type McpWarningLine,
   type StatusBand,
   type StatusBandAction,
   type WarningFix,
 } from "./fix";
+export { hasMcpServerBlock, hasMcpServerLine } from "./mcp-line-presence";
 export { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
 export {
   buildMcpListQuery,
@@ -45,7 +44,7 @@ export {
   type McpServerSwitches,
   type McpServerSwitchTarget,
 } from "./server-switch";
-export { chooseNamedServer } from "./named-lists";
+export { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
 export {
   describeOfferAddress,
   joinOfferedServers,
@@ -69,9 +68,10 @@ export {
 export { resolveDraftMcpServerIds } from "./draft-pick";
 export { decideDraftServersPick } from "./draft-servers-pick";
 export {
-  decideThreadStartList,
+  canResetToStart,
   decideThreadStartSource,
   describeThreadStartFoot,
+  listKnownServerIds,
   type StartProjectRecord,
   type StartRecord,
   type ThreadStartDecision,

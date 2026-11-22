@@ -652,7 +652,7 @@ describe("the + menu's writes that end badly", () => {
     expect((await within(popover).findByRole("alert", { hidden: true })).textContent).toBe(REFUSAL);
   });
 
-  it("forgets a refusal once the menu it was shown in closes", async () => {
+  it("keeps a refusal the menu showed through closing the menu and opening it again", async () => {
     const thread = threadWith([LINEAR]);
     await openComposerApp(`/threads/${thread.session.id}`, {
       thread,
@@ -671,7 +671,42 @@ describe("the + menu's writes that end badly", () => {
     toggleMenu(popover, "closed");
     await openServersSubmenu();
 
-    expect(within(popover).queryByRole("alert", { hidden: true })).toBeNull();
+    expect((await within(popover).findByRole("alert", { hidden: true })).textContent).toBe(REFUSAL);
+  });
+
+  it("keeps a refusal the submenu showed through the handoff to the picker and back, until the next write", async () => {
+    const thread = threadWith([LINEAR]);
+    const nine = buildManyServers(9);
+    const { calls } = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR, ...nine],
+      handlers: {
+        [`PATCH /api/v1/sessions/${thread.session.id}`]: {
+          status: 403,
+          body: buildForbiddenBody(REFUSAL),
+        },
+      },
+    });
+    const popover = await openServersSubmenu();
+    fireEvent.click(findSwitch("sentry"));
+    await within(popover).findByRole("alert", { hidden: true });
+
+    fireEvent.click(
+      within(popover).getByRole("menuitem", { name: /more servers?…$/, hidden: true }),
+    );
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    toggleMenu(popover, "closed");
+
+    expect((await within(picker).findByRole("alert")).textContent).toBe(REFUSAL);
+
+    fireEvent.click(within(picker).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "MCP servers of this thread" })).toBeNull();
+    });
+    await openServersSubmenu();
+
+    expect((await within(popover).findByRole("alert", { hidden: true })).textContent).toBe(REFUSAL);
+    expect(readListWrites(calls, thread.session.id)).toHaveLength(1);
   });
 });
 

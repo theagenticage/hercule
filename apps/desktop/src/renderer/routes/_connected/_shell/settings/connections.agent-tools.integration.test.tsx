@@ -7,9 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildErrorBody } from "@hercule/client-core/testing";
+import type { PluginDetail } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
+  LINEAR_PLUGIN,
   SENTRY_HOBBY_CONNECTION,
+  SENTRY_PLUGIN,
   SENTRY_WORK,
   SENTRY_WORK_ID,
   LINEAR,
@@ -51,6 +54,37 @@ describe("Settings > Connections, agent tools", () => {
     expect(
       within(findRow("Linear · acme")).getByRole("button", { name: /^agent tools/ }).textContent,
     ).toBe("agent tools off");
+  });
+
+  it("says one note for each server a Connection's plugin offers, when it offers two", async () => {
+    // The Sentry plugin also offers a docs server, reached with the same Connection type.
+    const twoOffers: PluginDetail = {
+      ...SENTRY_PLUGIN,
+      contributions: [
+        ...SENTRY_PLUGIN.contributions,
+        {
+          extensionPoint: "mcp-server",
+          id: "sentry/sentry-docs",
+          definition: {
+            displayName: "Sentry docs",
+            description: "The Sentry documentation server.",
+            connectionType: "sentry/sentry",
+            origin: "https://docs.sentry.example",
+          },
+        },
+      ],
+    };
+    await openConnections({
+      servers: [SENTRY_WORK],
+      handlers: { "GET /api/v1/plugins": { body: [twoOffers, LINEAR_PLUGIN] } },
+    });
+
+    const notes = within(findRow("Sentry · work")).getAllByRole("button", { name: /^agent tools/ });
+    // The first offer has a record and is on. The docs offer has none, so it is off.
+    expect(notes.map((note) => note.textContent)).toEqual(["agent tools on", "agent tools off"]);
+    expect(
+      within(findRow("Linear · acme")).getAllByRole("button", { name: /^agent tools/ }),
+    ).toHaveLength(1);
   });
 
   it("puts the note on the account's line, after the account", async () => {

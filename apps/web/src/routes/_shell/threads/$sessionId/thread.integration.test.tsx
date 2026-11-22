@@ -5755,6 +5755,31 @@ describe("Thread: the MCP servers of the + menu", () => {
     );
   });
 
+  it("keeps a refusal through closing the menu, the handoff to the picker, and opening them again, until the next write", async () => {
+    const user = userEvent.setup();
+    const MESSAGE = "Changing a thread's servers needs mcp.manage.";
+    const { api } = await openServersThread([S_NOTION, S_GITHUB], {
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: {
+        status: 403,
+        body: { error: { code: "forbidden", message: MESSAGE, details: { grant: "mcp.manage" } } },
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await within(submenu).findByRole("alert");
+
+    // The handoff closes the menu and opens the picker, which shows the same refusal.
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect((await within(picker).findByRole("alert")).textContent).toBe(MESSAGE);
+
+    // Closing the picker keeps it for the next time the menu opens.
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    const reopened = await openServersSubmenu(user);
+    expect((await within(reopened).findByRole("alert")).textContent).toBe(MESSAGE);
+    expect(readUpdates(api)).toHaveLength(1);
+  });
+
   it.each([
     [
       "invalid",
@@ -5918,18 +5943,60 @@ describe("Thread: the MCP servers of the + menu", () => {
     );
   });
 
-  it("keeps the topic and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {
+  it("offers no reset once a refresh of the project beyond the first page failed, though an earlier read succeeded", async () => {
+    const user = userEvent.setup();
+    const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": { body: { items: [] } },
+        [`GET /api/v1/projects/${WEBSHOP.id}`]: () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The project could not be read.") }
+            : { body: beyondFirstPage },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    await within(submenu).findByRole("button", { name: "Back to webshop's list" });
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.project(WEBSHOP.id) }));
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The project could not be read.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+  });
+
+  it("keeps the subscription and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {
+    // The list is empty, so only the open menu or picker holds the topic: a flag that dropped
+    // during the handoff would drop the subscription and make it again.
     const user = userEvent.setup();
     const { api, live } = await openServersThread([]);
     const submenu = await openServersSubmenu(user);
     await waitFor(() => {
       expect(readServerReads(api)).toBe(2);
     });
+    expect(live.countSubscriptions("mcpServer")).toBe(1);
 
     await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
     const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(live.topics()).toContain("mcpServer");
+    expect(live.countSubscriptions("mcpServer")).toBe(1);
     expect(readServerReads(api)).toBe(2);
     await user.click(within(picker).getByRole("button", { name: "Done" }));
     await waitFor(() => {

@@ -34,31 +34,17 @@ const buildStartList = (
 };
 
 /**
- * Returns the list a Thread starts with: its project's list, even when that
- * list is empty, and for a Thread in no project the default list. A list is
- * not always rewritten when a server is deleted, so ids no view knows are
- * dropped from either list, and `complete` is then false. The source is `none` when a Thread in no project
- * starts with an empty list.
- *
- * A `projectId` that is not in `projects` is read as no project.
+ * Returns the ids of `ids` that a server in `views` has, in their order. A
+ * list is not always rewritten when a server is deleted, so a screen that
+ * draws a stored list drops the ids no server has, the same way a start list
+ * does.
  */
-export const decideThreadStartList = (
-  projectId: string | null,
-  projects: readonly Project[],
-  defaultIds: readonly string[],
+export const listKnownServerIds = (
+  ids: readonly string[],
   views: readonly McpServerView[],
-): ThreadStartList => {
+): string[] => {
   const knownServerIds = new Set(views.map((view) => view.server.id));
-  const project = projects.find((each) => each.id === projectId);
-  if (project !== undefined) {
-    return buildStartList(
-      { kind: "project", projectName: project.name },
-      project.mcpServerIds,
-      knownServerIds,
-    );
-  }
-  const list = buildStartList({ kind: "default" }, defaultIds, knownServerIds);
-  return list.mcpServerIds.length === 0 ? { ...list, source: { kind: "none" } } : list;
+  return ids.filter((id) => knownServerIds.has(id));
 };
 
 /** What a record the start list needs is, as the app's cache holds it. */
@@ -153,10 +139,19 @@ const holdSameIds = (one: readonly string[], other: readonly string[]): boolean 
   one.length === other.length && one.every((id) => other.includes(id));
 
 /**
+ * Checks whether going back to `start` would change the list `ids`: `start`
+ * is complete, so every id it holds can be written, and it holds other ids
+ * than `ids`. The button that goes back shows exactly when this is true, and
+ * pressing it writes exactly then, so the two never disagree.
+ */
+export const canResetToStart = (start: ThreadStartList, ids: readonly string[]): boolean =>
+  start.complete && !holdSameIds(ids, start.mcpServerIds);
+
+/**
  * Returns the line at the foot of the submenu and the picker of a Thread
  * whose list is `mcpServerIds`, and the button that goes back to the start
- * list, which is `null` while the start list is not known, is not `complete`
- * or equals the list.
+ * list, which is `null` while the start list is not known or
+ * `canResetToStart` is false.
  */
 export const describeThreadStartFoot = (
   decision: ThreadStartDecision,
@@ -179,10 +174,7 @@ export const describeThreadStartFoot = (
       const { line, resetLabel } = describeStartLine(decision.start);
       return {
         foot: line,
-        reset:
-          !decision.start.complete || holdSameIds(mcpServerIds, decision.start.mcpServerIds)
-            ? null
-            : { label: resetLabel },
+        reset: canResetToStart(decision.start, mcpServerIds) ? { label: resetLabel } : null,
       };
     }
   }

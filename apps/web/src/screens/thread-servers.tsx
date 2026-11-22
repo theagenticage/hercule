@@ -8,19 +8,19 @@
 import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readErrorMessage } from "@hercule/client-core";
+import { buildMcpServerViews, type McpServerView } from "@hercule/client-core/mcp-servers";
 import {
-  buildMcpServerViews,
   decideThreadServersDemand,
   describeThreadServers,
-  type McpServerView,
   type StartProjectRecord,
   type StartRecord,
   type ThreadServersDescription,
   type ThreadServersRecords,
-} from "@hercule/client-core/mcp-servers";
+} from "@hercule/client-core/mcp-servers/first-screen";
 import type { Session } from "@hercule/contract";
 import { useRouteContext } from "@tanstack/react-router";
 import { useLiveInvalidation } from "../app/live-invalidation";
+import { buildStartRecord } from "../app/start-record";
 import {
   connectionsQuery,
   mcpServersQuery,
@@ -82,24 +82,20 @@ function useStartRecords(
 ): Pick<ThreadServersRecords, "project" | "defaultIds"> {
   const { client } = useRouteContext({ from: "/_shell" });
   const listed = useQuery({ ...projectsQuery(client), enabled: false }).data?.items;
-  const settings = useQuery({ ...settingsQuery(client), enabled: false }).data;
+  const settings = useQuery({ ...settingsQuery(client), enabled: false });
   const found = listed?.find((each) => each.id === projectId);
   const addressed = useQuery({
     ...projectQuery(client, projectId ?? ""),
     enabled: editing && thread.kind === "started" && projectId !== null && found === undefined,
   });
   const project: StartProjectRecord =
-    found !== undefined
-      ? { kind: "read", value: found }
-      : addressed.data !== undefined
-        ? { kind: "read", value: addressed.data }
-        : addressed.error === null
-          ? { kind: "pending" }
-          : { kind: "failed", message: readErrorMessage(addressed.error) };
-  const defaultIds: StartRecord<readonly string[]> =
-    settings === undefined
-      ? { kind: "pending" }
-      : { kind: "read", value: settings.user["thread.mcpServerIds"] ?? [] };
+    found === undefined
+      ? buildStartRecord(addressed, (data) => data)
+      : { kind: "read", value: found };
+  const defaultIds: StartRecord<readonly string[]> = buildStartRecord(
+    settings,
+    (data) => data.user["thread.mcpServerIds"] ?? [],
+  );
   return { project, defaultIds };
 }
 

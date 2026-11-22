@@ -3,14 +3,12 @@
  * servers…" in the `+` menu. Loaded the first time it opens (see
  * `lazy-thread-servers.ts`).
  */
-import { useRef, type JSX, type RefObject } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
+import { useRef, type JSX } from "react";
 import { describeThreadStartFoot, type McpServerView } from "@hercule/client-core/mcp-servers";
-import { pluginsQuery } from "../../app/queries";
+import type { PluginDetail } from "@hercule/contract";
 import { GlassDialog } from "../glass-dialog";
 import { ServerPickerDialog } from "../settings/mcp-servers/server-picker";
-import { useThreadServers } from "./thread-servers";
+import { useThreadServers, useThreadViews } from "./thread-servers";
 import { WithThreadServerEdits, type ThreadServersTarget } from "./thread-server-edits";
 import type { ThreadServerEdits } from "./use-thread-edits";
 
@@ -24,15 +22,13 @@ import type { ThreadServerEdits } from "./use-thread-edits";
  */
 export default function ThreadServerPicker({
   target,
-  clearRefusalRef,
   onClose,
 }: {
   readonly target: ThreadServersTarget;
-  readonly clearRefusalRef: RefObject<(() => void) | null>;
   readonly onClose: () => void;
 }): JSX.Element {
   return (
-    <WithThreadServerEdits target={target} clearRefusalRef={clearRefusalRef}>
+    <WithThreadServerEdits target={target}>
       {(edits) => <ServersPicker edits={edits} onClose={onClose} />}
     </WithThreadServerEdits>
   );
@@ -46,7 +42,8 @@ function ServersPicker({
   readonly edits: ThreadServerEdits;
   readonly onClose: () => void;
 }): JSX.Element | null {
-  const { views, readFailure } = useThreadServers();
+  const views = useThreadViews();
+  const { plugins, readFailure } = useThreadServers();
   const dialogRef = useRef<HTMLDialogElement>(null);
   if (readFailure !== null) {
     return (
@@ -71,22 +68,22 @@ function ServersPicker({
       </GlassDialog>
     );
   }
-  if (views === undefined) return null;
-  return <ThreadPickerDialog views={views} edits={edits} onClose={onClose} />;
+  if (views === undefined || plugins === undefined) return null;
+  return <ThreadPickerDialog views={views} plugins={plugins} edits={edits} onClose={onClose} />;
 }
 
 /** Renders the dialog once the servers are read. Its foot says where the list started, or why that is not known yet. */
 function ThreadPickerDialog({
   views,
+  plugins,
   edits,
   onClose,
 }: {
   readonly views: readonly McpServerView[];
+  readonly plugins: readonly PluginDetail[];
   readonly edits: ThreadServerEdits;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const { described } = useThreadServers();
   const { foot, reset } = describeThreadStartFoot(
     described.start ?? { kind: "pending" },

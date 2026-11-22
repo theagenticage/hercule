@@ -34,9 +34,9 @@ import { ThreadServersMenu } from "./thread-servers-menu";
  * Opening "N more servers…" closes the menu and opens the picker, which is
  * drawn until the user is done. A refusal of a write belongs to the thread's
  * list, not to the control that started the write, so it shows under the
- * submenu or in the picker, whichever is open when it arrives. It is
- * forgotten when the user closes the menu or the picker having seen it, or
- * when the next write starts.
+ * submenu or in the picker, whichever is open when it arrives. It stays
+ * through closing, opening again and the handoff from the submenu to the
+ * picker, and is forgotten when the next write starts.
  */
 export function ThreadPlusMenu({
   client,
@@ -105,21 +105,11 @@ export function ThreadPlusMenu({
   const apply = session === null ? applyToDraft : edit.apply;
   const refusal = edit.problem();
 
-  // A refusal is forgotten once the user has seen it and closes the control.
-  // While a write runs, its refusal has not arrived yet, so it is kept.
-  const forgetSeenRefusal = (): void => {
-    if (!edit.blocked) edit.clearRefusal();
-  };
-  const handleOpenChange = (next: boolean): void => {
-    if (!next) forgetSeenRefusal();
-    onOpenChange(next);
-  };
-
   return (
     <>
       <PlusMenu
         open={open}
-        onOpenChange={handleOpenChange}
+        onOpenChange={onOpenChange}
         attachDisabledReason={attachDisabledReason}
         serversOffReason={serversOffReason}
         onFiles={onFiles}
@@ -162,7 +152,6 @@ export function ThreadPlusMenu({
           onChoose={apply}
           onClose={() => {
             setPicking(false);
-            forgetSeenRefusal();
           }}
         />
       ) : null}

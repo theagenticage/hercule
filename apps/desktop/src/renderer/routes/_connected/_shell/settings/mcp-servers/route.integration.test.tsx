@@ -487,6 +487,37 @@ describe("Settings > MCP servers, the default list and its picker", () => {
     expect(within(findPickRow("linear")).getByRole("checkbox", { checked: false })).toBeTruthy();
   });
 
+  it("keeps a refusal the picker showed through closing it and opening it again", async () => {
+    await openList({
+      servers: [SENTRY_WORK, LINEAR],
+      handlers: {
+        [`PATCH ${SETTINGS_PATH}`]: {
+          status: 403,
+          body: {
+            error: {
+              code: "forbidden",
+              message: "This token lacks mcp.manage.",
+              details: { grant: "mcp.manage" },
+            },
+          },
+        },
+      },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+    await screen.findByRole("dialog", { name: PICKER_TITLE });
+    await userEvent.click(within(findPickRow("linear")).getByRole("checkbox"));
+    await within(screen.getByRole("dialog")).findByRole("alert");
+
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Change…" }));
+
+    const alert = await within(await screen.findByRole("dialog")).findByRole("alert");
+    expect(alert.textContent).toBe("Could not save: This token lacks mcp.manage.");
+  });
+
   it("applies a change to the setting as the cache holds it when the user presses, not as the picker drew it", async () => {
     const { world, context } = await openList({
       servers: [SENTRY_WORK, LINEAR],

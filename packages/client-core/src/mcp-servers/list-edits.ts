@@ -19,31 +19,28 @@
  * `McpListCache` and subscribes its controls to `readState`.
  */
 import type { FetchQueryOptions, QueryClient, QueryKey } from "@tanstack/query-core";
+import type { McpServer } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError, readErrorMessage } from "../errors";
-import {
-  createEditGuard,
-  hasReadSince,
-  readMarkOf,
-  type McpListEditState,
-  type ReadMark,
-} from "./edit-guard";
-import { chooseNamedServer } from "./named-lists";
+import { createEditGuard, type McpListEditState, type McpListRefusal } from "./edit-guard";
+import { chooseNamedServer, findOtherOccupant, type NamedServer } from "./named-lists";
 import { decideProjectBoxWrite, type ProjectBoxAction } from "./project-boxes";
 import {
+  markQueriesStale,
+  readBaseAfterWrite,
+  readCatalogueAfterRefusal,
+  type McpListQuery,
+} from "./reconcile";
+import {
+  canResetToStart,
   decideThreadStartSource,
   type StartProjectRecord,
   type StartRecord,
   type ThreadStartList,
 } from "./start-list";
-import type { McpServerView } from "./views";
+import { buildMcpServerViews, type McpServerView } from "./views";
 
-/** A query the module reads: its key, and a read of it that never answers from the cache. */
-export interface McpListQuery {
-  readonly queryKey: QueryKey;
-  /** Reads the query from the controller and puts the answer in the cache, even when the cache holds a fresh one. */
-  readonly fetch: () => Promise<unknown>;
-}
+export type { McpListQuery } from "./reconcile";
 
 /**
  * Returns the `McpListQuery` of the query `options`: reading it fetches with
@@ -99,9 +96,16 @@ export interface McpListCache {
    * succeeds.
    */
   readBase(target: McpListTarget): McpListQuery;
-  /** Returns the other queries that hold the target's list, such as a project read by its id. They are marked stale, not read. */
+  /** Returns the other queries that hold the target's list, such as a project read by its id. After a write they are marked stale and not read: the next use reads them. */
   readOtherKeys(target: McpListTarget): readonly QueryKey[];
-  /** Returns the servers joined with their Connections as the cache holds them, or `undefined` while one of the reads is missing. */
+  /** Returns the server records the cache holds, or `undefined` while the list of servers is not cached. Every decision of an edit is made from their ids and names. */
+  readServers(): readonly McpServer[] | undefined;
+  /**
+   * Returns the servers joined with their Connections as the cache holds them,
+   * or `undefined` while one of the reads is missing. Only the words of a
+   * refusal use it, to name the server that holds a name, so an edit never
+   * waits for it.
+   */
   readViews(): readonly McpServerView[] | undefined;
   /** Returns the query that reads the servers. A refusal as invalid reads it again, because the list may name a deleted server. */
   readCatalogue(): McpListQuery;
@@ -125,6 +129,13 @@ export interface McpListEdits {
   readonly readState: (target: McpListTarget) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
   readonly clearRefusal: (target: McpListTarget) => void;
+  /**
+   * Counts the caller as a control that shows the target's state, such as a
+   * menu or a screen that stays mounted. A refusal stays while one does. After
+   * the last one has left, a refusal is dropped after
+   * `DETACHED_REFUSAL_LIFETIME_MS`. Returns the function that detaches.
+   */
+  readonly attach: (target: McpListTarget) => () => void;
   /** Calls `listener` whenever the state of any target changes. Returns the function that stops it. */
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -133,38 +144,37 @@ export interface McpListEdits {
 export type McpListDecision =
   | { readonly kind: "write"; readonly mcpServerIds: readonly string[] }
   | { readonly kind: "unchanged" }
-  | { readonly kind: "taken"; readonly occupant: McpServerView; readonly serverId: string };
+  /** The list names `occupantId`, another server of the name, and not the one the user saw. `serverId` is the server the user asked for. */
+  | { readonly kind: "taken"; readonly occupantId: string; readonly serverId: string };
 
 const isSameList = (one: readonly string[], other: readonly string[]): boolean =>
   one.length === other.length && one.every((id, index) => id === other[index]);
 
-const holdSameIds = (one: readonly string[], other: readonly string[]): boolean =>
-  one.length === other.length && one.every((id) => other.includes(id));
-
 /**
- * Returns what `choice` does to the list `ids`, given the servers `views` the
- * catalogue knows. Pure, so a Draft Thread, which keeps its list as an unsent
- * pick, decides a choice the same way a started Thread does.
+ * Returns what `choice` does to the list `ids`, given the ids and names of the
+ * `servers` the catalogue knows. Pure, so a Draft Thread, which keeps its list
+ * as an unsent pick, decides a choice the same way a started Thread does.
  *
  * - `write`: the new list. Ids that no server knows stay in it, so an edit
  *   never erases a server the catalogue has not read yet.
- * - `unchanged`: nothing to write. A server the catalogue does not know, an
- *   off whose server is gone or a name that is already off, a list that
- *   would stay the same, and a reset while `start` is unknown or incomplete.
+ * - `unchanged`: nothing to write. A server the catalogue does not know (the
+ *   requested one, or for an off the one the user saw), a name that is
+ *   already off, a list that would stay the same, and a reset while `start`
+ *   is unknown or would not change the list (`canResetToStart`).
  * - `taken`: the name's slot in `ids` holds another server than the one the
  *   user saw, so the choice would replace a server the user never decided
- *   about.
+ *   about (`findOtherOccupant`).
  *
  * `start` is the Thread's start list, used by `reset` only.
  */
 export const decideMcpListChoice = ({
   ids,
-  views,
+  servers,
   choice,
   start,
 }: {
   readonly ids: readonly string[];
-  readonly views: readonly McpServerView[];
+  readonly servers: readonly NamedServer[];
   readonly choice: McpListChoice;
   readonly start?: ThreadStartList | undefined;
 }): McpListDecision => {
@@ -172,29 +182,28 @@ export const decideMcpListChoice = ({
     isSameList(next, ids) ? { kind: "unchanged" } : { kind: "write", mcpServerIds: next };
   switch (choice.kind) {
     case "name": {
-      const sameName = views.filter((view) => view.server.name === choice.name);
-      const knows = (id: string): boolean => sameName.some((view) => view.server.id === id);
-      if (choice.serverId === null && !knows(choice.shownServerId)) return { kind: "unchanged" };
-      const occupantId = ids.find((id) => knows(id) && id !== choice.shownServerId);
-      if (occupantId !== undefined) {
-        return {
-          kind: "taken",
-          occupant: sameName.find((view) => view.server.id === occupantId)!,
-          serverId: choice.serverId ?? choice.shownServerId,
-        };
+      // The account the choice is about: the one asked for, or for an off the one the user saw.
+      const requestedId = choice.serverId ?? choice.shownServerId;
+      if (!servers.some((server) => server.id === requestedId && server.name === choice.name)) {
+        return { kind: "unchanged" };
       }
-      return decideWrite(chooseNamedServer(ids, views, choice.name, choice.serverId));
+      const occupantId = findOtherOccupant(ids, servers, choice.name, [
+        choice.shownServerId,
+        requestedId,
+      ]);
+      if (occupantId !== undefined) return { kind: "taken", occupantId, serverId: requestedId };
+      return decideWrite(chooseNamedServer(ids, servers, choice.name, choice.serverId));
     }
     case "box": {
-      const server = views.find((view) => view.server.id === choice.serverId);
+      const server = servers.find((each) => each.id === choice.serverId);
       if (server === undefined) return { kind: "unchanged" };
-      const decided = decideProjectBoxWrite(ids, views, server, choice.action);
+      const decided = decideProjectBoxWrite(ids, servers, server, choice.action);
       return decided.kind === "refused"
-        ? { kind: "taken", occupant: decided.occupant, serverId: choice.serverId }
+        ? { kind: "taken", occupantId: decided.occupantId, serverId: choice.serverId }
         : decideWrite(decided.mcpServerIds);
     }
     case "reset":
-      return start === undefined || !start.complete || holdSameIds(ids, start.mcpServerIds)
+      return start === undefined || !canResetToStart(start, ids)
         ? { kind: "unchanged" }
         : { kind: "write", mcpServerIds: start.mcpServerIds };
   }
@@ -250,7 +259,7 @@ export const createMcpListEdits = ({
   readonly client: HerculeClient;
   readonly cache: McpListCache;
 }): McpListEdits => {
-  const guard = createEditGuard(queryClient);
+  const guard = createEditGuard();
 
   /** Writes `mcpServerIds` as the list of the target. */
   const write = (target: McpListTarget, mcpServerIds: readonly string[]): Promise<unknown> => {
@@ -273,42 +282,16 @@ export const createMcpListEdits = ({
   };
 
   /**
-   * Reads again what the write may have changed. Returns false when the base
-   * record could not be read: the cache then still holds the list as it was
-   * before the write, and an edit built on it would undo the write.
+   * Runs the write, then reads again what it may have changed, and releases
+   * the target when the edit base was read.
    *
-   * The base is read with `fetchQuery`, ordered after the write, not
-   * invalidated, because an invalidation reads only queries somebody
-   * observes. A read already in flight started before the write ended, so it
-   * is cancelled first.
+   * - The base is read first and on its own (`readBaseAfterWrite`). The
+   *   cache then still holds the list as it was before the write, and an edit
+   *   built on it would undo the write.
+   * - The other queries of the list are only marked stale.
+   * - A server deleted since the list was read makes the controller refuse the
+   *   list as invalid, so the servers are read again too, after the refusal.
    */
-  const readAgain = async (
-    target: McpListTarget,
-    failure: unknown,
-  ): Promise<{ readonly ok: boolean; readonly mark: ReadMark }> => {
-    const base = cache.readBase(target);
-    await queryClient.cancelQueries({ queryKey: base.queryKey, exact: true });
-    const mark = readMarkOf(queryClient, base.queryKey);
-    const others = cache
-      .readOtherKeys(target)
-      .map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true }));
-    // A server deleted since the list was read makes the controller refuse the list as invalid.
-    const catalogue =
-      failure instanceof ApiError && failure.code === "validation"
-        ? cache
-            .readCatalogue()
-            .fetch()
-            .catch(() => {})
-        : undefined;
-    const read = await base.fetch().then(
-      () => true,
-      // A read of the base that others made meanwhile counts too.
-      () => hasReadSince(queryClient, base.queryKey, mark),
-    );
-    await Promise.all([...others, catalogue]);
-    return { ok: read, mark };
-  };
-
   const run = async (
     key: string,
     target: McpListTarget,
@@ -322,53 +305,88 @@ export const createMcpListEdits = ({
     } catch (error) {
       failure = error;
     }
-    const { ok, mark } = await readAgain(target, failure);
+    markQueriesStale(queryClient, cache.readOtherKeys(target));
+    const catalogue =
+      failure instanceof ApiError && failure.code === "validation"
+        ? readCatalogueAfterRefusal(queryClient, cache.readCatalogue())
+        : undefined;
+    const read = await readBaseAfterWrite(queryClient, cache.readBase(target));
+    await catalogue;
+    // Asked only now: a read that succeeded while the servers were read still counts.
+    const wasRead = read.hasSucceeded();
+    if (wasRead) read.stop();
     guard.finish(key, {
       refusal: saved ? null : { kind: "refused", message: readErrorMessage(failure) },
-      unread: ok ? null : { saved, baseKey: cache.readBase(target).queryKey, mark },
+      unread: wasRead ? null : { saved, read },
     });
+  };
+
+  /** Describes the server `serverId` for the words of a refusal: its joined view when the cache holds one, else its record alone. */
+  const describeOccupant = (servers: readonly McpServer[], serverId: string): McpServerView => {
+    const joined = cache.readViews()?.find((view) => view.server.id === serverId);
+    return (
+      joined ?? buildMcpServerViews([servers.find((server) => server.id === serverId)!], [], [])[0]!
+    );
   };
 
   /** Returns the refusal that stops a choice from being applied, or the decision about it. */
   const decide = (
     target: McpListTarget,
     choice: McpListChoice,
-  ): McpListDecision | { readonly kind: "refused"; readonly message: string } => {
+  ):
+    | Exclude<McpListDecision, { readonly kind: "taken" }>
+    | Extract<McpListRefusal, { readonly kind: "taken" }>
+    | { readonly kind: "refused"; readonly message: string } => {
     const refused = (message: string) => ({ kind: "refused", message }) as const;
     const ids = cache.readList(target);
     if (ids === undefined) return refused(NOT_LOADED[target.kind]);
-    const views = cache.readViews();
-    if (views === undefined) {
+    const servers = cache.readServers();
+    if (servers === undefined) {
       return refused("The servers are not read yet, so the list was not changed. Try again.");
     }
-    if (choice.kind === "box" && !views.some((view) => view.server.id === choice.serverId)) {
+    if (choice.kind === "box" && !servers.some((server) => server.id === choice.serverId)) {
       return refused(
         "This server is not in the list of servers yet, so the list was not changed. Try again.",
       );
     }
-    if (choice.kind !== "reset") return decideMcpListChoice({ ids, views, choice });
-    // Only a started Thread has a list to go back to.
-    if (target.kind !== "thread") return { kind: "unchanged" };
-    const source = decideThreadStartSource({
-      projectId: target.projectId,
-      ...cache.readStartRecords(target.projectId),
-      knownServerIds: new Set(views.map((view) => view.server.id)),
-    });
-    switch (source.kind) {
-      case "pending":
-        return refused("The list this thread started from is not read yet. Try again.");
-      case "failed":
-        return refused(`Where this list started could not be read (${source.message}).`);
-      case "missing":
-        return refused(
-          "This thread's project no longer exists, so there is no list to go back to.",
-        );
-      case "start":
-        // A list with ids the servers do not know yet would be written without them.
-        return source.start.complete
-          ? decideMcpListChoice({ ids, views, choice, start: source.start })
-          : refused("The servers are not fully read yet, so the list cannot be reset. Try again.");
+    let decided: McpListDecision;
+    if (choice.kind !== "reset") {
+      decided = decideMcpListChoice({ ids, servers, choice });
+    } else if (target.kind !== "thread") {
+      // Only a started Thread has a list to go back to.
+      return { kind: "unchanged" };
+    } else {
+      const source = decideThreadStartSource({
+        projectId: target.projectId,
+        ...cache.readStartRecords(target.projectId),
+        knownServerIds: new Set(servers.map((server) => server.id)),
+      });
+      switch (source.kind) {
+        case "pending":
+          return refused("The list this thread started from is not read yet. Try again.");
+        case "failed":
+          return refused(`Where this list started could not be read (${source.message}).`);
+        case "missing":
+          return refused(
+            "This thread's project no longer exists, so there is no list to go back to.",
+          );
+        case "start":
+          // A list with ids the servers do not know yet would be written without them.
+          if (!source.start.complete) {
+            return refused(
+              "The servers are not fully read yet, so the list cannot be reset. Try again.",
+            );
+          }
+          decided = decideMcpListChoice({ ids, servers, choice, start: source.start });
+      }
     }
+    return decided.kind === "taken"
+      ? {
+          kind: "taken",
+          occupant: describeOccupant(servers, decided.occupantId),
+          serverId: decided.serverId,
+        }
+      : decided;
   };
 
   return {
@@ -403,6 +421,7 @@ export const createMcpListEdits = ({
     clearRefusal: (target) => {
       guard.clearRefusal(buildTargetKey(target));
     },
+    attach: (target) => guard.attach(buildTargetKey(target)),
     subscribe: guard.subscribe,
   };
 };
