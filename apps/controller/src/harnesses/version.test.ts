@@ -11,7 +11,7 @@ import {
   PI_TESTED_VERSION,
   PI_VERSION,
 } from "@hercule/home/version";
-import { computeHarnessVersionVerdict, computeVersionVerdict, findVersionFloor } from "./version";
+import { computeHarnessVersionVerdict, computeVersionVerdict } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -63,16 +63,18 @@ describe("computeVersionVerdict", () => {
   });
 });
 
-describe("findVersionFloor", () => {
-  it("returns the SDK's CLI version for Claude Code, and null for a harness with no pin", () => {
-    expect(findVersionFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
-    expect(findVersionFloor("nobody-pinned-this")).toBeNull();
+describe("computeHarnessVersionVerdict", () => {
+  it("holds Claude Code to the SDK's CLI version, floor and tested maximum alike", () => {
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", CLAUDE_CODE_VERSION)).toBe("ok");
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", "1.0.0")).toBe("below-floor");
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", "99.0.0")).toBe(
+      "above-tested-max",
+    );
   });
 
   // pi has changed its RPC mode between releases, so a release newer than the
   // one anyone tested is flagged, but a release the tests ran on is ok.
-  it("returns the oldest pi release this build supports, below the newest one it was tested on", () => {
-    expect(findVersionFloor("pi/pi")).toBe(PI_VERSION);
+  it("holds pi to the oldest release this build supports, with a newer one it was tested on", () => {
     expect(PI_VERSION).toBe("1.3.0");
     expect(PI_TESTED_VERSION).toBe("1.6.0");
     // pi 0.87 and older exit at start on the flags that load pi's MCP.
@@ -82,9 +84,9 @@ describe("findVersionFloor", () => {
     expect(computeHarnessVersionVerdict("pi/pi", "1.6.1")).toBe("above-tested-max");
   });
 
-  it("holds Claude Code and Codex to one version, both floor and tested maximum", () => {
-    expect(computeHarnessVersionVerdict("claude-code/claude-code", CLAUDE_CODE_VERSION)).toBe("ok");
+  it("holds Codex to the release this build's types were generated from, floor and tested maximum alike", () => {
     expect(computeHarnessVersionVerdict("codex/codex", CODEX_VERSION)).toBe("ok");
+    expect(computeHarnessVersionVerdict("codex/codex", "0.1.0")).toBe("below-floor");
     expect(computeHarnessVersionVerdict("codex/codex", "99.0.0")).toBe("above-tested-max");
   });
 
@@ -92,8 +94,8 @@ describe("findVersionFloor", () => {
     expect(computeHarnessVersionVerdict("nobody-pinned-this", "1.0.0")).toBe("unknown");
   });
 
-  it("returns the Codex release this build's types were generated from", () => {
-    expect(findVersionFloor("codex/codex")).toBe(CODEX_VERSION);
+  it("returns unknown for a pinned harness that reported no version", () => {
+    expect(computeHarnessVersionVerdict("pi/pi", null)).toBe("unknown");
   });
 
   it("writes the Claude Code floor in one generated file and nowhere else in the source", () => {

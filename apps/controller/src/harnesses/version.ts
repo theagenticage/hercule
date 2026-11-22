@@ -31,10 +31,6 @@ const LIMITS: ReadonlyMap<string, VersionLimits> = new Map([
   ["pi/pi", { floor: PI_VERSION, testedMax: PI_TESTED_VERSION }],
 ]);
 
-/** Returns the oldest version a runner may run for the harness, or `null` when none is pinned. */
-export const findVersionFloor = (harnessId: string): string | null =>
-  LIMITS.get(harnessId)?.floor ?? null;
-
 /**
  * Parses the first three dot-separated components of a version as numbers, so
  * 10 sorts after 9 rather than before it. Returns `undefined` if there are not

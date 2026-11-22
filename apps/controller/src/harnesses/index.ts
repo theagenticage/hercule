@@ -9,4 +9,4 @@ export { listUnenforcedFields } from "./enforcement";
 export { buildVersionKey, harnessRepository } from "./repository";
 export { HarnessReleases, HarnessReleasesLayer } from "./releases";
 export { HarnessService, HarnessServiceLayer } from "./service";
-export { computeHarnessVersionVerdict, findVersionFloor } from "./version";
+export { computeHarnessVersionVerdict } from "./version";

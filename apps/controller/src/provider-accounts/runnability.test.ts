@@ -3,8 +3,8 @@
  * runner, which every caller of the rule shares.
  */
 import { describe, expect, it } from "vitest";
+import { CODEX_VERSION } from "@hercule/home/version";
 import type { RunnerFacts } from "@hercule/protocol";
-import { findVersionFloor } from "../harnesses";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";
 import {
   decideHarnessOnRunner,
@@ -53,9 +53,8 @@ const account = (kind: string, credentialExpiresAt: string | null = null) => ({
 
 describe("decideHarnessOnRunner", () => {
   it("is runnable when the binary and the adapter are there and the version is not below the floor", () => {
-    const floor = findVersionFloor("codex/codex")!;
     expect(decideHarnessOnRunner(factsWith(), harness, null)).toBe("runnable");
-    expect(decideHarnessOnRunner(factsWith(), harness, floor)).toBe("runnable");
+    expect(decideHarnessOnRunner(factsWith(), harness, CODEX_VERSION)).toBe("runnable");
   });
 
   it("is missing before the runner's first report, without the binary, or without an adapter", () => {

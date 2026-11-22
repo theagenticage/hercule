@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import { CODEX_VERSION } from "@hercule/home/version";
 import { withTransaction } from "../db";
-import { findVersionFloor } from "../harnesses";
 import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { findModels, findRunnerRefusal, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
@@ -263,7 +263,7 @@ describe("a Codex below the version this build supports", () => {
   });
 
   it("accepts the floor itself", async () => {
-    const { available, laptop } = await listWithCodexAt(findVersionFloor(CODEX_HARNESS_ID)!);
+    const { available, laptop } = await listWithCodexAt(CODEX_VERSION);
 
     expect(available.runnerIds).toEqual([laptop]);
   });
