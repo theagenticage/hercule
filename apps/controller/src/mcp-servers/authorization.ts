@@ -9,7 +9,10 @@
  * from servers that the user chose but did not write:
  *
  * - the address is http or https, holds no user name or password, and is
- *   https whenever the MCP server is (no downgrade);
+ *   https, except on the same host as an http MCP server (a server that signs
+ *   its users in itself, in a private network). A code, a client secret or a
+ *   token must never cross the network in clear text because a server's
+ *   metadata said so;
  * - a redirect is a failure and is never followed;
  * - a request has 30 seconds, and an answer is read up to 1 MiB;
  * - the HTTP client records no trace span, because a span records the address
@@ -217,9 +220,9 @@ export const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray
 /**
  * Parses an address that an OAuth server named, and checks the outbound rules
  * on it. Fails with `AuthorizationUnreadable` when it is not an address, is not
- * http or https, holds a user name or a password, or is http while the MCP
- * server is https. `what` names the address in the message, which never quotes
- * the address.
+ * http or https, holds a user name or a password, or is http while it is not on
+ * the same host as an http MCP server. `what` names the address in the
+ * message, which never quotes the address.
  */
 export const checkOutboundUrl = (
   raw: string,
@@ -233,8 +236,11 @@ export const checkOutboundUrl = (
   if (url.username !== "" || url.password !== "") {
     return failUnreadable(`the ${what} holds a user name or a password`);
   }
-  if (server.protocol === "https:" && url.protocol === "http:") {
-    return failUnreadable(`the ${what} is http, and the MCP server is https`);
+  if (
+    url.protocol === "http:" &&
+    !(server.protocol === "http:" && url.hostname === server.hostname)
+  ) {
+    return failUnreadable(`the ${what} is http, and only the MCP server's own host may be`);
   }
   return Effect.succeed(url);
 };

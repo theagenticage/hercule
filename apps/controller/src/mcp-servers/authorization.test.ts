@@ -113,35 +113,67 @@ describe("the addresses where metadata may be", () => {
 });
 
 describe("checkOutboundUrl", () => {
-  it("accepts an https address for an https server and an http address for an http server", async () => {
-    expect(
-      (await Effect.runPromise(checkOutboundUrl("https://a.example/x", SERVER, "t"))).href,
-    ).toBe("https://a.example/x");
-    const http = new URL("http://127.0.0.1:9/mcp");
-    expect(
-      (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:9/token", http, "t"))).href,
-    ).toBe("http://127.0.0.1:9/token");
+  const HTTP_SERVER = new URL("http://127.0.0.1:9/mcp");
+
+  it("accepts an https address for an https server and for an http server", async () => {
+    for (const server of [SERVER, HTTP_SERVER]) {
+      expect(
+        (await Effect.runPromise(checkOutboundUrl("https://a.example/x", server, "t"))).href,
+      ).toBe("https://a.example/x");
+    }
   });
 
-  it("accepts an https address for an http server", async () => {
-    const http = new URL("http://127.0.0.1:9/mcp");
-    await expect(
-      Effect.runPromise(checkOutboundUrl("https://a.example/x", http, "t")),
-    ).resolves.toBeDefined();
+  it("accepts an http address on the host of an http server, whatever its port", async () => {
+    expect(
+      (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:9/token", HTTP_SERVER, "t")))
+        .href,
+    ).toBe("http://127.0.0.1:9/token");
+    expect(
+      (await Effect.runPromise(checkOutboundUrl("http://127.0.0.1:77/token", HTTP_SERVER, "t")))
+        .href,
+    ).toBe("http://127.0.0.1:77/token");
   });
 
   it.each([
-    ["not an address", "not a url", "the token endpoint is not an http or https address"],
-    ["a file address", "file:///etc/passwd", "the token endpoint is not an http or https address"],
-    ["a user name", "https://u@a.example/x", "the token endpoint holds a user name or a password"],
-    ["a password", "https://u:p@a.example/x", "the token endpoint holds a user name or a password"],
+    ["not an address", "not a url", SERVER, "the token endpoint is not an http or https address"],
     [
-      "a downgrade",
-      "http://a.example/x",
-      "the token endpoint is http, and the MCP server is https",
+      "a file address",
+      "file:///etc/passwd",
+      SERVER,
+      "the token endpoint is not an http or https address",
     ],
-  ])("refuses %s, and never quotes the address", async (_name, raw, message) => {
-    const error = await fails(checkOutboundUrl(raw, SERVER, "token endpoint"));
+    [
+      "a user name",
+      "https://u@a.example/x",
+      SERVER,
+      "the token endpoint holds a user name or a password",
+    ],
+    [
+      "a password",
+      "https://u:p@a.example/x",
+      SERVER,
+      "the token endpoint holds a user name or a password",
+    ],
+    [
+      "an http address for an https server",
+      "http://a.example/x",
+      SERVER,
+      "the token endpoint is http, and only the MCP server's own host may be",
+    ],
+    [
+      "an http address on the host of an https server",
+      "http://mcp.example.com/x",
+      SERVER,
+      "the token endpoint is http, and only the MCP server's own host may be",
+    ],
+    [
+      "an http address on another host than an http server",
+      "http://127.0.0.2:9/x",
+      HTTP_SERVER,
+      "the token endpoint is http, and only the MCP server's own host may be",
+    ],
+  ])("refuses %s, and never quotes the address", async (_name, raw, server, message) => {
+    const error = await fails(checkOutboundUrl(raw, server, "token endpoint"));
     expect(error).toMatchObject({ _tag: "AuthorizationUnreadable", message });
   });
 });
@@ -263,6 +295,18 @@ describe("readAuthorizationServerMetadata", () => {
     ["a body that is not an object", 3],
   ])("refuses %s", async (_name, body) => {
     expect(await fails(readAuthorizationServerMetadata(body, ISSUER, SERVER))).toMatchObject({
+      _tag: "AuthorizationUnreadable",
+    });
+  });
+
+  it.each([
+    ["authorization", "authorization_endpoint"],
+    ["token", "token_endpoint"],
+    ["registration", "registration_endpoint"],
+  ])("refuses an http %s endpoint on another host, also for an http server", async (_name, key) => {
+    const httpServer = new URL("http://127.0.0.1:9/mcp");
+    const body = { ...valid, [key]: "http://auth.example.com/endpoint" };
+    expect(await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer))).toMatchObject({
       _tag: "AuthorizationUnreadable",
     });
   });
