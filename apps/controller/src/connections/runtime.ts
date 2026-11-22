@@ -44,7 +44,7 @@ import { announce, nowIso, withTransaction } from "../db";
 import { Notifier } from "../notifications";
 import {
   isStale,
-  makeRefreshPermits,
+  makeKeyedLocks,
   parseTokens,
   ProviderUnreachable,
   renewTokenSet,
@@ -392,16 +392,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * One permit per connection, so two callers that find the same expired
-   * token do not both use the refresh token. Keys are `connection:<id>`.
+   * One lock per connection, so two callers that find the same expired token
+   * do not both use the refresh token. Keys are connection ids.
    */
-  const refreshPermits = makeRefreshPermits();
-
-  /** Runs `effect` while holding the connection's refresh permit. */
-  const withConnectionPermit = <A, E, R>(
-    connectionId: string,
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E, R> => refreshPermits.withPermit(`connection:${connectionId}`, effect);
+  const refreshPermits = makeKeyedLocks();
 
   /**
    * Returns the token endpoint and the client a connection of this type
@@ -620,7 +614,7 @@ const make = Effect.gen(function* () {
     ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     promotion.whenServing(
-      withConnectionPermit(
+      refreshPermits.withPermit(
         connectionId,
         Effect.flatMap(readConnectionForUse(connectionId), (current) =>
           Effect.map(
@@ -722,7 +716,7 @@ const make = Effect.gen(function* () {
       // The gate is passed before the permit is taken, so no caller holds
       // the permit while it waits for a freeze to end.
       const refreshedTokens = yield* promotion.whenServing(
-        withConnectionPermit(
+        refreshPermits.withPermit(
           row.id,
           refreshTokens(row, type, undefined, markStaleTokenNeedsReauth, Effect.void),
         ),
@@ -1149,7 +1143,8 @@ const make = Effect.gen(function* () {
     withRefreshPermit: <A, E, R>(
       connectionId: string,
       effect: Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E, R> => promotion.whenServing(withConnectionPermit(connectionId, effect)),
+    ): Effect.Effect<A, E, R> =>
+      promotion.whenServing(refreshPermits.withPermit(connectionId, effect)),
   };
 });
 

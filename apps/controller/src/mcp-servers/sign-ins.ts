@@ -30,7 +30,7 @@ import { withTransaction } from "../db";
 import {
   isExpired,
   isStale,
-  makeRefreshPermits,
+  makeKeyedLocks,
   ProviderUnreachable,
   renewTokenSet,
   type ProviderRefused,
@@ -126,7 +126,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
-  const refreshPermits = makeRefreshPermits();
+  const refreshPermits = makeKeyedLocks();
 
   /**
    * Returns the token a request to the server carries, or `undefined` when
@@ -179,22 +179,13 @@ const make = Effect.gen(function* () {
    * the transaction that writes, keeps a sign-in the user made while the
    * provider was called from being overwritten. Fails with `SignInReplaced`
    * when the secret changed, and then writes nothing.
-   *
-   * The new access token must be a bearer token, because it is sent in a
-   * header and removed from every answer. Fails with `ProviderUnreachable`
-   * (the token endpoint answered something Hercule cannot use) when it is not.
    */
   const writeTokensIfHeld = (
     serverId: string,
     held: { readonly text: string; readonly signIn: OAuthSignIn },
     next: TokenSet,
-  ): Effect.Effect<void, SignInReplaced | ProviderUnreachable> =>
+  ): Effect.Effect<void, SignInReplaced> =>
     Effect.gen(function* () {
-      if (!isBearerToken(next.accessToken)) {
-        return yield* new ProviderUnreachable({
-          message: "the token endpoint's answer holds an access token that is not a bearer token",
-        });
-      }
       const written = yield* Effect.orDie(
         withTransaction(
           sql,
@@ -260,7 +251,7 @@ const make = Effect.gen(function* () {
       }
       return yield* promotion.whenServing(
         refreshPermits.withPermit(
-          `mcp-server:${serverId}`,
+          serverId,
           Effect.gen(function* () {
             const held = yield* readStoredOAuth(serverId);
             if (Option.isNone(held)) {

@@ -224,7 +224,11 @@ export type ServerAccess = UnusableAccess | UsableAccess;
  * refresh permit, right before a renewal calls the provider. A renewal does
  * not move the destination, so `admit` cannot see one that landed while it
  * ran. `ServerCredentials.readVersion` can: when it changed, the credentials
- * read are no longer current and are read again.
+ * read are no longer current and are read once more. That one re-read is the
+ * most, because a provider that issues tokens that are stale at once would
+ * make every read renew again, forever. A renewal that lands after the
+ * re-read is caught later: the tool's request checks that its session can
+ * carry the credentials it sends (`canCarryCredentials` in `calls.ts`).
  *
  * Fails with whatever `admit` fails with, and with
  * `ServerCredentialsUnavailable` when the server cannot give credentials.
@@ -236,13 +240,13 @@ export const prepareRequest = <Refusal>(
   admit: Effect.Effect<void, Refusal>,
 ): Effect.Effect<UpstreamCredentials, ServerCredentialsUnavailable | Refusal> =>
   Effect.gen(function* () {
-    while (true) {
+    for (let rereads = 0; ; rereads++) {
       // Read before the credentials, so that a renewal that stores new ones in
       // between shows as a different version, never as the same.
       const version = yield* credentials.readVersion;
       const prepared = yield* credentials.readForUse(admit);
       yield* admit;
-      if ((yield* credentials.readVersion) === version) return prepared;
+      if (rereads === 1 || (yield* credentials.readVersion) === version) return prepared;
     }
   });
 

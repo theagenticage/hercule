@@ -2,12 +2,13 @@
  * The two generic halves of refreshing an OAuth token set, shared by every
  * owner of one (a Connection, an MCP Server added by URL):
  *
- * - `RefreshPermits` lets one refresh at a time run per owner.
+ * - `KeyedLocks` lets one caller at a time run per key, such as one refresh
+ *   per owner.
  * - `renewTokenSet` sends the refresh and stores its answer, so a rotated
  *   refresh token is never lost.
  *
  * The order around them stays the owner's: pass the promotion gate, take the
- * permit, read the stored tokens again under the permit, run the owner's own
+ * lock, read the stored tokens again under the lock, run the owner's own
  * guard, then call `renewTokenSet`. The owner also decides what a refusal
  * means for its status.
  */
@@ -16,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
-  isStale,
   ProviderUnreachable,
   refreshAccess,
   type OAuthClient,
@@ -25,16 +25,18 @@ import {
 } from "./client";
 
 /**
- * One permit per key, so two callers that find the same expired token do not
- * both use the refresh token. Some providers invalidate a refresh token once
- * it is used, which would leave the second caller with tokens that no longer
- * work.
+ * A set of locks, one per key, so that two callers with the same key never
+ * run at the same time. A refresh uses it with the owner's id as the key: two
+ * callers that find the same expired token must not both use the refresh
+ * token, because some providers invalidate a refresh token once it is used,
+ * which would leave the second caller with tokens that no longer work.
  */
-export interface RefreshPermits {
+export interface KeyedLocks {
   /**
-   * Runs `effect` while holding the permit of `key`, and waits first when
-   * another caller holds it. A key names the owner and its id, such as
-   * `connection:<id>`, so owners of different kinds never share a permit.
+   * Runs `effect` while holding the lock of `key`, and waits first when
+   * another caller holds it. Locks of different keys do not wait for each
+   * other. Each owner makes its own set, so a key needs no prefix to tell
+   * owners apart.
    */
   readonly withPermit: <A, E, R>(
     key: string,
@@ -43,26 +45,30 @@ export interface RefreshPermits {
 }
 
 /**
- * Creates an empty set of permits. The map is never pruned: it holds at most
+ * Creates an empty set of locks. The map is never pruned: it holds at most
  * one entry per key this process has seen, and removing an entry when its
- * owner is deleted could race a refresh that still holds it.
+ * owner is deleted could race a caller that still holds it.
  */
-export const makeRefreshPermits = (): RefreshPermits => {
-  const permits = new Map<string, Semaphore.Semaphore>();
+export const makeKeyedLocks = (): KeyedLocks => {
+  const locks = new Map<string, Semaphore.Semaphore>();
   return {
     withPermit: (key, effect) => {
       // Synchronous on purpose: if an effect ran between the read and the
       // write, two fibers could both pass the read and each create a
       // semaphore of its own.
-      let permit = permits.get(key);
-      if (permit === undefined) {
-        permit = Semaphore.makeUnsafe(1);
-        permits.set(key, permit);
+      let lock = locks.get(key);
+      if (lock === undefined) {
+        lock = Semaphore.makeUnsafe(1);
+        locks.set(key, lock);
       }
-      return permit.withPermits(1)(effect);
+      return lock.withPermits(1)(effect);
     },
   };
 };
+
+/** Kept until `oauth-sign-in.ts` moves to the new names `makeKeyedLocks` and `KeyedLocks`. */
+export const makeRefreshPermits = makeKeyedLocks;
+export type RefreshPermits = KeyedLocks;
 
 /**
  * Where and as whom a refresh goes: the token endpoint, the client, the
@@ -90,7 +96,7 @@ export interface RefreshEndpoint {
  * The request and the write are uninterruptible together. A provider that
  * rotates its refresh token invalidates the old one the moment it answers, so
  * a caller cancelled between the answer and the write (a timeout, a cancelled
- * run) would lose the only tokens that still work. `refreshAccess` bounds the
+ * run) would lose the only tokens that still work. `requestTokens` bounds the
  * request with its own timeout, so this cannot hold the caller or its permit
  * for long.
  *
@@ -98,12 +104,16 @@ export interface RefreshEndpoint {
  * does, and with the failure of `writeIfHeld`. A failed refresh writes
  * nothing, so the owner decides what a refusal means for its status.
  *
- * Also fails with `ProviderUnreachable`, after the write, when the new set is
- * already stale, which is what an `expires_in` of 0 gives. The set is stored
- * anyway, because the provider may have rotated the refresh token. Returning
- * it would make the caller read it, find it stale, and renew again at once,
- * for as long as the provider answers like that. The next request renews
- * again, once.
+ * An answer is stored before it is judged. When `endpoint.bearerOnly` is set
+ * and the answer cannot be sent as a bearer token, the rotated refresh token
+ * is still stored, with an empty access token that is already expired so that
+ * the next use renews it; then this fails with `ProviderUnreachable`.
+ *
+ * Returns the new set even when it is already stale (an `expires_in` of 0): it
+ * is the token the provider just issued, and the use that asked for the
+ * renewal needs it. A caller that reads the stored set again after a renewal
+ * must bound how often it does, or such a provider would make it renew in a
+ * loop.
  */
 export const renewTokenSet = <WriteFailure>(request: {
   readonly refreshToken: string;
@@ -120,16 +130,19 @@ export const renewTokenSet = <WriteFailure>(request: {
         ...request.endpoint,
         refreshToken: request.refreshToken,
       });
-      const next: TokenSet = {
-        ...answer,
-        refreshToken: answer.refreshToken ?? request.refreshToken,
-      };
-      yield* request.writeIfHeld(next);
-      if (isStale(next, yield* Clock.currentTimeMillis)) {
-        return yield* new ProviderUnreachable({
-          message: "the token endpoint issued an access token that is already about to expire",
-        });
+      const refreshToken = answer.tokens.refreshToken ?? request.refreshToken;
+      const next: TokenSet = { ...answer.tokens, refreshToken };
+      if (answer.unusableReason === undefined) {
+        yield* request.writeIfHeld(next);
+        return next;
       }
-      return next;
+      const now = new Date(yield* Clock.currentTimeMillis).toISOString();
+      yield* request.writeIfHeld({
+        accessToken: "",
+        refreshToken,
+        expiresAt: now,
+        obtainedAt: now,
+      });
+      return yield* new ProviderUnreachable({ message: answer.unusableReason });
     }),
   );

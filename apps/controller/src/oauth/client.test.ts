@@ -1,8 +1,10 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   exchangeCode,
@@ -12,11 +14,14 @@ import {
   postForm,
   refreshAccess,
   serializeTokens,
+  TOKEN_REQUEST_TIMEOUT_SECONDS,
   type OAuthClient,
   type TokenSet,
 } from "./client";
 
 const TOKEN = "gho_secret-access-token";
+
+const TEN_YEARS_SECONDS = 10 * 365 * 24 * 60 * 60;
 
 describe("parseTokens", () => {
   it("parses what serializeTokens wrote", async () => {
@@ -288,7 +293,60 @@ describe("a token endpoint's answer", () => {
       () => new Response(JSON.stringify({ token_type: null }), { status: 200 }),
     );
 
+    expect(failure.message).toBe("the token endpoint's response has no access token");
+  });
+
+  it("reports an access token that is there but a refresh token that is not text as an invalid answer", async () => {
+    const failure = await failWith(
+      () => new Response(JSON.stringify({ access_token: "a", refresh_token: 5 }), { status: 200 }),
+    );
+
     expect(failure.message).toBe("the token endpoint's response is not a valid token response");
+  });
+
+  it("reads an answer that starts with a UTF-8 byte order mark", async () => {
+    const tokens = await exchange(
+      fakeTokenEndpoint(
+        () => new Response(`\uFEFF${JSON.stringify({ access_token: "access-from-bom" })}`),
+      ),
+      { client: { clientId: "id" } },
+    );
+
+    expect(tokens.accessToken).toBe("access-from-bom");
+  });
+
+  it.each([
+    ["an empty body", () => new Response(null, { status: 204 })],
+    ["an empty body of a 400", () => new Response("", { status: 400 })],
+    ["a body over 64 KiB", () => new Response("x".repeat(MAX_ANSWER_BYTES + 1), { status: 400 })],
+    [
+      "a body that breaks while it is read",
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"error":'));
+              controller.error(new Error("connection reset"));
+            },
+          }),
+          { status: 400 },
+        ),
+    ],
+  ])(
+    "is a refusal, not an unreachable provider, for a client error with %s",
+    async (_name, answer) => {
+      const failure = await failWith(answer);
+
+      expect(failure._tag).toBe("ProviderRefused");
+    },
+  );
+
+  it("stays unreachable for a rate limit whose body cannot be read", async () => {
+    const failure = await failWith(
+      () => new Response("x".repeat(MAX_ANSWER_BYTES + 1), { status: 429 }),
+    );
+
+    expect(failure._tag).toBe("ProviderUnreachable");
   });
 
   it("quotes no text of the provider when the answer is not JSON or has no access token", async () => {
@@ -313,7 +371,7 @@ describe("a token endpoint's answer", () => {
 
 describe("the lifetime and the type of a token", () => {
   const answerWith = (fields: Record<string, unknown>) => () =>
-    new Response(JSON.stringify({ access_token: "a", ...fields }), { status: 200 });
+    new Response(JSON.stringify({ access_token: "bearer-token-1", ...fields }), { status: 200 });
 
   const tryExchange = (fields: Record<string, unknown>, bearerOnly = false) =>
     Effect.runPromise(
@@ -329,28 +387,101 @@ describe("the lifetime and the type of a token", () => {
       ).pipe(Effect.provide(fakeTokenEndpoint(answerWith(fields)).layer)),
     );
 
+  const lifetimeOf = async (expiresIn: unknown) => {
+    const tokens = await exchange(fakeTokenEndpoint(answerWith({ expires_in: expiresIn })), {
+      client: { clientId: "id" },
+    });
+    return tokens.expiresAt === undefined
+      ? undefined
+      : Date.parse(tokens.expiresAt) - Date.parse(tokens.obtainedAt ?? "");
+  };
+
   it.each([
-    ["a negative number", -1],
-    ["a fraction", 3600.5],
-    ["more than ten years", 10 * 365 * 24 * 60 * 60 + 1],
-    ["a number too large for a date", 1e308],
-  ])("refuses expires_in of %s with a typed failure and fixed text", async (_name, expires) => {
-    const failure = await tryExchange({ expires_in: expires });
+    ["zero", 0, 0],
+    ["one", 1, 1000],
+    ["a fraction, rounded down", 3599.5, 3599 * 1000],
+    ["ten years", TEN_YEARS_SECONDS, TEN_YEARS_SECONDS * 1000],
+    ["more than ten years, cut to ten years", TEN_YEARS_SECONDS + 1, TEN_YEARS_SECONDS * 1000],
+    ["a number too large for a date, cut to ten years", 1e308, TEN_YEARS_SECONDS * 1000],
+  ])("keeps the tokens of an answer with an expires_in of %s", async (_name, expires, millis) => {
+    expect(await lifetimeOf(expires)).toBe(millis);
+  });
+
+  it.each([
+    ["negative", -1],
+    ["text", "3600"],
+    ["null", null],
+    ["a list", [1]],
+  ])(
+    "keeps the tokens of an answer with an expires_in that is %s, with no lifetime",
+    async (_name, expires) => {
+      expect(await lifetimeOf(expires)).toBeUndefined();
+    },
+  );
+
+  it("refuses an access token that is not a bearer token when only bearer is, and accepts it otherwise", async () => {
+    const failure = await tryExchange({ access_token: "has spaces in it" }, true);
+    const accepted = await exchange(
+      fakeTokenEndpoint(answerWith({ access_token: "has spaces in it" })),
+      { client: { clientId: "id" } },
+    );
 
     expect(failure).toMatchObject({
       _tag: "ProviderUnreachable",
-      message: "the token endpoint's response has an expires_in that is not a lifetime in seconds",
+      message: "the token endpoint's response holds an access token that is not a bearer token",
     });
+    expect(accepted.accessToken).toBe("has spaces in it");
   });
 
-  it.each([0, 1, 10 * 365 * 24 * 60 * 60])("accepts expires_in of %i", async (expires) => {
-    const tokens = await exchange(fakeTokenEndpoint(answerWith({ expires_in: expires })), {
-      client: { clientId: "id" },
-    });
-
-    expect(Date.parse(tokens.expiresAt ?? "") - Date.parse(tokens.obtainedAt ?? "")).toBe(
-      expires * 1000,
+  it("returns a refresh answer that is not a bearer token with the reason, where a code exchange fails", async () => {
+    const answer = await Effect.runPromise(
+      refreshAccess({
+        tokenUrl: TOKEN_URL,
+        client: { clientId: "id" },
+        refreshToken: "r",
+        bearerOnly: true,
+      }).pipe(
+        Effect.provide(
+          fakeTokenEndpoint(answerWith({ access_token: "has spaces", refresh_token: "rotated" }))
+            .layer,
+        ),
+      ),
     );
+
+    expect(answer.tokens).toMatchObject({ accessToken: "has spaces", refreshToken: "rotated" });
+    expect(answer.unusableReason).toBe(
+      "the token endpoint's response holds an access token that is not a bearer token",
+    );
+  });
+
+  it("gives up on an endpoint that never answers after 30 seconds, for a code exchange too", async () => {
+    const silent = HttpClient.make(() => Effect.never);
+
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          Effect.flip(
+            exchangeCode({
+              tokenUrl: TOKEN_URL,
+              client: { clientId: "id" },
+              code: "c",
+              redirectUri: "http://127.0.0.1:1/callback",
+              codeVerifier: "v",
+            }),
+          ),
+        );
+        yield* TestClock.adjust(TOKEN_REQUEST_TIMEOUT_SECONDS * 1000);
+        return yield* Fiber.join(fiber);
+      }).pipe(
+        Effect.provide(Layer.succeed(HttpClient.HttpClient, silent)),
+        Effect.provide(TestClock.layer()),
+      ),
+    );
+
+    expect(failure).toMatchObject({
+      _tag: "ProviderUnreachable",
+      message: "the token endpoint did not answer within 30 seconds",
+    });
   });
 
   it.each(["Bearer", "bearer", "BEARER"])(
@@ -361,7 +492,7 @@ describe("the lifetime and the type of a token", () => {
         bearerOnly: true,
       });
 
-      expect(tokens.accessToken).toBe("a");
+      expect(tokens.accessToken).toBe("bearer-token-1");
     },
   );
 
@@ -371,7 +502,7 @@ describe("the lifetime and the type of a token", () => {
       bearerOnly: true,
     });
 
-    expect(tokens.accessToken).toBe("a");
+    expect(tokens.accessToken).toBe("bearer-token-1");
   });
 
   it("ignores a missing, null or odd token type for a caller that is not bearer only", async () => {
@@ -380,7 +511,7 @@ describe("the lifetime and the type of a token", () => {
         client: { clientId: "id" },
       });
 
-      expect(tokens.accessToken).toBe("a");
+      expect(tokens.accessToken).toBe("bearer-token-1");
     }
   });
 
@@ -390,7 +521,7 @@ describe("the lifetime and the type of a token", () => {
       bearerOnly: true,
     });
 
-    expect(tokens.accessToken).toBe("a");
+    expect(tokens.accessToken).toBe("bearer-token-1");
   });
 
   it("refuses a token type that is not text when only bearer is", async () => {
@@ -410,7 +541,7 @@ describe("the lifetime and the type of a token", () => {
       _tag: "ProviderUnreachable",
       message: "the token endpoint's response holds a token that is not a bearer token",
     });
-    expect(accepted.accessToken).toBe("a");
+    expect(accepted.accessToken).toBe("bearer-token-1");
   });
 });
 

@@ -346,6 +346,41 @@ describe("the tokens of a sign-in", () => {
     });
   });
 
+  it("keep the rotated refresh token when a refresh answers with a token that is not a bearer token", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+
+      // The next refresh rotates the refresh token, and its access token is
+      // of a type Hercule cannot send. The use is refused, and the rotated
+      // refresh token must survive, because the old one no longer works.
+      authorizationServer.tokenType = "MAC";
+      authorizationServer.revokeAccessTokens();
+      await requestCheck(controller, serverId);
+      await eventually(
+        () => Promise.resolve(authorizationServer.tokenRequests.length),
+        (count) => count >= 2,
+      );
+      authorizationServer.tokenType = "Bearer";
+      await requestCheck(controller, serverId);
+      await eventually(
+        () => Promise.resolve(authorizationServer.tokenRequests.length),
+        (count) => count >= 3,
+      );
+
+      expect(authorizationServer.tokenRequests[1]).toMatchObject({
+        grant_type: "refresh_token",
+        refresh_token: "refresh-token-1",
+      });
+      expect(authorizationServer.tokenRequests[2]).toMatchObject({
+        grant_type: "refresh_token",
+        refresh_token: "refresh-token-2",
+      });
+    });
+  });
+
   it("are refreshed after the server refused the access token, and the request is tried again", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;
@@ -778,20 +813,21 @@ describe("finishing a sign-in", () => {
     });
   });
 
-  it.each([
-    ["a token that is not a bearer token", { tokenType: "MAC" }],
-  ])("is refused as unreadable for %s, and signs nothing in", async (_name, issued) => {
-    await withOAuthRig(async (rig) => {
-      Object.assign(rig.authorizationServer, issued);
-      const serverId = await addServerThatNeedsSignIn(rig);
-      const callback = await startAndApprove(rig, serverId);
+  it.each([["a token that is not a bearer token", { tokenType: "MAC" }]])(
+    "is refused as unreadable for %s, and signs nothing in",
+    async (_name, issued) => {
+      await withOAuthRig(async (rig) => {
+        Object.assign(rig.authorizationServer, issued);
+        const serverId = await addServerThatNeedsSignIn(rig);
+        const callback = await startAndApprove(rig, serverId);
 
-      const error = await refusal(rig, serverId, callback, 409);
+        const error = await refusal(rig, serverId, callback, 409);
 
-      expect(error).toMatchObject({ details: { reason: "source-unreadable" } });
-      await expectNotSignedIn(rig, serverId);
-    });
-  });
+        expect(error).toMatchObject({ details: { reason: "source-unreadable" } });
+        await expectNotSignedIn(rig, serverId);
+      });
+    },
+  );
 
   it("is refused as unreadable when the token endpoint cannot be reached", async () => {
     await withOAuthRig(async (rig) => {

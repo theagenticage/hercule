@@ -8,6 +8,7 @@
  * for the Connection or the server, and where the tokens are stored.
  */
 import { createHash } from "node:crypto";
+import { McpServerToken } from "@hercule/contract";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -130,9 +131,9 @@ const STANDARD_ERROR_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The longest `expires_in` a token endpoint may answer with: ten years, in
- * seconds. A larger value is a mistake or an attack, and it would not even
- * convert to a date.
+ * The longest lifetime kept from an `expires_in`: ten years, in seconds. A
+ * larger value is cut to it, because a huge one would not even convert to a
+ * date.
  */
 const MAX_EXPIRES_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
 
@@ -141,13 +142,31 @@ const MAX_EXPIRES_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
  * ignored. `token_type` is left undecoded: only a caller that sends the token
  * as a bearer token reads it (`requestTokens` with `bearerOnly`), and a
  * provider that sends it as `null` must still work for every other caller.
+ * `expires_in` is left undecoded too, because an odd one never refuses an
+ * answer that holds tokens (`readLifetimeSeconds`).
  */
 const TokenResponse = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.optionalKey(Schema.String),
-  expires_in: Schema.optionalKey(Schema.Number),
+  expires_in: Schema.optionalKey(Schema.Unknown),
   token_type: Schema.optionalKey(Schema.Unknown),
 });
+
+/**
+ * Returns the lifetime in seconds that a token answer's `expires_in` states,
+ * or `undefined` when it states none. An odd value never fails the answer,
+ * because the answer holds tokens, and a rotating provider has already
+ * invalidated the old refresh token. So a fraction is rounded down, a value
+ * above `MAX_EXPIRES_IN_SECONDS` is cut to it, and a negative value or one
+ * that is not a number is an unknown lifetime.
+ */
+const readLifetimeSeconds = (expiresIn: unknown): number | undefined =>
+  typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn >= 0
+    ? Math.min(Math.floor(expiresIn), MAX_EXPIRES_IN_SECONDS)
+    : undefined;
+
+/** Whether an access token fits the syntax of a bearer token (RFC 6750), as an MCP server's token must (see `McpServerToken`). */
+const isBearerToken = Schema.is(McpServerToken);
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 
@@ -201,8 +220,7 @@ const decodeStoredTokenSet = Schema.decodeUnknownEffect(StoredTokenSet);
 export const parseTokens = (stored: string): Effect.Effect<TokenSet, StoredTokensUnreadable> =>
   decodeStoredTokenSet(stored).pipe(
     Effect.mapError(
-      () =>
-        new StoredTokensUnreadable({ message: "this connection's stored tokens cannot be read" }),
+      () => new StoredTokensUnreadable({ message: "the stored tokens cannot be read" }),
     ),
   );
 
@@ -277,11 +295,12 @@ export const readBoundedText = (
  * returns the response body when it is not an OAuth error.
  *
  * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
- *   status, or when the status is any other client error.
+ *   status, or when the status is any other client error, also when its body
+ *   is empty, breaks while it is read, or is over `MAX_ANSWER_BYTES`.
  * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
- *   with a redirect, answers with a server error, answers with a body that is
- *   not JSON or is over `MAX_ANSWER_BYTES`, or answers 403 or 429 with no
- *   OAuth error.
+ *   with a redirect, answers with a server error, answers 200 with a body that
+ *   is not JSON, breaks while it is read or is over `MAX_ANSWER_BYTES`, or
+ *   answers 403 or 429 with no OAuth error.
  *
  * A redirect is never followed: the form holds a secret (a client secret, a
  * refresh token, a code or a device code), and a 307 or 308 makes a client
@@ -320,10 +339,18 @@ export const postForm = (
       if (response.status >= 500) {
         return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
       }
-      const text = yield* readBoundedText(response, endpointName);
+      // A body that cannot be read is no body for a client error: the status
+      // alone says the provider refused. Only an answer of 200 needs its body.
+      const text = yield* readBoundedText(response, endpointName).pipe(
+        Effect.catch((error) =>
+          response.status === 200 ? Effect.fail(error) : Effect.succeed(""),
+        ),
+      );
       let body: unknown;
       try {
-        body = text === "" ? null : JSON.parse(text);
+        // A UTF-8 byte order mark is not JSON, and some servers send one.
+        const json = text.startsWith("\uFEFF") ? text.slice(1) : text;
+        body = json === "" ? null : JSON.parse(json);
       } catch {
         if (response.status === 200) {
           return yield* failProviderUnreachable(
@@ -369,24 +396,116 @@ export const postForm = (
   );
 
 /**
+ * How long the token endpoint has to answer. A refresh holds the owner's
+ * one-at-a-time lock and, once sent, runs to its end even when its caller is
+ * cancelled (see `renewTokenSet`), so a provider that never answers needs a
+ * limit of its own. The code exchange and the device poll have the same limit.
+ */
+export const TOKEN_REQUEST_TIMEOUT_SECONDS = 30;
+
+/**
+ * What a token endpoint answered: the token set, and, for a caller that sends
+ * the token as a bearer token, why the answer cannot be used (`bearerOnly` of
+ * `requestTokens`). `unusableReason` is absent when it can.
+ */
+export interface TokenAnswer {
+  readonly tokens: TokenSet;
+  readonly unusableReason?: string;
+}
+
+/**
  * Sends a form-encoded request to the token endpoint, as every grant type
- * does, and returns the token set.
+ * does, and returns what it answered (`TokenAnswer`). It never judges whether
+ * the answer is usable: a caller that holds a refresh token must store a
+ * rotated one before it refuses the answer (`renewTokenSet`).
  *
- * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
- * neither tokens nor an error (an `access_token` that is missing or not a
- * string, or a `refresh_token` or `expires_in` of another type), when its `expires_in` is not a whole number of
- * seconds from 0 to ten years, or, with `bearerOnly`, when its `token_type` is
- * present and is not `Bearer` (any letter case). Without `bearerOnly`,
- * `token_type` is ignored, whatever it holds. `expires_in` is converted to
- * a timestamp here, because it counts from the moment of the response, and
- * that moment is stored as `obtainedAt`. A token without `expires_in` never
+ * Fails as `postForm` does, and with `ProviderUnreachable` when:
+ *
+ * - the endpoint has not answered within `TOKEN_REQUEST_TIMEOUT_SECONDS`. The
+ *   request stays interruptible even when the caller runs this effect
+ *   uninterruptibly, so that the timeout can cancel it;
+ * - the response is neither tokens nor an error: its `access_token` is
+ *   missing or not a string, or its `refresh_token` is not a string.
+ *
+ * `expires_in` never fails the answer (`readLifetimeSeconds`). It is converted
+ * to a timestamp here, because it counts from the moment of the response, and
+ * that moment is stored as `obtainedAt`. A token without a lifetime never
  * expires, and is stored with neither. A provider whose tokens do not expire
  * sends none.
  *
- * `bearerOnly` is for a caller that sends the token as `Authorization: Bearer`
- * and would otherwise send a token of another type as if it were a bearer one.
- * An answer with no `token_type`, or a `null` one, is accepted, because many
- * providers leave it out.
+ * With `bearerOnly`, the answer gets an `unusableReason` when its
+ * `token_type` is present and is not `Bearer` (any letter case), or when its
+ * access token is not a bearer token (`McpServerToken`). An answer with no
+ * `token_type`, or a `null` one, is fine, because many providers leave it
+ * out. Without `bearerOnly`, `token_type` is ignored, whatever it holds.
+ */
+const requestTokenAnswer = (
+  tokenUrl: string,
+  form: Record<string, string>,
+  headers: Record<string, string>,
+  bearerOnly: boolean,
+): Effect.Effect<TokenAnswer, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const answer = yield* postForm(tokenUrl, form, "token endpoint", headers);
+    const body = yield* decodeTokenResponse(answer).pipe(
+      Effect.catchTag("SchemaError", () =>
+        failProviderUnreachable(
+          typeof (answer as { readonly access_token?: unknown } | null)?.access_token === "string"
+            ? "the token endpoint's response is not a valid token response"
+            : "the token endpoint's response has no access token",
+        ),
+      ),
+    );
+    const millis = yield* Clock.currentTimeMillis;
+    const lifetime = readLifetimeSeconds(body.expires_in);
+    const tokens: TokenSet = {
+      accessToken: body.access_token,
+      ...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
+      ...(lifetime === undefined
+        ? {}
+        : {
+            expiresAt: new Date(millis + lifetime * 1000).toISOString(),
+            obtainedAt: new Date(millis).toISOString(),
+          }),
+    };
+    if (
+      bearerOnly &&
+      body.token_type !== undefined &&
+      body.token_type !== null &&
+      !(typeof body.token_type === "string" && body.token_type.toLowerCase() === "bearer")
+    ) {
+      return {
+        tokens,
+        unusableReason: "the token endpoint's response holds a token that is not a bearer token",
+      };
+    }
+    if (bearerOnly && !isBearerToken(body.access_token)) {
+      return {
+        tokens,
+        unusableReason:
+          "the token endpoint's response holds an access token that is not a bearer token",
+      };
+    }
+    return { tokens };
+  }).pipe(
+    Effect.interruptible,
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(TOKEN_REQUEST_TIMEOUT_SECONDS),
+      orElse: () =>
+        failProviderUnreachable(
+          `the token endpoint did not answer within ${String(TOKEN_REQUEST_TIMEOUT_SECONDS)} seconds`,
+        ),
+    }),
+  );
+
+/**
+ * Sends a form-encoded request to the token endpoint, and returns the token
+ * set. It fails as `requestTokenAnswer` does, and with `ProviderUnreachable`
+ * when `bearerOnly` is set and the answer cannot be sent as a bearer token.
+ * `bearerOnly` is for a caller that sends the token as `Authorization:
+ * Bearer` and would otherwise send a token of another type as if it were a
+ * bearer one. Not for a refresh, which stores its answer first
+ * (`refreshAccess`).
  */
 export const requestTokens = (
   tokenUrl: string,
@@ -394,48 +513,11 @@ export const requestTokens = (
   headers: Record<string, string> = {},
   { bearerOnly = false }: { readonly bearerOnly?: boolean } = {},
 ): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const body = yield* decodeTokenResponse(
-      yield* postForm(tokenUrl, form, "token endpoint", headers),
-    ).pipe(
-      Effect.catchTag("SchemaError", () =>
-        failProviderUnreachable("the token endpoint's response is not a valid token response"),
-      ),
-    );
-    if (
-      body.expires_in !== undefined &&
-      !(
-        Number.isInteger(body.expires_in) &&
-        body.expires_in >= 0 &&
-        body.expires_in <= MAX_EXPIRES_IN_SECONDS
-      )
-    ) {
-      return yield* failProviderUnreachable(
-        "the token endpoint's response has an expires_in that is not a lifetime in seconds",
-      );
-    }
-    if (
-      bearerOnly &&
-      body.token_type !== undefined &&
-      body.token_type !== null &&
-      !(typeof body.token_type === "string" && body.token_type.toLowerCase() === "bearer")
-    ) {
-      return yield* failProviderUnreachable(
-        "the token endpoint's response holds a token that is not a bearer token",
-      );
-    }
-    const millis = yield* Clock.currentTimeMillis;
-    return {
-      accessToken: body.access_token,
-      ...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
-      ...(body.expires_in === undefined
-        ? {}
-        : {
-            expiresAt: new Date(millis + body.expires_in * 1000).toISOString(),
-            obtainedAt: new Date(millis).toISOString(),
-          }),
-    };
-  });
+  Effect.flatMap(requestTokenAnswer(tokenUrl, form, headers, bearerOnly), (answer) =>
+    answer.unusableReason === undefined
+      ? Effect.succeed(answer.tokens)
+      : failProviderUnreachable(answer.unusableReason),
+  );
 
 /** Encodes a value as `application/x-www-form-urlencoded` does (RFC 6749 appendix B). */
 const encodeFormComponent = (value: string): string =>
@@ -497,22 +579,15 @@ export const exchangeCode = (request: {
 };
 
 /**
- * How long the token endpoint has to answer a refresh. A refresh holds the
- * owner's one-at-a-time lock and, once sent, runs to its end even when its
- * caller is cancelled (see `renewTokenSet`), so a provider that never answers
- * needs a limit of its own.
- */
-export const REFRESH_TIMEOUT_SECONDS = 30;
-
-/**
  * Exchanges the refresh token for a new token set. The client authenticates as
  * its `authMethod` says, so a public client sends no secret. `resource` and
- * `bearerOnly` are as in `exchangeCode`. When the response has no new refresh token, the old one
- * is still valid, and the caller keeps it.
+ * `bearerOnly` are as in `exchangeCode`. When the response has no new refresh
+ * token, the old one is still valid, and the caller keeps it.
  *
- * Fails with `ProviderUnreachable` when the endpoint has not answered within
- * `REFRESH_TIMEOUT_SECONDS`. The request stays interruptible even when the
- * caller runs this effect uninterruptibly, so that the timeout can cancel it.
+ * Returns the answer unjudged (`TokenAnswer`), where `exchangeCode` fails on
+ * an unusable one: a provider that rotates its refresh token has already
+ * invalidated the old one, so the caller stores the new one before it refuses
+ * the answer.
  */
 export const refreshAccess = (request: {
   readonly tokenUrl: string;
@@ -520,9 +595,9 @@ export const refreshAccess = (request: {
   readonly refreshToken: string;
   readonly resource?: string;
   readonly bearerOnly?: boolean;
-}): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> => {
+}): Effect.Effect<TokenAnswer, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> => {
   const authentication = buildClientAuthentication(request.client);
-  return requestTokens(
+  return requestTokenAnswer(
     request.tokenUrl,
     {
       grant_type: "refresh_token",
@@ -531,15 +606,6 @@ export const refreshAccess = (request: {
       ...(request.resource === undefined ? {} : { resource: request.resource }),
     },
     authentication.headers,
-    { bearerOnly: request.bearerOnly === true },
-  ).pipe(
-    Effect.interruptible,
-    Effect.timeoutOrElse({
-      duration: Duration.seconds(REFRESH_TIMEOUT_SECONDS),
-      orElse: () =>
-        failProviderUnreachable(
-          `the token endpoint did not answer within ${String(REFRESH_TIMEOUT_SECONDS)} seconds`,
-        ),
-    }),
+    request.bearerOnly === true,
   );
 };

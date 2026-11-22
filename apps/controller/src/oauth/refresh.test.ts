@@ -7,8 +7,8 @@ import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { describe, expect, it } from "vitest";
-import type { TokenSet } from "./client";
-import { makeRefreshPermits, renewTokenSet, type RefreshEndpoint } from "./refresh";
+import { isStale, type TokenSet } from "./client";
+import { makeKeyedLocks, renewTokenSet, type RefreshEndpoint } from "./refresh";
 
 const ENDPOINT: RefreshEndpoint = {
   tokenUrl: "https://auth.test/token",
@@ -47,25 +47,43 @@ describe("renewTokenSet", () => {
     expect(written).toEqual([next]);
   });
 
-  it("stores a set that is already stale, then fails as unreachable so no caller reads it and renews again", async () => {
+  it("stores a set that is already stale and returns it, for the use that asked for the renewal", async () => {
     const written: Array<TokenSet> = [];
 
-    const failure = await Effect.runPromise(
+    const next = await run(
+      renewTokenSet({
+        refreshToken: "old-refresh",
+        endpoint: ENDPOINT,
+        writeIfHeld: (tokens) => Effect.sync(() => void written.push(tokens)),
+      }),
+      { access_token: "new-access", refresh_token: "rotated", expires_in: 0 },
+    );
+
+    expect(next).toMatchObject({ accessToken: "new-access", refreshToken: "rotated" });
+    expect(written).toEqual([next]);
+  });
+
+  it("stores the rotated refresh token, with no usable access token, before it refuses an access token that is not a bearer token", async () => {
+    const written: Array<TokenSet> = [];
+
+    const failure = await run(
       Effect.flip(
         renewTokenSet({
           refreshToken: "old-refresh",
-          endpoint: ENDPOINT,
+          endpoint: { ...ENDPOINT, bearerOnly: true },
           writeIfHeld: (tokens) => Effect.sync(() => void written.push(tokens)),
         }),
-      ).pipe(
-        Effect.provide(
-          answering({ access_token: "new-access", refresh_token: "rotated", expires_in: 0 }),
-        ),
       ),
+      { access_token: "not a bearer token", refresh_token: "rotated" },
     );
 
     expect(failure).toMatchObject({ _tag: "ProviderUnreachable" });
-    expect(written.map((tokens) => tokens.refreshToken)).toEqual(["rotated"]);
+    // The access token is not kept, and what is kept counts as expired, so the
+    // next use renews with the rotated refresh token.
+    expect(written).toEqual([
+      expect.objectContaining({ accessToken: "", refreshToken: "rotated" }),
+    ]);
+    expect(isStale(written[0] as TokenSet, Date.now())).toBe(true);
   });
 
   it("keeps the old refresh token when the answer has none", async () => {
@@ -156,10 +174,10 @@ describe("renewTokenSet", () => {
   });
 });
 
-describe("makeRefreshPermits", () => {
+describe("makeKeyedLocks", () => {
   /** Runs one holder per key at once, and returns the most holders of one key that ran at the same time. */
   const measureOverlap = async (keys: ReadonlyArray<string>): Promise<number> => {
-    const permits = makeRefreshPermits();
+    const permits = makeKeyedLocks();
     const running = new Map<string, number>();
     let most = 0;
     const hold = (key: string) =>
@@ -177,11 +195,11 @@ describe("makeRefreshPermits", () => {
   };
 
   it("lets one holder of a key run at a time", async () => {
-    expect(await measureOverlap(["connection:1", "connection:1", "connection:1"])).toBe(1);
+    expect(await measureOverlap(["a", "a", "a"])).toBe(1);
   });
 
   it("lets holders of different keys run together", async () => {
-    const permits = makeRefreshPermits();
+    const permits = makeKeyedLocks();
     let both = false;
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -190,11 +208,11 @@ describe("makeRefreshPermits", () => {
         yield* Effect.all(
           [
             permits.withPermit(
-              "connection:1",
+              "a",
               Deferred.succeed(first, undefined).pipe(Effect.andThen(Deferred.await(second))),
             ),
             permits.withPermit(
-              "mcp-server:1",
+              "b",
               Deferred.await(first).pipe(
                 Effect.andThen(Deferred.succeed(second, undefined)),
                 Effect.andThen(Effect.sync(() => void (both = true))),
