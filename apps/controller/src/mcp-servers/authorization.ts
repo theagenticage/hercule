@@ -118,7 +118,7 @@ export interface RegisteredClient extends OAuthClient {
 }
 
 /** What a `WWW-Authenticate` header's `Bearer` challenge says about OAuth. */
-export interface BearerChallenge {
+interface BearerChallenge {
   /** The address of the protected resource metadata (RFC 9728), when the challenge names one. */
   readonly resourceMetadata: string | undefined;
   /** The scope the challenge asks for, when it names one. */

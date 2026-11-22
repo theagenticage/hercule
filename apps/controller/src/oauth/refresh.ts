@@ -66,10 +66,6 @@ export const makeKeyedLocks = (): KeyedLocks => {
   };
 };
 
-/** Kept until `oauth-sign-in.ts` moves to the new names `makeKeyedLocks` and `KeyedLocks`. */
-export const makeRefreshPermits = makeKeyedLocks;
-export type RefreshPermits = KeyedLocks;
-
 /**
  * Where and as whom a refresh goes: the token endpoint, the client, the
  * optional RFC 8707 `resource`, and `bearerOnly` (see `requestTokens`).

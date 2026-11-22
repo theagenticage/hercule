@@ -9,7 +9,6 @@ export {
   exchangeCode,
   isExpired,
   isStale,
-  MAX_ANSWER_BYTES,
   parseTokens,
   postForm,
   readBoundedText,
@@ -19,20 +18,9 @@ export {
   requestTokens,
   serializeTokens,
   StoredTokensUnreadable,
-  TOKEN_REQUEST_TIMEOUT_SECONDS,
-  // Kept until oauth-sign-in.ts drops its own timeout, which `requestTokens` now makes.
-  TOKEN_REQUEST_TIMEOUT_SECONDS as REFRESH_TIMEOUT_SECONDS,
   TokenSetSchema,
   type ClientAuthMethod,
   type OAuthClient,
-  type TokenAnswer,
   type TokenSet,
 } from "./client";
-export {
-  makeKeyedLocks,
-  makeRefreshPermits,
-  renewTokenSet,
-  type KeyedLocks,
-  type RefreshEndpoint,
-  type RefreshPermits,
-} from "./refresh";
+export { makeKeyedLocks, renewTokenSet, type RefreshEndpoint } from "./refresh";

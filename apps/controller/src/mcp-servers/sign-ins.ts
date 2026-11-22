@@ -24,7 +24,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
-import { McpServerToken } from "@hercule/contract";
 import { computeCredentialsIdentity, type RefreshGuard } from "../connections";
 import { withTransaction } from "../db";
 import {
@@ -45,7 +44,7 @@ import { mcpServerRepository, type McpServerStoredSource } from "./repository";
 export const SIGN_IN_TOKEN_SECRET = "token";
 
 /** The name of the secret that holds a sign-in through the browser. */
-export const SIGN_IN_OAUTH_SECRET = "oauth";
+const SIGN_IN_OAUTH_SECRET = "oauth";
 
 /** The sign-in a server was added with: what its `source` holds as `signIn`. */
 type SignIn = Extract<McpServerStoredSource, { readonly kind: "url" }>["signIn"];
@@ -61,6 +60,8 @@ const buildOwner = (serverId: string): SecretOwner => ({ kind: "mcp-server", id:
  * - `resource` is the identifier (RFC 8707) every token request names.
  * - `scope` is what the sign-in asked for, when it asked for anything.
  * - `client` is the client Hercule registered, and how it signs token requests.
+ *   `secretExpiresAtMillis` is when its secret stops working; a sign-in stored
+ *   without it has a client whose secret never expires.
  */
 const OAuthSignInSchema = Schema.Struct({
   issuer: Schema.String,
@@ -72,6 +73,7 @@ const OAuthSignInSchema = Schema.Struct({
     clientId: Schema.String,
     clientSecret: Schema.optionalKey(Schema.String),
     authMethod: Schema.Literals(["none", "client_secret_post", "client_secret_basic"]),
+    secretExpiresAtMillis: Schema.optionalKey(Schema.Number),
   }),
   tokens: TokenSetSchema,
 });
@@ -81,14 +83,6 @@ export type OAuthSignIn = Schema.Schema.Type<typeof OAuthSignInSchema>;
 const StoredOAuthSignIn = Schema.fromJsonString(OAuthSignInSchema);
 
 const decodeStoredOAuthSignIn = Schema.decodeUnknownEffect(StoredOAuthSignIn);
-
-/**
- * Whether a token fits the syntax of a bearer token (RFC 6750) that an MCP
- * server's pasted token must have. Hercule sends a token in a header and
- * removes it from every answer, which only works for a token of this form
- * (see `McpServerToken`).
- */
-export const isBearerToken = Schema.is(McpServerToken);
 
 /**
  * The server's OAuth sign-in changed while a refresh was on its way to the

@@ -219,6 +219,26 @@ describe("a client of the authorization server", () => {
     });
   });
 
+  it("is registered again once its secret expired, and kept while it has not", async () => {
+    await withOAuthRig(async (rig) => {
+      const { authorizationServer } = rig;
+      authorizationServer.issuesClientSecrets = true;
+      authorizationServer.secretExpiresAt = Math.floor(Date.now() / 1000) + 60;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+
+      await startSignIn(rig.controller, serverId);
+      expect(authorizationServer.registrations).toHaveLength(1);
+
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 1000 });
+      const later = await startSignIn(rig.controller, serverId);
+      vi.useRealTimers();
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(new URL(later.authorizationUrl).searchParams.get("client_id")).toBe("client-2");
+    });
+  });
+
   it("is replaced by a new one when the token endpoint is another", async () => {
     await withOAuthRig(async (rig) => {
       const { authorizationServer } = rig;

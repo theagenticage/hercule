@@ -25,7 +25,6 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as Clock from "effect/Clock";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -43,14 +42,7 @@ import {
 import { currentStamp } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import {
-  computeChallenge,
-  exchangeCode,
-  ProviderRefused,
-  ProviderUnreachable,
-  REFRESH_TIMEOUT_SECONDS,
-  type TokenSet,
-} from "../oauth";
+import { computeChallenge, exchangeCode, ProviderRefused, type TokenSet } from "../oauth";
 import {
   buildAuthorizationUrl,
   discoverAuthorization,
@@ -59,10 +51,10 @@ import {
   type RegisteredClient,
 } from "./authorization";
 import { mcpServerRepository } from "./repository";
-import { isBearerToken, McpServerSignIns, type OAuthSignIn } from "./sign-ins";
+import { McpServerSignIns, type OAuthSignIn } from "./sign-ins";
 
 /** How long a started sign-in can be finished. */
-export const SIGN_IN_LIFETIME_MILLIS = 10 * 60 * 1000;
+const SIGN_IN_LIFETIME_MILLIS = 10 * 60 * 1000;
 
 /**
  * The error codes an authorization endpoint may send back (RFC 6749 section
@@ -225,6 +217,7 @@ const make = Effect.gen(function* () {
       const stored = yield* signIns.readOAuth(serverId);
       return Option.isSome(stored) &&
         isSameServer(stored.value) &&
+        (stored.value.client.secretExpiresAtMillis ?? Infinity) > nowMillis &&
         stored.value.client.clientId !== rejectedClientIds.get(serverId)
         ? stored.value.client
         : undefined;
@@ -270,8 +263,7 @@ const make = Effect.gen(function* () {
   /**
    * Sends the code to the token endpoint, with the PKCE verifier, the client's
    * own authentication, the resource, and the redirect address exactly as the
-   * attempt used it. The request has the same 30 seconds as a refresh, because
-   * the user waits on it.
+   * attempt used it.
    */
   const exchange = (attempt: Attempt, code: string) =>
     provideOutboundHttp(
@@ -283,17 +275,7 @@ const make = Effect.gen(function* () {
         codeVerifier: attempt.codeVerifier,
         resource: attempt.discovery.resource,
         bearerOnly: true,
-      }).pipe(
-        Effect.timeoutOrElse({
-          duration: Duration.seconds(REFRESH_TIMEOUT_SECONDS),
-          orElse: () =>
-            Effect.fail(
-              new ProviderUnreachable({
-                message: `the token endpoint did not answer within ${String(REFRESH_TIMEOUT_SECONDS)} seconds`,
-              }),
-            ),
-        }),
-      ),
+      }),
     );
 
   /**
@@ -382,16 +364,6 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
-      Effect.flatMap((tokens) =>
-        isBearerToken(tokens.accessToken)
-          ? Effect.succeed(tokens)
-          : Effect.fail(
-              createInvalidStateError(
-                "The authorization server gave an access token that Hercule cannot send as a bearer token. Start the sign-in again.",
-                { reason: "source-unreadable" },
-              ),
-            ),
-      ),
     );
 
   /**
@@ -439,6 +411,9 @@ const make = Effect.gen(function* () {
               clientId: client.clientId,
               ...(client.clientSecret === undefined ? {} : { clientSecret: client.clientSecret }),
               authMethod: client.authMethod,
+              ...(client.secretExpiresAtMillis === undefined
+                ? {}
+                : { secretExpiresAtMillis: client.secretExpiresAtMillis }),
             },
             tokens,
           });
