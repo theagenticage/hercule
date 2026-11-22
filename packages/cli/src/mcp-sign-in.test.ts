@@ -50,8 +50,10 @@ const stubController = (options: {
 }) => {
   const browser: Array<BrowserRequest> = [];
   let redirectUri = "";
+  let authorizationUrl = "";
+  let listenerClosedWhenFinishing: boolean | undefined;
   let browserDone: Promise<void> = Promise.resolve();
-  const fetch = stubFetch((request) => {
+  const stub = stubFetch((request) => {
     if (request.method === "GET" && request.path === "/api/v1/mcp-servers") {
       return { items: [buildServer("needs-sign-in")] };
     }
@@ -63,8 +65,9 @@ const stubController = (options: {
           void (options.whenStarted?.(redirectUri) ?? Promise.resolve()).finally(resolve);
         }, 20);
       });
+      authorizationUrl = `https://auth.test/authorize?client_id=c&state=${STATE}`;
       return {
-        authorizationUrl: `https://auth.test/authorize?client_id=c&state=${STATE}`,
+        authorizationUrl,
         expiresAt: new Date(Date.now() + (options.expiresInMs ?? 60_000)).toISOString(),
       };
     }
@@ -73,10 +76,24 @@ const stubController = (options: {
     }
     return {};
   });
+  // Looks at the listener at the moment the CLI asks the controller to finish.
+  const fetch = Object.assign(
+    async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.endsWith("/sign-in/finish")) {
+        listenerClosedWhenFinishing = await isClosed(redirectUri);
+      }
+      return stub(url, init);
+    },
+    { calls: stub.calls },
+  );
   return {
     fetch,
     browser,
     getRedirectUri: () => redirectUri,
+    /** The `state` of the attempt, as the controller's answer to `startSignIn` carried it. */
+    getState: () => new URL(authorizationUrl).searchParams.get("state") ?? "",
+    /** Whether nothing listened any more when the CLI asked the controller to finish. */
+    wasListenerClosedWhenFinishing: () => listenerClosedWhenFinishing,
     /** Resolves when the browser's part has ended, so a test reads what it recorded. */
     settleBrowser: () => browserDone,
   };
@@ -120,6 +137,15 @@ describe("hercule mcp-server sign-in", () => {
         await visit(controller.browser, redirectUri, "/callback?code=c&state=state-of-another");
         await visit(controller.browser, redirectUri, "/callback");
         await visit(controller.browser, redirectUri, `/callback?code=c&state=${STATE}`, "POST");
+        // A return that is not one state and one of code and error is no answer.
+        await visit(controller.browser, redirectUri, `/callback?state=${STATE}`);
+        await visit(
+          controller.browser,
+          redirectUri,
+          `/callback?code=c&state=${STATE}&state=${STATE}`,
+        );
+        await visit(controller.browser, redirectUri, `/callback?code=c&code=d&state=${STATE}`);
+        await visit(controller.browser, redirectUri, `/callback?code=c&error=x&state=${STATE}`);
         await visit(controller.browser, redirectUri, `/callback?code=the-code&state=${STATE}`);
       },
     });
@@ -128,8 +154,10 @@ describe("hercule mcp-server sign-in", () => {
     expect(await run(io, SERVER_ID)).toBe(0);
     await controller.settleBrowser();
 
-    expect(controller.browser.map((request) => request.status)).toEqual([404, 404, 404, 404, 200]);
-    const answered = controller.browser[4]!.headers;
+    expect(controller.browser.map((request) => request.status)).toEqual([
+      404, 404, 404, 404, 404, 404, 404, 404, 200,
+    ]);
+    const answered = controller.browser[8]!.headers;
     expect(answered.get("cache-control")).toBe("no-store");
     expect(answered.get("referrer-policy")).toBe("no-referrer");
 
@@ -148,6 +176,7 @@ describe("hercule mcp-server sign-in", () => {
     expect(out).toContain("Signed in. notion is checking.");
     expect(out).toContain("hercule mcp-server read aaaaaaa1");
     expect(await isClosed(controller.getRedirectUri())).toBe(true);
+    expect(controller.wasListenerClosedWhenFinishing()).toBe(true);
   });
 
   it("prints the server as JSON on stdout, and the instructions on stderr, with --json", async () => {
@@ -228,8 +257,15 @@ describe("hercule mcp-server sign-in", () => {
 describe("hercule mcp-server sign-in --paste", () => {
   it("reads the pasted address from stdin, with no listener, and finishes the sign-in with it", async () => {
     const controller = stubController({});
-    const pasted = `http://127.0.0.1:50321/callback?code=the-code&state=${STATE}`;
-    const io = ioFor(controller.fetch, { stdin: `${pasted}\n` });
+    // The user's browser ends on the redirect URI the attempt was started
+    // with, carrying the state of the address it was sent to.
+    const io = {
+      ...ioFor(controller.fetch),
+      stdin: () =>
+        Promise.resolve(
+          `${controller.getRedirectUri()}?code=the-code&state=${controller.getState()}\n`,
+        ),
+    };
 
     expect(await run(io, SERVER_ID, "--paste")).toBe(0);
 
@@ -239,9 +275,24 @@ describe("hercule mcp-server sign-in --paste", () => {
     expect(redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
     expect(port).toBeGreaterThanOrEqual(49152);
     expect(port).toBeLessThanOrEqual(65535);
-    expect(calls[1]?.body).toEqual({ callbackQuery: pasted });
+    expect(calls[1]?.body).toEqual({
+      callbackQuery: `${redirectUri}?code=the-code&state=${STATE}`,
+    });
     expect(io.stdout.join("\n")).toContain("fails to load a page on 127.0.0.1");
     expect(io.stdout.join("\n")).toContain("Signed in. notion is checking.");
+  });
+
+  it("gives up waiting for the address when the attempt expires, and says to run the command again", async () => {
+    const controller = stubController({ expiresInMs: 150 });
+    // Stdin never ends, as a terminal that nobody types into.
+    const io = { ...ioFor(controller.fetch), stdin: () => new Promise<string>(() => undefined) };
+
+    expect(await run(io, SERVER_ID, "--paste")).toBe(1);
+
+    expect(io.stderr.join("\n")).toContain(
+      `hercule: The sign-in expired before you gave the address. Run \`hercule mcp-server sign-in ${SERVER_ID} --paste\` again.`,
+    );
+    expect(controller.fetch.calls.some((call) => call.path.endsWith("/finish"))).toBe(false);
   });
 
   it("refuses at a terminal before anything is sent, never prompting", async () => {

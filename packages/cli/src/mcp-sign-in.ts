@@ -78,10 +78,23 @@ interface ReturnListener {
 }
 
 /**
+ * Checks that a return carries exactly one `state`, which is `expectedState`,
+ * and exactly one of `code` and `error`. A name that appears twice makes the
+ * return ambiguous. The controller refuses such a return without using the
+ * attempt up, so the listener must not take it as the answer either.
+ */
+const isWellFormedReturn = (parameters: URLSearchParams, expectedState: string): boolean => {
+  const states = parameters.getAll("state");
+  const outcomes = parameters.getAll("code").length + parameters.getAll("error").length;
+  return states.length === 1 && states[0] === expectedState && outcomes === 1;
+};
+
+/**
  * Starts a listener on a free port of 127.0.0.1. It answers only
- * `GET /callback` with the state it accepts, and 404 to everything else, so a
- * stray request or a request carrying another attempt's state does not end the
- * wait.
+ * `GET /callback` with the state it accepts and a well-formed outcome
+ * (`isWellFormedReturn`), and 404 to everything else, so a stray request, a
+ * request carrying another attempt's state or a malformed return does not end
+ * the wait.
  */
 const listenForReturn = (): ReturnListener => {
   let acceptedState: string | undefined;
@@ -98,7 +111,7 @@ const listenForReturn = (): ReturnListener => {
         request.method === "GET" &&
         url.pathname === "/callback" &&
         acceptedState !== undefined &&
-        url.searchParams.get("state") === acceptedState
+        isWellFormedReturn(url.searchParams, acceptedState)
       ) {
         deliver(url.search.slice(1));
         return new Response(RETURN_PAGE, {
@@ -130,29 +143,26 @@ const buildExpiredError = (message: string, again: string, details: unknown): Ap
   new ApiError("invalid_state", `${message} Run \`${again}\` again.`, details);
 
 /**
- * Waits for the browser to come back, up to `expiresAt`. Returns the raw
- * query string of the return. Fails with a `sign-in-expired` error when time
- * runs out first.
+ * Waits for `waiting`, up to `expiresAt`, and returns what it resolves with.
+ * Fails with an `invalid_state` error that says what ran out (`what`) and to
+ * run the command again, when time runs out first. What `waiting` reads is not
+ * cancelled: the command ends right after.
  */
-const waitForReturn = async (
-  listener: ReturnListener,
+const waitUntilExpiry = async <Result>(
+  waiting: Promise<Result>,
   expiresAt: string,
+  what: string,
   again: string,
-): Promise<string> => {
+): Promise<Result> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () =>
-        reject(
-          buildExpiredError("The sign-in expired before your browser came back.", again, {
-            reason: "sign-in-expired",
-          }),
-        ),
+      () => reject(buildExpiredError(what, again, { reason: "sign-in-expired" })),
       Math.max(0, Date.parse(expiresAt) - Date.now()),
     );
   });
   try {
-    return await Promise.race([listener.returned, expired]);
+    return await Promise.race([waiting, expired]);
   } finally {
     clearTimeout(timer);
   }
@@ -252,7 +262,12 @@ export const signInMcpServer = async (
     if (listener === undefined) {
       say("After you approve, your browser fails to load a page on 127.0.0.1. That is expected.");
       say("Copy that page's whole address and give it on stdin.");
-      callbackQuery = await readPastedAddress(io);
+      callbackQuery = await waitUntilExpiry(
+        readPastedAddress(io),
+        started.expiresAt,
+        "The sign-in expired before you gave the address.",
+        again,
+      );
     } else {
       listener.acceptState(readState(started.authorizationUrl));
       const minutes = Math.max(1, Math.ceil((Date.parse(started.expiresAt) - Date.now()) / 60_000));
@@ -260,7 +275,15 @@ export const signInMcpServer = async (
         `Waiting for your browser to come back to this computer, for up to ${minutes} minute${minutes === 1 ? "" : "s"}. Press Ctrl-C to cancel.`,
       );
       say("If your browser is on another computer, cancel and run this again with --paste.");
-      callbackQuery = await waitForReturn(listener, started.expiresAt, again);
+      callbackQuery = await waitUntilExpiry(
+        listener.returned,
+        started.expiresAt,
+        "The sign-in expired before your browser came back.",
+        again,
+      );
+      // The browser is done with the listener, so nothing else may reach it
+      // while the controller finishes the sign-in.
+      listener.close();
     }
 
     server = await client.mcpServer
