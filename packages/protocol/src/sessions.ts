@@ -140,6 +140,20 @@ export const DisallowedTool = Schema.String.check(
 export const MCP_GATEWAY_ENTRY_NAME = "tools";
 
 /**
+ * What a harness puts in front of every tool name of the MCP Gateway:
+ * `mcp__tools__`. The controller counts it against a harness's name limit, and
+ * the runner's adapters strip it to read the tool back.
+ */
+export const MCP_GATEWAY_HARNESS_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
+
+/**
+ * The separator in a gateway tool name, `<server name>__<tool name>`. An MCP
+ * Server's name holds no double underscore (spec 21 section 2.2), so the first
+ * one ends the server's name.
+ */
+export const MCP_GATEWAY_TOOL_SEPARATOR = "__";
+
+/**
  * The gateway's entry in `SessionSpec.mcpServers` (spec 06 section 4): the one
  * MCP server the harness is given, the MCP Gateway in the controller. It holds
  * a path and a word, never an address or a token: the runner binds `url`

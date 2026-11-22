@@ -1,4 +1,4 @@
-import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { MCP_GATEWAY_HARNESS_PREFIX, MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 
 /**
  * Splits the name of a tool of the MCP Gateway into the MCP Server it belongs
@@ -14,13 +14,11 @@ import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 export const splitGatewayToolName = (
   name: string,
 ): { readonly server: string; readonly tool: string } | undefined => {
-  const split = name.indexOf("__");
-  if (split <= 0 || split + 2 >= name.length) return undefined;
-  return { server: name.slice(0, split), tool: name.slice(split + 2) };
+  const split = name.indexOf(MCP_GATEWAY_TOOL_SEPARATOR);
+  const toolStart = split + MCP_GATEWAY_TOOL_SEPARATOR.length;
+  if (split <= 0 || toolStart >= name.length) return undefined;
+  return { server: name.slice(0, split), tool: name.slice(toolStart) };
 };
-
-/** What Claude Code and pi put in front of the name of every tool of the MCP Gateway's entry, `tools`. */
-const GATEWAY_TOOL_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
 
 /**
  * Splits the name of a gateway tool, as a harness that prefixes MCP tool names
@@ -34,6 +32,6 @@ const GATEWAY_TOOL_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
 export const splitPrefixedGatewayToolName = (
   name: string,
 ): { readonly server: string; readonly tool: string } | undefined =>
-  name.startsWith(GATEWAY_TOOL_PREFIX)
-    ? splitGatewayToolName(name.slice(GATEWAY_TOOL_PREFIX.length))
+  name.startsWith(MCP_GATEWAY_HARNESS_PREFIX)
+    ? splitGatewayToolName(name.slice(MCP_GATEWAY_HARNESS_PREFIX.length))
     : undefined;

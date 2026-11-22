@@ -6,22 +6,16 @@
  * restart cannot change it.
  */
 import { createHash } from "node:crypto";
-import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
-
-/** What a harness puts in front of the gateway's tool names: `mcp__tools__`. */
-const HARNESS_PREFIX_LENGTH = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`.length;
+import { MCP_GATEWAY_HARNESS_PREFIX, MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 
 /** The longest tool name a harness accepts (pi's limit), prefix included. */
 const MAX_HARNESS_NAME_LENGTH = 64;
 
 /** The longest name the gateway sends: what is left of the limit after the harness's prefix. */
-const MAX_NAME_LENGTH = MAX_HARNESS_NAME_LENGTH - HARNESS_PREFIX_LENGTH;
+const MAX_NAME_LENGTH = MAX_HARNESS_NAME_LENGTH - MCP_GATEWAY_HARNESS_PREFIX.length;
 
 /** Length of the hash suffix: `_` plus six hex characters. */
 const SUFFIX_LENGTH = 7;
-
-/** The separator between the server's name and the tool's name. A server's name holds no double underscore. */
-const SEPARATOR = "__";
 
 /** A tool name the gateway sends as it is: only these characters. */
 const KEPT_CHARACTERS = /^[A-Za-z0-9_-]+$/;
@@ -91,7 +85,7 @@ const hashSuffix = (text: string): string =>
  * whether or not another tool would clash with the plain one.
  */
 export const buildToolName = ({ serverName, tool }: ToolKey): string => {
-  const prefix = `${serverName}${SEPARATOR}`;
+  const prefix = `${serverName}${MCP_GATEWAY_TOOL_SEPARATOR}`;
   if (
     KEPT_CHARACTERS.test(tool) &&
     !HASH_SUFFIX.test(tool) &&
