@@ -1399,6 +1399,76 @@ describe("names a call may use", () => {
   });
 });
 
+describe("which client a name was offered to", () => {
+  const STATELESS_LIST = () => request("tools/list", STATELESS_META);
+
+  it("refuses a call in the stateless era before any list, and runs it after a list", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+
+    const mark = countUpstreamRequests();
+    const refused = await callEcho(thread.token, "alpha__echo", undefined);
+    expect(refused.body.result.isError).toBe(true);
+    expect(textOf(refused)).toContain("List the tools again");
+    expect(listToolPostsSince(mark)).toEqual([]);
+
+    expect((await sendMcp(thread.token, STATELESS_LIST())).status).toBe(200);
+    expect((await callEcho(thread.token, "alpha__echo", undefined)).body.result.isError).toBe(
+      undefined,
+    );
+    expect(readUpstreamTools(mark)).toEqual(["echo"]);
+  });
+
+  it("does not accept in one era a name that only the other era was offered, in either direction", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+
+    // Offered on the stateful MCP session only: the stateless era has its own record, the token's.
+    const mark = countUpstreamRequests();
+    const refusedStateless = await callEcho(thread.token, "alpha__echo", undefined);
+    expect(refusedStateless.body.result.isError).toBe(true);
+    expect(textOf(refusedStateless)).toContain("List the tools again");
+    expect(listToolPostsSince(mark)).toEqual([]);
+
+    // Offered to the stateless era only: a new MCP session has its own record, and it is empty.
+    expect((await sendMcp(thread.token, STATELESS_LIST())).status).toBe(200);
+    const fresh = await initialize(thread.token);
+    const refusedStateful = await callEcho(thread.token, "alpha__echo", fresh.sessionId);
+    expect(refusedStateful.body.result.isError).toBe(true);
+    expect(textOf(refusedStateful)).toContain("List the tools again");
+    expect(listToolPostsSince(mark)).toEqual([]);
+
+    // Each era runs the call under the name its own list offered.
+    expect((await callEcho(thread.token, "alpha__echo", undefined)).body.result.isError).toBe(
+      undefined,
+    );
+    expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+      undefined,
+    );
+    expect(readUpstreamTools(mark)).toEqual(["echo", "echo"]);
+  });
+
+  it("sends a call to the server of that name the session's list holds when the call is dispatched, not the one the list offered", async () => {
+    await withNotion([SEARCH_PAGES], async (notion) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const { sessionId } = await initialize(thread.token);
+      expect(await listToolNames(thread.token, sessionId)).toEqual([NOTION_SEARCH_PAGES]);
+
+      // Another account's server has the same name and takes the first one's place in the Thread's list.
+      const other = await createNotion();
+      expect((await updateList(thread.session.id, [other.id])).status).toBe(200);
+
+      const mark = countUpstreamRequests();
+      expect(
+        (await callEcho(thread.token, NOTION_SEARCH_PAGES, sessionId)).body.result.isError,
+      ).toBeUndefined();
+      expect(readUpstreamTools(mark)).toEqual(["search_pages"]);
+      const [entry] = await readCallAudit(thread.session.id);
+      expect(entry?.payload).toMatchObject({ mcpServerId: other.id, outcome: "answered" });
+    });
+  });
+});
+
 /** The tools of the fake server the tests of names change: three that all read as `search_pages`. */
 const SEARCH_PAGES = { name: "search_pages", description: "Searches the pages" };
 const SEARCH_PAGES_WITH_HYPHEN = { name: "search-pages", description: "Searches the pages" };

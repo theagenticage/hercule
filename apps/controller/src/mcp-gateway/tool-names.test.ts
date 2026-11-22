@@ -72,6 +72,32 @@ describe("buildToolName", () => {
   });
 });
 
+describe("the names the gateway gives, pinned", () => {
+  // These strings are what harnesses hold and the Thread shows. A change of the hash function, a hash over
+  // the server's name too, or a change of case would change them, and so must fail here.
+  it("keeps a plain name with mixed case exactly as it is", () => {
+    expect(nameOf("SearchPages")).toBe("sentry__SearchPages");
+    expect(nameOf("Get_Issue-2")).toBe("sentry__Get_Issue-2");
+  });
+
+  it("gives a name with punctuation the first six hex characters of the SHA-256 of the original name, whatever the server", () => {
+    // `printf 'Search.Pages' | sha256sum` starts with 873eaa.
+    expect(nameOf("Search.Pages")).toBe("sentry__Search_Pages_873eaa");
+    expect(nameOf("Search.Pages", "linear")).toBe("linear__Search_Pages_873eaa");
+    expect(nameOf("get-issue.details")).toBe("sentry__get-issue_details_437857");
+    // The hash is over the UTF-8 bytes, so a character outside ASCII is part of it.
+    expect(nameOf("h\u00e9llo w\u00f6rld")).toBe("sentry__h_llo_w_rld_a1003f");
+  });
+
+  it("cuts a long name to 52 characters and ends it with the hash of the whole original name", () => {
+    expect(nameOf(`${"a".repeat(80)}_one`)).toBe(`sentry__${"a".repeat(37)}_e673ba`);
+  });
+
+  it("changes an original that ends like a changed name, and hashes it whole", () => {
+    expect(nameOf("list_abc123")).toBe("sentry__list_abc123_502c38");
+  });
+});
+
 describe("buildToolNames", () => {
   it("gives a tool the same name whatever else is in the list", () => {
     const alone = buildToolNames([{ serverName: "notion", tools: ["search_pages"] }]);
