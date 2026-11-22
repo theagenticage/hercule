@@ -66,11 +66,15 @@ export interface FakeModelMessage {
   readonly role: string;
   /** A string, or a list of parts of which the `text` parts hold the text. */
   readonly content?: unknown;
+  /** The calls an assistant message made, in the order it made them. */
+  readonly tool_calls?: ReadonlyArray<{ readonly function: { readonly name: string } }>;
 }
 
 /** A completion request as pi sends it, with only the fields a script reads. */
 export interface FakeModelRequest {
   readonly messages: ReadonlyArray<FakeModelMessage>;
+  /** The tools pi declares to the model on this request. */
+  readonly tools?: ReadonlyArray<{ readonly function: { readonly name: string } }>;
 }
 
 /**

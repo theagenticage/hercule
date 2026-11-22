@@ -785,7 +785,7 @@ const listSkillFolders = (ctx: HarnessRunnerContext): ReadonlyArray<string> => [
  *   access, skills and user material as the session, but not the Agent's instructions: its parent's
  *   prompt is its whole brief.
  */
-const buildArgv = (
+export const buildArgv = (
   spec: SessionSpec,
   ctx: SessionStartContext,
   selection: ModelSelection,
