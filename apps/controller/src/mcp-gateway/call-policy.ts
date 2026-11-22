@@ -87,21 +87,15 @@ export const makeCallPolicy = Effect.gen(function* () {
       // list now, which may be another account than the one the name was
       // offered for. Whether it is ready is the catalogue's decision, made
       // when the call is sent.
-      const views = yield* reads.readListedAvailability(actor.sessionId);
-      const listed = views.find(({ server }) => server.name === offered.serverName);
+      const listed = yield* reads.readListedServerNamed(actor.sessionId, offered.serverName);
       if (listed === undefined) {
         return { _tag: "refused", refusal: buildNotInListRefusal(offered) };
       }
-      const { server } = listed;
-      const tool = findOriginalToolName(
-        server.name,
-        yield* reads.readStoredToolNames(server.id),
-        toolName,
-      );
+      const tool = findOriginalToolName(offered.serverName, listed.toolNames, toolName);
       if (tool === undefined) {
         return { _tag: "refused", refusal: buildToolNotListedRefusal(offered) };
       }
-      return { _tag: "call", serverId: server.id, serverName: server.name, tool };
+      return { _tag: "call", serverId: listed.id, serverName: offered.serverName, tool };
     });
 
   /**
