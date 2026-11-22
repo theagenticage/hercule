@@ -21,6 +21,13 @@
 import type { FetchQueryOptions, QueryClient, QueryKey } from "@tanstack/query-core";
 import type { HerculeClient } from "../client";
 import { ApiError, readErrorMessage } from "../errors";
+import {
+  createEditGuard,
+  hasReadSince,
+  readMarkOf,
+  type McpListEditState,
+  type ReadMark,
+} from "./edit-guard";
 import { chooseNamedServer } from "./named-lists";
 import { decideProjectBoxWrite, type ProjectBoxAction } from "./project-boxes";
 import {
@@ -103,29 +110,6 @@ export interface McpListCache {
     readonly project: StartProjectRecord;
     readonly defaultIds: StartRecord<readonly string[]>;
   };
-}
-
-/** Why an edit was not made. */
-export type McpListRefusal =
-  /** The controller refused the write, or the edit could not start: `message` says why. */
-  | { readonly kind: "refused"; readonly message: string }
-  /** The list names `occupant`, another server of the name, and not the one the user saw. `serverId` is the server the user asked for. */
-  | { readonly kind: "taken"; readonly occupant: McpServerView; readonly serverId: string };
-
-/** What is true while the list could not be read again after an edit. */
-export interface McpListUnread {
-  /** True when the controller acknowledged the write: the change is saved, but the cache lacks it. */
-  readonly saved: boolean;
-}
-
-/** What a control shows of a target. The object stays the same until the target changes. */
-export interface McpListEditState {
-  /** True while an edit runs, or the list was not read again after the last one. Controls ignore new edits then. */
-  readonly blocked: boolean;
-  /** Why the last edit was not made. It stays until `clearRefusal` or the next edit. */
-  readonly refusal: McpListRefusal | null;
-  /** Set while the list could not be read again. A read of it that succeeds releases the target, and dismissing a refusal does not. */
-  readonly unread: McpListUnread | null;
 }
 
 /** The edits of MCP lists. */
@@ -239,42 +223,12 @@ export const describeMcpListProblem = (state: McpListEditState, prefix = ""): st
   return unread === null ? reason : `${reason} ${unread}`;
 };
 
-const IDLE: McpListEditState = { blocked: false, refusal: null, unread: null };
-
 const buildTargetKey = (target: McpListTarget): string =>
   target.kind === "thread"
     ? `thread:${target.sessionId}`
     : target.kind === "project"
       ? `project:${target.projectId}`
       : "default";
-
-/** Where the base query of a target was when a write ended: a read of it after that releases an unread target. */
-interface ReadMark {
-  readonly query: unknown;
-  readonly updates: number;
-}
-
-/** What the module keeps of one target while it is not idle. */
-interface Held {
-  running: boolean;
-  refusal: McpListRefusal | null;
-  unread: { readonly saved: boolean; readonly baseKey: QueryKey; readonly mark: ReadMark } | null;
-  snapshot: McpListEditState;
-}
-
-const readMarkOf = (queryClient: QueryClient, queryKey: QueryKey): ReadMark => {
-  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-  return { query, updates: query?.state.dataUpdateCount ?? 0 };
-};
-
-/** Returns true when the query `queryKey` holds data that a read made after `mark` fetched. */
-const hasReadSince = (queryClient: QueryClient, queryKey: QueryKey, mark: ReadMark): boolean => {
-  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-  return (
-    query?.state.status === "success" &&
-    (query !== mark.query || query.state.dataUpdateCount > mark.updates)
-  );
-};
 
 const NOT_LOADED: Readonly<Record<McpListTarget["kind"], string>> = {
   thread: "This thread is not loaded, so its list was not changed.",
@@ -296,59 +250,7 @@ export const createMcpListEdits = ({
   readonly client: HerculeClient;
   readonly cache: McpListCache;
 }): McpListEdits => {
-  const held = new Map<string, Held>();
-  const listeners = new Set<() => void>();
-  let stopWatching: (() => void) | null = null;
-
-  const releaseReadTargets = (): void => {
-    for (const [key, each] of held) {
-      if (
-        each.unread !== null &&
-        hasReadSince(queryClient, each.unread.baseKey, each.unread.mark)
-      ) {
-        each.unread = null;
-        commit(key);
-      }
-    }
-  };
-
-  /** Rebuilds the target's state after a change, forgets it when it is idle, and tells the listeners. */
-  function commit(key: string): void {
-    const each = held.get(key);
-    if (each !== undefined) {
-      if (!each.running && each.refusal === null && each.unread === null) held.delete(key);
-      else {
-        each.snapshot = {
-          blocked: each.running || each.unread !== null,
-          refusal: each.refusal,
-          unread: each.unread === null ? null : { saved: each.unread.saved },
-        };
-      }
-    }
-    // A read of the base that succeeds releases an unread target, so the module watches the cache only while one exists.
-    const hasUnread = [...held.values()].some((other) => other.unread !== null);
-    if (hasUnread && stopWatching === null) {
-      stopWatching = queryClient.getQueryCache().subscribe(releaseReadTargets);
-    } else if (!hasUnread && stopWatching !== null) {
-      stopWatching();
-      stopWatching = null;
-    }
-    for (const listener of listeners) listener();
-  }
-
-  const hold = (key: string): Held => {
-    let each = held.get(key);
-    if (each === undefined) {
-      each = { running: false, refusal: null, unread: null, snapshot: IDLE };
-      held.set(key, each);
-    }
-    return each;
-  };
-
-  const refuse = (key: string, refusal: McpListRefusal): void => {
-    hold(key).refusal = refusal;
-    commit(key);
-  };
+  const guard = createEditGuard(queryClient);
 
   /** Writes `mcpServerIds` as the list of the target. */
   const write = (target: McpListTarget, mcpServerIds: readonly string[]): Promise<unknown> => {
@@ -421,11 +323,10 @@ export const createMcpListEdits = ({
       failure = error;
     }
     const { ok, mark } = await readAgain(target, failure);
-    const each = hold(key);
-    each.running = false;
-    each.refusal = saved ? null : { kind: "refused", message: readErrorMessage(failure) };
-    if (!ok) each.unread = { saved, baseKey: cache.readBase(target).queryKey, mark };
-    commit(key);
+    guard.finish(key, {
+      refusal: saved ? null : { kind: "refused", message: readErrorMessage(failure) },
+      unread: ok ? null : { saved, baseKey: cache.readBase(target).queryKey, mark },
+    });
   };
 
   /** Returns the refusal that stops a choice from being applied, or the decision about it. */
@@ -473,17 +374,16 @@ export const createMcpListEdits = ({
   return {
     apply: (target, choice) => {
       const key = buildTargetKey(target);
-      const current = held.get(key);
-      if (current !== undefined && (current.running || current.unread !== null)) return;
+      if (guard.isBlocked(key)) return;
       const decided = decide(target, choice);
       switch (decided.kind) {
         case "unchanged":
           return;
         case "refused":
-          refuse(key, decided);
+          guard.refuse(key, decided);
           return;
         case "taken":
-          refuse(key, decided);
+          guard.refuse(key, decided);
           // The cache may be older than the controller's list, which is why another server holds the
           // name. Reading the list again lets the user's next try see what is there.
           for (const queryKey of [
@@ -494,28 +394,16 @@ export const createMcpListEdits = ({
           }
           return;
         case "write": {
-          const each = hold(key);
-          each.running = true;
-          each.refusal = null;
-          commit(key);
+          guard.start(key);
           void run(key, target, decided.mcpServerIds);
         }
       }
     },
-    readState: (target) => held.get(buildTargetKey(target))?.snapshot ?? IDLE,
+    readState: (target) => guard.readState(buildTargetKey(target)),
     clearRefusal: (target) => {
-      const key = buildTargetKey(target);
-      const each = held.get(key);
-      if (each === undefined || each.refusal === null) return;
-      each.refusal = null;
-      commit(key);
+      guard.clearRefusal(buildTargetKey(target));
     },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    subscribe: guard.subscribe,
   };
 };
 

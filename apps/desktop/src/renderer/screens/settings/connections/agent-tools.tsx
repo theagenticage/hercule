@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import {
   describeAgentToolsNote,
   describeUnavailableAgentToolsNote,
-  type McpServerSettingsRow,
+  type OfferedServer,
 } from "@hercule/client-core/mcp-servers";
 import { ChevronRightIcon } from "../../../icons/chevron-right";
 
@@ -24,50 +24,50 @@ export interface AgentTools {
 }
 
 /**
- * Returns what the Connection of `row` says about its server. The words come
- * from `describeAgentToolsNote`; the tone picks the mark in front of them.
+ * Returns what the Connection of `offered` says about its server. The words
+ * come from `describeAgentToolsNote`; the tone picks the mark in front of
+ * them.
  */
-export const describeAgentTools = (row: McpServerSettingsRow): AgentTools => {
-  const { view } = row;
-  const { words, failing } = describeAgentToolsNote(view);
-  const switchedOn = view !== null && view.displayStatus !== "off";
+export const describeAgentTools = ({ server }: OfferedServer): AgentTools => {
+  const { words, failing } = describeAgentToolsNote(server);
   return {
     text: words,
-    tone: failing ? "fail" : switchedOn ? "on" : "off",
-    serverId: view?.server.id ?? null,
+    tone: failing ? "fail" : server?.enabled === true ? "on" : "off",
+    serverId: server?.id ?? null,
   };
 };
 
 /**
  * Returns what each Connection with a server says about it, by the
- * Connection's id. A Connection whose plugin offers two servers says what its
- * first row's server is doing.
+ * Connection's id: one note for each server its plugins offer, in the order
+ * of `offered`.
  */
 export const mapAgentToolsByConnection = (
-  rows: readonly McpServerSettingsRow[],
-): ReadonlyMap<string, AgentTools> => {
-  const byConnection = new Map<string, AgentTools>();
-  for (const row of rows) {
-    if (!byConnection.has(row.connection.id)) {
-      byConnection.set(row.connection.id, describeAgentTools(row));
-    }
+  offered: readonly OfferedServer[],
+): ReadonlyMap<string, readonly AgentTools[]> => {
+  const byConnection = new Map<string, AgentTools[]>();
+  for (const each of offered) {
+    byConnection.set(each.connection.id, [
+      ...(byConnection.get(each.connection.id) ?? []),
+      describeAgentTools(each),
+    ]);
   }
   return byConnection;
 };
 
 /**
  * Returns the note of every Connection that has a server, for when the
- * servers could not be read: each says "agent tools: not available", with no
- * server to lead to. `rows` come from a list with no servers, which has one
- * row for each Connection whose plugin offers one.
+ * servers could not be read: one note for the Connection, "agent tools: not
+ * available", with no server to lead to. `offered` comes from a list with no
+ * servers.
  */
 export const mapUnavailableAgentTools = (
-  rows: readonly McpServerSettingsRow[],
-): ReadonlyMap<string, AgentTools> =>
+  offered: readonly OfferedServer[],
+): ReadonlyMap<string, readonly AgentTools[]> =>
   new Map(
-    rows.map((row) => [
-      row.connection.id,
-      { text: describeUnavailableAgentToolsNote().words, tone: "unavailable", serverId: null },
+    offered.map(({ connection }) => [
+      connection.id,
+      [{ text: describeUnavailableAgentToolsNote().words, tone: "unavailable", serverId: null }],
     ]),
   );
 

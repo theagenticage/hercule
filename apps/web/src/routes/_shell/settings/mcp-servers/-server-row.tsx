@@ -1,14 +1,14 @@
 import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail } from "@hercule/contract";
 import {
+  buildOfferSwitchTarget,
   describeNamingProjects,
   type McpServerSettingsRow,
 } from "@hercule/client-core/mcp-servers";
 import { Switch } from "@hercule/ui";
-import { useKeyedWrite } from "../../../../app/use-keyed-write";
+import { useMcpServerSwitch } from "../../../../app/mcp-server-switch";
 import { McpServerStatusWord } from "../../../../screens/mcp-server-status";
 import { ProviderMark } from "../../../../screens/provider-mark";
 
@@ -21,7 +21,8 @@ import { ProviderMark } from "../../../../screens/provider-mark";
  * - A server with no record yet has no page. Its switch creates the record,
  *   and a switch that is already on writes `enabled` instead.
  * - The switch ignores clicks while its write runs, even if the row was drawn
- *   again meanwhile, and a refusal shows under the row.
+ *   again meanwhile, and a refusal shows under the row. Whether a press creates
+ *   the server or updates its record is decided when it is pressed.
  */
 export function ServerRow({
   client,
@@ -32,38 +33,9 @@ export function ServerRow({
   readonly row: McpServerSettingsRow;
   readonly plugins: readonly PluginDetail[];
 }): JSX.Element {
-  const queryClient = useQueryClient();
   const { view } = row;
 
-  const switchServer = useKeyedWrite<boolean>({
-    // A server with no record yet is told apart by the Connection and the contribution it would be made for.
-    mutationKey: [
-      "mcp-server-switch",
-      view?.server.id ?? `${row.offer.contributionId}:${row.connection.id}`,
-    ],
-    mutationFn: async (enabled) => {
-      if (view === null) {
-        await client.mcpServer.create({
-          payload: {
-            source: {
-              kind: "plugin",
-              contributionId: row.offer.contributionId,
-              connectionId: row.connection.id,
-            },
-          },
-        });
-      } else {
-        await client.mcpServer.update({ params: { id: view.server.id }, payload: { enabled } });
-      }
-    },
-    // The list is read again after a refusal too: a `conflict` means another
-    // server of this account exists, which the list does not show yet.
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mcpServer() }),
-      ]),
-  });
+  const switchServer = useMcpServerSwitch(client, buildOfferSwitchTarget(row));
 
   const naming = describeNamingProjects(row.projects);
   const content: ReactNode = (
@@ -116,17 +88,15 @@ export function ServerRow({
         <span className="shrink-0 px-2.5">
           <Switch
             aria-label={`Offer ${row.name} ${row.connection.label} to threads`}
-            aria-disabled={switchServer.writing}
+            aria-disabled={switchServer.blocked}
             checked={view?.server.enabled ?? false}
-            onCheckedChange={(enabled) => {
-              switchServer.write(enabled);
-            }}
+            onCheckedChange={switchServer.press}
           />
         </span>
       </div>
-      {switchServer.refusal === null ? null : (
+      {switchServer.problem === null ? null : (
         <p className="px-2.5 pb-1.5 text-fine text-fail" role="alert">
-          {readErrorMessage(switchServer.refusal)}
+          {switchServer.problem}
         </p>
       )}
     </li>

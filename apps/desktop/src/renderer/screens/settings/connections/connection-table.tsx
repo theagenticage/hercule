@@ -49,9 +49,10 @@ const UNKNOWN_COUNT = (
  * - under it, the account the Connection acts as, unless the label already
  *   is that account's name (`showsAccountBesideLabel`). The line is then
  *   left out rather than repeat the name;
- * - on that line, for a Connection in `agentTools`, a small button with what
- *   its plugin's MCP server is doing, which calls `onOpenAgentTools`, or,
- *   when the servers could not be read, a muted note saying so;
+ * - on that line, for a Connection in `agentTools`, a small button for each
+ *   MCP server its plugins offer, with what the server is doing, which calls
+ *   `onOpenAgentTools`, or, when the servers could not be read, a muted note
+ *   saying so;
  * - one bar per hour of the last 24, the busiest hour's the tallest, and
  *   the events of those 24 hours. Without `counts`, the bars are left out
  *   and every count reads "–", never 0, because the events are unknown;
@@ -59,7 +60,8 @@ const UNKNOWN_COUNT = (
  *   the fail colour, with a dot, on a tinted row. The detail wraps rather
  *   than end in an ellipsis, because the user needs all of it;
  * - the ⋯ menu, whose items call `onReconnect`, `onConfigure`,
- *   `onOpenAgentTools` and `onDelete` with the Connection.
+ *   `onOpenAgentTools` and `onDelete` with the Connection. Agent tools… leads
+ *   to the first of the Connection's servers.
  *
  * With no Connection, a quiet note takes the place of the strip and the
  * table, as Settings > Assistants draws one with no assistant. It points to
@@ -86,12 +88,12 @@ export function ConnectionTable({
   readonly types: ReadonlyArray<ConnectionType>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /**
-   * What each Connection says about its plugin's MCP server, by the
-   * Connection's id. A Connection with no entry has no such server and shows
-   * nothing about it, and so does every Connection while this is undefined,
-   * because the servers are still being read.
+   * What each Connection says about its plugins' MCP servers, one note for
+   * each, by the Connection's id. A Connection with no entry has no such
+   * server and shows nothing about it, and so does every Connection while
+   * this is undefined, because the servers are still being read.
    */
-  readonly agentTools: ReadonlyMap<string, AgentTools> | undefined;
+  readonly agentTools: ReadonlyMap<string, readonly AgentTools[]> | undefined;
   /** Reconnect is offered only while the Connection's type is in the binary. */
   readonly onReconnect: (connection: Connection, type: ConnectionType) => void;
   readonly onConfigure: (connection: Connection) => void;
@@ -175,12 +177,16 @@ export function ConnectionTable({
                 ) : (
                   <span className="conn-line">
                     {showsAccountBesideLabel(connection) && <span>{connection.displayName}</span>}
-                    <AgentToolsButton
-                      tools={tools}
-                      onOpen={() => {
-                        onOpenAgentTools(tools);
-                      }}
-                    />
+                    {tools.map((note, index) => (
+                      <AgentToolsButton
+                        // The notes are listed in the order of the offers, which never changes while the row is drawn.
+                        key={index}
+                        tools={note}
+                        onOpen={() => {
+                          onOpenAgentTools(note);
+                        }}
+                      />
+                    ))}
                   </span>
                 )}
               </span>
@@ -212,7 +218,7 @@ export function ConnectionTable({
                   tools === undefined
                     ? undefined
                     : () => {
-                        onOpenAgentTools(tools);
+                        onOpenAgentTools(tools[0]!);
                       }
                 }
                 onDelete={() => {

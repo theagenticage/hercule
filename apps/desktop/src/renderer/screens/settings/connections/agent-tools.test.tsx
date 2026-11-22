@@ -3,10 +3,7 @@
  * for each state its server can be in.
  */
 import { describe, expect, it } from "vitest";
-import {
-  buildMcpServerSettingsRows,
-  type McpServerSettingsRow,
-} from "@hercule/client-core/mcp-servers";
+import { joinOfferedServers, type OfferedServer } from "@hercule/client-core/mcp-servers";
 import {
   OFFERING_CONNECTIONS,
   OFFERING_PLUGINS,
@@ -18,21 +15,18 @@ import {
 } from "../mcp-servers/mcp-servers.testing";
 import { describeAgentTools, mapAgentToolsByConnection } from "./agent-tools";
 
-/** Returns the rows of the fixture Connections when the servers are `servers`. */
-const buildRows = (
-  servers: Parameters<typeof buildMcpServerSettingsRows>[0]["servers"],
-): McpServerSettingsRow[] =>
-  buildMcpServerSettingsRows({
+/** Returns what the fixture Connections offer when the servers are `servers`. */
+const buildOffered = (servers: Parameters<typeof joinOfferedServers>[0]["servers"]) =>
+  joinOfferedServers({
     servers,
     connections: OFFERING_CONNECTIONS,
     plugins: OFFERING_PLUGINS,
-    projects: [],
   });
 
 const sentryWorkRow = (
-  servers: Parameters<typeof buildMcpServerSettingsRows>[0]["servers"],
-): McpServerSettingsRow =>
-  buildRows(servers).find((row) => row.connection.id === SENTRY_WORK_CONNECTION.id)!;
+  servers: Parameters<typeof joinOfferedServers>[0]["servers"],
+): OfferedServer =>
+  buildOffered(servers).find(({ connection }) => connection.id === SENTRY_WORK_CONNECTION.id)!;
 
 describe("describeAgentTools", () => {
   it("says off, with no server to lead to, for a Connection whose server has no record", () => {
@@ -77,13 +71,27 @@ describe("describeAgentTools", () => {
 });
 
 describe("mapAgentToolsByConnection", () => {
-  it("holds one entry for each Connection that has a row, by the Connection's id", () => {
-    const map = mapAgentToolsByConnection(buildRows([SENTRY_HOBBY]));
+  it("holds one entry for each Connection that has an offer, by the Connection's id", () => {
+    const map = mapAgentToolsByConnection(buildOffered([SENTRY_HOBBY]));
 
     expect([...map.keys()].toSorted()).toEqual(
       [LINEAR_CONNECTION.id, SENTRY_HOBBY_CONNECTION.id, SENTRY_WORK_CONNECTION.id].toSorted(),
     );
-    expect(map.get(SENTRY_HOBBY_CONNECTION.id)?.serverId).toBe(SENTRY_HOBBY.id);
-    expect(map.get(SENTRY_WORK_CONNECTION.id)?.serverId).toBeNull();
+    expect(map.get(SENTRY_HOBBY_CONNECTION.id)?.map((note) => note.serverId)).toEqual([
+      SENTRY_HOBBY.id,
+    ]);
+    expect(map.get(SENTRY_WORK_CONNECTION.id)?.map((note) => note.serverId)).toEqual([null]);
+  });
+
+  it("holds one note for each server a Connection's plugins offer", () => {
+    const [offered] = buildOffered([SENTRY_WORK]);
+    const second = { ...offered!, offer: { ...offered!.offer, contributionId: "sentry/second" } };
+
+    const map = mapAgentToolsByConnection([offered!, { ...second, server: null }]);
+
+    expect(map.get(SENTRY_WORK_CONNECTION.id)?.map((note) => note.text)).toEqual([
+      "agent tools on",
+      "agent tools off",
+    ]);
   });
 });

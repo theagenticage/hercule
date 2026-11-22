@@ -4,8 +4,8 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import {
-  buildMcpServerSettingsRows,
   describeAgentToolsNote,
+  joinOfferedServers,
   describeUnavailableAgentToolsNote,
 } from "@hercule/client-core/mcp-servers";
 import { cn } from "@hercule/ui";
@@ -41,13 +41,12 @@ export function AgentToolsNote({
 }): JSX.Element | null {
   const read = useQuery(mcpServersQuery(client));
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const rows = buildMcpServerSettingsRows({
+  const offered = joinOfferedServers({
     servers: read.data?.items ?? [],
     connections: [connection],
     plugins,
-    projects: [],
   });
-  if (rows.length === 0 || (read.data === undefined && read.error === null)) return null;
+  if (offered.length === 0 || (read.data === undefined && read.error === null)) return null;
   if (read.data === undefined) {
     return (
       <span className="self-start text-fine text-muted">
@@ -58,8 +57,8 @@ export function AgentToolsNote({
 
   return (
     <>
-      {rows.map(({ view, offer }) => {
-        const { words, failing } = describeAgentToolsNote(view);
+      {offered.map(({ server, offer }) => {
+        const { words, failing } = describeAgentToolsNote(server);
         const className = cn(
           "inline-flex items-center gap-1.5 self-start text-fine hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
           failing ? "text-fail" : "text-muted",
@@ -73,7 +72,7 @@ export function AgentToolsNote({
           </>
         );
         const title = "Agent tools are switched on and off in Settings > MCP servers";
-        return view === null ? (
+        return server === null ? (
           <Link
             key={offer.contributionId}
             to="/settings/mcp-servers"
@@ -86,7 +85,7 @@ export function AgentToolsNote({
           <Link
             key={offer.contributionId}
             to="/settings/mcp-servers/$id"
-            params={{ id: view.server.id }}
+            params={{ id: server.id }}
             title={title}
             className={className}
           >

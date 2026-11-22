@@ -7,7 +7,7 @@ import {
   readErrorMessage,
   type ConnectionType,
 } from "@hercule/client-core";
-import { buildMcpServerSettingsRows } from "@hercule/client-core/mcp-servers";
+import { joinOfferedServers } from "@hercule/client-core/mcp-servers";
 import type { Connection } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "../../../../app/live";
@@ -110,17 +110,10 @@ function Connections(): JSX.Element {
   const agentTools =
     serversRead.data !== undefined
       ? mapAgentToolsByConnection(
-          buildMcpServerSettingsRows({
-            servers: serversRead.data,
-            connections,
-            plugins,
-            projects: [],
-          }),
+          joinOfferedServers({ servers: serversRead.data, connections, plugins }),
         )
       : serversRead.isError
-        ? mapUnavailableAgentTools(
-            buildMcpServerSettingsRows({ servers: [], connections, plugins, projects: [] }),
-          )
+        ? mapUnavailableAgentTools(joinOfferedServers({ servers: [], connections, plugins }))
         : undefined;
   const types = listConnectionTypes(plugins);
   const [dialog, setDialog] = useState<ConnectionsDialog | null>(null);

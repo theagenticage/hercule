@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { PluginDetail } from "@hercule/contract";
-import { describeOfferAddress, readMcpServerOffers } from "./offers";
-import { LINEAR_PLUGIN, SENTRY_PLUGIN } from "./testing";
+import { describeOfferAddress, joinOfferedServers, readMcpServerOffers } from "./offers";
+import {
+  CONNECTIONS,
+  LINEAR_PLUGIN,
+  OFFERING_PLUGINS,
+  SENTRY_HOBBY,
+  SENTRY_PLUGIN,
+  buildConnection,
+  buildServer,
+} from "./testing";
 
 describe("readMcpServerOffers", () => {
   it("returns one offer for each mcp-server contribution, named by its bare word, and ignores other contributions", () => {
@@ -29,6 +37,58 @@ describe("readMcpServerOffers", () => {
     };
 
     expect(readMcpServerOffers([broken])).toEqual([]);
+  });
+});
+
+describe("joinOfferedServers", () => {
+  it("lists each offer on each Connection of its type, with the record that names both, or none", () => {
+    const joined = joinOfferedServers({
+      servers: [SENTRY_HOBBY],
+      connections: CONNECTIONS,
+      plugins: OFFERING_PLUGINS,
+    });
+
+    expect(
+      joined.map(({ offer, connection, server }) => [
+        offer.contributionId,
+        connection.id,
+        server?.id ?? null,
+      ]),
+    ).toEqual([
+      ["sentry/sentry", "c-work", null],
+      ["sentry/sentry", "c-hobby", "s-hobby"],
+      ["linear/linear", "c-linear", null],
+    ]);
+  });
+
+  it("does not match a record of another contribution on the same Connection, or a server added by URL", () => {
+    const joined = joinOfferedServers({
+      servers: [
+        buildServer("s-other", "other", "c-work"),
+        buildServer("s-url", "docs", "c-work", {
+          source: {
+            kind: "url",
+            url: "https://docs.example/mcp",
+            signIn: "none",
+            signInOffered: null,
+          },
+        }),
+      ],
+      connections: [buildConnection("c-work", "sentry/sentry", "work")],
+      plugins: [SENTRY_PLUGIN],
+    });
+
+    expect(joined.map(({ server }) => server)).toEqual([null]);
+  });
+
+  it("lists nothing for a Connection whose type no plugin offers a server for", () => {
+    expect(
+      joinOfferedServers({
+        servers: [],
+        connections: [buildConnection("c-x", "github/github", "x")],
+        plugins: OFFERING_PLUGINS,
+      }),
+    ).toEqual([]);
   });
 });
 

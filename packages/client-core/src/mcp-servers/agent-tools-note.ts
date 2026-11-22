@@ -3,7 +3,9 @@
  * offers an MCP Server (spec 17, Settings > Connections). The web app and the
  * desktop app both draw it, so the words are decided here.
  */
-import type { McpServerView } from "./views";
+import type { McpServer } from "@hercule/contract";
+import { decideDisplayStatus } from "./display-status";
+import { MCP_SERVER_STATUS_FACTS } from "./status";
 
 /** What the note says, and whether it is drawn in the failure colours. */
 export interface AgentToolsNote {
@@ -24,8 +26,8 @@ export const describeUnavailableAgentToolsNote = (): AgentToolsNote => ({
 });
 
 /**
- * Returns the note for the server `view` of a Connection, or for `null`
- * while the Connection's server has no record:
+ * Returns the note for the `server` of a Connection, or for `null` while the
+ * Connection's server has no record:
  *
  * - "agent tools off" with no record, and for a server switched off;
  * - "agent tools on" for a ready server;
@@ -33,10 +35,10 @@ export const describeUnavailableAgentToolsNote = (): AgentToolsNote => ({
  * - "agent tools: needs sign-in", "agent tools: unreachable" or "agent tools:
  *   error", with `failing` true, for a server that needs the user.
  */
-export const describeAgentToolsNote = (view: McpServerView | null): AgentToolsNote => {
-  if (view === null || view.displayStatus === "off") {
-    return { words: "agent tools off", failing: false };
-  }
-  if (view.displayStatus === "ready") return { words: "agent tools on", failing: false };
-  return { words: `agent tools: ${view.statusWord}`, failing: view.failing };
+export const describeAgentToolsNote = (server: McpServer | null): AgentToolsNote => {
+  const status = server === null ? "off" : decideDisplayStatus(server);
+  if (status === "off") return { words: "agent tools off", failing: false };
+  if (status === "ready") return { words: "agent tools on", failing: false };
+  const { word, failing } = MCP_SERVER_STATUS_FACTS[status];
+  return { words: `agent tools: ${word}`, failing };
 };

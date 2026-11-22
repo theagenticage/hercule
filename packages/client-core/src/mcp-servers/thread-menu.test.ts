@@ -213,6 +213,20 @@ describe("buildServerPicker", () => {
     ]);
   });
 
+  it.each([
+    ["ready", null],
+    ["checking", null],
+    ["needs-sign-in", "needs sign-in"],
+    ["unreachable", "unreachable"],
+    ["error", "error"],
+  ] as const)("writes the status word of a %s server as %s", (status, word) => {
+    const { rows } = build({
+      views: buildViews([buildServer("s-one", "linear", "c-linear", { status })]),
+    });
+
+    expect(rows[0]?.statusWord).toBe(word);
+  });
+
   it("counts the chosen names, and a name with two accounts once", () => {
     const picker = build({ mcpServerIds: ["s-hobby", "s-linear"] });
 

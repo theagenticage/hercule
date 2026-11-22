@@ -11,6 +11,7 @@
  * meanwhile never leaves a stale row.
  */
 import { groupServersByName, type ServerNameGroup } from "./named-lists";
+import { MCP_SERVER_STATUS_FACTS } from "./status";
 import { describeReconnect, type McpServerView, type ReconnectTarget } from "./views";
 
 /** How many server names a menu or a picker lists before it moves the rest behind a link or a filter. */
@@ -125,12 +126,11 @@ export const buildThreadServerMenu = ({
     .map((group): ServerMenuRow => {
       const shown = decideShownAccount(group, mcpServerIds, rememberedAccounts);
       const on = mcpServerIds.includes(shown.server.id);
-      const note =
-        shown.displayStatus !== "needs-sign-in"
-          ? null
-          : on
-            ? "on, joins once you sign in"
-            : "needs sign-in";
+      const note = !MCP_SERVER_STATUS_FACTS[shown.displayStatus].needsSignIn
+        ? null
+        : on
+          ? "on, joins once you sign in"
+          : "needs sign-in";
       return {
         name: group.name,
         accounts: group.views,
@@ -166,8 +166,6 @@ export interface ServerPicker {
   /** Whether the dialog draws a filter field: there are more than eight names. */
   readonly showsFilter: boolean;
 }
-
-const STATUSES_WITH_WORD = new Set(["needs-sign-in", "unreachable", "error", "off"]);
 
 /**
  * Returns the picker for the list `mcpServerIds`. Every server is offered,
@@ -208,7 +206,9 @@ export const buildServerPicker = ({
         accountCount > 1
           ? `${shown.typeName} Connection, ${String(accountCount)} accounts`
           : `${shown.typeName} Connection`,
-      statusWord: STATUSES_WITH_WORD.has(shown.displayStatus) ? shown.statusWord : null,
+      statusWord: MCP_SERVER_STATUS_FACTS[shown.displayStatus].showsWordInPicker
+        ? shown.statusWord
+        : null,
     };
   });
   const needle = filter.trim().toLowerCase();

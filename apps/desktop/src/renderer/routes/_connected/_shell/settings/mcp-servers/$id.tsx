@@ -9,11 +9,13 @@ import {
 } from "@hercule/client-core";
 import {
   buildMcpServerViews,
+  buildServerSwitchTarget,
   decideStatusBand,
   describeOfferAddress,
   readMcpServerOffers,
 } from "@hercule/client-core/mcp-servers";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
+import { useMcpServerSwitch } from "../../../../../app/mcp-server-switch";
 import {
   connectionsQuery,
   mcpServerQuery,
@@ -31,7 +33,6 @@ import {
 import { SettingsHeaderTitle } from "../../../../../screens/settings/settings-frame";
 import { ProjectBoxes } from "./-project-boxes";
 import { RemoveSection } from "./-remove-section";
-import { useServerSwitch } from "./-switch-server";
 
 /**
  * Returns whether a read of a server's page failed because the address names
@@ -104,7 +105,7 @@ function McpServerPage(): JSX.Element {
     source.kind === "plugin"
       ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
       : undefined;
-  const flip = useServerSwitch({ kind: "update", serverId: id });
+  const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data));
   const check = useMutation({
     mutationFn: () => client.mcpServer.check({ params: { id } }),
     onSettled: async () => {
@@ -145,12 +146,12 @@ function McpServerPage(): JSX.Element {
       <ServerSection
         view={view}
         plugins={plugins}
-        switchBusy={flip.isBlocked}
-        switchError={flip.problem()}
+        switchBusy={flip.blocked}
+        switchError={flip.problem}
         checkBusy={check.isPending}
         checkError={check.error === null ? null : readErrorMessage(check.error)}
         onFlipSwitch={() => {
-          flip.start(!view.server.enabled);
+          flip.press(!view.server.enabled);
         }}
         onCheck={startCheck}
       />

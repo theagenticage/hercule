@@ -10,17 +10,9 @@ import { describeConnectionTypeName } from "../connection-settings";
 import { listConnectionTypes } from "../connection-types";
 import { parsePluginId } from "../plugin-id";
 import { formatCount } from "../threads/work-summary";
-import { decideDisplayStatus, type McpServerDisplayStatus } from "./display-status";
+import { decideDisplayStatus } from "./display-status";
 import { readMcpServerOffers } from "./offers";
-
-const STATUS_WORDS: Readonly<Record<McpServerDisplayStatus, string>> = {
-  ready: "ready",
-  checking: "checking",
-  "needs-sign-in": "needs sign-in",
-  unreachable: "unreachable",
-  error: "error",
-  off: "off",
-};
+import { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
 
 /** One MCP Server, joined with what a screen needs to draw it. */
 export interface McpServerView {
@@ -69,10 +61,7 @@ export const buildMcpServerViews = (
   return servers.map((server) => {
     const { source } = server;
     const displayStatus = decideDisplayStatus(server);
-    const failing =
-      displayStatus === "needs-sign-in" ||
-      displayStatus === "unreachable" ||
-      displayStatus === "error";
+    const { word: statusWord, failing } = MCP_SERVER_STATUS_FACTS[displayStatus];
     if (source.kind === "url") {
       const host = new URL(source.url).host;
       return {
@@ -86,7 +75,7 @@ export const buildMcpServerViews = (
             ? host
             : `${host} · ${formatCount(server.tools.length, "tool")}`,
         displayStatus,
-        statusWord: STATUS_WORDS[displayStatus],
+        statusWord,
         failing,
         statusDetail: failing ? server.statusDetail : null,
       };
@@ -113,7 +102,7 @@ export const buildMcpServerViews = (
       typeName,
       secondLine,
       displayStatus,
-      statusWord: STATUS_WORDS[displayStatus],
+      statusWord,
       failing,
       statusDetail: failing ? server.statusDetail : null,
     };
@@ -155,4 +144,4 @@ export const isCheckDisabled = (view: McpServerView): boolean =>
  * time of the refusal to show instead.
  */
 export const describeConnectionRowProblem = (view: McpServerView): string | null =>
-  view.displayStatus === "needs-sign-in" ? view.statusWord : null;
+  MCP_SERVER_STATUS_FACTS[view.displayStatus].needsSignIn ? view.statusWord : null;

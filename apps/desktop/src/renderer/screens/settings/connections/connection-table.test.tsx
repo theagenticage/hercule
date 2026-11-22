@@ -62,7 +62,7 @@ const COUNTS: EventCountsByConnection = {
  */
 const chooseRowItem = async (
   item: string,
-  agentTools: ReadonlyMap<string, AgentTools> | undefined = undefined,
+  agentTools: ReadonlyMap<string, readonly AgentTools[]> | undefined = undefined,
 ) => {
   const callbacks = {
     onReconnect: vi.fn(),
@@ -140,9 +140,9 @@ describe("ConnectionTable", () => {
   });
 
   describe("agent tools", () => {
-    const TOOLS: ReadonlyMap<string, AgentTools> = new Map([
-      [CONNECTION.id, { text: "agent tools on", tone: "on", serverId: "s-1" }],
-      [FAILED.id, { text: "agent tools: needs sign-in", tone: "fail", serverId: null }],
+    const TOOLS: ReadonlyMap<string, readonly AgentTools[]> = new Map([
+      [CONNECTION.id, [{ text: "agent tools on", tone: "on", serverId: "s-1" }]],
+      [FAILED.id, [{ text: "agent tools: needs sign-in", tone: "fail", serverId: null }]],
     ]);
 
     it("shows each note on its row, in the fail colour with a red dot for a failing server", () => {
@@ -167,6 +167,36 @@ describe("ConnectionTable", () => {
       const failing = screen.getByRole("button", { name: "agent tools: needs sign-in" });
       expect(failing.className).toContain("is-fail");
       expect(failing.querySelector(".dot--fail")).not.toBeNull();
+    });
+
+    it("shows one note for each server a Connection's plugins offer", () => {
+      render(
+        <ConnectionTable
+          connections={[CONNECTION]}
+          counts={COUNTS}
+          types={[GITHUB]}
+          plugins={[]}
+          agentTools={
+            new Map([
+              [
+                CONNECTION.id,
+                [
+                  { text: "agent tools on", tone: "on", serverId: "s-1" },
+                  { text: "agent tools off", tone: "off", serverId: null },
+                ],
+              ],
+            ])
+          }
+          onReconnect={vi.fn()}
+          onConfigure={vi.fn()}
+          onOpenAgentTools={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getAllByRole("button", { name: /^agent tools/ }).map((note) => note.textContent),
+      ).toEqual(["agent tools on", "agent tools off"]);
     });
 
     it("shows no note for a Connection with no entry, or while the servers are unread", () => {
@@ -219,13 +249,13 @@ describe("ConnectionTable", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "agent tools on" }));
 
-      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id));
+      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id)![0]);
     });
 
     it("calls onOpenAgentTools from the row's menu item Agent tools…", async () => {
       const { onOpenAgentTools, onDelete } = await chooseRowItem("Agent tools…", TOOLS);
 
-      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id));
+      expect(onOpenAgentTools).toHaveBeenCalledExactlyOnceWith(TOOLS.get(CONNECTION.id)![0]);
       expect(onDelete).not.toHaveBeenCalled();
     });
 

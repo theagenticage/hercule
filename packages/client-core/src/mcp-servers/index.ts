@@ -21,7 +21,7 @@ export {
   type StatusBandAction,
   type WarningFix,
 } from "./fix";
-export { type McpServerDisplayStatus } from "./display-status";
+export { MCP_SERVER_STATUS_FACTS, type McpServerDisplayStatus } from "./status";
 export {
   buildMcpListQuery,
   createMcpListEdits,
@@ -31,15 +31,27 @@ export {
   type McpListCache,
   type McpListChoice,
   type McpListDecision,
-  type McpListEditState,
   type McpListQuery,
   type McpListEdits,
-  type McpListRefusal,
   type McpListTarget,
-  type McpListUnread,
 } from "./list-edits";
+export { type McpListEditState, type McpListRefusal, type McpListUnread } from "./edit-guard";
+export {
+  buildOfferSwitchTarget,
+  buildServerSwitchTarget,
+  createMcpServerSwitches,
+  findOrCreateMcpServerSwitches,
+  type McpServerSwitchCache,
+  type McpServerSwitches,
+  type McpServerSwitchTarget,
+} from "./server-switch";
 export { chooseNamedServer } from "./named-lists";
-export { describeOfferAddress, readMcpServerOffers } from "./offers";
+export {
+  describeOfferAddress,
+  joinOfferedServers,
+  readMcpServerOffers,
+  type OfferedServer,
+} from "./offers";
 export {
   buildProjectBoxes,
   decideProjectBoxWrite,

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { McpServer } from "@hercule/contract";
 import { describeAgentToolsNote, describeUnavailableAgentToolsNote } from "./agent-tools-note";
-import { SENTRY_WORK, buildViews } from "./testing";
+import { SENTRY_WORK } from "./testing";
 
 const noteOf = (overrides: Partial<McpServer>) =>
-  describeAgentToolsNote(buildViews([{ ...SENTRY_WORK, ...overrides }])[0]!);
+  describeAgentToolsNote({ ...SENTRY_WORK, ...overrides });
 
 describe("describeAgentToolsNote", () => {
   it("says off for a server with no record", () => {

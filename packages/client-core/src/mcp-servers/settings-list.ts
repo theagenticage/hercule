@@ -6,7 +6,7 @@ import type { Connection, McpServer, PluginDetail, Project } from "@hercule/cont
 import { describeConnectionTypeName } from "../connection-settings";
 import { listConnectionTypes } from "../connection-types";
 import { formatNameList } from "../name-list";
-import { readMcpServerOffers, type McpServerOffer } from "./offers";
+import { joinOfferedServers, type McpServerOffer } from "./offers";
 import { buildMcpServerViews, type McpServerView } from "./views";
 
 /** One row of the group "From your Connections". */
@@ -48,40 +48,31 @@ export const buildMcpServerSettingsRows = ({
   readonly plugins: readonly PluginDetail[];
   readonly projects: readonly Project[];
 }): McpServerSettingsRow[] => {
-  const views = buildMcpServerViews(servers, connections, plugins);
   const types = listConnectionTypes(plugins);
-  return readMcpServerOffers(plugins)
-    .flatMap((offer) =>
-      connections
-        .filter((connection) => connection.type === offer.connectionType)
-        .map((connection) => {
-          const view =
-            views.find(
-              ({ server: { source } }) =>
-                source.kind === "plugin" &&
-                source.contributionId === offer.contributionId &&
-                source.connectionId === connection.id,
-            ) ?? null;
-          const typeName = describeConnectionTypeName(
-            connection,
-            types.find((type) => type.type === connection.type),
-          );
-          return {
-            offer,
-            connection,
-            view,
-            typeName,
-            name: view?.server.name ?? offer.defaultName,
-            secondLine:
-              view?.secondLine ?? `${typeName} Connection · switch it on to see its tools`,
-            statusWord: view?.statusWord ?? "off",
-            projects:
-              view === null
-                ? []
-                : projects.filter((project) => project.mcpServerIds.includes(view.server.id)),
-          };
-        }),
-    )
+  const viewsByServer = new Map(
+    buildMcpServerViews(servers, connections, plugins).map((view) => [view.server, view]),
+  );
+  return joinOfferedServers({ servers, connections, plugins })
+    .map(({ offer, connection, server }) => {
+      const view = server === null ? null : viewsByServer.get(server)!;
+      const typeName = describeConnectionTypeName(
+        connection,
+        types.find((type) => type.type === connection.type),
+      );
+      return {
+        offer,
+        connection,
+        view,
+        typeName,
+        name: view?.server.name ?? offer.defaultName,
+        secondLine: view?.secondLine ?? `${typeName} Connection · switch it on to see its tools`,
+        statusWord: view?.statusWord ?? "off",
+        projects:
+          view === null
+            ? []
+            : projects.filter((project) => project.mcpServerIds.includes(view.server.id)),
+      };
+    })
     .toSorted(
       (a, b) =>
         a.typeName.localeCompare(b.typeName) ||
