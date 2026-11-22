@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
-import { parseTokens, serializeTokens, type TokenSet } from "./oauth";
+import { parseTokens, serializeTokens, type TokenSet } from "./client";
 
 const TOKEN = "gho_secret-access-token";
 

@@ -91,25 +91,22 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { applyIntakeOverrides, normalizeIntakeOverrides, PluginIntake } from "../intake-settings";
+import { computeChallenge, exchangeCode, serializeTokens, type TokenSet } from "../oauth";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
   CALLBACK_PATH,
-  computeChallenge,
   decodeCallback,
-  exchangeCode,
   exchangeDeviceCode,
   oauthClients,
   OAUTH_TOKENS,
   buildRedirectUri,
   requestDeviceCode,
-  serializeTokens,
   SETUP_LIFETIME_MS,
   SLOW_DOWN_STEP_SECONDS,
   type Outcome,
-  type TokenSet,
 } from "./oauth";
 import { buildDefaultLabel } from "./default-label";
 import { PluginConfigs } from "./plugin-configs";

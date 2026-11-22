@@ -28,7 +28,6 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
@@ -43,19 +42,19 @@ import {
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
 import { Notifier } from "../notifications";
-import { PromotionState } from "../promotion";
-import { Secrets } from "../secrets";
 import {
   isStale,
-  OAUTH_TOKENS,
-  oauthClients,
+  makeRefreshPermits,
   parseTokens,
-  refreshAccess,
   ProviderUnreachable,
+  renewTokenSet,
   serializeTokens,
-  type OAuthClient,
+  type RefreshEndpoint,
   type TokenSet,
-} from "./oauth";
+} from "../oauth";
+import { PromotionState } from "../promotion";
+import { Secrets } from "../secrets";
+import { OAUTH_TOKENS, oauthClients } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository, type StoredConnection } from "./repository";
 
@@ -393,26 +392,16 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * One semaphore per connection, so two callers that find the same expired
-   * token do not both use the refresh token. Some providers invalidate a
-   * refresh token once it is used, which would leave the second caller with
-   * tokens that no longer work.
-   *
-   * The map is never pruned: it holds at most one entry per connection this
-   * process has seen, and removing an entry on delete could race a refresh
-   * that still holds it.
+   * One permit per connection, so two callers that find the same expired
+   * token do not both use the refresh token. Keys are `connection:<id>`.
    */
-  const permits = new Map<string, Semaphore.Semaphore>();
+  const refreshPermits = makeRefreshPermits();
 
-  // Synchronous on purpose: if an effect ran between the read and the write, two
-  // fibers could both pass the read and each create a semaphore of its own.
-  const readOrCreateRefreshPermit = (connectionId: string): Semaphore.Semaphore => {
-    const held = permits.get(connectionId);
-    if (held !== undefined) return held;
-    const made = Semaphore.makeUnsafe(1);
-    permits.set(connectionId, made);
-    return made;
-  };
+  /** Runs `effect` while holding the connection's refresh permit. */
+  const withConnectionPermit = <A, E, R>(
+    connectionId: string,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> => refreshPermits.withPermit(`connection:${connectionId}`, effect);
 
   /**
    * Returns the token endpoint and the client a connection of this type
@@ -430,7 +419,7 @@ const make = Effect.gen(function* () {
   const findRefreshEndpoint = (
     row: StoredConnection,
     type: ConnectionType,
-  ): Effect.Effect<Option.Option<{ readonly tokenUrl: string; readonly client: OAuthClient }>> =>
+  ): Effect.Effect<Option.Option<RefreshEndpoint>> =>
     Effect.gen(function* () {
       const { oauth, device } = type;
       if (oauth !== undefined) {
@@ -513,37 +502,33 @@ const make = Effect.gen(function* () {
       // check and the provider request.
       yield* guard;
       // The request and the write that stores its answer are uninterruptible
-      // together. A provider that rotates its refresh token invalidates the old
-      // one the moment it answers, so a caller cancelled between the answer and
-      // the write (a timeout, a cancelled run) would lose the only tokens that
-      // still work. `refreshAccess` bounds the request with its own timeout,
-      // so this cannot hold the caller or the lock for long.
+      // together, as `renewTokenSet` explains. Marking the connection when the
+      // provider refuses is part of the same unit.
       return yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          const answer = yield* refreshAccess({ ...endpoint.value, refreshToken }).pipe(
-            Effect.provide(FetchHttpClient.layer),
-            // The provider's own text stays out of the message: the status
-            // detail and the Notification are read by people and agents.
-            Effect.catchTag("ProviderRefused", () =>
-              markTokensNeedReauth(row.id, held, row.credentialsGeneration, REFRESH_REFUSED),
-            ),
-          );
-          // When the response has no refresh token, the old one is still valid.
-          const next: TokenSet = { ...answer, refreshToken: answer.refreshToken ?? refreshToken };
-          yield* writeWhileTokensHeld(
-            row.id,
-            held,
-            row.credentialsGeneration,
-            Effect.orDie(
-              secrets.set(
-                { kind: "connection", id: row.id },
-                OAUTH_TOKENS,
-                Redacted.make(serializeTokens(next)),
+        renewTokenSet({
+          refreshToken,
+          endpoint: endpoint.value,
+          writeIfHeld: (next) =>
+            writeWhileTokensHeld(
+              row.id,
+              held,
+              row.credentialsGeneration,
+              Effect.orDie(
+                secrets.set(
+                  { kind: "connection", id: row.id },
+                  OAUTH_TOKENS,
+                  Redacted.make(serializeTokens(next)),
+                ),
               ),
             ),
-          );
-          return next;
-        }),
+        }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          // The provider's own text is not in the status detail or the
+          // Notification: people and agents read them.
+          Effect.catchTag("ProviderRefused", () =>
+            markTokensNeedReauth(row.id, held, row.credentialsGeneration, REFRESH_REFUSED),
+          ),
+        ),
       );
     });
 
@@ -635,7 +620,8 @@ const make = Effect.gen(function* () {
     ConnectionCredentialsUnavailable | ProviderUnreachable | CannotRefresh | GuardFailure
   > =>
     promotion.whenServing(
-      readOrCreateRefreshPermit(connectionId).withPermits(1)(
+      withConnectionPermit(
+        connectionId,
         Effect.flatMap(readConnectionForUse(connectionId), (current) =>
           Effect.map(
             refreshTokens(
@@ -736,7 +722,8 @@ const make = Effect.gen(function* () {
       // The gate is passed before the permit is taken, so no caller holds
       // the permit while it waits for a freeze to end.
       const refreshedTokens = yield* promotion.whenServing(
-        readOrCreateRefreshPermit(row.id).withPermits(1)(
+        withConnectionPermit(
+          row.id,
           refreshTokens(row, type, undefined, markStaleTokenNeedsReauth, Effect.void),
         ),
       );
@@ -1162,8 +1149,7 @@ const make = Effect.gen(function* () {
     withRefreshPermit: <A, E, R>(
       connectionId: string,
       effect: Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E, R> =>
-      promotion.whenServing(readOrCreateRefreshPermit(connectionId).withPermits(1)(effect)),
+    ): Effect.Effect<A, E, R> => promotion.whenServing(withConnectionPermit(connectionId, effect)),
   };
 });
 
