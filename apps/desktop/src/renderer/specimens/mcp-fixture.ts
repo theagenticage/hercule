@@ -1,5 +1,5 @@
 /**
- * The records the MCP specimens seed their query cache with, as the
+ * The records the MCP specimens' fake controller answers with, as the
  * controller would return them (spec 17 §Settings, MCP servers, and the
  * composer's `+` menu). One world serves every scene:
  *
@@ -30,14 +30,21 @@ import {
 } from "./settings-connections-fixture";
 import { PROVIDER_PLUGINS } from "./settings-providers-fixture";
 import { DRAFT_PAGE_RECORDS, WEBSHOP_DRAFT } from "./draft-fixture";
-import type {
-  DraftScreenRecords,
-  McpServersRecords,
-  SidebarRecords,
-  ThreadScreenRecords,
-} from "./shell-page";
+import type { DraftScreenRecords, SidebarRecords, ThreadScreenRecords } from "./shell-page";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 import { buildTranscript, FIX_SESSION, FIX_STEPS, THREAD_PAGE_RECORDS } from "./thread-fixture";
+
+/**
+ * What the MCP screens read besides the shell's lists, which hold the
+ * projects (each with its servers), the Connections and the plugins: the
+ * servers, and the setting that lists the servers of a thread with no project.
+ */
+export interface McpServersRecords {
+  /** Every MCP Server, sorted by name, as `mcpServer.query` returns them. */
+  readonly servers: ReadonlyArray<McpServer>;
+  /** The setting `thread.mcpServerIds`. */
+  readonly defaultServerIds: ReadonlyArray<string>;
+}
 
 /** The time `minutes` before the specimen's clock, as the API spells a time. */
 const minutesAgo = (minutes: number): string =>

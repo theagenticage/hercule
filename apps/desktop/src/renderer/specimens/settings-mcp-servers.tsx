@@ -1,8 +1,8 @@
 /**
- * The Settings > MCP servers specimen: the app's real shell with Settings
- * open on the MCP servers section, drawn from the world in mcp-fixture.ts.
- * `capture:ui` draws its four states (scripts/ui-screens.ts); open it in the
- * dev server for a check by eye.
+ * The Settings > MCP servers specimen: the app, booted through its own router
+ * over a fake controller (mcp-scene.ts), with Settings open on the MCP servers
+ * section, drawn from the world in mcp-fixture.ts. `capture:ui` draws its four
+ * states (scripts/ui-screens.ts); open it in the dev server for a check by eye.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`,
  * and opens the state its `?state=` names:
@@ -22,8 +22,7 @@ import {
   MCP_SETTINGS_PAGE_RECORDS,
 } from "./mcp-fixture";
 import { pressPart, waitForPart } from "./mcp-script";
-import { mountMcpServersSettingsSpecimen } from "./shell-page";
-import { markSheetReady } from "./sheet-page";
+import { markMcpSceneReady, mountMcpScene } from "./mcp-scene";
 
 const state = new URLSearchParams(location.search).get("state") ?? "list";
 
@@ -42,10 +41,11 @@ function chooseAddress(name: string): string {
   }
 }
 
-await mountMcpServersSettingsSpecimen(MCP_SETTINGS_PAGE_RECORDS, chooseAddress(state), MCP_RECORDS);
-const style = document.createElement("style");
-style.textContent = "* { animation: none !important; }";
-document.head.append(style);
+const page = await mountMcpScene(
+  { records: MCP_SETTINGS_PAGE_RECORDS, mcp: MCP_RECORDS },
+  chooseAddress(state),
+);
+await waitForPart(".mcp-list, .mcp-record");
 if (state === "projects") {
   // Ticking webshop while its list names the other `sentry` opens the refusal.
   await waitForPart(".mcp-proj-row");
@@ -62,4 +62,4 @@ if (state === "picker") {
   await pressPart('section[aria-label="Threads without a project"] button');
   await waitForPart("dialog[open].mcp-picker .mcp-pick-row");
 }
-await markSheetReady();
+await markMcpSceneReady(page);

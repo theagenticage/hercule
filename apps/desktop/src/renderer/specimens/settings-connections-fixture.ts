@@ -1,6 +1,6 @@
 /**
  * The records the Settings > Connections specimen (settings-connections.tsx)
- * seeds its query cache with, as the controller would return them: the
+ * draws from, as the controller would return them: the
  * event sources the Bureau book's desktop/settings-connections.html lists,
  * each a Connection of a plugin that declares its Connection type and its
  * mark.
