@@ -49,7 +49,7 @@ export interface NamedTools {
   /**
    * Tools that are not offered: their original name is not well-formed
    * Unicode, or another tool of the same server gets the same name. The
-   * caller logs them.
+   * caller logs them and warns the Thread.
    */
   readonly leftOut: ReadonlyArray<ToolKey>;
 }

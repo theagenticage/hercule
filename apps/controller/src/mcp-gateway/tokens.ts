@@ -118,7 +118,12 @@ const selectOfferedTools = (state: TokenState, session: McpSession | undefined):
 /**
  * Records that a `tools/list` answer offered `name` to the client a request
  * comes from, for the tool `offered`. A name offered again is recorded again
- * for what it stands for now. Names are never removed.
+ * for what it stands for now. Names are never removed, and the record has no
+ * cap: a server that renames its tools at every check adds names until the MCP
+ * session or the token ends. The lists are bounded per server (10,000 tools,
+ * 4 MiB), but a cap on the record would have to drop a name a client may still
+ * hold, and that client's next call would be refused. So the growth is left as
+ * it is.
  */
 export const recordOffer = (
   state: TokenState,
