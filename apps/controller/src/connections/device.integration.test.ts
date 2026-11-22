@@ -904,6 +904,68 @@ describe("the access token of a connection set up by a device flow", () => {
     },
   );
 
+  /** Makes every refresh answer with `REFRESHED_TOKEN`, valid for `expiresIn` seconds. */
+  const answerRefreshesExpiring = (provider: DeviceProvider, expiresIn: unknown): void => {
+    provider.answers.token = () =>
+      buildJsonResponse({
+        access_token: REFRESHED_TOKEN,
+        refresh_token: "refresh-2",
+        token_type: "bearer",
+        expires_in: expiresIn,
+      });
+  };
+
+  it.each([
+    ["a fraction of a second", 3599.5],
+    ["a lifetime of 68 years", 2147483647],
+    ["a negative lifetime", -5],
+    ["text", "3600"],
+  ])(
+    "keeps a refresh answer whose expires_in is odd (%s): it stores the tokens and the connection stays connected",
+    async (_name, expiresIn) => {
+      await withDevice(async (harness, registry, token, provider) => {
+        useRotatingRefreshToken(provider, 0);
+        const id = await signIn(harness, token, provider);
+        const surface = readConnectionsSurface(registry.device);
+        answerRefreshesExpiring(provider, expiresIn);
+
+        expect(await Effect.runPromise(surface.credentials(id))).toEqual({
+          accessToken: REFRESHED_TOKEN,
+        });
+        // The tokens were stored: the next call finds them good and does not refresh.
+        expect(await Effect.runPromise(surface.credentials(id))).toEqual({
+          accessToken: REFRESHED_TOKEN,
+        });
+        expect(refreshRequests(provider)).toHaveLength(1);
+        expect(await listConnections(harness.base, token)).toMatchObject([
+          { id, status: "connected" },
+        ]);
+      });
+    },
+  );
+
+  it("hands out a token that was already expired when the refresh issued it, once per use, and refreshes again for the next use", async () => {
+    await withDevice(async (harness, registry, token, provider) => {
+      useRotatingRefreshToken(provider, 0);
+      const id = await signIn(harness, token, provider);
+      const surface = readConnectionsSurface(registry.device);
+      answerRefreshesExpiring(provider, 0);
+
+      const first = await Effect.runPromise(surface.credentials(id));
+      expect(refreshRequests(provider)).toHaveLength(1);
+      const second = await Effect.runPromise(surface.credentials(id));
+
+      expect([first, second]).toEqual([
+        { accessToken: REFRESHED_TOKEN },
+        { accessToken: REFRESHED_TOKEN },
+      ]);
+      expect(refreshRequests(provider)).toHaveLength(2);
+      expect(await listConnections(harness.base, token)).toMatchObject([
+        { id, status: "connected" },
+      ]);
+    });
+  });
+
   it("is refreshed once when two callers find it expired at the same time, because the provider refuses the old refresh token", async () => {
     await withDevice(async (harness, registry, token, provider) => {
       useRotatingRefreshToken(provider, 0);
@@ -926,6 +988,26 @@ describe("the access token of a connection set up by a device flow", () => {
       useRotatingRefreshToken(provider, 0);
       const id = await signIn(harness, token, provider);
       provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.device).credentials(id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      expect(await listConnections(harness.base, token)).toMatchObject([
+        { id, status: "needs-reauth" },
+      ]);
+    });
+  });
+
+  it.each([
+    ["has no body", () => new Response(null, { status: 400 })],
+    ["has a body over 64 KiB", () => new Response("x".repeat(64 * 1024 + 1), { status: 400 })],
+  ])("marks the connection needs-reauth when the provider's refusal %s", async (_name, refusal) => {
+    await withDevice(async (harness, registry, token, provider) => {
+      useRotatingRefreshToken(provider, 0);
+      const id = await signIn(harness, token, provider);
+      provider.answers.token = refusal;
 
       const failure = await Effect.runPromise(
         Effect.flip(readConnectionsSurface(registry.device).credentials(id)),
