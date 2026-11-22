@@ -314,6 +314,34 @@ describe("the tokens of a sign-in", () => {
     });
   });
 
+  it("are not refreshed in a loop when every refresh answers with a token that lives 0 seconds", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      authorizationServer.expiresIn = 0;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      // The first check after the sign-in finds a stale token and renews it,
+      // and the renewal's token is stale again.
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "unreachable");
+      const refreshes = () =>
+        authorizationServer.tokenRequests.filter((form) => form.grant_type === "refresh_token")
+          .length;
+      const before = refreshes();
+
+      await requestCheck(controller, serverId);
+      await eventually(
+        () => Promise.resolve(refreshes()),
+        (count) => count > before,
+      );
+      // A loop would keep asking the provider; give it time to show.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // One renewal for the check, not one per read of the credentials.
+      expect(refreshes() - before).toBe(1);
+      expect((await readRow(controller)).status).toBe("unreachable");
+    });
+  });
+
   it("are refreshed after the server refused the access token, and the request is tried again", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;

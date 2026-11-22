@@ -11,14 +11,16 @@
  * guard, then call `renewTokenSet`. The owner also decides what a refusal
  * means for its status.
  */
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
+  isStale,
+  ProviderUnreachable,
   refreshAccess,
   type OAuthClient,
   type ProviderRefused,
-  type ProviderUnreachable,
   type TokenSet,
 } from "./client";
 
@@ -95,6 +97,13 @@ export interface RefreshEndpoint {
  * Fails with `ProviderRefused` or `ProviderUnreachable` as `refreshAccess`
  * does, and with the failure of `writeIfHeld`. A failed refresh writes
  * nothing, so the owner decides what a refusal means for its status.
+ *
+ * Also fails with `ProviderUnreachable`, after the write, when the new set is
+ * already stale, which is what an `expires_in` of 0 gives. The set is stored
+ * anyway, because the provider may have rotated the refresh token. Returning
+ * it would make the caller read it, find it stale, and renew again at once,
+ * for as long as the provider answers like that. The next request renews
+ * again, once.
  */
 export const renewTokenSet = <WriteFailure>(request: {
   readonly refreshToken: string;
@@ -116,6 +125,11 @@ export const renewTokenSet = <WriteFailure>(request: {
         refreshToken: answer.refreshToken ?? request.refreshToken,
       };
       yield* request.writeIfHeld(next);
+      if (isStale(next, yield* Clock.currentTimeMillis)) {
+        return yield* new ProviderUnreachable({
+          message: "the token endpoint issued an access token that is already about to expire",
+        });
+      }
       return next;
     }),
   );

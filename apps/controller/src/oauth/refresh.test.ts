@@ -47,6 +47,27 @@ describe("renewTokenSet", () => {
     expect(written).toEqual([next]);
   });
 
+  it("stores a set that is already stale, then fails as unreachable so no caller reads it and renews again", async () => {
+    const written: Array<TokenSet> = [];
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        renewTokenSet({
+          refreshToken: "old-refresh",
+          endpoint: ENDPOINT,
+          writeIfHeld: (tokens) => Effect.sync(() => void written.push(tokens)),
+        }),
+      ).pipe(
+        Effect.provide(
+          answering({ access_token: "new-access", refresh_token: "rotated", expires_in: 0 }),
+        ),
+      ),
+    );
+
+    expect(failure).toMatchObject({ _tag: "ProviderUnreachable" });
+    expect(written.map((tokens) => tokens.refreshToken)).toEqual(["rotated"]);
+  });
+
   it("keeps the old refresh token when the answer has none", async () => {
     const written: Array<TokenSet> = [];
 
