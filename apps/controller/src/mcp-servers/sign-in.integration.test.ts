@@ -24,6 +24,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { uuidFromString } from "../db";
+import { del } from "../http/testing";
 import type { SetUpController } from "../workflows/testing";
 import {
   countNotifications,
@@ -32,6 +33,7 @@ import {
   readRecord,
   readRefusal,
   readRow,
+  callAs,
   readServer,
   runSql,
   requestCheck,
@@ -294,6 +296,26 @@ describe("the tokens of a sign-in", () => {
     });
   });
 
+  it("are refreshed once when two calls find the access token refused at the same time", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+
+      authorizationServer.revokeAccessTokens();
+      const results = await Promise.all([
+        callAs(controller, serverId),
+        callAs(controller, serverId),
+      ]);
+
+      expect(results.map((result) => result._tag)).toEqual(["Success", "Success"]);
+      expect(
+        authorizationServer.tokenRequests.filter((form) => form.grant_type === "refresh_token"),
+      ).toHaveLength(1);
+    });
+  });
+
   it("make the server need sign-in when the provider refuses the refresh, without the provider's words", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;
@@ -370,6 +392,18 @@ describe("finishing a sign-in", () => {
       );
 
       expect(finished.source).toMatchObject({ signIn: "oauth" });
+    });
+  });
+
+  it("is refused for a server that was deleted after the start", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId);
+      await del(rig.controller.base, `/api/v1/mcp-servers/${serverId}`, rig.controller.token);
+
+      await refusal(rig, serverId, callback, 404);
+
+      expect(rig.authorizationServer.tokenRequests).toEqual([]);
     });
   });
 
@@ -606,6 +640,24 @@ describe("starting a sign-in", () => {
     } finally {
       await elsewhere.stop(true);
     }
+  });
+
+  it("is unreadable when the metadata is larger than the limit", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const publish = rig.fake.answerFirst;
+      rig.fake.answerFirst = (request) =>
+        new URL(request.url).pathname.startsWith("/.well-known/")
+          ? new Response("x".repeat(1024 * 1024 + 1), {
+              headers: { "content-type": "application/json" },
+            })
+          : publish(request);
+
+      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
+
+      expect(error.details).toEqual({ reason: "source-unreadable" });
+      expect(error.message).toContain("more than 1048576 bytes");
+    });
   });
 
   it("writes nothing to the database", async () => {
