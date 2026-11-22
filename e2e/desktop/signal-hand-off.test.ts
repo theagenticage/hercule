@@ -38,12 +38,13 @@ describe("hercule signal hand-off", () => {
     });
     const readTaskIds = async (): Promise<readonly string[]> =>
       (await client.task.query({ query: { limit: 100 } })).items.map((task) => task.id).sort();
-    const tasksBefore = await readTaskIds();
     const runner = await arranged.fleet.enlistRunner("hand-off-runner");
     const [thread] = await arranged.fleet.spawnThreads(1, { runner });
     // The runner holds the thread, and so its token, once the controller has
     // started it there.
     await arranged.waitForStatus(thread!.id, "busy");
+    // Read after the thread started, because a thread joins a Task of its own.
+    const tasksBefore = await readTaskIds();
 
     const refused = await runCli(["signal", "hand-off", signalId, "--workflow", workflow.id], {
       home: arranged.home,
