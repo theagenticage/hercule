@@ -939,12 +939,22 @@ export interface FakeAuthorizationServer {
   readonly issuer: string;
   /** The path of the token endpoint. A test changes it to move the token endpoint. */
   tokenPath: string;
+  /** The path of the authorization endpoint. A test changes it to move the authorization endpoint. */
+  authorizePath: string;
   /** Whether the metadata promises `iss` on authorization responses, and the redirects carry it. */
   sendsIssuer: boolean;
   /** The `expires_in`, in seconds, of every access token it issues. */
   expiresIn: number;
   /** The `token_type` of every access token it issues. */
   tokenType: string;
+  /**
+   * When set, registration gives the client a secret and the method
+   * `client_secret_post`, and the token endpoint refuses a request without that
+   * secret. By default clients are public.
+   */
+  issuesClientSecrets: boolean;
+  /** The client secrets registration gave out, by client id. */
+  readonly clientSecrets: ReadonlyMap<string, string>;
   /**
    * The `expires_in` of the access token that the code exchange issues, when
    * it differs from `expiresIn`. A test makes it 0 to get a token that is stale
@@ -996,6 +1006,7 @@ export const startFakeAuthorizationServer = (
     { readonly challenge: string; readonly redirectUri: string; readonly clientId: string }
   >();
   const clients = new Set<string>();
+  const clientSecrets = new Map<string, string>();
   const refreshTokens = new Set<string>();
   let accessTokens = new Set<string>();
   let issued = 0;
@@ -1038,11 +1049,11 @@ export const startFakeAuthorizationServer = (
         }
         return Response.json({
           issuer,
-          authorization_endpoint: `${issuer}/authorize`,
+          authorization_endpoint: `${issuer}${fake.authorizePath}`,
           token_endpoint: `${issuer}${fake.tokenPath}`,
           registration_endpoint: `${issuer}/register`,
           code_challenge_methods_supported: ["S256"],
-          token_endpoint_auth_methods_supported: ["none"],
+          token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
           ...(fake.sendsIssuer ? { authorization_response_iss_parameter_supported: true } : {}),
         });
       }
@@ -1051,12 +1062,25 @@ export const startFakeAuthorizationServer = (
         registrations.push(body);
         const clientId = `client-${String(registrations.length)}`;
         clients.add(clientId);
+        if (fake.issuesClientSecrets) {
+          const secret = `dcr-secret-${Math.random().toString(36).slice(2)}`;
+          clientSecrets.set(clientId, secret);
+          return Response.json(
+            {
+              ...body,
+              client_id: clientId,
+              client_secret: secret,
+              token_endpoint_auth_method: "client_secret_post",
+            },
+            { status: 201 },
+          );
+        }
         return Response.json(
           { ...body, client_id: clientId, token_endpoint_auth_method: "none" },
           { status: 201 },
         );
       }
-      if (url.pathname === "/authorize") {
+      if (url.pathname === fake.authorizePath) {
         authorizationRequests.push(url);
         const params = url.searchParams;
         const redirect = URL.parse(params.get("redirect_uri") ?? "");
@@ -1080,6 +1104,8 @@ export const startFakeAuthorizationServer = (
         const form = Object.fromEntries(new URLSearchParams(await request.text()));
         tokenRequests.push(form);
         if (!clients.has(form.client_id ?? "")) return refuse("invalid_client");
+        const secret = clientSecrets.get(form.client_id ?? "");
+        if (secret !== undefined && form.client_secret !== secret) return refuse("invalid_client");
         if (form.resource !== upstream.url) return refuse("invalid_target");
         if (form.grant_type === "refresh_token") {
           if (fake.refuseRefresh) return refuse("invalid_grant");
@@ -1109,9 +1135,12 @@ export const startFakeAuthorizationServer = (
   const fake: FakeAuthorizationServer = {
     issuer: origin(server.port as number),
     tokenPath: "/token",
+    authorizePath: "/authorize",
     sendsIssuer: true,
     expiresIn: 3600,
     tokenType: "Bearer",
+    issuesClientSecrets: false,
+    clientSecrets,
     firstExpiresIn: undefined,
     refuseRefresh: false,
     redirectMetadataTo: undefined,

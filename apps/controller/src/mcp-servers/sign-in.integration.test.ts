@@ -233,6 +233,22 @@ describe("a client of the authorization server", () => {
   });
 });
 
+describe("a client of the authorization server, when its authorization endpoint moved", () => {
+  it("is replaced by a new one", async () => {
+    await withOAuthRig(async (rig) => {
+      const { authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      authorizationServer.authorizePath = "/authorize-2";
+
+      const second = await startSignIn(rig.controller, serverId);
+
+      expect(authorizationServer.registrations).toHaveLength(2);
+      expect(new URL(second.authorizationUrl).pathname).toBe("/authorize-2");
+    });
+  });
+});
+
 describe("the tokens of a sign-in", () => {
   it("are refreshed before they expire, and the rotated refresh token is the one stored", async () => {
     await withOAuthRig(async (rig) => {
@@ -566,6 +582,21 @@ describe("finishing a sign-in", () => {
     });
   });
 
+  it("refuses an empty iss, also when the metadata did not promise one", async () => {
+    await withOAuthRig(async (rig) => {
+      rig.authorizationServer.sendsIssuer = false;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const callback = await startAndApprove(rig, serverId, { iss: "" });
+      expect(new URL(callback).searchParams.get("iss")).toBe("");
+
+      const error = await refusal(rig, serverId, callback, 409);
+
+      expect(error).toMatchObject({ details: { reason: "sign-in-refused" } });
+      expect(rig.authorizationServer.tokenRequests).toEqual([]);
+      await expectNotSignedIn(rig, serverId);
+    });
+  });
+
   it.each([
     ["a wrong iss", { iss: "https://evil.example" }],
     ["a wrong iss on an error answer", { iss: "https://evil.example", deny: true }],
@@ -885,25 +916,56 @@ describe("starting a sign-in", () => {
 });
 
 describe("what a sign-in leaves behind", () => {
-  it("holds no token, code or verifier in an answer, an audit entry, a Notification or a row", async () => {
+  it("holds no token, code, verifier or client secret in an answer, a refusal, an audit entry, a Notification or a row", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;
+      authorizationServer.issuesClientSecrets = true;
       authorizationServer.firstExpiresIn = 0;
       const serverId = await addServerThatNeedsSignIn(rig);
+      const refusals: Array<string> = [];
+
+      // Refusals on the way: an answer for a sign-in that is gone, and a code
+      // the provider refuses.
+      const first = await startAndApprove(rig, serverId);
+      const forged = first.replace(/code=[^&]*/, "code=forged-code");
+      refusals.push(
+        JSON.stringify(
+          await readRefusal(await requestFinishSignIn(controller, serverId, forged), 409),
+        ),
+      );
+      refusals.push(
+        JSON.stringify(
+          await readRefusal(await requestFinishSignIn(controller, serverId, first), 409),
+        ),
+      );
+
       const { authorizationUrl } = await startSignIn(controller, serverId);
       const callback = await authorizationServer.approve(authorizationUrl);
       const code = new URL(callback).searchParams.get("code")!;
-      const finishedResponse = await requestFinishSignIn(controller, serverId, callback);
-      const finished = JSON.stringify(await readRecord(finishedResponse));
+      const finished = JSON.stringify(
+        await readRecord(await requestFinishSignIn(controller, serverId, callback)),
+      );
       await waitForStatus(controller, "ready");
       // A rejected token and a refused refresh put the failure paths in the dump too.
       authorizationServer.refuseRefresh = true;
       authorizationServer.revokeAccessTokens();
       await requestCheck(controller, serverId);
       await waitForStatus(controller, "needs-sign-in");
+      refusals.push(JSON.stringify((await callAs(controller, serverId))._tag));
+
+      // What the provider really saw, not what the test assumes it saw.
+      const exchanged = authorizationServer.tokenRequests.find((form) => form.code === code);
+      const verifier = exchanged?.code_verifier;
+      // Each start that finds no stored client registers one.
+      const clientSecrets = [...authorizationServer.clientSecrets.values()];
+      expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(clientSecrets).toHaveLength(2);
+      expect(clientSecrets).toContain(exchanged?.client_secret);
 
       const secrets = [
         code,
+        verifier!,
+        ...clientSecrets,
         "access-token-1",
         "access-token-2",
         "refresh-token-1",
@@ -911,12 +973,13 @@ describe("what a sign-in leaves behind", () => {
       ];
       const everything = [
         finished,
+        ...refusals,
         JSON.stringify(await readServer(controller, serverId)),
         JSON.stringify(await controller.harness.audit("mcpServer.updated")),
         await dumpDatabase(controller),
       ].join("\n");
       for (const secret of secrets) {
-        expect(everything, `the text holds ${secret}`).not.toContain(secret);
+        expect(everything, "the text holds a secret").not.toContain(secret);
       }
     });
   });

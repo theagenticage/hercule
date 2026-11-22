@@ -39,6 +39,11 @@ describe("parseCallbackQuery", () => {
     });
   });
 
+  it("keeps an iss that is present and empty apart from one that is absent", async () => {
+    expect((await parse("code=c1&state=s1&iss=")).iss).toBe("");
+    expect((await parse("code=c1&state=s1")).iss).toBeUndefined();
+  });
+
   it("drops a fragment after a bare query", async () => {
     expect(await parse("code=c1&state=s1#done")).toMatchObject({ code: "c1", state: "s1" });
   });

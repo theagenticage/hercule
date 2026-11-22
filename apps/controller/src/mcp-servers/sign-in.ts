@@ -81,7 +81,12 @@ export interface Callback {
   /** The authorization code. Exactly one of `code` and `error` is set. */
   readonly code: string | undefined;
   readonly error: string | undefined;
-  /** The issuer the authorization server says the answer is from (RFC 9207), when it said. */
+  /**
+   * The issuer the authorization server says the answer is from (RFC 9207).
+   * `undefined` when the answer has no `iss` parameter at all. An `iss` that is
+   * present and empty stays the empty text, so it is told apart from an absent
+   * one and is compared like any other value.
+   */
   readonly iss: string | undefined;
 }
 
@@ -99,7 +104,8 @@ const refuseCallback = (message: string): Effect.Effect<never, Validation> =>
  * - there is no `state`;
  * - it holds both `code` and `error`, or neither.
  *
- * A parameter with an empty value counts as absent.
+ * A `state`, `code` or `error` with an empty value counts as absent. An empty
+ * `iss` does not: it is kept as the empty text, which no issuer equals.
  */
 export const parseCallbackQuery = (text: string): Effect.Effect<Callback, Validation> => {
   const trimmed = text.trim();
@@ -134,7 +140,7 @@ export const parseCallbackQuery = (text: string): Effect.Effect<Callback, Valida
   if ((code === undefined) === (error === undefined)) {
     return refuseCallback("the answer holds both a code and an error, or neither");
   }
-  return Effect.succeed({ address, state, code, error, iss: read("iss") });
+  return Effect.succeed({ address, state, code, error, iss: params.get("iss") ?? undefined });
 };
 
 /**
