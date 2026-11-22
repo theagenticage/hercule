@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import {
   AuthorizationUrlHasNoState,
   makeSignInReturnLayer,
-  SIGN_IN_RETURN_WAIT_MILLISECONDS,
+  SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
   SignInReturn,
 } from "./sign-in-return";
 
@@ -21,16 +22,16 @@ afterEach(async () => {
 });
 
 /**
- * Builds the service with waits of at most `waitMilliseconds`, and returns
- * it. Closing the scope is what quitting the app does.
+ * Builds the service with listeners that last `lifetimeMilliseconds`, and
+ * returns it. Closing the scope is what quitting the app does.
  */
 const openService = async (
-  waitMilliseconds: number = SIGN_IN_RETURN_WAIT_MILLISECONDS,
+  lifetimeMilliseconds: number = SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
 ): Promise<{ service: SignInReturn["Service"]; quit: () => Promise<void> }> => {
   const scope = await Effect.runPromise(Scope.make());
   openScopes.push(scope);
   const context = await Effect.runPromise(
-    Layer.buildWithScope(makeSignInReturnLayer(waitMilliseconds), scope),
+    Layer.buildWithScope(makeSignInReturnLayer(lifetimeMilliseconds), scope),
   );
   return {
     service: Context.get(context, SignInReturn),
@@ -77,7 +78,8 @@ describe("the browser's return", () => {
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
     const body = await page.text();
-    expect(body).toContain("Signed in. You can close this tab and return to Hercule.");
+    expect(body).toContain("You can close this tab and return to Hercule.");
+    expect(body).not.toContain("Signed in");
     expect(body).not.toContain("<script");
     expect(await isListening(redirectUri)).toBe(false);
   });
@@ -97,26 +99,57 @@ describe("the browser's return", () => {
       await fetch(`${origin}/favicon.ico`),
       await fetch(`${origin}/callback/more?state=s1`),
       await fetch(`${redirectUri}?code=a`),
-      await fetch(`${redirectUri}?state=s2`),
-      await fetch(`${redirectUri}?state=s1`, { method: "POST" }),
+      await fetch(`${redirectUri}?code=a&state=s2`),
+      await fetch(`${redirectUri}?code=a&state=s1`, { method: "POST" }),
     ];
     expect(strays.map((response) => response.status)).toEqual([404, 404, 404, 404, 404, 404]);
     await Promise.all(strays.map((response) => response.text()));
     expect(ended).toBe(false);
 
-    await fetch(`${redirectUri}?state=s1`);
-    expect(await waiting).toEqual({ _tag: "received", callbackQuery: "state=s1" });
+    await fetch(`${redirectUri}?code=a&state=s1`);
+    expect(await waiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s1" });
+  });
+
+  it("answers 404 to a return that is not exactly one state and one of code and error, and goes on waiting", async () => {
+    const { service } = await openService();
+    const { listenerId, redirectUri } = await listenOn(service);
+    const waiting = waitFor(service, listenerId, "s1");
+    let ended = false;
+    void waiting.then(() => {
+      ended = true;
+    });
+
+    const malformed = [
+      "state=s1",
+      "state=s1&state=s1&code=a",
+      "state=s1&state=s2&code=a",
+      "state=s1&code=a&code=b",
+      "state=s1&code=a&error=access_denied",
+      "state=s1&error=a&error=b",
+    ];
+    for (const query of malformed) {
+      const response = await fetch(`${redirectUri}?${query}`);
+      await response.text();
+      expect(response.status, query).toBe(404);
+    }
+    expect(ended).toBe(false);
+
+    await fetch(`${redirectUri}?error=access_denied&state=s1`);
+    expect(await waiting).toEqual({
+      _tag: "received",
+      callbackQuery: "error=access_denied&state=s1",
+    });
   });
 
   it("answers 404 before any wait names the state", async () => {
     const { service } = await openService();
     const { listenerId, redirectUri } = await listenOn(service);
 
-    expect((await fetch(`${redirectUri}?state=s1`)).status).toBe(404);
+    expect((await fetch(`${redirectUri}?code=a&state=s1`)).status).toBe(404);
 
     const waiting = waitFor(service, listenerId, "s1");
-    await fetch(`${redirectUri}?state=s1`);
-    expect(await waiting).toEqual({ _tag: "received", callbackQuery: "state=s1" });
+    await fetch(`${redirectUri}?code=a&state=s1`);
+    expect(await waiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s1" });
   });
 });
 
@@ -158,8 +191,8 @@ describe("cancelling", () => {
     expect(await isListening(first.redirectUri)).toBe(false);
     expect(second.listenerId).not.toBe(first.listenerId);
     const secondWaiting = waitFor(service, second.listenerId, "s2");
-    await fetch(`${second.redirectUri}?state=s2`);
-    expect(await secondWaiting).toEqual({ _tag: "received", callbackQuery: "state=s2" });
+    await fetch(`${second.redirectUri}?code=a&state=s2`);
+    expect(await secondWaiting).toEqual({ _tag: "received", callbackQuery: "code=a&state=s2" });
   });
 
   it("is what quitting the app does to the listener", async () => {
@@ -175,11 +208,52 @@ describe("cancelling", () => {
 });
 
 describe("the time limit", () => {
+  it("closes the port when the browser does not return in time, and no one waits", async () => {
+    const { service } = await openService(50);
+    const { redirectUri } = await listenOn(service);
+    expect(await isListening(redirectUri)).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(await isListening(redirectUri)).toBe(false);
+  });
+
   it("answers timed-out when the browser does not return in time, and closes the port", async () => {
     const { service } = await openService(50);
     const { listenerId, redirectUri } = await listenOn(service);
 
     expect(await waitFor(service, listenerId, "s1")).toEqual({ _tag: "timed-out" });
+    expect(await isListening(redirectUri)).toBe(false);
+  });
+});
+
+describe("a wait that is interrupted", () => {
+  it("closes the port, because the page that waited went away", async () => {
+    const { service } = await openService();
+    const { listenerId, redirectUri } = await listenOn(service);
+    const waiting = Effect.runFork(
+      service.wait(listenerId, "https://mcp.example/authorize?state=s1"),
+    );
+    // The wait registers when the fiber first runs.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await isListening(redirectUri)).toBe(true);
+
+    await Effect.runPromise(Fiber.interrupt(waiting));
+
+    expect(await isListening(redirectUri)).toBe(false);
+  });
+});
+
+describe("ending the current listener", () => {
+  it("closes the port of the listener there is, and does nothing when there is none", async () => {
+    const { service } = await openService();
+    await Effect.runPromise(service.cancelCurrent);
+    const { listenerId, redirectUri } = await listenOn(service);
+    const waiting = waitFor(service, listenerId, "s1");
+
+    await Effect.runPromise(service.cancelCurrent);
+
+    expect(await waiting).toEqual({ _tag: "cancelled" });
     expect(await isListening(redirectUri)).toBe(false);
   });
 });

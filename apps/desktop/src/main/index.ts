@@ -49,7 +49,11 @@ import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
-import { makeSignInReturnLayer, SIGN_IN_RETURN_WAIT_MILLISECONDS } from "./sign-in-return";
+import {
+  makeSignInReturnLayer,
+  SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
+  SignInReturn,
+} from "./sign-in-return";
 import { StoredTokenLayer } from "./stored-token";
 import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
@@ -127,7 +131,7 @@ const startApp = (): void => {
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
       PickedSkillFoldersLayer,
-      makeSignInReturnLayer(SIGN_IN_RETURN_WAIT_MILLISECONDS),
+      makeSignInReturnLayer(SIGN_IN_RETURN_LIFETIME_MILLISECONDS),
     ).pipe(
       Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
@@ -144,9 +148,18 @@ const startApp = (): void => {
       runtime.runPromise(AppSettings.use((settings) => settings.readControllerUrl)),
     );
   });
-  app.on("web-contents-created", (_event, contents) =>
-    secureWebContents(contents, (effect) => runtime.runFork(effect)),
-  );
+  app.on("web-contents-created", (_event, contents) => {
+    secureWebContents(contents, (effect) => runtime.runFork(effect));
+    // A sign-in's return listener is for the page that started it. Once the
+    // page reloads, crashes or is destroyed, no one is left to use the
+    // return, so the port closes.
+    const endSignInReturn = () => runtime.runFork(SignInReturn.use((r) => r.cancelCurrent));
+    contents.once("destroyed", endSignInReturn);
+    contents.on("render-process-gone", endSignInReturn);
+    contents.on("did-start-navigation", (details) => {
+      if (details.isMainFrame && !details.isSameDocument) endSignInReturn();
+    });
+  });
   registerIpcHandlers(runtime);
 
   app.on("activate", () => runtime.runFork(MainWindow.use((window) => window.show)));

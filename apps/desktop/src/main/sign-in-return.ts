@@ -11,14 +11,18 @@
  * - It listens on 127.0.0.1 and never on another interface, on a port the
  *   system picks.
  * - There is at most one listener. Starting a listener ends the one before.
- * - The only request it answers is `GET /callback` carrying the `state` of
- *   the sign-in it waits for, so a stray request, such as a port scan or
- *   another program, can neither end the wait nor inject a result.
- * - A listener ends after the browser returned, after it was cancelled, after
- *   10 minutes, and when the app quits.
+ * - The only request it answers is `GET /callback` carrying exactly one
+ *   `state`, the one of the sign-in it waits for, and exactly one of `code`
+ *   and `error`. A stray request, such as a port scan or another program, can
+ *   neither end the wait nor inject a result, and a malformed return does not
+ *   use up the listener.
+ * - A listener ends after the browser returned, after it was cancelled, 10
+ *   minutes after it started listening (also when no one ever waits for it),
+ *   when the page that waits for it goes away, and when the app quits.
  *
- * Main reads nothing in the returning request but its `state`. The renderer
- * gets the raw query string and hands it to the controller, which checks it.
+ * Main reads nothing in the returning request but those three names. The
+ * renderer gets the raw query string and hands it to the controller, which
+ * checks it.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -29,8 +33,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SignInReturnListenOutcome, SignInReturnWaitOutcome } from "../ipc/contract";
 
-/** How long a wait lasts before it answers `timed-out`: 10 minutes. */
-export const SIGN_IN_RETURN_WAIT_MILLISECONDS = 10 * 60 * 1000;
+/** How long a listener lasts from the moment it is bound before it answers `timed-out`: 10 minutes. */
+export const SIGN_IN_RETURN_LIFETIME_MILLISECONDS = 10 * 60 * 1000;
 
 /** The renderer asked to wait for a sign-in whose authorization URL has no `state`. */
 export class AuthorizationUrlHasNoState extends Data.TaggedError("AuthorizationUrlHasNoState")<{
@@ -44,7 +48,9 @@ export class SignInReturn extends Context.Service<
     /**
      * Starts a listener on 127.0.0.1 and returns its id and its redirect URI.
      * Ends the listener before it, if any: that listener's wait answers
-     * `cancelled`. Returns `unavailable` when no port can be bound.
+     * `cancelled`. Returns `unavailable` when no port can be bound. The
+     * listener ends by itself after the time limit, whether or not `wait`
+     * is ever called.
      */
     readonly listen: Effect.Effect<SignInReturnListenOutcome>;
 
@@ -52,10 +58,11 @@ export class SignInReturn extends Context.Service<
      * Waits for the browser to return to the listener `listenerId`, for the
      * sign-in that `authorizationUrl` starts, and ends the listener when it
      * answers. Returns `received` with the raw query string of the request
-     * whose `state` matches, `timed-out` when none came in time, and
-     * `cancelled` when `cancel` or a newer `listen` ended the listener, or
-     * when no such listener exists. Fails with AuthorizationUrlHasNoState
-     * when no request could ever match.
+     * whose `state` matches, `timed-out` when none came before the listener's
+     * time limit, and `cancelled` when `cancel` or a newer `listen` ended the
+     * listener, or when no such listener exists. Interrupting the wait (the
+     * page that called it went away) ends the listener. Fails with
+     * AuthorizationUrlHasNoState when no request could ever match.
      */
     readonly wait: (
       listenerId: string,
@@ -64,19 +71,26 @@ export class SignInReturn extends Context.Service<
 
     /** Ends the listener `listenerId`, and answers its pending wait `cancelled`. Does nothing when there is no such listener. */
     readonly cancel: (listenerId: string) => Effect.Effect<void>;
+
+    /** Ends the listener there is, whichever it is, as `cancel` does. Does nothing when there is none. */
+    readonly cancelCurrent: Effect.Effect<void>;
   }
 >()("hercule/desktop/SignInReturn") {}
 
-/** The page the browser shows after it returned. It holds no script and loads nothing. */
+/**
+ * The page the browser shows after it returned. It holds no script and loads
+ * nothing, and it does not say the sign-in worked: the return may be a refusal
+ * or a code the controller then rejects.
+ */
 const RETURNED_PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="color-scheme" content="light dark">
-<title>Signed in</title>
+<title>Hercule</title>
 </head>
 <body>
-<p>Signed in. You can close this tab and return to Hercule.</p>
+<p>You can close this tab and return to Hercule.</p>
 </body>
 </html>
 `;
@@ -89,6 +103,8 @@ interface Listener {
   expectedState: string | null;
   /** Answers each pending wait. Each one removes itself when it answers. */
   readonly answerWaits: Set<(outcome: SignInReturnWaitOutcome) => void>;
+  /** Ends the listener when its time limit passes. Starts when the port is bound. */
+  timer: ReturnType<typeof setTimeout> | undefined;
   ended: boolean;
 }
 
@@ -124,10 +140,23 @@ const bindToLoopback = (server: Server): Promise<number | null> =>
   });
 
 /**
- * Builds the SignInReturn service. A wait lasts at most `waitMilliseconds`;
- * the app passes `SIGN_IN_RETURN_WAIT_MILLISECONDS`, and a test passes less.
+ * Checks that a callback query is a return that the controller can judge: one
+ * `state` that is `expectedState`, and exactly one of `code` and `error`. A
+ * name that appears twice makes the return ambiguous, so it is refused.
  */
-export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<SignInReturn> =>
+const isWellFormedReturn = (query: string, expectedState: string): boolean => {
+  const parameters = new URLSearchParams(query);
+  const states = parameters.getAll("state");
+  const outcomes = parameters.getAll("code").length + parameters.getAll("error").length;
+  return states.length === 1 && states[0] === expectedState && outcomes === 1;
+};
+
+/**
+ * Builds the SignInReturn service. A listener lasts at most `lifetimeMilliseconds`
+ * from the moment it is bound; the app passes `SIGN_IN_RETURN_LIFETIME_MILLISECONDS`,
+ * and a test passes less.
+ */
+export const makeSignInReturnLayer = (lifetimeMilliseconds: number): Layer.Layer<SignInReturn> =>
   Layer.effect(SignInReturn)(
     Effect.gen(function* () {
       let current: Listener | null = null;
@@ -136,6 +165,7 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
       const end = (listener: Listener, outcome: SignInReturnWaitOutcome): void => {
         if (listener.ended) return;
         listener.ended = true;
+        clearTimeout(listener.timer);
         if (current === listener) current = null;
         // `close` stops accepting at once. A connection that is answering
         // finishes; one that is idle goes now.
@@ -154,7 +184,7 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
           request.method === "GET" &&
           path === "/callback" &&
           listener.expectedState !== null &&
-          new URLSearchParams(query).get("state") === listener.expectedState;
+          isWellFormedReturn(query, listener.expectedState);
         if (!matches) {
           answerNotFound(response);
           return;
@@ -176,6 +206,7 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
           server: createServer((request, response) => answerRequest(listener, request, response)),
           expectedState: null,
           answerWaits: new Set(),
+          timer: undefined,
           ended: false,
         };
         current = listener;
@@ -186,6 +217,10 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
         }
         // A newer `listen` ended this listener while it was binding.
         if (listener.ended) return { _tag: "unavailable" };
+        listener.timer = setTimeout(
+          () => end(listener, { _tag: "timed-out" }),
+          lifetimeMilliseconds,
+        );
         return {
           _tag: "listening",
           listenerId: listener.id,
@@ -208,16 +243,15 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
           listener.expectedState = state;
           return yield* Effect.callback<SignInReturnWaitOutcome>((resume) => {
             const answerWait = (outcome: SignInReturnWaitOutcome) => {
-              clearTimeout(timer);
               listener.answerWaits.delete(answerWait);
               resume(Effect.succeed(outcome));
             };
-            const timer = setTimeout(() => end(listener, { _tag: "timed-out" }), waitMilliseconds);
             listener.answerWaits.add(answerWait);
-            // The renderer stopped waiting: the timer must not outlive it.
+            // The page that waits went away (it reloaded or closed), so no
+            // one is left to use the return: the port must not stay open.
             return Effect.sync(() => {
-              clearTimeout(timer);
               listener.answerWaits.delete(answerWait);
+              end(listener, { _tag: "cancelled" });
             });
           });
         });
@@ -227,12 +261,12 @@ export const makeSignInReturnLayer = (waitMilliseconds: number): Layer.Layer<Sig
           if (current !== null && current.id === listenerId) end(current, { _tag: "cancelled" });
         });
 
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          if (current !== null) end(current, { _tag: "cancelled" });
-        }),
-      );
+      const cancelCurrent = Effect.sync(() => {
+        if (current !== null) end(current, { _tag: "cancelled" });
+      });
 
-      return SignInReturn.of({ listen, wait, cancel });
+      yield* Effect.addFinalizer(() => cancelCurrent);
+
+      return SignInReturn.of({ listen, wait, cancel, cancelCurrent });
     }),
   );
