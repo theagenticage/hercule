@@ -1557,7 +1557,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
   - `hercule mcp-server delete <id>`. Purpose: "Remove an MCP server from every project and every thread that names it."
   - `hercule mcp-server check <id>`. Purpose: "List the server's tools again. It does not wait; run `hercule mcp-server read` later to see the result."
   - `hercule mcp-server set-token <id>` *(built by [#1210](https://github.com/theagenticage/hercule/issues/1210))*. Purpose: "Give a server added by address the token you pasted for it." The token is read from stdin, as every secret is (section 6.3).
-  - `hercule mcp-server sign-in <id>` *(built by [#1210](https://github.com/theagenticage/hercule/issues/1210))*. Purpose: "Start the sign-in of a server added by address, and print the address to open."
+  - `hercule mcp-server sign-in <id>` *(built by [#1210](https://github.com/theagenticage/hercule/issues/1210))*. Purpose: "Start the sign-in of a server added by address, and print the address to open." *(Amended 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* A hand-written handler runs it, as `hercule login` is, because it listens: on `127.0.0.1` for the browser's return, or with `--paste` it reads the address the browser ended on from stdin (piped: the CLI never prompts, section 6.1). It ends by printing the server.
   - `mcpServer.finishSignIn` has no command of its own: its row is `hidden: true`, with the reason that `hercule mcp-server sign-in` calls it once it has caught the redirect on loopback or read the address the user pasted.
 
 ## 3. Actor stamping
