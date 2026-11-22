@@ -875,6 +875,46 @@ describe("the liveness check", () => {
   });
 });
 
+describe("what the controller logs when a connection closes", () => {
+  it("logs no error for a runner that closes without naming a code", async () => {
+    // The controller logs through Effect's default logger, which writes to the
+    // console. The test reads what reaches it.
+    const written: string[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        written.push(args.map(String).join(" "));
+      }),
+    );
+    try {
+      await withServer(async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // `close()` with no code arrives at the controller as 1005.
+        wire.send({ _tag: "goodbye" });
+        wire.close();
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "offline",
+        );
+      });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    expect(written.filter((line) => line.includes("connection ended in an error"))).toEqual([]);
+  });
+});
+
 describe("a goodbye that is still queued when the close arrives", () => {
   /**
    * Returns one masked WebSocket frame. The mask key is all zeros, which is
