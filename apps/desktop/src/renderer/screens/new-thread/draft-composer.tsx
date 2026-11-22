@@ -1,4 +1,4 @@
-import { Suspense, type JSX, type ReactNode, type Ref } from "react";
+import type { JSX, ReactNode, Ref } from "react";
 import {
   buildComposerPlaceholder,
   formatAccessMode,
@@ -18,8 +18,7 @@ import { ComposerCard, type ComposerAttachments } from "../session/composer-fram
 import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
-import { LazyDraftPlus } from "../thread/lazy-thread-servers";
-import { PlusPlaceholder } from "../thread/plus-placeholder";
+import { PlusMenu } from "../thread/plus-menu";
 import { ThreadServersProvider } from "../thread/thread-servers";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
@@ -250,10 +249,11 @@ export function DraftComposer({
           replaceMessageRef={replaceMessageRef}
           skills={skills}
           renderPlus={(attach) => (
-            // Without its own boundary, the menu's load would suspend the draft.
-            <Suspense fallback={<PlusPlaceholder />}>
-              <LazyDraftPlus view={view} onChoose={onChoose} attach={attach} />
-            </Suspense>
+            <PlusMenu
+              target={{ kind: "draft", view, onChoose }}
+              attach={attach}
+              serversOff={null}
+            />
           )}
           start={
             offReason === null ? (

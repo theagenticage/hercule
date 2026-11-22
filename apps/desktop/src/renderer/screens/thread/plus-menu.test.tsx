@@ -6,10 +6,10 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { DraftView } from "@hercule/client-core";
 import type { PlusAttach } from "../session/composer-frame";
 import { PlusMenu } from "./plus-menu";
 import { ThreadServersContext, type ThreadServers } from "./thread-servers";
-import type { ThreadServerEdits } from "./use-thread-edits";
 
 const SERVERS: ThreadServers = {
   described: {
@@ -23,17 +23,13 @@ const SERVERS: ThreadServers = {
   setEditing: () => undefined,
 };
 
-const EDITS: ThreadServerEdits = {
-  apply: () => undefined,
-  busy: false,
-  refusal: null,
-  clearRefusal: () => undefined,
-};
+/** A Draft Thread, which no test here reads: the submenu and the picker that would edit it never load. */
+const TARGET = { kind: "draft", view: {} as DraftView, onChoose: () => undefined } as const;
 
 /** Renders the `+` menu with the servers of an open thread that has none. */
 const renderMenu = (props: { attach: PlusAttach; serversOff: string | null }) => (
   <ThreadServersContext value={SERVERS}>
-    <PlusMenu {...props} edits={EDITS} />
+    <PlusMenu {...props} target={TARGET} />
   </ThreadServersContext>
 );
 

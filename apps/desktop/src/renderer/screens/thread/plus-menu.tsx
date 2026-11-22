@@ -1,20 +1,34 @@
-import { Suspense, useEffect, useState, type JSX, type KeyboardEvent } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import { ToolsIcon } from "../../icons/tools";
 import { FileIcon } from "../../icons/file";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { PlusAttach } from "../session/composer-frame";
 import { isMenuFocusKey, moveMenuFocus } from "../move-menu-focus";
 import type { ThreadServersRow } from "@hercule/client-core/mcp-servers";
+import { PlusIcon } from "../../icons/plus";
 import { ComposerMenu } from "./composer-menu";
-import { PlusFace, describePlusLabel } from "./plus-face";
-import { LazyThreadServerPicker, LazyThreadServersMenu } from "./lazy-thread-servers";
-import { ReconnectDialog } from "./reconnect-dialog";
+import {
+  LazyReconnectDialog,
+  LazyThreadServerPicker,
+  LazyThreadServersMenu,
+} from "./lazy-thread-servers";
 import { useThreadServers } from "./thread-servers";
-import type { ThreadServerEdits } from "./use-thread-edits";
+import type { ThreadServersTarget } from "./thread-server-edits";
 
 /**
  * Renders the composer's `+`: a button that opens a menu above itself with two
- * rows (spec 17 §Design system, the `+` menu).
+ * rows (spec 17 §Design system, the `+` menu). The button and the two rows are
+ * part of the first screen, so Attach works on the first click and the red dot
+ * is drawn from the first frame. Only the submenu and the picker load, when
+ * the MCP row opens.
  *
  * - "Attach an image" does what the `+` did before, with its disabled state
  *   and the reason as its tooltip (see `PlusAttach`).
@@ -26,7 +40,8 @@ import type { ThreadServerEdits } from "./use-thread-edits";
  *   `+`.
  *
  * The thread's list and its row come from the open thread's servers (see
- * `ThreadServersProvider`), and `edits` is how a change is made. Opening the
+ * `ThreadServersProvider`), and `target` is the thread whose list the submenu
+ * and the picker edit (see `WithThreadServerEdits`). Opening the
  * MCP row or the picker tells the provider the editor is open, which is when
  * it reads the servers, and it stays open from the submenu to the picker.
  * Opening the menu for Attach alone reads nothing. The dialogs the menu
@@ -42,11 +57,11 @@ import type { ThreadServerEdits } from "./use-thread-edits";
  */
 export function PlusMenu({
   attach,
-  edits,
+  target,
   serversOff,
 }: {
   readonly attach: PlusAttach;
-  readonly edits: ThreadServerEdits;
+  readonly target: ThreadServersTarget;
   readonly serversOff: string | null;
 }): JSX.Element {
   const { described, setEditing } = useThreadServers();
@@ -55,6 +70,9 @@ export function PlusMenu({
   // Whether the submenu is open. It closes with the menu, in `onClosed`.
   const [showsServers, setShowsServers] = useState(false);
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
+  // Set by the submenu or the picker while it is drawn. The menu cannot load the edits itself, so
+  // this is how it forgets a refusal when the user closes what showed it.
+  const clearRefusalRef = useRef<(() => void) | null>(null);
   // One state for the submenu and the picker, so the handoff from one to the other never drops it.
   const editing = showsServers || picking;
   useEffect(() => {
@@ -71,10 +89,15 @@ export function PlusMenu({
         width="bare"
         disabled={false}
         triggerClassName="icon-btn plus-button"
-        triggerLabel={describePlusLabel(row)}
-        trigger={<PlusFace row={row} />}
+        triggerLabel={row.failing ? `Add (${row.words})` : "Add"}
+        trigger={
+          <>
+            <PlusIcon />
+            {row.failing && <i className="dot dot--fail plus-dot" />}
+          </>
+        }
         onClosed={() => {
-          edits.clearRefusal();
+          clearRefusalRef.current?.();
           setShowsServers(false);
         }}
       >
@@ -86,7 +109,8 @@ export function PlusMenu({
             onShowServers={() => {
               setShowsServers(true);
             }}
-            edits={edits}
+            target={target}
+            clearRefusalRef={clearRefusalRef}
             serversOff={serversOff}
             onAttach={() => {
               close();
@@ -108,21 +132,24 @@ export function PlusMenu({
         // Without their own boundary, the dialogs' load would suspend the composer behind them.
         <Suspense fallback={null}>
           <LazyThreadServerPicker
-            edits={edits}
+            target={target}
+            clearRefusalRef={clearRefusalRef}
             onClose={() => {
-              edits.clearRefusal();
+              clearRefusalRef.current?.();
               setPicking(false);
             }}
           />
         </Suspense>
       )}
       {reconnectingId !== null && (
-        <ReconnectDialog
-          connectionId={reconnectingId}
-          onClose={() => {
-            setReconnectingId(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyReconnectDialog
+            connectionId={reconnectingId}
+            onClose={() => {
+              setReconnectingId(null);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );
@@ -139,7 +166,8 @@ function PlusMenuPanels({
   row,
   showsServers,
   onShowServers,
-  edits,
+  target,
+  clearRefusalRef,
   serversOff,
   onAttach,
   onClose,
@@ -150,7 +178,8 @@ function PlusMenuPanels({
   readonly row: ThreadServersRow;
   readonly showsServers: boolean;
   readonly onShowServers: () => void;
-  readonly edits: ThreadServerEdits;
+  readonly target: ThreadServersTarget;
+  readonly clearRefusalRef: RefObject<(() => void) | null>;
   readonly serversOff: string | null;
   readonly onAttach: () => void;
   readonly onClose: () => void;
@@ -217,7 +246,8 @@ function PlusMenuPanels({
       {showsServers && (
         <Suspense fallback={<div className="pop plus-sub" aria-busy="true" />}>
           <LazyThreadServersMenu
-            edits={edits}
+            target={target}
+            clearRefusalRef={clearRefusalRef}
             onOpenPicker={onOpenPicker}
             onReconnect={onReconnect}
             onClose={onClose}

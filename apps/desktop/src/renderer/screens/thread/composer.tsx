@@ -1,4 +1,4 @@
-import { Suspense, useSyncExternalStore, type JSX, type Ref } from "react";
+import { useSyncExternalStore, type JSX, type Ref } from "react";
 import {
   useIsMutating,
   useMutation,
@@ -61,8 +61,7 @@ import { TallyPill } from "../subagents/tally-pill";
 import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
-import { LazyStartedThreadPlus } from "./lazy-thread-servers";
-import { PlusPlaceholder } from "./plus-placeholder";
+import { PlusMenu } from "./plus-menu";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 
@@ -337,16 +336,13 @@ export function ThreadComposer({
       }
       step={answer?.step}
       renderPlus={(attach) => (
-        // Without its own boundary, the menu's load would suspend the composer.
-        <Suspense fallback={<PlusPlaceholder />}>
-          <LazyStartedThreadPlus
-            session={session}
-            attach={attach}
-            serversOff={
-              answer !== null && !SERVERS_WORK_WHILE_ANSWERING ? SERVERS_OFF_WHILE_ANSWERING : null
-            }
-          />
-        </Suspense>
+        <PlusMenu
+          target={{ kind: "started", session }}
+          attach={attach}
+          serversOff={
+            answer !== null && !SERVERS_WORK_WHILE_ANSWERING ? SERVERS_OFF_WHILE_ANSWERING : null
+          }
+        />
       )}
       historyKey={answer?.historyKey ?? MESSAGE_HISTORY_KEY}
       onFieldBlur={guard.release}

@@ -116,7 +116,7 @@ export const withServers = (
   },
 });
 
-/** Returns the popover of the `+` menu, once the menu's code has loaded and replaced the plain `+`. */
+/** Returns the popover of the `+` menu, which is drawn with the composer. */
 export const findPlusPopover = async (): Promise<HTMLElement> => {
   await waitFor(() => {
     expect(document.querySelector("[popover][aria-label='Add']")).not.toBeNull();

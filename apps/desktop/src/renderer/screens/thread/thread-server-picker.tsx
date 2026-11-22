@@ -3,7 +3,7 @@
  * servers…" in the `+` menu. Loaded the first time it opens (see
  * `lazy-thread-servers.ts`).
  */
-import { useRef, type JSX } from "react";
+import { useRef, type JSX, type RefObject } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { describeThreadStartFoot, type McpServerView } from "@hercule/client-core/mcp-servers";
@@ -11,17 +11,35 @@ import { pluginsQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { ServerPickerDialog } from "../settings/mcp-servers/server-picker";
 import { useThreadServers } from "./thread-servers";
+import { WithThreadServerEdits, type ThreadServersTarget } from "./thread-server-edits";
 import type { ThreadServerEdits } from "./use-thread-edits";
 
 /**
  * Renders the picker "MCP servers of this thread" for the open thread's
  * servers, once they are read: the cache first, and the topic held while the
  * dialog is open (see `ThreadServersProvider`). Changes are made through
- * `edits`. When the servers cannot be read, a dialog says
+ * the edits of `target`. When the servers cannot be read, a dialog says
  * why instead. `onClose` is called whenever the dialog closes, and the
  * caller then unmounts it.
  */
 export default function ThreadServerPicker({
+  target,
+  clearRefusalRef,
+  onClose,
+}: {
+  readonly target: ThreadServersTarget;
+  readonly clearRefusalRef: RefObject<(() => void) | null>;
+  readonly onClose: () => void;
+}): JSX.Element {
+  return (
+    <WithThreadServerEdits target={target} clearRefusalRef={clearRefusalRef}>
+      {(edits) => <ServersPicker edits={edits} onClose={onClose} />}
+    </WithThreadServerEdits>
+  );
+}
+
+/** Renders the dialog for the thread's servers, or why they could not be read. */
+function ServersPicker({
   edits,
   onClose,
 }: {

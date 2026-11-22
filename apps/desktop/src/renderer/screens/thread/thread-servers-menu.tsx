@@ -4,7 +4,7 @@
  * "MCP servers" row opens, so the first screen holds only the menu's two rows
  * (spec 17 §What MCP servers cost). Nothing outside the lazy file may import it.
  */
-import { useState, type JSX } from "react";
+import { useState, type JSX, type RefObject } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
@@ -20,6 +20,7 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import { PluginMark } from "../../marks/plugin-mark";
 import { ServerName, ServerSwitch } from "../settings/mcp-servers/server-parts";
 import { useThreadServers } from "./thread-servers";
+import { WithThreadServerEdits, type ThreadServersTarget } from "./thread-server-edits";
 import type { ThreadServerEdits } from "./use-thread-edits";
 import "./thread-servers.css";
 
@@ -27,11 +28,39 @@ import "./thread-servers.css";
  * Renders the submenu "Servers of this thread" for the open thread's servers:
  * they are read when it opens (the cache first), and while it is open the
  * `mcpServer` topic is held (see `ThreadServersProvider`). Changes are made
- * through `edits`. `onOpenPicker` and `onReconnect` are called with
+ * through the edits of `target`. `onOpenPicker` and `onReconnect` are called with
  * the menu still open: the caller closes it and opens the dialog. `onClose`
  * closes the menu, for the link to Settings.
  */
 export default function ThreadServersMenu({
+  target,
+  clearRefusalRef,
+  onOpenPicker,
+  onReconnect,
+  onClose,
+}: {
+  readonly target: ThreadServersTarget;
+  readonly clearRefusalRef: RefObject<(() => void) | null>;
+  readonly onOpenPicker: () => void;
+  readonly onReconnect: (connectionId: string) => void;
+  readonly onClose: () => void;
+}): JSX.Element {
+  return (
+    <WithThreadServerEdits target={target} clearRefusalRef={clearRefusalRef}>
+      {(edits) => (
+        <ServersOfThread
+          edits={edits}
+          onOpenPicker={onOpenPicker}
+          onReconnect={onReconnect}
+          onClose={onClose}
+        />
+      )}
+    </WithThreadServerEdits>
+  );
+}
+
+/** Renders the submenu's panel: a note while the servers are read, the rows after. */
+function ServersOfThread({
   edits,
   onOpenPicker,
   onReconnect,

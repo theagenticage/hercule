@@ -2,8 +2,8 @@
  * How a change to a thread's list of MCP servers is made: a started thread
  * writes `session.update` at once, a Draft Thread keeps its list with its
  * other unsent picks. What the thread knows of its servers is
- * `ThreadServersProvider`'s; this file loads with the `+` menu, never with the
- * first screen.
+ * `ThreadServersProvider`'s; this file loads with the submenu and the picker,
+ * never with the first screen.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";

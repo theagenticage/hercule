@@ -7,10 +7,10 @@
  * the menu, answer mode, and what the thread reads.
  *
  * jsdom has no popover API, so a test sends the `toggle` event the browser
- * sends when the popover opens. The menu and its submenu load the first time
- * they are needed, so the tests wait for them.
+ * sends when the popover opens. The submenu loads the first time
+ * it is needed, so the tests wait for it.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Session } from "@hercule/contract";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -708,5 +708,78 @@ describe("the + menu on a thread that cannot be resumed", () => {
     await waitFor(() => {
       expect(readListWrites(calls, exited.session.id)).toHaveLength(1);
     });
+  });
+});
+
+describe("the + before the code of the servers' submenu has loaded", () => {
+  it("draws the + and the count on its MCP row with the composer, and no submenu", async () => {
+    const thread = threadWith([SENTRY_WORK, LINEAR]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_WORK, LINEAR],
+    });
+
+    // No wait for a chunk: the button and its words are part of the composer.
+    const popover = document.querySelector<HTMLElement>("[popover][aria-label='Add']")!;
+    expect(screen.getByRole("button", { name: "Add" })).not.toBeNull();
+    toggleMenu(popover, "open");
+
+    expect(readServersRowWords(popover)).toBe("2");
+    expect(
+      screen.queryByRole("group", { name: "Servers of this thread", hidden: true }),
+    ).toBeNull();
+  });
+
+  it("puts the red dot on the + as soon as the servers say one needs sign-in", async () => {
+    const thread = threadWith([SENTRY_WORK]);
+    await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [SENTRY_SIGNED_OUT],
+    });
+
+    expect(screen.getByRole("button", { name: "Add (1 needs sign-in)" })).not.toBeNull();
+    expect(document.querySelector(".plus-dot")).not.toBeNull();
+  });
+
+  it.each([
+    ["a Draft Thread", `/?project=${WEBSHOP.id}`],
+    ["a started thread", `/threads/${THREAD_FIXTURES.finished.session.id}`],
+  ])("attaches on the first click on %s, loading nothing of the servers", async (_name, path) => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click");
+    try {
+      const { calls } = await openComposerApp(path, { servers: [SENTRY_WORK] });
+      const popover = document.querySelector<HTMLElement>("[popover][aria-label='Add']")!;
+      toggleMenu(popover, "open");
+
+      fireEvent.click(
+        within(popover).getByRole("menuitem", { name: "Attach an image", hidden: true }),
+      );
+
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(findCalls(calls, "GET", SERVER_LIST)).toHaveLength(0);
+      expect(
+        screen.queryByRole("group", { name: "Servers of this thread", hidden: true }),
+      ).toBeNull();
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it("keeps the focus on the same + while the submenu loads and draws", async () => {
+    const thread = threadWith([LINEAR]);
+    await openComposerApp(`/threads/${thread.session.id}`, { thread, servers: [LINEAR] });
+    const trigger = screen.getByRole("button", { name: "Add" });
+    trigger.focus();
+    const popover = document.querySelector<HTMLElement>("[popover][aria-label='Add']")!;
+    toggleMenu(popover, "open");
+
+    fireEvent.click(within(popover).getByRole("menuitem", { name: /^MCP servers/, hidden: true }));
+    await within(popover).findByRole("group", { name: "Servers of this thread", hidden: true });
+    await waitFor(() => {
+      expect(popover.querySelector(".plus-row")).not.toBeNull();
+    });
+
+    expect(screen.getByRole("button", { name: "Add" })).toBe(trigger);
+    expect(document.activeElement).toBe(trigger);
   });
 });
