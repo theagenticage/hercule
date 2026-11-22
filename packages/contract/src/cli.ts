@@ -4584,7 +4584,7 @@ export const CLI = {
                 flag: "token",
                 stdin: true,
                 secret: true,
-                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
+                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 printable characters, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
               },
             },
           },
@@ -4687,12 +4687,12 @@ export const CLI = {
         secret: true,
         required: true,
         flag: "token",
-        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces.",
+        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 printable characters, with no `Bearer ` in front and no spaces.",
       },
     },
     errors: {
       validation:
-        "the token is not a bearer token: it is shorter than 8 characters, holds characters other than letters, digits and - . _ ~ + /, or has `Bearer ` in front of it or a space in it",
+        "the token is not usable: it is shorter than 8 characters, holds a character that is not printable ASCII, or has `Bearer ` in front of it or a space in it",
       invalid_state:
         "the server is a plugin server, which is reached with its Connection: reconnect that Connection with `hercule connection set-credentials` or in Settings > Connections",
     },
