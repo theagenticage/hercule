@@ -145,15 +145,16 @@ const readOfferedTools = (requests: ReadonlyArray<ScriptedModelRequest>): Readon
 /**
  * Returns the name the model is shown for the gateway's tool `wanted`. Codex
  * shows a gateway name as it is, except that it turns `-` into `_` and then
- * adds a suffix of its own to names that are alike after that. A test that
- * needs such a tool ends the tool's description with its gateway name in
- * square brackets, which is how the stand-in model finds it. Returns
- * `undefined` when no tool shown matches.
+ * adds a suffix of its own to names that are alike after that, so which tool
+ * holds a spelling is Codex's choice and not the gateway's. A test that needs
+ * such a tool ends the tool's description with its gateway name in square
+ * brackets, and the tool is found by that. A tool without such a description
+ * is found by its name as shown. Returns `undefined` when no tool shown matches.
  */
 const findShownName = (shown: ReadonlyArray<ShownTool>, wanted: string): string | undefined =>
   (
-    shown.find((tool) => tool.name === wanted) ??
-    shown.find((tool) => tool.description?.endsWith(`[${wanted}]`))
+    shown.find((tool) => tool.description?.endsWith(`[${wanted}]`)) ??
+    shown.find((tool) => tool.name === wanted)
   )?.name;
 
 /**
