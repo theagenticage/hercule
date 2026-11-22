@@ -133,12 +133,9 @@ const readToolResults = (model: FakeModelServer): ReadonlyArray<string> =>
     .map(readRequestMessageText);
 
 /**
- * Builds a script that calls one gateway tool by the gateway's own name. pi
- * shows the model a tool under its own spelling, which is not the gateway's
- * name: it turns `-` into `_` and adds a suffix of its own to names that are
- * alike after that. So the tools of such a test carry their gateway name at
- * the end of their description, in square brackets, and the script finds a
- * tool by that.
+ * Builds a script that calls one gateway tool by the gateway's own name. The
+ * tools of such a test carry their gateway name at the end of their
+ * description, in square brackets, and the script finds a tool by that.
  *
  * The prompt `call <name>` makes the model call the tool whose description
  * ends with `[<name>]`: directly when pi has declared it already, and else
@@ -458,7 +455,7 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
   );
 
   it(
-    "asks about a call on the call's own item, and shows the gateway's name for the call once it has run",
+    "asks about a call on the call's own item, and shows the gateway's name for the call",
     async () => {
       const owners: ReadonlyArray<readonly [string, string]> = [
         [`${SERVER_NAME}__search_pages`, "search_pages"],
@@ -497,7 +494,7 @@ describe.skipIf(piBinary === undefined)("the real pi on the MCP Gateway", () => 
 
             await running.answer(opened, "allow");
 
-            // The result of the call carries the gateway's own name, and the item shows it.
+            // The item shows the gateway's name, from its start to its end.
             expect(
               filterByTag(running.seen, "item.completed").find(
                 (event) => event.itemId === started.itemId,

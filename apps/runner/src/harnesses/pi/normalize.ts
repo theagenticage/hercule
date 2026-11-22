@@ -14,7 +14,6 @@
  * state keeps what was already sent and reports only the new part.
  */
 import type * as Schema from "effect/Schema";
-import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type {
   ContextCompactionDetail,
   ItemKind,
@@ -31,7 +30,7 @@ import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize
 import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { buildEditedPathFields } from "../edited-paths";
-import { splitGatewayToolName, splitPrefixedGatewayToolName } from "../gateway-tool-name";
+import { splitPrefixedGatewayToolName } from "../gateway-tool-name";
 import { requireText, truncateFact, truncateMessage } from "../text";
 import { buildUnknownItemLabel } from "../message-reporting";
 import { resolvePiPath } from "./edited-path";
@@ -522,9 +521,7 @@ export const readFactArg = (
  *   as pi reads it (see `resolvePiPath`). When the path is missing or
  *   longer than the fact bound, it shows the tool's name instead.
  * - A tool of the MCP Gateway shows the MCP Server and the tool, as the other
- *   harnesses do. At the start the tool is named as pi names it, which can
- *   differ from the gateway's name; the completed item corrects it
- *   (`readGatewayToolDetail`). Its arguments belong to an outside server, so a `command`
+ *   harnesses do. Its arguments belong to an outside server, so a `command`
  *   or `path` among them is not shown as a shell command or a workspace file.
  * - Any other tool shows its command, else its file path, else its name.
  */
@@ -568,26 +565,6 @@ const buildToolDetail = (
   if (typeof command === "string") return { command: truncateMessage(command) };
   const path = readFactArg(args, "path");
   return path === undefined ? { name: truncateFact(toolName) } : { path };
-};
-
-/**
- * Reads, from the end of a call to the MCP Gateway, the MCP Server and the
- * tool as the gateway names them. pi shows the model its own spelling of the
- * tool's name (a `-` becomes `_`, and a suffix of its own tells apart names
- * that read alike) and that is the name on the call's start, but the result's
- * `details` hold the gateway's own `{ server: "tools", tool: "<server>__<tool>" }`.
- * Returns `undefined` for a tool that is not the gateway's, and when the result
- * has no such details, as a call that was refused before it ran.
- */
-const readGatewayToolDetail = (toolName: string, result: unknown): Schema.Json | undefined => {
-  if (splitPrefixedGatewayToolName(toolName) === undefined) return undefined;
-  const details = isRecord(result) ? result["details"] : undefined;
-  if (!isRecord(details) || details["server"] !== MCP_GATEWAY_ENTRY_NAME) return undefined;
-  const tool =
-    typeof details["tool"] === "string" ? splitGatewayToolName(details["tool"]) : undefined;
-  return tool === undefined
-    ? undefined
-    : { name: truncateFact(tool.tool), server: truncateFact(tool.server), kind: "mcp" };
 };
 
 /** Returns a tool's output so far as one string. */
@@ -713,10 +690,6 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEve
     if (event.isError === true) state.refusedAnswers += 1;
   }
   const refused = state.declined.delete(callId);
-  // The result of a gateway call names the tool as the gateway does, and
-  // that replaces the name pi gave the call when it started.
-  const gatewayDetail = readGatewayToolDetail(item.toolName, event.result);
-  const completing = gatewayDetail === undefined ? item : { ...item, detail: gatewayDetail };
   return [
     {
       _tag: "item.completed",
@@ -726,7 +699,7 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEve
       itemId: item.itemId,
       kind: item.kind,
       status: refused ? "declined" : event.isError === true ? "failed" : "completed",
-      ...buildCompletedDetail(completing),
+      ...buildCompletedDetail(item),
     },
   ];
 };

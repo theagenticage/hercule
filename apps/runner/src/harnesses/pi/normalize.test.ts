@@ -306,54 +306,6 @@ describe("normalizing a call to the MCP Gateway on a pi turn", () => {
     expect(completed?.detail).toEqual(SHOWN);
   });
 
-  it("shows the gateway's own name on the completed item, where pi showed the model its own spelling", () => {
-    // pi can show a spelling of its own, with a suffix, for names that read alike to it. The gateway's names
-    // never read alike to pi, so this is a backstop: the item still shows the name the gateway sent.
-    const piName = "mcp__tools__sentry__search_pages_a7feafcf";
-    const events = normalizeFromStart([
-      { type: "agent_start" },
-      buildToolStart(piName, { query: "a" }),
-      {
-        ...buildToolEnd(false),
-        toolName: piName,
-        result: {
-          content: [{ type: "text", text: "ok" }],
-          details: { server: "tools", tool: "sentry__search_pages_f33805" },
-        },
-      },
-    ]);
-
-    // The start frame carries only pi's spelling.
-    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({
-      name: "search_pages_a7feafcf",
-      server: "sentry",
-      kind: "mcp",
-    });
-    expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
-      name: "search_pages_f33805",
-      server: "sentry",
-      kind: "mcp",
-    });
-  });
-
-  it("keeps pi's spelling when the result has no details, as a call refused before it ran", () => {
-    const events = normalizeFromStart([
-      { type: "agent_start" },
-      buildToolStart("mcp__tools__sentry__search_pages_a7feafcf", {}),
-      {
-        ...buildToolEnd(true),
-        toolName: "mcp__tools__sentry__search_pages_a7feafcf",
-        result: { content: [{ type: "text", text: "denied" }] },
-      },
-    ]);
-
-    expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
-      name: "search_pages_a7feafcf",
-      server: "sentry",
-      kind: "mcp",
-    });
-  });
-
   it("reports a gateway call whose result is an error as a failed item", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
