@@ -2736,6 +2736,9 @@ describe("the request kind for each tool", () => {
     ["Grep", { pattern: "todo", path: "/work" }, "file_read_approval", ["/work"]],
     ["LS", { path: "/work" }, "file_read_approval", ["/work"]],
     ["WebFetch", { url: "https://example.com" }, "tool_approval", []],
+    // The card names a gateway tool as the model sees it, hash included.
+    ["mcp__tools__notion__search_pages_f33805", {}, "tool_approval", []],
+    ["mcp__tools__notion__search_pages_52ac82", {}, "tool_approval", []],
   ];
 
   for (const [toolName, input, kind, paths] of KINDS) {

@@ -20,7 +20,9 @@ import * as Stream from "effect/Stream";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { McpSchema } from "effect/ai";
+import { absorbFailures } from "../absorbing";
 import type { SessionActor } from "../actor";
+import { SessionService } from "../sessions";
 import { makeCallPolicy } from "./call-policy";
 import {
   buildDiscoverResult,
@@ -51,10 +53,12 @@ import {
   type RequestId,
   type RequestRefusal,
 } from "./protocol";
+import { buildLeftOutToolsWarning, claimLeftOutWarnings } from "./left-out-tools";
 import { makeFreshReads } from "./reads";
 import { buildTooManyCallsRefusal } from "./refusals";
 import { buildServedInstructions, buildToolDefinition, projectTools } from "./served";
 import { buildServerSentBody } from "./streams";
+import type { ToolKey } from "./tool-names";
 import {
   cancelCall,
   hasRoomForListenStream,
@@ -63,6 +67,7 @@ import {
   makeTokenStates,
   type McpCaller,
   type McpSession,
+  recordOffer,
   type TokenState,
 } from "./tokens";
 
@@ -201,11 +206,33 @@ const make = Effect.gen(function* () {
   const reads = yield* makeFreshReads;
   const tokenStates = yield* makeTokenStates;
   const callPolicy = yield* makeCallPolicy;
+  const sessionService = yield* SessionService;
 
   /** Reads the instructions the session gets. They need the served servers but no tool names. */
   const readInstructions = (actor: SessionActor): Effect.Effect<string> =>
     Effect.map(reads.readServedAvailability(actor), (served) =>
       buildServedInstructions(served, actor),
+    );
+
+  /**
+   * Tells the Thread about the servers whose tools are left out of a list,
+   * once per token and server until the set of left-out tools changes. A
+   * failed write is logged and changes nothing for the agent.
+   */
+  const warnThreadOfLeftOutTools = (
+    state: TokenState,
+    leftOut: ReadonlyArray<ToolKey>,
+  ): Effect.Effect<void> =>
+    absorbFailures(
+      "Writing the warning about tools that are not offered failed",
+      state.warnings.writing.withPermits(1)(
+        Effect.forEach(
+          claimLeftOutWarnings(state.warnings.leftOutTold, leftOut),
+          (server) =>
+            sessionService.writeRuntimeWarning(state.sessionId, buildLeftOutToolsWarning(server)),
+          { discard: true },
+        ),
+      ),
     );
 
   const initialize = (
@@ -223,20 +250,31 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** Answers `tools/list` and records the names it sends: only these names may be called. */
-  const respondToolsList = (era: Era, state: TokenState, actor: SessionActor, id: RequestId) =>
+  /**
+   * Answers `tools/list` and records, for the client that asked, the names it
+   * offers and what each was offered for: only these names may be called by
+   * that client, and a refusal names what the name was offered for.
+   */
+  const respondToolsList = (
+    era: Era,
+    state: TokenState,
+    session: McpSession | undefined,
+    actor: SessionActor,
+    id: RequestId,
+  ) =>
     Effect.gen(function* () {
-      const { tools, leftOut } = projectTools(yield* reads.readServed(actor), state.names);
-      // Nothing waits between naming the tools and recording the names, so two
-      // lists at once cannot give one name to two tools.
-      state.names.record(tools);
-      // One line per list, with a count and no tool name: the names come from
-      // outside servers and one list can leave out many tools.
+      const { tools, leftOut } = projectTools(yield* reads.readServed(actor));
+      for (const { name, serverId, serverName, tool } of tools) {
+        recordOffer(state, session, name, { serverId, serverName, tool });
+      }
+      // The log gets one line per list, with a count and no tool name: the
+      // names come from outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
         yield* Effect.logWarning(
-          `MCP gateway: ${leftOut.length} tool(s) got no unique name and are not offered to session ${actor.sessionId}`,
+          `MCP gateway: ${leftOut.length} tool(s) have a name that is not valid text or is another tool's name on their server, and are not offered to session ${actor.sessionId}`,
         );
       }
+      yield* warnThreadOfLeftOutTools(state, leftOut);
       return respondJson(
         buildRpcResult(id, buildToolsListResult(era, tools.map(buildToolDefinition))),
       );
@@ -269,7 +307,10 @@ const make = Effect.gen(function* () {
         state,
         session,
         id,
-        callPolicy.runToolCall(state, actor, { name, arguments: args as JsonObject | undefined }),
+        callPolicy.runToolCall(state, session, actor, {
+          name,
+          arguments: args as JsonObject | undefined,
+        }),
       );
       if (Option.isNone(ran)) {
         const refused = yield* callPolicy.refuseCall(
@@ -355,7 +396,7 @@ const make = Effect.gen(function* () {
             : respondJson(buildMethodNotFound(id, method)),
         );
       case "tools/list":
-        return respondToolsList(era, state, caller.actor, id);
+        return respondToolsList(era, state, session, caller.actor, id);
       case "tools/call":
         return respondToolsCall(era, state, caller.actor, id, params, session);
       case "server/discover":

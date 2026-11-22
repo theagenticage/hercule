@@ -253,7 +253,7 @@ const answerGetState = (command: ReadonlyArray<string>): Record<string, unknown>
 /** Builds pi's response to a command it rejects, with the given error message. */
 export const buildRefusal = (error: string): Record<string, unknown> => ({ success: false, error });
 
-export const FAKE_PI_VERSION = "0.85.1";
+export const FAKE_PI_VERSION = "1.3.0";
 
 /** Returns what `pi auth check --provider zai --json` prints in pi 0.85.1, with and without a key. */
 const answerAuthCheck = (env: Readonly<Record<string, string | undefined>>): Ran =>
@@ -497,15 +497,16 @@ export const listSentCommands = (
   sent.filter((one) => one.type === type).map((one) => one.command);
 
 /**
- * The fields of a session's context a test can set: its edit marks, its
- * library skills folder, its repository skills folders, its model argument
- * and its catalog models. None is set by default, and the default model
- * argument is Z.ai's.
+ * The fields of a session's context a test can set: its edit marks, its MCP
+ * servers, its library skills folder, its repository skills folders, its
+ * model argument and its catalog models. None is set by default (the MCP
+ * servers are an empty list), and the default model argument is Z.ai's.
  */
 type SessionContextOverrides = Partial<
   Pick<
     SessionStartContext,
     | "editMarks"
+    | "mcpServers"
     | "librarySkillsFolder"
     | "repositorySkillsFolders"
     | "modelArgument"

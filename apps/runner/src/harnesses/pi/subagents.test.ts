@@ -17,12 +17,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, HarnessEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import type { EditMarks } from "../index";
 import {
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -257,6 +259,27 @@ describe("how a subagent's pi is started", () => {
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBeDefined();
   });
 
+  it("gets the session's MCP Gateway, as the session's own pi does", async () => {
+    const gateway = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:7421/mcp" };
+    const run = await startBusySession({}, SPEC, {}, { mcpServers: [gateway] });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(child.command).toEqual(expect.arrayContaining(["builtin:mcp", "builtin:tool-search"]));
+    expect(child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(gateway.url);
+  });
+
+  it("gets no MCP when the session has none, and no address from the runner's own environment", async () => {
+    const run = await startBusySession({}, SPEC, {
+      [MCP_GATEWAY_URL_VARIABLE]: "http://elsewhere/mcp",
+    });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(child.command).not.toContain("builtin:mcp");
+    expect(child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
+  });
+
   it("loads the session skills folder, as the session's own pi does", async () => {
     const librarySkillsFolder = "/runner/session-skills/0199e0e7";
     const run = await startBusySession({}, SPEC, {}, { librarySkillsFolder });
@@ -351,6 +374,13 @@ describe("how a subagent's pi is started", () => {
     const copy = join(agentFolderOf(subagent.child), `extension-${subagent.subagentId}.ts`);
     const rootCopy = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
 
+    // Each agent's copy is in its own folder, so a copy the parent rewrites
+    // is never one the subagent loads.
+    expect(agentFolderOf(subagent.child)).not.toBe(agentFolderOf(run.child));
+    expect(existsSync(join(agentFolderOf(run.child), `extension-${subagent.subagentId}.ts`))).toBe(
+      false,
+    );
+    expect(existsSync(join(agentFolderOf(subagent.child), `extension-${SESSION}.ts`))).toBe(false);
     const readExtensionArg = (command: ReadonlyArray<string>) => command[command.indexOf("-e") + 1];
     expect(readExtensionArg(subagent.child.command)).toBe(copy);
     expect(subagent.child.env[AGENT_FILE_VARIABLE]).toBe(copy);
@@ -798,6 +828,54 @@ describe("a session that ends while a subagent runs", () => {
     await waitUntil("ended the session", () => filterByTag(run.seen, "session.exited").length > 0);
     expectUsageWithoutTurn(run, subagent);
     expect(subagent.child.stdinClosed()).toBe(true);
+  });
+});
+
+describe("the private agent folders of a session's pi processes", () => {
+  it("removes a subagent's folder when its own pi exits, and keeps its parent's", async () => {
+    const run = await startBusySession();
+    const subagent = await askForSubagent(run, run.child);
+    const subagentFolder = agentFolderOf(subagent.child);
+    const parentFolder = agentFolderOf(run.child);
+
+    subagent.child.crash();
+
+    await waitUntil("removed the subagent's folder", () => !existsSync(subagentFolder));
+    expect(existsSync(parentFolder)).toBe(true);
+  });
+
+  it("removes the session's folder when its own pi exits, and keeps the folder of a subagent that still runs", async () => {
+    const run = await startBusySession({ lingers: true });
+    const subagent = await askForSubagent(run, run.child);
+    const subagentFolder = agentFolderOf(subagent.child);
+    const parentFolder = agentFolderOf(run.child);
+
+    run.child.crash();
+
+    await waitUntil("removed the session's folder", () => !existsSync(parentFolder));
+    expect(existsSync(subagentFolder)).toBe(true);
+
+    subagent.child.crash();
+    await waitUntil("removed the subagent's folder", () => !existsSync(subagentFolder));
+  });
+
+  it("removes the subagent's folder when its pi cannot be started", async () => {
+    const folders: Array<string> = [];
+    const run = await startBusySession({
+      atSpawn: (env) => {
+        folders.push(env["PI_CODING_AGENT_DIR"]!);
+        // The session's own pi starts. Every spawn after it fails.
+        if (folders.length > 1) throw new Error("spawn: permission denied");
+      },
+    });
+
+    pushSubagentCall(run.child, "call_doomed", DESCRIPTION);
+    const refusal = await awaitRefusal(run.child, "call_doomed");
+
+    expect(refusal).toContain("The subagent could not start");
+    expect(folders).toHaveLength(2);
+    expect(existsSync(folders[1]!)).toBe(false);
+    expect(existsSync(folders[0]!)).toBe(true);
   });
 });
 

@@ -123,7 +123,7 @@ const SHIPPED = [
           auto: "unsupported",
           "full-access": "native",
         },
-        mcpPassthrough: "unsupported",
+        mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
       },

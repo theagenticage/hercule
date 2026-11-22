@@ -4,6 +4,7 @@
  * map `claimWarning` records into.
  */
 import type { McpServerWarningReason } from "@hercule/protocol";
+import type { OfferedTool } from "./tool-names";
 
 /** Why a call was refused: a reason the Thread can name, or a tool name no server of the session has. */
 export type RefusalReason = McpServerWarningReason | "unknown-tool";
@@ -57,17 +58,18 @@ export const buildUnknownToolRefusal = (toolName: string): Refusal => ({
     "ask the user to check which MCP servers are in this Thread's list.",
 });
 
-/** The server the name belongs to is not in the session's list any more. */
-export const buildNotInListRefusal = (
-  server: { readonly id: string; readonly name: string } | undefined,
-  serverName: string,
-  tool: string,
-): Refusal => ({
+/**
+ * The server the name was offered for is not in the session's list any more.
+ * The refusal names that server and tool, from what the name was offered for,
+ * so it stays true when the server was deleted or another server of the same
+ * name has taken its place.
+ */
+export const buildNotInListRefusal = (offered: OfferedTool): Refusal => ({
   reason: "not-in-list",
-  ...(server === undefined ? {} : { server }),
-  tool,
+  server: { id: offered.serverId, name: offered.serverName },
+  tool: offered.tool,
   message:
-    `The MCP server "${serverName}" is not in this Thread's list any more. ` +
+    `The MCP server "${offered.serverName}" is not in this Thread's list any more. ` +
     "The user may have removed it from the Thread or deleted it. " +
     "If you still need it, ask the user to check which MCP servers this Thread has.",
 });
@@ -120,3 +122,16 @@ export const claimWarning = (
   seen.set(key, { turnId, atMs: nowMs });
   return true;
 };
+
+/**
+ * The server of the name is in the session's list, but none of the tools it
+ * lists now has the called name: the tool is gone, or two tools of the server
+ * share the name and are left out of every list. The refusal names what the
+ * name was offered for.
+ */
+export const buildToolNotListedRefusal = (offered: OfferedTool): Refusal => ({
+  reason: "error",
+  server: { id: offered.serverId, name: offered.serverName },
+  tool: offered.tool,
+  message: `The MCP server "${offered.serverName}" no longer offers this tool.`,
+});

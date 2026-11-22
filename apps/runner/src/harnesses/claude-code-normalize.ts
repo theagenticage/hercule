@@ -35,7 +35,6 @@ import type {
   UnknownItemDetail,
   Usage,
 } from "@hercule/protocol";
-import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import {
   buildSubagentRegistry,
   cleanSubagentId,
@@ -52,7 +51,7 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
-import { splitGatewayToolName } from "./gateway-tool-name";
+import { splitPrefixedGatewayToolName } from "./gateway-tool-name";
 import {
   convertAdvisorResult,
   convertBashCodeExecutionResult,
@@ -403,23 +402,6 @@ export const classifyTool = (name: string): ItemKind =>
 
 /** Checks whether a tool is an MCP tool. The name prefix is the only way to tell. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
-
-/** What Claude Code puts in front of the name of every tool of the MCP Gateway's entry, `tools`. */
-const GATEWAY_TOOL_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
-
-/**
- * Splits the name Claude Code gives a gateway tool into the MCP Server it
- * belongs to and the tool's own name: `mcp__tools__sentry__search_issues`
- * gives the server `sentry` and the tool `search_issues`. Returns `undefined`
- * for any other tool, and for a name with no server part, which the gateway
- * never builds.
- */
-const splitPrefixedGatewayToolName = (
-  name: string,
-): { readonly server: string; readonly tool: string } | undefined =>
-  name.startsWith(GATEWAY_TOOL_PREFIX)
-    ? splitGatewayToolName(name.slice(GATEWAY_TOOL_PREFIX.length))
-    : undefined;
 
 /**
  * The tools that start a subagent. Recent CLIs name the tool `Agent` in

@@ -15,12 +15,14 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AccessMode } from "@hercule/protocol";
+import { MCP_GATEWAY_ENTRY_NAME, type AccessMode } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -92,6 +94,59 @@ describe("where the extension reads the access mode from", () => {
   });
 });
 
+describe("the MCP Gateway registration", () => {
+  const GATEWAY_URL = "http://127.0.0.1:7421/mcp";
+
+  it("registers the gateway with the address the adapter set, the token as a reference pi expands itself, and deferred tools", () => {
+    const { mcpServers } = loadExtension({ [MCP_GATEWAY_URL_VARIABLE]: GATEWAY_URL });
+
+    // The header holds the text `${HERCULE_TOKEN}`, not the token: pi reads
+    // the variable when it connects, so the token is in no file or argument.
+    expect(mcpServers).toEqual([
+      {
+        name: MCP_GATEWAY_ENTRY_NAME,
+        config: {
+          url: GATEWAY_URL,
+          headers: { Authorization: `Bearer \${${SESSION_TOKEN_VARIABLE}}` },
+          exposure: "deferred",
+        },
+      },
+    ]);
+  });
+
+  it("registers nothing when the adapter set no address", () => {
+    expect(loadExtension({}).mcpServers).toEqual([]);
+  });
+
+  describe("when pi refuses the registration", () => {
+    const env = { [MCP_GATEWAY_URL_VARIABLE]: GATEWAY_URL };
+    const refusal = new Error('MCP server name "tools" is already registered');
+
+    it("keeps the approval hook, which pi would drop with the whole extension if the factory threw", () => {
+      const { handlers } = loadExtension(env, refusal);
+
+      expect(handlers.has("tool_call")).toBe(true);
+    });
+
+    it("warns the user once the session has started, with pi's own reason", async () => {
+      const { handlers } = loadExtension(env, refusal);
+      const notices: Array<{ message: string; level: unknown }> = [];
+
+      const start = handlers.get("session_start");
+      expect(start, "the extension registered no session_start handler").toBeDefined();
+      await start!(
+        { type: "session_start", reason: "startup" },
+        { ui: { notify: (message: string, level: unknown) => notices.push({ message, level }) } },
+      );
+
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.level).toBe("warning");
+      expect(notices[0]!.message).toContain("this thread has no MCP tools");
+      expect(notices[0]!.message).toContain(refusal.message);
+    });
+  });
+});
+
 /** An output schema like the one an Agent gives a session (spec 06 section 7). */
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -145,17 +200,27 @@ const createBashToolDefinition = (cwd: string, options: Record<string, unknown>)
 /** A `pi.on` handler the extension registered: pi calls it with the event and the context. */
 type EventHandler = (event: unknown, ctx: unknown) => Promise<unknown>;
 
+/** An MCP server the extension registered with pi, as pi's `registerMcpServer` receives it. */
+interface RegisteredMcpServer {
+  readonly name: string;
+  readonly config: unknown;
+}
+
 /**
  * Loads the extension the way pi loads it, and returns every tool it
- * registered and every event handler, by event name. It evaluates the source
- * and runs the default export against a fake pi that records registrations.
- * The environment is the only input, because the adapter tells the extension
- * about the session through the environment.
+ * registered, every MCP server and every event handler, by event name. It
+ * evaluates the source and runs the default export against a fake pi that
+ * records registrations. The environment is the only input, because the
+ * adapter tells the extension about the session through the environment.
+ * `mcpRegistrationError` makes pi's `registerMcpServer` throw it, as pi does
+ * for an invalid name or config.
  */
 const loadExtension = (
   env: Readonly<Record<string, string | undefined>>,
+  mcpRegistrationError?: Error,
 ): {
   readonly tools: ReadonlyArray<RegisteredTool>;
+  readonly mcpServers: ReadonlyArray<RegisteredMcpServer>;
   readonly handlers: ReadonlyMap<string, EventHandler>;
 } => {
   const body = EXTENSION_SOURCE.split("\n")
@@ -181,6 +246,7 @@ const loadExtension = (
     join,
   ) as (pi: unknown) => void;
   const tools: Array<RegisteredTool> = [];
+  const mcpServers: Array<RegisteredMcpServer> = [];
   const handlers = new Map<string, EventHandler>();
   load({
     on: (event: string, handler: EventHandler) => {
@@ -189,8 +255,12 @@ const loadExtension = (
     registerTool: (tool: RegisteredTool) => {
       tools.push(tool);
     },
+    registerMcpServer: (name: string, config: unknown) => {
+      if (mcpRegistrationError !== undefined) throw mcpRegistrationError;
+      mcpServers.push({ name, config });
+    },
   });
-  return { tools, handlers };
+  return { tools, mcpServers, handlers };
 };
 
 /** Loads the extension, and returns every tool it registered. */

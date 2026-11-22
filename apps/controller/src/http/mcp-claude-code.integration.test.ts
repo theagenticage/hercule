@@ -31,12 +31,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Plugin } from "@hercule/plugin-host";
 import { buildMcpServerEntries } from "../../../runner/src/harnesses/claude-code";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createProfile, spawnThreadUnder, type Arranged } from "../sessions/testing";
 import {
-  createServers,
   eventually,
   readServer,
   startFakeUpstream,
@@ -46,19 +42,16 @@ import {
   countListChanged,
   describeRequest,
   requestsOf,
-  startRecordingProxy,
   waitUntilQuiet,
-  type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
-import { post, send, waitWithin } from "./testing";
+import { withGatewayRig, withThreadOnGateway, type GatewayRig } from "./mcp-gateway-rig.testing";
+import { post, waitWithin } from "./testing";
 import { withFleet } from "../workspaces/testing";
 
 const claude = Bun.which("claude") ?? undefined;
 
 /** The most one step of these tests waits for the CLI, which is a separate process that starts slowly. */
 const STEP_MS = 20_000;
-
-let PLUGINS: ReadonlyArray<Plugin>;
 
 // -- A stand-in for the Messages API -------------------------------------------
 
@@ -354,47 +347,19 @@ const withClaude = async (
   }
 };
 
-/** What a test needs to reach the gateway as the CLI does. */
-interface GatewayRig {
-  readonly proxy: RecordingProxy;
-  readonly gatewayUrl: string;
-  readonly sessionToken: string;
-  readonly modelUrl: string;
-  /** The session whose list the gateway serves. */
-  readonly sessionId: string;
-}
-
 /**
- * Spawns a live Thread whose list holds the servers `serverIds`, puts the
- * recording proxy in front of the controller and a stand-in model that calls
- * `tools` in order, and runs `body`. Stops the proxy and the stand-in after.
+ * Starts the stand-in model that calls `tools` in order, runs `body` with its
+ * address, and stops it afterwards.
  */
-const withThreadOnGateway = async (
-  arranged: Arranged,
-  options: {
-    readonly serverIds: ReadonlyArray<string>;
-    readonly tools: ReadonlyArray<string>;
-    readonly answerDiscoverLikeOlderServer: boolean;
-  },
-  body: (rig: GatewayRig) => Promise<void>,
+const withStandInModel = async (
+  tools: ReadonlyArray<string>,
+  body: (modelUrl: string) => Promise<void>,
 ): Promise<void> => {
-  const profile = await createProfile(arranged, "claude-gateway", ["mcp.use"]);
-  const thread = await spawnThreadUnder(arranged, profile, {
-    mcpServerIds: [...options.serverIds],
-  });
-  const proxy = startRecordingProxy(arranged.harness.base, options);
-  const model = startStandInModel(options.tools);
+  const model = startStandInModel(tools);
   try {
-    await body({
-      proxy,
-      gatewayUrl: proxy.url,
-      sessionToken: thread.token,
-      modelUrl: model.url,
-      sessionId: thread.session.id,
-    });
+    await body(model.url);
   } finally {
     model.stop();
-    await proxy.stop();
   }
 };
 
@@ -404,58 +369,29 @@ const withThreadOnGateway = async (
  * front of the controller, and a stand-in model.
  */
 const withGateway = (
-  options: { readonly answerDiscoverLikeOlderServer: boolean },
-  body: (
-    rig: GatewayRig & {
-      readonly setList: (names: ReadonlyArray<"alpha" | "bravo">) => Promise<void>;
-    },
-  ) => Promise<void>,
+  options: {
+    readonly upstream: FakeUpstream;
+    readonly answerDiscoverLikeOlderServer: boolean;
+    /** The tools the stand-in model calls, in order. By default `alpha`'s `echo`, once. */
+    readonly calls?: ReadonlyArray<string>;
+  },
+  body: (rig: GatewayRig & { readonly modelUrl: string }) => Promise<void>,
 ): Promise<void> =>
-  withFleet(
-    async (arranged) => {
-      const controller = {
-        harness: arranged.harness,
-        base: arranged.harness.base,
-        token: arranged.token,
-      };
-      const [alpha, bravo] = await createServers(controller, ["alpha", "bravo"]);
-      for (const server of [alpha!, bravo!]) {
-        await eventually(
-          () => readServer(controller, server.id),
-          (record) => record.status === "ready",
-        );
-      }
-      const ids = { alpha: alpha!.id, bravo: bravo!.id };
-      await withThreadOnGateway(
-        arranged,
-        {
-          serverIds: [alpha!.id],
-          tools: ["mcp__tools__alpha__echo"],
-          answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
-        },
-        (rig) =>
-          body({
-            ...rig,
-            setList: async (names) => {
-              const response = await send(
-                "PATCH",
-                arranged.harness.base,
-                `/api/v1/sessions/${rig.sessionId}`,
-                {
-                  body: { mcpServerIds: names.map((name) => ids[name]) },
-                  token: arranged.token,
-                },
-              );
-              expect(response.status).toBe(200);
-            },
-          }),
-      );
-    },
-    { plugins: PLUGINS },
+  withStandInModel(options.calls ?? ["mcp__tools__alpha__echo"], (modelUrl) =>
+    withGatewayRig(
+      {
+        upstream: options.upstream,
+        profileName: "claude-gateway",
+        serverNames: ["alpha", "bravo"],
+        listed: ["alpha"],
+        answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
+      },
+      (rig) => body({ ...rig, modelUrl }),
+    ),
   );
 
-const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details"];
-const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details"];
+const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details_437857"];
+const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details_437857"];
 
 /** Waits until the CLI lists exactly `tools` for the gateway's entry. */
 const waitForTools = (
@@ -477,7 +413,6 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         { name: "get-issue.details", description: "Reads an issue" },
       ],
     });
-    PLUGINS = [buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", upstream) })];
   });
 
   afterAll(async () => {
@@ -485,7 +420,7 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
   });
 
   it("works on the 2026-07-28 path and lists again when the gateway sends list_changed on subscriptions/listen", async () => {
-    await withGateway({ answerDiscoverLikeOlderServer: false }, async (rig) => {
+    await withGateway({ upstream, answerDiscoverLikeOlderServer: false }, async (rig) => {
       await withClaude(rig, async (running) => {
         await waitForTools(running, ALPHA_TOOLS);
 
@@ -522,8 +457,54 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
     });
   }, 120_000);
 
+  it("lists and calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike", async () => {
+    const tools = [
+      { name: "search_pages", description: "Searches the pages" },
+      { name: "search-pages", description: "Searches the pages by hyphen" },
+      { name: "search.pages", description: "Searches the pages by dot" },
+    ];
+    const owners: ReadonlyArray<readonly [string, string]> = [
+      ["alpha__search_pages_f33805", "search-pages"],
+      ["alpha__search_pages_52ac82", "search.pages"],
+      ["alpha__search_pages", "search_pages"],
+    ];
+    const searching = await startFakeUpstream({ tools });
+    try {
+      await withGateway(
+        {
+          upstream: searching,
+          answerDiscoverLikeOlderServer: false,
+          calls: owners.map(([name]) => `mcp__tools__${name}`),
+        },
+        async (rig) => {
+          await withClaude(rig, async (running) => {
+            // The gateway lists in order of the original names: `-`, `.`, `_`. The hyphen and the dot are changed to `_` and a hash.
+            await waitForTools(
+              running,
+              owners.map(([name]) => name),
+            );
+            const results = await running.runToolCalls(owners.length);
+            expect(results.map((result) => result.isError)).toEqual([false, false, false]);
+            expect(requestsOf(rig.proxy.seen, "tools/call").map((one) => one.tool)).toEqual(
+              owners.map(([name]) => name),
+            );
+            expect(
+              searching.requests
+                .filter((one) => one.method === "tools/call")
+                .map((one) => one.tool),
+            ).toEqual(owners.map(([, tool]) => tool));
+          });
+        },
+      );
+    } finally {
+      await searching.stop();
+    }
+  }, 120_000);
+
   it("works on the older path when server/discover is refused, lists again on list_changed from the GET stream, and opens a new MCP session after a 404", async () => {
-    await withGateway({ answerDiscoverLikeOlderServer: true }, async (rig) => {
+    // The model calls `echo` twice: once for the call the 404 interrupts, and once after the refusal.
+    const calls = ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"];
+    await withGateway({ upstream, answerDiscoverLikeOlderServer: true, calls }, async (rig) => {
       await withClaude(rig, async (running) => {
         await waitForTools(running, ALPHA_TOOLS);
 
@@ -551,21 +532,11 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         await waitForTools(running, ALL_TOOLS);
 
         // The controller forgets the MCP session, as a restart does. The CLI is not told.
-        const gone = await fetch(`${rig.gatewayUrl}/mcp`, {
-          method: "DELETE",
-          headers: {
-            authorization: `Bearer ${rig.sessionToken}`,
-            "mcp-session-id": firstSession,
-            "mcp-protocol-version": "2025-11-25",
-          },
-        });
-        expect(gone.status).toBe(204);
+        expect(await rig.forgetMcpSession()).toBe(firstSession);
 
         // Its own next request is a tool call, which names the forgotten session.
         const afterRestart = rig.proxy.seen.length;
         const result = await running.runToolCall();
-        expect(result.isError).toBe(false);
-        expect(result.text).toContain("hello");
         const [refused] = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call");
         expect(describeRequest(refused!)).toBe("POST tools/call 2025-11-25 session 404");
         expect(refused!.sessionId).toBe(firstSession);
@@ -579,6 +550,25 @@ describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway",
         const retried = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call").at(-1)!;
         expect(retried.status).toBe(200);
         expect(newSessions).toContain(retried.sessionId);
+
+        // It sends the call before it lists, and the gateway has offered no name to the new MCP
+        // session, so the model sees one refusal that asks it to list again. This is the accepted
+        // cost of keeping the names offered per MCP session (spec 21 section 3.4).
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain("List the tools again");
+
+        // The refusal sent list_changed, the CLI lists again on its new session, and then the call runs.
+        expect(
+          await waitWithin(STEP_MS, () =>
+            requestsOf(rig.proxy.seen.slice(afterRestart), "tools/list").some((one) =>
+              newSessions.includes(one.sessionId),
+            ),
+          ),
+          "tools/list on a new MCP session",
+        ).toBe(true);
+        const again = await running.runToolCall();
+        expect(again.isError).toBe(false);
+        expect(again.text).toContain("hello");
 
         // The new MCP sessions have streams of their own, and a change reaches the CLI on them.
         // The CLI may still be handshaking, so wait until it has been quiet for a moment.
@@ -646,57 +636,59 @@ describe.skipIf(claude === undefined)("the real Claude Code on servers added by 
         ids.push(id);
       }
 
-      await withThreadOnGateway(
-        arranged,
-        {
-          serverIds: ids,
-          tools: ["mcp__tools__open__echo", "mcp__tools__tokened__echo"],
-          answerDiscoverLikeOlderServer: false,
-        },
-        async (rig) => {
-          await withClaude(rig, async (running) => {
-            await eventually(
-              () => running.readStatus(),
-              (reported) =>
-                reported.status === "connected" &&
-                reported.tools.join() === "open__echo,tokened__echo",
-            );
+      await withStandInModel(["mcp__tools__open__echo", "mcp__tools__tokened__echo"], (modelUrl) =>
+        withThreadOnGateway(
+          arranged,
+          {
+            profileName: "claude-gateway",
+            serverIds: ids,
+            answerDiscoverLikeOlderServer: false,
+          },
+          async (rig) => {
+            await withClaude({ ...rig, modelUrl }, async (running) => {
+              await eventually(
+                () => running.readStatus(),
+                (reported) =>
+                  reported.status === "connected" &&
+                  reported.tools.join() === "open__echo,tokened__echo",
+              );
 
-            const results = await running.runToolCalls(2);
+              const results = await running.runToolCalls(2);
 
-            expect(results.map((result) => result.isError)).toEqual([false, false]);
-            expect(results.map((result) => result.text)).toEqual([
-              expect.stringContaining("hello"),
-              expect.stringContaining("hello"),
-            ]);
-            for (const fake of [open, tokened]) {
-              expect(fake.requests.filter((request) => request.method === "tools/call")).toEqual([
-                expect.objectContaining({ tool: "echo", status: 200 }),
+              expect(results.map((result) => result.isError)).toEqual([false, false]);
+              expect(results.map((result) => result.text)).toEqual([
+                expect.stringContaining("hello"),
+                expect.stringContaining("hello"),
               ]);
-            }
-            // The fake that holds the token let in only requests with the bearer. The other saw none.
-            expect(new Set(tokened.requests.map((request) => request.authorization))).toEqual(
-              new Set([`Bearer ${TOKEN}`]),
-            );
-            expect(new Set(open.requests.map((request) => request.authorization))).toEqual(
-              new Set([null]),
-            );
+              for (const fake of [open, tokened]) {
+                expect(fake.requests.filter((request) => request.method === "tools/call")).toEqual([
+                  expect.objectContaining({ tool: "echo", status: 200 }),
+                ]);
+              }
+              // The fake that holds the token let in only requests with the bearer. The other saw none.
+              expect(new Set(tokened.requests.map((request) => request.authorization))).toEqual(
+                new Set([`Bearer ${TOKEN}`]),
+              );
+              expect(new Set(open.requests.map((request) => request.authorization))).toEqual(
+                new Set([null]),
+              );
 
-            // The CLI records which tools it used in its config folder, a moment after the call.
-            // Waiting for that record means the search below has something to find in the files.
-            expect(
-              await waitWithin(STEP_MS, () =>
-                running.readTraces().files.includes("mcp__tools__tokened__echo"),
-              ),
-              "the CLI's record of its tool use",
-            ).toBe(true);
-            // Only these two surfaces are searched for the token: the messages
-            // the CLI wrote to its stdout, and the files under its config folders.
-            const traces = running.readTraces();
-            expect(traces.output).not.toContain(TOKEN);
-            expect(traces.files).not.toContain(TOKEN);
-          });
-        },
+              // The CLI records which tools it used in its config folder, a moment after the call.
+              // Waiting for that record means the search below has something to find in the files.
+              expect(
+                await waitWithin(STEP_MS, () =>
+                  running.readTraces().files.includes("mcp__tools__tokened__echo"),
+                ),
+                "the CLI's record of its tool use",
+              ).toBe(true);
+              // Only these two surfaces are searched for the token: the messages
+              // the CLI wrote to its stdout, and the files under its config folders.
+              const traces = running.readTraces();
+              expect(traces.output).not.toContain(TOKEN);
+              expect(traces.files).not.toContain(TOKEN);
+            });
+          },
+        ),
       );
     });
   }, 120_000);

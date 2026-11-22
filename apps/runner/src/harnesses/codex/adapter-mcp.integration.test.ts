@@ -6,7 +6,7 @@
  *
  * The model is a local Responses API fixture that calls the tool the test
  * names (`mock-model.testing.ts`), and the MCP server is a fake that records
- * what it receives (`fake-mcp-server.testing.ts`). Neither needs a login or
+ * what it receives (`../fake-mcp-server.testing.ts`). Neither needs a login or
  * calls an outside service.
  *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
@@ -17,6 +17,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } f
 import { join } from "node:path";
 import { afterAll, describe, expect, it, onTestFinished } from "vitest";
 import { Effect } from "effect";
+import { MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
@@ -30,7 +31,7 @@ import {
   SNAPSHOT_IMAGE_TOOL,
   startFakeMcpServer,
   WHOAMI_TOOL,
-} from "./fake-mcp-server.testing";
+} from "../fake-mcp-server.testing";
 import { cleanupHomes, createScratchHome, PNG_BYTES } from "../testing";
 import { buildContext, SESSION, SPEC } from "./testing";
 
@@ -236,7 +237,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
         calledSoFar.push(tool);
         expect(mcp.listCalledTools()).toEqual(calledSoFar);
         // The item names the MCP Server and the tool, as the model's tool is `<server>__<tool>`.
-        const [server, name] = tool.split("__");
+        const [server, name] = tool.split(MCP_GATEWAY_TOOL_SEPARATOR);
         expect(findCallItems(run.seen).slice(-2)).toMatchObject([
           { _tag: "item.started", detail: { name, server, kind: "mcp" } },
           {

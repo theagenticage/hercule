@@ -17,7 +17,7 @@
  */
 import type { AccountKind } from "@hercule/plugin-host";
 import type { RunnerFacts } from "@hercule/protocol";
-import { computeVersionVerdict, findVersionFloor } from "../harnesses";
+import { computeHarnessVersionVerdict, readHarnessFloor } from "../harnesses";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";
 import type { StoredProviderAccount } from "./repository";
 
@@ -69,9 +69,19 @@ export const decideHarnessOnRunner = (
     facts.adapters.includes(harness.id) &&
     facts.harnesses.some((binary) => binary.name === harness.binaryName && binary.present);
   if (!present) return "missing";
-  return computeVersionVerdict(reportedVersion, findVersionFloor(harness.id)) === "below-floor"
+  return computeHarnessVersionVerdict(harness.id, reportedVersion) === "below-floor"
     ? "below-floor"
     : "runnable";
+};
+
+/**
+ * Returns the end of an instruction to update a harness that is below the
+ * floor: ` to 1.3.0 or newer`, naming the floor, or an empty string for a
+ * harness with no pinned floor.
+ */
+export const describeFloorToUpdateTo = (harnessId: string): string => {
+  const floor = readHarnessFloor(harnessId);
+  return floor === undefined ? "" : ` to ${floor} or newer`;
 };
 
 /**
@@ -85,7 +95,7 @@ export const findHarnessProblem = (
 ): string | null => {
   if (verdicts.includes("runnable")) return null;
   return verdicts.includes("below-floor")
-    ? `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it`
+    ? `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it${describeFloorToUpdateTo(harness.id)}`
     : `${harness.displayName} is not installed on any connected machine; install it on a machine first`;
 };
 

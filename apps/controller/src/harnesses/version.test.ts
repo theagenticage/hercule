@@ -1,67 +1,106 @@
 /**
- * The floor is the CLI version the compiled-in SDK was built against - the
- * newest version anybody tested, not a policy. It changes only when the
- * dependency changes.
+ * The floor is the oldest version a runner may run. For Claude Code it is the
+ * CLI version the compiled-in SDK was built against, and it is also the newest
+ * version anybody tested. pi has a tested maximum above its floor.
  */
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hercule/home/version";
-import { findVersionFloor, computeVersionVerdict } from "./version";
+import {
+  CLAUDE_CODE_VERSION,
+  CODEX_VERSION,
+  PI_TESTED_VERSION,
+  PI_VERSION,
+} from "@hercule/home/version";
+import { computeHarnessVersionVerdict, computeVersionVerdict, readHarnessFloor } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("computeVersionVerdict", () => {
   it("returns unknown when there is no version, or no floor to compare it with", () => {
-    expect(computeVersionVerdict(null, "2.1.263")).toBe("unknown");
-    expect(computeVersionVerdict("1.2.3", null)).toBe("unknown");
-    expect(computeVersionVerdict(null, null)).toBe("unknown");
+    expect(computeVersionVerdict(null, "2.1.263", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("1.2.3", null, null)).toBe("unknown");
+    expect(computeVersionVerdict(null, null, null)).toBe("unknown");
   });
 
   it("returns below-floor for a version lower than the floor in any component", () => {
-    expect(computeVersionVerdict("2.1.262", "2.1.263")).toBe("below-floor");
-    expect(computeVersionVerdict("2.0.999", "2.1.263")).toBe("below-floor");
-    expect(computeVersionVerdict("1.9.9", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("2.1.262", "2.1.263", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("2.0.999", "2.1.263", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("1.9.9", "2.1.263", "2.1.263")).toBe("below-floor");
     // Numbers rather than text, so 10 comes after 9.
-    expect(computeVersionVerdict("2.1.9", "2.1.10")).toBe("below-floor");
+    expect(computeVersionVerdict("2.1.9", "2.1.10", "2.1.10")).toBe("below-floor");
   });
 
   it("returns ok for the floor itself", () => {
-    expect(computeVersionVerdict("2.1.263", "2.1.263")).toBe("ok");
+    expect(computeVersionVerdict("2.1.263", "2.1.263", "2.1.263")).toBe("ok");
   });
 
-  it("returns above-tested-max for any version newer than the floor", () => {
+  it("returns above-tested-max for any version newer than the tested maximum", () => {
     // Not an error: the pair almost certainly works. It is the accurate label
     // for a runner with a CLI newer than the SDK in this binary.
-    expect(computeVersionVerdict("2.1.264", "2.1.263")).toBe("above-tested-max");
-    expect(computeVersionVerdict("2.2.0", "2.1.263")).toBe("above-tested-max");
-    expect(computeVersionVerdict("3.0.0", "2.1.263")).toBe("above-tested-max");
-    expect(computeVersionVerdict("2.10.0", "2.9.0")).toBe("above-tested-max");
+    expect(computeVersionVerdict("2.1.264", "2.1.263", "2.1.263")).toBe("above-tested-max");
+    expect(computeVersionVerdict("2.2.0", "2.1.263", "2.1.263")).toBe("above-tested-max");
+    expect(computeVersionVerdict("3.0.0", "2.1.263", "2.1.263")).toBe("above-tested-max");
+    expect(computeVersionVerdict("2.10.0", "2.9.0", "2.9.0")).toBe("above-tested-max");
+  });
+
+  it("returns ok from the floor up to the tested maximum, and above-tested-max past it", () => {
+    expect(computeVersionVerdict("1.2.9", "1.3.0", "1.6.0")).toBe("below-floor");
+    expect(computeVersionVerdict("1.3.0", "1.3.0", "1.6.0")).toBe("ok");
+    expect(computeVersionVerdict("1.5.2", "1.3.0", "1.6.0")).toBe("ok");
+    expect(computeVersionVerdict("1.6.0", "1.3.0", "1.6.0")).toBe("ok");
+    expect(computeVersionVerdict("1.6.1", "1.3.0", "1.6.0")).toBe("above-tested-max");
+    expect(computeVersionVerdict("1.10.0", "1.3.0", "1.6.0")).toBe("above-tested-max");
   });
 
   it("returns unknown for a version it cannot parse", () => {
-    expect(computeVersionVerdict("nightly", "2.1.263")).toBe("unknown");
-    expect(computeVersionVerdict("2.1", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("nightly", "2.1.263", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("2.1", "2.1.263", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("1.4.0", "1.3.0", "latest")).toBe("unknown");
   });
 });
 
-describe("findVersionFloor", () => {
-  it("returns the SDK's CLI version for Claude Code, and null for a harness with no pin", () => {
-    expect(findVersionFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
-    expect(findVersionFloor("nobody-pinned-this")).toBeNull();
+describe("readHarnessFloor", () => {
+  it("returns the floor of each pinned harness, and none for a harness with no pinned version", () => {
+    expect(readHarnessFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
+    expect(readHarnessFloor("codex/codex")).toBe(CODEX_VERSION);
+    expect(readHarnessFloor("pi/pi")).toBe(PI_VERSION);
+    expect(readHarnessFloor("nobody-pinned-this")).toBeUndefined();
+  });
+});
+
+describe("computeHarnessVersionVerdict", () => {
+  it("holds Claude Code to the SDK's CLI version, floor and tested maximum alike", () => {
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", CLAUDE_CODE_VERSION)).toBe("ok");
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", "1.0.0")).toBe("below-floor");
+    expect(computeHarnessVersionVerdict("claude-code/claude-code", "99.0.0")).toBe(
+      "above-tested-max",
+    );
   });
 
-  // pi is pre-1.0 with recorded breaking changes in its RPC mode, so its floor
-  // and the newest anyone tested are the same release.
-  it("returns the pi release this build was verified against", () => {
-    expect(findVersionFloor("pi/pi")).toBe(PI_VERSION);
-    expect(PI_VERSION).toBe("0.85.1");
-    expect(computeVersionVerdict("0.85.1", findVersionFloor("pi/pi"))).toBe("ok");
-    expect(computeVersionVerdict("0.84.3", findVersionFloor("pi/pi"))).toBe("below-floor");
-    expect(computeVersionVerdict("0.86.0", findVersionFloor("pi/pi"))).toBe("above-tested-max");
+  // pi has changed its RPC mode between releases, so a release newer than the
+  // one anyone tested is flagged, but a release the tests ran on is ok.
+  it("holds pi to the oldest release this build supports, with a newer one it was tested on", () => {
+    expect(PI_VERSION).toBe("1.3.0");
+    expect(PI_TESTED_VERSION).toBe("1.6.0");
+    // pi 0.87 and older exit at start on the flags that load pi's MCP.
+    expect(computeHarnessVersionVerdict("pi/pi", "0.87.1")).toBe("below-floor");
+    expect(computeHarnessVersionVerdict("pi/pi", "1.3.0")).toBe("ok");
+    expect(computeHarnessVersionVerdict("pi/pi", "1.6.0")).toBe("ok");
+    expect(computeHarnessVersionVerdict("pi/pi", "1.6.1")).toBe("above-tested-max");
   });
 
-  it("returns the Codex release this build's types were generated from", () => {
-    expect(findVersionFloor("codex/codex")).toBe(CODEX_VERSION);
+  it("holds Codex to the release this build's types were generated from, floor and tested maximum alike", () => {
+    expect(computeHarnessVersionVerdict("codex/codex", CODEX_VERSION)).toBe("ok");
+    expect(computeHarnessVersionVerdict("codex/codex", "0.1.0")).toBe("below-floor");
+    expect(computeHarnessVersionVerdict("codex/codex", "99.0.0")).toBe("above-tested-max");
+  });
+
+  it("returns unknown for a harness with no pinned version", () => {
+    expect(computeHarnessVersionVerdict("nobody-pinned-this", "1.0.0")).toBe("unknown");
+  });
+
+  it("returns unknown for a pinned harness that reported no version", () => {
+    expect(computeHarnessVersionVerdict("pi/pi", null)).toBe("unknown");
   });
 
   it("writes the Claude Code floor in one generated file and nowhere else in the source", () => {

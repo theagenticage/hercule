@@ -4,12 +4,20 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { AnswerNotDelivered } from "@hercule/protocol";
+import { AnswerNotDelivered, MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
@@ -17,6 +25,7 @@ import { makePiAdapter, REPROMPT } from "./adapter";
 import { RPC_DEADLINE } from "./rpc";
 import {
   AGENT_FILE_VARIABLE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBMIT_RESULT_TOOL,
@@ -29,6 +38,7 @@ import {
   buildContext,
   createDriving,
   createPiHome,
+  listAgentSpawns,
   TEST_ZAI_KEY,
   PRIOR,
   buildRefusal,
@@ -79,6 +89,39 @@ const writePriorSessionFile = (home: string, id: string): string => {
 const readFlagValue = (argv: ReadonlyArray<string>, flag: string): string | undefined =>
   argv[argv.indexOf(flag) + 1];
 
+/** The MCP Gateway as the runner resolves it for a session start. */
+const GATEWAY = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:7421/mcp" };
+
+describe("launching pi with the MCP Gateway", () => {
+  it("loads pi's MCP client and tool search beside the extension, and gives the extension the gateway's address", async () => {
+    const run = await startTestSession({}, SPEC, {}, { mcpServers: [GATEWAY] });
+
+    // `--no-extensions` stays: only what Hercule names loads. The two flags
+    // come right after the extension's own.
+    const flags = buildFlags(run.ctx.home, agentFolderOf(run.child));
+    const after = flags.indexOf("--session-dir");
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...flags.slice(0, after),
+      "-e",
+      "builtin:mcp",
+      "-e",
+      "builtin:tool-search",
+      ...flags.slice(after),
+    ]);
+    expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(GATEWAY.url);
+  });
+
+  it("loads nothing for a session without the gateway, and removes an address the runner inherited", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const run = await startTestSession({}, SPEC, { [MCP_GATEWAY_URL_VARIABLE]: GATEWAY.url });
+
+    expect(run.child.command).not.toContain("builtin:mcp");
+    expect(run.child.command).not.toContain("builtin:tool-search");
+    expect(run.child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
+  });
+});
+
 describe("launching pi for a session", () => {
   it("turns off context files, the user's own extensions and pi's own approvals for a workspace-less session", async () => {
     const run = await startTestSession();
@@ -125,6 +168,30 @@ describe("launching pi for a session", () => {
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(run.child.env["PI_SKIP_VERSION_CHECK"]).toBe("1");
     expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+  });
+
+  it("writes each file of the agent folder readable by this user only", async () => {
+    const run = createDriving();
+    writeFileSync(join(run.ctx.home, "models.json"), '{"providers":{}}');
+    writeFileSync(join(run.ctx.home, "models-store.json"), "{}");
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, systemPrompt: "Be brief." }, run.ctx),
+    );
+    await waitUntil("spawned a pi", () => listAgentSpawns(run.spawns).length === 1);
+
+    // The home's `models.json` may hold a literal `apiKey`, and the copy is the account's key on disk.
+    const folder = agentFolderOf(listAgentSpawns(run.spawns)[0]!);
+    const names = readdirSync(folder);
+    expect(names.toSorted()).toEqual([
+      "extension-" + SESSION + ".ts",
+      "models-store.json",
+      "models.json",
+      "system-prompt.txt",
+    ]);
+    for (const name of names) {
+      expect(lstatSync(join(folder, name)).mode & 0o777, name).toBe(0o600);
+    }
   });
 
   it("uses the account's key over a key from the runner's environment", async () => {
@@ -185,6 +252,22 @@ describe("launching pi for a session", () => {
 
     await waitUntil("deleted the session's extension", () => !existsSync(path));
     expect(run.cleanedFiles).toEqual([path]);
+  });
+
+  it("still removes the session's folder when killing what holds its extension fails", async () => {
+    const { seam, spawns } = buildFakePiSeam();
+    const adapter = makePiAdapter({
+      ...seam,
+      killProcessesHolding: () => Effect.die(new Error("the process list could not be read")),
+    });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, buildContext(createPiHome())));
+    await waitUntil("spawned a pi", () => listAgentSpawns(spawns).length === 1);
+    const folder = agentFolderOf(listAgentSpawns(spawns)[0]!);
+    expect(existsSync(folder)).toBe(true);
+
+    listAgentSpawns(spawns)[0]!.crash();
+
+    await waitUntil("removed the session's folder", () => !existsSync(folder));
   });
 
   it("resumes a native session by its transcript file, never by its id", async () => {
@@ -610,6 +693,48 @@ describe("sending an input to a pi session", () => {
       expect.objectContaining({ message: "hello" }),
     ]);
     expect(listSentCommands(run.sent, "steer")).toEqual([]);
+  });
+
+  it("ends the turn of a prompt that pi handled itself, so the next input opens a turn", async () => {
+    const run = await startTestSession({
+      answers: { prompt: () => ({ success: true, data: { disposition: "handled" } }) },
+    });
+
+    const handled = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/mcp" }));
+    const next = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    expect(handled.delivery).toBe("opened");
+    expect(next.delivery).toBe("opened");
+    expect(next.turnId).not.toBe(handled.turnId);
+    expect(
+      run.seen
+        .filter((event) => "turnId" in event && event.turnId === handled.turnId)
+        .map((event) => (event._tag === "item.completed" ? event.kind : event._tag)),
+    ).toEqual(["turn.started", "item.started", "user_message", "turn.completed"]);
+    expect(filterByTag(run.seen, "turn.completed")[0]).toMatchObject({
+      turnId: handled.turnId,
+      state: "completed",
+    });
+  });
+
+  it("leaves the turn to pi when pi handled a prompt after it started a run", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/start-something" }));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+    // The run starts before pi answers the prompt.
+    run.child.push({ type: "agent_start" });
+    await waitUntil("announced the turn", () => filterByTag(run.seen, "turn.started").length === 1);
+
+    run.child.push({
+      type: "response",
+      command: "prompt",
+      id: listSentCommands(run.sent, "prompt")[0]!["id"],
+      success: true,
+      data: { disposition: "handled" },
+    });
+    await sending;
+
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
   });
 
   it("steers the running turn instead of opening a second one", async () => {

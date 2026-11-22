@@ -1,7 +1,7 @@
 /**
  * What the gateway keeps for each Session Token, and keeps in step with the
  * database: its MCP sessions, its open streams, the calls running for it, and
- * the names it was sent. State lives in memory only. A controller restart
+ * the tool names each of its clients was offered. State lives in memory only. A controller restart
  * drops it, and a harness that names an unknown MCP session gets 404 and opens
  * a new one.
  *
@@ -26,7 +26,7 @@ import { makeFreshReads } from "./reads";
 import type { SeenWarning } from "./refusals";
 import { fingerprintServed } from "./served";
 import type { OpenStream } from "./streams";
-import { makeNameLedger, type NameLedger } from "./tool-names";
+import type { OfferedTool } from "./tool-names";
 
 /** How often the sweep forgets the Session Tokens that ended. */
 const SWEEP_INTERVAL = Duration.minutes(1);
@@ -55,11 +55,24 @@ export interface McpCaller {
   readonly actor: SessionActor;
 }
 
+/**
+ * The tool names a `tools/list` answer offered to one client, each with what
+ * it was offered for. A client of the stateful era is one MCP session. The
+ * stateless era has no MCP session, so its clients share their token's record.
+ * A call is accepted only under a name in the record of the client it comes
+ * from, so a client that learned a name before a restart or an upgrade must
+ * list the tools itself before the name works, whatever another client of the
+ * same token has listed.
+ */
+type OfferedTools = Map<string, OfferedTool>;
+
 /** One stateful MCP session, which `initialize` creates. */
 export interface McpSession {
   readonly id: string;
   /** The revision `initialize` negotiated. Later requests of the session must not name another. */
   readonly revision: string;
+  /** The tool names offered on this MCP session since it opened. */
+  readonly offered: OfferedTools;
   /**
    * The `tools/call` requests running now, each with its JSON-RPC id as JSON
    * text, so `notifications/cancelled` can stop the ones it names. Keyed by the
@@ -72,6 +85,8 @@ export interface McpSession {
 export interface WarningState {
   /** When the Thread was last told about each refusal. */
   readonly seen: Map<string, SeenWarning>;
+  /** For each server name, the set of its tools the Thread was last told are not offered (`claimLeftOutWarnings`). */
+  readonly leftOutTold: Map<string, string>;
   /** Serializes the claim of a warning and its write, so a burst of refusals writes one line. */
   readonly writing: Semaphore.Semaphore;
 }
@@ -84,12 +99,52 @@ export interface TokenState {
   readonly streams: Set<OpenStream>;
   /** Every `tools/call` running for the token, of either era, so the end of the token can stop them. */
   readonly runningCalls: Set<Fiber.Fiber<unknown, unknown>>;
-  /** The names `tools/list` sent to this token. A call is accepted only under one of them. */
-  readonly names: NameLedger;
+  /** The tool names offered to the token's clients of the stateless era, which have no MCP session. */
+  readonly offeredWithoutSession: OfferedTools;
   /** Serializes the admission of streams, so a legacy GET stream replaces its predecessor once. */
   readonly admission: Semaphore.Semaphore;
   readonly warnings: WarningState;
 }
+
+/**
+ * Returns the record of the tool names offered to the client a request comes
+ * from: its MCP session's, or the token's for the stateless era, where
+ * `session` is `undefined`. The two functions below are the only readers and
+ * writers of these records.
+ */
+const selectOfferedTools = (state: TokenState, session: McpSession | undefined): OfferedTools =>
+  session?.offered ?? state.offeredWithoutSession;
+
+/**
+ * Records that a `tools/list` answer offered `name` to the client a request
+ * comes from, for the tool `offered`. A name offered again is recorded again
+ * for what it stands for now. Names are never removed, and the record has no
+ * cap: a server that renames its tools at every check adds names until the MCP
+ * session or the token ends. The lists are bounded per server (10,000 tools,
+ * 4 MiB), but a cap on the record would have to drop a name a client may still
+ * hold, and that client's next call would be refused. So the growth is left as
+ * it is.
+ */
+export const recordOffer = (
+  state: TokenState,
+  session: McpSession | undefined,
+  name: string,
+  offered: OfferedTool,
+): void => {
+  selectOfferedTools(state, session).set(name, offered);
+};
+
+/**
+ * Returns what `name` was offered for to the client a request comes from, or
+ * `undefined` when no `tools/list` answer has offered it to that client. This
+ * is the answer to "may this client call this name", and it says nothing of
+ * what the name reaches now.
+ */
+export const findOffer = (
+  state: TokenState,
+  session: McpSession | undefined,
+  name: string,
+): OfferedTool | undefined => selectOfferedTools(state, session).get(name);
 
 /** Tells every open stream of the token to list the tools again. */
 export const notifyListChanged = (state: TokenState): Effect.Effect<void> =>
@@ -139,9 +194,9 @@ export const makeTokenStates = Effect.gen(function* () {
       mcpSessions: new Map(),
       streams: new Set(),
       runningCalls: new Set(),
-      names: makeNameLedger(),
+      offeredWithoutSession: new Map(),
       admission: Semaphore.makeUnsafe(1),
-      warnings: { seen: new Map(), writing: Semaphore.makeUnsafe(1) },
+      warnings: { seen: new Map(), leftOutTold: new Map(), writing: Semaphore.makeUnsafe(1) },
     };
     states.set(tokenHash, created);
     return created;
@@ -177,8 +232,8 @@ export const makeTokenStates = Effect.gen(function* () {
     Effect.suspend(() => removeMcpSession(state, mcpSessionId));
 
   /**
-   * Opens an MCP session at `revision`. A token that already keeps 16 loses its
-   * oldest. The oldest leaves and the new session joins in one synchronous
+   * Opens an MCP session at `revision`. A token that already keeps 16
+   * loses its oldest. The oldest leaves and the new session joins in one synchronous
    * step, so two `initialize` requests that arrive together never both find
    * room. The oldest session's streams and calls end after that.
    */
@@ -189,7 +244,12 @@ export const makeTokenStates = Effect.gen(function* () {
         state.mcpSessions.size >= MAX_MCP_SESSIONS_PER_TOKEN && oldest !== undefined
           ? removeMcpSession(state, oldest)
           : Effect.void;
-      const session: McpSession = { id: crypto.randomUUID(), revision, calls: new Map() };
+      const session: McpSession = {
+        id: crypto.randomUUID(),
+        revision,
+        offered: new Map(),
+        calls: new Map(),
+      };
       state.mcpSessions.set(session.id, session);
       return Effect.as(ending, session);
     });
@@ -241,11 +301,7 @@ export const makeTokenStates = Effect.gen(function* () {
           if (!(yield* isServing)) return false;
           const actor = yield* reads.resolveActor(state.tokenHash);
           if (Option.isNone(actor)) return false;
-          stream.told = fingerprintServed(
-            yield* reads.readServed(actor.value),
-            actor.value,
-            state.names,
-          );
+          stream.told = fingerprintServed(yield* reads.readServed(actor.value), actor.value);
           // Nothing waits between this check and the add, so a token that is
           // forgotten or a shutdown that starts cannot slip between them.
           const replaced = yield* Effect.sync(() => {
@@ -335,7 +391,7 @@ export const makeTokenStates = Effect.gen(function* () {
       if (state.streams.size > 0) {
         const served = yield* reads.readServed(actor.value);
         servedServerIds = served.map(({ server }) => server.id);
-        const fingerprint = fingerprintServed(served, actor.value, state.names);
+        const fingerprint = fingerprintServed(served, actor.value);
         yield* Effect.forEach(
           [...state.streams].filter((stream) => stream.told !== fingerprint),
           (stream) => {

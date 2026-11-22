@@ -17,6 +17,7 @@
  */
 import {
   MCP_GATEWAY_ENTRY_NAME,
+  MCP_GATEWAY_HARNESS_PREFIX,
   type ApprovalDecision,
   type ApprovalRequest,
   type OpenRequest,
@@ -163,7 +164,7 @@ const buildElicitationToolName = (params: McpServerElicitationRequestParams): st
   if (toolName !== undefined) {
     return truncateFact(
       params.serverName === MCP_GATEWAY_ENTRY_NAME
-        ? `mcp__${params.serverName}__${toolName}`
+        ? `${MCP_GATEWAY_HARNESS_PREFIX}${toolName}`
         : `${params.serverName}/${toolName}`,
     );
   }

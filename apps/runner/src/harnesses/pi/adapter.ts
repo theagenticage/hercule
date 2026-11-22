@@ -1,10 +1,10 @@
 /**
  * The pi adapter. It runs one pi process per session, plus one per running
- * subagent, and talks to each in pi's RPC mode. A session's processes share a
- * private agent folder built from the account's Harness Home when the session
- * starts (see `agent-folder.ts`), and the transcripts go to the home's own
- * `sessions` folder. If pi used the developer's own directory, Hercule's
- * sessions would mix with the user's login, skills and settings. Two
+ * subagent, and talks to each in pi's RPC mode. Each process runs in a private
+ * agent folder of its own, built from the account's Harness Home right before
+ * the process is spawned (see `agent-folder.ts`), and the transcripts go to
+ * the home's own `sessions` folder. If pi used the developer's own directory,
+ * Hercule's sessions would mix with the user's login, skills and settings. Two
  * exceptions are named on the command line:
  *
  * - a session with a library skills folder loads the skills in it, which
@@ -53,6 +53,7 @@ import type {
   LocalAttachment,
   HarnessAdapter,
   HarnessRunnerContext,
+  SessionStartContext,
   TextGenerationContext,
   UserMaterial,
 } from "../index";
@@ -92,10 +93,12 @@ import { truncateFact, truncateMessage } from "../text";
 import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
+import { decideMcpLaunch, type McpLaunch } from "./mcp";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  MCP_GATEWAY_URL_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -105,6 +108,7 @@ import {
   type SubagentReply,
 } from "./extension";
 import {
+  buildHandledInputEvents,
   endTurn,
   normalize,
   buildNormalizingState,
@@ -115,7 +119,13 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { createAgentFolder, makeModelFilesWriter, type AgentFolder } from "./agent-folder";
+import {
+  createAgentFolder,
+  makeModelFilesBuilder,
+  removeAgentFolder,
+  writeModelFiles,
+  type ModelFiles,
+} from "./agent-folder";
 import { writeFileAtomically } from "./atomic-file";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
@@ -277,6 +287,17 @@ class SpawnFailed extends Error {
 }
 
 /**
+ * The error `startAgentProcess` throws when the agent folder or the
+ * instructions file in it could not be written, before anything was spawned.
+ * The original error is kept as `cause`.
+ */
+class PrepareFailed extends Error {
+  constructor(cause: unknown) {
+    super(describeError(cause), { cause });
+  }
+}
+
+/**
  * The message of the `SteerRefused` for an input that arrives while pi
  * compacts the conversation between turns. The user sees it as written.
  */
@@ -409,7 +430,7 @@ const confirmStartedModel = (
 interface Held {
   readonly binding: SessionBinding;
   readonly spec: SessionSpec;
-  readonly ctx: HarnessRunnerContext;
+  readonly ctx: SessionStartContext;
   /** The pi binary the session's own agent runs, which its subagents run too. */
   readonly binary: string;
   /** The session's own agent, whose pi process is the session's. */
@@ -417,11 +438,13 @@ interface Held {
   /** The subagents running now, by id. An ended subagent is removed. */
   readonly subagents: Map<SubagentId, Subagent>;
   /**
-   * The session's private agent folder. Every pi process of the session, the
-   * subagents' too, runs in it, so a subagent sees the same declared models as
-   * its parent. It is removed when the last of those processes has exited.
+   * The model files the session's launch computed. Each pi process of the
+   * session, the subagents' too, gets them written into an agent folder of its
+   * own, so a subagent loads the same declared models as its parent did at
+   * launch. They do not change during the session: a model change goes to pi
+   * as a command and touches no file.
    */
-  readonly folder: AgentFolder;
+  readonly modelFiles: ModelFiles;
   /**
    * How many subagent pi processes have not been released yet: those running,
    * and those stopped whose process has not exited or been cleaned up. The
@@ -622,6 +645,21 @@ const announcesAgentSettled = (frame: unknown): boolean =>
   (frame as { readonly type?: unknown }).type === "agent_settled";
 
 /**
+ * Checks whether pi's response to a `prompt` command says that pi handled the
+ * input itself (`disposition: "handled"`): the input was one of pi's own
+ * commands, or an extension's input hook consumed it. pi then starts no agent
+ * run. The other dispositions are `started` and `queued`.
+ */
+const announcesHandledPrompt = (response: Readonly<Record<string, unknown>>): boolean => {
+  const data = response["data"];
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly disposition?: unknown }).disposition === "handled"
+  );
+};
+
+/**
  * Checks whether the runner should re-prompt the turn when pi settles. All of
  * these must hold:
  *
@@ -650,8 +688,8 @@ const owesAnswer = (state: Normalizing): boolean =>
 const buildSessionsDir = (home: string): string => join(home, "sessions");
 
 /**
- * Returns the path of the copy of the extension one agent loads, in the
- * session's private agent folder, named after the agent: the session's id for
+ * Returns the path of the copy of the extension one agent loads, in that
+ * agent's private agent folder, named after the agent: the session's id for
  * the session's own agent, or the subagent's id (see `spawnAgent`).
  */
 const buildExtensionPath = (agentFolder: string, agentId: string): string =>
@@ -659,8 +697,9 @@ const buildExtensionPath = (agentFolder: string, agentId: string): string =>
 
 /**
  * Returns the path the Agent's instructions for one session are written to, in
- * the session's private agent folder. When the `--append-system-prompt` value names a file
- * pi can open, pi reads that file; otherwise it uses the value as the text.
+ * the private agent folder of the session's own agent. When the
+ * `--append-system-prompt` value names a file pi can open, pi reads that file;
+ * otherwise it uses the value as the text.
  * The adapter always passes a path, for two reasons:
  *
  * - instructions on the command line would be visible in the machine's
@@ -769,16 +808,17 @@ const listSkillFolders = (ctx: HarnessRunnerContext): ReadonlyArray<string> => [
  *   passes the transcript with `--session` instead: pi rejects the two
  *   together, because the transcript already has its own session id.
  * - A subagent keeps no transcript (`--no-session`), because it lives only
- *   as long as its one task. It gets the same tools, access, skills and user
- *   material as the session, but not the Agent's instructions: its parent's
+ *   as long as its one task. It gets the same tools (the MCP Gateway's too),
+ *   access, skills and user material as the session, but not the Agent's instructions: its parent's
  *   prompt is its whole brief.
  */
 const buildArgv = (
   spec: SessionSpec,
-  ctx: HarnessRunnerContext,
+  ctx: SessionStartContext,
   selection: ModelSelection,
   launch: AgentLaunch,
   extensionFile: string,
+  mcp: McpLaunch,
 ): ReadonlyArray<string> => {
   const session = launch.kind === "session" ? launch : undefined;
   const transcript = session?.transcript;
@@ -810,6 +850,10 @@ const buildArgv = (
     "--offline",
     "-e",
     extensionFile,
+    // `--no-extensions` also drops pi's bundled MCP client and tool search, so
+    // the session's MCP Gateway needs them named. A subagent gets them too,
+    // because it has the session's tools (see `decideMcpLaunch`).
+    ...mcp.argv,
     ...(session === undefined
       ? ["--no-session"]
       : [
@@ -1189,12 +1233,15 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * refuses it or the process cannot start, and when the process starts on
    * another model than the session's.
    *
-   * The subagent's pi runs in the session's private agent folder, so it loads
-   * the same declared models as its parent and nothing here writes them again.
-   * The process is spawned before this returns. The launch then waits for the
-   * new pi's first answer, and the session can be stopped, or the call ended,
-   * during that wait. So it checks again before it sends the task, and closes
-   * the process when the subagent is no longer wanted.
+   * The subagent's pi runs in a private agent folder of its own, created
+   * (see `startAgentProcess`) from the model files the session's launch
+   * computed and removed when that pi has exited. The folder is never the parent's, so nothing the parent
+   * writes into its folder (a `models.json` or an `mcp.json`, say) reaches the
+   * subagent, and the subagent loads the same declared models its parent did
+   * at launch. The process is spawned before this returns. The launch then
+   * waits for the new pi's first answer, and the session can be stopped, or the
+   * call ended, during that wait. So it checks again before it sends the task,
+   * and closes the process when the subagent is no longer wanted.
    */
   const startSubagent = (
     held: Held,
@@ -1217,32 +1264,20 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     }
     const subagentId = crypto.randomUUID();
     const depth = parent.depth + 1;
-    const extensionFile = buildExtensionPath(held.folder.path, subagentId);
     let child: PiChild;
-    let releaseFolder = (): void => undefined;
     try {
-      releaseFolder = held.folder.borrow();
-      child = spawnAgent(
-        [
-          held.binary,
-          ...buildArgv(
-            held.spec,
-            held.ctx,
-            held.modelSelection,
-            { kind: "subagent" },
-            extensionFile,
-          ),
-        ],
-        buildAgentEnv(held.ctx, held.spec, depth, extensionFile, held.folder.path),
-        held.ctx.cwd,
-        extensionFile,
-        () => {
+      child = startAgentProcess({
+        spec: held.spec,
+        ctx: held.ctx,
+        binary: held.binary,
+        modelFiles: held.modelFiles,
+        selection: held.modelSelection,
+        agent: { kind: "subagent", subagentId, depth },
+        onReleased: () => {
           held.subagentProcesses -= 1;
-          releaseFolder();
         },
-      );
+      });
     } catch (error) {
-      releaseFolder();
       const message = error instanceof Error ? error.message : String(error);
       refuse(`The subagent could not start: ${message}`);
       warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
@@ -1565,7 +1600,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     };
   };
 
-  const writeModelFiles = makeModelFilesWriter(seam.spawn);
+  const buildModelFiles = makeModelFilesBuilder(seam.spawn);
 
   /**
    * Starts one agent's pi process with `argv`, on its own copy of the
@@ -1605,11 +1640,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       removeExtension();
       throw new SpawnFailed(error);
     }
-    const release = (): Promise<void> =>
-      Effect.runPromise(seam.killProcessesHolding(extensionFile)).then(() => {
-        removeExtension();
-        onReleased();
-      });
+    // `Effect.exit` keeps a failed kill from stopping the two steps after it:
+    // the copy, and the folder `onReleased` removes, must not stay behind
+    // because a process that holds the copy could not be killed.
+    const release = async (): Promise<void> => {
+      await Effect.runPromise(Effect.exit(seam.killProcessesHolding(extensionFile)));
+      removeExtension();
+      onReleased();
+    };
     void child.exited.then(release, release);
     return child;
   };
@@ -1647,15 +1685,18 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * controller rotates the session, not its subagents, so a subagent that could
    * not compact would have no way to free its context. `extensionFile` is the
    * agent's own copy of the extension. When the session has an edit watch,
-   * every agent gets the marks directory. `agentFolder` is the session's private
-   * agent folder, which becomes pi's agent directory.
+   * every agent gets the marks directory. `agentFolder` is the agent's own
+   * private agent folder, which becomes pi's agent directory. `mcp` is the
+   * process's MCP launch decision (see `decideMcpLaunch`): every agent gets the
+   * MCP Gateway's address when the session has the gateway.
    */
   const buildAgentEnv = (
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
     spec: SessionSpec,
     depth: number,
     extensionFile: string,
     agentFolder: string,
+    mcp: McpLaunch,
   ): Record<string, string | undefined> =>
     buildEnv(ctx, {
       PI_CODING_AGENT_DIR: agentFolder,
@@ -1674,7 +1715,95 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           ? undefined
           : JSON.stringify(spec.outputSchema),
       [NO_AUTO_COMPACTION_VARIABLE]: cancelsAutomaticCompaction(spec, depth) ? "1" : undefined,
+      ...mcp.env,
     });
+
+  /**
+   * Starts one pi process for a session's own agent or for a subagent, and
+   * returns it. Everything the process needs is prepared here, in this order:
+   *
+   * 1. A private agent folder, created from the launch's model files (see
+   *    `createAgentFolder`), and for a session's own agent, the instructions
+   *    file in it.
+   * 2. The process's MCP launch decision (see `decideMcpLaunch`), made once
+   *    and used for both its command line and its environment.
+   * 3. The process itself, on its own copy of the extension (see `spawnAgent`).
+   *
+   * The folder is removed when any step fails, and when the process has
+   * exited, after its leftover processes are killed. `onReleased` runs then,
+   * and its caller needs no cleanup of its own.
+   *
+   * Throws `PrepareFailed` when the folder or the instructions cannot be
+   * written, `SpawnFailed` when pi cannot start, and the file system's own
+   * error when the extension copy cannot be written.
+   */
+  const startAgentProcess = (request: {
+    readonly spec: SessionSpec;
+    readonly ctx: SessionStartContext;
+    readonly binary: string;
+    readonly modelFiles: ModelFiles;
+    /** The model the process starts on. A subagent starts on its session's current one. */
+    readonly selection: ModelSelection;
+    readonly agent:
+      | {
+          readonly kind: "session";
+          readonly sessionId: string;
+          readonly transcript: string | undefined;
+          /** The text for the instructions file, or undefined when the session has none. */
+          readonly instructions: string | undefined;
+        }
+      | { readonly kind: "subagent"; readonly subagentId: string; readonly depth: number };
+    /** Runs after the process has exited and its folder is removed. */
+    readonly onReleased: () => void;
+  }): PiChild => {
+    const { spec, ctx, agent } = request;
+    let folder: string;
+    try {
+      folder = createAgentFolder(request.modelFiles);
+    } catch (error) {
+      throw new PrepareFailed(error);
+    }
+    try {
+      const agentId = agent.kind === "session" ? agent.sessionId : agent.subagentId;
+      const extensionFile = buildExtensionPath(folder, agentId);
+      let launch: AgentLaunch = { kind: "subagent" };
+      if (agent.kind === "session") {
+        let systemPromptFile: string | undefined;
+        if (agent.instructions !== undefined) {
+          systemPromptFile = buildSystemPromptPath(folder);
+          try {
+            writeFileAtomically(systemPromptFile, agent.instructions);
+          } catch (error) {
+            throw new PrepareFailed(error);
+          }
+        }
+        launch = {
+          kind: "session",
+          sessionId: agent.sessionId,
+          transcript: agent.transcript,
+          systemPromptFile,
+        };
+      }
+      const mcp = decideMcpLaunch(ctx.mcpServers);
+      const depth = agent.kind === "session" ? 0 : agent.depth;
+      return spawnAgent(
+        [request.binary, ...buildArgv(spec, ctx, request.selection, launch, extensionFile, mcp)],
+        buildAgentEnv(ctx, spec, depth, extensionFile, folder, mcp),
+        // pi resolves every relative path against the directory it starts in,
+        // so a child that inherited the runner's directory would write the
+        // user's work into whatever directory the runner was started from.
+        ctx.cwd,
+        extensionFile,
+        () => {
+          removeAgentFolder(folder);
+          request.onReleased();
+        },
+      );
+    } catch (error) {
+      removeAgentFolder(folder);
+      throw error;
+    }
+  };
 
   const probe = makeProbe(seam.spawn, seam.run);
 
@@ -1747,13 +1876,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   ): Effect.Effect<TextGenerationOutcome, string> =>
     Effect.acquireUseRelease(
       // The scratch directory is pi's agent directory for this call: the
-      // account's model files are copied into it, with the models the request
-      // carries declared (see `makeModelFilesWriter`).
-      writeModelFiles(ctx.cwd, ctx.binary, ctx, buildEnv(ctx)).pipe(
+      // account's model files are written into it, with the models the request
+      // carries declared (see `makeModelFilesBuilder`).
+      buildModelFiles(ctx.binary, ctx, buildEnv(ctx)).pipe(
         Effect.mapError(describeError),
-        Effect.andThen(
+        Effect.andThen((files) =>
           Effect.try({
             try: () => {
+              writeModelFiles(ctx.cwd, files);
               const extensionFile = join(ctx.cwd, "extension.ts");
               const instructionsFile = join(ctx.cwd, "instructions.txt");
               writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
@@ -1787,6 +1917,9 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
                   [SUBAGENTS_VARIABLE]: undefined,
                   [NO_AUTO_COMPACTION_VARIABLE]: undefined,
                   [SESSION_MARKS_DIR_VARIABLE]: undefined,
+                  // A text generation has no MCP: it loads none of pi's
+                  // bundled extensions, so a registration would only fail.
+                  [MCP_GATEWAY_URL_VARIABLE]: undefined,
                 }),
                 // pi's working directory. It is the scratch directory, never a
                 // workspace, so a call can neither see nor change the user's files.
@@ -1898,6 +2031,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     harnessId: PI,
     harnessName: PI_NAME,
     binaryName: PI_BINARY,
+    // pi's own MCP client connects the gateway: `startSession` loads it with
+    // the flags `decideMcpLaunch` returns, and Hercule's extension registers
+    // the gateway with it. Without this, the controller would give a pi
+    // session no gateway entry.
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.empty,
@@ -1944,65 +2082,30 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           );
         }
         const instructions = buildSessionInstructions(ctx.herculeTool.orientation, spec);
-        // The session's pi processes all run in one private agent folder
-        // (see `AgentFolder`), which also holds the files only they read:
-        // the extension and the instructions.
-        const folder = yield* Effect.try({
-          try: () => {
-            mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-            return createAgentFolder();
-          },
-          catch: (error) => buildPrepareFailure(error),
-        });
-        const systemPromptFile =
-          instructions === undefined ? undefined : buildSystemPromptPath(folder.path);
-        const extensionFile = buildExtensionPath(folder.path, sessionId);
         yield* Effect.try({
-          try: () => {
-            if (systemPromptFile !== undefined && instructions !== undefined) {
-              writeFileAtomically(systemPromptFile, instructions);
-            }
-          },
-          catch: (error) => error,
-        }).pipe(
-          Effect.andThen(writeModelFiles(folder.path, binary, ctx, buildEnv(ctx))),
+          try: () => mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 }),
+          catch: buildPrepareFailure,
+        });
+        // Computed once, before any folder exists. The session's own pi and
+        // each subagent's get these files written into a folder of their own.
+        const modelFiles = yield* buildModelFiles(binary, ctx, buildEnv(ctx)).pipe(
           Effect.mapError(buildPrepareFailure),
-          // A launch that fails or is interrupted before its pi starts has
-          // no process to remove the folder.
-          Effect.onError(() => Effect.sync(folder.discard)),
         );
         const child = yield* Effect.try({
-          try: () => {
-            const releaseFolder = folder.borrow();
-            try {
-              return spawnAgent(
-                [
-                  binary,
-                  ...buildArgv(
-                    spec,
-                    ctx,
-                    spec.modelSelection,
-                    { kind: "session", sessionId, transcript, systemPromptFile },
-                    extensionFile,
-                  ),
-                ],
-                buildAgentEnv(ctx, spec, 0, extensionFile, folder.path),
-                // The session's working directory. pi resolves every relative
-                // path against the directory it starts in, so a child that
-                // inherited the runner's directory would write the user's work
-                // into whatever directory the runner was started from.
-                ctx.cwd,
-                extensionFile,
-                releaseFolder,
-              );
-            } catch (error) {
-              releaseFolder();
-              throw error;
-            }
-          },
+          try: () =>
+            startAgentProcess({
+              spec,
+              ctx,
+              binary,
+              modelFiles,
+              selection: spec.modelSelection,
+              agent: { kind: "session", sessionId, transcript, instructions },
+              onReleased: () => undefined,
+            }),
           catch: (error) => {
+            if (error instanceof PrepareFailed) return buildPrepareFailure(error.cause);
             if (!(error instanceof SpawnFailed)) {
-              // A failed file write before the spawn.
+              // A failed write of the extension before the spawn.
               return buildStartFailure(PI_NAME, describeError(error));
             }
             // Only a spawn that failed because the binary is missing means pi
@@ -2043,7 +2146,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           binary,
           root,
           subagents: new Map(),
-          folder,
+          modelFiles,
           subagentProcesses: 0,
           parks: new Map(),
           modelSelection: spec.modelSelection,
@@ -2130,7 +2233,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
-        yield* Effect.tapError(
+        const response = yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
             message: buildPiPrompt(input, listSkillFolders(held.ctx)),
@@ -2163,12 +2266,23 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               root.state.turnId = undefined;
             }),
         ).pipe(Effect.mapError(buildInputFailure));
+        // pi handles a prompt itself when it is one of pi's own commands, such
+        // as `/mcp`. It then starts no agent run, so it never sends
+        // `agent_settled` to end the turn, and the turn ends after the user's
+        // message below. A steer gets no such answer: pi queues it for a run
+        // that is going.
+        const handledByPi = !steered && announcesHandledPrompt(response);
         // A successful prompt reply acknowledges delivery even when Stop
         // raced it. Abort again if that reply accepted work after the first
         // abort; never let the delayed acceptance restart the stopped turn.
-        if (held.inputGeneration !== generation && root.state.turnId === turnId && !held.stopping)
+        if (
+          !handledByPi &&
+          held.inputGeneration !== generation &&
+          root.state.turnId === turnId &&
+          !held.stopping
+        )
           yield* abortTurn(root, "interrupt");
-        for (const event of buildUserMessage({
+        const userMessage = buildUserMessage({
           sessionId,
           turnId,
           text: input.text,
@@ -2177,7 +2291,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           senderSessionId: input.senderSessionId,
           steered,
           harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
-        })) {
+        });
+        for (const event of handledByPi
+          ? buildHandledInputEvents(root.state, userMessage)
+          : userMessage) {
           emit(event);
         }
         return { turnId, delivery: steered ? "steered" : "opened" };

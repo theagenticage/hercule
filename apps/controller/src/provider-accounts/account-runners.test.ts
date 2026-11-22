@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import { CODEX_VERSION } from "@hercule/home/version";
 import { withTransaction } from "../db";
-import { findVersionFloor } from "../harnesses";
 import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { findModels, findRunnerRefusal, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
@@ -255,15 +255,15 @@ describe("a Codex below the version this build supports", () => {
 
     expect(available.runnerIds).toEqual([]);
     expect(available.noRunnerMessage).toBe(
-      "Codex is older than this version of Hercule supports on every machine that has it; update it",
+      `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
     );
     expect(findRunnerRefusal(available, laptop)).toBe(
-      "Codex on laptop is older than Hercule supports; update it",
+      `Codex on laptop is older than Hercule supports; update it to ${CODEX_VERSION} or newer`,
     );
   });
 
   it("accepts the floor itself", async () => {
-    const { available, laptop } = await listWithCodexAt(findVersionFloor(CODEX_HARNESS_ID)!);
+    const { available, laptop } = await listWithCodexAt(CODEX_VERSION);
 
     expect(available.runnerIds).toEqual([laptop]);
   });

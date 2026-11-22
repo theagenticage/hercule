@@ -32,6 +32,11 @@ export const requiresApproval = (mode: AccessMode, toolName: string): boolean =>
   // subagent runs under the same access mode, so each of its own calls is
   // asked about like any other.
   if (toolName === "subagent") return false;
+  // pi's own tool for finding MCP tools. The name is pi's, not Hercule's, so
+  // no constant in this repository holds it. It only loads the definitions of
+  // the tools that match, for the next model request: it runs nothing and
+  // changes nothing. Each tool it loads is still asked about when called.
+  if (toolName === "tool_search") return false;
   // pi's read-only built-in tools: reading the workspace changes nothing.
   const reading = ["read", "grep", "find", "ls"];
   // The tools each mode runs without asking. Full access has no row, because

@@ -2,8 +2,10 @@
  * Runs the real Codex against the real MCP Gateway, to check what the spec
  * could only assume (spec 21 section 3.11): that Codex works on the older wire
  * era, sees `notifications/tools/list_changed` and lists again, opens a new MCP
- * session when the gateway answers 404 for the one it holds. Resuming and
- * forking a thread is checked beside the adapter, in
+ * session when the gateway answers 404 for the one it holds, and that a name
+ * Codex showed the model never reaches the other tool when a twin with `-` or
+ * `_` comes or goes (see the last `describe`).
+ * Resuming and forking a thread is checked beside the adapter, in
  * `apps/runner/src/harnesses/codex/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. Codex starts the way the Codex
@@ -33,11 +35,12 @@
  *   on the new session.
  * - **A real cold gateway.** The test controller cannot restart over the same
  *   database: `withServer` makes a new Hercule Home and a new gateway for each
- *   run, and its `reboot` repeats only the boot steps inside the same process,
- *   so the gateway keeps the names it has sent. A test of the call that follows
- *   a restart (the gateway refuses it once with "list the tools again", spec 21
- *   section 3.4, and nothing reaches the server) needs a controller that can be
- *   stopped and started over one database.
+ *   run, and its `reboot` repeats only the boot steps inside the same process.
+ *   The 404 test makes the gateway forget one MCP session instead. The new
+ *   MCP session has offered no name, which is what a restart leaves, so the
+ *   call Codex sends before it lists is refused once, as spec 21 section 3.4
+ *   says. A call after a real restart needs a controller that can be stopped
+ *   and started over one database.
  *
  * Skipped when no `codex` binary is found. `HERCULE_CODEX_TEST_BINARY` selects
  * one without changing `PATH`. No CI job installs Codex, so this file runs on a
@@ -48,6 +51,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import { MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 import { findCodexTestBinary } from "../../../runner/src/harnesses/codex/codex-binary.testing";
 import { buildMcpServerConfig } from "../../../runner/src/harnesses/codex/mcp";
 import {
@@ -62,33 +66,29 @@ import {
   type ScriptedModelRequest,
 } from "../../../runner/src/harnesses/codex/mock-model.testing";
 import type { ThreadStartParams, TurnStartParams } from "../../../runner/src/harnesses/codex/types";
-import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";
-import { createProfile, spawnThreadUnder } from "../sessions/testing";
+import { startFakeUpstream, type FakeTool, type FakeUpstream } from "../mcp-servers/testing";
 import {
-  createServers,
-  eventually,
-  readServer,
-  startFakeUpstream,
-  type FakeTool,
-  type FakeUpstream,
-} from "../mcp-servers/testing";
+  OLDER_ERA_REVISIONS,
+  TWIN_SCENARIOS,
+  WHOAMI_TOOL,
+  buildTwinTool,
+  readUpstreamCalls,
+  withGatewayRig,
+  type ToolChangingGatewayRig,
+} from "./mcp-gateway-rig.testing";
 import {
   countListChanged,
   describeRequest,
   requestsOf,
-  startRecordingProxy,
+  waitUntilQuiet,
   type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
-import { send, waitWithin } from "./testing";
-import { withFleet } from "../workspaces/testing";
+import { waitWithin } from "./testing";
 
 const codex = findCodexTestBinary();
 
 /** The most one step of these tests waits for Codex, which is a separate process that starts slowly. */
 const STEP_MS = 30_000;
-
-/** The revisions of the older era, which Codex asks `initialize` for. */
-const OLDER_ERA_REVISIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 /** The name the gateway has as an MCP server in Codex's config, as the runner names it. */
 const GATEWAY_NAME = "tools";
@@ -112,40 +112,62 @@ const readPrompt = (item: Record<string, unknown> | undefined): string =>
 /** The shape of an entry of a model request's `tools`, and of a tool search's result: Codex's namespace of the gateway. */
 type ToolEntry = Record<string, unknown>;
 
-/** Returns the names of the gateway's tools in the namespace entries among `entries`. */
-const readGatewayTools = (entries: ReadonlyArray<ToolEntry>): ReadonlyArray<string> =>
+/** A tool of the gateway as the model is shown it. */
+interface ShownTool {
+  readonly name: string;
+  readonly description?: string;
+}
+
+/** Returns the gateway's tools in the namespace entries among `entries`. */
+const readGatewayToolEntries = (entries: ReadonlyArray<ToolEntry>): ReadonlyArray<ShownTool> =>
   entries
     .filter((entry) => entry["name"] === `mcp__${GATEWAY_NAME}`)
-    .flatMap((entry) =>
-      (entry["tools"] as ReadonlyArray<{ readonly name: string }>).map((one) => one.name),
-    );
+    .flatMap((entry) => entry["tools"] as ReadonlyArray<ShownTool>);
 
 /**
- * Returns the names of the gateway's tools the model has been shown in
- * `requests`, once each. A Codex shows them in one of two shapes, and the
- * request itself says which:
+ * Returns the gateway's tools the model has been shown in `requests`. A Codex
+ * shows them in one of two shapes, and the request itself says which:
  *
  * - inline, as a `mcp__tools` namespace in the request's `tools`;
  * - deferred, as the result of a `tool_search_call`, which comes back as a
  *   `tool_search_output` item in the request's input. Such a request has a
  *   `tool_search` tool and no inline namespace.
  */
+const readShownTools = (requests: ReadonlyArray<ScriptedModelRequest>): ReadonlyArray<ShownTool> =>
+  requests.flatMap((request) => [
+    ...readGatewayToolEntries(request.body.tools),
+    ...readGatewayToolEntries(
+      request.body.input
+        .filter((item) => item["type"] === "tool_search_output")
+        .flatMap((item) => item["tools"] as ReadonlyArray<ToolEntry>),
+    ),
+  ]);
+
+/** Returns the names of the gateway's tools the model has been shown in `requests`, once each. */
 const readOfferedTools = (requests: ReadonlyArray<ScriptedModelRequest>): ReadonlyArray<string> => [
-  ...new Set(
-    requests.flatMap((request) => [
-      ...readGatewayTools(request.body.tools),
-      ...readGatewayTools(
-        request.body.input
-          .filter((item) => item["type"] === "tool_search_output")
-          .flatMap((item) => item["tools"] as ReadonlyArray<ToolEntry>),
-      ),
-    ]),
-  ),
+  ...new Set(readShownTools(requests).map((tool) => tool.name)),
 ];
 
 /**
+ * Returns the name the model is shown for the gateway's tool `wanted`. Codex
+ * shows a gateway name as it is, except that it turns `-` into `_` and then
+ * adds a suffix of its own to names that are alike after that, so which tool
+ * holds a spelling is Codex's choice and not the gateway's. A test that needs
+ * such a tool ends the tool's description with its gateway name in square
+ * brackets, and the tool is found by that. A tool without such a description
+ * is found by its name as shown. Returns `undefined` when no tool shown matches.
+ */
+const findShownName = (shown: ReadonlyArray<ShownTool>, wanted: string): string | undefined =>
+  (
+    shown.find((tool) => tool.description?.endsWith(`[${wanted}]`)) ??
+    shown.find((tool) => tool.name === wanted)
+  )?.name;
+
+/**
  * Builds the model's script. A prompt `call <tool>` makes the model call that
- * tool of the gateway once, with the argument `hello`. When Codex has not shown
+ * tool of the gateway once, with the argument `hello`. A prompt `call exactly
+ * <name>` makes it call the name `<name>` as it is, which is how a test calls a
+ * name Codex showed earlier. When Codex has not shown
  * the model the tool and offers a `tool_search` tool, the model searches for
  * the tool first and calls it only if the search returned it. Any other request
  * ends the turn.
@@ -154,19 +176,23 @@ const buildCallScript = () => {
   let calls = 0;
   let searches = 0;
   let searchedFor: string | undefined;
-  const buildCall = (tool: string) => ({
+  const buildCall = (shownName: string) => ({
     type: "function_call",
     namespace: `mcp__${GATEWAY_NAME}`,
-    name: tool,
+    name: shownName,
     call_id: `call-${String(++calls)}`,
     arguments: JSON.stringify({ text: "hello" }),
   });
   return (request: ScriptedModelRequest) => {
     const last = request.body.input.at(-1);
-    const wanted = /call (\w+)/.exec(readPrompt(last))?.[1];
+    // `call exactly <name>` sends the name as it is, whether or not Codex shows it now.
+    const exact = /^call exactly (\S+)$/.exec(readPrompt(last))?.[1];
+    if (exact !== undefined) return [buildCall(exact)];
+    const wanted = /call ([\w-]+)/.exec(readPrompt(last))?.[1];
     if (wanted !== undefined) {
+      const shownName = findShownName(readShownTools([request]), wanted);
       const canSearch = request.body.tools.some((tool) => tool["type"] === "tool_search");
-      if (canSearch && !readOfferedTools([request]).includes(wanted)) {
+      if (canSearch && shownName === undefined) {
         searchedFor = wanted;
         return [
           {
@@ -177,11 +203,14 @@ const buildCallScript = () => {
           },
         ];
       }
-      return [buildCall(wanted)];
+      return [buildCall(shownName ?? wanted)];
     }
     if (last?.["type"] === "tool_search_output" && searchedFor !== undefined) {
-      const found = readGatewayTools(last["tools"] as ReadonlyArray<ToolEntry>);
-      return found.includes(searchedFor) ? [buildCall(searchedFor)] : undefined;
+      const shownName = findShownName(
+        readGatewayToolEntries(last["tools"] as ReadonlyArray<ToolEntry>),
+        searchedFor,
+      );
+      return shownName === undefined ? undefined : [buildCall(shownName)];
     }
     return undefined;
   };
@@ -359,31 +388,10 @@ const withCodexHome = async (
 // -- The gateway -------------------------------------------------------------
 
 /** What `withGateway` gives a test. */
-interface Gateway {
-  readonly proxy: RecordingProxy;
-  /** The address Codex is given: the recording proxy in front of the controller. */
-  readonly gatewayUrl: string;
-  readonly sessionToken: string;
+interface Gateway extends ToolChangingGatewayRig {
   readonly upstream: FakeUpstream;
   readonly model: ReturnType<typeof startScriptedModel>;
-  /** Puts the `sentry` server in the Thread's list, or takes it out. */
-  readonly setListed: (listed: boolean) => Promise<void>;
-  /**
-   * Makes the gateway forget the MCP session that Codex holds, as a restart
-   * does for every session, and returns the id of the session that was
-   * forgotten. Codex is not told.
-   */
-  readonly forgetMcpSession: () => Promise<string>;
 }
-
-const WHOAMI_TOOL: FakeTool = {
-  name: "whoami",
-  description: "Returns the user the server acts as",
-};
-
-/** Returns the `tools/call` requests the fake upstream received. */
-const readUpstreamCalls = (upstream: FakeUpstream) =>
-  upstream.requests.filter((one) => one.method === "tools/call");
 
 /**
  * Runs `body` against a controller with a live Thread, a recording proxy in
@@ -398,63 +406,15 @@ const withGateway = async (
   const upstream = await startFakeUpstream({ tools: options.tools ?? [WHOAMI_TOOL] });
   const model = startScriptedModel(buildCallScript());
   try {
-    await withFleet(
-      async (arranged) => {
-        const controller = {
-          harness: arranged.harness,
-          base: arranged.harness.base,
-          token: arranged.token,
-        };
-        const [sentry] = await createServers(controller, [SERVER_NAME]);
-        await eventually(
-          () => readServer(controller, sentry!.id),
-          (record) => record.status === "ready",
-        );
-        const profile = await createProfile(arranged, "codex-gateway", ["mcp.use"]);
-        const thread = await spawnThreadUnder(arranged, profile, {
-          mcpServerIds: options.listed ? [sentry!.id] : [],
-        });
-        const proxy = startRecordingProxy(arranged.harness.base, {
-          answerDiscoverLikeOlderServer: false,
-        });
-        try {
-          await body({
-            proxy,
-            gatewayUrl: proxy.url,
-            sessionToken: thread.token,
-            upstream,
-            model,
-            setListed: async (listed) => {
-              const response = await send(
-                "PATCH",
-                arranged.harness.base,
-                `/api/v1/sessions/${thread.session.id}`,
-                { body: { mcpServerIds: listed ? [sentry!.id] : [] }, token: arranged.token },
-              );
-              expect(response.status).toBe(200);
-            },
-            forgetMcpSession: async () => {
-              const [initialize] = requestsOf(proxy.seen, "initialize");
-              const [list] = requestsOf(proxy.seen, "tools/list");
-              const gone = await fetch(`${proxy.url}/mcp`, {
-                method: "DELETE",
-                headers: {
-                  authorization: `Bearer ${thread.token}`,
-                  "mcp-session-id": initialize!.answeredSessionId!,
-                  "mcp-protocol-version": list!.protocolVersion!,
-                },
-              });
-              expect(gone.status).toBe(204);
-              return initialize!.answeredSessionId!;
-            },
-          });
-        } finally {
-          await proxy.stop();
-        }
-      },
+    await withGatewayRig(
       {
-        plugins: [buildMcpServerPlugin("acme", { server: buildDeskMcpServer("acme", upstream) })],
+        upstream,
+        profileName: "codex-gateway",
+        serverNames: [SERVER_NAME],
+        listed: options.listed ? [SERVER_NAME] : [],
+        answerDiscoverLikeOlderServer: false,
       },
+      (rig) => body({ ...rig, upstream, model }),
     );
   } finally {
     await model.stop();
@@ -542,7 +502,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       const [get] = requestsOf(rig.proxy.seen, "GET");
       const changesBefore = countListChanged([get!]);
 
-      await rig.setListed(true);
+      await rig.setList([SERVER_NAME]);
       expect(
         await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
         "list_changed on the GET stream",
@@ -569,7 +529,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       rig.proxy.withholdListChanged(true);
       const [get] = requestsOf(rig.proxy.seen, "GET");
       const changesBefore = countListChanged([get!]);
-      await rig.setListed(false);
+      await rig.setList([]);
       expect(
         await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
         "the gateway sent list_changed",
@@ -621,9 +581,55 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
         );
       }
 
-      // Each call reached the server once, and the one the gateway answered with 404 never did.
+      // The gateway offered no name to the new MCP session, so the call sent before the list is refused
+      // once (the accepted cost of offering names per MCP session, spec 21 section 3.4), and the one the
+      // gateway answered with 404 never reached the server either.
+      expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami"]);
+      expect(running.readFinishedCalls().map((one) => one.status)).toEqual(["completed", "failed"]);
+
+      // The refusal told Codex's streams to list again, so the next call runs.
+      await running.runTurn(threadId, `call ${WHOAMI}`);
       expect(readUpstreamCalls(rig.upstream).map((one) => one.tool)).toEqual(["whoami", "whoami"]);
       expect(running.readFinishedCalls().map((one) => one.status)).toEqual([
+        "completed",
+        "failed",
+        "completed",
+      ]);
+    });
+  }, 120_000);
+
+  it("calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike", async () => {
+    const tools = [
+      { name: "search_pages", description: `Searches [${SERVER_NAME}__search_pages]` },
+      { name: "search-pages", description: `Searches [${SERVER_NAME}__search_pages_f33805]` },
+      { name: "search.pages", description: `Searches [${SERVER_NAME}__search_pages_52ac82]` },
+    ];
+    await withCodexOnGateway({ listed: true, tools }, async (rig, home) => {
+      const running = await home.start();
+      const threadId = await running.startThread();
+      const owners: ReadonlyArray<readonly [string, string]> = [
+        [`${SERVER_NAME}__search_pages`, "search_pages"],
+        [`${SERVER_NAME}__search_pages_f33805`, "search-pages"],
+        [`${SERVER_NAME}__search_pages_52ac82`, "search.pages"],
+      ];
+      for (const [name, tool] of owners) {
+        const before = readUpstreamCalls(rig.upstream).length;
+        await running.runTurn(threadId, `call ${name}`);
+        expect(
+          requestsOf(rig.proxy.seen, "tools/call")
+            .map((one) => one.tool)
+            .at(-1),
+          `the gateway was called as ${name}`,
+        ).toBe(name);
+        expect(
+          readUpstreamCalls(rig.upstream)
+            .slice(before)
+            .map((one) => one.tool),
+          name,
+        ).toEqual([tool]);
+      }
+      expect(running.readFinishedCalls().map((one) => one.status)).toEqual([
+        "completed",
         "completed",
         "completed",
       ]);
@@ -644,7 +650,7 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
       await running.runTurn(threadId, `call ${SERVER_NAME}__tool007`);
 
       const first = rig.model.requests[0]!;
-      const inline = readGatewayTools(first.body.tools).length;
+      const inline = readGatewayToolEntries(first.body.tools).length;
       const hasToolSearch = first.body.tools.some((tool) => tool["type"] === "tool_search");
       expect(inline === 300 || (inline === 0 && hasToolSearch), "all inline, or none inline").toBe(
         true,
@@ -655,3 +661,198 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 });
+
+// -- A name Codex showed, and a twin that comes or goes -------------------------
+
+/** The most a test of the twins takes: each runs one Codex process for its scenario. */
+const TWIN_TEST_MS = 120_000;
+
+/** What the model is shown of the twins: each name Codex shows, and the tool of the server it stands for. */
+type ShownTwins = Readonly<Record<string, string>>;
+
+/** What happened to one call of a name the model chose. */
+interface TwinCall {
+  /** The name the gateway received. */
+  readonly sentToGateway: ReadonlyArray<string>;
+  /** The tools of the server that ran. */
+  readonly ranUpstream: ReadonlyArray<string>;
+  /** Codex's report of the call, or `none` when it reported no call. */
+  readonly status: string;
+  /** What the model was sent back for the call. */
+  readonly modelWasTold: string | undefined;
+}
+
+/** What one state of the server's tools showed and did. */
+interface TwinStep {
+  /** The tools of the server in this state, by their original names. */
+  readonly listed: ReadonlyArray<string>;
+  /** What the model was shown in this state. */
+  readonly shown: ShownTwins;
+  /** The call of the name the model chose in the first state. */
+  readonly call: TwinCall;
+}
+
+/**
+ * Starts Codex on a server that lists the tools of the first of `states`, and
+ * looks at what the model is shown. The model then calls the name shown for
+ * the tool `calledTool`. For each next state, the server's tools are changed,
+ * the model is shown what Codex shows then, and the model calls the very same
+ * name again. Returns one step for each state.
+ */
+const runTwinScenario = async (options: {
+  readonly states: ReadonlyArray<ReadonlyArray<FakeTool>>;
+  readonly calledTool: string;
+}): Promise<{ readonly name: string; readonly steps: ReadonlyArray<TwinStep> }> => {
+  let result: { name: string; steps: Array<TwinStep> } | undefined;
+  await withCodexOnGateway({ listed: true, tools: options.states[0]! }, async (rig, home) => {
+    const running = await home.start();
+    const threadId = await running.startThread();
+    expect(await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200)).toBe(true);
+    expect(await waitForRequest(rig.proxy, "tools/list")).toBe(true);
+    await waitUntilQuiet(rig.proxy, 500);
+
+    /** Runs a turn that calls nothing, and returns what the model is shown in it. */
+    const look = async (): Promise<ShownTwins> => {
+      const mark = rig.model.requests.length;
+      await running.runTurn(threadId, "look");
+      const shown = readShownTools([rig.model.requests[mark]!]);
+      return Object.fromEntries(
+        shown.map((tool) => [tool.name, /\[(.+)\]$/.exec(tool.description ?? "")?.[1] ?? "?"]),
+      );
+    };
+    const callExactly = async (name: string): Promise<TwinCall> => {
+      const gatewayMark = requestsOf(rig.proxy.seen, "tools/call").length;
+      const upstreamMark = readUpstreamCalls(rig.upstream).length;
+      const callsMark = running.readFinishedCalls().length;
+      const requestsMark = rig.model.requests.length;
+      await running.runTurn(threadId, `call exactly ${name}`);
+      const outputs = rig.model.requests
+        .slice(requestsMark)
+        .flatMap((request) => request.body.input)
+        .filter((item) => item["type"] === "function_call_output");
+      return {
+        modelWasTold: outputs.length === 0 ? undefined : JSON.stringify(outputs.at(-1)!["output"]),
+        sentToGateway: requestsOf(rig.proxy.seen, "tools/call")
+          .slice(gatewayMark)
+          .map((one) => one.tool!),
+        ranUpstream: readUpstreamCalls(rig.upstream)
+          .slice(upstreamMark)
+          .map((one) => one.tool!),
+        status: running.readFinishedCalls().slice(callsMark)[0]?.status ?? "none",
+      };
+    };
+
+    const first = await look();
+    const name = Object.keys(first).find((shown) => first[shown] === options.calledTool)!;
+    const steps: Array<TwinStep> = [
+      {
+        listed: options.states[0]!.map((tool) => tool.name),
+        shown: first,
+        call: await callExactly(name),
+      },
+    ];
+    for (const tools of options.states.slice(1)) {
+      const [get] = requestsOf(rig.proxy.seen, "GET");
+      const changesBefore = countListChanged([get!]);
+      await rig.replaceTools(tools);
+      expect(
+        await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
+        "list_changed on the GET stream",
+      ).toBe(true);
+      await waitUntilQuiet(rig.proxy, 1_000);
+      const shown = await look();
+      steps.push({ listed: tools.map((tool) => tool.name), shown, call: await callExactly(name) });
+    }
+    result = { name, steps };
+  });
+  return result!;
+};
+
+/** The gateway's name for `tool` of `sentry`. */
+const buildGatewayName = (tool: string): string =>
+  `${SERVER_NAME}${MCP_GATEWAY_TOOL_SEPARATOR}${tool}`;
+
+/** The name of `search_pages`, which the gateway keeps as it is. */
+const UNDERSCORE_NAME = buildGatewayName("search_pages");
+
+/**
+ * The name of `search-pages`: the hyphen becomes `_`, and the first six hex
+ * characters of the SHA-256 of `search-pages` follow. The gateway keeps no
+ * hyphen, so Codex has no `-` to fold into the name of `search_pages`.
+ */
+const HYPHEN_NAME = buildGatewayName("search_pages_f33805");
+
+/** The name Codex shows, and the gateway sends, for each of the two tools. */
+const NAMES: Readonly<Record<string, string>> = {
+  search_pages: UNDERSCORE_NAME,
+  "search-pages": HYPHEN_NAME,
+};
+
+/** What a call that reached `tool` through the gateway looks like. */
+const ranCall = (tool: string) => ({
+  sentToGateway: [NAMES[tool]!],
+  ranUpstream: [tool],
+  status: "completed",
+});
+
+/** What a call looks like when Codex refuses the name itself: nothing reaches the gateway and Codex reports no call. */
+const REFUSED_BY_CODEX = { sentToGateway: [], ranUpstream: [], status: "none" };
+
+/** Returns what each step showed and did, without the text Codex told the model. */
+const summarizeSteps = (steps: ReadonlyArray<TwinStep>) =>
+  steps.map(({ listed, shown, call }) => ({
+    listed,
+    shown,
+    sentToGateway: call.sentToGateway,
+    ranUpstream: call.ranUpstream,
+    status: call.status,
+  }));
+
+/** The tools that Codex shows for a list of tools, each under the gateway's name. */
+const buildShown = (listed: ReadonlyArray<string>): ShownTwins =>
+  Object.fromEntries(listed.map((tool) => [NAMES[tool]!, tool]));
+
+/**
+ * Codex, 0.169 and 0.171, shows the model `_` for `-` and gives every tool
+ * whose shown name has a twin a suffix of its own, worked out from the
+ * current list alone. The gateway keeps no `-` in a name, so no two gateway
+ * names look alike to Codex, and Codex shows each name as it is. A name the
+ * model used therefore means the same tool in every state of the list: it
+ * runs its own tool while that tool is listed, and Codex refuses it once the
+ * tool is gone. It never runs the sibling tool, with no restart, as the
+ * hyphen-keeping names did (spec 21 section 3.4).
+ */
+describe.skipIf(codex === undefined)(
+  "a name the model already used never runs the other tool in Codex, when a twin with - or _ comes or goes",
+  () => {
+    for (const { title, states, calledTool } of TWIN_SCENARIOS) {
+      it(
+        `${title}: the model's name for ${calledTool} runs ${calledTool} while it is listed and is refused after`,
+        async () => {
+          const run = await runTwinScenario({
+            states: states.map((listed) => listed.map(buildTwinTool)),
+            calledTool,
+          });
+          expect(run.name).toBe(NAMES[calledTool]);
+          expect(summarizeSteps(run.steps)).toEqual(
+            states.map((listed) => ({
+              listed,
+              shown: buildShown(listed),
+              ...(listed.includes(calledTool) ? ranCall(calledTool) : REFUSED_BY_CODEX),
+            })),
+          );
+          for (const step of run.steps) {
+            expect(
+              step.call.ranUpstream.every((tool) => tool === calledTool),
+              "no other tool ran",
+            ).toBe(true);
+            if (step.call.ranUpstream.length === 0) {
+              expect(step.call.modelWasTold).toContain("unsupported call");
+            }
+          }
+        },
+        TWIN_TEST_MS,
+      );
+    }
+  },
+);

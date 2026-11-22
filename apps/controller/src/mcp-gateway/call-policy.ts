@@ -22,22 +22,32 @@ import {
   buildMissingGrantRefusal,
   buildNotInListRefusal,
   buildRefusalWarning,
+  buildToolNotListedRefusal,
   buildUnknownToolRefusal,
   claimWarning,
   type Refusal,
 } from "./refusals";
 import { holdsMcpUse } from "./served";
-import { notifyListChanged, type TokenState } from "./tokens";
+import { findOriginalToolName } from "./tool-names";
+import { findOffer, notifyListChanged, type McpSession, type TokenState } from "./tokens";
+
+/**
+ * Where an admitted call goes: the server of the called name in the session's
+ * list now, and the tool of that server the name stands for. This can be
+ * another server than the one the name was offered for (`OfferedTool`), when
+ * the offered one was replaced by a server of the same name. An early refusal
+ * names the offer, and a refusal after the call is sent names this target.
+ */
+interface DispatchTarget {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly tool: string;
+}
 
 /** What a call turned out to be, before anything is sent. */
 type CallDecision =
   | { readonly _tag: "refused"; readonly refusal: Refusal }
-  | {
-      readonly _tag: "call";
-      readonly serverId: string;
-      readonly serverName: string;
-      readonly tool: string;
-    };
+  | { readonly _tag: "call"; readonly target: DispatchTarget };
 
 /** How an audited call ended. */
 type CallOutcome =
@@ -57,42 +67,54 @@ export const makeCallPolicy = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
 
-  /** Reads what a call means and whether it may go on, without sending anything. */
+  /**
+   * Reads what a call means and whether it may go on, without sending anything.
+   * This is the one place that admits a call by its name. `session` is the MCP
+   * session the call arrives on, or `undefined` in the stateless era.
+   */
   const decideCall = (
     state: TokenState,
+    session: McpSession | undefined,
     actor: SessionActor,
     toolName: string,
   ): Effect.Effect<CallDecision> =>
     Effect.gen(function* () {
       if (!holdsMcpUse(actor)) return { _tag: "refused", refusal: buildMissingGrantRefusal() };
-      // A call is accepted only under a name `tools/list` sent to this token
-      // since the controller started, and the name keeps its meaning. A name
-      // a harness remembers from before a restart is refused, because the list
-      // may have changed and a recomputed name could reach another tool than
-      // the one the harness showed. The streams are told to list again.
-      const meaning = state.names.find(toolName);
-      if (meaning === undefined) {
+      // A call is accepted only under a name `tools/list` offered on the MCP
+      // session it arrives on (to the token, in the stateless era). That proves
+      // this client was offered the name and saw what it stands for now. A name
+      // a client remembers from before a restart or an upgrade is refused
+      // once, and the streams are told to list again. The refusal names what
+      // the name was offered for, whatever the records say today.
+      const offered = findOffer(state, session, toolName);
+      if (offered === undefined) {
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }
       // The server the name reaches is the one of that name in the session's
-      // list now, which may be another account than the one the name was sent
-      // for. Whether it is ready and still lists the tool is the catalogue's
-      // decision, made when the call is sent.
-      const views = yield* reads.readListedAvailability(actor.sessionId);
-      const listed = views.find(({ server }) => server.name === meaning.serverName);
+      // list now, which may be another account than the one the name was
+      // offered for. Whether it is ready is the catalogue's decision, made
+      // when the call is sent.
+      const listed = yield* reads.readListedServerNamed(actor.sessionId, offered.serverName);
       if (listed === undefined) {
-        return {
-          _tag: "refused",
-          refusal: buildNotInListRefusal(
-            { id: meaning.serverId, name: meaning.serverName },
-            meaning.serverName,
-            meaning.tool,
-          ),
-        };
+        return { _tag: "refused", refusal: buildNotInListRefusal(offered) };
       }
-      const { server } = listed;
-      return { _tag: "call", serverId: server.id, serverName: server.name, tool: meaning.tool };
+      const tool = findOriginalToolName(offered.serverName, listed.toolNames, toolName);
+      if (tool === undefined) {
+        return { _tag: "refused", refusal: buildToolNotListedRefusal(offered) };
+      }
+      // Two tools of one server whose names clash by the 24-bit hash can trade
+      // a name when the server's list changes. The offer holds what the name
+      // was offered for, so this one comparison stops the call from reaching
+      // the other tool before the client lists again.
+      if (tool !== offered.tool) {
+        yield* notifyListChanged(state);
+        return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
+      }
+      return {
+        _tag: "call",
+        target: { serverId: listed.id, serverName: offered.serverName, tool },
+      };
     });
 
   /**
@@ -230,15 +252,16 @@ export const makeCallPolicy = Effect.gen(function* () {
       decision._tag === "refused"
         ? refuse(decision.refusal)
         : Effect.suspend(() => {
-            server = { id: decision.serverId, name: decision.serverName };
-            tool = decision.tool;
+            const { target } = decision;
+            server = { id: target.serverId, name: target.serverName };
+            tool = target.tool;
             return catalogue
               .callTool({
                 upstreamScope: state.tokenHash,
-                serverId: decision.serverId,
-                tool: decision.tool,
+                serverId: target.serverId,
+                tool: target.tool,
                 arguments: call.arguments,
-                authorize: authorizeCall(state.tokenHash, decision.serverId),
+                authorize: authorizeCall(state.tokenHash, target.serverId),
               })
               .pipe(
                 Effect.map((result) => {
@@ -250,15 +273,15 @@ export const makeCallPolicy = Effect.gen(function* () {
                     notServing = true;
                     return refuseWhileNotServing(
                       actor.sessionId,
-                      decision.serverName,
-                      decision.tool,
+                      target.serverName,
+                      target.tool,
                       refused.message,
                     );
                   }
                   return refuse({
                     reason: refused.reason,
-                    server: { id: decision.serverId, name: decision.serverName },
-                    tool: decision.tool,
+                    server: { id: target.serverId, name: target.serverName },
+                    tool: target.tool,
                     message: refused.message,
                   });
                 }),
@@ -292,8 +315,8 @@ export const makeCallPolicy = Effect.gen(function* () {
         Effect.catchIf(isPromotionRefusal, (gate) =>
           refuseWhileNotServing(
             actor.sessionId,
-            decision._tag === "call" ? decision.serverName : decision.refusal.server?.name,
-            decision._tag === "call" ? decision.tool : undefined,
+            decision._tag === "call" ? decision.target.serverName : decision.refusal.server?.name,
+            decision._tag === "call" ? decision.target.tool : undefined,
             gate.error.message,
           ),
         ),
@@ -314,12 +337,14 @@ export const makeCallPolicy = Effect.gen(function* () {
       admitExecution(state, actor, { arguments: undefined }, { _tag: "refused", refusal }),
 
     /**
-     * Runs one `tools/call` for the session and returns its tool result: the
-     * server's answer, or a refusal with `isError: true`. Never fails: a defect
-     * is left to the caller.
+     * Runs one `tools/call` that arrives on `session` (`undefined` in the
+     * stateless era) and returns its tool result: the
+     * server's answer, or a refusal with `isError: true`. Never fails: a
+     * defect is left to the caller.
      */
     runToolCall: (
       state: TokenState,
+      session: McpSession | undefined,
       actor: SessionActor,
       call: { readonly name: string; readonly arguments: JsonObject | undefined },
     ): Effect.Effect<McpSchema.CallToolResult> =>
@@ -329,7 +354,7 @@ export const makeCallPolicy = Effect.gen(function* () {
         // its entry, as `failed`. While the controller is frozen or sealed the
         // gate refuses the write, and then the call goes unaudited as spec 21
         // section 3.9 says of every call in that window.
-        const decision = yield* decideCall(state, actor, call.name).pipe(
+        const decision = yield* decideCall(state, session, actor, call.name).pipe(
           Effect.onError(() =>
             Effect.uninterruptible(
               promotion

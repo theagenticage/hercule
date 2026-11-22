@@ -28,9 +28,10 @@ const definition: HarnessDefinition = {
       auto: "unsupported",
       "full-access": "native",
     },
-    // MCP is an extension to pi rather than part of its core, so the pinned
-    // version passes nothing through.
-    mcpPassthrough: "unsupported",
+    // pi has an MCP client built in since 0.99, as an extension that pi
+    // bundles. Hercule starts pi with `--no-extensions`, so the adapter loads
+    // it explicitly, and its own extension registers the MCP Gateway with it.
+    mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
   },

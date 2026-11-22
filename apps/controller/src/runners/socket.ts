@@ -196,6 +196,27 @@ const RUNNER_ENDED_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005, 1006]
  */
 const QUEUED_FRAMES_DEADLINE = Duration.seconds(5);
 
+/**
+ * The close codes of a connection that ended on purpose, so it is not an
+ * error: 1000 (normal), 1001 (going away) and 1005 (closed with no status
+ * code). A runner that stops sends 1000. A client that closes without naming a
+ * code, as a browser's `close()` does, arrives as 1005. 1001 is what an end
+ * sends when it is leaving, and the controller itself sends it when it closes
+ * a connection that a newer one displaced or that went silent. Every other code
+ * is a fault: 1006 means the connection dropped with no close frame, and the
+ * rest are refusals.
+ */
+const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1001, 1005]);
+
+/**
+ * Checks whether the connection ended with a close that is not an error. Takes
+ * any error, because the receive loop can also fail with a database error.
+ */
+const endedNormally = (error: unknown): boolean =>
+  Socket.isSocketError(error) &&
+  error.reason._tag === "SocketCloseError" &&
+  NORMAL_CLOSE_CODES.has(error.reason.code);
+
 /** Checks whether the runner or the network ended the connection, as opposed to the controller. */
 const endedByRunnerOrNetwork = (error: Socket.SocketError): boolean =>
   error.reason._tag === "SocketCloseError" && RUNNER_ENDED_CLOSE_CODES.has(error.reason.code);
@@ -496,9 +517,13 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     yield* Effect.ensuring(
       Effect.race(
-        Effect.tapCause(receiveFrames, (cause) =>
-          Effect.logError("A runner's connection ended in an error", cause),
-        ).pipe(Effect.ignore),
+        receiveFrames.pipe(
+          Effect.catchIf(endedNormally, () => Effect.void),
+          Effect.tapCause((cause) =>
+            Effect.logError("A runner's connection ended in an error", cause),
+          ),
+          Effect.ignore,
+        ),
         Effect.race(ask, closeWhenAsked),
       ),
       Effect.tapCause(leave, (cause) =>
