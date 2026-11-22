@@ -174,11 +174,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Stores the renewed tokens of the sign-in `held` read, but only while the
-   * server still holds that sign-in: its `sign_in_generation` is `generation`
-   * and the secret is still the text `held`. Both are checked in the one
-   * transaction that writes, so a sign-in the user made while the provider
-   * was called is never overwritten. Fails with `SignInReplaced` when either
-   * changed, and then writes nothing.
+   * server's secret is still the text `held`. A new sign-in, a pasted token and
+   * a deleted server all replace or delete that secret, so one comparison, in
+   * the transaction that writes, keeps a sign-in the user made while the
+   * provider was called from being overwritten. Fails with `SignInReplaced`
+   * when the secret changed, and then writes nothing.
    *
    * The new access token must be a bearer token, because it is sent in a
    * header and removed from every answer. Fails with `ProviderUnreachable`
@@ -187,7 +187,6 @@ const make = Effect.gen(function* () {
   const writeTokensIfHeld = (
     serverId: string,
     held: { readonly text: string; readonly signIn: OAuthSignIn },
-    generation: number,
     next: TokenSet,
   ): Effect.Effect<void, SignInReplaced | ProviderUnreachable> =>
     Effect.gen(function* () {
@@ -200,14 +199,8 @@ const make = Effect.gen(function* () {
         withTransaction(
           sql,
           Effect.gen(function* () {
-            const current = yield* servers.readSignInGeneration(serverId);
             const stored = yield* secrets.get(buildOwner(serverId), SIGN_IN_OAUTH_SECRET);
-            if (
-              Option.isNone(current) ||
-              current.value !== generation ||
-              Option.isNone(stored) ||
-              Redacted.value(stored.value) !== held.text
-            ) {
+            if (Option.isNone(stored) || Redacted.value(stored.value) !== held.text) {
               return false;
             }
             yield* secrets.set(
@@ -269,11 +262,8 @@ const make = Effect.gen(function* () {
         refreshPermits.withPermit(
           `mcp-server:${serverId}`,
           Effect.gen(function* () {
-            // The generation is read before the sign-in, so a sign-in that lands
-            // between the two reads leaves a pair that the write below refuses.
-            const generation = yield* Effect.orDie(servers.readSignInGeneration(serverId));
             const held = yield* readStoredOAuth(serverId);
-            if (Option.isNone(generation) || Option.isNone(held)) {
+            if (Option.isNone(held)) {
               return yield* new SignInReplaced({ message: "the server holds no OAuth sign-in" });
             }
             const { signIn } = held.value;
@@ -297,8 +287,7 @@ const make = Effect.gen(function* () {
                 resource: signIn.resource,
                 bearerOnly: true,
               },
-              writeIfHeld: (next) =>
-                writeTokensIfHeld(serverId, held.value, generation.value, next),
+              writeIfHeld: (next) => writeTokensIfHeld(serverId, held.value, next),
             }).pipe(
               Effect.provideService(HttpClient.HttpClient, httpClient),
               // No span at all: a client span records the address, and a failed
