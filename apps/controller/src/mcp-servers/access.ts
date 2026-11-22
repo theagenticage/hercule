@@ -121,6 +121,16 @@ export interface ServerCredentials {
    */
   readonly credentialsRecordId: string;
   /**
+   * Whether an upstream session goes on after the credentials it opened with
+   * were renewed. A plugin server's Connection renews its token under the
+   * same sign-in, so its sessions go on. A server added by URL answers a
+   * request that continues an exchange only with the token its session opened
+   * with (`readWithoutRefresh`), so a session is replaced when a call would
+   * send another token: otherwise the call's own request would carry the new
+   * token and the requests that follow it would fail after the tool ran.
+   */
+  readonly sessionSurvivesRenewal: boolean;
+  /**
    * Returns the credentials for a request that starts an exchange, renewing
    * them first when they have expired. A renewal runs `guard` right before it
    * calls the provider, and fails with whatever the guard fails with. Fails
@@ -347,6 +357,7 @@ const resolvePluginAccess = (
     },
     credentials: {
       credentialsRecordId: connection.id,
+      sessionSurvivesRenewal: true,
       readForUse: (guard) =>
         Effect.mapError(
           connectionTypes.readCredentialsForUse(connection.id, guard),
@@ -428,11 +439,13 @@ const resolveUrlAccess = (
       signIn === "oauth"
         ? {
             credentialsRecordId: id,
+            sessionSurvivesRenewal: false,
             ...resolveOAuthCredentials(name, id, signIns, toUpstream, replaced),
             describeRejected,
           }
         : {
             credentialsRecordId: id,
+            sessionSurvivesRenewal: false,
             // The guard protects a refresh, and this access never refreshes.
             readForUse: () => Effect.map(signIns.readToken(id, signIn), toUpstream),
             refreshAfterRejection: () =>

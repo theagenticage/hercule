@@ -23,6 +23,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
+import { McpProtocol } from "effect/ai";
 import { uuidFromString } from "../db";
 import { del } from "../http/testing";
 import type { SetUpController } from "../workflows/testing";
@@ -358,6 +359,49 @@ describe("the tokens of a sign-in", () => {
       );
       expect(await countNotifications(controller)).toBe(1);
     });
+  });
+});
+
+describe("an upstream session of a signed-in server", () => {
+  it("is replaced when a refresh rotated the token, so a reply to a request of the server carries the token that session opened with", async () => {
+    await withOAuthRig(
+      async (rig) => {
+        const { controller, authorizationServer, fake } = rig;
+        const serverId = await addServerThatNeedsSignIn(rig);
+        await signInWithBrowser(rig, serverId);
+        await waitForStatus(controller, "ready");
+        expect((await callAs(controller, serverId))._tag).toBe("Success");
+        const requestsBefore = fake.requests.length;
+
+        // The next call finds its token refused, so a refresh rotates it, and
+        // the server then asks the client for a reply (a ping).
+        authorizationServer.revokeAccessTokens();
+        fake.intercept = ({ method }) =>
+          method === "tools/call"
+            ? new Response(
+                `data: ${JSON.stringify({ jsonrpc: "2.0", id: "from-server", method: "ping" })}\n\n`,
+                { status: 200, headers: { "content-type": "text/event-stream" } },
+              )
+            : method === "?"
+              ? new Response(null, { status: 202 })
+              : undefined;
+        await callAs(controller, serverId);
+
+        const during = fake.requests.slice(requestsBefore);
+        // A reply has no JSON-RPC method, which the fake records as `?`.
+        const replies = during.filter((request) => request.method === "?");
+        expect(replies.map((reply) => [reply.authorization, reply.status])).toEqual([
+          [`Bearer ${authorizationServer.currentAccessToken()}`, 202],
+        ]);
+        // The session the old token opened was replaced by one opened with the new token.
+        expect(
+          during
+            .filter((request) => request.method === "initialize")
+            .map((request) => request.authorization),
+        ).toEqual([`Bearer ${authorizationServer.currentAccessToken()}`]);
+      },
+      { fake: { protocols: [McpProtocol.v2025_11_25] } },
+    );
   });
 });
 

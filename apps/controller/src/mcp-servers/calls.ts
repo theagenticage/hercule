@@ -6,8 +6,9 @@
  * Upstream MCP sessions live in memory, one per Session Token and server, and
  * the first call that needs one opens it. A session is replaced when the
  * server's `revision` or the `generation` of its credentials (for a plugin
- * server, its Connection's `credentialsGeneration`) moved since it opened. It
- * is closed once the calls that use it have ended, when the gateway says its
+ * server, its Connection's `credentialsGeneration`) moved since it opened, and
+ * a server added by URL also replaces it when a renewal gave its token another
+ * identity. It is closed once the calls that use it have ended, when the gateway says its
  * token no longer serves the server (`closeUpstreamSessionsExcept`), when
  * something else replaced it, or when a committed change took the server's
  * destination away. An opening that nothing waits for any more is cancelled
@@ -144,6 +145,8 @@ interface UpstreamSlot {
   readonly serverRevision: number;
   /** The server's credentials generation when the slot was made (`readCredentialsGeneration`). */
   readonly credentialsGeneration: number | undefined;
+  /** The identity of the credentials the session opened with (`UpstreamCredentials.identity`). */
+  readonly credentialsIdentity: string;
   /** Ends with the open session, or the reason it could not be opened. */
   readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError>;
   /** Completing it cancels an opening that has not ended. */
@@ -255,7 +258,10 @@ const make = Effect.gen(function* () {
   /**
    * Takes hold of the session for this token and server, and starts opening
    * it when there is none. A session made for an older `revision` of the
-   * server, or an older `generation` of its credentials, is replaced.
+   * server, or an older `generation` of its credentials, is replaced. So is a
+   * session opened with other credentials than the ones this call sends, when
+   * the server's sessions do not survive a renewal
+   * (`ServerCredentials.sessionSurvivesRenewal`).
    * `prepareSend` prepares each request of the opening. Call `releaseSlot`
    * when the call is done with it.
    */
@@ -272,7 +278,9 @@ const make = Effect.gen(function* () {
       const usable =
         existing !== undefined &&
         existing.serverRevision === server.revision &&
-        existing.credentialsGeneration === credentialsGeneration;
+        existing.credentialsGeneration === credentialsGeneration &&
+        (access.credentials.sessionSurvivesRenewal ||
+          existing.credentialsIdentity === credentials.identity);
       if (usable) {
         existing.users += 1;
         return existing;
@@ -286,6 +294,7 @@ const make = Effect.gen(function* () {
         credentialsRecordId: access.credentials.credentialsRecordId,
         serverRevision: server.revision,
         credentialsGeneration,
+        credentialsIdentity: credentials.identity,
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),
