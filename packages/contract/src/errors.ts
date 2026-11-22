@@ -183,9 +183,28 @@ export class Conflict extends Schema.Error<Conflict>("hercule/Conflict")(
  * - `source-unreadable`: the system the thing lives in could not be read, or
  *   answered something this contract does not accept. Trying again later may
  *   work. The message is safe to show.
+ * - `sign-in-unsupported`: an MCP server added by address offers no sign-in
+ *   through the browser (it publishes no OAuth metadata). A client offers the
+ *   token field instead.
+ * - `sign-in-expired`: a sign-in that was started cannot be finished, because
+ *   it ran out (it lives ten minutes), a newer sign-in replaced it, the server
+ *   was given another sign-in meanwhile, or the controller restarted. A client
+ *   starts the sign-in again and does not retry the same answer.
+ * - `sign-in-refused`: the answer of the browser or of the provider says the
+ *   sign-in did not happen: the user said no, the provider refused the code,
+ *   or the answer was not the one the sign-in waits for. The message names
+ *   the provider's error code only when it is a standard one. A client may
+ *   start the sign-in again.
  */
 export const InvalidStateDetails = Schema.Struct({
-  reason: Schema.Literals(["request-closed", "blocker-cycle", "source-unreadable"]),
+  reason: Schema.Literals([
+    "request-closed",
+    "blocker-cycle",
+    "source-unreadable",
+    "sign-in-unsupported",
+    "sign-in-expired",
+    "sign-in-refused",
+  ]),
 });
 
 export type InvalidStateDetails = Schema.Schema.Type<typeof InvalidStateDetails>;

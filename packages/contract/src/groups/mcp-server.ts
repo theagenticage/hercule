@@ -244,6 +244,52 @@ export const McpServerSetTokenInput = closedStruct({ token: McpServerToken });
 
 export type McpServerSetTokenInput = Schema.Schema.Type<typeof McpServerSetTokenInput>;
 
+/**
+ * The address the browser returns to after a sign-in: exactly
+ * `http://127.0.0.1:<port>/callback`, with a port from 1 to 65535. Nothing else
+ * is a redirect address: not another spelling of the loopback host, not user
+ * information, a query or a fragment. A client that catches the return listens
+ * on that port. A client that cannot listen (the web app) picks a port nothing
+ * listens on, and the user pastes the address the browser ended on.
+ */
+export const McpServerSignInRedirectUri = Schema.String.check(
+  Schema.makeFilter((uri) => {
+    const port = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/callback$/.exec(uri)?.[1];
+    return port !== undefined && Number(port) <= 65535
+      ? undefined
+      : "A redirect address is exactly http://127.0.0.1:<port>/callback, with a port from 1 to 65535, and no user name, query or fragment.";
+  }),
+);
+
+export type McpServerSignInRedirectUri = Schema.Schema.Type<typeof McpServerSignInRedirectUri>;
+
+/** The payload of `mcpServer.startSignIn`: the address the browser returns to. */
+export const McpServerStartSignInInput = closedStruct({ redirectUri: McpServerSignInRedirectUri });
+
+export type McpServerStartSignInInput = Schema.Schema.Type<typeof McpServerStartSignInInput>;
+
+/**
+ * What `mcpServer.startSignIn` answers: the address to open in a browser, and
+ * the time after which the sign-in cannot be finished. The address holds a
+ * one-time `state`, and nothing a client may keep.
+ */
+export const McpServerSignInStart = Schema.Struct({
+  authorizationUrl: Schema.String,
+  expiresAt: Timestamp,
+});
+
+export type McpServerSignInStart = Schema.Schema.Type<typeof McpServerSignInStart>;
+
+/**
+ * The payload of `mcpServer.finishSignIn`: what the browser was sent back
+ * with. It is the whole address the browser ended on, or only its query string
+ * (`code`, `state` and `iss`, or `error`). The text holds the sign-in's
+ * one-time code, so it is never logged or kept.
+ */
+export const McpServerFinishSignInInput = closedStruct({ callbackQuery: Schema.NonEmptyString });
+
+export type McpServerFinishSignInInput = Schema.Schema.Type<typeof McpServerFinishSignInInput>;
+
 const params = { id: Id };
 
 export const mcpServer = HttpApiGroup.make("mcpServer")
@@ -318,6 +364,44 @@ export const mcpServer = HttpApiGroup.make("mcpServer")
     HttpApiEndpoint.post("setToken", "/mcp-servers/:id/token", {
       params,
       payload: McpServerSetTokenInput,
+      success: McpServer,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // Starts the sign-in of a server added by URL, through its OAuth server,
+    // and answers the address to open in a browser. It changes nothing stored:
+    // the attempt lives in the controller's memory for ten minutes, and a newer
+    // start for the same server replaces it.
+    //
+    // - `validation`: the redirect address is not the exact loopback form.
+    // - `invalid_state`: the details say which. No details: the server is a
+    //   plugin server, which is reached with its Connection's credential.
+    //   `sign-in-unsupported`: the server offers no sign-in through the browser.
+    //   `source-unreadable`: the server or its authorization server could not be
+    //   reached, or answered what OAuth does not allow; trying again later may
+    //   work.
+    HttpApiEndpoint.post("startSignIn", "/mcp-servers/:id/sign-in", {
+      params,
+      payload: McpServerStartSignInInput,
+      success: McpServerSignInStart,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // Finishes a sign-in that `startSignIn` began, with what the browser came
+    // back with, and answers with the server, in status `checking` with sign-in
+    // `oauth`. A server that is on lists its tools again with the new tokens.
+    //
+    // - `validation`: the text is not a redirect answer: it has no `state`,
+    //   repeats a parameter, holds both or neither of `code` and `error`, or is
+    //   an address for another redirect address than the one the sign-in used.
+    // - `invalid_state`: the details say which. `sign-in-expired`: no sign-in
+    //   of this server waits for that `state` (it ran out, was replaced, or the
+    //   server's sign-in changed); start again. `sign-in-refused`: the user or
+    //   the provider said no, the provider refused the code, or the answer came
+    //   from another issuer. `source-unreadable`: the token endpoint could not
+    //   be reached; the sign-in is used up, so start again. No details: the
+    //   server is a plugin server.
+    HttpApiEndpoint.post("finishSignIn", "/mcp-servers/:id/sign-in/finish", {
+      params,
+      payload: McpServerFinishSignInInput,
       success: McpServer,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

@@ -50,7 +50,8 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * its grant does not show it: the grant family of `requires` already says so
  * for the `credential`, `secret` and `infra` families (see `canCarrySecrets`).
  * `mcp.manage` also covers operations that carry none, so
- * `mcpServer.create` and `mcpServer.setToken`, which take a token, set it.
+ * `mcpServer.create`, `mcpServer.setToken` and `mcpServer.finishSignIn`, which
+ * take a token or a sign-in code, set it.
  */
 interface OperationRow {
   readonly requires: Requirement;
@@ -907,6 +908,18 @@ const TABLE = {
     carriesSecret: true,
     method: "POST",
     path: "/api/v1/mcp-servers/:id/token",
+  },
+  "mcpServer.startSignIn": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in",
+  },
+  // The query holds the one-time `code` of the sign-in.
+  "mcpServer.finishSignIn": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in/finish",
   },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
