@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { queryKeys } from "@hercule/client-core";
+import { describeThreadStartFoot } from "@hercule/client-core/mcp-servers";
 import { describeThreadServers } from "@hercule/client-core/mcp-servers/first-screen";
 import { buildErrorBody } from "@hercule/client-core/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
@@ -36,6 +37,7 @@ import {
   openComposerApp,
   openServersSubmenu,
   OPS,
+  readListWrites,
   readSubmenuRows,
   toggleMenu,
   waitForTopicReads,
@@ -51,7 +53,27 @@ vi.mock("@hercule/client-core/mcp-servers/first-screen", async (importOriginal) 
   return { ...original, describeThreadServers: vi.fn(original.describeThreadServers) };
 });
 
+// Lets a test record each description of the foot the editor draws, to look at every render and
+// not only the one that settles. It describes the foot as the real function does.
+const foot = vi.hoisted(() => ({
+  describe: undefined as unknown as typeof describeThreadStartFoot,
+}));
+vi.mock("@hercule/client-core/mcp-servers", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@hercule/client-core/mcp-servers")>();
+  foot.describe = original.describeThreadStartFoot;
+  return { ...original, describeThreadStartFoot: vi.fn(original.describeThreadStartFoot) };
+});
+
 const SERVER_LIST = "/api/v1/mcp-servers";
+
+/**
+ * Returns the click handler a button has now. Called later, it stands for a click that began on the
+ * render this button came from, before the cache changed.
+ */
+const readClickHandler = (button: HTMLElement): (() => void) => {
+  const key = Object.keys(button).find((each) => each.startsWith("__reactProps$"))!;
+  return (button as unknown as Record<string, { onClick: () => void }>)[key]!.onClick;
+};
 
 /** An id that names no server, as a server deleted since a pick was made. */
 const DELETED_ID = "01a06d02-8300-7000-8000-0000000000ff";
@@ -264,6 +286,80 @@ describe("an open thread's start list", () => {
     expect(readFoot()).not.toContain("Back to webshop's list");
     // The thread's own switches keep working.
     expect(findSwitch("linear").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("never draws the reset of an earlier start in a render that already knows the refresh of the projects failed", async () => {
+    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
+    let failing = false;
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR, SENTRY_WORK],
+      projects: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS],
+      handlers: {
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", READ_FAILURE) }
+            : { body: { items: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS] } },
+      },
+    });
+    const popover = await openServersSubmenu();
+    await waitFor(() => {
+      expect(popover.querySelector(".plus-foot")?.textContent).toContain("Back to webshop's list");
+    });
+    // Every render of the foot, with what the projects' read was at that moment.
+    const seen: { kind: string; reads: string | undefined }[] = [];
+    vi.mocked(describeThreadStartFoot).mockImplementation((decision, ids) => {
+      seen.push({
+        kind: decision.kind,
+        reads: app.context.queryClient.getQueryState(queryKeys.projects())?.status,
+      });
+      return foot.describe(decision, ids);
+    });
+    failing = true;
+    await act(() => app.context.queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+    await waitFor(() => {
+      expect(popover.querySelector(".plus-foot")?.textContent).toContain(
+        `could not be read (${READ_FAILURE})`,
+      );
+    });
+
+    expect(seen.filter(({ reads }) => reads === "error").map(({ kind }) => kind)).not.toContain(
+      "start",
+    );
+  });
+
+  it("writes nothing when a reset pressed on an earlier render arrives after the refresh of the projects failed", async () => {
+    const thread = withServers(THREAD_FIXTURES.finished, [LINEAR]);
+    let failing = false;
+    const app = await openComposerApp(`/threads/${thread.session.id}`, {
+      thread,
+      servers: [LINEAR, SENTRY_WORK],
+      projects: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS],
+      handlers: {
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", READ_FAILURE) }
+            : { body: { items: [{ ...WEBSHOP, mcpServerIds: [SENTRY_WORK_ID] }, OPS] } },
+      },
+    });
+    const popover = await openServersSubmenu();
+    const earlierReset = readClickHandler(
+      await within(popover).findByRole("button", { name: "Back to webshop's list", hidden: true }),
+    );
+
+    failing = true;
+    await act(() => app.context.queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+    await waitFor(() => {
+      expect(popover.querySelector(".plus-foot .menu-note")?.textContent).toContain(
+        `could not be read (${READ_FAILURE})`,
+      );
+    });
+    await act(async () => {
+      earlierReset();
+      await Promise.resolve();
+    });
+
+    expect(readListWrites(app.calls, thread.session.id)).toEqual([]);
   });
 
   it("says why the servers could not be read when a record they are joined with fails, with nothing cached", async () => {

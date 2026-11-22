@@ -106,7 +106,7 @@ function McpServerPage(): JSX.Element {
     source.kind === "plugin"
       ? readMcpServerOffers(plugins).find((each) => each.contributionId === source.contributionId)
       : undefined;
-  const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data));
+  const flip = useMcpServerSwitch(buildServerSwitchTarget(query.data), query.data.id);
   // The switch shows the server's record in the list of servers, the value a
   // press is decided on. While this page's own read shows another value, it
   // waits, so a press never lands on an old value.

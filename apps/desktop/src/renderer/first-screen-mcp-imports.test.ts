@@ -9,10 +9,13 @@
  * renderer imports, so a first-screen file that switches to the broad
  * `@hercule/client-core/mcp-servers` entry fails here.
  *
- * It follows the value imports of the routes the desktop build counts as its
- * first screen (the `--route` list of `build:desktop:bundle` in the root
+ * It follows the value imports of the renderer's entry (`main.tsx`, which
+ * `index.html` loads) and of the routes the desktop build counts as its first
+ * screen (the `--route` list of `build:desktop:bundle` in the root
  * `package.json`) through the renderer and `@hercule/client-core`. A dynamic
- * `import()`, which loads later, is not followed.
+ * `import()`, which loads later, is not followed. The generated route tree is
+ * not followed either: it names every route, and the build splits each route's
+ * code at build time, so only the routes the first screen renders are listed.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -24,6 +27,14 @@ const clientCoreSource = join(repository, "packages/client-core/src");
 const mcpServersFolder = `${join(clientCoreSource, "mcp-servers")}/`;
 
 /** The routes the first screen renders, as `build:desktop:bundle` names them. */
+const rendererSource = join(repository, "apps/desktop/src/renderer");
+
+/** The file `index.html` loads as the renderer's entry. */
+const RENDERER_ENTRY = join(rendererSource, "main.tsx");
+
+/** The generated route tree, which imports every route and is left to `FIRST_SCREEN_ROUTES`. */
+const ROUTE_TREE = join(rendererSource, "routeTree.gen.ts");
+
 const FIRST_SCREEN_ROUTES = [
   "__root.tsx",
   "_connected.tsx",
@@ -76,11 +87,11 @@ const resolveSourceFile = (from: string, path: string): string | undefined => {
     .find((candidate) => existsSync(candidate));
 };
 
-/** Returns every source file the files `entries` reach through value imports, themselves included. */
+/** Returns every source file the files `entries` reach through value imports, themselves included, except through the route tree. */
 const collectReachedFiles = (entries: readonly string[]): Set<string> => {
   const reached = new Set<string>();
   const visit = (file: string): void => {
-    if (reached.has(file)) return;
+    if (reached.has(file) || file === ROUTE_TREE) return;
     reached.add(file);
     for (const path of findValueImports(readFileSync(file, "utf8"))) {
       const next = resolveSourceFile(file, path);
@@ -106,10 +117,20 @@ describe("the desktop renderer's first screen and the MCP server models", () => 
       ...pickMcpServerModels(collectReachedFiles([join(mcpServersFolder, "first-screen.ts")])),
     ];
 
-    const reached = pickMcpServerModels(collectReachedFiles(FIRST_SCREEN_ROUTES));
+    const reached = pickMcpServerModels(
+      collectReachedFiles([RENDERER_ENTRY, ...FIRST_SCREEN_ROUTES]),
+    );
 
     // The first screen does read the models: a walk that finds none follows nothing.
     expect(reached).toContain("first-screen.ts");
     expect(reached.filter((file) => !allowed.includes(file))).toEqual([]);
+  });
+
+  it("starts from the entry that index.html loads, and does not follow the route tree", () => {
+    expect(readFileSync(join(rendererSource, "index.html"), "utf8")).toContain('src="/main.tsx"');
+    const entryOnly = collectReachedFiles([RENDERER_ENTRY]);
+
+    expect(entryOnly.has(join(rendererSource, "app/router.tsx"))).toBe(true);
+    expect(entryOnly.has(ROUTE_TREE)).toBe(false);
   });
 });

@@ -29,7 +29,7 @@ import {
   type ThreadStartDecision,
 } from "@hercule/client-core/mcp-servers/first-screen";
 import type { McpServerView } from "@hercule/client-core/mcp-servers";
-import type { MutableLiveTopic, PluginDetail, Session } from "@hercule/contract";
+import type { McpServer, MutableLiveTopic, PluginDetail, Session } from "@hercule/contract";
 import { buildStartRecord } from "../../app/start-record";
 import { MCP_SERVER_TOPICS, useScreenTopicsLive } from "../../app/live";
 import { mcpServersQuery, projectsQuery, settingsQuery } from "../../app/queries";
@@ -119,16 +119,30 @@ function useStartRecords(
   return { project, defaultIds };
 }
 
-/**
- * What the code that opens with a line, the menu or the picker reports back
- * to the provider: the servers joined with their Connections and plugins,
- * where the list started, and why a read failed.
- */
-export interface ThreadServersJoined {
+/** The servers joined with their Connections and plugins, and where the thread's list started. */
+export interface ThreadServersJoin {
+  /** `undefined` until the Connections, plugins and servers are read. */
   readonly views: readonly McpServerView[] | undefined;
   /** The plugins the views were joined with, so `undefined` exactly when `views` is. */
   readonly plugins: readonly PluginDetail[] | undefined;
+  /** `undefined` unless the menu or picker is open and the servers are read. */
   readonly start: ThreadStartDecision | undefined;
+}
+
+/**
+ * What the code that opens with a line, the menu or the picker reports back
+ * to the provider: why a read failed, and `joinServers`, which joins the
+ * servers it read the Connections and plugins for. The provider calls it in
+ * its own render, on the records and servers it holds then, so the views, the
+ * plugins and the start it shares always belong to the same records as the
+ * list it describes. That code loads only when wanted, so the provider cannot
+ * import it.
+ */
+export interface ThreadServersJoined {
+  readonly joinServers: (
+    records: ThreadServersRecords,
+    servers: readonly McpServer[] | undefined,
+  ) => ThreadServersJoin;
   /** The error of the Connections or plugins read, or `null`. */
   readonly failure: Error | null;
 }
@@ -188,33 +202,31 @@ export function ThreadServersProvider({
     () => describeThreadServers(records, servers.data),
     [records, servers.data],
   );
-  // What was joined for an earlier line or menu is dropped once none is wanted.
+  // What was read for an earlier line or menu is dropped once none is wanted.
   const join = demand.views ? joined : undefined;
+  // Joined here, from the records and servers of this render, so a change to either never shows
+  // beside the views or the start of the earlier ones.
+  const joinedNow = useMemo(
+    () => join?.joinServers(records, servers.data),
+    [join, records, servers.data],
+  );
   const failure = servers.error ?? join?.failure ?? null;
   const readFailure = failure === null ? null : readErrorMessage(failure);
+  const views = joinedNow?.views;
+  const plugins = joinedNow?.plugins;
+  const start = joinedNow?.start;
   const shared = useMemo(
-    () => ({
-      described,
-      start: join?.start,
-      plugins: join?.plugins,
-      readFailure,
-      setEditing,
-    }),
-    [described, join, readFailure],
+    () => ({ described, start, plugins, readFailure, setEditing }),
+    [described, start, plugins, readFailure],
   );
   return (
     <>
       <ThreadServersContext value={shared}>
-        <ThreadViewsContext value={join?.views}>{children}</ThreadViewsContext>
+        <ThreadViewsContext value={views}>{children}</ThreadViewsContext>
       </ThreadServersContext>
       <Suspense fallback={null}>
         {demand.views ? (
-          <LazyThreadServersJoin
-            records={records}
-            projectId={projectId}
-            servers={servers.data}
-            onJoined={setJoined}
-          />
+          <LazyThreadServersJoin editing={editing} projectId={projectId} onJoined={setJoined} />
         ) : null}
       </Suspense>
     </>

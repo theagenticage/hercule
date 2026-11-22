@@ -46,7 +46,7 @@ export function ServerSection({
   const { server, connection } = view;
 
   // The same target as the server's row in the list, so the two share one guard.
-  const switchServer = useMcpServerSwitch(client, buildServerSwitchTarget(server));
+  const switchServer = useMcpServerSwitch(client, buildServerSwitchTarget(server), server.id);
   const catalogued = useSuspenseQuery(mcpServersQuery(client)).data.items.find(
     ({ id }) => id === server.id,
   );

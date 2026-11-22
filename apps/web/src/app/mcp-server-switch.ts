@@ -27,11 +27,15 @@ export interface McpServerSwitch {
 /**
  * Returns the switch of `target`, shared by every control of the app that
  * switches it. The guard and the refusal belong to the target, not to the
- * control, so a row and the page of the same server never write at once.
+ * control, so a row and the page of the same server never write at once. A
+ * control that shows an existing record passes its id as `existingRecordId`,
+ * so its press only updates that record and never creates a server (see
+ * `McpServerSwitches.apply`).
  */
 export function useMcpServerSwitch(
   client: HerculeClient,
   target: McpServerSwitchTarget,
+  existingRecordId?: string,
 ): McpServerSwitch {
   const queryClient = useQueryClient();
   const switches = findOrCreateMcpServerSwitches({
@@ -52,7 +56,7 @@ export function useMcpServerSwitch(
   }, [switches, key]);
   return {
     press: (on) => {
-      switches.apply(target, on);
+      switches.apply(target, on, existingRecordId);
     },
     blocked: state.blocked,
     problem: describeMcpListProblem(state),

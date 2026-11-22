@@ -280,6 +280,15 @@ const buildThreadRoutes = (
   );
 };
 
+/**
+ * Returns the click handler a button has now. Called later, it stands for a click that began on the
+ * render this button came from, before the cache changed.
+ */
+const readClickHandler = (button: HTMLElement): (() => void) => {
+  const key = Object.keys(button).find((each) => each.startsWith("__reactProps$"))!;
+  return (button as unknown as Record<string, { onClick: () => void }>)[key]!.onClick;
+};
+
 const openApp = async (
   fixture: Session,
   rows: readonly TranscriptRow[],
@@ -6029,6 +6038,45 @@ describe("Thread: the MCP servers of the + menu", () => {
         .getByRole("switch", { name: "notion in this thread" })
         .getAttribute("aria-disabled"),
     ).not.toBe("true");
+  });
+
+  it("writes nothing when a reset pressed on an earlier render arrives after the refresh of the projects failed", async () => {
+    const user = userEvent.setup();
+    const listed: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { api, queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The projects could not be read.") }
+            : { body: { items: [listed] } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    const earlierReset = readClickHandler(
+      await within(submenu).findByRole("button", { name: "Back to webshop's list" }),
+    );
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+    await within(submenu).findByText(/Where this list started could not be read/);
+    await act(async () => {
+      earlierReset();
+      await Promise.resolve();
+    });
+
+    expect(
+      api.calls.filter(
+        (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+      ),
+    ).toEqual([]);
   });
 
   it("keeps the subscription and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {

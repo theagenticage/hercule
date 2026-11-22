@@ -1313,6 +1313,48 @@ describe("Settings > MCP servers > one server's page > the switch while the page
   });
 });
 
+describe("Settings > MCP servers > one server's page > the server leaves the list while the page's own read is held", () => {
+  it("makes the switch unavailable with the reason, and sends neither a create nor an update", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const world = buildWorld();
+    let holding = false;
+    // The hobby server is a plugin server that is off, the one a stale press would create again.
+    const { api, live } = await openPage(S_HOBBY, {
+      world,
+      extra: {
+        [`GET /api/v1/mcp-servers/${S_HOBBY.id}`]: async () => {
+          if (holding) await gate.opened;
+          const found = world.servers.find((each) => each.id === S_HOBBY.id);
+          return found === undefined
+            ? { status: 404, body: buildErrorBody("not_found", "no such server") }
+            : { body: found };
+        },
+      },
+    });
+    const offered = await screen.findByRole("switch", { name: "Offered to threads" });
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    holding = true;
+
+    world.servers = world.servers.filter((each) => each.id !== S_HOBBY.id);
+    act(() => {
+      live.push("mcpServer", { _tag: "invalidate", ids: [S_HOBBY.id], kind: "deleted" });
+    });
+
+    expect(
+      await screen.findByText(
+        "This server is not in the list of servers any more, so the switch waits.",
+      ),
+    ).toBeDefined();
+    expect(offered.getAttribute("aria-disabled")).toBe("true");
+    await user.click(offered);
+    expect(listWrites(api)).toEqual([]);
+    gate.release();
+  });
+});
+
 describe("Settings > MCP servers > the lists are read again when the section opens", () => {
   it("shows a default list changed while the section was closed", async () => {
     const { api, world, router } = await openList();

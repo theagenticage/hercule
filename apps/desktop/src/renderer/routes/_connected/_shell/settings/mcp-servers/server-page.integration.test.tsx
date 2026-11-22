@@ -322,6 +322,39 @@ describe("a server's page, the switch while the page's own read is behind the li
   });
 });
 
+describe("a server's page, the server leaves the list while the page's own read is held", () => {
+  it("makes the switch unavailable with the reason, and sends neither a create nor an update", async () => {
+    const held = holdAnswer();
+    let holding = false;
+    // An off plugin server is the one a stale press would create again.
+    const off = { ...SENTRY_WORK, enabled: false };
+    const { calls, world, live } = await openPage(off, {
+      handlers: {
+        [`GET ${WORK_URL}`]: () => (holding ? held.handler() : { body: off }),
+      },
+    });
+    const flip = () =>
+      within(findSection("Server")).getByRole("switch", { name: "Offered to threads" });
+    holding = true;
+
+    world.servers = [];
+    act(() => {
+      live.pushInvalidation("mcpServer", [SENTRY_WORK_ID], { kind: "deleted" });
+    });
+
+    await waitFor(() => {
+      expect(within(findSection("Server")).getByRole("alert").textContent).toBe(
+        "This server is not in the list of servers any more, so the switch waits.",
+      );
+    });
+    expect(flip().getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(flip());
+    expect(findCalls(calls, "POST", SERVER_LIST_PATH)).toEqual([]);
+    expect(findCalls(calls, "PATCH", WORK_URL)).toEqual([]);
+    held.answer({ body: off });
+  });
+});
+
 describe("a server's page, Projects", () => {
   it("ticks a project's box with a write of its list, and unticks it", async () => {
     const { world, calls } = await openPage(SENTRY_WORK);

@@ -316,6 +316,34 @@ describe("a press on the switch", () => {
     expect(switches.readState(target).refusal).toMatchObject({ kind: "refused" });
   });
 
+  it("never creates the server of a page whose record left the list, and refuses with a reason", async () => {
+    const { client, queryClient, switches } = await setup([SENTRY_WORK]);
+    queryClient.setQueryData(SERVERS_KEY, []);
+
+    switches.apply(WORK, true, SENTRY_WORK.id);
+
+    expect(client.mcpServer.create).not.toHaveBeenCalled();
+    expect(client.mcpServer.update).not.toHaveBeenCalled();
+    expect(switches.readState(WORK).refusal).toMatchObject({ kind: "refused" });
+  });
+
+  it("updates the page's own record, and never a record created again under another id", async () => {
+    const { client, queryClient, switches, settle } = await setup([SENTRY_WORK]);
+
+    switches.apply(WORK, false, SENTRY_WORK.id);
+    await settle(WORK);
+    expect(client.mcpServer.update).toHaveBeenCalledExactlyOnceWith({
+      params: { id: SENTRY_WORK.id },
+      payload: { enabled: false },
+    });
+
+    queryClient.setQueryData(SERVERS_KEY, [{ ...SENTRY_WORK, id: "s-recreated" }]);
+    switches.apply(WORK, true, SENTRY_WORK.id);
+
+    expect(client.mcpServer.update).toHaveBeenCalledTimes(1);
+    expect(switches.readState(WORK).refusal).toMatchObject({ kind: "refused" });
+  });
+
   it("shares one guard between every consumer of a query client", async () => {
     const { queryClient, client } = await setup();
     const options = {
@@ -342,8 +370,11 @@ describe("decideServerPageSwitch", () => {
     expect(decide({ ...page })).toEqual({ on: true, waitReason: null });
   });
 
-  it("shows the page's own value while the list has no record of the server", () => {
-    expect(decide(undefined)).toEqual({ on: true, waitReason: null });
+  it("shows the page's own value and waits while the list has no record of the server", () => {
+    expect(decide(undefined)).toEqual({
+      on: true,
+      waitReason: "This server is not in the list of servers any more, so the switch waits.",
+    });
   });
 
   it("shows the list's value and waits while the page's read shows another one", () => {

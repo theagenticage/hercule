@@ -67,20 +67,23 @@ export interface ServerPageSwitch {
   readonly on: boolean;
   /**
    * Why the switch cannot be pressed now, or `null` when the page and the
-   * list agree. It is set while the page's read of the server shows another
-   * value than the list, because that read is still running or failed.
+   * list agree. It is set while the list has no record of the server, and
+   * while the page's read of the server shows another value than the list,
+   * because that read is still running or failed.
    */
   readonly waitReason: string | null;
 }
 
 /**
  * Decides what the switch on the page of `page` shows. A press is decided on
- * the server's record in the list of servers (`catalogued`, `undefined` while
+ * the server's record in the list of servers (`catalogued`, `undefined` when
  * the list has no record of it), so the switch shows that record. When the
- * page's own read shows another value, a press could land on an old one: the
- * switch then waits and says why. `pageReadFailed` tells whether the page's
- * last read failed, and `reload` is the app's words for opening the page again
- * ("Reload the page", "Reopen the page"), used in the reason of a failed read.
+ * list has no record, the server was deleted and the page still shows its
+ * last read: the switch waits and says so. When the page's own read shows
+ * another value, a press could land on an old one: the switch then waits and
+ * says why. `pageReadFailed` tells whether the page's last read failed, and
+ * `reload` is the app's words for opening the page again ("Reload the page",
+ * "Reopen the page"), used in the reason of a failed read.
  */
 export const decideServerPageSwitch = ({
   page,
@@ -93,9 +96,15 @@ export const decideServerPageSwitch = ({
   readonly pageReadFailed: boolean;
   readonly reload: string;
 }): ServerPageSwitch => {
-  const lags = catalogued !== undefined && catalogued.enabled !== page.enabled;
+  if (catalogued === undefined) {
+    return {
+      on: page.enabled,
+      waitReason: "This server is not in the list of servers any more, so the switch waits.",
+    };
+  }
+  const lags = catalogued.enabled !== page.enabled;
   return {
-    on: catalogued?.enabled ?? page.enabled,
+    on: catalogued.enabled,
     waitReason: !lags
       ? null
       : pageReadFailed
@@ -125,8 +134,14 @@ export interface McpServerSwitches {
    * no record of it, updates its record otherwise. Does nothing while the
    * target is blocked, and for an off of a server with no record. The guard is
    * taken before this returns, so a second call in the same tick does nothing.
+   *
+   * A control that shows an existing record, such as a server's page, passes
+   * that record's id as `existingRecordId`. The press then only ever updates
+   * that record: when the cache no longer holds it (it was deleted, or it was
+   * deleted and created again under a new id), the press is refused with a
+   * reason and writes nothing, so it can never create a server.
    */
-  readonly apply: (target: McpServerSwitchTarget, on: boolean) => void;
+  readonly apply: (target: McpServerSwitchTarget, on: boolean, existingRecordId?: string) => void;
   /** Returns what a control shows of the target. */
   readonly readState: (target: McpServerSwitchTarget) => McpListEditState;
   /** Forgets the target's refusal, when the user dismisses it. */
@@ -221,7 +236,7 @@ export const createMcpServerSwitches = ({
   };
 
   return {
-    apply: (target, on) => {
+    apply: (target, on, existingRecordId) => {
       const key = buildTargetKey(target);
       if (guard.isBlocked(key)) return;
       const servers = cache.readServers();
@@ -236,7 +251,10 @@ export const createMcpServerSwitches = ({
         return;
       }
       let write: () => Promise<unknown>;
-      if (record !== undefined) {
+      if (existingRecordId !== undefined && record?.id !== existingRecordId) {
+        refuse("This server no longer exists, so nothing was changed.");
+        return;
+      } else if (record !== undefined) {
         write = () =>
           client.mcpServer.update({ params: { id: record.id }, payload: { enabled: on } });
       } else if (target.kind === "url") {

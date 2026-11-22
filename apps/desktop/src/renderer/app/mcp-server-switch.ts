@@ -30,9 +30,14 @@ export interface McpServerSwitch {
  * switches it. The guard and the refusal belong to the target, not to the
  * control, so a row and the page of the same server never write at once. The
  * refusal stays while a control shows the target and for a while after the
- * last one is gone.
+ * last one is gone. A control that shows an existing record passes its id as
+ * `existingRecordId`, so its press only updates that record and never creates
+ * a server (see `McpServerSwitches.apply`).
  */
-export function useMcpServerSwitch(target: McpServerSwitchTarget): McpServerSwitch {
+export function useMcpServerSwitch(
+  target: McpServerSwitchTarget,
+  existingRecordId?: string,
+): McpServerSwitch {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const switches = findOrCreateMcpServerSwitches({
@@ -53,7 +58,7 @@ export function useMcpServerSwitch(target: McpServerSwitchTarget): McpServerSwit
   }, [switches, key]);
   return {
     press: (on) => {
-      switches.apply(target, on);
+      switches.apply(target, on, existingRecordId);
     },
     blocked: state.blocked,
     problem: describeMcpListProblem(state),
