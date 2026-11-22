@@ -6,7 +6,7 @@
  * first screen: the provider loads it the first time it is wanted (see
  * `ThreadServersProvider`).
  */
-import { useLayoutEffect, useMemo, type JSX, type ReactNode } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -15,13 +15,8 @@ import {
   type ThreadServersRecords,
 } from "@hercule/client-core/mcp-servers";
 import type { McpServer } from "@hercule/contract";
-import { useMcpServerViews } from "../../app/mcp-server-views";
-import { connectionsQuery, mcpServersQuery, pluginsQuery, settingsQuery } from "../../app/queries";
-import {
-  ThreadViewsContext,
-  type ThreadServersJoin,
-  type ThreadServersJoined,
-} from "./thread-servers";
+import { connectionsQuery, pluginsQuery, settingsQuery } from "../../app/queries";
+import type { ThreadServersJoin, ThreadServersJoined } from "./thread-servers";
 
 /**
  * Reads the Connections and plugins and hands `onJoined` the function that
@@ -78,27 +73,4 @@ export function ThreadServersJoin({
     };
   }, [joined, onJoined]);
   return null;
-}
-
-/**
- * Renders `children` with the servers joined from what the cache holds, for a
- * transcript outside any thread's page, such as the first moments of a thread
- * in the Inbox. It reads and subscribes to nothing, so its lines draw their
- * fix buttons only when the servers are cached already. `hasMcpLine` is
- * whether the transcript holds a line about servers (see `useHasMcpLine`):
- * the code that joins them loads only then.
- */
-export function CachedThreadViews({
-  hasMcpLine,
-  children,
-}: {
-  readonly hasMcpLine: boolean;
-  readonly children: ReactNode;
-}): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const servers = useQuery({ ...mcpServersQuery(client), enabled: false });
-  const connections = useQuery({ ...connectionsQuery(client), enabled: false });
-  const plugins = useQuery({ ...pluginsQuery(client), enabled: false });
-  const views = useMcpServerViews(hasMcpLine, servers.data, connections.data, plugins.data);
-  return <ThreadViewsContext value={views}>{children}</ThreadViewsContext>;
 }

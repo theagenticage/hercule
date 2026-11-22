@@ -44,6 +44,12 @@ const FIRST_SCREEN_ROUTES = [
   "_connected/_shell/threads/$sessionId/index.tsx",
 ].map((route) => join(repository, "apps/desktop/src/renderer/routes", route));
 
+/** Everything the first screen's exclusion check starts from: the entry and the routes it renders. */
+const FIRST_SCREEN_ENTRIES = [RENDERER_ENTRY, ...FIRST_SCREEN_ROUTES];
+
+/** The file that holds the first moments of a Thread, which the Inbox loads with a started Thread's transcript. */
+const THREAD_FIRST_MOMENTS = join(rendererSource, "screens/thread/thread-first-moments.tsx");
+
 /**
  * Returns the module paths `source` imports or re-exports as values. An
  * `import type`, an `export type`, and a clause whose every name is a `type`
@@ -109,17 +115,21 @@ const pickMcpServerModels = (files: ReadonlySet<string>): string[] =>
     .map((file) => file.slice(mcpServersFolder.length))
     .toSorted();
 
+/**
+ * Returns the files of the MCP server models that a first-screen walk may
+ * reach: the narrow entry's own files, and `draft-pick.ts`, a leaf that
+ * `threads/resolve-thread.ts` imports for the draft's list.
+ */
+const listNarrowModels = (): string[] => [
+  "draft-pick.ts",
+  ...pickMcpServerModels(collectReachedFiles([join(mcpServersFolder, "first-screen.ts")])),
+];
+
 describe("the desktop renderer's first screen and the MCP server models", () => {
   it("reaches only the files of the narrow first-screen entry", () => {
-    // `draft-pick.ts` is a leaf that `threads/resolve-thread.ts` imports for the draft's list.
-    const allowed = [
-      "draft-pick.ts",
-      ...pickMcpServerModels(collectReachedFiles([join(mcpServersFolder, "first-screen.ts")])),
-    ];
+    const allowed = listNarrowModels();
 
-    const reached = pickMcpServerModels(
-      collectReachedFiles([RENDERER_ENTRY, ...FIRST_SCREEN_ROUTES]),
-    );
+    const reached = pickMcpServerModels(collectReachedFiles(FIRST_SCREEN_ENTRIES));
 
     // The first screen does read the models: a walk that finds none follows nothing.
     expect(reached).toContain("first-screen.ts");
@@ -130,7 +140,23 @@ describe("the desktop renderer's first screen and the MCP server models", () => 
     expect(readFileSync(join(rendererSource, "index.html"), "utf8")).toContain('src="/main.tsx"');
     const entryOnly = collectReachedFiles([RENDERER_ENTRY]);
 
+    // The exclusion check above starts from the same entry, so a broad import in `main.tsx` fails it.
+    expect(FIRST_SCREEN_ENTRIES).toContain(RENDERER_ENTRY);
     expect(entryOnly.has(join(rendererSource, "app/router.tsx"))).toBe(true);
     expect(entryOnly.has(ROUTE_TREE)).toBe(false);
+  });
+});
+
+describe("the first moments of a Thread, which the Inbox loads with a started Thread's transcript", () => {
+  it("never loads the join, the views' builder or the code that decides where a list started", () => {
+    const reachedFiles = collectReachedFiles([THREAD_FIRST_MOMENTS]);
+    const reached = [...reachedFiles].map((file) => file.slice(rendererSource.length + 1));
+
+    // The walk does reach the transcript, so a walk that follows nothing cannot pass.
+    expect(reached).toContain("screens/thread/transcript.tsx");
+    expect(reached).not.toContain("screens/thread/thread-servers-join.tsx");
+    expect(reached).not.toContain("app/build-mcp-server-views.ts");
+    const allowed = listNarrowModels();
+    expect(pickMcpServerModels(reachedFiles).filter((file) => !allowed.includes(file))).toEqual([]);
   });
 });

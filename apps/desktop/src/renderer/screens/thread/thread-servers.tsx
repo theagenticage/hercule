@@ -72,7 +72,7 @@ export const ThreadServersContext = createContext<ThreadServers | null>(null);
 /**
  * The servers joined with their Connections, which a line about servers, the
  * open menu and the picker draw. Filled by `ThreadServersProvider`, and by
- * `CachedThreadViews` (in `thread-servers-join.tsx`) for a transcript that
+ * `CachedThreadViews` (in `cached-thread-views.tsx`) for a transcript that
  * has no provider.
  */
 export const ThreadViewsContext = createContext<readonly McpServerView[] | undefined>(undefined);

@@ -4,7 +4,10 @@
  * by the test, so nothing depends on how fast a chunk arrives. Both load when
  * the "MCP servers" row opens (see `lazy-thread-servers.ts`), so the `+`,
  * Attach and the red dot must never wait for them, and the records that
- * change while the join is held show as they are once it arrives.
+ * change while the join is held show as they are once it arrives. The module
+ * that builds a line's views (`app/build-mcp-server-views.ts`) is held for the
+ * whole test: the editor must draw its rows from the join's own code, with no
+ * second import behind the join.
  */
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -46,6 +49,20 @@ const joinImport = vi.hoisted(() => {
 });
 vi.mock("./thread-servers-join", async (importOriginal) => {
   await joinImport.gate;
+  return importOriginal();
+});
+
+// The module that builds the views for a line of the transcript is never released before the
+// test's last step. The editor's rows must not wait for it.
+const builderImport = vi.hoisted(() => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { gate, release: () => release() };
+});
+vi.mock("../../app/build-mcp-server-views", async (importOriginal) => {
+  await builderImport.gate;
   return importOriginal();
 });
 
@@ -103,6 +120,7 @@ describe("the + while the code of the servers' submenu and join is still loading
       expect(popover.querySelector(".plus-row")).toBeNull();
       expect(screen.getByRole("textbox", { name: "Message" })).toBe(composer);
 
+      // Only the join is released: the views' builder stays held, and the rows still arrive.
       joinImport.release();
       await waitFor(() => {
         expect(popover.querySelector(".plus-row")).not.toBeNull();
@@ -120,6 +138,7 @@ describe("the + while the code of the servers' submenu and join is still loading
     } finally {
       submenuImport.release();
       joinImport.release();
+      builderImport.release();
       click.mockRestore();
     }
   });
