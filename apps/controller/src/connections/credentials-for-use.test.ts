@@ -291,6 +291,34 @@ describe("the credentials the core reads to call an outside server", () => {
     expect(refreshRequests()).toHaveLength(1);
   });
 
+  it("does not refresh a token that lives 5 minutes while it is new, and refreshes it once half its lifetime has passed", async () => {
+    const shortLived: TokenSet = {
+      ...FRESH_TOKENS,
+      expiresAt: expiresAt(5 * MINUTE),
+      obtainedAt: expiresAt(0),
+    };
+    const { justObtained, afterTwoMinutes, requestsBeforeHalfLife, afterThreeMinutes } = await run(
+      { tokens: shortLived },
+      (id) =>
+        Effect.gen(function* () {
+          const justObtained = yield* readForUse(id);
+          yield* TestClock.adjust(2 * MINUTE);
+          const afterTwoMinutes = yield* readForUse(id);
+          const requestsBeforeHalfLife = refreshRequests().length;
+          answerRefreshWithNewToken();
+          yield* TestClock.adjust(1 * MINUTE);
+          const afterThreeMinutes = yield* readForUse(id);
+          return { justObtained, afterTwoMinutes, requestsBeforeHalfLife, afterThreeMinutes };
+        }),
+    );
+
+    expect(justObtained.credentials).toEqual({ accessToken: "stored-token" });
+    expect(afterTwoMinutes.credentials).toEqual({ accessToken: "stored-token" });
+    expect(requestsBeforeHalfLife).toBe(0);
+    expect(afterThreeMinutes.credentials).toEqual({ accessToken: "refreshed-token" });
+    expect(refreshRequests()).toHaveLength(1);
+  });
+
   it("fails with needs-sign-in, and marks the Connection needs-reauth, when the provider refuses the refresh", async () => {
     const { failure, status } = await run({ tokens: STALE_TOKENS }, (id) =>
       Effect.gen(function* () {

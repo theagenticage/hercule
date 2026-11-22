@@ -21,10 +21,11 @@ import type * as HttpClientError from "effect/http/HttpClientError";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 /**
- * A token is refreshed this long before it expires. A caller hands out a
- * token that must last through the poll or action that asked for it, and a
- * poll can take a minute or more. A token that expired halfway would get a
- * 401, which marks the sign-in as lost for nothing.
+ * A token is refreshed this long before it expires, or earlier by half its
+ * lifetime when that is shorter (see `isStale`). A caller hands out a token
+ * that must last through the poll or action that asked for it, and a poll can
+ * take a minute or more. A token that expired halfway would get a 401, which
+ * marks the sign-in as lost for nothing.
  */
 const REFRESH_MARGIN_MS = 10 * 60 * 1000;
 
@@ -35,11 +36,18 @@ const REFRESH_MARGIN_MS = 10 * 60 * 1000;
  */
 export const MAX_ANSWER_BYTES = 64 * 1024;
 
-/** The tokens the provider issued, as stored by `serializeTokens`. */
+/**
+ * The tokens the provider issued, as stored by `serializeTokens`.
+ *
+ * `obtainedAt` is the ISO time the provider's answer arrived. It is set
+ * together with `expiresAt`, and `isStale` needs it to know the token's
+ * lifetime. A set stored before the field existed has none.
+ */
 export interface TokenSet {
   readonly accessToken: string;
   readonly refreshToken?: string;
   readonly expiresAt?: string;
+  readonly obtainedAt?: string;
 }
 
 /**
@@ -151,14 +159,20 @@ export class StoredTokensUnreadable extends Schema.TaggedError<StoredTokensUnrea
   { message: Schema.String },
 ) {}
 
+/**
+ * The schema of a `TokenSet`. A secret that embeds a token set decodes it with
+ * this schema, so that a field added to `TokenSet` is never dropped on the way
+ * through that secret.
+ */
+export const TokenSetSchema = Schema.Struct({
+  accessToken: Schema.String,
+  refreshToken: Schema.optionalKey(Schema.String),
+  expiresAt: Schema.optionalKey(Schema.String),
+  obtainedAt: Schema.optionalKey(Schema.String),
+});
+
 /** A token set as `serializeTokens` writes it: a JSON object in the shape of `TokenSet`. */
-const StoredTokenSet = Schema.fromJsonString(
-  Schema.Struct({
-    accessToken: Schema.String,
-    refreshToken: Schema.optionalKey(Schema.String),
-    expiresAt: Schema.optionalKey(Schema.String),
-  }),
-);
+const StoredTokenSet = Schema.fromJsonString(TokenSetSchema);
 
 const decodeStoredTokenSet = Schema.decodeUnknownEffect(StoredTokenSet);
 
@@ -182,9 +196,29 @@ export const parseTokens = (stored: string): Effect.Effect<TokenSet, StoredToken
 /** Converts a token set to the text `parseTokens` reads. */
 export const serializeTokens = (tokens: TokenSet): string => JSON.stringify(tokens);
 
-/** Checks whether the access token expires within the refresh margin, and so needs a refresh. */
-export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
-  tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
+/**
+ * Checks whether the access token needs a refresh: the time left is at most
+ * the smaller of the refresh margin (10 minutes) and half of the token's
+ * lifetime. A token that never expires is never stale.
+ *
+ * The margin depends on the lifetime because a provider may issue tokens that
+ * live 10 minutes or less. With a fixed margin, every token such a provider
+ * issues would be stale the moment it arrives, and a caller would refresh
+ * again and again. With half the lifetime as the limit, a token just obtained
+ * is never stale, and it is still renewed before it expires.
+ *
+ * A set without `obtainedAt` was stored before the field existed, and keeps
+ * the fixed margin.
+ */
+export const isStale = (tokens: TokenSet, nowMillis: number): boolean => {
+  if (tokens.expiresAt === undefined) return false;
+  const expiresAtMillis = Date.parse(tokens.expiresAt);
+  const margin =
+    tokens.obtainedAt === undefined
+      ? REFRESH_MARGIN_MS
+      : Math.min(REFRESH_MARGIN_MS, (expiresAtMillis - Date.parse(tokens.obtainedAt)) / 2);
+  return expiresAtMillis - nowMillis <= margin;
+};
 
 /** Checks whether the access token has expired, so that the provider would refuse it. */
 export const isExpired = (tokens: TokenSet, nowMillis: number): boolean =>
@@ -318,9 +352,9 @@ export const postForm = (
  *
  * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
  * neither tokens nor an error. `expires_in` is converted to a timestamp here,
- * because it counts from the moment of the response. A token without
- * `expires_in` never expires, and is stored without `expiresAt`. A provider
- * whose tokens do not expire sends none.
+ * because it counts from the moment of the response, and that moment is
+ * stored as `obtainedAt`. A token without `expires_in` never expires, and is
+ * stored with neither. A provider whose tokens do not expire sends none.
  */
 export const requestTokens = (
   tokenUrl: string,
@@ -341,7 +375,10 @@ export const requestTokens = (
       ...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
       ...(body.expires_in === undefined
         ? {}
-        : { expiresAt: new Date(millis + body.expires_in * 1000).toISOString() }),
+        : {
+            expiresAt: new Date(millis + body.expires_in * 1000).toISOString(),
+            obtainedAt: new Date(millis).toISOString(),
+          }),
     };
   });
 

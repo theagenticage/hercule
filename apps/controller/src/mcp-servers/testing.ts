@@ -945,8 +945,8 @@ export interface FakeAuthorizationServer {
   expiresIn: number;
   /**
    * The `expires_in` of the access token that the code exchange issues, when
-   * it differs from `expiresIn`. A test makes it short to get a token that is
-   * stale at once, while the refreshed tokens last.
+   * it differs from `expiresIn`. A test makes it 0 to get a token that is stale
+   * at once, while the refreshed tokens last.
    */
   firstExpiresIn: number | undefined;
   /** When set, a refresh is refused with `invalid_grant`. */

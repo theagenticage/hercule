@@ -20,6 +20,7 @@ export {
   requestTokens,
   serializeTokens,
   StoredTokensUnreadable,
+  TokenSetSchema,
   type ClientAuthMethod,
   type OAuthClient,
   type TokenSet,

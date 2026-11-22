@@ -236,8 +236,8 @@ describe("the tokens of a sign-in", () => {
   it("are refreshed before they expire, and the rotated refresh token is the one stored", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;
-      // A token that lasts 5 minutes is inside the refresh margin at once.
-      authorizationServer.firstExpiresIn = 300;
+      // A token with no lifetime left is stale at once.
+      authorizationServer.firstExpiresIn = 0;
       const serverId = await addServerThatNeedsSignIn(rig);
 
       await signInWithBrowser(rig, serverId);
@@ -269,6 +269,31 @@ describe("the tokens of a sign-in", () => {
         () => Promise.resolve(listAuthorizations(rig).at(-1)),
         (header) => header === "Bearer access-token-3",
       );
+    });
+  });
+
+  it("are refreshed once, not in a loop, when the provider issues tokens that live 5 minutes", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      authorizationServer.expiresIn = 300;
+      // The first token has no lifetime left, so the first request refreshes it.
+      authorizationServer.firstExpiresIn = 0;
+      const serverId = await addServerThatNeedsSignIn(rig);
+
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+      const checkedBefore = (await readRow(controller)).checked_at;
+      await requestCheck(controller, serverId);
+      await eventually(
+        () => readRow(controller),
+        (row) => row.checked_at !== checkedBefore,
+      );
+
+      expect(authorizationServer.tokenRequests.map((form) => form.grant_type)).toEqual([
+        "authorization_code",
+        "refresh_token",
+      ]);
+      expect(listAuthorizations(rig).at(-1)).toBe("Bearer access-token-2");
     });
   });
 
@@ -676,7 +701,7 @@ describe("what a sign-in leaves behind", () => {
   it("holds no token, code or verifier in an answer, an audit entry, a Notification or a row", async () => {
     await withOAuthRig(async (rig) => {
       const { controller, authorizationServer } = rig;
-      authorizationServer.firstExpiresIn = 300;
+      authorizationServer.firstExpiresIn = 0;
       const serverId = await addServerThatNeedsSignIn(rig);
       const { authorizationUrl } = await startSignIn(controller, serverId);
       const callback = await authorizationServer.approve(authorizationUrl);

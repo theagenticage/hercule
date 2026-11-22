@@ -5,6 +5,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { describe, expect, it } from "vitest";
 import {
   exchangeCode,
+  isStale,
   MAX_ANSWER_BYTES,
   parseTokens,
   refreshAccess,
@@ -21,6 +22,7 @@ describe("parseTokens", () => {
       accessToken: TOKEN,
       refreshToken: "refresh-1",
       expiresAt: "2026-10-02T00:00:00.000Z",
+      obtainedAt: "2026-10-01T23:55:00.000Z",
     };
     expect(await Effect.runPromise(parseTokens(serializeTokens(tokens)))).toEqual(tokens);
   });
@@ -35,6 +37,45 @@ describe("parseTokens", () => {
     expect(failure._tag).toBe("StoredTokensUnreadable");
     expect(String(failure)).not.toContain(TOKEN);
     expect(JSON.stringify(failure)).not.toContain(TOKEN);
+  });
+});
+
+describe("isStale", () => {
+  const MINUTE = 60 * 1000;
+  const OBTAINED = Date.parse("2026-10-02T00:00:00.000Z");
+  const buildTokensLivingFor = (lifetimeMillis: number): TokenSet => ({
+    accessToken: TOKEN,
+    obtainedAt: new Date(OBTAINED).toISOString(),
+    expiresAt: new Date(OBTAINED + lifetimeMillis).toISOString(),
+  });
+
+  it("is false for a token that lives 5 minutes, at the moment it was obtained", () => {
+    expect(isStale(buildTokensLivingFor(5 * MINUTE), OBTAINED)).toBe(false);
+  });
+
+  it("is true for a token that lives 5 minutes, 3 minutes after it was obtained", () => {
+    expect(isStale(buildTokensLivingFor(5 * MINUTE), OBTAINED + 3 * MINUTE)).toBe(true);
+  });
+
+  it("is true for a token that lives an hour only in its last 10 minutes", () => {
+    const tokens = buildTokensLivingFor(60 * MINUTE);
+    expect(isStale(tokens, OBTAINED + 49 * MINUTE)).toBe(false);
+    expect(isStale(tokens, OBTAINED + 50 * MINUTE)).toBe(true);
+  });
+
+  it("keeps the fixed 10 minute margin for a stored set without obtainedAt", () => {
+    const stored: TokenSet = {
+      accessToken: TOKEN,
+      expiresAt: new Date(OBTAINED + 5 * MINUTE).toISOString(),
+    };
+    expect(isStale(stored, OBTAINED)).toBe(true);
+    expect(
+      isStale({ ...stored, expiresAt: new Date(OBTAINED + 11 * MINUTE).toISOString() }, OBTAINED),
+    ).toBe(false);
+  });
+
+  it("is false for a token that never expires", () => {
+    expect(isStale({ accessToken: TOKEN }, OBTAINED)).toBe(false);
   });
 });
 
@@ -101,6 +142,23 @@ describe("exchangeCode and refreshAccess", () => {
         },
       },
     ]);
+  });
+
+  it("record when an answer with expires_in arrived, and leave obtainedAt out when it has none", async () => {
+    const withLifetime = fakeTokenEndpoint(
+      () => new Response(JSON.stringify({ access_token: "a", expires_in: 300 })),
+    );
+    const without = fakeTokenEndpoint(answerTokens);
+    const before = Date.now();
+
+    const timed = await exchange(withLifetime, { client: { clientId: "id" } });
+    const untimed = await exchange(without, { client: { clientId: "id" } });
+
+    const obtainedAt = Date.parse(timed.obtainedAt ?? "");
+    expect(obtainedAt).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(timed.expiresAt ?? "")).toBe(obtainedAt + 300_000);
+    expect(untimed).not.toHaveProperty("obtainedAt");
+    expect(untimed).not.toHaveProperty("expiresAt");
   });
 
   it("send a public client's id and no secret", async () => {

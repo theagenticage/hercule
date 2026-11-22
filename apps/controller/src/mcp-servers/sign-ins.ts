@@ -34,6 +34,7 @@ import {
   ProviderUnreachable,
   renewTokenSet,
   type ProviderRefused,
+  TokenSetSchema,
   type TokenSet,
 } from "../oauth";
 import { PromotionState } from "../promotion";
@@ -72,11 +73,7 @@ const OAuthSignInSchema = Schema.Struct({
     clientSecret: Schema.optionalKey(Schema.String),
     authMethod: Schema.Literals(["none", "client_secret_post", "client_secret_basic"]),
   }),
-  tokens: Schema.Struct({
-    accessToken: Schema.String,
-    refreshToken: Schema.optionalKey(Schema.String),
-    expiresAt: Schema.optionalKey(Schema.String),
-  }),
+  tokens: TokenSetSchema,
 });
 
 export type OAuthSignIn = Schema.Schema.Type<typeof OAuthSignInSchema>;

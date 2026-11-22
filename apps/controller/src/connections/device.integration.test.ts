@@ -868,7 +868,7 @@ describe("the access token of a connection set up by a device flow", () => {
 
   it("is refreshed with the type's public client id and no client secret, and the new token is stored", async () => {
     await withDevice(async (harness, registry, token, provider) => {
-      useRotatingRefreshToken(provider, 60);
+      useRotatingRefreshToken(provider, 0);
       const id = await signIn(harness, token, provider);
       const surface = readConnectionsSurface(registry.device);
 
@@ -888,9 +888,10 @@ describe("the access token of a connection set up by a device flow", () => {
 
   it.each([
     { expiresIn: 15 * 60, refreshed: false },
-    { expiresIn: 5 * 60, refreshed: true },
+    { expiresIn: 5 * 60, refreshed: false },
+    { expiresIn: 0, refreshed: true },
   ])(
-    "refreshes a token 10 minutes before it expires, not earlier: with $expiresIn seconds left, refreshed is $refreshed",
+    "refreshes a token only when less than half its lifetime is left: a token just obtained that lives $expiresIn seconds, refreshed is $refreshed",
     async ({ expiresIn, refreshed }) => {
       await withDevice(async (harness, registry, token, provider) => {
         useRotatingRefreshToken(provider, expiresIn);
@@ -905,7 +906,7 @@ describe("the access token of a connection set up by a device flow", () => {
 
   it("is refreshed once when two callers find it expired at the same time, because the provider refuses the old refresh token", async () => {
     await withDevice(async (harness, registry, token, provider) => {
-      useRotatingRefreshToken(provider, 60);
+      useRotatingRefreshToken(provider, 0);
       const id = await signIn(harness, token, provider);
       const surface = readConnectionsSurface(registry.device);
 
@@ -922,7 +923,7 @@ describe("the access token of a connection set up by a device flow", () => {
 
   it("fails, and marks the connection needs-reauth, when the provider refuses the refresh", async () => {
     await withDevice(async (harness, registry, token, provider) => {
-      useRotatingRefreshToken(provider, 60);
+      useRotatingRefreshToken(provider, 0);
       const id = await signIn(harness, token, provider);
       provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
 
