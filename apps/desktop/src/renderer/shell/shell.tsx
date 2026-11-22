@@ -57,8 +57,8 @@ export function Shell({
   // starts to slide in the next. The click's work then never shares a frame
   // with the slide's start. After the window has been still, the frame that
   // draws a click starts 4 to 5 ms late, so even a small render can miss that
-  // frame's deadline and drop the slide's first frame. Intake's split does
-  // the same (spec 17, §Measured). React does not render the attribute, so
+  // frame's deadline and drop the slide's first frame (spec 17, §Measured).
+  // React does not render the attribute, so
   // setting it draws nothing but the box. Under Reduce motion nothing moves,
   // and when the shell first draws nothing slides, so the box follows at once.
   useLayoutEffect(() => {

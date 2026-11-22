@@ -144,6 +144,9 @@ export const AUDIT_KINDS = [
   "signal.decided",
   "signal.withdrawn",
   "signal.markedDone",
+  // Nothing writes these three any more: snoozing and Not urgent are gone.
+  // They stay because the log still holds entries of them, and the log reads
+  // this list to tell an audit entry from an event it routes.
   "signal.snoozed",
   "signal.unsnoozed",
   "signal.priorityLowered",
@@ -247,7 +250,7 @@ const RECORD_KINDS = {
   "signal.decided": "updated",
   "signal.withdrawn": "updated",
   // One entry of these four kinds records one move on several signals, so it
-  // names every signal the move changed.
+  // names every signal the move changed. Only the first is still written.
   "signal.markedDone": "updated",
   "signal.snoozed": "updated",
   "signal.unsnoozed": "updated",

@@ -199,7 +199,7 @@
 }
 
 /* Not in the book, which draws no archive. More opens a menu 6px under its
-   button, its right edge on the button's, as Intake's pane menu does. */
+   button, its right edge on the button's, as the Inbox's pane menu does. */
 .more-menu {
   min-width: 180px;
   margin-top: 6px;

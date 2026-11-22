@@ -13,7 +13,7 @@ import { ConfirmDialog } from "../../../../screens/confirm-dialog";
 import { IgnoreRuleRow } from "../../../../screens/settings/intake/ignore-rule-row";
 
 /**
- * Renders the Ignore Rules list of the plugin `pluginId` on Settings > Intake:
+ * Renders the Ignore Rules list of the plugin `pluginId` on Settings > Signals:
  * one row per rule of the plugin's kinds, each with what it caught and a
  * Delete that asks first. A rule belongs to no Connection, so the list is the
  * same under every segment. With no rules, nothing is drawn.

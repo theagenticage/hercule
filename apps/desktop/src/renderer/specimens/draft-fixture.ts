@@ -20,12 +20,12 @@
  *   book's two bars;
  * - the book's Task has no source and no bars, and is low here, one bar.
  *
- * The book's page has two more states, for a fresh install whose Intake is
- * still empty, and the specimen is opened with the same `?state=`:
+ * The book's page has two more states, for a fresh install with no planned
+ * task yet, and the specimen is opened with the same `?state=`:
  *
  * - `first`: the same draft, with no planned task and a GitHub Connection, so
- *   the starters are about code and the line under them says that Triage
- *   reads GitHub;
+ *   the starters are about code and the line under them points at the
+ *   Inbox;
  * - `first-no-repo`: webshop has no repo and nothing is connected, so the
  *   draft works without a checkout, the starters are about knowledge work,
  *   and the line under them asks the user to connect GitHub.

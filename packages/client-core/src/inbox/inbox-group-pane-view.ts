@@ -7,7 +7,7 @@
 import type { EntityPeer, EntityStatus, InboxGroupDetail, InboxThing } from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
 import { describeClaim } from "../desk/link-claim";
-import { namePlugin, type PluginName } from "../intake";
+import { namePlugin, type PluginName } from "../plugin-names";
 import { decideReason } from "./inbox-row";
 
 /** One member of the group: the line it takes in the pane. */

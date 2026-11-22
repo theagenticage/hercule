@@ -142,34 +142,6 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
   },
   {
-    name: "intake",
-    path: "intake.html",
-    contentSelector: 'section.asks-detail[aria-label="The open signal"] > *',
-    nonTextParts: [
-      { selector: ".asks-modes", kind: "boundary" },
-      // No checkbox (.ask-box): a row's checkbox is hidden until the pointer or the focus is
-      // on it, or the row is checked, and no row of this specimen is.
-      { selector: ".asks-sec .dot", kind: "mark" },
-      { selector: ".ask-mark:not(.ask-mark--face) svg", kind: "mark" },
-      { selector: ".ask-act svg", kind: "mark" },
-      { selector: ".asks-pane-btn svg", kind: "mark" },
-      { selector: ".b-change-checks .mark", kind: "mark" },
-    ],
-  },
-  {
-    name: "tracking-pane",
-    path: "intake.html?scene=tracking-pane-needs-you",
-    contentSelector: 'section.asks-detail[aria-label="The open Tracking row"] > *',
-    nonTextParts: [
-      { selector: ".asks-modes", kind: "boundary" },
-      { selector: ".ask-act svg", kind: "mark" },
-      { selector: ".tr-sec .mark", kind: "mark" },
-      { selector: ".tr-wait .mark", kind: "mark" },
-      { selector: ".tr-steps .mark", kind: "mark" },
-      { selector: ".tr-ask-q .mark", kind: "mark" },
-    ],
-  },
-  {
     name: "workflows",
     path: "workflows.html",
     contentSelector: 'nav[aria-label="Workflows"] .virtual-list-items > *',

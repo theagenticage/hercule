@@ -45,10 +45,6 @@ const DESK_PAINT_PROPERTIES = ["filter", "background-color", "rotate"];
  * The rules allowed to transition a layout property, each with that property,
  * because spec 17 records a measurement showing it is cheap:
  *
- * - Intake's list, the sized column of a split, as its side pane opens or
- *   closes. The column's rows are lines of a fixed count, each cut with an
- *   ellipsis, so a frame of the transition lays the column out without
- *   measuring text again.
  * - The box that holds the shell's sidebar, as the sidebar is shown or
  *   hidden. The sidebar inside keeps its width, so a frame never lays out
  *   its rows again; it lays out the box and the main pane beside it, which
@@ -59,7 +55,6 @@ const DESK_PAINT_PROPERTIES = ["filter", "background-color", "rotate"];
  *   one height whose width does not change while they fold.
  */
 export const LAYOUT_TRANSITIONS = [
-  { file: "screens/intake/intake.css", rule: ".asks-list", property: "width" },
   { file: "shell/shell.css", rule: ".side-slot", property: "width" },
   { file: "screens/thread/model-menu-list.css", rule: ".ac-body", property: "height" },
   { file: "screens/thread/model-menu-list.css", rule: ".ac-body", property: "margin-bottom" },

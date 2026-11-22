@@ -6,9 +6,8 @@ import { readAcknowledgedInboxArrival, subscribeInboxArrival } from "../app/inbo
 import { readOverviewView, subscribeOverviewView } from "../app/overview-view";
 import { trackBody } from "../app/motion";
 import { inboxCountQuery, userQuery } from "../app/queries";
-import { useToDoCount } from "../app/tracking";
 import { DiscussionsIcon } from "../icons/discussions";
-import { IntakeIcon } from "../icons/intake";
+import { InboxIcon } from "../icons/inbox";
 import { OfficeIcon } from "../icons/office";
 import { WikiIcon } from "../icons/wiki";
 import { WorkflowsIcon } from "../icons/workflows";
@@ -29,21 +28,16 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * - The Inbox, ending in a plain grey count of the cards with a clock on them,
  *   hidden at 0, and one small marigold dot while the Inbox holds an arrival
  *   this client has not shown the user yet (see `InboxRow`).
- * - Intake, which keeps its row until the Inbox takes it, ending in its To do
- *   count in marigold: the open signals and the rows of Tracking that wait on
- *   the user. The count is hidden at 0.
  * - Workflows, with no count: a total of the user's workflows gives the user
  *   nothing to act on. What a run waits on the user for shows in Waiting on
  *   you instead. The row is also selected on a run's page, because a run
  *   belongs to its workflow, as the book draws it.
  * - Discussions and Wiki, with no count either.
  *
- * The shell's loader reads the To do list, Tracking's reads and the Inbox's
- * counts, and keeps them cached for the life of the window, so nothing here
- * waits in practice.
+ * The shell's loader reads the Inbox's counts and keeps them cached for the
+ * life of the window, so nothing here waits in practice.
  */
 export function WorkSection(): JSX.Element {
-  const toDoCount = useToDoCount();
   const runOpen =
     useMatch({ from: "/_connected/_shell/runs/$runId", shouldThrow: false }) !== undefined;
   const navigate = useNavigate();
@@ -87,18 +81,6 @@ export function WorkSection(): JSX.Element {
         <span>The office</span>
       </Link>
       <InboxRow />
-      {/* A screen reader reads the count with what it counts, as it does the
-          Hercule segment's: "Intake, 8 to do". */}
-      <Link
-        to="/intake"
-        className="nav-row"
-        activeProps={SELECTED_LINK_PROPS}
-        aria-label={toDoCount > 0 ? `Intake, ${String(toDoCount)} to do` : undefined}
-      >
-        <IntakeIcon />
-        <span>Intake</span>
-        {toDoCount > 0 && <b className="count count--you">{toDoCount}</b>}
-      </Link>
       <Link
         to="/workflows"
         className={runOpen ? "nav-row is-on" : "nav-row"}
@@ -178,7 +160,7 @@ function InboxRow(): JSX.Element {
       activeProps={SELECTED_LINK_PROPS}
       aria-label={description.length > 0 ? `Inbox, ${description.join(", ")}` : undefined}
     >
-      <IntakeIcon />
+      <InboxIcon />
       <span>Inbox</span>
       {hasNewArrival && <i className="nav-new" />}
       {waiting > 0 && <InboxCount value={waiting} />}

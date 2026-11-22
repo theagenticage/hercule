@@ -1,7 +1,8 @@
 /**
  * Tests `event.query` on a migrated test database: its filters, the set
  * of events Intake shows, the facts each event carries, the security entries
- * it hides, and the query plans of the filters that read other tables.
+ * it hides, and the query plans of the filters and the facts that read other
+ * tables.
  *
  * Every row is written with plain SQL, because the events domain cannot
  * import the domains that own these tables. The plugins' settings come from a
@@ -13,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import * as TestClock from "effect/testing/TestClock";
-import type { EventHandling, IntakeOverrides, IntakeSettings } from "@hercule/contract";
+import type { IntakeOverrides, IntakeSettings } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { uuidFromString, withTransaction } from "../db";
@@ -57,9 +58,7 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-const buildSessionActor = (
-  grants: ReadonlyArray<"event.read" | "event.audit" | "session.read" | "run.read">,
-): Actor => ({
+const buildSessionActor = (grants: ReadonlyArray<"event.read" | "event.audit">): Actor => ({
   _tag: "session",
   sessionId: "0199e0e7-0000-7000-8000-00000000b501",
   profileId: "0199e0e7-0000-7000-8000-00000000d001",
@@ -140,11 +139,10 @@ interface NewSignal {
   readonly title?: string;
   readonly eventIds?: ReadonlyArray<number>;
   readonly resolution?: { readonly eventId?: number; readonly outcome: string };
-  readonly snoozedUntil?: string;
   readonly createdAt?: string;
 }
 
-/** Writes one signal with its `signal_events` rows, and its snooze if it has one. */
+/** Writes one signal with its `signal_events` rows. */
 const insertSignal = (n: number, signal: NewSignal) =>
   inTransaction(
     Effect.gen(function* () {
@@ -168,29 +166,10 @@ const insertSignal = (n: number, signal: NewSignal) =>
       for (const eventId of signal.eventIds ?? []) {
         yield* sql`INSERT INTO signal_events (signal_id, event_id) VALUES (${bytesOf(n)}, ${eventId})`;
       }
-      if (signal.snoozedUntil !== undefined) {
-        yield* sql`
-        INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
-        VALUES (${bytesOf(n)}, ${signal.snoozedUntil}, ${AT}, 'user')`;
-      }
     }),
   );
 
-const insertTask = (n: number, title: string, eventId: number, deleted = false) =>
-  inTransaction(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`
-      INSERT INTO tasks (id, title, description, status, priority, created_at, updated_at,
-                         status_changed_at, deleted_at)
-      VALUES (${bytesOf(n)}, ${title}, '', 'open', 'normal', ${AT}, ${AT}, ${AT},
-              ${deleted ? AT : null})`;
-      yield* sql`
-      INSERT INTO task_provenance (id, task_id, event_id, at, actor)
-      VALUES (${bytesOf(n + 1000)}, ${bytesOf(n)}, ${eventId}, ${AT}, 'user')`;
-    }),
-  );
-
+/** Writes a Subscription held by the session or the run with the id `holderId`. */
 const insertSubscription = (
   n: number,
   holderKind: "session" | "run",
@@ -209,30 +188,17 @@ const insertSubscription = (
     ),
   );
 
-const insertSession = (n: number, title: string) =>
-  Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    withTransaction(
-      sql,
-      sql`
-      INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
-                            requested_access_mode, access_mode, spec, title, status, created_at,
-                            last_activity_at)
-      VALUES (${bytesOf(n)}, x'01', x'01', x'01', 'write', 'write', '{}', ${title}, 'idle', ${AT},
-              ${AT})`,
-    ),
-  );
-
-const insertRun = (n: number, workflowName: string) =>
+const insertRun = (n: number) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     withTransaction(
       sql,
       sql`
       INSERT INTO runs (id, plan, inputs, origin, status, created_at)
-      VALUES (${bytesOf(n)}, ${JSON.stringify({ name: workflowName })}, '{}', '{}', 'running', ${AT})`,
+      VALUES (${bytesOf(n)}, '{"name":"Nightly"}', '{}', '{}', 'running', ${AT})`,
     ),
   );
 
-/** Records that a session queued the event as an input from the subscription. */
+/** Records that a session queued the event as an input from the Subscription. */
 const insertSessionInput = (
   n: number,
   sessionId: number,
@@ -261,17 +227,6 @@ const insertRunStep = (runId: number, stepId: string, eventId: number) =>
     ),
   );
 
-/** Writes an Ignore Rule of `acme/asked` with the text given. */
-const insertIgnoreRule = (n: number, text: string) =>
-  Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    withTransaction(
-      sql,
-      sql`
-      INSERT INTO ignore_rules (id, kind, match, text, actor, created_at)
-      VALUES (${bytesOf(n)}, 'acme/asked', '{"author":"bot"}', ${text}, 'user', ${AT})`,
-    ),
-  );
-
 /** Records that the Ignore Rule `ruleId` caught the event, with a copy of `ruleText`. */
 const insertIgnoreRuleCatch = (
   eventId: number,
@@ -297,175 +252,15 @@ const queryIds = (input: QueryInput = {}) =>
     return page.items.map((item) => item.id);
   });
 
-const handling = (...handlings: ReadonlyArray<EventHandling>): QueryInput => ({
-  handling: handlings,
-});
-
-/**
- * Writes one event of each way the handlings tell apart, and returns their
- * ids by name:
- *
- * - `raised`: raised an Acme signal;
- * - `evidence`: listed by a core `unsure` signal;
- * - `ended`: ended an Acme signal;
- * - `ignored`: caught by an Ignore Rule;
- * - `onTask`: on a Task, and on a deleted Task;
- * - `known`: received by a live session Subscription;
- * - `knownEnded`: received only by an ended Subscription;
- * - `deletedTask`: on a deleted Task only;
- * - `none`: nothing came of it.
- */
-const arrangeHandlings = Effect.gen(function* () {
-  const raised = yield* insertEvent({ title: "raised" });
-  const evidence = yield* insertEvent({ title: "evidence" });
-  const ended = yield* insertEvent({ title: "ended" });
-  const ignored = yield* insertEvent({ title: "ignored" });
-  const onTask = yield* insertEvent({ title: "on task" });
-  const known = yield* insertEvent({ title: "known" });
-  const knownEnded = yield* insertEvent({ title: "known ended" });
-  const deletedTask = yield* insertEvent({ title: "deleted task" });
-  const none = yield* insertEvent({ title: "none" });
-
-  yield* insertSignal(1, { kind: "acme/asked", eventIds: [raised] });
-  yield* insertSignal(2, { kind: "unsure", eventIds: [evidence] });
-  yield* insertSignal(3, {
-    kind: "acme/asked",
-    eventIds: [],
-    resolution: { eventId: ended, outcome: "Merged" },
-  });
-  yield* insertIgnoreRule(5, "Asked · Author bot");
-  yield* insertIgnoreRuleCatch(ignored, 5, "Asked · Author bot");
-  yield* insertTask(10, "Fix it", onTask);
-  yield* insertTask(11, "Gone", deletedTask, true);
-  yield* insertSession(20, "Triage session");
-  yield* insertSubscription(30, "session", 20);
-  yield* insertSessionInput(40, 20, 30, known);
-  yield* insertSubscription(31, "session", 20, { ended: true });
-  yield* insertSessionInput(41, 20, 31, knownEnded);
-  return { raised, evidence, ended, ignored, onTask, known, knownEnded, deletedTask, none };
-});
-
-describe("event.query handling filters", () => {
-  it("finds the event that raised a plugin signal with raised-signal", async () => {
-    const ids = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("raised-signal")), arranged.raised] as const;
-      }),
-    );
-    expect(ids[0]).toEqual([ids[1]]);
-  });
-
-  it("finds the event a core signal lists with evidence, and not the one a plugin signal raised", async () => {
-    const [found, expected] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("evidence")), arranged.evidence] as const;
-      }),
-    );
-    expect(found).toEqual([expected]);
-  });
-
-  it("finds the event that ended a signal with ended-signal", async () => {
-    const [found, expected] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("ended-signal")), arranged.ended] as const;
-      }),
-    );
-    expect(found).toEqual([expected]);
-  });
-
-  it("finds the event an Ignore Rule caught with ignored", async () => {
-    const [found, expected] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("ignored")), arranged.ignored] as const;
-      }),
-    );
-    expect(found).toEqual([expected]);
-  });
-
-  it("finds an event on a live Task with on-task, and not one on a deleted Task", async () => {
-    const [found, expected] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("on-task")), arranged.onTask] as const;
-      }),
-    );
-    expect(found).toEqual([expected]);
-  });
-
-  it("finds an event a live Subscription received with known-work, and not one only an ended Subscription received", async () => {
-    const [found, expected] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("known-work")), arranged.known] as const;
-      }),
-    );
-    expect(found).toEqual([expected]);
-  });
-
-  it("finds a run's Subscription's event only through the trigger that received it", async () => {
-    const found = await run(
-      Effect.gen(function* () {
-        const received = yield* insertEvent();
-        const other = yield* insertEvent();
-        yield* insertRun(50, "Nightly");
-        yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
-        yield* insertSubscription(61, "run", 50, { triggerId: "unrelated" });
-        yield* insertRunStep(50, "wanted", received);
-        return [yield* queryIds(handling("known-work")), received, other] as const;
-      }),
-    );
-    expect(found[0]).toEqual([found[1]]);
-  });
-
-  it("finds the events nothing came of with no-action, including the ones with only an ended Subscription or a deleted Task, and not the one an Ignore Rule caught", async () => {
-    const [found, arranged] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        return [yield* queryIds(handling("no-action")), arranged] as const;
-      }),
-    );
-    expect(found).toEqual(
-      [arranged.none, arranged.deletedTask, arranged.knownEnded].sort((a, b) => b - a),
-    );
-  });
-
-  it("returns the events with any of several handlings, newest first, with no event twice", async () => {
-    const [found, arranged] = await run(
-      Effect.gen(function* () {
-        const arranged = yield* arrangeHandlings;
-        // The event on a Task also raised a signal, so it matches both handlings.
-        yield* insertSignal(4, { kind: "acme/asked", eventIds: [arranged.onTask] });
-        return [yield* queryIds(handling("raised-signal", "on-task")), arranged] as const;
-      }),
-    );
-    expect(found).toEqual([arranged.onTask, arranged.raised]);
-  });
-
-  it("returns every event for an empty handling list", async () => {
-    const found = await run(
-      Effect.gen(function* () {
-        yield* arrangeHandlings;
-        return yield* queryIds({ handling: [] });
-      }),
-    );
-    expect(found).toHaveLength(9);
-  });
-});
-
 describe("event.query facts", () => {
-  it("lists the signals an event raised or is evidence for, with the snooze and the outcome", async () => {
-    const [event, signals] = await run(
+  it("lists the signals an event raised or is evidence for, oldest first, with the outcome once resolved", async () => {
+    const signals = await run(
       Effect.gen(function* () {
         const eventId = yield* insertEvent();
         yield* insertSignal(1, {
           kind: "acme/asked",
           title: "Review it",
           eventIds: [eventId],
-          snoozedUntil: "2099-01-01T00:00:00.000Z",
           createdAt: "2026-10-11T10:00:00.000Z",
         });
         yield* insertSignal(2, {
@@ -475,28 +270,17 @@ describe("event.query facts", () => {
           resolution: { outcome: "Replied" },
           createdAt: "2026-10-11T11:00:00.000Z",
         });
-        // A snooze that has run out no longer shows.
+        // A signal the event only ended does not name it.
         yield* insertSignal(3, {
-          kind: "fyi",
-          title: "Woke up",
-          eventIds: [eventId],
-          snoozedUntil: "2000-01-01T00:00:00.000Z",
-          createdAt: "2026-10-11T12:00:00.000Z",
+          kind: "acme/asked",
+          resolution: { eventId, outcome: "Merged" },
         });
         const events = yield* EventService;
-        const page = yield* events.query({});
-        return [eventId, page.items[0]!.signals] as const;
+        return (yield* events.query({})).items[0]!.signals;
       }),
     );
-    expect(event).toBeGreaterThan(0);
     expect(signals).toEqual([
-      {
-        signalId: idOf(1),
-        kind: "acme/asked",
-        status: "open",
-        title: "Review it",
-        snoozedUntil: "2099-01-01T00:00:00.000Z",
-      },
+      { signalId: idOf(1), kind: "acme/asked", status: "open", title: "Review it" },
       {
         signalId: idOf(2),
         kind: "unsure",
@@ -504,150 +288,34 @@ describe("event.query facts", () => {
         title: "Done already",
         outcome: "Replied",
       },
-      { signalId: idOf(3), kind: "fyi", status: "open", title: "Woke up" },
     ]);
   });
 
-  it("lists the signals an event ended", async () => {
-    const resolved = await run(
-      Effect.gen(function* () {
-        const eventId = yield* insertEvent();
-        yield* insertSignal(1, {
-          kind: "acme/asked",
-          title: "Asked",
-          resolution: { eventId, outcome: "Merged" },
-        });
-        // A signal ended by hand names no event.
-        yield* insertSignal(2, { kind: "acme/asked", resolution: { outcome: "Dismissed" } });
-        const events = yield* EventService;
-        return (yield* events.query({})).items[0]!.resolvedSignals;
-      }),
-    );
-    expect(resolved).toEqual([{ signalId: idOf(1), title: "Asked", outcome: "Merged" }]);
-  });
-
-  it("lists the Tasks of an event and leaves out a deleted Task", async () => {
-    const tasks = await run(
-      Effect.gen(function* () {
-        const eventId = yield* insertEvent();
-        yield* insertTask(1, "Keep", eventId);
-        yield* insertTask(2, "Gone", eventId, true);
-        const events = yield* EventService;
-        return (yield* events.query({})).items[0]!.tasks;
-      }),
-    );
-    expect(tasks).toEqual([{ taskId: idOf(1), title: "Keep" }]);
-  });
-
-  it("lists the live Subscriptions that received the event, with the session's title or the run's workflow name", async () => {
+  it("lists the live Subscriptions that received the event, and leaves out an ended one", async () => {
     const knownBy = await run(
       Effect.gen(function* () {
         const eventId = yield* insertEvent();
-        yield* insertSession(20, "Triage session");
         yield* insertSubscription(30, "session", 20);
         yield* insertSessionInput(40, 20, 30, eventId);
-        yield* insertRun(50, "Nightly");
-        yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
-        yield* insertRunStep(50, "wanted", eventId);
-        // An ended Subscription is not listed, and neither is a holder with no record.
         yield* insertSubscription(31, "session", 20, { ended: true });
         yield* insertSessionInput(41, 20, 31, eventId);
-        yield* insertSubscription(32, "session", 99);
-        yield* insertSessionInput(42, 99, 32, eventId);
+        // Only the run's Subscription for the trigger that started the step
+        // received the event.
+        yield* insertRun(50);
+        yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
+        yield* insertSubscription(61, "run", 50, { triggerId: "unrelated" });
+        yield* insertRunStep(50, "wanted", eventId);
         const events = yield* EventService;
         return (yield* events.query({})).items[0]!.knownBy;
       }),
     );
     expect(knownBy).toEqual([
-      {
-        subscriptionId: idOf(30),
-        holder: { kind: "session", id: idOf(20) },
-        title: "Triage session",
-      },
-      { subscriptionId: idOf(32), holder: { kind: "session", id: idOf(99) }, title: null },
-      { subscriptionId: idOf(60), holder: { kind: "run", id: idOf(50) }, title: "Nightly" },
+      { subscriptionId: idOf(30), holder: { kind: "session", id: idOf(20) } },
+      { subscriptionId: idOf(60), holder: { kind: "run", id: idOf(50) } },
     ]);
   });
 
-  it.each([
-    [["event.read"], null, null],
-    [["event.read", "session.read"], "Triage session", null],
-    [["event.read", "run.read"], null, "Nightly"],
-    [["event.read", "session.read", "run.read"], "Triage session", "Nightly"],
-  ] as const)(
-    "shows a holder's title only to a caller that holds the grant to read it (%j)",
-    async (grants, sessionTitle, runTitle) => {
-      const knownBy = await run(
-        Effect.gen(function* () {
-          const eventId = yield* insertEvent();
-          yield* insertSession(20, "Triage session");
-          yield* insertSubscription(30, "session", 20);
-          yield* insertSessionInput(40, 20, 30, eventId);
-          yield* insertRun(50, "Nightly");
-          yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
-          yield* insertRunStep(50, "wanted", eventId);
-          const events = yield* EventService;
-          return (yield* events.query({})).items[0]!.knownBy;
-        }),
-        buildSessionActor(grants),
-      );
-      expect(knownBy.map((fact) => [fact.holder.kind, fact.title])).toEqual([
-        ["session", sessionTitle],
-        ["run", runTitle],
-      ]);
-    },
-  );
-
-  it("names the Ignore Rule that caught an event, by the text the catch keeps, and says when the rule was deleted", async () => {
-    const [live, deleted] = await run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const liveEvent = yield* insertEvent();
-        const deletedEvent = yield* insertEvent();
-        yield* insertIgnoreRule(1, "Asked · Author bot");
-        yield* insertIgnoreRuleCatch(liveEvent, 1, "Asked · Author bot");
-        yield* insertIgnoreRuleCatch(deletedEvent, 2, "Asked · Author gone");
-        const events = yield* EventService;
-        const byId = new Map((yield* events.query({})).items.map((item) => [item.id, item]));
-        yield* withTransaction(sql, sql`DELETE FROM ignore_rules WHERE id = ${bytesOf(1)}`);
-        const afterDelete = (yield* events.query({})).items.find((item) => item.id === liveEvent);
-        return [
-          [byId.get(liveEvent)!.ignoredBy, afterDelete!.ignoredBy],
-          byId.get(deletedEvent)!.ignoredBy,
-        ] as const;
-      }),
-    );
-    expect(live).toEqual([
-      { ruleId: idOf(1), kind: "acme/asked", text: "Asked · Author bot", ruleDeleted: false },
-      { ruleId: idOf(1), kind: "acme/asked", text: "Asked · Author bot", ruleDeleted: true },
-    ]);
-    expect(deleted).toEqual({
-      ruleId: idOf(2),
-      kind: "acme/asked",
-      text: "Asked · Author gone",
-      ruleDeleted: true,
-    });
-  });
-
-  it("names the first catch of an event that rules of two kinds caught", async () => {
-    const ignoredBy = await run(
-      Effect.gen(function* () {
-        const eventId = yield* insertEvent();
-        yield* insertIgnoreRuleCatch(eventId, 2, "Pinged · Author bot", "acme/pinged", LATER);
-        yield* insertIgnoreRuleCatch(eventId, 1, "Asked · Author bot", "acme/asked", AT);
-        const events = yield* EventService;
-        return (yield* events.query({})).items[0]!.ignoredBy;
-      }),
-    );
-    expect(ignoredBy).toEqual({
-      ruleId: idOf(1),
-      kind: "acme/asked",
-      text: "Asked · Author bot",
-      ruleDeleted: true,
-    });
-  });
-
-  it("returns empty fact lists for an event nothing came of", async () => {
+  it("returns empty lists for an event no signal names and no Subscription received", async () => {
     const [item] = await run(
       Effect.gen(function* () {
         yield* insertEvent();
@@ -655,24 +323,16 @@ describe("event.query facts", () => {
         return (yield* events.query({})).items;
       }),
     );
-    expect(item).toMatchObject({
-      signals: [],
-      resolvedSignals: [],
-      ignoredBy: null,
-      tasks: [],
-      knownBy: [],
-    });
+    expect(item).toMatchObject({ signals: [], knownBy: [] });
   });
 
-  it("reads each list of facts with one query, whatever the size of the page", async () => {
+  it("reads each kind of fact with one query, whatever the size of the page", async () => {
     const statements = await run(
       Effect.gen(function* () {
-        const first = yield* insertEvent();
         for (let index = 0; index < 5; index += 1) {
           const eventId = yield* insertEvent();
           yield* insertSignal(index + 1, { kind: "acme/asked", eventIds: [eventId] });
         }
-        yield* insertTask(20, "A task", first);
         const compiled: Array<string> = [];
         const events = yield* EventService;
         yield* events.query({}).pipe(
@@ -686,11 +346,9 @@ describe("event.query facts", () => {
         return compiled;
       }),
     );
-    // One page query, then one query each for the signals, the signals ended,
-    // the Ignore Rule catches, the Tasks and the Subscriptions.
-    expect(statements.filter((text) => text.includes("FROM events"))).toHaveLength(1);
-    expect(statements.filter((text) => text.includes("task_provenance"))).toHaveLength(1);
-    expect(statements).toHaveLength(6);
+    // The page, then one query for the signals and one for the Subscriptions.
+    expect(statements).toHaveLength(3);
+    expect(statements.filter((text) => text.includes("signal_events"))).toHaveLength(1);
   });
 });
 
@@ -802,10 +460,7 @@ describe("event.query filters", () => {
         yield* insertEvent({ source: "manual", title: "pager alert" });
         yield* insertEvent({ source: "acme", title: "calm" });
         yield* insertSignal(1, { kind: "acme/asked", eventIds: [wanted] });
-        return [
-          yield* queryIds({ source: "acme", text: "pager", ...handling("raised-signal") }),
-          wanted,
-        ] as const;
+        return [yield* queryIds({ source: "acme", text: "pager", intake: true }), wanted] as const;
       }),
     );
     expect(found).toEqual([expected]);
@@ -947,8 +602,7 @@ describe("event.query security entries", () => {
     ["intake", { intake: true }],
     ["text", { text: "findme" }],
     ["source", { source: "acme" }],
-    ["handling", handling("raised-signal")],
-    ["all of them", { intake: true, text: "findme", source: "acme", ...handling("raised-signal") }],
+    ["all of them", { intake: true, text: "findme", source: "acme" }],
   ];
 
   it.each(FILTERS)(
@@ -1054,38 +708,6 @@ describe("event.query plans", () => {
     expect(listScans(plan)).toEqual([]);
   });
 
-  it.each([
-    ["ended-signal", "signals_resolution_event"],
-    ["on-task", "task_provenance_event"],
-    ["raised-signal", "signal_events_event"],
-    ["evidence", "signal_events_event"],
-  ] as const)("reads the %s filter by listing the event ids in %s", async (name, index) => {
-    const plan = await explainPageQuery(handling(name));
-    // The events with this handling are few, so the filter reads the index
-    // of the fact table and looks those events up by id. It never reads the
-    // whole log.
-    expect(plan).toMatch(new RegExp(`(SCAN|SEARCH) \\w+ USING (COVERING )?INDEX ${index}\\b`));
-    expect(plan).toContain("SEARCH events USING INTEGER PRIMARY KEY");
-    expect(plan).not.toContain("SCAN events");
-  });
-
-  it("reads the ignored filter by listing the caught event ids, then looking those events up", async () => {
-    // A catch's key is its event's id, so the catches table is its own index.
-    const plan = await explainPageQuery(handling("ignored"));
-    expect(plan).toContain("ignore_rule_catches");
-    expect(plan).toContain("SEARCH events USING INTEGER PRIMARY KEY");
-    expect(plan).not.toContain("SCAN events");
-  });
-
-  it.each([["session_inputs_event"], ["run_steps_event"]] as const)(
-    "reads the known-work filter by searching %s",
-    async (index) => {
-      const plan = await explainPageQuery(handling("known-work"));
-      expect(plan).toMatch(new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(`));
-      expect(listScans(plan)).toEqual([]);
-    },
-  );
-
   it("reads the source filter through the events_source index", async () => {
     const plan = await explainPageQuery({ source: "acme" });
     expect(plan).toMatch(/SEARCH events USING (COVERING )?INDEX events_source \(/);
@@ -1097,23 +719,24 @@ describe("event.query plans", () => {
     expect(listScans(plan)).toEqual([]);
   });
 
-  it("reads the no-action filter by walking the log newest first", async () => {
-    // No-action asks for the events that have nothing, which SQLite can find
-    // only by checking each event. The walk stops once the page is full, and
-    // the facts it checks are looked up through indexes.
-    const plan = await explainPageQuery(handling("no-action"));
-    expect(plan).toContain("SCAN events");
+  it("reads the signals behind an event for the intake filter by listing their event ids", async () => {
+    // The switches are read first, so the page of events is the last statement.
+    const plan = (await explainQuery({ intake: true })).at(-1)!;
+    // Few events have a signal behind them, so each part of the filter reads
+    // the index of its own table and never the whole log for it.
     expect(plan).toContain("signal_events_event");
     expect(plan).toContain("signals_resolution_event");
+    expect(plan).toContain("ignore_rule_catches");
   });
 
   it("reads the facts of a page through indexes", async () => {
     const plans = await explainQuery({}, insertEvent());
-    // The page, then the signals, the signals ended, the Ignore Rule catches,
-    // the Tasks and the Subscriptions.
-    expect(plans).toHaveLength(6);
+    // The page, then the signals, then the Subscriptions.
+    expect(plans).toHaveLength(3);
     expect(plans.flatMap(listScans)).toEqual([]);
-    expect(plans[2]).toContain("signals_resolution_event");
+    expect(plans[1]).toContain("signal_events_event");
+    expect(plans[2]).toContain("session_inputs_event");
+    expect(plans[2]).toContain("run_steps_event");
   });
 });
 

@@ -2,17 +2,18 @@
  * Tests the Inbox in the packaged app, signed in to a real controller (spec
  * 17 §Inbox). Three journeys, kept to what only the packaged app proves:
  *
- * - the sidebar's Inbox row says how many things someone waits on and opens
- *   the Inbox; the rail lists the saved queries with their counts; the list
- *   draws rows, and a virtual list mounts only some of them; the pane shows
- *   the current row; J moves the current row and the pane follows; a token
- *   typed in the search narrows the list; the bar's floating controls are
- *   `no-drag`, so a press on them is the page's and not the window's;
+ * - the sidebar's Inbox row, and the Hercule segment in grey, say how many
+ *   things someone waits on, and the row opens the Inbox; the rail lists the
+ *   saved queries with their counts; the list draws rows, and a virtual list
+ *   mounts only some of them; the pane shows the current row; J moves the
+ *   current row and the pane follows; a token typed in the search narrows the
+ *   list; the bar's floating controls are `no-drag`, so a press on them is
+ *   the page's and not the window's;
  * - T takes the current thing on, so the controller has a Task with its
  *   title and the thing leaves the list; "With Hercule" then holds it, and G
  *   on it goes to that Task on Work, where its card is drawn;
  * - E dismisses the current thing and the undo key puts it back, each seen in
- *   the list and in the controller's count.
+ *   the list, in the Hercule segment's count and in the controller's count.
  *
  * GitHub cannot be reached offline, so the things are written into the
  * scratch database while the controller is stopped, in the shape the GitHub
@@ -43,6 +44,8 @@ interface OpenInbox {
   readonly page: Page;
   /** The sidebar's Inbox row. */
   readonly sidebarRow: Locator;
+  /** The Hercule segment of the sidebar's face switch. */
+  readonly segment: Locator;
   /** The mounted rows of the list, top to bottom. */
   readonly rows: Locator;
   /** The pane beside the list. */
@@ -76,10 +79,10 @@ async function arrangeInbox(): Promise<OpenInbox> {
     seedInbox(arranged.home);
   });
   const { page } = await openSignedIn(arranged.url);
-  await page
+  const segment = page
     .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: "Hercule" })
-    .click();
+    .getByRole("tab", { name: /^Hercule/ });
+  await segment.click();
   const sidebarRow = page
     .getByRole("navigation", { name: "Hercule", exact: true })
     .getByRole("link", { name: /^Inbox/ });
@@ -87,10 +90,15 @@ async function arrangeInbox(): Promise<OpenInbox> {
     arranged,
     page,
     sidebarRow,
+    segment,
     rows: page.getByRole("tree").getByRole("treeitem"),
     pane: page.getByLabel("The open thing"),
   };
 }
+
+/** Returns the accessible name of the Hercule segment, such as "Hercule, 300 waiting". */
+const readSegmentName = (segment: Locator): Promise<string | null> =>
+  segment.getAttribute("aria-label");
 
 /** Returns the title of the row `row`, as the list draws it. */
 const readRowTitle = (row: Locator): Promise<string> =>
@@ -106,9 +114,15 @@ const locateRow = (page: Page, ref: string): Locator =>
 
 describe("Inbox", () => {
   it("opens from the sidebar's count, lists the saved queries with their counts, moves with J, narrows with a token, and keeps the bar's controls out of the drag strip", async () => {
-    const { arranged, page, sidebarRow, rows, pane } = await arrangeInbox();
+    const { arranged, page, sidebarRow, segment, rows, pane } = await arrangeInbox();
     const waiting = await readWaitingCount(arranged);
     expect(waiting).toBe(INBOX_CARDS);
+
+    // The Hercule segment counts the same things, in grey: none of them is a
+    // thread waiting on the user.
+    await expect.poll(() => readSegmentName(segment)).toBe(`Hercule, ${String(waiting)} waiting`);
+    expect(await segment.locator("b").getAttribute("class")).toBe("count");
+    expect(await segment.locator("b").textContent()).toBe(String(waiting));
 
     // The sidebar's row says how many things someone waits on, and opens the Inbox.
     await expect
@@ -203,7 +217,6 @@ describe("Inbox", () => {
     // The bar floats in the window's 52px drag strip: its controls opt out of
     // dragging, or a press on them would move the window and never reach the page.
     const controls = [
-      page.locator(".ib-pill"),
       page.locator(".ib-search > *").first(),
       page.getByRole("button", { name: "Show the keys" }),
     ];
@@ -261,7 +274,7 @@ describe("Inbox", () => {
   });
 
   it("dismisses the current thing with E and puts it back with the undo key", async () => {
-    const { arranged, page, sidebarRow, rows } = await arrangeInbox();
+    const { arranged, page, sidebarRow, segment, rows } = await arrangeInbox();
     await sidebarRow.click();
     const first = rows.first();
     await first.waitFor();
@@ -272,6 +285,9 @@ describe("Inbox", () => {
     await page.keyboard.press("e");
     await expect.poll(() => locateRow(page, ref).count()).toBe(0);
     await expect.poll(() => readWaitingCount(arranged)).toBe(waiting - 1);
+    await expect
+      .poll(() => readSegmentName(segment))
+      .toBe(`Hercule, ${String(waiting - 1)} waiting`);
     await page.locator(".undo-line.is-on").waitFor();
     // The line is as wide as its content and centred on the list, not squeezed into half of it.
     const box = await page.locator(".undo-line.is-on").evaluate((line) => {
@@ -290,5 +306,6 @@ describe("Inbox", () => {
     await page.keyboard.press(`${PRIMARY_KEY}+z`);
     await expect.poll(() => locateRow(page, ref).count()).toBe(1);
     await expect.poll(() => readWaitingCount(arranged)).toBe(waiting);
+    await expect.poll(() => readSegmentName(segment)).toBe(`Hercule, ${String(waiting)} waiting`);
   });
 });

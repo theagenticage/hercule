@@ -26,7 +26,6 @@
     "capture:assistant": "node scripts/capture-assistant.ts",
     "capture:room": "node scripts/capture-room.ts",
     "capture:first-run": "node scripts/capture-first-run.ts",
-    "capture:intake": "node scripts/capture-intake.ts",
     "capture:fleet": "node scripts/capture-fleet.ts",
     "capture:ui": "node scripts/capture-ui.ts",
     "ui:metrics": "node scripts/ui-metrics.ts",

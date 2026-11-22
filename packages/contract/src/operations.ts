@@ -140,29 +140,12 @@ const TABLE = {
   // `session.read` and `run.read`). A caller without them gets `Forbidden`,
   // not a thinner board. A GET only reads, so the row needs no `readOnly`.
   "task.queryBoard": { requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
-  // Reads the Tasks and the runs of the work handed off from Intake, so the
-  // service also needs `run.read`.
-  "task.queryTracking": {
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/tracking",
-  },
-  // Reads the runs of the handed-off Tasks as well as the Tasks, so the service
-  // also needs `run.read`.
-  "task.queryLegs": { requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
-  // Reads the runs of one Task as well as the Task, so the service also needs
-  // `run.read`.
   // Reads whether any live Task has a failed run, so the service also needs
   // `run.query`.
   "task.readAttention": {
     requires: "task.read",
     method: "GET",
     path: "/api/v1/tasks/attention",
-  },
-  "task.readTracking": {
-    requires: "task.read",
-    method: "GET",
-    path: "/api/v1/tasks/:id/tracking",
   },
   // Reads a Task's sessions, their open Requests and its runs, so the service
   // also needs `session.query` and `run.query`, as `task.queryBoard` does.
@@ -277,12 +260,6 @@ const TABLE = {
   },
 
   "signal.query": { requires: "signal.read", method: "GET", path: "/api/v1/signals" },
-  // Reads Task titles, so the service also needs `task.read`.
-  "signal.queryYourWork": {
-    requires: "signal.read",
-    method: "GET",
-    path: "/api/v1/signals/your-work",
-  },
   "signal.read": { requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
   // Raising is a verb on signals with no signal to act on yet, so its path is
   // the collection's plus the verb, as `run.start`'s is.
@@ -300,23 +277,12 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/:id/withdraw",
   },
-  // The four moves that send nothing to the source take a list of ids, so
-  // their paths are the collection's plus the verb.
+  // Done sends nothing to the source and takes a list of ids, so its path is
+  // the collection's plus the verb.
   "signal.markDone": {
     requires: "signal.write",
     method: "POST",
     path: "/api/v1/signals/mark-done",
-  },
-  "signal.snooze": { requires: "signal.write", method: "POST", path: "/api/v1/signals/snooze" },
-  "signal.unsnooze": {
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/unsnooze",
-  },
-  "signal.lowerPriority": {
-    requires: "signal.write",
-    method: "POST",
-    path: "/api/v1/signals/lower-priority",
   },
   // An External Entity has no grant family of its own: the Inbox is the
   // user's view of what concerns them, and a card becomes a Task, so reading

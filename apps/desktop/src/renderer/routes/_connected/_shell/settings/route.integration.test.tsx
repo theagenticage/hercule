@@ -129,7 +129,7 @@ describe("the Settings list", () => {
       "Profile",
       "Appearance",
       "Threads",
-      "Intake",
+      "Signals",
       "Assistants",
       "Skills",
       "Connections",

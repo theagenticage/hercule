@@ -32,5 +32,7 @@ export const Route = createFileRoute("/_connected/_shell/inbox")({
 function InboxRoute(): JSX.Element {
   const { controller } = Route.useRouteContext();
   const search = Route.useSearch();
-  return <InboxScreen controller={controller} scope={readInboxScope(search)} />;
+  return (
+    <InboxScreen controller={controller} scope={readInboxScope(search)} thing={search.thing} />
+  );
 }

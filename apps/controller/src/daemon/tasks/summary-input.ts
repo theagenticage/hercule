@@ -24,7 +24,7 @@ import type { OutputSchema } from "@hercule/protocol";
 import { dropCursorError } from "../../db";
 import { externalEntityRepository } from "../../external-entities";
 import { inputRepository, readRecentAssistantText, sessionRepository } from "../../sessions";
-import { taskRepository, TaskTrackingRuns } from "../../tasks";
+import { taskRepository, TaskRuns } from "../../tasks";
 import { cutText, cutTextAtWord, takeTail } from "../../text";
 import type { TextGenerationCall } from "../../text-generation";
 
@@ -268,18 +268,14 @@ const fitInput = (input: SummaryInput): string => {
  */
 export const buildTaskSummaryCall = (
   taskId: string,
-): Effect.Effect<
-  Option.Option<TextGenerationCall>,
-  SqlError,
-  SqlClient.SqlClient | TaskTrackingRuns
-> =>
+): Effect.Effect<Option.Option<TextGenerationCall>, SqlError, SqlClient.SqlClient | TaskRuns> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const tasks = yield* taskRepository;
     const entities = yield* externalEntityRepository;
     const sessions = yield* sessionRepository;
     const inputs = yield* inputRepository;
-    const trackingRuns = yield* TaskTrackingRuns;
+    const taskRuns = yield* TaskRuns;
 
     const task = Option.getOrUndefined(yield* tasks.readTitleAndDescription(taskId));
     if (task === undefined) return Option.none();
@@ -343,8 +339,7 @@ export const buildTaskSummaryCall = (
       )
       .slice(0, MAX_SUMMARY_QUESTIONS);
 
-    const history = yield* trackingRuns.readRunHistory(taskId);
-    const runs = history.runs
+    const runs = (yield* taskRuns.readRunHistory(taskId))
       .slice(-MAX_SUMMARY_RUNS)
       .toReversed()
       .map((run): RunInput => ({

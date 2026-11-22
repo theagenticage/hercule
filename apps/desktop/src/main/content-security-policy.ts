@@ -34,7 +34,7 @@ const buildConnectSources = (url: string): ReadonlyArray<string> => {
  *   header and shows its bytes through an object URL, so the token never
  *   goes into an image's URL;
  * - any HTTPS address: a signal's blocks carry images from their source,
- *   such as an author's avatar, and Intake draws them inline. What loading
+ *   such as an author's avatar, and the Inbox draws them inline. What loading
  *   them tells their host is tracked in #503.
  */
 export const buildContentSecurityPolicy = (

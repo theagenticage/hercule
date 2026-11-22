@@ -108,7 +108,6 @@ export const buildSignalLine = (
   createdAt: "2026-11-07T09:00:00.000Z",
   say: { say, tone: "plain" },
   asks: true,
-  snoozed: false,
   ...overrides,
 });
 

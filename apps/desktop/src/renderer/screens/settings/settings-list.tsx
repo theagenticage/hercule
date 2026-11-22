@@ -7,7 +7,7 @@ import { CpuIcon } from "../../icons/cpu";
 import { CrewIcon } from "../../icons/crew";
 import { FleetIcon } from "../../icons/fleet";
 import { IdIcon } from "../../icons/id";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { KeyIcon } from "../../icons/key";
 import { PaletteIcon } from "../../icons/palette";
 import { PuzzleIcon } from "../../icons/puzzle";
@@ -42,7 +42,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
       { label: "Profile", Icon: UserIcon, to: "/settings/profile" },
       { label: "Appearance", Icon: PaletteIcon, to: "/settings/appearance" },
       { label: "Threads", Icon: ThreadsIcon, to: null },
-      { label: "Intake", Icon: IntakeIcon, to: "/settings/intake" },
+      { label: "Signals", Icon: InboxIcon, to: "/settings/signals" },
     ],
   },
   {

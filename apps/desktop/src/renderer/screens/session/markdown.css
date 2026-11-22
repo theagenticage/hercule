@@ -2,8 +2,8 @@
    lists, quotes, tables, details, code and footnotes. markdown.tsx imports
    this file itself, so every screen that draws markdown gets these rules, with
    no other stylesheet loaded first. The messages (`.msg-body`, `.bubble`) and
-   Intake's text (`.b-words`) are the containers they style through. Intake's
-   own rules for its text are in intake.css. */
+   the Inbox's text (`.b-words`) are the containers they style through. The
+   Inbox's own rules for its text are in inbox-blocks.css. */
 
 /* Markdown. The book draws paragraphs, inline code and code blocks; the
    rules for the other elements markdown can hold keep them in the same
@@ -55,8 +55,8 @@
   text-align: left;
 }
 /* A column's alignment, from the table's delimiter row. The renderer sets it
-   as an attribute, never a `style`. Intake's text has no `text-align` of its
-   own, so these rules are not scoped to the messages. */
+   as an attribute, never a `style`. The Inbox's text has no `text-align` of
+   its own, so these rules are not scoped to the messages. */
 table :is(th, td)[data-align="left"] {
   text-align: left;
 }
@@ -72,8 +72,8 @@ table :is(th, td)[data-align="right"] {
    once open, with no transition, as the thread's "Worked for" chevron. The
    blocks inside line up with the summary's text. The rules for the blocks
    inside say `[open]` for their specificity: it must beat the margins that
-   the rules above give a paragraph or a table. Intake's text takes the same
-   rules, so they are not scoped to the messages. */
+   the rules above give a paragraph or a table. The Inbox's text takes the
+   same rules, so they are not scoped to the messages. */
 :is(.msg-body, .bubble, .b-words) details > summary {
   list-style: none;
   cursor: pointer;

@@ -1,13 +1,13 @@
 /**
- * Signals: what Intake puts in front of the user because a move is asked of
- * them, such as a review someone requested or work triage prepared.
+ * Signals: what the core puts in front of the user because a move is asked
+ * of them, such as a review someone requested or work triage prepared.
  *
  * A Signal is its own record, never a Notification; the two share only the
  * shape of a Bound Action. A signal is created `open` and stays open while a
  * move is asked of the user. It resolves as `decided` when the user makes
  * their move, or `withdrawn` when no move is asked any more. Apart from its
- * resolution, and Not urgent lowering its priority, a signal never changes:
- * a new question is a new signal that replaces the old one.
+ * resolution, a signal never changes: a new question is a new signal that
+ * replaces the old one.
  *
  * A signal's body is a list of Blocks: data its producer fills, drawn by each
  * app in its own way. Every limit on a block is enforced here, so a producer
@@ -41,7 +41,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Actor, Id, isQualifiedId, Timestamp, TimestampWithOffset } from "../ids";
+import { Actor, Id, isQualifiedId, Timestamp } from "../ids";
 import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
 import { closedStruct } from "../closed";
 import { Authenticated } from "../security";
@@ -59,7 +59,7 @@ import {
   refuseAmbiguousActions,
   ResolutionOrigin,
 } from "./notification";
-import { TaskCreateInput, TaskPriority, TaskStatus } from "./task";
+import { TaskCreateInput, TaskPriority } from "./task";
 
 /**
  * Re-exported from the package plugins are written against, so a plugin cuts
@@ -517,15 +517,11 @@ export const SignalMatch = Schema.Record(Schema.String, Schema.String);
 
 export type SignalMatch = Schema.Schema.Type<typeof SignalMatch>;
 
-/** A snooze on an open signal: it is off To do until `until`. */
-export const SignalSnooze = Schema.Struct({ until: Timestamp, snoozedAt: Timestamp });
-
-export type SignalSnooze = Schema.Schema.Type<typeof SignalSnooze>;
-
 /**
  * The outside thing a signal is about, when a signal's `threadRef` is the ref
- * of a full record of a work kind. It is enough to name the thing on Intake's
- * group; the card is read with `externalEntity.read`.
+ * of a full record of a work kind. It holds enough to name the thing; the
+ * thing's ref is the signal's `threadRef`, by which it was found, and the card
+ * itself is read with `externalEntity.read`.
  */
 export const SignalEntity = Schema.Struct({
   id: Id,
@@ -570,8 +566,6 @@ export const Signal = Schema.Struct({
   /** The newer signal that replaced this one. */
   replacedBy: Schema.optionalKey(Id),
   createdAt: Timestamp,
-  /** Read beside the record, never stored on it: set while the signal is snoozed. */
-  snooze: Schema.optionalKey(SignalSnooze),
   /**
    * Read beside the record, never stored on it: the card this signal is about.
    * Present when the signal's thread ref is the ref of a full record of a work
@@ -585,12 +579,11 @@ export type Signal = Schema.Schema.Type<typeof Signal>;
 /**
  * The lists `signal.query` returns:
  *
- * - `to-do`: the open signals that are not snoozed, or whose snooze has run
- *   out, oldest first. It is not paged: every client counts the whole list.
- * - `later`: the open signals snoozed until a future time, soonest first.
+ * - `to-do`: the open signals, oldest first. It is not paged: every client
+ *   counts the whole list.
  * - `done`: the resolved signals, newest first.
  */
-export const SignalView = Schema.Literals(["to-do", "later", "done"]);
+export const SignalView = Schema.Literals(["to-do", "done"]);
 
 export type SignalView = Schema.Schema.Type<typeof SignalView>;
 
@@ -598,9 +591,9 @@ export type SignalView = Schema.Schema.Type<typeof SignalView>;
  * The filters of `signal.query`. `view` picks the list, and defaults to
  * `to-do`. `source` is the id of the plugin whose kind the signal is.
  *
- * `later` and `done` are read page by page with `limit` and `cursor`. Each
- * view has one fixed order, so there is no `sort`. `to-do` refuses `limit`
- * and `cursor`, because it always returns the whole list.
+ * `done` is read page by page with `limit` and `cursor`. Each view has one
+ * fixed order, so there is no `sort`. `to-do` refuses `limit` and `cursor`,
+ * because it always returns the whole list.
  */
 export const SignalFilter = Schema.Struct({
   view: Schema.optionalKey(SignalView),
@@ -611,7 +604,7 @@ export const SignalFilter = Schema.Struct({
   Schema.makeFilter((filter) =>
     (filter.view ?? "to-do") === "to-do" &&
     (filter.limit !== undefined || filter.cursor !== undefined)
-      ? "The to-do view is not paged: it returns every signal on To do. Leave out limit and cursor, or ask for the later or done view."
+      ? "The to-do view is not paged: it returns every open signal. Leave out limit and cursor, or ask for the done view."
       : undefined,
   ),
 );
@@ -623,12 +616,12 @@ export const SignalPage = page(Signal);
 
 export type SignalPage = Schema.Schema.Type<typeof SignalPage>;
 
-/** The most signals one call of `markDone`, `snooze`, `unsnooze` or `lowerPriority` names. */
+/** The most signals one call of `markDone` names. */
 export const MAX_SIGNAL_IDS = MAX_PAGE_LIMIT;
 
 /**
- * The signals one call of `markDone`, `snooze`, `unsnooze` or `lowerPriority`
- * changes: one user action, such as a bulk snooze, is one call.
+ * The signals one call of `markDone` changes: one user action, such as
+ * marking a selection Done, is one call.
  */
 const SignalIds = atMost(Id, MAX_SIGNAL_IDS).check(Schema.isMinLength(1));
 
@@ -644,23 +637,10 @@ export const SkippedSignal = Schema.Struct({
 
 export type SkippedSignal = Schema.Schema.Type<typeof SkippedSignal>;
 
-/** The payload of `signal.markDone`, `signal.unsnooze` and `signal.lowerPriority`. */
+/** The payload of `signal.markDone`. */
 export const SignalIdsInput = Schema.Struct({ signalIds: SignalIds });
 
 export type SignalIdsInput = Schema.Schema.Type<typeof SignalIdsInput>;
-
-/**
- * The payload of `signal.snooze`: the signals, and the exact time they come
- * back to To do. `until` is written with its offset, such as
- * `2026-10-13T09:00+02:00`, and decodes to the UTC timestamp the controller
- * stores. A time in the past is refused.
- */
-export const SignalSnoozeInput = Schema.Struct({
-  signalIds: SignalIds,
-  until: TimestampWithOffset,
-});
-
-export type SignalSnoozeInput = Schema.Schema.Type<typeof SignalSnoozeInput>;
 
 /** What `signal.markDone` returns: the signals it resolved, and those already resolved. */
 export const SignalMarkDoneResult = Schema.Struct({
@@ -669,67 +649,6 @@ export const SignalMarkDoneResult = Schema.Struct({
 });
 
 export type SignalMarkDoneResult = Schema.Schema.Type<typeof SignalMarkDoneResult>;
-
-/** What `signal.snooze` returns: the signals it snoozed, and those already resolved. */
-export const SignalSnoozeResult = Schema.Struct({
-  snoozed: Schema.Array(Id),
-  skipped: Schema.Array(SkippedSignal),
-});
-
-export type SignalSnoozeResult = Schema.Schema.Type<typeof SignalSnoozeResult>;
-
-/**
- * What `signal.unsnooze` returns: the signals it put back on To do, and those
- * already resolved. An open signal that was not snoozed is in neither list.
- */
-export const SignalUnsnoozeResult = Schema.Struct({
-  unsnoozed: Schema.Array(Id),
-  skipped: Schema.Array(SkippedSignal),
-});
-
-export type SignalUnsnoozeResult = Schema.Schema.Type<typeof SignalUnsnoozeResult>;
-
-/**
- * What `signal.lowerPriority` returns: the signals it moved from `urgent` to
- * `high`, and those already resolved. An open signal that was not urgent is
- * in neither list.
- */
-export const SignalLowerPriorityResult = Schema.Struct({
-  lowered: Schema.Array(Id),
-  skipped: Schema.Array(SkippedSignal),
-});
-
-export type SignalLowerPriorityResult = Schema.Schema.Type<typeof SignalLowerPriorityResult>;
-
-/**
- * One Task of Your work: an open Task that belongs to at least one open
- * signal, snoozed or not. `signalIds` holds the ids of those signals, so a
- * client can tell which rows of To do the Task covers.
- */
-export const YourWorkTask = Schema.Struct({
-  id: Id,
-  title: Schema.String,
-  status: TaskStatus,
-  updatedAt: Timestamp,
-  signalIds: Schema.Array(Id),
-});
-
-export type YourWorkTask = Schema.Schema.Type<typeof YourWorkTask>;
-
-/**
- * What `signal.queryYourWork` returns. Your work is the open Tasks (status
- * `open` or `in-progress`, not deleted) whose provenance carries the thread
- * ref of an open signal, snoozed or not. Each Task appears once, with the ids
- * of the open signals it belongs to. A snooze plays no part: the client keeps
- * the Tasks whose `signalIds` meet its own read of To do, so To do alone
- * decides what shows, and a snooze that runs out between the two reads cannot
- * make them disagree. The Tasks are ordered by `updatedAt`, newest first,
- * then by id. Your work is worked out on every read and never stored (spec 10
- * section 9.5).
- */
-export const SignalYourWork = Schema.Struct({ tasks: Schema.Array(YourWorkTask) });
-
-export type SignalYourWork = Schema.Schema.Type<typeof SignalYourWork>;
 
 /**
  * The payload of `signal.raise`. The core fills in the origin from the
@@ -882,11 +801,10 @@ export const SignalWithdrawInput = Schema.Struct({
 export type SignalWithdrawInput = Schema.Schema.Type<typeof SignalWithdrawInput>;
 
 /**
- * The signal operations: list To do, Later or Done, read one signal, raise a
+ * The signal operations: list the open or the resolved signals, read one signal, raise a
  * signal, take one of its actions as the user, hand it to a workflow as the
- * user, withdraw a signal its raiser
- * no longer needs answered, and the moves that send nothing to the source:
- * Done, snooze, unsnooze and Not urgent.
+ * user, withdraw a signal its raiser no longer needs answered, and mark
+ * signals Done, which sends nothing to the source.
  */
 export const signal = HttpApiGroup.make("signal")
   .add(
@@ -895,12 +813,6 @@ export const signal = HttpApiGroup.make("signal")
       query: SignalFilter,
       success: SignalPage,
       error: [Unauthenticated, Forbidden, Validation, Internal],
-    }),
-    // A static path beside `/signals/:id`: the router prefers it, and
-    // "your-work" is not an id.
-    HttpApiEndpoint.get("queryYourWork", "/signals/your-work", {
-      success: SignalYourWork,
-      error: [Unauthenticated, Forbidden, Internal],
     }),
     HttpApiEndpoint.get("read", "/signals/:id", {
       params: { id: Id },
@@ -956,21 +868,6 @@ export const signal = HttpApiGroup.make("signal")
       payload: SignalIdsInput,
       success: SignalMarkDoneResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
-    }),
-    HttpApiEndpoint.post("snooze", "/signals/snooze", {
-      payload: SignalSnoozeInput,
-      success: SignalSnoozeResult,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
-    }),
-    HttpApiEndpoint.post("unsnooze", "/signals/unsnooze", {
-      payload: SignalIdsInput,
-      success: SignalUnsnoozeResult,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
-    }),
-    HttpApiEndpoint.post("lowerPriority", "/signals/lower-priority", {
-      payload: SignalIdsInput,
-      success: SignalLowerPriorityResult,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

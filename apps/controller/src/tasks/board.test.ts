@@ -20,7 +20,7 @@ import {
   MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
   MAX_ENTITY_MARKS,
-  MAX_TRACKING_FAILURE_CAUSE,
+  MAX_FAILURE_CAUSE,
   WorkBoard,
   WorkCard,
   type Grant,
@@ -349,7 +349,7 @@ describe("buildWorkCard", () => {
       );
 
       expect(withoutMessage.failure?.cause).toBe("workspace failed");
-      expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_TRACKING_FAILURE_CAUSE);
+      expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_FAILURE_CAUSE);
       expect(Schema.is(WorkCard)(withoutMessage)).toBe(true);
       expect(Schema.is(WorkCard)(longMessage)).toBe(true);
     });

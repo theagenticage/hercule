@@ -13,6 +13,7 @@ import {
   type HerculeClient,
   type Waiting,
 } from "@hercule/client-core";
+import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
 import { runnersQuery, sessionQuery } from "../../app/queries";
 import { useReadSessionPresentation } from "../../app/session-presentation";
@@ -74,7 +75,9 @@ const isSeatedByCachedRecord = (
  * - an assistant opens its Conversation, where its Request is answered: in
  *   the Office's drawer while the Office is open, because an assistant
  *   always has a colleague there, and on its own screen otherwise;
- * - a signal opens Intake with the signal selected.
+ * - an External Entity opens the Inbox's Everything list, which holds every
+ *   thing on the Inbox, newest first, with the thing in its pane, as an
+ *   urgent signal's notification asks.
  *
  * The seats are read when the destination is opened, so the function keeps
  * its identity while the threads change. A session the presentation does not
@@ -110,8 +113,11 @@ export function useOpenDestination(): (destination: Destination) => void {
           else void navigate({ to: "/assistants/$assistantId", params: { assistantId } });
           return;
         }
-        case "signal":
-          void navigate({ to: "/intake", search: { signal: destination.signalId } });
+        case "entity":
+          void navigate({
+            to: "/inbox",
+            search: { list: CORE_SAVED_QUERY_IDS.everything, thing: destination.ref },
+          });
           return;
       }
     },

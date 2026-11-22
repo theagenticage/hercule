@@ -63,7 +63,6 @@ function renderFrame(props: Partial<ComponentProps<typeof InboxFrame>> = {}): {
       paneWidth={420}
       onPaneWidthChange={vi.fn()}
       onClosePane={vi.fn()}
-      onOpenIntake={vi.fn()}
       onOpenKeys={vi.fn()}
       isKeysOpen={false}
       {...given}
@@ -108,23 +107,15 @@ describe("InboxFrame layout", () => {
     expect(document.activeElement?.textContent).toBe("Someone waits on me");
   });
 
-  it("drops the pill under 628px and keeps it from there up", () => {
+  it("drops the pill under 628px and keeps it from there up, and keeps the page's heading at every width", () => {
     renderFrame();
     reportWidth(628);
-    expect(screen.getByRole("button", { name: "Intake" }).closest(".ib-pill")).not.toBeNull();
+    expect(document.querySelector(".ib-pill")?.textContent).toBe("Inbox");
     expect(document.querySelector(".ib")?.classList.contains("is-pill-gone")).toBe(false);
 
     reportWidth(627);
     expect(document.querySelector(".ib")?.classList.contains("is-pill-gone")).toBe(true);
-  });
-
-  it("calls onOpenIntake when the pill's Intake tab is pressed", async () => {
-    const onOpenIntake = vi.fn();
-    renderFrame({ onOpenIntake });
-
-    await userEvent.click(screen.getByRole("button", { name: "Intake" }));
-
-    expect(onOpenIntake).toHaveBeenCalledOnce();
+    expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toBeTruthy();
   });
 
   it("calls onOpenKeys from the keys button and shows it expanded while the keys are open", async () => {
@@ -373,7 +364,6 @@ describe("InboxFrame without a current thing", () => {
         paneWidth={420}
         onPaneWidthChange={vi.fn()}
         onClosePane={vi.fn()}
-        onOpenIntake={vi.fn()}
         onOpenKeys={vi.fn()}
         isKeysOpen={false}
       />

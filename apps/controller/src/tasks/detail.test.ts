@@ -24,7 +24,7 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { TaskBoardFactsLayer, TaskDetailFactsLayer } from "../daemon/tasks";
 import { buildPluginStack } from "../plugins/testing";
-import { TaskTrackingRunsLayer } from "../daemon/runs";
+import { TaskRunsLayer } from "../daemon/runs";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { externalEntityRepository, type ObservedEntity } from "../external-entities";
@@ -33,7 +33,7 @@ import { sessionRepository } from "../sessions";
 import { TaskBoardFacts } from "./board";
 import { TaskDetailFacts, TaskDetails, TaskDetailsLayer } from "./detail";
 import { taskRepository, type NewTask } from "./repository";
-import { TaskTrackingRuns } from "./tracking";
+import { TaskRuns } from "./task-runs";
 
 const AT = "2026-10-20T10:00:00.000Z";
 const minute = (n: number) => `2026-10-20T11:${String(n).padStart(2, "0")}:00.000Z`;
@@ -90,7 +90,7 @@ const PLAN = {
 
 /** Reads details as the user, over the real ports and a fresh database. */
 const DetailsOverRealPorts = TaskDetailsLayer.pipe(
-  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
   Layer.provideMerge(buildPluginStack()),
 );
 
@@ -359,7 +359,7 @@ describe("task.readDetail", () => {
     expect(detail!.sessions[0]!.openRequests).toEqual([]);
 
     expect(detail!.runCount).toBe(3);
-    // Tracking lists the runs oldest first.
+    // The runs come oldest first.
     expect(detail!.runs.map((run) => [run.id, run.status])).toEqual([
       [ids.failedRun, "failed"],
       [ids.runningRun, "pending"],
@@ -724,17 +724,12 @@ describe("who may read the details", () => {
                       };
                     }),
                 }),
-                Layer.succeed(TaskTrackingRuns)({
+                Layer.succeed(TaskRuns)({
                   readRunHistory: () =>
                     Effect.sync(() => {
                       asked.push("run history");
-                      return { runs: [], agentStep: undefined, endingActionStepName: undefined };
+                      return [];
                     }),
-                  readLatestRuns: () => Effect.die("not read by the details"),
-                  readWorkflowName: () => Effect.die("not read by the details"),
-                  readWorkflowNames: () => Effect.die("not read by the details"),
-                  readTaskIds: () => Effect.die("not read by the details"),
-                  readLegRuns: () => Effect.die("not read by the details"),
                 }),
                 Layer.succeed(TaskDetailFacts)({
                   readSessions: () =>

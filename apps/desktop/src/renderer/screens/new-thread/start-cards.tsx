@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildStartCards } from "@hercule/client-core";
 import { startTasksQuery } from "../../app/queries";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { TasksIcon } from "../../icons/tasks";
 import { GitHubMark } from "../../logos";
 
@@ -16,7 +16,7 @@ const StarterThreads = lazy(() =>
 
 /**
  * Renders the start cards under a Draft Thread's composer, as the Bureau
- * book's `session-empty` page draws them: "Start from Intake", then up to
+ * book's `session-empty` page draws them: "Start from Work", then up to
  * three planned tasks of the project, most urgent first. Each card shows where
  * the task came from, its priority as bars, and its title.
  *
@@ -57,8 +57,8 @@ export function StartCards({
   return (
     <section aria-labelledby={headingId}>
       <h2 className="starts-h section-h" id={headingId}>
-        <IntakeIcon size={14} />
-        Start from Intake
+        <InboxIcon size={14} />
+        Start from Work
       </h2>
       <div className="starts">
         {cards.map((card) => (

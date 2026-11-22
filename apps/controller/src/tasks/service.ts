@@ -530,10 +530,10 @@ const make = Effect.gen(function* () {
    * either end of a changed edge.
    *
    * The announcement is a derived push (it reads the board and the pane of
-   * each Task named, not the Task lists, Tracking or Your work). An edge is
-   * not a field of the Task record, so no list of Tasks goes stale, and no
-   * edge changes a Task's links or its liveness. The board draws the lock and
-   * the words of a card from its edges, and the pane lists them.
+   * each Task named, not the Task lists). An edge is not a field of the Task
+   * record, so no list of Tasks goes stale, and no edge changes a Task's
+   * links or its liveness. The board draws the lock and the words of a card
+   * from its edges, and the pane lists them.
    */
   const recordEdgeWrite = (
     write: EdgeWrite,
@@ -712,8 +712,8 @@ const make = Effect.gen(function* () {
    * Task, so a run starting or ending on the Task changes it. A Task that
    * links no entity changes no card, and announces nothing.
    *
-   * It is not a `task` push: a plain one makes every client read Tracking and
-   * Your work again, and a derived one reads the Work board alone. A run
+   * It is not a `task` push: a plain one makes every client read its Task
+   * lists again, and a derived one reads the Work board alone. A run
    * starts and ends rarely, but a workflow trigger can start many.
    */
   const announceRunChangeOnLinkedEntity = (taskId: string): Effect.Effect<void, SqlError> =>
@@ -2207,7 +2207,7 @@ const make = Effect.gen(function* () {
             yield* linkOwners.moveTaskLinks(sourceId, targetId);
             yield* tasks.moveWorkspaces(sourceId, targetId);
             // The entries move before the survivor gains its own, and unedited:
-            // Tracking joins them to the runs, which moved just above.
+            // a handoff entry still names its run, which moved just above.
             yield* tasks.moveProvenance(sourceId, targetId);
             // The checks have found no loop, so the moved edges keep the
             // stored relation a DAG. The survivor reports what it gained in

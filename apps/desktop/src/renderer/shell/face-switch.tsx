@@ -1,7 +1,8 @@
 import { useRef, type JSX, type KeyboardEvent } from "react";
-import { describeOrchestrationSegment } from "@hercule/client-core";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import { useFailedRun } from "../app/failed-run";
-import { useToDoCount } from "../app/tracking";
+import { inboxCountQuery } from "../app/queries";
 import type { SidebarFace } from "./sidebar-face";
 
 /** The switch's segments, in order, with the label each one shows. */
@@ -19,10 +20,12 @@ const SEGMENTS: ReadonlyArray<{ readonly face: SidebarFace; readonly label: stri
  *   with its face.
  * - Only the selected segment is in the tab order. ← and → select the other
  *   segment and move the focus to it, as in any segmented control.
- * - The Hercule segment ends in Intake's To do count, in marigold, and its
- *   accessible name carries the count: "Hercule, 8 to do". The count is the
- *   open signals and the rows of Tracking that wait on the user. It is hidden
- *   at 0.
+ * - The Hercule segment ends in the Inbox's count, in the same plain grey as
+ *   the Inbox's row on the Hercule face, and its accessible name carries the
+ *   count: "Hercule, 8 waiting". The count is the things on the Inbox someone
+ *   waits on the user for, the `waiting` of `externalEntity.countInbox`. It is
+ *   hidden at 0. The shell's loader reads it and keeps it cached for the life
+ *   of the window, so nothing here waits in practice.
  * - While a run is failed on a Task and the Threads face shows, a 7px marigold
  *   dot sits at the end of the Hercule segment, as a button of its own beside
  *   the tab list (it is not a tab). It is the only click here that opens Work
@@ -39,7 +42,8 @@ export function FaceSwitch({
   readonly onChange: (face: SidebarFace) => void;
   readonly listId: string;
 }): JSX.Element {
-  const toDoCount = useToDoCount();
+  const { client } = useRouteContext({ from: "/_connected/_shell" }).controller;
+  const { waiting } = useSuspenseQuery(inboxCountQuery(client)).data;
   const { hasFailedRun, openFailedRuns } = useFailedRun();
   // The Hercule face shows the same dot on its Overview row instead.
   const showsDot = hasFailedRun && face === "threads";
@@ -74,15 +78,13 @@ export function FaceSwitch({
             data-has-dot={segment.face === "orchestration" && showsDot ? "" : undefined}
             onClick={() => onChange(segment.face)}
             aria-label={
-              segment.face === "orchestration" && toDoCount > 0
-                ? describeOrchestrationSegment(toDoCount)
+              segment.face === "orchestration" && waiting > 0
+                ? `${segment.label}, ${String(waiting)} waiting`
                 : undefined
             }
           >
             {segment.label}
-            {segment.face === "orchestration" && toDoCount > 0 && (
-              <b className="count count--you">{toDoCount}</b>
-            )}
+            {segment.face === "orchestration" && waiting > 0 && <b className="count">{waiting}</b>}
           </button>
         ))}
       </div>

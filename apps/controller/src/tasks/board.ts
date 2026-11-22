@@ -19,7 +19,7 @@
  * The Task rows are this domain's. The sessions and runs of each Task belong
  * to domains that depend on this one, so this domain declares what it needs
  * as the `TaskBoardFacts` port and the controller daemon implements it
- * (ADR 0033), as it does for `TaskTrackingRuns`.
+ * (ADR 0033), as it does for `TaskRuns`.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -32,7 +32,7 @@ import {
   MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
   MAX_ENTITY_MARKS,
-  MAX_TRACKING_FAILURE_CAUSE,
+  MAX_FAILURE_CAUSE,
   type EntityEdge,
   type EntityGrouping,
   type EntityMark,
@@ -263,7 +263,7 @@ export const buildWorkCard = (
                 reason: facts.failure.reason,
                 message: facts.failure.message,
               }),
-              MAX_TRACKING_FAILURE_CAUSE,
+              MAX_FAILURE_CAUSE,
             ),
           },
         }),

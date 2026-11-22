@@ -75,12 +75,9 @@ import {
   type SessionSkillList,
   type Signal,
   type SignalAction,
-  type SignalLowerPriorityResult,
   type SignalMarkDoneResult,
   type SignalRaiseResult,
   type SignalResolution,
-  type SignalSnoozeResult,
-  type SignalUnsnoozeResult,
   type TaskChangeResult,
   type Skill,
   type SkillDetail,
@@ -846,9 +843,9 @@ const renderNotificationDecided = (
 
 /**
  * Returns a signal as a row of `signal list`: its id, kind, priority, title,
- * who waits on the user, where the question is asked, its age, and, for a
- * snoozed signal still in Later, when it comes back. The blocks and the
- * actions are left to `signal read`, because they do not fit on one line.
+ * who waits on the user, where the question is asked, and its age. The
+ * blocks and the actions are left to `signal read`, because they do not fit
+ * on one line.
  */
 const summarizeSignal = (signal: Signal, now: Date): Record<string, unknown> => ({
   id: signal.id,
@@ -858,11 +855,6 @@ const summarizeSignal = (signal: Signal, now: Date): Record<string, unknown> => 
   asker: signal.asker,
   place: signal.place,
   age: formatAge(signal.createdAt, now),
-  // A snooze whose time has passed stays on the signal until it is resolved,
-  // and that signal is back on To do, so only a future time is printed.
-  ...(signal.snooze !== undefined && Date.parse(signal.snooze.until) > now.getTime()
-    ? { back: signal.snooze.until }
-    : {}),
 });
 
 /** Returns the rows of a page of `signal list` as a table. */
@@ -915,9 +907,8 @@ const renderSignalHandedOff = (signal: ResolvedSignal): ReadonlyArray<string> =>
 };
 
 /**
- * Returns the lines printed after `signal done`, `signal snooze`, `signal
- * unsnooze` and `signal lower-priority`: one line per signal the command
- * changed, such as "signal 0b1c2d3e snoozed", then one per signal it skipped
+ * Returns the lines printed after `signal done`: one line per signal the
+ * command changed, such as "signal 0b1c2d3e done", then one per signal it skipped
  * because the signal was already resolved. A call that changed nothing and
  * skipped nothing prints one line saying so, because no output at all reads
  * like a failure.
@@ -1544,18 +1535,6 @@ const VALUE_RENDERERS: Partial<
   "signal.markDone": (value) => {
     const { done, skipped } = value as SignalMarkDoneResult;
     return renderSignalsMoved("done", done, skipped);
-  },
-  "signal.snooze": (value) => {
-    const { snoozed, skipped } = value as SignalSnoozeResult;
-    return renderSignalsMoved("snoozed", snoozed, skipped);
-  },
-  "signal.unsnooze": (value) => {
-    const { unsnoozed, skipped } = value as SignalUnsnoozeResult;
-    return renderSignalsMoved("unsnoozed", unsnoozed, skipped);
-  },
-  "signal.lowerPriority": (value) => {
-    const { lowered, skipped } = value as SignalLowerPriorityResult;
-    return renderSignalsMoved("lowered", lowered, skipped);
   },
   "session.spawn": (value) => renderSpawnedSession(value as Session),
   "session.read": (value) => renderSession(value as Session),

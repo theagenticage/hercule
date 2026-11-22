@@ -118,12 +118,19 @@
  * workspace, one in none, one Done and one archived), and stores a workflow
  * whose step is `task.update` with `status: in-progress`. After the upgrade
  * each Task reads with the stage of its status and with every other field and
- * time as it was, the handed-off Task is still listed by `hercule task
- * tracking`, the two shared Threads share one new Task, the main and
+ * time as it was, the handed-off Task is still listed by `hercule task list
+ * --handed-off true` and keeps its handoff entry and its run, the two shared
+ * Threads share one new Task, the main and
  * workspace-less Threads have a Task each, the Done and archived Threads have
  * none, and the event log holds no `task.created` it did not hold before. The
  * stored workflow is then run, and its legacy status step must succeed and
  * move the Task to `building`.
+ *
+ * Migration 132 drops `signal_snoozes`, so a signal snoozed when the database
+ * is upgraded is an open signal like any other. The edge binary raises an FYI
+ * signal and snoozes it far into the future with its own CLI, and lists it in
+ * Later only. After the upgrade the same signal is on To do, reads back, and
+ * resolves with `signal done`, and the table is gone.
  *
  * It is not a matrix of session states or harness behaviour.
  *
@@ -379,7 +386,7 @@ const SHIPPED_WORKFLOW_KEYS = ["card-in-review", "card-landed"] as const;
 /**
  * The Tasks whose provenance names a ref, which migration 114 turns into links:
  * one through a handoff entry (it names a signal as well) and one through a plain
- * `ref` entry. Both stay `open`, so Tracking leaves them out.
+ * `ref` entry. Both stay `open`.
  */
 const LINKED_TASKS = [
   {
@@ -588,6 +595,9 @@ const EDGE_RUNNER_AUDIT_KINDS = [
 /** The workspaces the fixture writes for audit entries to name: one on the seeded runner, one on the real runner. */
 const SEEDED_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d1";
 const REAL_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d2";
+
+/** The migration that drops `signal_snoozes`, the snoozes of Intake's Later view. */
+const DROP_SIGNAL_SNOOZES_MIGRATION = 132;
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -2510,14 +2520,14 @@ async function readTriggers(
   return new Map(triggers.map((trigger) => [trigger.triggerId, trigger]));
 }
 
-/** Lists the ids of the Tasks that `hercule task tracking` lists, in the order it prints them. */
-async function readTrackedTaskIds(options: {
+/** Lists the ids of the Tasks that `hercule task list --handed-off true` lists. */
+async function readHandedOffTaskIds(options: {
   readonly home: string;
   readonly binary: string;
 }): Promise<ReadonlyArray<string>> {
-  const ran = await runCli(["task", "tracking", "--json"], options);
+  const ran = await runCli(["task", "list", "--handed-off", "true", "--json"], options);
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return expectJson<{ rows: ReadonlyArray<{ taskId: string }> }>(ran).rows.map((row) => row.taskId);
+  return readListedItems<{ id: string }>(ran).map((task) => task.id);
 }
 
 /** Returns the id of the last migration the database in `home` ran. */
@@ -3010,6 +3020,47 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // A signal the edge binary snoozes far into the future: it is in Later,
+      // not on To do, until the upgrade drops the snoozes.
+      const snoozedSignalId =
+        edgeVersion < DROP_SIGNAL_SNOOZES_MIGRATION
+          ? expectJson<{ signalId: string }>(
+              await runCli(
+                [
+                  "signal",
+                  "raise",
+                  "--kind",
+                  "fyi",
+                  "--title",
+                  "Upgrade fixture snoozed signal",
+                  "--reason",
+                  "Snoozed before the upgrade",
+                  "--event-id",
+                  "1",
+                  "--json",
+                ],
+                edge,
+              ),
+            ).signalId
+          : undefined;
+      if (snoozedSignalId !== undefined) {
+        const snoozed = await runCli(
+          ["signal", "snooze", snoozedSignalId, "--until", "2999-01-01T00:00Z", "--json"],
+          edge,
+        );
+        expect(snoozed.code, `${snoozed.stdout}\n${snoozed.stderr}`).toBe(0);
+        const listIds = async (args: ReadonlyArray<string>) =>
+          readListedItems<{ id: string }>(
+            await runCli(["signal", "list", ...args, "--json"], edge),
+          ).map((signal) => signal.id);
+        expect(await listIds([])).not.toContain(snoozedSignalId);
+        expect(await listIds(["--view", "later"])).toContain(snoozedSignalId);
+      } else {
+        console.log(
+          `Skipping the snoozed signal fixture: the edge database already ran migration ${String(DROP_SIGNAL_SNOOZES_MIGRATION)}.`,
+        );
+      }
+
       if (linkedTaskRowsSeeded) {
         for (const task of LINKED_TASKS) {
           expect(await readTaskIdsOnRef(task.ref, edge), `edge Tasks on ${task.ref}`).toEqual([
@@ -3077,14 +3128,14 @@ describe("upgrading from the previous edge release", () => {
 
       if (taskStageRows !== undefined) {
         // The edge binary reads the Tasks it never wrote as the Tasks they are,
-        // and lists the handed-off one under Tracking.
+        // and lists the handed-off one as handed off.
         for (const seeded of [...SEEDED_TASKS, { ...HANDED_OFF_TASK, status: "in-progress" }]) {
           expect(
             expectJson<ReadTask>(await runCli(["task", "read", seeded.id, "--json"], edge)),
             `edge Task ${seeded.title}`,
           ).toMatchObject({ id: seeded.id, title: seeded.title, status: seeded.status });
         }
-        expect(await readTrackedTaskIds(edge)).toEqual([HANDED_OFF_TASK.id]);
+        expect(await readHandedOffTaskIds(edge)).toContain(HANDED_OFF_TASK.id);
       } else {
         console.log(
           `Skipping the task stages fixture: the edge database already ran migration ${String(TASK_STAGES_MIGRATION)}.`,
@@ -3584,6 +3635,39 @@ describe("upgrading from the previous edge release", () => {
         expect(upgradedSignal.match).toEqual(JSON.parse(SEEDED_SIGNAL_MATCH));
       }
 
+      if (snoozedSignalId !== undefined) {
+        // The snooze is gone, so the signal is on To do now, whatever time it
+        // named, and Done resolves it as it would any open signal.
+        expect(
+          readListedItems<{ id: string }>(await runCli(["signal", "list", "--json"], upgraded)).map(
+            (signal) => signal.id,
+          ),
+        ).toContain(snoozedSignalId);
+        expect(
+          expectJson<{ status: string; title: string }>(
+            await runCli(["signal", "read", snoozedSignalId, "--json"], upgraded),
+          ),
+        ).toMatchObject({ status: "open", title: "Upgrade fixture snoozed signal" });
+        expect(
+          expectJson<{ done: ReadonlyArray<string> }>(
+            await runCli(["signal", "done", snoozedSignalId, "--json"], upgraded),
+          ).done,
+        ).toEqual([snoozedSignalId]);
+        expect(
+          expectJson<{ status: string; resolution: { outcome: string } }>(
+            await runCli(["signal", "read", snoozedSignalId, "--json"], upgraded),
+          ),
+        ).toMatchObject({ status: "resolved", resolution: { outcome: "Done, nothing sent" } });
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader.query("SELECT name FROM sqlite_master WHERE name = 'signal_snoozes'").all(),
+          ).toEqual([]);
+        } finally {
+          reader.close();
+        }
+      }
+
       // The messages written before the upgrade are searchable after it.
       const passages = readListedItems<{ sessionId: string; excerpt: string }>(
         await runCli(
@@ -3876,7 +3960,24 @@ describe("upgrading from the previous edge release", () => {
           stage: "building",
           updatedAt: SEEDED_TASK_UPDATED,
         });
-        expect(await readTrackedTaskIds(upgraded)).toEqual([HANDED_OFF_TASK.id]);
+        expect(await readHandedOffTaskIds(upgraded)).toContain(HANDED_OFF_TASK.id);
+        // The handoff entry still names its signal and its run, and the Task's
+        // details list that run.
+        expect(
+          expectJson<{ provenance: ReadonlyArray<Record<string, unknown>> }>(
+            await runCli(["task", "read", HANDED_OFF_TASK.id, "--json"], upgraded),
+          ).provenance,
+        ).toContainEqual(
+          expect.objectContaining({
+            signalId: HANDED_OFF_TASK.signalId,
+            runId: HANDED_OFF_TASK.runId,
+          }),
+        );
+        expect(
+          expectJson<{ runs: ReadonlyArray<{ id: string; status: string }> }>(
+            await runCli(["task", "details", HANDED_OFF_TASK.id, "--json"], upgraded),
+          ).runs,
+        ).toMatchObject([{ id: HANDED_OFF_TASK.runId, status: "completed" }]);
 
         // Migration 111 gave the unfinished Threads their Tasks: the two that
         // share an ephemeral workspace share one, the main workspace's Thread

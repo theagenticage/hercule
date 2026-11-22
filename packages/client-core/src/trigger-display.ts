@@ -7,14 +7,13 @@
 import {
   ANY_CONNECTION,
   isSchedule,
-  type EventWithFacts,
+  type ListedEvent,
   type Trigger,
   type TriggerFiresOn,
   type TriggerOn,
   type Workflow,
   toIdTail,
 } from "@hercule/contract";
-import { describeEventTitle } from "./intake";
 import {
   describeBoundUse,
   describeStartTriggerStatus,
@@ -205,7 +204,7 @@ export const describeTrigger = (
  * be formatted in that timezone is shown as the timestamp the controller sent.
  */
 export const describeHeldEvents = (
-  events: ReadonlyArray<EventWithFacts>,
+  events: ReadonlyArray<ListedEvent>,
   heldCount: number,
   timezone: string,
 ): HeldEventsReading => {
@@ -213,7 +212,8 @@ export const describeHeldEvents = (
   return {
     rows: events.map((event) => ({
       id: event.id,
-      title: describeEventTitle(event),
+      // The one-line title the event's source set, or its kind when it set none.
+      title: event.title ?? event.kind,
       isKindTitle: event.title === null,
       author: event.author ?? undefined,
       receivedText: formatStamp(new Date(event.receivedAt), timezone) ?? event.receivedAt,

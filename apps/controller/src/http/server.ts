@@ -125,7 +125,7 @@ import {
   runTaskSummaryLoop,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   thawExpiredFreezes,
 } from "../daemon";
 import { stopWrites } from "../db";
@@ -519,9 +519,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // call reads the Task's runs through the port the tasks domain declares,
     // which only the controller daemon can answer.
     yield* Effect.forkScoped(
-      runTaskSummaryLoop.pipe(
-        Effect.provide(Layer.mergeAll(TaskTrackingRunsLayer, TaskSummariesLayer)),
-      ),
+      runTaskSummaryLoop.pipe(Effect.provide(Layer.mergeAll(TaskRunsLayer, TaskSummariesLayer))),
     );
     // External Entities nothing needs are deleted once a day.
     yield* Effect.forkScoped(runEntityPruneLoop);

@@ -252,22 +252,6 @@ describe("who is on the Inbox", () => {
     expect(refs).toEqual(["concern", "signal", "task"]);
   });
 
-  it("does not list a signal that is snoozed until later", async () => {
-    const refs = await run(({ sql }) =>
-      Effect.gen(function* () {
-        yield* insertTicket({ key: "a", concerns: [] });
-        const id = yield* raise("acme:ticket:a", NOTE, 2);
-        yield* sql`INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
-          VALUES (${uuidFromString(id)}, ${at(60)}, ${at(3)}, 'user')`;
-        return {
-          before: refsOf(yield* list(10)),
-          after: refsOf(yield* list(61)),
-        };
-      }),
-    );
-    expect(refs).toEqual({ before: [], after: ["a"] });
-  });
-
   it("brings a dismissed thing back for an ask raised after the dismissal, and for nothing else", async () => {
     const steps = await run(({ repository }) =>
       Effect.gen(function* () {

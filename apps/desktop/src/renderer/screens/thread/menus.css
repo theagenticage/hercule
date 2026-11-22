@@ -51,7 +51,7 @@
 }
 
 /* Not in the book. A menu of items, such as a Connection row's ⋯ menu,
-   Add a Connection's menu, Intake's pane menu and the snooze menu. Each
+   Add a Connection's menu and the Inbox's pane menu. Each
    menu sets only its own width, placement and item columns. The book
    highlights an item on `:hover` and `:focus-visible`; these menus mark
    one active item instead, under the pointer or with the focus, so two

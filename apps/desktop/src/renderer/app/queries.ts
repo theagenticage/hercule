@@ -24,7 +24,6 @@ import {
   classifyTranscriptPage,
   detectLocalRunner,
   findTranscriptAfterPosition,
-  type EventListFilter,
   isNotFound,
   mergeNewestMessagePage,
   mergeSentMessage,
@@ -36,7 +35,6 @@ import {
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
-  type TrackingRead,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -48,8 +46,6 @@ import {
   type ConversationMessage,
   type EntityCard,
   type EntitySearchQuery,
-  type EventHandling,
-  type HandoffLeg,
   type InboxClause,
   type InboxList,
   type InboxValueQuery,
@@ -57,8 +53,6 @@ import {
   type RunSummary,
   type Runner,
   type Session,
-  type SignalFilter,
-  type SignalPage,
   type SkillsPreviewFilter,
   type Task,
   type TranscriptRow,
@@ -719,8 +713,8 @@ export const eventCountsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads one Connection with its Intake settings, for the segment of Settings >
- * Intake that edits it. Unlike the listing, `connection.read` works out the
+ * Reads one Connection with its intake settings, for the segment of Settings >
+ * Signals that edits it. Unlike the listing, `connection.read` works out the
  * value in effect for every kind the Connection's plugin declares. A push on
  * the `connection` topic that names the Connection reads it again, and so
  * does a push on the `plugin` topic, which changes what every Connection of
@@ -768,262 +762,19 @@ export const assistantsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads Tracking: `task.queryTracking` returns every Task Tracking follows,
- * with its title, its handoffs, and its newest run and newest live run, and
- * the time the read started (`TrackingRead`). The rows are not built here:
- * a row also depends on the Requests and signals that wait on its Task, which
- * change on their own, so the app builds them from this read and those (see
- * `useTrackingRows`). The Hercule segment's count and Tracking's rows both
- * come from it, so it is shell data, kept for the life of the window.
- *
- * The key is stable, so the entry is the same whichever Tasks are tracked. A
- * push on the `task` topic reads it again, and one on the `run` topic when
- * the push can change it (see `findTrackingTasksAffectedByRunPush`).
+ * Reads every open signal, read whole, for the urgent signals' native
+ * notifications, which the shell sends main on every screen. A push on the
+ * `signal` topic reads it again.
  */
-export const trackingQuery = (client: HerculeClient) =>
+export const openSignalsQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: queryKeys.tracking(),
-    queryFn: async (): Promise<TrackingRead> => {
-      // Taken before the request, so a read that started after a change committed shows the change.
-      const readStartedAt = performance.now();
-      const { rows: tasks } = await client.task.queryTracking();
-      return { tasks, readStartedAt };
-    },
+    queryKey: queryKeys.signals({ view: "to-do" }),
+    queryFn: async () => (await client.signal.query({ query: { view: "to-do" } })).items,
     ...SHELL_READ_OPTIONS,
   });
 
 /**
- * Reads what the Tracking pane of the Task `taskId` draws (`task.readTracking`):
- * its first handoff, its newest runs with the output of the newest run's last
- * agent step. Fails with a `not_found` `ApiError` when no such Task exists,
- * which is not tried again: the pane shows that the Task was not found.
- *
- * Only the pane that is open reads it, so a Task nobody opened costs nothing.
- * It is kept current by pushes: one on the `task` topic that names the Task,
- * and one on the `run` topic that can change this Task's runs (see
- * `findTrackingTasksAffectedByRunPush`). Both mark it out of date, and it is
- * read again only while a pane shows it. Its cost is one request per open pane
- * and per such push, and no timer.
- */
-export const trackingDetailQuery = (client: HerculeClient, taskId: string) =>
-  queryOptions({
-    queryKey: queryKeys.trackingDetail(taskId),
-    queryFn: () => client.task.readTracking({ params: { id: taskId } }),
-    retry: isWorthRetrying,
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Reads Your work (`signal.queryYourWork`): the open Tasks that belong to an
- * open signal, snoozed or not, each with the ids of those signals (spec 10
- * §9.5). One request answers it, whatever the number of signals.
- * `matchYourWork` matches the Tasks to the To do list the app holds, so the
- * app's own read of To do decides which signals show Your work. The
- * controller does not judge snoozes here, so a snooze that runs out, which
- * sends no push, needs no new read of Your work.
- *
- * Shell data, kept for the life of the window. A push on the `task` topic
- * reads it again, because a Task's status or provenance may have changed, and
- * so does a push on the `signal` topic, because a signal may have opened or
- * resolved.
- */
-export const yourWorkQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: queryKeys.yourWork(),
-    queryFn: () => client.signal.queryYourWork(),
-    ...SHELL_READ_OPTIONS,
-  });
-
-/** The key of To do's list (`signalsToDoQuery`). */
-export const TO_DO_SIGNALS_KEY = queryKeys.signals({ view: "to-do" });
-
-/** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
-const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
-
-/**
- * Reads Intake's To do list: every open signal that is not snoozed, read
- * whole, because every client counts it. The Hercule segment's count and
- * Intake's list both come from it, and a push on the `signal` topic reads it
- * again.
- *
- * Each read first reads the soonest `until` on Later and stores it for the
- * snooze timer. Read in that order, a snooze that runs out between the two
- * reads is missing from To do but still sets the timer, which reads To do
- * again once it has run out. Read in the other order, or apart, that snooze
- * could be missing from both, and To do would stay without it.
- */
-export const signalsToDoQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: TO_DO_SIGNALS_KEY,
-    queryFn: async ({ client: queryClient }) => {
-      const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
-      queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
-      const { items } = await client.signal.query({ query: { view: "to-do" } });
-      return items;
-    },
-    ...SHELL_READ_OPTIONS,
-  });
-
-/**
- * Reads Intake's Later list page by page, soonest snooze first: every open
- * signal snoozed until a future time, or only those of the plugin `source`
- * for a plugin's tab. A push on the `signal` topic reads the held pages
- * again. Intake reads it only while it shows Later, or the Later count.
- */
-export const signalsLaterQuery = (client: HerculeClient, source?: string) =>
-  infiniteQueryOptions({
-    queryKey: queryKeys.signals(buildPagedSignalFilter("later", source)),
-    queryFn: ({ pageParam }) =>
-      client.signal.query({ query: buildPagedSignalFilter("later", source, pageParam) }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.nextCursor,
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Returns the soonest `until` on Later, or `null` when nothing is snoozed,
- * as the last read of To do stored it (see `signalsToDoQuery`). The snooze
- * timer waits for that time on every screen (see `SnoozeTimer`), so this is
- * a shell read. It reads To do when To do has not been read yet, and never
- * reads Later on its own.
- */
-export const snoozeTimerQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: SNOOZE_TIMER_KEY,
-    queryFn: async ({ client: queryClient }): Promise<string | null> => {
-      await queryClient.fetchQuery(signalsToDoQuery(client));
-      return queryClient.getQueryData<string | null>(SNOOZE_TIMER_KEY) ?? null;
-    },
-    ...SHELL_READ_OPTIONS,
-  });
-
-/**
- * One page of Intake's Done list: the signals as `signal.query` returns them,
- * and the leg of each handoff among them (see `HandoffLeg`), so a row can tell
- * where the work the user handed off stands. `legs` is empty when the page
- * holds no signal that started a run.
- */
-export type DoneSignalPage = SignalPage & { readonly legs: ReadonlyArray<HandoffLeg> };
-
-/**
- * The last part of the key of every Done list that `signalsDoneQuery` reads.
- * The cleared-today read has the same filter in a larger page size and no
- * legs, so only this mark tells the two apart for certain. The key still
- * starts with `signals`, so a push on the `signal` topic reads Done lists
- * again like every other signal list.
- */
-const DONE_LIST_MARK = "with-legs";
-
-/**
- * Returns whether `queryKey` is the key of a Done list that `signalsDoneQuery`
- * reads, whichever source tab it is for. The data of such a query holds the
- * legs of its pages (see `DoneSignalPage`).
- */
-export const isDoneListKey = (queryKey: QueryKey): boolean =>
-  queryKey[0] === "signals" && queryKey[2] === DONE_LIST_MARK;
-
-/** The first part of the key of every leg that `handoffLegQuery` reads. */
-const HANDOFF_LEG_KEY_PREFIX = "handoff-leg";
-
-/** Returns whether `queryKey` is the key of a leg that `handoffLegQuery` reads. */
-export const isHandoffLegKey = (queryKey: QueryKey): boolean =>
-  queryKey[0] === HANDOFF_LEG_KEY_PREFIX;
-
-/**
- * Reads Intake's Done list page by page, newest first: every resolved
- * signal, or only those of the plugin `source` for a plugin's tab. Each page
- * is read with `signal.query`, then the legs of the handoffs on it with one
- * `task.queryLegs` request for the run ids of its signals' resolutions. A
- * page with no run id makes no second request. A page is at most
- * `MAX_LEG_QUERY_RUNS` signals long, so one request is always enough.
- *
- * It is kept current by pushes, which read the held pages again: a `signal`
- * push (a signal resolved or changed), a `task` push that can change a held
- * leg, and a `run` push that can change a held leg (see `invalidateForPush`).
- * A push that arrives while a page is being read reads it once more after
- * that. A run's creation push reads the held pages while they are shown (two
- * requests per held page), because a re-run is created before any leg holds
- * it. Later pushes about other runs, such as a cron run's, are ignored. There
- * is no timer.
- */
-export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
-  infiniteQueryOptions({
-    queryKey: [...queryKeys.signals(buildPagedSignalFilter("done", source)), DONE_LIST_MARK],
-    queryFn: async ({ pageParam }): Promise<DoneSignalPage> => {
-      const page = await client.signal.query({
-        query: buildPagedSignalFilter("done", source, pageParam),
-      });
-      const runIds = [...new Set(page.items.flatMap((signal) => signal.resolution?.runId ?? []))];
-      if (runIds.length === 0) return { ...page, legs: [] };
-      const { legs } = await client.task.queryLegs({ query: { runIds } });
-      return { ...page, legs };
-    },
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.nextCursor,
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Reads the leg of the handoff that started the run `runId`, or `null` when
- * that run is no handoff's. The pane of a Done signal uses it when its leg is
- * on no loaded Done page, such as after a link or a reload to a signal past
- * the first page. It is kept current like a Done list (see
- * `invalidateForPush`), and its key lies outside the `signals` prefix because
- * a signal push cannot change a leg.
- */
-export const handoffLegQuery = (client: HerculeClient, runId: string) =>
-  queryOptions({
-    queryKey: [HANDOFF_LEG_KEY_PREFIX, runId],
-    queryFn: async (): Promise<HandoffLeg | null> => {
-      const { legs } = await client.task.queryLegs({ query: { runIds: [runId] } });
-      return legs[0] ?? null;
-    },
-    retry: isWorthRetrying,
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Reads Done newest first in the largest pages the controller gives, for the
- * count of signals cleared today under To do. The foot reads the next page
- * only until a page reaches a signal resolved before today, so most days it
- * takes one request. A push on the `signal` topic reads the held pages again.
- */
-export const signalsClearedTodayQuery = (client: HerculeClient) =>
-  infiniteQueryOptions({
-    queryKey: queryKeys.signals(
-      buildPagedSignalFilter("done", undefined, undefined, MAX_PAGE_LIMIT),
-    ),
-    queryFn: ({ pageParam }) =>
-      client.signal.query({
-        query: buildPagedSignalFilter("done", undefined, pageParam, MAX_PAGE_LIMIT),
-      }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.nextCursor,
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Reads every signal of the kind `kind` on Later, following the cursor to
- * the last page. Together with To do, which the shell holds whole, it gives
- * every open signal of the kind, so the count of signals an Ignore Rule would
- * take off the list is never cut short by a page.
- *
- * Intake reads it once each time Hercule's offer or the Ignore dialog opens.
- * Its key lies outside the `signals` prefix, so a push on the `signal` topic
- * does not read all of Later again. The entry is dropped as soon as nothing
- * reads it (`gcTime: 0`), so the next opening reads Later afresh.
- */
-export const laterSignalsOfKindQuery = (client: HerculeClient, kind: string) =>
-  queryOptions({
-    queryKey: queryKeys.laterSignalsOfKind(kind),
-    queryFn: () =>
-      readEveryPage((page) => client.signal.query({ query: { view: "later", kind, ...page } })),
-    ...LIVE_KEPT_READ_OPTIONS,
-    gcTime: 0,
-  });
-
-/**
- * Reads every Ignore Rule, with what each caught, for Settings > Intake. No
+ * Reads every Ignore Rule, with what each caught, for Settings > Signals. No
  * live topic covers the rules, so the section reads them each time it opens,
  * see `readOnOpen`.
  */
@@ -1035,24 +786,7 @@ export const ignoreRulesQuery = (client: HerculeClient) =>
   });
 
 /**
- * Builds the filter of one page of the paged view `view`, `limit` signals
- * long. The query key is built from the same filter without a cursor, so
- * every page of one list shares one key.
- */
-const buildPagedSignalFilter = (
-  view: "later" | "done",
-  source: string | undefined,
-  cursor?: string,
-  limit: number = DEFAULT_PAGE_LIMIT,
-): SignalFilter => ({
-  view,
-  limit,
-  ...(source === undefined ? {} : { source }),
-  ...(cursor === undefined ? {} : { cursor }),
-});
-
-/**
- * Reads every plugin, for the names Intake gives each signal's source. A push
+ * Reads every plugin, for the names the app gives each source. A push
  * on the `plugin` topic reads it again.
  */
 export const pluginsQuery = (client: HerculeClient) =>
@@ -1281,12 +1015,10 @@ export const entitySearchQuery = (client: HerculeClient, search: EntitySearchQue
   });
 
 /**
- * Reads every workflow: the workflow list's rows, and the name Intake gives a
- * signal a workflow's run raised. The shell holds no `workflow` topic,
- * because the controller pushes on it at every cron fire. The workflows page
- * holds it while it is mounted and the window is visible (`useScreenTopicsLive`),
- * so a push reads the list again there. Intake holds no topic, so it reads
- * the list each time it opens, see `readOnOpen`.
+ * Reads every workflow: the workflow list's rows. The shell holds no
+ * `workflow` topic, because the controller pushes on it at every cron fire.
+ * The workflows page holds it while it is mounted and the window is visible
+ * (`useScreenTopicsLive`), so a push reads the list again there.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -1899,8 +1631,8 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Reads one signal for Intake's pane. Unlike the To do list, `signal.read`
- * carries the describe line of each action of an open signal. A push on the
+ * Reads one signal for the Inbox's pane. Unlike the list of open signals,
+ * `signal.read` carries the describe line of each action of an open signal. A push on the
  * `signal` topic that names the signal reads it again. Fails with a
  * `not_found` `ApiError` when no such signal exists.
  */
@@ -1911,51 +1643,6 @@ export const signalQuery = (client: HerculeClient, id: string) =>
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
-
-/**
- * What the Everything view narrows its events by. A field is `undefined` or
- * empty when that filter is off, so a caller passes the URL's values as they
- * are.
- */
-export interface EverythingFilter {
-  readonly text?: EventListFilter["text"] | undefined;
-  readonly source?: EventListFilter["source"] | undefined;
-  readonly handling?: EventHandling | undefined;
-}
-
-/**
- * Reads Intake's Everything view page by page, newest first: the events
- * Intake covers, received since `since`, with the facts their handlings are
- * drawn from, narrowed by `filter`. Not a live topic: the log is append-only,
- * so Intake reads it again each time it opens, see `readInfiniteOnOpen`.
- *
- * `since` is the start of the retention horizon. It is not part of the key,
- * because it moves with the clock and a listing is read again from its first
- * page on every opening anyway.
- */
-export const eventsEverythingQuery = (
-  client: HerculeClient,
-  filter: EverythingFilter,
-  since: string,
-) => {
-  const listing: EventListFilter = {
-    intake: true,
-    ...(filter.text === undefined || filter.text === "" ? {} : { text: filter.text }),
-    ...(filter.source === undefined || filter.source === "" ? {} : { source: filter.source }),
-    ...(filter.handling === undefined ? {} : { handling: [filter.handling] }),
-  };
-  return infiniteQueryOptions({
-    queryKey: queryKeys.events(listing),
-    queryFn: ({ pageParam }) =>
-      client.event.query({
-        query: { ...listing, since, ...(pageParam === undefined ? {} : { cursor: pageParam }) },
-      }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.nextCursor,
-    retry: isWorthRetrying,
-    ...READ_ON_OPEN_OPTIONS,
-  });
-};
 
 /**
  * Reads the first page of the infinite `options` once for this opening of a
@@ -1991,18 +1678,6 @@ export const readInfiniteOnOpen = async <Page, PageParam>(
     // The screen reads the failure from the query.
   }
 };
-
-/**
- * Reads one event, for the address Intake's pane opens a signal at on its
- * source. The event log is append-only, so the read is made once and kept.
- */
-export const eventQuery = (client: HerculeClient, id: number) =>
-  queryOptions({
-    queryKey: queryKeys.event(id),
-    queryFn: () => client.event.read({ params: { id } }),
-    retry: isWorthRetrying,
-    staleTime: Infinity,
-  });
 
 /** How many audit entries the Activity page reads in one page. */
 const MACHINE_ACTIVITY_PAGE_SIZE = 100;
@@ -2324,11 +1999,10 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
  * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
  * assistants and the current session of each one's main conversation, the
- * Connections, the signed-in user, Intake's To do list, whose count the
- * Hercule segment shows, the Tasks Tracking lists and their runs (the count
- * takes in Tracking's waiting rows), the Tasks that To do's signals are
- * about (Your work, which makes a row Needs you), the Inbox's counts, and the
- * plugins that name each signal's source.
+ * Connections, the signed-in user, the open signals, whose urgent ones the
+ * app notifies, the Inbox's counts, which the Hercule segment and the Inbox's
+ * row show, whether a run failed on a live Task, for the sidebar's dot, and
+ * the plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -2363,10 +2037,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(harnessesQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
-    queryClient.ensureQueryData(signalsToDoQuery(client)),
-    queryClient.ensureQueryData(snoozeTimerQuery(client)),
-    queryClient.ensureQueryData(trackingQuery(client)),
-    queryClient.ensureQueryData(yourWorkQuery(client)),
+    queryClient.ensureQueryData(openSignalsQuery(client)),
     queryClient.ensureQueryData(inboxCountQuery(client)),
     queryClient.ensureQueryData(taskAttentionQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),

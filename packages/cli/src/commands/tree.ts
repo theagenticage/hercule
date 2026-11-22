@@ -130,8 +130,8 @@ export interface Field {
   readonly resolves: OperationId | undefined;
   /**
    * The queries sent to the list operation in `resolves`, whose answers are
-   * read together to match a tail. One query such as `{ view: "later" }`
-   * matches among the snoozed signals; `[{}]`, the default, is the listing
+   * read together to match a tail. One query such as `{ closed: true }`
+   * matches among the closed initiatives; `[{}]`, the default, is the listing
    * as it comes, which holds the ids this field takes.
    */
   readonly resolvesQueries: ReadonlyArray<ResolvingQuery>;

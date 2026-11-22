@@ -1,7 +1,6 @@
 /**
  * The three blocks that carry no markdown and no people: labelled fields, a
- * trend line and a piece of code. The Inbox's pane and Intake's pane draw
- * them with these same elements, so a plugin's block looks the same in both.
+ * trend line and a piece of code, as the Inbox's pane draws them.
  */
 import type { JSX } from "react";
 import type { CodeBlock, FieldsBlock, TrendBlock } from "@hercule/contract";

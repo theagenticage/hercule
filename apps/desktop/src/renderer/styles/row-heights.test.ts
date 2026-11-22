@@ -12,7 +12,6 @@ import { computeLengthAtStep, computeTextSizeStepPx } from "./evaluate-text-size
 import rowHeights from "./row-heights.css?raw";
 import { readLengths } from "../app/text-size";
 import { LIST_HEIGHT_PROPERTIES } from "../screens/list-pane/list-row-sizes";
-import { readIntakeListHeights } from "../screens/intake/list-heights";
 import { ITEM_HEIGHT_PROPERTIES } from "../shell/sidebar-items";
 
 /** The registered properties and their `initial-value`s, by name. */
@@ -44,10 +43,6 @@ describe("row-heights.css", () => {
       "--list-height-one-line-row": [40, 1],
       "--list-height-two-line-row": [52, 2],
       "--list-height-column-row": [46, 2],
-      "--intake-height-section": [40, 1],
-      "--intake-height-group": [32, 1],
-      "--intake-height-row": [52, 2],
-      "--tracking-height-row": [46, 2],
       "--model-browser-height-row": [46, 2],
       "--fleet-activity-height-day": [48, 1],
       "--fleet-activity-height-entry": [35, 1],
@@ -105,15 +100,6 @@ describe("the heights of the default Text size", () => {
       oneLineRow: 40,
       twoLineRow: 52,
       columnRow: 46,
-    });
-  });
-
-  it("are those of Intake's list and opened Tracking", () => {
-    expect(readIntakeListHeights()).toEqual({
-      section: 40,
-      group: 32,
-      signalRow: 52,
-      trackingRow: 46,
     });
   });
 });

@@ -11,7 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor } from "../actor";
 import { withTransaction } from "../db";
 import { TaskBoardFactsLayer, TaskDetailFactsLayer, TaskServicePortsLayer } from "../daemon/tasks";
-import { TaskTrackingRunsLayer } from "../daemon/runs";
+import { TaskRunsLayer } from "../daemon/runs";
 import { PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { buildPluginStack } from "../plugins/testing";
@@ -21,7 +21,7 @@ import { TaskService, TaskServiceLayer } from "./index";
 import { A_MINUTE, arrange, arrangeConnection, createTaskLinking, pr, USER } from "./testing";
 
 const reads = Layer.mergeAll(TaskBoardLayer, TaskDetailsLayer).pipe(
-  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
   Layer.provideMerge(buildPluginStack()),
 );
 

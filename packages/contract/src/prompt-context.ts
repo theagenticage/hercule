@@ -29,8 +29,7 @@
 import { flattenToOneLine } from "./agent-text";
 import type { EntityFieldValue } from "./groups/external-entity";
 import { MAX_CONTEXT_REFERENCES } from "./groups/session";
-import { ExternalRef, isId } from "./ids";
-import { Schema } from "effect";
+import { isExternalRef, isId } from "./ids";
 
 /** The longest title written in the block, in characters. A longer title is cut and ends with an ellipsis. */
 const MAX_TITLE_LENGTH = 200;
@@ -60,8 +59,6 @@ const SHARE_LINE_PREFIX = "They share: ";
 const GROUP_ORIGIN_PATTERN = /^From your linked group “(.*)” \((\d+) things\)$/;
 const SELECTION_ORIGIN_PATTERN = /^From your selection \((\d+) things\)$/;
 const ONE_ORIGIN_LINE = "From your Inbox (1 thing)";
-
-const isExternalRef = Schema.is(ExternalRef);
 
 /**
  * Where the things came from, which decides the block's first line:

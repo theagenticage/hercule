@@ -97,7 +97,7 @@ import {
   TaskBoardFactsLayer,
   TaskDetailFactsLayer,
   TaskServiceWithPortsLayer,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   TriggeredRunsLayer,
   WorkflowServiceWithPortsLayer,
   WorkspaceStepsLayer,
@@ -111,8 +111,6 @@ import {
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
-  YourWork,
-  YourWorkLayer,
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
@@ -139,15 +137,7 @@ import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { RunnerMetricsService, RunnerMetricsServiceLayer } from "../runner-metrics";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
-import {
-  TaskBoard,
-  TaskBoardLayer,
-  TaskDetails,
-  TaskDetailsLayer,
-  TaskService,
-  TaskTracking,
-  TaskTrackingLayer,
-} from "../tasks";
+import { TaskBoard, TaskBoardLayer, TaskDetails, TaskDetailsLayer, TaskService } from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
@@ -315,7 +305,6 @@ const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
-    const tracking = yield* TaskTracking;
     const board = yield* TaskBoard;
     const details = yield* TaskDetails;
     const runs = yield* RunService;
@@ -323,9 +312,6 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryBoard", () => withApiErrors(board.query()))
       .handle("readAttention", () => withApiErrors(tasks.readAttention()))
-      .handle("queryTracking", () => withApiErrors(tracking.query()))
-      .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
-      .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
       .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
@@ -417,10 +403,8 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
 const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
   Effect.gen(function* () {
     const signals = yield* SignalService;
-    const yourWork = yield* YourWork;
     return handlers
       .handle("query", ({ query }) => withApiErrors(signals.query(query)))
-      .handle("queryYourWork", () => withApiErrors(yourWork.query()))
       .handle("read", ({ params }) => withApiErrors(signals.read(params.id)))
       .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
       .handle("act", ({ params, payload }) =>
@@ -432,10 +416,7 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
       )
-      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
-      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
-      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
-      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)));
   }),
 );
 
@@ -1160,17 +1141,15 @@ const operationServices = Layer.mergeAll(
     Layer.provide(LiveTopicsLayer),
     Layer.provide(McpServerCallsWithChangesLayer),
   ),
-  // Tracking's read gets each Task's newest runs from the runs repository,
-  // which the controller daemon connects to the tasks domain.
-  TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
-  // The board's read gets each Task's sessions and runs the same way.
+  // The board's read gets each Task's sessions and runs from the runs and
+  // sessions repositories, which the controller daemon connects to the tasks
+  // domain.
   TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
   // The details pane's read gets the Task's sessions and runs the same way, and
   // the card's facts and the newest runs from the ports above.
   TaskDetailsLayer.pipe(
-    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
   ),
-  YourWorkLayer,
   // Taking an entity on makes a Task through the task service, and reading a
   // thing at its source goes through the plugin host's lookups.
   ExternalEntityDomainLayer,

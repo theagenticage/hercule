@@ -230,12 +230,12 @@ describe("parseArguments", () => {
 
   it("refuses --sort on a paged list with one fixed order", async () => {
     const signalList = lookUpCommand("signal", "list");
-    await expect(parseArguments(signalList, ["--sort", "until"], refuseStdinRead)).rejects.toThrow(
-      /unknown flag --sort/,
-    );
+    await expect(
+      parseArguments(signalList, ["--sort", "createdAt"], refuseStdinRead),
+    ).rejects.toThrow(/unknown flag --sort/);
     const paged = await parseArguments(
       signalList,
-      ["--view", "later", "--limit", "5"],
+      ["--view", "done", "--limit", "5"],
       refuseStdinRead,
     );
     expect(paged.limit).toBe(5);
