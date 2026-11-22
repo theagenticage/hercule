@@ -15,7 +15,7 @@ import { requireGrant } from "../actor";
 import { PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { buildVersionKey, harnessRepository } from "./repository";
-import { computeVersionVerdict, findVersionFloor } from "./version";
+import { computeHarnessVersionVerdict } from "./version";
 
 const make = Effect.gen(function* () {
   const host = yield* PluginHost;
@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
               runnerId,
               installed,
               version,
-              versionVerdict: computeVersionVerdict(version, findVersionFloor(definition.id)),
+              versionVerdict: computeHarnessVersionVerdict(definition.id, version),
             };
           }),
           latestRelease: releases.get(definition.id) ?? { lastGoodRead: null, error: null },

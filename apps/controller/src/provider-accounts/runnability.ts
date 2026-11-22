@@ -17,7 +17,7 @@
  */
 import type { AccountKind } from "@hercule/plugin-host";
 import type { RunnerFacts } from "@hercule/protocol";
-import { computeVersionVerdict, findVersionFloor } from "../harnesses";
+import { computeHarnessVersionVerdict } from "../harnesses";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";
 import type { StoredProviderAccount } from "./repository";
 
@@ -69,7 +69,7 @@ export const decideHarnessOnRunner = (
     facts.adapters.includes(harness.id) &&
     facts.harnesses.some((binary) => binary.name === harness.binaryName && binary.present);
   if (!present) return "missing";
-  return computeVersionVerdict(reportedVersion, findVersionFloor(harness.id)) === "below-floor"
+  return computeHarnessVersionVerdict(harness.id, reportedVersion) === "below-floor"
     ? "below-floor"
     : "runnable";
 };

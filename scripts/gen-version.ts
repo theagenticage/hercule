@@ -32,6 +32,14 @@ const CODEX_RELEASE = "0.171.0";
  */
 const PI_RELEASE = "1.3.0";
 
+/**
+ * The newest pi release anyone ran this build's adapter against. A pi newer
+ * than this is reported as untested. It is apart from `PI_RELEASE` because
+ * both 1.3.0 and 1.6.0 ran the MCP Gateway tests on 2026-11-22, so the oldest
+ * supported release and the newest tested one are no longer the same.
+ */
+const PI_TESTED_RELEASE = "1.6.0";
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };
 const sha = (await $`git rev-parse --short HEAD`.cwd(root).nothrow().quiet().text()).trim();
@@ -50,7 +58,10 @@ export const CLAUDE_CODE_VERSION = ${JSON.stringify(claudeCodeVersion)};
 /** The Codex release \`scripts/gen-codex-types.ts\` generated this build's types from. */
 export const CODEX_VERSION = ${JSON.stringify(CODEX_RELEASE)};
 
-/** The pi release this build's adapter was verified against. */
+/** The oldest pi release this build's adapter supports. */
 export const PI_VERSION = ${JSON.stringify(PI_RELEASE)};
+
+/** The newest pi release this build's adapter was tested against. */
+export const PI_TESTED_VERSION = ${JSON.stringify(PI_TESTED_RELEASE)};
 `,
 );
