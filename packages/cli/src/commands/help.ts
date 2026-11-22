@@ -225,6 +225,13 @@ const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   return found;
 };
 
+/** One row of the flags section: the flag with its placeholder, what kind of flag it is, and what it does. */
+export interface FlagRow {
+  readonly label: string;
+  readonly notes: string;
+  readonly help?: string;
+}
+
 /** Builds the row of one flag in the flags section: its label, its notes and the `help` shown for it. */
 const buildFlagRow = (
   field: Field,
@@ -242,8 +249,16 @@ const buildFlagRow = (
   };
 };
 
-/** Builds the help of one command: `hercule <noun>... <verb> --help`. */
-export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
+/**
+ * Builds the help of one command: `hercule <noun>... <verb> --help`.
+ *
+ * `extraFlags` lists the flags a hand-written command takes beyond the ones
+ * its operation's fields give, so its help shows them with the others.
+ */
+export const buildCommandHelp = (
+  command: Command,
+  extraFlags: ReadonlyArray<FlagRow> = [],
+): ReadonlyArray<string> => {
   // The keys of a `oneOf` field are listed in a group for each entry, not
   // among the other flags.
   const flags = [
@@ -258,6 +273,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     flags.length > 0 ||
     command.choices.length > 0 ||
     command.paged ||
+    extraFlags.length > 0 ||
     command.requires === "setup-token";
   lines.push(
     "",
@@ -288,9 +304,8 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   if (takesFlags) {
     // Collect every row before printing any, so the label column is exactly as
     // wide as the widest label shown.
-    const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) =>
-      buildFlagRow(field, field.help),
-    );
+    const rows: Array<FlagRow> = flags.map((field) => buildFlagRow(field, field.help));
+    rows.push(...extraFlags);
     if (command.requires === "setup-token") {
       rows.push({
         label: "--setup-token <token>",
@@ -345,7 +360,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     const width = Math.max(
       ...[...rows, ...groups.flatMap((group) => group.rows)].map((row) => row.label.length),
     );
-    const printRows = (shown: ReadonlyArray<{ label: string; notes: string; help?: string }>) => {
+    const printRows = (shown: ReadonlyArray<FlagRow>) => {
       for (const row of shown) {
         lines.push(...formatLabelledText(row.label, width, row.notes));
         if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
