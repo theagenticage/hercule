@@ -44,6 +44,7 @@ import type {
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
 import { connectionRepository, OAUTH_TOKENS } from "../connections";
+import { computeChallenge } from "../oauth";
 import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso, withTransaction } from "../db";
 import { get, post, send, type ServerHarness } from "../http/testing";
@@ -157,6 +158,12 @@ export interface FakeUpstream {
   authorize: (authorization: string | null, method: string) => boolean;
   /** The `WWW-Authenticate` header of the HTTP 401 that `authorize` makes. The default is a bare `Bearer`. */
   challenge: string;
+  /**
+   * Looks at every request before anything else, and answers it by returning a
+   * response, for the metadata a server publishes at a well-known address.
+   * The request is not recorded. The default answers nothing.
+   */
+  answerFirst: (request: Request) => Response | undefined;
   /** When set, every request gets a 302 to this address instead of an answer. */
   redirectTo: string | undefined;
   /** When set, every request gets this HTTP status and an empty body instead of an answer. */
@@ -285,6 +292,8 @@ export const startFakeUpstream = (
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
+      const early = fake.answerFirst(request);
+      if (early !== undefined) return early;
       let method = "?";
       let params: Record<string, unknown> | undefined;
       let id: unknown;
@@ -352,6 +361,7 @@ export const startFakeUpstream = (
     requests,
     authorize: () => true,
     challenge: "Bearer",
+    answerFirst: () => undefined,
     redirectTo: undefined,
     refuseWithStatus: undefined,
     intercept: () => undefined,
@@ -908,6 +918,331 @@ export const withUrlRig = async (
   } finally {
     await fake.stop();
   }
+};
+
+/** The scope the fake MCP server's challenge asks for. */
+export const OAUTH_TEST_SCOPE = "mcp.read";
+
+/** How the fake authorization server answers the browser, one sign-in at a time. */
+export interface FakeApproval {
+  /** The user says no: the redirect carries `error=access_denied` and a description. */
+  readonly deny?: boolean;
+  /** The `iss` the redirect carries. `null` leaves it out. By default it is the issuer, when the server sends one. */
+  readonly iss?: string | null;
+  /** The `state` the redirect carries, instead of the one the request had. */
+  readonly state?: string;
+}
+
+/** What the fake authorization server was asked to do, for a test to check. */
+export interface FakeAuthorizationServer {
+  /** The issuer identifier: the origin of the fake. */
+  readonly issuer: string;
+  /** The path of the token endpoint. A test changes it to move the token endpoint. */
+  tokenPath: string;
+  /** Whether the metadata promises `iss` on authorization responses, and the redirects carry it. */
+  sendsIssuer: boolean;
+  /** The `expires_in`, in seconds, of every access token it issues. */
+  expiresIn: number;
+  /**
+   * The `expires_in` of the access token that the code exchange issues, when
+   * it differs from `expiresIn`. A test makes it short to get a token that is
+   * stale at once, while the refreshed tokens last.
+   */
+  firstExpiresIn: number | undefined;
+  /** When set, a refresh is refused with `invalid_grant`. */
+  refuseRefresh: boolean;
+  /** When set, every metadata request gets a 302 to this address. */
+  redirectMetadataTo: string | undefined;
+  /** The forms the token endpoint received. */
+  readonly tokenRequests: ReadonlyArray<Record<string, string>>;
+  /** The JSON bodies the registration endpoint received. */
+  readonly registrations: ReadonlyArray<Record<string, unknown>>;
+  /** The address the browser was sent to for each authorization request. */
+  readonly authorizationRequests: ReadonlyArray<URL>;
+  /**
+   * Does what the browser does when the user signs in: opens the address, and
+   * returns the address of the redirect it gets back, the one a client
+   * catches or the user pastes.
+   */
+  approve: (authorizationUrl: string, approval?: FakeApproval) => Promise<string>;
+  /** Whether an `Authorization` header carries an access token that was issued and not revoked. */
+  accepts: (authorization: string | null) => boolean;
+  /** The access token issued last. */
+  currentAccessToken: () => string;
+  /** Makes the fake MCP server refuse every access token issued so far, as a server that revoked them does. */
+  revokeAccessTokens: () => void;
+  stop: () => Promise<void>;
+}
+
+/**
+ * Starts a fake OAuth authorization server on a free loopback port. It serves
+ * the metadata, Dynamic Client Registration, an authorization endpoint that
+ * redirects with a code, and a token endpoint that checks what a real one
+ * checks (PKCE, the redirect address, the client, the `resource`) and rotates
+ * its refresh tokens. It never calls a real vendor.
+ *
+ * `upstream` is the fake MCP server it protects: the fake publishes the
+ * server's protected resource metadata there, makes the server's 401 point at
+ * it, and lets the server accept only the tokens it issued.
+ */
+export const startFakeAuthorizationServer = (
+  upstream: FakeUpstream,
+): Promise<FakeAuthorizationServer> => {
+  const origin = (port: number) => `http://127.0.0.1:${String(port)}`;
+  const codes = new Map<
+    string,
+    { readonly challenge: string; readonly redirectUri: string; readonly clientId: string }
+  >();
+  const clients = new Set<string>();
+  const refreshTokens = new Set<string>();
+  let accessTokens = new Set<string>();
+  let issued = 0;
+  let lastAccessToken = "";
+  const tokenRequests: Array<Record<string, string>> = [];
+  const registrations: Array<Record<string, unknown>> = [];
+  const authorizationRequests: Array<URL> = [];
+  const resourceMetadataPath = "/.well-known/oauth-protected-resource/mcp";
+
+  const issueTokens = (): Response => {
+    issued += 1;
+    lastAccessToken = `access-token-${String(issued)}`;
+    const refreshToken = `refresh-token-${String(issued)}`;
+    accessTokens.add(lastAccessToken);
+    refreshTokens.add(refreshToken);
+    return Response.json({
+      access_token: lastAccessToken,
+      refresh_token: refreshToken,
+      token_type: "Bearer",
+      expires_in: issued === 1 ? (fake.firstExpiresIn ?? fake.expiresIn) : fake.expiresIn,
+    });
+  };
+  const refuse = (error: string) => Response.json({ error }, { status: 400 });
+
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const url = new URL(request.url);
+      const issuer = origin(server.port as number);
+      if (url.pathname.startsWith("/.well-known/")) {
+        if (fake.redirectMetadataTo !== undefined) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: fake.redirectMetadataTo },
+          });
+        }
+        if (url.pathname !== "/.well-known/oauth-authorization-server") {
+          return new Response("not found", { status: 404 });
+        }
+        return Response.json({
+          issuer,
+          authorization_endpoint: `${issuer}/authorize`,
+          token_endpoint: `${issuer}${fake.tokenPath}`,
+          registration_endpoint: `${issuer}/register`,
+          code_challenge_methods_supported: ["S256"],
+          token_endpoint_auth_methods_supported: ["none"],
+          ...(fake.sendsIssuer ? { authorization_response_iss_parameter_supported: true } : {}),
+        });
+      }
+      if (url.pathname === "/register" && request.method === "POST") {
+        const body = (await request.json()) as Record<string, unknown>;
+        registrations.push(body);
+        const clientId = `client-${String(registrations.length)}`;
+        clients.add(clientId);
+        return Response.json(
+          { ...body, client_id: clientId, token_endpoint_auth_method: "none" },
+          { status: 201 },
+        );
+      }
+      if (url.pathname === "/authorize") {
+        authorizationRequests.push(url);
+        const params = url.searchParams;
+        const redirect = URL.parse(params.get("redirect_uri") ?? "");
+        const problems = [
+          params.get("response_type") === "code" ? "" : "response_type",
+          clients.has(params.get("client_id") ?? "") ? "" : "client_id",
+          redirect?.hostname === "127.0.0.1" && redirect.pathname === "/callback"
+            ? ""
+            : "redirect_uri",
+          params.get("code_challenge_method") === "S256" ? "" : "code_challenge_method",
+          params.get("code_challenge") ? "" : "code_challenge",
+          params.get("state") ? "" : "state",
+          params.get("resource") === upstream.url ? "" : "resource",
+          params.get("scope") === OAUTH_TEST_SCOPE ? "" : "scope",
+        ].filter((problem) => problem !== "");
+        if (problems.length > 0)
+          return new Response(`bad request: ${problems.join(",")}`, { status: 400 });
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === fake.tokenPath && request.method === "POST") {
+        const form = Object.fromEntries(new URLSearchParams(await request.text()));
+        tokenRequests.push(form);
+        if (!clients.has(form.client_id ?? "")) return refuse("invalid_client");
+        if (form.resource !== upstream.url) return refuse("invalid_target");
+        if (form.grant_type === "refresh_token") {
+          if (fake.refuseRefresh) return refuse("invalid_grant");
+          const token = form.refresh_token ?? "";
+          if (!refreshTokens.has(token)) return refuse("invalid_grant");
+          // A rotating provider: the old refresh token dies the moment it is used.
+          refreshTokens.delete(token);
+          return issueTokens();
+        }
+        const code = codes.get(form.code ?? "");
+        if (form.grant_type !== "authorization_code" || code === undefined)
+          return refuse("invalid_grant");
+        codes.delete(form.code ?? "");
+        if (
+          code.redirectUri !== form.redirect_uri ||
+          code.clientId !== form.client_id ||
+          computeChallenge(form.code_verifier ?? "") !== code.challenge
+        ) {
+          return refuse("invalid_grant");
+        }
+        return issueTokens();
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const fake: FakeAuthorizationServer = {
+    issuer: origin(server.port as number),
+    tokenPath: "/token",
+    sendsIssuer: true,
+    expiresIn: 3600,
+    firstExpiresIn: undefined,
+    refuseRefresh: false,
+    redirectMetadataTo: undefined,
+    tokenRequests,
+    registrations,
+    authorizationRequests,
+    approve: async (authorizationUrl, approval = {}) => {
+      const request = new URL(authorizationUrl);
+      const answered = await fetch(request, { redirect: "manual" });
+      if (answered.status !== 204) {
+        throw new Error(`the fake authorization server refused: ${await answered.text()}`);
+      }
+      const redirectUri = request.searchParams.get("redirect_uri") as string;
+      const callback = new URL(redirectUri);
+      const code = `code-${String(codes.size + 1)}-${Math.random().toString(36).slice(2)}`;
+      callback.searchParams.set(
+        "state",
+        approval.state ?? (request.searchParams.get("state") as string),
+      );
+      if (approval.deny === true) {
+        callback.searchParams.set("error", "access_denied");
+        callback.searchParams.set("error_description", "the user said SECRET-DESCRIPTION");
+      } else {
+        callback.searchParams.set("code", code);
+        codes.set(code, {
+          challenge: request.searchParams.get("code_challenge") as string,
+          redirectUri,
+          clientId: request.searchParams.get("client_id") as string,
+        });
+      }
+      const iss =
+        approval.iss === undefined ? (fake.sendsIssuer ? fake.issuer : null) : approval.iss;
+      if (iss !== null) callback.searchParams.set("iss", iss);
+      return callback.href;
+    },
+    accepts: (authorization) =>
+      authorization !== null &&
+      authorization.startsWith("Bearer ") &&
+      accessTokens.has(authorization.slice("Bearer ".length)),
+    currentAccessToken: () => lastAccessToken,
+    revokeAccessTokens: () => {
+      accessTokens = new Set();
+    },
+    stop: async () => {
+      await server.stop(true);
+    },
+  };
+
+  upstream.challenge = `Bearer resource_metadata="${upstream.origin}${resourceMetadataPath}", scope="${OAUTH_TEST_SCOPE}"`;
+  upstream.authorize = (authorization) => fake.accepts(authorization);
+  upstream.answerFirst = (request) =>
+    new URL(request.url).pathname === resourceMetadataPath
+      ? Response.json({
+          resource: upstream.url,
+          authorization_servers: [fake.issuer],
+          scopes_supported: ["other.scope"],
+        })
+      : undefined;
+  return Promise.resolve(fake);
+};
+
+/** What `withOAuthRig` hands the test. */
+export interface OAuthRig extends UrlRig {
+  readonly authorizationServer: FakeAuthorizationServer;
+}
+
+/**
+ * Starts the fake MCP server, a fake authorization server that protects it,
+ * and a controller with no plugin, as `withUrlRig` does. The MCP server accepts
+ * only the access tokens the authorization server issued.
+ */
+export const withOAuthRig = async (
+  body: (rig: OAuthRig) => Promise<void>,
+  options: Pick<RigOptions, "fake"> = {},
+) => {
+  await withUrlRig(async (rig) => {
+    const authorizationServer = await startFakeAuthorizationServer(rig.fake);
+    try {
+      await body({ ...rig, authorizationServer });
+    } finally {
+      await authorizationServer.stop();
+    }
+  }, options);
+};
+
+/** The redirect address a test's sign-in returns to: a port nothing listens on. */
+export const TEST_REDIRECT_URI = "http://127.0.0.1:50123/callback";
+
+/** Sends `mcpServer.startSignIn` and returns the raw response. */
+export const requestStartSignIn = (
+  controller: SetUpController,
+  id: string,
+  redirectUri = TEST_REDIRECT_URI,
+) => post(controller.base, `/api/v1/mcp-servers/${id}/sign-in`, { redirectUri }, controller.token);
+
+/** Sends `mcpServer.finishSignIn` and returns the raw response. */
+export const requestFinishSignIn = (
+  controller: SetUpController,
+  id: string,
+  callbackQuery: string,
+) =>
+  post(
+    controller.base,
+    `/api/v1/mcp-servers/${id}/sign-in/finish`,
+    { callbackQuery },
+    controller.token,
+  );
+
+/** Starts a sign-in, which must work, and returns the address to open. */
+export const startSignIn = async (
+  controller: SetUpController,
+  id: string,
+  redirectUri = TEST_REDIRECT_URI,
+): Promise<{ readonly authorizationUrl: string; readonly expiresAt: string }> => {
+  const response = await requestStartSignIn(controller, id, redirectUri);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as {
+    readonly authorizationUrl: string;
+    readonly expiresAt: string;
+  };
+};
+
+/**
+ * Signs a server in through the fake authorization server, start to finish,
+ * and returns the server as the finish answered. Both calls must work.
+ */
+export const signInWithBrowser = async (
+  rig: OAuthRig,
+  serverId: string,
+  approval?: FakeApproval,
+): Promise<McpServerRecord> => {
+  const { authorizationUrl } = await startSignIn(rig.controller, serverId);
+  const callback = await rig.authorizationServer.approve(authorizationUrl, approval);
+  return readRecord(await requestFinishSignIn(rig.controller, serverId, callback));
 };
 
 export const refreshedToken = () =>
