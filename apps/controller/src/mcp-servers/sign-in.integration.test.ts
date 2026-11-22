@@ -455,6 +455,8 @@ describe("finishing a sign-in", () => {
         reason: "sign-in-expired",
       });
 
+      // The void attempt sent neither its code nor its verifier.
+      expect(rig.authorizationServer.tokenRequests).toEqual([]);
       expect(await readSignInColumns(rig.controller, serverId)).toMatchObject({ sign_in: "token" });
     });
   });
@@ -682,6 +684,49 @@ describe("starting a sign-in", () => {
 
       expect(error.details).toEqual({ reason: "source-unreadable" });
       expect(error.message).toContain("more than 1048576 bytes");
+    });
+  });
+
+  it("does not replace the attempt of a start that began later, when it is the slower one", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      // The probe of the first start waits until the second start is done.
+      const releaseFirst = rig.fake.hold("initialize");
+      const arrived = rig.fake.requests.length;
+      const first = requestStartSignIn(rig.controller, serverId);
+      await rig.fake.waitForRequests(arrived + 1);
+      const releaseSecond = rig.fake.hold("initialize");
+      const second = requestStartSignIn(rig.controller, serverId);
+      await rig.fake.waitForRequests(arrived + 2);
+      releaseSecond();
+      const newer = (await (await second).json()) as { readonly authorizationUrl: string };
+
+      releaseFirst();
+
+      expect((await readRefusal(await first, 409)).details).toEqual({
+        reason: "sign-in-expired",
+      });
+      const callback = await rig.authorizationServer.approve(newer.authorizationUrl);
+      const finished = await readRecord(
+        await requestFinishSignIn(rig.controller, serverId, callback),
+      );
+      expect(finished.source).toMatchObject({ signIn: "oauth" });
+    });
+  });
+
+  it("publishes no attempt when a token was pasted while the discovery ran", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const release = rig.fake.hold("initialize");
+      const arrived = rig.fake.requests.length;
+      const slow = requestStartSignIn(rig.controller, serverId);
+      await rig.fake.waitForRequests(arrived + 1);
+      await readRecord(await sendToken(rig.controller, serverId, "pasted-token-1"));
+
+      release();
+
+      expect((await readRefusal(await slow, 409)).details).toEqual({ reason: "sign-in-expired" });
+      expect(await readSignInColumns(rig.controller, serverId)).toMatchObject({ sign_in: "token" });
     });
   });
 

@@ -201,6 +201,14 @@ const make = Effect.gen(function* () {
 
   /** The attempts that were started and not finished, by server id: at most one per server. */
   const attempts = new Map<string, Attempt>();
+  /**
+   * The number of the newest `start` of each server. A start takes its number
+   * when it begins and publishes its attempt only while it is still the newest,
+   * so a slow start never replaces the attempt of a start that began later.
+   * It holds one small number per server that was ever started.
+   */
+  const latestStarts = new Map<string, number>();
+  let startsBegun = 0;
   // Its permits are plain per-key mutexes.
   const locks = makeRefreshPermits();
   const withServerLock = <A, E, R>(serverId: string, effect: Effect.Effect<A, E, R>) =>
@@ -212,6 +220,27 @@ const make = Effect.gen(function* () {
       if (attempt.expiresAtMillis <= nowMillis) attempts.delete(serverId);
     }
   };
+
+  /**
+   * Checks that the server still exists, is still added by URL, and still has
+   * the `sign_in_generation` an attempt started with. A pasted token, a Replace
+   * or another finished sign-in raises the generation. Reads only, so it runs
+   * inside or outside a transaction.
+   */
+  const isStillSameSignIn = (
+    serverId: string,
+    signInGeneration: number,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      const found = (yield* servers.readMany([serverId], "without-tools")).get(serverId);
+      const generation = yield* servers.readSignInGeneration(serverId);
+      return (
+        found !== undefined &&
+        found.source.kind === "url" &&
+        Option.isSome(generation) &&
+        generation.value === signInGeneration
+      );
+    });
 
   const expiredSignIn = (server: Pick<SignInTarget, "id">): InvalidState =>
     createInvalidStateError(
@@ -261,7 +290,9 @@ const make = Effect.gen(function* () {
    * Takes the attempt the answer belongs to, so that no second answer with
    * the same `state` is used. Fails with `InvalidState` (`sign-in-expired`)
    * when the server has no attempt, the attempt ran out or is already taken,
-   * or the `state` is not the attempt's. Fails with `Validation` when the
+   * or the `state` is not the attempt's. The deadline is checked here, so an
+   * attempt that ran out is refused whether or not anything swept it away.
+   * Fails with `Validation` when the
    * client sent a whole address that is not the attempt's redirect address,
    * and then leaves the attempt as it is, so the user may paste the right one.
    */
@@ -272,8 +303,11 @@ const make = Effect.gen(function* () {
     withServerLock(
       server.id,
       Effect.gen(function* () {
-        sweepExpired(yield* Clock.currentTimeMillis);
         const attempt = attempts.get(server.id);
+        if (attempt !== undefined && attempt.expiresAtMillis <= (yield* Clock.currentTimeMillis)) {
+          attempts.delete(server.id);
+          return yield* expiredSignIn(server);
+        }
         if (
           attempt === undefined ||
           attempt.claimed ||
@@ -363,9 +397,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Stores the sign-in in one transaction, under the server's lock, when the
-   * attempt is still the server's current one, the server still exists and is
-   * a server added by URL, and its `sign_in_generation` is the attempt's.
-   * Otherwise it writes nothing and fails with `InvalidState`
+   * attempt is still the server's current one, it has not run out, the server
+   * still exists and is a server added by URL, and its `sign_in_generation` is
+   * the attempt's. Otherwise it writes nothing and fails with `InvalidState`
    * (`sign-in-expired`): the user pasted a token, replaced the server, or
    * started another sign-in while the browser and the token endpoint were
    * busy. The server goes back to `checking`, as `setToken` does, and the
@@ -379,22 +413,16 @@ const make = Effect.gen(function* () {
       attempt.serverId,
       Effect.gen(function* () {
         const { serverId } = attempt;
-        if (attempts.get(serverId) !== attempt) {
+        if (
+          attempts.get(serverId) !== attempt ||
+          attempt.expiresAtMillis <= (yield* Clock.currentTimeMillis)
+        ) {
           return yield* expiredSignIn({ id: serverId });
         }
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const found = (yield* servers.readMany([serverId], "without-tools")).get(serverId);
-            const generation = yield* servers.readSignInGeneration(serverId);
-            if (
-              found === undefined ||
-              found.source.kind !== "url" ||
-              Option.isNone(generation) ||
-              generation.value !== attempt.signInGeneration
-            ) {
-              return false;
-            }
+            if (!(yield* isStillSameSignIn(serverId, attempt.signInGeneration))) return false;
             const at = yield* nowIso;
             const { discovery, client } = attempt;
             yield* signIns.deleteAll(serverId);
@@ -432,41 +460,62 @@ const make = Effect.gen(function* () {
      * Starts a sign-in for a server added by URL and returns the address to
      * open in a browser, and when the sign-in runs out. It discovers the
      * server's authorization server, registers a client for it (or keeps the
-     * one the server's last sign-in used, when that sign-in's issuer and token
-     * endpoint are the ones found now), and keeps the attempt in memory,
-     * replacing any attempt the server had. It writes nothing to the database,
-     * so a start that is slow cannot bring back a secret that a delete, a
-     * Replace or a pasted token removed meanwhile. `signInGeneration` is the
-     * server's `sign_in_generation`, read before this call, so a sign-in the
-     * user makes while the discovery runs makes this attempt void.
+     * one the server's last sign-in used, when that sign-in's issuer, token
+     * endpoint and authorization endpoint are the ones found now), and keeps
+     * the attempt in memory, replacing any attempt the server had. It writes
+     * nothing to the database, so a start that is slow cannot bring back a
+     * secret that a delete, a Replace or a pasted token removed meanwhile.
+     * `signInGeneration` is the server's `sign_in_generation`, read before this
+     * call.
+     *
+     * The discovery takes a while and runs outside the lock, so the attempt is
+     * published only when, under the lock, no newer start of this server has
+     * begun, the server is still a server added by URL, and its
+     * `sign_in_generation` is still `signInGeneration`. A start that lost one of
+     * these fails with `sign-in-expired` and leaves the newer attempt alone.
      *
      * Fails with `InvalidState`: `sign-in-unsupported` when the server offers
-     * no sign-in through the browser that Hercule can use, and
-     * `source-unreadable` when the server or its authorization server cannot
-     * be reached or answers what OAuth does not allow.
+     * no sign-in through the browser that Hercule can use, `source-unreadable`
+     * when the server or its authorization server cannot be reached or answers
+     * what OAuth does not allow, and `sign-in-expired` as said above.
      */
     start: (
       server: SignInTarget,
       signInGeneration: number,
       redirectUri: string,
-    ): Effect.Effect<McpServerSignInStart, InvalidState> =>
+    ): Effect.Effect<McpServerSignInStart, InvalidState | SqlError> =>
       Effect.gen(function* () {
+        const startNumber = yield* withServerLock(
+          server.id,
+          Effect.sync(() => {
+            startsBegun += 1;
+            latestStarts.set(server.id, startsBegun);
+            return startsBegun;
+          }),
+        );
         const discovery = yield* outbound(discoverAuthorization(server.url));
         const stored = yield* signIns.readOAuth(server.id);
         const client =
           Option.isSome(stored) &&
           stored.value.issuer === discovery.issuer &&
-          stored.value.tokenEndpoint === discovery.tokenEndpoint
+          stored.value.tokenEndpoint === discovery.tokenEndpoint &&
+          stored.value.authorizationEndpoint === discovery.authorizationEndpoint
             ? stored.value.client
             : yield* outbound(registerClient(discovery));
         const codeVerifier = buildRandomToken();
         const state = buildRandomToken();
-        const nowMillis = yield* Clock.currentTimeMillis;
-        const expiresAtMillis = nowMillis + SIGN_IN_LIFETIME_MILLIS;
-        yield* withServerLock(
+        const expiresAtMillis = yield* withServerLock(
           server.id,
-          Effect.sync(() => {
+          Effect.gen(function* () {
+            const nowMillis = yield* Clock.currentTimeMillis;
             sweepExpired(nowMillis);
+            if (
+              latestStarts.get(server.id) !== startNumber ||
+              !(yield* isStillSameSignIn(server.id, signInGeneration))
+            ) {
+              return yield* expiredSignIn(server);
+            }
+            const expiresAtMillis = nowMillis + SIGN_IN_LIFETIME_MILLIS;
             attempts.set(server.id, {
               serverId: server.id,
               signInGeneration,
@@ -478,6 +527,7 @@ const make = Effect.gen(function* () {
               expiresAtMillis,
               claimed: false,
             });
+            return expiresAtMillis;
           }),
         );
         return {
@@ -522,17 +572,19 @@ const make = Effect.gen(function* () {
      *    once);
      * 3. the answer's `iss` is the issuer the attempt started with;
      * 4. the answer is a code, not an error;
-     * 5. the authorization server accepts the code (outside any transaction,
+     * 5. the server still has the `sign_in_generation` the attempt started
+     *    with, so a void attempt never sends its code;
+     * 6. the authorization server accepts the code (outside any transaction,
      *    because it waits on an outside server);
-     * 6. the sign-in is stored when the server is still the one the attempt
-     *    started from (`commit`).
+     * 7. the sign-in is stored when the server is still the one the attempt
+     *    started from and the attempt has not run out (`commit`).
      *
      * An attempt that fails after step 2 is used up, and the user starts
      * again. The caller wakes the server's check after this returns, when the
      * server is switched on.
      *
      * Fails with `Validation` for step 1 and `InvalidState` for the others:
-     * `sign-in-expired` for steps 2 and 6, `sign-in-refused` for steps 3 and
+     * `sign-in-expired` for steps 2, 5 and 7, `sign-in-refused` for steps 3 and
      * 4 and when the authorization server refuses the code, and
      * `source-unreadable` when it cannot be reached.
      */
@@ -553,6 +605,12 @@ const make = Effect.gen(function* () {
                 ? `The authorization server did not sign you in (${error}).`
                 : "The authorization server did not sign you in.",
             );
+          }
+          // A pasted token, a Replace or another sign-in that landed since the
+          // start makes the attempt void, and then the code and the verifier
+          // must not leave this process.
+          if (!(yield* isStillSameSignIn(attempt.serverId, attempt.signInGeneration))) {
+            return yield* expiredSignIn({ id: attempt.serverId });
           }
           const tokens = yield* exchangeForTokens(attempt, callback.code);
           yield* commit(attempt, tokens);
