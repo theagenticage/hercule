@@ -76,17 +76,18 @@ export const makeCallPolicy = Effect.gen(function* () {
       // may have changed and a recomputed name could reach another tool than
       // the one the harness showed. The streams are told to list again.
       //
-      // The same holds for the first call of an MCP session that may hold
-      // names from before. A harness that lost its session lists the tools
-      // again before it resends the call (pi does), so the name is in the
-      // ledger by then, but it may now stand for another tool than the one the
-      // harness chose. Only the first call is refused, and a call refused as
-      // unknown counts as that first call, so a harness that calls before it
-      // lists is refused once.
+      // The same holds for every call of an MCP session that may hold names
+      // from before, until its client lists the tools again after a refusal.
+      // A harness that lost its session lists the tools before it resends the
+      // call (pi does), so the name is in the ledger by then, but it may now
+      // stand for another tool than the one the harness chose. pi also runs the
+      // calls of one message at once, so all of them are refused, not only the
+      // first. A refusal for an unknown name counts as that refusal, so a
+      // harness that calls before it lists is refused once.
       const meaning = state.names.find(toolName);
-      const mayHoldNameFromBefore = session?.mayHoldNamesFromBefore === true;
-      if (session !== undefined) session.mayHoldNamesFromBefore = false;
-      if (meaning === undefined || mayHoldNameFromBefore) {
+      const namesMayBeStale = session !== undefined && session.namesFromBefore !== "not-suspected";
+      if (meaning === undefined || namesMayBeStale) {
+        if (namesMayBeStale) session.namesFromBefore = "suspected-and-refused";
         yield* notifyListChanged(state);
         return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
       }

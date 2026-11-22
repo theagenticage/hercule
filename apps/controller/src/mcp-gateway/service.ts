@@ -164,9 +164,10 @@ const readBody = (
  *
  * A 404 also records on the token that a client of it holds a session from
  * before: after a restart, or after the gateway dropped the session. The MCP
- * sessions the token opens from then on are marked, and their first
- * `tools/call` is refused once (`decideCall`), because that client may resend
- * a call under a name that now means another tool.
+ * sessions the token opens from then on are marked, and their `tools/call`
+ * requests are refused (`decideCall`) until the client lists the tools after a
+ * refusal, because that client may resend calls under names that now mean
+ * other tools.
  */
 const admitMcpSession = (
   request: HttpServerRequest.HttpServerRequest,
@@ -232,13 +233,29 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** Answers `tools/list` and records the names it sends: only these names may be called. */
-  const respondToolsList = (era: Era, state: TokenState, actor: SessionActor, id: RequestId) =>
+  /**
+   * Answers `tools/list` and records the names it sends: only these names may
+   * be called. On an MCP session whose calls were refused because its client
+   * may hold names from before, a list that was asked after that refusal ends
+   * the refusals. A list asked before it does not: it is the client listing
+   * before it resends its call.
+   */
+  const respondToolsList = (
+    era: Era,
+    state: TokenState,
+    session: McpSession | undefined,
+    actor: SessionActor,
+    id: RequestId,
+  ) =>
     Effect.gen(function* () {
+      // Read before the list is built, because a refusal can come in while the list is read, and the
+      // client cannot have acted on that refusal when it asked.
+      const askedAfterRefusal = session?.namesFromBefore === "suspected-and-refused";
       const { tools, leftOut } = projectTools(yield* reads.readServed(actor), state.names);
       // Nothing waits between naming the tools and recording the names, so two
       // lists at once cannot give one name to two tools.
       state.names.record(tools);
+      if (session !== undefined && askedAfterRefusal) session.namesFromBefore = "not-suspected";
       // One line per list, with a count and no tool name: the names come from
       // outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
@@ -367,7 +384,7 @@ const make = Effect.gen(function* () {
             : respondJson(buildMethodNotFound(id, method)),
         );
       case "tools/list":
-        return respondToolsList(era, state, caller.actor, id);
+        return respondToolsList(era, state, session, caller.actor, id);
       case "tools/call":
         return respondToolsCall(era, state, caller.actor, id, params, session);
       case "server/discover":

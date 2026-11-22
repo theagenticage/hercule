@@ -1333,7 +1333,7 @@ describe("a client that holds an MCP session from before", () => {
   const nameLostMcpSession = (token: string) =>
     sendMcp(token, request("tools/list"), { "mcp-session-id": "from-before-the-restart" });
 
-  it("refuses the first call of the session it opens next once, even when it listed the tools first, and runs the next", async () => {
+  it("refuses a call on the session it opens next even when it listed the tools first, and runs the next call once it lists again", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
     expect((await nameLostMcpSession(thread.token)).status).toBe(404);
     const { sessionId } = await initialize(thread.token);
@@ -1350,6 +1350,13 @@ describe("a client that holds an MCP session from before", () => {
       expect(listToolPostsSince(mark)).toEqual([]);
       await waitForListChanges(stream, 2);
 
+      // Still refused: listing before the refusal did not end it.
+      expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+        true,
+      );
+      expect(listToolPostsSince(mark)).toEqual([]);
+
+      await listToolNames(thread.token, sessionId);
       expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
         undefined,
       );
@@ -1357,6 +1364,31 @@ describe("a client that holds an MCP session from before", () => {
     } finally {
       stream.close();
     }
+  });
+
+  it("refuses every call that arrives together on the session, and runs the next call once it lists again", async () => {
+    const thread = await spawnThread(["mcp.use"], [servers[0]]);
+    await nameLostMcpSession(thread.token);
+    const { sessionId } = await initialize(thread.token);
+    await listToolNames(thread.token, sessionId);
+
+    // pi runs the calls of one model message at the same time.
+    const mark = countUpstreamRequests();
+    const answers = await Promise.all([
+      callEcho(thread.token, "alpha__echo", sessionId),
+      callEcho(thread.token, "alpha__get_issue_details", sessionId),
+    ]);
+    for (const answer of answers) {
+      expect(answer.body.result.isError).toBe(true);
+      expect(textOf(answer)).toContain("List the tools again");
+    }
+    expect(listToolPostsSince(mark)).toEqual([]);
+
+    await listToolNames(thread.token, sessionId);
+    expect((await callEcho(thread.token, "alpha__echo", sessionId)).body.result.isError).toBe(
+      undefined,
+    );
+    expect(listToolPostsSince(mark)).toHaveLength(1);
   });
 
   it("never sends a resent call to the tool that holds its name now", async () => {
