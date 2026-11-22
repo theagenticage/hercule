@@ -29,7 +29,9 @@ export { mcpServerRepository, type StoredMcpServer, type StoredMcpTool } from ".
 export {
   McpServerService,
   McpServerServiceLayer,
+  type FinishSignInInput,
   type SetTokenInput,
+  type StartSignInInput,
   type UpdateInput,
 } from "./service";
 export { buildErrorResult } from "./upstream";

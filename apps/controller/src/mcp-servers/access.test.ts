@@ -53,7 +53,7 @@ const resolve = (
     {
       readToken: () => Effect.succeed(signIns.token),
       readVersion: () => Effect.succeed("version"),
-    } as unknown as McpServerSignIns,
+    } as unknown as McpServerSignIns["Service"],
   );
 
 const resolveUsable = (

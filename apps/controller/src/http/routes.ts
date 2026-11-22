@@ -519,6 +519,12 @@ const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
       .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)))
       .handle("setToken", ({ params, payload }) =>
         withApiErrors(mcpServers.setToken({ ...params, ...payload })),
+      )
+      .handle("startSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.startSignIn({ ...params, ...payload })),
+      )
+      .handle("finishSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.finishSignIn({ ...params, ...payload })),
       );
   }),
 );

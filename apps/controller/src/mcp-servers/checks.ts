@@ -48,7 +48,7 @@ import {
 import type { McpServerDependencies } from "./catalogue";
 import type { McpServerEdit, StoredMcpServer, StoredMcpTool } from "./repository";
 import { mcpServerRepository } from "./repository";
-import { mcpServerSignIns } from "./sign-ins";
+import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 import {
   buildFailureEdit,
   buildUpstreamFailureEdit,
@@ -182,7 +182,7 @@ const make = Effect.gen(function* () {
   const servers = yield* mcpServerRepository;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const signIns = yield* mcpServerSignIns;
+  const signIns = yield* McpServerSignIns;
   const promotion = yield* PromotionState;
   const httpClient = yield* HttpClient.HttpClient;
 
@@ -397,4 +397,8 @@ export const McpServerChecksLayer: Layer.Layer<
   McpServerChecks,
   never,
   SqlClient.SqlClient | ConnectionTypes | PluginHost | PromotionState | Notifier | Secrets
-> = Layer.effect(McpServerChecks)(make).pipe(Layer.provide(FetchHttpClient.layer));
+> = Layer.effect(McpServerChecks)(make).pipe(
+  Layer.provide(FetchHttpClient.layer),
+  // One instance for every consumer, so they share the permits of a refresh.
+  Layer.provide(McpServerSignInsLayer),
+);

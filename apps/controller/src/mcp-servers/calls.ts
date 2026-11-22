@@ -66,7 +66,7 @@ import {
   type ServerUnavailableReason,
 } from "./catalogue";
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
-import { mcpServerSignIns } from "./sign-ins";
+import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 import {
   buildStatusFromFailure,
   buildUpstreamFailureEdit,
@@ -181,7 +181,7 @@ const make = Effect.gen(function* () {
   const catalogue = yield* mcpServerCatalogue;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const signIns = yield* mcpServerSignIns;
+  const signIns = yield* McpServerSignIns;
   const promotion = yield* PromotionState;
   const recordChanges = yield* RecordChanges;
   const httpClient = yield* HttpClient.HttpClient;
@@ -701,4 +701,8 @@ export const McpServerCallsLayer: Layer.Layer<
   | Notifier
   | RecordChanges
   | Secrets
-> = Layer.effect(McpServerCalls)(make).pipe(Layer.provide(FetchHttpClient.layer));
+> = Layer.effect(McpServerCalls)(make).pipe(
+  Layer.provide(FetchHttpClient.layer),
+  // One instance for every consumer, so they share the permits of a refresh.
+  Layer.provide(McpServerSignInsLayer),
+);
