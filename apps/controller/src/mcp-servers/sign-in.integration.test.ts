@@ -361,6 +361,53 @@ describe("the tokens of a sign-in", () => {
   });
 });
 
+describe("a call whose sign-in cannot be renewed", () => {
+  it("makes the server need sign-in, once, and the next call does not try the refresh again", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, authorizationServer } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+
+      authorizationServer.refuseRefresh = true;
+      authorizationServer.revokeAccessTokens();
+      const result = await callAs(controller, serverId);
+
+      expect(result._tag).toBe("Failure");
+      const row = await waitForStatus(controller, "needs-sign-in");
+      expect(row.status_detail).toBe(
+        "remote's sign-in has expired: paste a token or sign in in Settings > MCP servers",
+      );
+      expect(row.sign_in_offered).toBe("oauth");
+      expect(await countNotifications(controller)).toBe(1);
+      const refreshes = () =>
+        authorizationServer.tokenRequests.filter((form) => form.grant_type === "refresh_token")
+          .length;
+      const before = refreshes();
+
+      // The catalogue no longer serves the server, so the call stops before the provider.
+      expect((await callAs(controller, serverId))._tag).toBe("Failure");
+      expect(refreshes()).toBe(before);
+    });
+  });
+
+  it("keeps offering the browser when a later 401 names no OAuth metadata", async () => {
+    await withOAuthRig(async (rig) => {
+      const { controller, fake } = rig;
+      const serverId = await addServerThatNeedsSignIn(rig);
+      await signInWithBrowser(rig, serverId);
+      await waitForStatus(controller, "ready");
+
+      fake.challenge = "Bearer";
+      fake.authorize = () => false;
+      await requestCheck(controller, serverId);
+
+      const row = await waitForStatus(controller, "needs-sign-in");
+      expect(row.sign_in_offered).toBe("oauth");
+    });
+  });
+});
+
 describe("finishing a sign-in", () => {
   /** Finishes with `callback`, which must be refused with `status`, and returns the refusal. */
   const refusal = async (rig: OAuthRig, serverId: string, callback: string, status: number) =>

@@ -68,6 +68,7 @@ import {
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
 import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 import {
+  buildFailureEdit,
   buildStatusFromFailure,
   buildUpstreamFailureEdit,
   mcpServerState,
@@ -522,12 +523,43 @@ const make = Effect.gen(function* () {
        */
       const admit = Effect.asVoid(checkBeforeSend(first));
 
-      /** Returns the refusal that a failure to give credentials means for this call. */
-      const buildUnavailableRefusal = (error: ServerCredentialsUnavailable): McpCallRefused =>
-        new McpCallRefused({
-          reason: error.status,
-          message: describeRefusal(error.status, server),
-        });
+      /**
+       * Refuses the call because the server could not give credentials. When
+       * the server needs a sign-in (the provider refused the refresh), it also
+       * writes that as the server's status, as a check does: otherwise the
+       * server stays `ready` and every later call tries the same refused
+       * refresh token. The write is against the revision the call started
+       * with, so a sign-in that landed meanwhile keeps its status. Any other
+       * failure, such as a provider that cannot be reached, is for this call
+       * only (spec 21 section 5.1).
+       */
+      const refuseUnavailable = (error: ServerCredentialsUnavailable) =>
+        Effect.andThen(
+          error.status === "needs-sign-in"
+            ? absorbFailures(
+                `Writing the status of MCP server ${server.id} after its sign-in was refused`,
+                Effect.gen(function* () {
+                  const at = yield* nowIso;
+                  yield* state.writeCheckResult(
+                    server.id,
+                    basis,
+                    buildFailureEdit(
+                      server,
+                      { status: error.status, detail: error.detail, cause: error.cause ?? null },
+                      at,
+                    ),
+                    at,
+                  );
+                }),
+              )
+            : Effect.void,
+          Effect.fail(
+            new McpCallRefused({
+              reason: error.status,
+              message: describeRefusal(error.status, server),
+            }),
+          ),
+        );
 
       /**
        * Prepares a request that starts an exchange (`prepareRequest`): the
@@ -535,9 +567,10 @@ const make = Effect.gen(function* () {
        * when a check refuses, the request is not sent and the call fails with
        * the refusal.
        */
-      const prepareSend: PrepareSend<McpCallRefused> = Effect.mapError(
+      const prepareSend: PrepareSend<McpCallRefused> = Effect.catch(
         prepareRequest(serverCredentials, admit),
-        (error) => (error instanceof McpCallRefused ? error : buildUnavailableRefusal(error)),
+        (error) =>
+          error instanceof McpCallRefused ? Effect.fail(error) : refuseUnavailable(error),
       );
 
       /**
@@ -655,7 +688,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.catchTags({
           UpstreamError: refuseUpstreamFailure,
-          ServerCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
+          ServerCredentialsUnavailable: refuseUnavailable,
           ExchangeBroken: () =>
             refuse("error", describeMayHaveRun(name, "the exchange with it broke")),
         }),

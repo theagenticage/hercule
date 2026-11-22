@@ -406,7 +406,9 @@ const resolveUrlAccess = (
     ({
       status: "needs-sign-in",
       detail: `${name} ${signIn === "none" ? "asks for sign-in" : "refused its sign-in"}: ${describeSignInFix("url")}`,
-      signInOffered: offersOAuth ? "oauth" : "token",
+      // A server signed in through the browser keeps offering the browser, also
+      // when a later 401 names no metadata.
+      signInOffered: offersOAuth || signIn === "oauth" ? "oauth" : "token",
     }) as const;
   const replaced = new ServerCredentialsUnavailable({
     status: "error",

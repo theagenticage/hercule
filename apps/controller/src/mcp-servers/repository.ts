@@ -559,13 +559,16 @@ const make = Effect.gen(function* () {
      * Records that an OAuth sign-in was stored for a server added by URL, and
      * prepares the server to be checked with it exactly as `writeTokenSignIn`
      * does for a pasted token: `signIn` becomes `oauth`, the check is due at
-     * `at`, `revision` and `sign_in_generation` go up.
+     * `at`, `revision` and `sign_in_generation` go up. The server offers
+     * `oauth` as its sign-in from then on, so a refresh the provider refuses
+     * still lets the user sign in again through the browser.
      */
     writeOAuthSignIn: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
-          SET sign_in = 'oauth', sign_in_generation = sign_in_generation + 1,
+          SET sign_in = 'oauth', sign_in_offered = 'oauth',
+              sign_in_generation = sign_in_generation + 1,
               ${backToChecking(at)}
           WHERE id = ${uuidFromString(id)}
         `,
