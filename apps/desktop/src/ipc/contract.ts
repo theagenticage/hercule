@@ -346,6 +346,41 @@ const HttpUrl = Schema.String.check(
 );
 
 /**
+ * What main answers when asked to start catching the browser's return from a
+ * sign-in.
+ *
+ * - `listening`: main listens on `redirectUri`, which is
+ *   `http://127.0.0.1:<port>/callback` for a port main picked. `listenerId`
+ *   names this listener in `signInReturn.wait` and `signInReturn.cancel`.
+ * - `unavailable`: main could not listen, for example because it could not
+ *   bind a port. The user can sign in by pasting the browser's address
+ *   instead.
+ */
+export const SignInReturnListenOutcome = Schema.TaggedUnion({
+  listening: { listenerId: Schema.String, redirectUri: Schema.String },
+  unavailable: {},
+});
+export type SignInReturnListenOutcome = typeof SignInReturnListenOutcome.Type;
+
+/**
+ * What main answers when asked to wait for the browser's return from a
+ * sign-in. The listener is closed after any of them.
+ *
+ * - `received`: the browser came back with the right `state`.
+ *   `callbackQuery` is the raw query string of that request, without the
+ *   leading `?`. It goes to `mcpServer.finishSignIn` as it is.
+ * - `cancelled`: `signInReturn.cancel` or a newer `signInReturn.listen` ended
+ *   the listener, or `listenerId` is not a listener main has.
+ * - `timed-out`: the browser did not come back within 10 minutes.
+ */
+export const SignInReturnWaitOutcome = Schema.TaggedUnion({
+  received: { callbackQuery: Schema.String },
+  cancelled: {},
+  "timed-out": {},
+});
+export type SignInReturnWaitOutcome = typeof SignInReturnWaitOutcome.Type;
+
+/**
  * A menu item the page carries out: Sign Out, New Thread, Office, Inbox,
  * Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
  * faces of the sidebar, or View > Toggle Sidebar, which hides or shows the
@@ -644,6 +679,36 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   /** Opens an `http:` or `https:` URL in the default browser. Refuses any other URL. */
   "link.open": {
     request: Schema.Struct({ url: HttpUrl }),
+    response: Schema.Void,
+  },
+  /**
+   * Starts a listener on 127.0.0.1, on a port main picks, that catches the
+   * browser's return from an MCP server's sign-in, and answers its redirect
+   * URI. There is at most one listener: a new one ends the one before, and the
+   * `signInReturn.wait` of that one answers `cancelled`. Main runs a server
+   * only while a sign-in runs.
+   */
+  "signInReturn.listen": {
+    request: Schema.Undefined,
+    response: SignInReturnListenOutcome,
+  },
+  /**
+   * Waits until the browser returns to the listener `listenerId`, then
+   * closes the listener. Only a `GET /callback` whose `state` equals the one
+   * in `authorizationUrl` ends the wait. Main answers every other request
+   * with 404 and goes on waiting. Refused when `authorizationUrl` has no
+   * `state`.
+   */
+  "signInReturn.wait": {
+    request: Schema.Struct({ listenerId: Schema.String, authorizationUrl: HttpUrl }),
+    response: SignInReturnWaitOutcome,
+  },
+  /**
+   * Closes the listener `listenerId`, and its pending `signInReturn.wait`
+   * answers `cancelled`. Does nothing when main has no such listener.
+   */
+  "signInReturn.cancel": {
+    request: Schema.Struct({ listenerId: Schema.String }),
     response: Schema.Void,
   },
 } as const satisfies Record<`${string}.${string}`, RendererToMainIpcChannel>;

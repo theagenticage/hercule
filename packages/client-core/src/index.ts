@@ -290,6 +290,7 @@ export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
 export { joinCommand } from "./join-command";
+export { buildPastedRedirectUri } from "./mcp-server-sign-in";
 export {
   buildRetireQuestion,
   findRunnerConflictField,

@@ -292,6 +292,11 @@ const createScriptedBridge = ({
       save: () => Promise.resolve({ _tag: "Saved" }),
     },
     link: { open: done },
+    signInReturn: {
+      listen: () => Promise.resolve({ _tag: "unavailable" }),
+      wait: () => Promise.resolve({ _tag: "cancelled" }),
+      cancel: done,
+    },
     menu: { onCommand: () => () => undefined },
     destination: { onOpen: () => () => undefined },
   };

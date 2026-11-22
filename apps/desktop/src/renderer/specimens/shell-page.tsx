@@ -532,6 +532,11 @@ const REFUSING_BRIDGE: Bridge = {
   link: {
     open: () => Promise.reject(buildBridgeCallError("link.open")),
   },
+  signInReturn: {
+    listen: () => Promise.reject(buildBridgeCallError("signInReturn.listen")),
+    wait: () => Promise.reject(buildBridgeCallError("signInReturn.wait")),
+    cancel: () => Promise.reject(buildBridgeCallError("signInReturn.cancel")),
+  },
   menu: {
     onCommand: () => () => undefined,
   },

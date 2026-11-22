@@ -3,6 +3,8 @@ import { Schema } from "effect";
 import {
   MenuCommand,
   RENDERER_TO_MAIN_IPC_CHANNELS,
+  SignInReturnListenOutcome,
+  SignInReturnWaitOutcome,
   type RendererToMainIpcChannelName,
 } from "./contract";
 
@@ -107,6 +109,19 @@ describe("the requests of the renderer-to-main channels", () => {
     // The renderer names a skill of the last pick, and never sends a path.
     { name: "skillFolders.pick", valid: undefined, invalid: "~/.agents/skills" },
     { name: "skillArchive.build", valid: { name: "teach" }, invalid: { path: "/etc" } },
+    // The renderer names a listener and the URL it opens; a web page only.
+    { name: "signInReturn.listen", valid: undefined, invalid: { port: 4937 } },
+    {
+      name: "signInReturn.wait",
+      valid: { listenerId: "l-1", authorizationUrl: "https://mcp.example/authorize?state=s" },
+      invalid: { listenerId: "l-1", authorizationUrl: "file:///etc" },
+    },
+    {
+      name: "signInReturn.wait",
+      valid: { listenerId: "l-1", authorizationUrl: "http://127.0.0.1:4937/authorize" },
+      invalid: { authorizationUrl: "https://mcp.example/authorize?state=s" },
+    },
+    { name: "signInReturn.cancel", valid: { listenerId: "l-1" }, invalid: "l-1" },
   ];
 
   it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {
@@ -137,5 +152,30 @@ describe("the menu commands", () => {
 
   it("refuses a command no menu item sends", () => {
     expect(() => decode("openPreferences")).toThrow();
+  });
+});
+
+describe("the responses of the sign-in return's channels", () => {
+  const decodeListen = Schema.decodeUnknownSync(SignInReturnListenOutcome);
+  const decodeWait = Schema.decodeUnknownSync(SignInReturnWaitOutcome);
+
+  it("decodes the outcomes of listen", () => {
+    const listening = {
+      _tag: "listening",
+      listenerId: "l-1",
+      redirectUri: "http://127.0.0.1:50000/callback",
+    };
+    expect(decodeListen(listening)).toEqual(listening);
+    expect(decodeListen({ _tag: "unavailable" })).toEqual({ _tag: "unavailable" });
+    expect(() => decodeListen({ _tag: "listening" })).toThrow();
+  });
+
+  it("decodes the outcomes of wait", () => {
+    const received = { _tag: "received", callbackQuery: "code=a&state=s" };
+    expect(decodeWait(received)).toEqual(received);
+    expect(decodeWait({ _tag: "cancelled" })).toEqual({ _tag: "cancelled" });
+    expect(decodeWait({ _tag: "timed-out" })).toEqual({ _tag: "timed-out" });
+    expect(() => decodeWait({ _tag: "received" })).toThrow();
+    expect(() => decodeWait({ _tag: "timedOut" })).toThrow();
   });
 });

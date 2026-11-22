@@ -327,6 +327,11 @@ const BRIDGE: Bridge = {
   firstRunProgress: { read: () => Promise.resolve(null), save: refuse("firstRunProgress.save") },
   appearance: { read: () => DEFAULT_APPEARANCE, save: refuse("appearance.save") },
   link: { open: refuse("link.open") },
+  signInReturn: {
+    listen: refuse("signInReturn.listen"),
+    wait: refuse("signInReturn.wait"),
+    cancel: refuse("signInReturn.cancel"),
+  },
   menu: { onCommand: () => () => undefined },
   destination: { onOpen: () => () => undefined },
 };

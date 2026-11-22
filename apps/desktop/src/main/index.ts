@@ -49,6 +49,7 @@ import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
+import { makeSignInReturnLayer, SIGN_IN_RETURN_WAIT_MILLISECONDS } from "./sign-in-return";
 import { StoredTokenLayer } from "./stored-token";
 import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
@@ -126,6 +127,7 @@ const startApp = (): void => {
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
       PickedSkillFoldersLayer,
+      makeSignInReturnLayer(SIGN_IN_RETURN_WAIT_MILLISECONDS),
     ).pipe(
       Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
