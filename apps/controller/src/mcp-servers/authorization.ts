@@ -158,14 +158,39 @@ export const parseBearerChallenge = (header: string | undefined): BearerChalleng
   return { resourceMetadata, scope };
 };
 
+/** Returns the address as text without its fragment, which is never sent to a server. */
+const withoutFragment = (address: URL): string => {
+  const copy = new URL(address);
+  copy.hash = "";
+  return copy.href;
+};
+
 /**
- * Lists the addresses where a server's protected resource metadata may be,
- * in the order to try them (RFC 9728 section 3.1): the well-known address with
- * the server's path after it, then the well-known address of its origin.
+ * An address where protected resource metadata may be, with the resource
+ * identifier its `resource` field must equal (RFC 9728 section 3.3).
  */
-export const buildResourceMetadataUrls = (server: URL): ReadonlyArray<string> => {
+export interface ResourceMetadataCandidate {
+  readonly url: string;
+  readonly resource: string;
+}
+
+/**
+ * Lists the addresses where a server's protected resource metadata may be, in
+ * the order to try them (RFC 9728 section 3.1): the well-known address with
+ * the server's path after it, then the well-known address of its origin. Each
+ * comes with the identifier it was built from, which the metadata's `resource`
+ * must equal: the server's address for the first, and its origin for the
+ * second.
+ */
+export const buildResourceMetadataCandidates = (
+  server: URL,
+): ReadonlyArray<ResourceMetadataCandidate> => {
   const wellKnown = `${server.origin}/.well-known/oauth-protected-resource`;
-  return server.pathname === "/" ? [wellKnown] : [`${wellKnown}${server.pathname}`, wellKnown];
+  if (server.pathname === "/") return [{ url: wellKnown, resource: withoutFragment(server) }];
+  return [
+    { url: `${wellKnown}${server.pathname}`, resource: withoutFragment(server) },
+    { url: wellKnown, resource: `${server.origin}/` },
+  ];
 };
 
 /**
@@ -224,19 +249,14 @@ const ProtectedResourceMetadata = Schema.Struct({
 const decodeProtectedResourceMetadata = Schema.decodeUnknownOption(ProtectedResourceMetadata);
 
 /**
- * Compares a resource identifier with the server's address. The identifier
- * must be the address, as the URL standard writes it, with or without the
- * query, and with no fragment: `https://a.example` is `https://a.example/`.
+ * Checks that a resource identifier is exactly the expected one (RFC 9728
+ * section 3.3). Both are compared as addresses the way the URL standard
+ * writes them, so `https://a.example` is `https://a.example/`. A query or a
+ * fragment that one has and the other lacks makes them different.
  */
-const isAddressOf = (resource: string, server: URL): boolean => {
+const isSameResource = (resource: string, expected: string): boolean => {
   const parsed = URL.parse(resource);
-  if (parsed === null) return false;
-  const withoutQuery = new URL(server);
-  withoutQuery.search = "";
-  withoutQuery.hash = "";
-  const withQuery = new URL(server);
-  withQuery.hash = "";
-  return parsed.href === withoutQuery.href || parsed.href === withQuery.href;
+  return parsed !== null && parsed.href === new URL(expected).href;
 };
 
 /**
@@ -253,13 +273,14 @@ const checkScope = (scope: string): Effect.Effect<string, AuthorizationUnreadabl
  * Validates protected resource metadata and returns what discovery needs of
  * it: the resource identifier, the first authorization server's issuer, and
  * the scopes the metadata lists. Fails with `AuthorizationUnreadable` when
- * the body is not metadata, when its `resource` is not the server's address
- * (RFC 9728 section 7.3), or when it names no authorization server. A later
- * authorization server is never used.
+ * the body is not metadata, when its `resource` is not exactly
+ * `expectedResource` (RFC 9728 section 3.3: the document may be about another
+ * resource, and then it must not be used), or when it names no authorization
+ * server. A later authorization server is never used.
  */
 export const readProtectedResourceMetadata = (
   body: unknown,
-  server: URL,
+  expectedResource: string,
 ): Effect.Effect<
   {
     readonly resource: string;
@@ -274,7 +295,7 @@ export const readProtectedResourceMetadata = (
       return yield* failUnreadable("the protected resource metadata is not valid");
     }
     const { resource, authorization_servers, scopes_supported } = decoded.value;
-    if (!isAddressOf(resource, server)) {
+    if (!isSameResource(resource, expectedResource)) {
       return yield* failUnreadable("the protected resource metadata is for another address");
     }
     const issuer = authorization_servers[0];
@@ -524,10 +545,11 @@ const parseJsonObject = (text: string): Record<string, unknown> | undefined => {
 /**
  * Reads one metadata document. Returns the JSON object when the address
  * answers 200 with one, and `none` when it answers anything else that is not
- * a server failure: an unknown address, or a page that is not metadata. Fails
- * with `AuthorizationUnreadable` for a redirect, a 5xx, a 429, an answer over
- * 1 MiB and a transport failure, because those say nothing about whether the
- * document exists.
+ * a server failure, such as an unknown address. Fails with
+ * `AuthorizationUnreadable` for a redirect, a 5xx, a 429, an answer over 1 MiB
+ * and a transport failure, because those say nothing about whether the
+ * document exists, and for a 200 answer that is not a JSON object, because
+ * the document exists and is broken.
  */
 const readMetadata = (
   url: URL,
@@ -542,24 +564,30 @@ const readMetadata = (
     if (answer.status >= 500 || answer.status === 429) {
       return yield* failUnreadable(`the ${what} answered HTTP ${String(answer.status)}`);
     }
-    return answer.status === 200
-      ? Option.fromNullishOr(parseJsonObject(answer.body))
-      : Option.none();
+    if (answer.status !== 200) return Option.none();
+    const document = parseJsonObject(answer.body);
+    return document === undefined
+      ? yield* failUnreadable(`the ${what} is not a JSON object`)
+      : Option.some(document);
   });
 
-/** Reads the first of the addresses that answers with metadata, and returns `none` when none does. */
-const readFirstMetadata = (
-  urls: ReadonlyArray<URL>,
+/**
+ * Reads the first of the candidates whose address answers with metadata, and
+ * returns the document with the candidate that gave it, or `none` when no
+ * address does.
+ */
+const readFirstMetadata = <Candidate extends { readonly url: string }>(
+  candidates: ReadonlyArray<Candidate>,
   what: string,
 ): Effect.Effect<
-  Option.Option<Record<string, unknown>>,
+  Option.Option<{ readonly document: Record<string, unknown>; readonly candidate: Candidate }>,
   AuthorizationUnreadable,
   HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
-    for (const url of urls) {
-      const found = yield* readMetadata(url, what);
-      if (Option.isSome(found)) return found;
+    for (const candidate of candidates) {
+      const found = yield* readMetadata(new URL(candidate.url), what);
+      if (Option.isSome(found)) return Option.some({ document: found.value, candidate });
     }
     return Option.none();
   });
@@ -645,8 +673,13 @@ export const discoverAuthorization = (
             server,
             "protected resource metadata address",
           );
+    // The metadata a challenge names must be about the address that was probed
+    // (RFC 9728 section 3.3), and the metadata at a well-known address about
+    // the identifier that address was built from.
     const resourceMetadata = yield* readFirstMetadata(
-      named === undefined ? buildResourceMetadataUrls(server).map((url) => new URL(url)) : [named],
+      named === undefined
+        ? buildResourceMetadataCandidates(server)
+        : [{ url: named.href, resource: withoutFragment(server) }],
       "protected resource metadata",
     );
     if (Option.isNone(resourceMetadata)) {
@@ -654,18 +687,21 @@ export const discoverAuthorization = (
         ? failUnsupported("it publishes no OAuth metadata")
         : failUnreadable("the protected resource metadata that the server names is not there");
     }
-    const resource = yield* readProtectedResourceMetadata(resourceMetadata.value, server);
+    const resource = yield* readProtectedResourceMetadata(
+      resourceMetadata.value.document,
+      resourceMetadata.value.candidate.resource,
+    );
 
     const issuer = yield* checkOutboundUrl(resource.issuer, server, "authorization server");
     const serverMetadata = yield* readFirstMetadata(
-      buildAuthorizationServerMetadataUrls(issuer).map((url) => new URL(url)),
+      buildAuthorizationServerMetadataUrls(issuer).map((url) => ({ url })),
       "authorization server metadata",
     );
     if (Option.isNone(serverMetadata)) {
       return yield* failUnreadable("the authorization server's metadata is not there");
     }
     const authorizationServer = yield* readAuthorizationServerMetadata(
-      serverMetadata.value,
+      serverMetadata.value.document,
       resource.issuer,
       server,
     );

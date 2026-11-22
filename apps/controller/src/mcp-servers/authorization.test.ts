@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import {
   buildAuthorizationServerMetadataUrls,
   buildAuthorizationUrl,
-  buildResourceMetadataUrls,
+  buildResourceMetadataCandidates,
   checkOutboundUrl,
   parseBearerChallenge,
   readAuthorizationServerMetadata,
@@ -70,16 +70,27 @@ describe("parseBearerChallenge", () => {
 });
 
 describe("the addresses where metadata may be", () => {
-  it("lists the protected resource metadata of a server with a path, path first", () => {
-    expect(buildResourceMetadataUrls(new URL("https://mcp.example.com/a/mcp?k=1"))).toEqual([
-      "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp",
-      "https://mcp.example.com/.well-known/oauth-protected-resource",
+  it("lists the protected resource metadata of a server with a path, path first, each with the identifier it was built from", () => {
+    expect(
+      buildResourceMetadataCandidates(new URL("https://mcp.example.com/a/mcp?k=1#top")),
+    ).toEqual([
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp",
+        resource: "https://mcp.example.com/a/mcp?k=1",
+      },
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
+        resource: "https://mcp.example.com/",
+      },
     ]);
   });
 
   it("lists the protected resource metadata of a server with no path once", () => {
-    expect(buildResourceMetadataUrls(new URL("https://mcp.example.com"))).toEqual([
-      "https://mcp.example.com/.well-known/oauth-protected-resource",
+    expect(buildResourceMetadataCandidates(new URL("https://mcp.example.com"))).toEqual([
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
+        resource: "https://mcp.example.com/",
+      },
     ]);
   });
 
@@ -136,8 +147,9 @@ describe("checkOutboundUrl", () => {
 });
 
 describe("readProtectedResourceMetadata", () => {
-  const read = (body: unknown, server = SERVER) =>
-    Effect.runPromise(readProtectedResourceMetadata(body, server));
+  const SERVER_RESOURCE = "https://mcp.example.com/mcp";
+  const read = (body: unknown, expected = SERVER_RESOURCE) =>
+    Effect.runPromise(readProtectedResourceMetadata(body, expected));
 
   it("returns the resource, the first authorization server and the listed scopes", async () => {
     expect(
@@ -154,25 +166,24 @@ describe("readProtectedResourceMetadata", () => {
   });
 
   it.each([
-    ["the address with no path slash", "https://mcp.example.com", "https://mcp.example.com"],
+    ["the address with no path slash", "https://mcp.example.com", "https://mcp.example.com/"],
     [
       "the address with its query",
       "https://mcp.example.com/mcp?k=1",
       "https://mcp.example.com/mcp?k=1",
     ],
-    [
-      "the address without its query",
-      "https://mcp.example.com/mcp",
-      "https://mcp.example.com/mcp?k=1",
-    ],
-  ])("accepts %s as the resource", async (_name, resource, server) => {
-    const found = await read({ resource, authorization_servers: [ISSUER] }, new URL(server));
+  ])("accepts %s as the resource", async (_name, resource, expected) => {
+    const found = await read({ resource, authorization_servers: [ISSUER] }, expected);
     expect(found.resource).toBe(resource);
   });
 
   it.each([
     ["another address", { resource: "https://evil.example/mcp", authorization_servers: [ISSUER] }],
     ["a fragment", { resource: "https://mcp.example.com/mcp#x", authorization_servers: [ISSUER] }],
+    [
+      "a query that the expected address lacks",
+      { resource: "https://mcp.example.com/mcp?k=1", authorization_servers: [ISSUER] },
+    ],
     ["no resource", { authorization_servers: [ISSUER] }],
     ["an address that is not one", { resource: "nope", authorization_servers: [ISSUER] }],
     [
@@ -185,9 +196,16 @@ describe("readProtectedResourceMetadata", () => {
     ],
     ["a body that is not an object", "text"],
   ])("refuses %s", async (_name, body) => {
-    expect(await fails(readProtectedResourceMetadata(body, SERVER))).toMatchObject({
+    expect(await fails(readProtectedResourceMetadata(body, SERVER_RESOURCE))).toMatchObject({
       _tag: "AuthorizationUnreadable",
     });
+  });
+
+  it("refuses a resource that drops the query of the address it must equal", async () => {
+    const body = { resource: "https://mcp.example.com/mcp", authorization_servers: [ISSUER] };
+    expect(
+      await fails(readProtectedResourceMetadata(body, "https://mcp.example.com/mcp?k=1")),
+    ).toMatchObject({ _tag: "AuthorizationUnreadable" });
   });
 });
 

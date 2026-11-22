@@ -821,6 +821,40 @@ describe("starting a sign-in", () => {
     });
   });
 
+  it("is unreadable, not unsupported, when the metadata is a 200 answer that is not JSON", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const publish = rig.fake.answerFirst;
+      rig.fake.answerFirst = (request) =>
+        new URL(request.url).pathname.startsWith("/.well-known/")
+          ? new Response("<html>not metadata</html>", { status: 200 })
+          : publish(request);
+
+      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
+
+      expect(error.details).toEqual({ reason: "source-unreadable" });
+    });
+  });
+
+  it("is unreadable when the metadata is about another address than the one the server's challenge was for", async () => {
+    await withOAuthRig(async (rig) => {
+      const serverId = await addServerThatNeedsSignIn(rig);
+      const publish = rig.fake.answerFirst;
+      rig.fake.answerFirst = (request) =>
+        new URL(request.url).pathname.startsWith("/.well-known/")
+          ? Response.json({
+              resource: `${rig.fake.url}?other=1`,
+              authorization_servers: [rig.authorizationServer.issuer],
+            })
+          : publish(request);
+
+      const error = await readRefusal(await requestStartSignIn(rig.controller, serverId), 409);
+
+      expect(error.details).toEqual({ reason: "source-unreadable" });
+      expect(error.message).toContain("for another address");
+    });
+  });
+
   it("writes nothing to the database", async () => {
     await withOAuthRig(async (rig) => {
       const serverId = await addServerThatNeedsSignIn(rig);
