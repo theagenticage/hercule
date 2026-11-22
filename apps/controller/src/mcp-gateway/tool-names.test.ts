@@ -12,6 +12,10 @@ const MAX_NAME_LENGTH = 52;
 /** A changed name ends in `_` and six hex characters. */
 const CHANGED_ENDING = /_[0-9a-f]{6}$/;
 
+/** Two original names that share a cut prefix and the first 24 bits of their hashes. Found by search. */
+const CLASHING_ONE = `${"a".repeat(80)}.1780`;
+const CLASHING_OTHER = `${"a".repeat(80)}.3667`;
+
 const nameOf = (tool: string, serverName = "sentry"): string => buildToolName({ serverName, tool });
 
 describe("buildToolName", () => {
@@ -97,15 +101,24 @@ describe("buildToolNames", () => {
   });
 
   it("leaves out both tools of one server whose names coincide, and names the others", () => {
-    // A real clash needs two 24-bit hashes that agree, which a test cannot find, so the list names one tool twice.
+    // The 24-bit hashes of these two tools agree, and both are cut to the same prefix.
     const { named, leftOut } = buildToolNames([
-      { serverName: "sentry", tools: ["echo", "twin", "twin"] },
+      { serverName: "sentry", tools: ["echo", CLASHING_ONE, CLASHING_OTHER] },
     ]);
+    expect(nameOf(CLASHING_ONE)).toBe(nameOf(CLASHING_OTHER));
     expect(named.map((one) => one.tool)).toEqual(["echo"]);
     expect(leftOut).toEqual([
-      { serverName: "sentry", tool: "twin" },
-      { serverName: "sentry", tool: "twin" },
+      { serverName: "sentry", tool: CLASHING_ONE },
+      { serverName: "sentry", tool: CLASHING_OTHER },
     ]);
+  });
+
+  it("offers a tool its server lists twice once, and leaves nothing out", () => {
+    const { named, leftOut } = buildToolNames([
+      { serverName: "sentry", tools: ["whoami", "whoami", "echo"] },
+    ]);
+    expect(named.map((one) => one.name)).toEqual(["sentry__echo", "sentry__whoami"]);
+    expect(leftOut).toEqual([]);
   });
 });
 
@@ -145,6 +158,12 @@ describe("findOriginalToolName", () => {
   });
 
   it("returns undefined when two listed tools have the name, because neither is offered", () => {
-    expect(findOriginalToolName("notion", ["twin", "twin"], "notion__twin")).toBeUndefined();
+    expect(
+      findOriginalToolName("sentry", [CLASHING_ONE, CLASHING_OTHER], nameOf(CLASHING_ONE)),
+    ).toBeUndefined();
+  });
+
+  it("returns the original name of a tool the server lists twice", () => {
+    expect(findOriginalToolName("notion", ["twin", "twin"], "notion__twin")).toBe("twin");
   });
 });

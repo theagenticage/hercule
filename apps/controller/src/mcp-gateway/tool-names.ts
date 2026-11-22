@@ -105,7 +105,8 @@ const compareText = (one: string, other: string): number =>
  * Returns the name of every tool of `servers`, in order by server name and
  * then by original tool name. Each name depends on its own tool only.
  *
- * Two kinds of tool are left out:
+ * A tool a server lists twice under the same original name is one tool and
+ * is named once. Two kinds of tool are left out:
  *
  * - A tool whose original name is not well-formed Unicode (it holds a lone
  *   surrogate). Such a name cannot be told apart from another: the hash and
@@ -120,7 +121,7 @@ export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools 
   const sorted = servers
     .toSorted((one, other) => compareText(one.serverName, other.serverName))
     .flatMap((server) =>
-      server.tools
+      [...new Set(server.tools)]
         .toSorted(compareText)
         .map((tool): ToolKey => ({ serverName: server.serverName, tool })),
     );
@@ -140,8 +141,9 @@ export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools 
 /**
  * Returns the original name of the tool of `serverName` that `name` stands
  * for, out of the tool names the server lists now. Returns `undefined` when
- * no listed tool has that name, or when more than one has it: such tools are
- * left out of every list (`buildToolNames`), so none of them may be called.
+ * no listed tool has that name, or when more than one original name has it:
+ * such tools are left out of every list (`buildToolNames`), so none of them
+ * may be called. A tool listed twice under one original name is one tool.
  * A tool whose original name is not well-formed Unicode never matches, for
  * the same reason.
  */
@@ -150,8 +152,10 @@ export const findOriginalToolName = (
   listedTools: ReadonlyArray<string>,
   name: string,
 ): string | undefined => {
-  const matching = listedTools.filter(
-    (tool) => isWellFormed(tool) && buildToolName({ serverName, tool }) === name,
+  const matching = new Set(
+    listedTools.filter(
+      (tool) => isWellFormed(tool) && buildToolName({ serverName, tool }) === name,
+    ),
   );
-  return matching.length === 1 ? matching[0] : undefined;
+  return matching.size === 1 ? [...matching][0] : undefined;
 };
