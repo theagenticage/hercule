@@ -52,9 +52,23 @@ export interface ServerTools {
 export interface NamedTools {
   /** In order by server name, then by original tool name. */
   readonly named: ReadonlyArray<ToolKey & { readonly name: string }>;
-  /** Tools whose name another tool of the same server has too. The caller logs them. */
+  /**
+   * Tools that are not offered: their original name is not well-formed
+   * Unicode, or another tool of the same server gets the same name. The
+   * caller logs them.
+   */
   readonly leftOut: ReadonlyArray<ToolKey>;
 }
+
+/** Matches a lone surrogate. With the `u` flag, a surrogate that belongs to a pair is part of one character and does not match. */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
+/**
+ * Returns whether `text` is well-formed Unicode, which means it holds no lone
+ * surrogate. This is what `String.prototype.isWellFormed` checks. The project
+ * builds against the ES2023 library, which does not declare that method.
+ */
+const isWellFormed = (text: string): boolean => !LONE_SURROGATE.test(text);
 
 /** Returns the first six hex characters of the SHA-256 of `text`. */
 const hashSuffix = (text: string): string =>
@@ -95,29 +109,38 @@ const compareText = (one: string, other: string): number =>
 
 /**
  * Returns the name of every tool of `servers`, in order by server name and
- * then by original tool name. Each name depends on its own tool only. A tool
- * whose name another tool of the same server also gets is left out together
- * with that tool, because no name may stand for two tools. This needs two
- * different original names that share a normalized prefix and the first 24
- * bits of their hashes.
+ * then by original tool name. Each name depends on its own tool only.
+ *
+ * Two kinds of tool are left out:
+ *
+ * - A tool whose original name is not well-formed Unicode (it holds a lone
+ *   surrogate). Such a name cannot be told apart from another: the hash and
+ *   the normalized text treat every lone surrogate as the same replacement
+ *   character, so two different names would get one gateway name.
+ * - A tool whose name another tool of the same server also gets. Both are left
+ *   out, because no name may stand for two tools. This needs two different
+ *   original names that share a normalized prefix and the first 24 bits of
+ *   their hashes.
  */
 export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools => {
-  const all = servers
+  const sorted = servers
     .toSorted((one, other) => compareText(one.serverName, other.serverName))
     .flatMap((server) =>
-      server.tools.toSorted(compareText).map((tool) => ({
-        serverName: server.serverName,
-        tool,
-        name: buildToolName({ serverName: server.serverName, tool }),
-      })),
+      server.tools
+        .toSorted(compareText)
+        .map((tool): ToolKey => ({ serverName: server.serverName, tool })),
     );
+  const all = sorted
+    .filter(({ tool }) => isWellFormed(tool))
+    .map((key) => ({ ...key, name: buildToolName(key) }));
   const counts = new Map<string, number>();
   for (const { name } of all) counts.set(name, (counts.get(name) ?? 0) + 1);
   const named = all.filter(({ name }) => counts.get(name) === 1);
-  const leftOut = all
+  const clashing = all
     .filter(({ name }) => counts.get(name) !== 1)
     .map(({ serverName, tool }): ToolKey => ({ serverName, tool }));
-  return { named, leftOut };
+  const illFormed = sorted.filter(({ tool }) => !isWellFormed(tool));
+  return { named, leftOut: [...illFormed, ...clashing] };
 };
 
 /**
@@ -125,12 +148,16 @@ export const buildToolNames = (servers: ReadonlyArray<ServerTools>): NamedTools 
  * for, out of the tool names the server lists now. Returns `undefined` when
  * no listed tool has that name, or when more than one has it: such tools are
  * left out of every list (`buildToolNames`), so none of them may be called.
+ * A tool whose original name is not well-formed Unicode never matches, for
+ * the same reason.
  */
 export const findOriginalToolName = (
   serverName: string,
   listedTools: ReadonlyArray<string>,
   name: string,
 ): string | undefined => {
-  const matching = listedTools.filter((tool) => buildToolName({ serverName, tool }) === name);
+  const matching = listedTools.filter(
+    (tool) => isWellFormed(tool) && buildToolName({ serverName, tool }) === name,
+  );
   return matching.length === 1 ? matching[0] : undefined;
 };

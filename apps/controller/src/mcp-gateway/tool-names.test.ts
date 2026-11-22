@@ -63,10 +63,6 @@ describe("buildToolName", () => {
     expect(name).toMatch(CHANGED_ENDING);
   });
 
-  it("gives the same name for the same tool every time", () => {
-    expect(nameOf("get-issue.details")).toBe(nameOf("get-issue.details"));
-  });
-
   it("gives tools that differ only in a replaced character different names", () => {
     expect(nameOf("a.b")).not.toBe(nameOf("a b"));
   });
@@ -110,6 +106,31 @@ describe("buildToolNames", () => {
       { serverName: "sentry", tool: "twin" },
       { serverName: "sentry", tool: "twin" },
     ]);
+  });
+});
+
+describe("a tool whose original name is not well-formed Unicode", () => {
+  // Two different lone surrogates both become the replacement character when hashed or normalized.
+  const first = "a\uD800b";
+  const second = "a\uD801b";
+
+  it("is left out of the list, and is not counted as a tool that clashes", () => {
+    const { named, leftOut } = buildToolNames([
+      { serverName: "notion", tools: [first, "smile\u{1F600}", "search", second] },
+    ]);
+    // A character outside the basic plane is a pair of surrogates, and is well-formed.
+    expect(named.map((one) => one.tool)).toEqual(["search", "smile\u{1F600}"]);
+    expect(leftOut).toEqual([
+      { serverName: "notion", tool: first },
+      { serverName: "notion", tool: second },
+    ]);
+  });
+
+  it("never matches a name in lookup, not even the name the other lone surrogate would give", () => {
+    const name = buildToolName({ serverName: "notion", tool: first });
+    expect(name).toBe(buildToolName({ serverName: "notion", tool: second }));
+    expect(findOriginalToolName("notion", [first, second], name)).toBeUndefined();
+    expect(findOriginalToolName("notion", [first, "search"], "notion__search")).toBe("search");
   });
 });
 

@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
       // outside servers and one list can leave out many tools.
       if (leftOut.length > 0) {
         yield* Effect.logWarning(
-          `MCP gateway: ${leftOut.length} tool(s) share their name with another tool of their server and are not offered to session ${actor.sessionId}`,
+          `MCP gateway: ${leftOut.length} tool(s) have a name that is not valid text or is another tool's name on their server, and are not offered to session ${actor.sessionId}`,
         );
       }
       return respondJson(
