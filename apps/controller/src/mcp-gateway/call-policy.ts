@@ -103,6 +103,14 @@ export const makeCallPolicy = Effect.gen(function* () {
       if (tool === undefined) {
         return { _tag: "refused", refusal: buildToolNotListedRefusal(offered) };
       }
+      // Two tools of one server whose names clash by the 24-bit hash can trade
+      // a name when the server's list changes. The offer holds what the name
+      // was offered for, so this one comparison stops the call from reaching
+      // the other tool before the client lists again.
+      if (tool !== offered.tool) {
+        yield* notifyListChanged(state);
+        return { _tag: "refused", refusal: buildUnknownToolRefusal(toolName) };
+      }
       return {
         _tag: "call",
         target: { serverId: listed.id, serverName: offered.serverName, tool },

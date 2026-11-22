@@ -1521,9 +1521,12 @@ const withNotion = async (
     await body(notion, async (replacement) => {
       await upstream.configure({ tools: replacement });
       expect((await requestCheck(controller, notion.id)).status).toBe(200);
+      // By names and not by count: a replacement that swaps one tool for another keeps the count.
+      const replacementNames = replacement.map((tool) => tool.name).toSorted();
       await eventually(
-        async () => (await readServer(controller, notion.id)).tools.length,
-        (count) => count === replacement.length,
+        async () =>
+          (await readServer(controller, notion.id)).tools.map((tool) => tool.name).toSorted(),
+        (names) => JSON.stringify(names) === JSON.stringify(replacementNames),
       );
     });
   } finally {
@@ -1650,6 +1653,37 @@ describe("tools a server lists that clash on their names", () => {
       await replaceTools([ECHO, ...CLASHING_TOOLS]);
       await listToolNames(thread.token, sessionId);
       expect(await readNotOfferedWarnings()).toHaveLength(2);
+    });
+  });
+
+  it("refuses a call under a name that now resolves to the sibling of the tool it was offered for, and sends nothing upstream", async () => {
+    await withNotion([ECHO, CLASHING_TOOLS[0]!], async (notion, replaceTools) => {
+      const thread = await spawnThread(["mcp.use"], [notion]);
+      const { sessionId } = await initialize(thread.token);
+      const [name] = (await listToolNames(thread.token, sessionId)).filter(
+        (listed) => listed !== "notion__echo",
+      );
+
+      // The server swaps the tool for its sibling, which gets the same name.
+      await replaceTools([ECHO, CLASHING_TOOLS[1]!]);
+      const stream = await openGetStream(thread.token, sessionId);
+      try {
+        await waitForListChanges(stream, 1);
+        const mark = countUpstreamRequests();
+        const refused = await callEcho(thread.token, name!, sessionId);
+        expect(refused.body.result.isError).toBe(true);
+        expect(textOf(refused)).toContain("List the tools again");
+        expect(readUpstreamTools(mark)).toEqual([]);
+        await waitForListChanges(stream, 2);
+      } finally {
+        stream.close();
+      }
+
+      // After a list, the name is offered for the sibling, and the call reaches it.
+      expect(await listToolNames(thread.token, sessionId)).toContain(name);
+      const mark = countUpstreamRequests();
+      expect((await callEcho(thread.token, name!, sessionId)).body.result.isError).toBeUndefined();
+      expect(readUpstreamTools(mark)).toEqual([CLASHING_TOOLS[1]!.name]);
     });
   });
 });
