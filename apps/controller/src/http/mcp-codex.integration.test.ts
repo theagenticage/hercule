@@ -2,8 +2,10 @@
  * Runs the real Codex against the real MCP Gateway, to check what the spec
  * could only assume (spec 21 section 3.11): that Codex works on the older wire
  * era, sees `notifications/tools/list_changed` and lists again, opens a new MCP
- * session when the gateway answers 404 for the one it holds. Resuming and
- * forking a thread is checked beside the adapter, in
+ * session when the gateway answers 404 for the one it holds, and what a name
+ * Codex showed the model reaches when a tool with a twin of the same shown
+ * name comes or goes (it can reach the other tool: see the last `describe`).
+ * Resuming and forking a thread is checked beside the adapter, in
  * `apps/runner/src/harnesses/codex/adapter-mcp.integration.test.ts`.
  *
  * Nothing here is billed and no login is used. Codex starts the way the Codex
@@ -49,6 +51,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import { MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 import { findCodexTestBinary } from "../../../runner/src/harnesses/codex/codex-binary.testing";
 import { buildMcpServerConfig } from "../../../runner/src/harnesses/codex/mcp";
 import {
@@ -69,12 +72,13 @@ import {
   WHOAMI_TOOL,
   readUpstreamCalls,
   withGatewayRig,
-  type GatewayRig,
+  type ToolChangingGatewayRig,
 } from "./mcp-gateway-rig.testing";
 import {
   countListChanged,
   describeRequest,
   requestsOf,
+  waitUntilQuiet,
   type RecordingProxy,
 } from "./mcp-recording-proxy.testing";
 import { waitWithin } from "./testing";
@@ -159,7 +163,9 @@ const findShownName = (shown: ReadonlyArray<ShownTool>, wanted: string): string 
 
 /**
  * Builds the model's script. A prompt `call <tool>` makes the model call that
- * tool of the gateway once, with the argument `hello`. When Codex has not shown
+ * tool of the gateway once, with the argument `hello`. A prompt `call exactly
+ * <name>` makes it call the name `<name>` as it is, which is how a test calls a
+ * name Codex showed earlier. When Codex has not shown
  * the model the tool and offers a `tool_search` tool, the model searches for
  * the tool first and calls it only if the search returned it. Any other request
  * ends the turn.
@@ -177,6 +183,9 @@ const buildCallScript = () => {
   });
   return (request: ScriptedModelRequest) => {
     const last = request.body.input.at(-1);
+    // `call exactly <name>` sends the name as it is, whether or not Codex shows it now.
+    const exact = /^call exactly (\S+)$/.exec(readPrompt(last))?.[1];
+    if (exact !== undefined) return [buildCall(exact)];
     const wanted = /call ([\w-]+)/.exec(readPrompt(last))?.[1];
     if (wanted !== undefined) {
       const shownName = findShownName(readShownTools([request]), wanted);
@@ -377,7 +386,7 @@ const withCodexHome = async (
 // -- The gateway -------------------------------------------------------------
 
 /** What `withGateway` gives a test. */
-interface Gateway extends GatewayRig {
+interface Gateway extends ToolChangingGatewayRig {
   readonly upstream: FakeUpstream;
   readonly model: ReturnType<typeof startScriptedModel>;
 }
@@ -650,3 +659,279 @@ describe.skipIf(codex === undefined)("the real Codex on the MCP Gateway", () => 
     });
   }, 120_000);
 });
+
+// -- A name Codex showed, and a twin that comes or goes -------------------------
+
+/** A tool of `sentry` whose description ends with its own name in square brackets, which is how a test tells which tool Codex shows under a name. */
+const buildTwinTool = (name: string): FakeTool => ({ name, description: `Searches [${name}]` });
+
+const UNDERSCORE_TOOL = buildTwinTool("search_pages");
+const HYPHEN_TOOL = buildTwinTool("search-pages");
+
+/** The most a test of the twins takes: each runs several Codex processes, one for each scenario. */
+const TWIN_TEST_MS = 300_000;
+
+/** What the model is shown of the twins: each name Codex shows, and the tool of the server it stands for. */
+type ShownTwins = Readonly<Record<string, string>>;
+
+/** What happened to one call of a name the model chose. */
+interface TwinCall {
+  /** The name the gateway received. */
+  readonly sentToGateway: ReadonlyArray<string>;
+  /** The tools of the server that ran. */
+  readonly ranUpstream: ReadonlyArray<string>;
+  /** Codex's report of the call, or `none` when it reported no call. */
+  readonly status: string;
+  /** What the model was sent back for the call. */
+  readonly modelWasTold: string | undefined;
+}
+
+/** What one state of the server's tools showed and did. */
+interface TwinStep {
+  /** The tools of the server in this state, by their original names. */
+  readonly listed: ReadonlyArray<string>;
+  /** What the model was shown in this state. */
+  readonly shown: ShownTwins;
+  /** The call of the name the model chose in the first state. */
+  readonly call: TwinCall;
+}
+
+/**
+ * Starts Codex on a server that lists the tools of the first of `states`, and
+ * looks at what the model is shown. The model then calls the name shown for
+ * the tool `calledTool`. For each next state, the server's tools are changed,
+ * the model is shown what Codex shows then, and the model calls the very same
+ * name again. Returns one step for each state.
+ */
+const runTwinScenario = async (options: {
+  readonly states: ReadonlyArray<ReadonlyArray<FakeTool>>;
+  readonly calledTool: string;
+}): Promise<{ readonly name: string; readonly steps: ReadonlyArray<TwinStep> }> => {
+  let result: { name: string; steps: Array<TwinStep> } | undefined;
+  await withCodexOnGateway({ listed: true, tools: options.states[0]! }, async (rig, home) => {
+    const running = await home.start();
+    const threadId = await running.startThread();
+    expect(await waitForRequest(rig.proxy, "GET", 0, (one) => one.status === 200)).toBe(true);
+    expect(await waitForRequest(rig.proxy, "tools/list")).toBe(true);
+    await waitUntilQuiet(rig.proxy, 500);
+
+    /** Runs a turn that calls nothing, and returns what the model is shown in it. */
+    const look = async (): Promise<ShownTwins> => {
+      const mark = rig.model.requests.length;
+      await running.runTurn(threadId, "look");
+      const shown = readShownTools([rig.model.requests[mark]!]);
+      return Object.fromEntries(
+        shown.map((tool) => [tool.name, /\[(.+)\]$/.exec(tool.description ?? "")?.[1] ?? "?"]),
+      );
+    };
+    const callExactly = async (name: string): Promise<TwinCall> => {
+      const gatewayMark = requestsOf(rig.proxy.seen, "tools/call").length;
+      const upstreamMark = readUpstreamCalls(rig.upstream).length;
+      const callsMark = running.readFinishedCalls().length;
+      const requestsMark = rig.model.requests.length;
+      await running.runTurn(threadId, `call exactly ${name}`);
+      const outputs = rig.model.requests
+        .slice(requestsMark)
+        .flatMap((request) => request.body.input)
+        .filter((item) => item["type"] === "function_call_output");
+      return {
+        modelWasTold: outputs.length === 0 ? undefined : JSON.stringify(outputs.at(-1)!["output"]),
+        sentToGateway: requestsOf(rig.proxy.seen, "tools/call")
+          .slice(gatewayMark)
+          .map((one) => one.tool!),
+        ranUpstream: readUpstreamCalls(rig.upstream)
+          .slice(upstreamMark)
+          .map((one) => one.tool!),
+        status: running.readFinishedCalls().slice(callsMark)[0]?.status ?? "none",
+      };
+    };
+
+    const first = await look();
+    const name = Object.keys(first).find((shown) => first[shown] === options.calledTool)!;
+    const steps: Array<TwinStep> = [
+      {
+        listed: options.states[0]!.map((tool) => tool.name),
+        shown: first,
+        call: await callExactly(name),
+      },
+    ];
+    for (const tools of options.states.slice(1)) {
+      const [get] = requestsOf(rig.proxy.seen, "GET");
+      const changesBefore = countListChanged([get!]);
+      await rig.replaceTools(tools);
+      expect(
+        await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
+        "list_changed on the GET stream",
+      ).toBe(true);
+      await waitUntilQuiet(rig.proxy, 1_000);
+      const shown = await look();
+      steps.push({ listed: tools.map((tool) => tool.name), shown, call: await callExactly(name) });
+    }
+    result = { name, steps };
+  });
+  return result!;
+};
+
+/** The gateway's name for `tool` of `sentry`. */
+const buildGatewayName = (tool: string): string =>
+  `${SERVER_NAME}${MCP_GATEWAY_TOOL_SEPARATOR}${tool}`;
+
+/** The name Codex shows for a lone tool whose name has `-` or `_` between its words. */
+const PLAIN_NAME = buildGatewayName("search_pages");
+
+/** The names Codex shows when both twins are listed: its own suffix on each, the same for the same tool every time. */
+const UNDERSCORE_NAME = `${PLAIN_NAME}_987a6a995dbb`;
+const HYPHEN_NAME = `${PLAIN_NAME}_281727d9ca73`;
+const BOTH_SHOWN = { [HYPHEN_NAME]: "search-pages", [UNDERSCORE_NAME]: "search_pages" };
+
+/** What a call that reached `tool` through the gateway looks like. */
+const ranCall = (tool: string) => ({
+  sentToGateway: [buildGatewayName(tool)],
+  ranUpstream: [tool],
+  status: "completed",
+});
+
+/** What a call looks like when Codex refuses the name itself: nothing reaches the gateway and Codex reports no call. */
+const REFUSED_BY_CODEX = { sentToGateway: [], ranUpstream: [], status: "none" };
+
+/** Returns what each step showed and did, without the text Codex told the model. */
+const summarizeSteps = (steps: ReadonlyArray<TwinStep>) =>
+  steps.map(({ listed, shown, call }) => ({
+    listed,
+    shown,
+    sentToGateway: call.sentToGateway,
+    ranUpstream: call.ranUpstream,
+    status: call.status,
+  }));
+
+/**
+ * Codex, 0.169 and 0.171, shows `-` as `_` and gives every tool whose shown
+ * name has a twin a suffix of its own, so the twins' names depend on which
+ * tools are listed now and on nothing the gateway sent. The name of a lone
+ * tool is therefore the name of its twin when the twin takes its place. These
+ * tests record what Codex does with a name the model used, when a twin comes or
+ * goes with no restart (spec 21 section 3.4).
+ */
+describe.skipIf(codex === undefined)(
+  "a name Codex shows for a gateway tool, when a twin with - or _ comes or goes",
+  () => {
+    it(
+      "is shown for no tool once the twin is listed, and Codex refuses a call of it before the gateway sees it",
+      async () => {
+        const added = await runTwinScenario({
+          states: [[UNDERSCORE_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL]],
+          calledTool: "search_pages",
+        });
+        expect(added.name).toBe(PLAIN_NAME);
+        expect(summarizeSteps(added.steps)).toEqual([
+          {
+            listed: ["search_pages"],
+            shown: { [PLAIN_NAME]: "search_pages" },
+            ...ranCall("search_pages"),
+          },
+          { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
+        ]);
+        expect(added.steps[1]!.call.modelWasTold).toContain("unsupported call");
+
+        // The same when the lone tool is the one with `-`: Codex shows it as `_` too.
+        const addedReverse = await runTwinScenario({
+          states: [[HYPHEN_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL]],
+          calledTool: "search-pages",
+        });
+        expect(addedReverse.name).toBe(PLAIN_NAME);
+        expect(summarizeSteps(addedReverse.steps)).toEqual([
+          {
+            listed: ["search-pages"],
+            shown: { [PLAIN_NAME]: "search-pages" },
+            ...ranCall("search-pages"),
+          },
+          { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
+        ]);
+      },
+      TWIN_TEST_MS,
+    );
+
+    it(
+      "with Codex's suffix is shown for no tool once the twin is removed, whichever twin goes, and Codex refuses a call of it before the gateway sees it",
+      async () => {
+        const bothThenUnderscore = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [UNDERSCORE_TOOL]];
+        const bothThenHyphen = [[UNDERSCORE_TOOL, HYPHEN_TOOL], [HYPHEN_TOOL]];
+        const cases = [
+          // The tool called stays, and the other goes.
+          { states: bothThenUnderscore, calledTool: "search_pages", name: UNDERSCORE_NAME },
+          { states: bothThenHyphen, calledTool: "search-pages", name: HYPHEN_NAME },
+          // The tool called goes.
+          { states: bothThenUnderscore, calledTool: "search-pages", name: HYPHEN_NAME },
+          { states: bothThenHyphen, calledTool: "search_pages", name: UNDERSCORE_NAME },
+        ];
+        for (const { states, calledTool, name } of cases) {
+          const run = await runTwinScenario({ states, calledTool });
+          const survivor = states[1]![0]!.name;
+          expect(run.name).toBe(name);
+          expect(summarizeSteps(run.steps), `${calledTool} called, then ${survivor} stays`).toEqual(
+            [
+              {
+                listed: ["search_pages", "search-pages"],
+                shown: BOTH_SHOWN,
+                ...ranCall(calledTool),
+              },
+              { listed: [survivor], shown: { [PLAIN_NAME]: survivor }, ...REFUSED_BY_CODEX },
+            ],
+          );
+        }
+      },
+      TWIN_TEST_MS,
+    );
+
+    // This is the finding of the test: the name does MOVE inside Codex, with no restart. The model
+    // used `sentry__search_pages` when it was one tool's name, and the same name reaches the other
+    // tool once the twin has come and gone, or once the server has swapped one tool for the other.
+    // The gateway sends each tool under its own name every time (spec 21 section 3.4), so this is
+    // Codex's own naming at work and the gateway cannot prevent it.
+    it(
+      "MOVES to the sibling tool when the twin comes and then goes, and when the server swaps one tool for the other",
+      async () => {
+        const comesAndGoes = [
+          {
+            states: [[UNDERSCORE_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL], [HYPHEN_TOOL]],
+            calledTool: "search_pages",
+            from: "search_pages",
+            to: "search-pages",
+          },
+          {
+            states: [[HYPHEN_TOOL], [UNDERSCORE_TOOL, HYPHEN_TOOL], [UNDERSCORE_TOOL]],
+            calledTool: "search-pages",
+            from: "search-pages",
+            to: "search_pages",
+          },
+        ];
+        for (const { states, calledTool, from, to } of comesAndGoes) {
+          const run = await runTwinScenario({ states, calledTool });
+          expect(run.name, `${from} first`).toBe(PLAIN_NAME);
+          expect(summarizeSteps(run.steps)).toEqual([
+            { listed: [from], shown: { [PLAIN_NAME]: from }, ...ranCall(from) },
+            { listed: ["search_pages", "search-pages"], shown: BOTH_SHOWN, ...REFUSED_BY_CODEX },
+            // The same name as in the first step, and the other tool runs.
+            { listed: [to], shown: { [PLAIN_NAME]: to }, ...ranCall(to) },
+          ]);
+        }
+
+        for (const [from, to] of [
+          ["search_pages", "search-pages"],
+          ["search-pages", "search_pages"],
+        ] as const) {
+          const swapped = await runTwinScenario({
+            states: [[buildTwinTool(from)], [buildTwinTool(to)]],
+            calledTool: from,
+          });
+          expect(swapped.name, `${from} swapped for ${to}`).toBe(PLAIN_NAME);
+          expect(summarizeSteps(swapped.steps)).toEqual([
+            { listed: [from], shown: { [PLAIN_NAME]: from }, ...ranCall(from) },
+            { listed: [to], shown: { [PLAIN_NAME]: to }, ...ranCall(to) },
+          ]);
+        }
+      },
+      TWIN_TEST_MS,
+    );
+  },
+);

@@ -11,6 +11,7 @@ import {
   createServers,
   eventually,
   readServer,
+  requestCheck,
   type FakeTool,
   type FakeUpstream,
 } from "../mcp-servers/testing";
@@ -48,6 +49,16 @@ export interface GatewayRig {
    * `tools/list`.
    */
   readonly forgetMcpSession: () => Promise<string>;
+}
+
+/** A `GatewayRig` that can also change what the fake MCP server lists. */
+export interface ToolChangingGatewayRig extends GatewayRig {
+  /**
+   * Makes the fake MCP server list `tools` from now on, checks every server of
+   * the rig again so that the controller's stored list follows, and returns once
+   * it does. The gateway then sends `list_changed` to the harness's streams.
+   */
+  readonly replaceTools: (tools: ReadonlyArray<FakeTool>) => Promise<void>;
 }
 
 /** Returns the `tools/call` requests the fake MCP server received. */
@@ -128,7 +139,7 @@ export const withGatewayRig = (
     readonly listed: ReadonlyArray<string>;
     readonly answerDiscoverLikeOlderServer: boolean;
   },
-  body: (rig: GatewayRig) => Promise<void>,
+  body: (rig: ToolChangingGatewayRig) => Promise<void>,
 ): Promise<void> =>
   withFleet(
     async (arranged) => {
@@ -153,7 +164,20 @@ export const withGatewayRig = (
           idsByName,
           answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
         },
-        body,
+        (rig) =>
+          body({
+            ...rig,
+            replaceTools: async (tools) => {
+              await options.upstream.configure({ tools });
+              for (const server of servers) {
+                expect((await requestCheck(controller, server.id)).status).toBe(200);
+                await eventually(
+                  async () => (await readServer(controller, server.id)).tools.length,
+                  (count) => count === tools.length,
+                );
+              }
+            },
+          }),
       );
     },
     {
