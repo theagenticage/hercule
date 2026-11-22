@@ -87,6 +87,13 @@ const discover = async (answers: Answers, server = SERVER) => {
   return { outcome, web };
 };
 
+/** Returns the message of a failed outcome. Fails the test when the outcome is a success. */
+const failureMessage = (outcome: { readonly _tag: string }): string => {
+  const { failure } = outcome as { failure?: { message: string } };
+  if (failure === undefined) throw new Error("the outcome is not a failure");
+  return failure.message;
+};
+
 /** Discovers against a web that serves `prm` and `as`, and returns the failure's tag, which the test expects. */
 const discoveryFailure = async (prm: unknown, as: unknown, server = SERVER): Promise<string> => {
   const { outcome } = await discover({ [`GET ${PRM_URL}`]: prm, [`GET ${AS_URL}`]: as }, server);
@@ -285,12 +292,8 @@ describe("discoverAuthorization", () => {
       [`GET ${PRM_URL}`]: { resource: SERVER, authorization_servers: [issuer] },
     });
 
-    expect(outcome).toMatchObject({
-      failure: {
-        _tag: "AuthorizationUnreadable",
-        message: expect.stringContaining("is not there"),
-      },
-    });
+    expect(outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
+    expect(failureMessage(outcome)).toContain("is not there");
     expect(web.metadataRequests.slice(1)).toEqual(expected);
   });
 
@@ -372,9 +375,7 @@ describe("discoverAuthorization", () => {
     });
 
     expect(notJson.outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
-    expect(tooLarge.outcome).toMatchObject({
-      failure: { message: expect.stringContaining("more than 1048576 bytes") },
-    });
+    expect(failureMessage(tooLarge.outcome)).toContain("more than 1048576 bytes");
   });
 
   it("refuses a redirect, which it never follows, and a server error", async () => {
@@ -386,9 +387,7 @@ describe("discoverAuthorization", () => {
     });
     const failing = await discover({ [`GET ${PRM_URL}`]: new Response(null, { status: 503 }) });
 
-    expect(redirect.outcome).toMatchObject({
-      failure: { message: expect.stringContaining("redirect") },
-    });
+    expect(failureMessage(redirect.outcome)).toContain("redirect");
     expect(failing.outcome).toMatchObject({ failure: { _tag: "AuthorizationUnreadable" } });
     expect(redirect.web.metadataRequests).toEqual([PRM_URL]);
   });
@@ -453,9 +452,7 @@ describe("discoverAuthorization", () => {
           },
           HTTP_SERVER,
         );
-        expect(outcome).toMatchObject({
-          failure: { message: expect.stringContaining("but its authorization server is https") },
-        });
+        expect(failureMessage(outcome)).toContain("but its authorization server is https");
       },
     );
   });

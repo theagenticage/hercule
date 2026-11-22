@@ -11,7 +11,6 @@ import {
   makeSignInReturnLayer,
   SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
   SignInReturn,
-  type PageEvents,
 } from "./sign-in-return";
 
 /** The scopes of the services these tests built; each test's service lives until the test ends. */
@@ -224,7 +223,7 @@ describe("a page that ends", () => {
   const openPage = () => {
     const page = new EventEmitter();
     const cancel = vi.fn();
-    cancelWhenPageEnds(page as unknown as PageEvents, cancel);
+    cancelWhenPageEnds(page, cancel);
     return { page, cancel };
   };
 
