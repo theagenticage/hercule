@@ -386,14 +386,12 @@ describe("the body of an answer that is not read to its end", () => {
    * never ends, `chunkBytes` at a time, and records whether the client
    * cancelled that body.
    */
-  const startEndlessBodyServer = (init: {
-    status: number;
-    headers?: Record<string, string>;
-    chunkBytes?: number;
-  }) => {
+  const startEndlessBodyServer = (
+    responseInit: { status: number; headers?: Record<string, string> },
+    chunkBytes = 1,
+  ) => {
     const state = { cancelled: false };
-    const chunk = new Uint8Array(init.chunkBytes ?? 1);
-    const { chunkBytes: _chunkBytes, ...responseInit } = init;
+    const chunk = new Uint8Array(chunkBytes);
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -434,11 +432,11 @@ describe("the body of an answer that is not read to its end", () => {
   };
 
   it.each([
-    ["a redirect", { status: 302, headers: { location: "http://127.0.0.1:1/elsewhere" } }],
-    ["a server error", { status: 502 }],
-    ["a body over the limit", { status: 200, chunkBytes: MAX_ANSWER_BYTES + 1 }],
-  ])("is cancelled for %s", async (_name, init) => {
-    const server = startEndlessBodyServer(init);
+    ["a redirect", { status: 302, headers: { location: "http://127.0.0.1:1/elsewhere" } }, 1],
+    ["a server error", { status: 502 }, 1],
+    ["a body over the limit", { status: 200 }, MAX_ANSWER_BYTES + 1],
+  ])("is cancelled for %s", async (_name, init, chunkBytes) => {
+    const server = startEndlessBodyServer(init, chunkBytes);
     try {
       const failure = await Effect.runPromise(
         Effect.flip(postForm(server.url, { a: "b" }, "token endpoint")).pipe(
