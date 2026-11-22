@@ -275,8 +275,6 @@ export const EntitySignalLine = Schema.Struct({
   say: EntityReason,
   /** `resolution.outcome`, when the signal has ended. */
   outcome: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH))),
-  /** True while the signal is snoozed. */
-  snoozed: Schema.Boolean,
   /** True when the signal's kind asks the user for a move (`listAskingKinds`). */
   asks: Schema.Boolean,
 });
@@ -696,7 +694,7 @@ export const InboxQuery = Schema.Union([
 export type InboxQuery = Schema.Schema.Type<typeof InboxQuery>;
 
 /**
- * One open ask on a thing: an open signal, not snoozed and not taken, of a
+ * One open ask on a thing: an open signal, not taken, of a
  * kind that asks the user for a move. `say` is the finished sentence, such as
  * "Mei asked for your review", and `noun` names the kind ("review request").
  */
@@ -743,8 +741,8 @@ export type InboxActiveTask = Schema.Schema.Type<typeof InboxActiveTask>;
  *   newest first. It is a field of the thing, not of `task`, because a client
  *   that has just handed the thing to a workflow draws that workflow at once,
  *   before it knows which Task the hand-off made.
- * - `openKinds` are the distinct kinds of every open signal, snoozed ones
- *   included: what a hand-off ends is read from it.
+ * - `openKinds` are the distinct kinds of every open signal: what a hand-off
+ *   ends is read from it.
  * - `dismissedAt` is set only when the thing came back after a dismissal.
  * - `arrival` is the thing's place in the controller's arrival sequence: the
  *   number it took when it last arrived on the Inbox (new, back after a
@@ -1271,10 +1269,10 @@ export const ExternalEntityDetail = Schema.Struct({
   /**
    * The signals about this thing, in time order, oldest first. Open ones are
    * selected first, up to `MAX_ENTITY_SIGNALS`, and resolved ones fill the room
-   * left. Snoozed signals are included, marked `snoozed`.
+   * left.
    */
   signals: atMost(EntitySignalLine, MAX_ENTITY_SIGNALS),
-  /** How many open signals the thing has, snoozed ones included. */
+  /** How many open signals the thing has. */
   openCount: Schema.Int,
   /** How many signals the thing has in all, open and resolved. */
   signalCount: Schema.Int,

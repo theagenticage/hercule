@@ -4,9 +4,9 @@
  *
  * A signal and an entity meet by exact equality of `signals.thread_ref` and
  * `external_entities.ref`, on read. Nothing is stored on either side. The
- * signals domain owns every read of the signals by thread ref, and decides
- * which signal is live (open and not snoozed now). This module only turns what
- * it returns into the contract's lines, using the entity's reason templates.
+ * signals domain owns every read of the signals by thread ref. This module
+ * only turns what it returns into the contract's lines, using the entity's
+ * reason templates.
  */
 import type { EntityReason, EntitySignalLine, ExternalEntityDetail } from "@hercule/contract";
 import type { ThreadSignal, ThreadSignalLines } from "../signals";

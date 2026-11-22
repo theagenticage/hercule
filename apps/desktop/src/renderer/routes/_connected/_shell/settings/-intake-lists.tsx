@@ -18,19 +18,16 @@ import { useIntakeEditor } from "./-intake-editor";
  * line gives the error.
  *
  * Each toggle saves as soon as it is pressed, and a row whose value is a
- * choice of this level can be reset (see `useIntakeEditor`). `pointedKind` is
- * the kind a link asks for, whose row scrolls into view and is highlighted.
+ * choice of this level can be reset (see `useIntakeEditor`).
  */
 export function IntakeLists({
   pluginId,
   connectionId,
   pluginName,
-  pointedKind,
 }: {
   readonly pluginId: string;
   readonly connectionId: string | undefined;
   readonly pluginName: string;
-  readonly pointedKind: string | undefined;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const editor = useIntakeEditor(client, pluginId, connectionId);
@@ -64,7 +61,6 @@ export function IntakeLists({
         source={describeIntakeSource(row, pluginName)}
         canReset={canResetIntakeRow(row, level)}
         resetting={resetting}
-        pointed={pointedKind === row.kind}
         error={error}
         onToggle={(on) => {
           save(change(on));

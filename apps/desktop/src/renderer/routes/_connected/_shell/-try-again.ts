@@ -6,8 +6,7 @@
  * client's mutation cache, not in a component. A component forgets them: the
  * user can leave Work, or open another Task, while a request is on its way,
  * and a rebuilt screen that forgot it would let a second press start a second
- * run on the same Task. This is the lock `useRerunTracking` keeps for Intake
- * (`screens/intake/use-rerun-tracking.ts`), with the same rules:
+ * run on the same Task. The lock follows these rules:
  *
  * - The mutation never goes out of the cache by time (`gcTime: Infinity`).
  * - The lock ends when the board no longer shows that run as the Task's

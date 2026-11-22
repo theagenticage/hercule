@@ -13,7 +13,6 @@
  *   list or one profile's page;
  * - settings-connections.tsx, which opens Settings > Connections;
  * - settings-providers.tsx, which opens Settings > Providers;
- * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows;
  * - fleet.tsx, which opens the Fleet page or a machine's page;
  * - work.tsx, which opens the Work board;
@@ -58,16 +57,11 @@ import type {
   Assistant,
   Connection,
   ConversationMessage,
-  Event,
   EventCountsByConnection,
-  EventHandling,
-  EventWithFacts,
-  HandoffLeg,
   Harness,
   InboxGroupQuery,
   InboxQuery,
   InboxValueQuery,
-  IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
   MemoryEntry,
@@ -81,18 +75,14 @@ import type {
   Resource,
   Runner,
   Session,
-  Signal,
   SignedInUser,
   Skill,
   SkillDetail,
   SkillRevisionDiff,
   SkillsPreviewFilter,
   Task,
-  TrackingDetail,
-  TrackingTask,
   TranscriptRow,
   Workspace,
-  YourWorkTask,
 } from "@hercule/contract";
 import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import {
@@ -120,11 +110,8 @@ import {
   currentConversationSessionQuery,
   discussionQuery,
   discussionsQuery,
-  eventQuery,
-  eventsEverythingQuery,
   fleetSessionsQuery,
   eventCountsQuery,
-  ignoreRulesQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
@@ -158,20 +145,10 @@ import {
   skillDiffQuery,
   skillQuery,
   skillsQuery,
-  signalQuery,
-  signalsClearedTodayQuery,
-  signalsDoneQuery,
-  laterSignalsOfKindQuery,
-  signalsLaterQuery,
-  signalsToDoQuery,
   taskAttentionQuery,
-  snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
   threadAndAgentSessionsQuery,
-  trackingDetailQuery,
-  trackingQuery,
-  yourWorkQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -213,10 +190,8 @@ import { Route as ProvidersSettingsRoute } from "../routes/_connected/_shell/set
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
-import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as SkillsSettingsRoute } from "../routes/_connected/_shell/settings/skills/index";
 import { Route as SkillSettingsRoute } from "../routes/_connected/_shell/settings/skills/$name";
-import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as InboxRoute } from "../routes/_connected/_shell/inbox";
 import { Route as WorkRoute } from "../routes/_connected/_shell/work";
 import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
@@ -277,15 +252,7 @@ export interface SidebarRecords {
    * Hercule face. None when left out. A screen that reads them too sets its own.
    */
   readonly connections?: ReadonlyArray<Connection>;
-  /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
-  readonly signals?: ReadonlyArray<Signal>;
-  /** The signals on Later, soonest snooze first. None when left out. */
-  readonly later?: ReadonlyArray<Signal>;
-  /** The signals on Done, newest first, which Intake's foot counts. None when left out. */
-  readonly done?: ReadonlyArray<Signal>;
-  /** The leg of each handoff on `done`, which Done's rows and pane read their trips from. None when left out. */
-  readonly doneLegs?: ReadonlyArray<HandoffLeg>;
-  /** The installed plugins, which name each signal's source. None when left out. */
+  /** The installed plugins, which name each source. None when left out. */
   readonly plugins?: ReadonlyArray<PluginDetail>;
   /**
    * The live sessions that are not threads. Those of a run with an open
@@ -293,27 +260,6 @@ export interface SidebarRecords {
    * workflow in Needs you. None when left out.
    */
   readonly agentSessions?: ReadonlyArray<Session>;
-  /**
-   * What `task.queryTracking` returns: the Tasks Tracking follows, which the
-   * Hercule segment's count and Intake's Tracking read. None when left out.
-   */
-  readonly tracking?: ReadonlyArray<TrackingTask>;
-  /**
-   * What `task.readTracking` returns for each Task whose pane a scene opens,
-   * by the Task's id. None when left out.
-   */
-  readonly trackingDetails?: ReadonlyMap<string, TrackingDetail>;
-  /**
-   * The signals handed to the Tasks of `tracking`, as `signal.read` returns
-   * them, which each Tracking pane reads under "You asked". None when left out.
-   */
-  readonly handedSignals?: ReadonlyArray<Signal>;
-  /**
-   * What `signal.queryYourWork` returns: the open Tasks that belong to a
-   * signal on To do, which make a Tracking row Needs you (Your work). None
-   * when left out.
-   */
-  readonly yourWorkTasks?: ReadonlyArray<YourWorkTask>;
   /** Whether a run failed on a live Task, which draws the sidebar's failed-run dot. False when left out. */
   readonly hasFailedRun?: boolean;
 }
@@ -415,42 +361,6 @@ export interface AppearanceSettingsRecords {
 }
 
 /**
- * What Intake reads besides the shell's lists, which hold To do, Later, Done
- * and the plugins: the selected signal and the event it was raised from. It
- * also says which view Intake opens on, and how the page answers a move.
- */
-export interface IntakeRecords {
-  /** The selected signal, as the controller reads it, or `null` when none is selected. */
-  readonly signal: Signal | null;
-  /** The event the selected signal was raised from, or `null` for none. */
-  readonly event: Event | null;
-  /** The view Intake opens on. To do when left out. */
-  readonly view?: "later" | "done" | "everything";
-  /** Whether Tracking is opened over the To do list. Folded when left out. */
-  readonly trackingOpen?: boolean;
-  /** The Task whose pane is open in opened Tracking. None when left out. */
-  readonly trackingTaskId?: string;
-  /**
-   * What the Everything view reads: the events its one page holds, newest
-   * first, under the search text, the handling filter and the source tab it
-   * opens with, and the event whose pane is open. Used only when `view` is "everything".
-   */
-  readonly everything?: {
-    readonly events: ReadonlyArray<EventWithFacts>;
-    readonly text?: string;
-    readonly handling?: EventHandling;
-    readonly source?: string;
-    readonly selectedEventId?: number;
-  };
-  /**
-   * Answers the requests that move signals, such as `signal.markDone`, for a
-   * scene that makes a move. Every other request is refused, as on every
-   * page. When left out, moves are refused too.
-   */
-  readonly answerMove?: FetchLike;
-}
-
-/**
  * What Settings > Connections reads: the Connections, the plugins that
  * declare their types and marks, and the events each Connection received.
  */
@@ -479,14 +389,6 @@ export interface ProvidersSettingsRecords {
   readonly catalog: ModelCatalog;
 }
 
-/**
- * What Settings > Intake reads besides the shell's lists, which hold the
- * plugins and the Connections: the Ignore Rules, with what each caught.
- */
-export interface IntakeSettingsRecords {
-  readonly ignoreRules: ReadonlyArray<IgnoreRuleWithCatches>;
-}
-
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
@@ -497,8 +399,6 @@ interface OpenScreens {
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly connectionsSettings?: ConnectionsSettingsRecords;
   readonly providersSettings?: ProvidersSettingsRecords;
-  readonly intake?: IntakeRecords;
-  readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
   readonly fleet?: FleetRecords;
   readonly work?: WorkRecords;
@@ -533,9 +433,6 @@ const refuseRequest: FetchLike = (url) =>
         "Add the record it reads to the specimen's fixture.",
     ),
   );
-
-/** Matches the address of a request that moves signals: Done, Snooze, Unsnooze or Not urgent. */
-const MOVE_PATH = /\/api\/v1\/signals\/(mark-done|snooze|unsnooze|lower-priority)$/;
 
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
@@ -671,8 +568,6 @@ const seedQueryCache = (
     appearanceSettings,
     connectionsSettings,
     providersSettings,
-    intake,
-    intakeSettings,
     workflows,
     fleet,
     work,
@@ -695,46 +590,7 @@ const seedQueryCache = (
   queryClient.setQueryData(harnessesQuery(client).queryKey, HARNESSES);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
-  queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);
-  // Each paged list fits on its one page.
-  queryClient.setQueryData(signalsLaterQuery(client).queryKey, {
-    pages: [{ items: records.later ?? [] }],
-    pageParams: [undefined],
-  });
-  // The Ignore dialog, and an open offer of an Ignore Rule, look for the
-  // signals a rule matches in Later of the rule's kind, read whole.
-  for (const kind of new Set(
-    [...(records.signals ?? []), ...(records.later ?? [])].map((signal) => signal.kind),
-  )) {
-    queryClient.setQueryData(
-      laterSignalsOfKindQuery(client, kind).queryKey,
-      (records.later ?? []).filter((signal) => signal.kind === kind),
-    );
-  }
-  queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [], legs: records.doneLegs ?? [] }],
-    pageParams: [undefined],
-  });
-  queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [] }],
-    pageParams: [undefined],
-  });
-  queryClient.setQueryData(
-    snoozeTimerQuery(client).queryKey,
-    records.later?.[0]?.snooze?.until ?? null,
-  );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
-  queryClient.setQueryData(trackingQuery(client).queryKey, {
-    tasks: records.tracking ?? [],
-    readStartedAt: 0,
-  });
-  for (const [taskId, detail] of records.trackingDetails ?? []) {
-    queryClient.setQueryData(trackingDetailQuery(client, taskId).queryKey, detail);
-  }
-  for (const signal of records.handedSignals ?? []) {
-    queryClient.setQueryData(signalQuery(client, signal.id).queryKey, signal);
-  }
-  queryClient.setQueryData(yourWorkQuery(client).queryKey, { tasks: records.yourWorkTasks ?? [] });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
@@ -841,27 +697,6 @@ const seedQueryCache = (
       localRunnerId: providersSettings.controllerRunnerId,
       textGeneration: { model: null, lastFailure: null, unavailableReason: null },
     });
-  }
-  if (intakeSettings !== undefined) {
-    queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
-  }
-  if (intake !== undefined) {
-    // The drawings' signals come from plugins, so no workflow names any of them.
-    queryClient.setQueryData(workflowsQuery(client).queryKey, []);
-  }
-  if (intake?.everything !== undefined) {
-    const { events, text, handling, source } = intake.everything;
-    queryClient.setQueryData(
-      // `since` is not part of the listing's key, so any value finds it.
-      eventsEverythingQuery(client, { text, handling, source }, "").queryKey,
-      { pages: [{ items: events }], pageParams: [undefined] },
-    );
-  }
-  if (intake?.signal != null) {
-    queryClient.setQueryData(signalQuery(client, intake.signal.id).queryKey, intake.signal);
-  }
-  if (intake?.event != null) {
-    queryClient.setQueryData(eventQuery(client, intake.event.id).queryKey, intake.event);
   }
   if (run !== undefined) {
     const { workflow, agents, workflowActions } = run.workflows.openWorkflow;
@@ -1132,8 +967,8 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, Intake, Workflows, and Settings with its Appearance,
- * Connections, Intake, Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
+ * `/assistants/$assistantId`, Workflows, and Settings with its Appearance,
+ * Connections, Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -1149,13 +984,10 @@ function AssistantRoute(): JSX.Element {
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
  * already holds both. The Permission profiles routes are attached the same
- * way, and so are Settings > Intake, whose loader reads the Ignore Rules
- * again each time the section opens, and Workflows, whose loader reads the lists the cache already
+ * way, and so is Workflows, whose loader reads the lists the cache already
  * holds, and so is Settings > Connections, whose loader reads the
  * Connections and the plugins through a query client this router's context
- * does not have, and the cache already holds both. Intake keeps a loader of
- * its own that returns the moment it opened, because the screen reads that
- * moment, and the cache already holds the records its real loader would read.
+ * does not have, and the cache already holds both.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -1255,20 +1087,6 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
-  const intakeSettingsRoute = IntakeSettingsRoute.update({
-    id: "/intake",
-    path: "/intake",
-    getParentRoute: () => settingsRoute,
-    loader: undefined,
-  } as never);
-  const intakeRoute = IntakeRoute.update({
-    id: "/intake",
-    path: "/intake",
-    getParentRoute: () => shellRoute,
-    // The real loader reads the cache again; the screen needs only the moment
-    // it opened, which is the specimen's stopped clock.
-    loader: () => ({ openedAt: Date.now() }),
-  } as never);
   const workflowsRoute = WorkflowsRoute.update({
     id: "/workflows",
     path: "/workflows",
@@ -1362,7 +1180,6 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
-        intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
         workRoute,
         inboxRoute,
@@ -1376,7 +1193,6 @@ const buildRouter = (
           appearanceSettingsRoute,
           connectionsSettingsRoute,
           providersSettingsRoute,
-          intakeSettingsRoute,
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
@@ -1468,8 +1284,7 @@ const findRunDrawnSelector = (path: string): string =>
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, a
  * Connection's row when it opens Settings > Connections, a
- * plugin's section when it opens Settings > Intake, the
- * list's rows or its empty line when it opens Intake or Workflows, a step
+ * the list's rows or its empty line when it opens Workflows, a step
  * when it opens a run's page, and the start cards with the focus in the
  * message field when it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
@@ -1534,19 +1349,6 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   ) {
     throw new Error(
       "Settings > Providers drew no account's card and no line saying there is none. Check the page's console for the error.",
-    );
-  }
-  if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {
-    throw new Error(
-      "Settings > Intake drew no plugin's section. Check the page's console for the error.",
-    );
-  }
-  if (
-    screens.intake !== undefined &&
-    document.querySelector(".ask-row, .asks-empty, .asks-zero, .asks-note") === null
-  ) {
-    throw new Error(
-      "Intake drew no row and no empty line. Check the page's console for the error.",
     );
   }
   if (
@@ -1625,7 +1427,6 @@ async function mountShellSpecimen(
   pathOpenedAfterDrawn?: string,
 ): Promise<void> {
   applySheetAppearance();
-  const answerMove = screens.intake?.answerMove;
   const created = screens.providersSettings?.createdAccount;
   const catalog = screens.providersSettings?.catalog;
   const answerJson = (body: unknown): Promise<Response> =>
@@ -1644,9 +1445,7 @@ async function mountShellSpecimen(
                 url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
               ? answerJson(catalog)
               : refuseRequest(url, init)
-      : answerMove === undefined
-        ? refuseRequest
-        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init));
+      : refuseRequest;
   const inbox = screens.inbox;
   const fetchWithInbox: FetchLike =
     inbox === undefined
@@ -1771,8 +1570,6 @@ async function mountShellSpecimen(
   // The starters, which a draft shows in a project with no planned task, load
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
-  // The list draws its rows once it has measured its height, after the first render.
-  if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty, .asks-zero");
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
   }
@@ -1940,52 +1737,6 @@ export async function mountProvidersSettingsSpecimen(
   settings: ProvidersSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/providers", { providersSettings: settings });
-}
-
-/**
- * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Intake open: the main pane shows the app's real Intake screen, on
- * `intake.view` or To do, with the signals from `records`, and the pane of
- * `intake.signal` when it is not `null`. On Everything, it shows the events
- * of `intake.everything`. Returns once the list's rows, or its empty line, are in
- * the document. Fails when the page has no `#root`, draws no sidebar row, no
- * list row and no empty line, or tries to read a record the cache does not
- * hold.
- */
-export async function mountIntakeSpecimen(
-  records: SidebarRecords,
-  intake: IntakeRecords,
-): Promise<void> {
-  const search = new URLSearchParams();
-  if (intake.view !== undefined) search.set("view", intake.view);
-  if (intake.signal !== null) search.set("signal", intake.signal.id);
-  if (intake.trackingOpen === true) search.set("tracking", "true");
-  if (intake.trackingTaskId !== undefined) search.set("task", intake.trackingTaskId);
-  const everything = intake.everything;
-  if (everything?.selectedEventId !== undefined) {
-    search.set("event", String(everything.selectedEventId));
-  }
-  if (everything?.text !== undefined) search.set("text", everything.text);
-  if (everything?.handling !== undefined) search.set("handling", everything.handling);
-  if (everything?.source !== undefined) search.set("source", everything.source);
-  const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
-  await mountShellSpecimen(records, path, { intake });
-}
-
-/**
- * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Settings > Intake open: the main pane shows the app's real Settings
- * frame and Intake section, with a section for each plugin in `records`
- * that raises signals or reads events, and the Ignore Rules of `settings`.
- * Returns once the sections are in the document. Fails when the page has no
- * `#root`, draws no sidebar row or no plugin's section, or tries to read a
- * record the cache does not hold.
- */
-export async function mountIntakeSettingsSpecimen(
-  records: SidebarRecords,
-  settings: IntakeSettingsRecords,
-): Promise<void> {
-  await mountShellSpecimen(records, "/settings/intake", { intakeSettings: settings });
 }
 
 /**

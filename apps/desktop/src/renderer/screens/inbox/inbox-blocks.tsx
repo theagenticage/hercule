@@ -1,9 +1,9 @@
 /**
  * The blocks of a thing or a signal as the Inbox's pane draws them (spec 17
  * §The pane): text, messages, a change, checks, fields, a trend and code, and
- * one quiet line for a block of a type this app does not know. Intake draws
- * the same blocks in its own look in `signal-blocks.tsx`; the three blocks
- * that are alike in both come from `inbox-blocks-parts.tsx`.
+ * one quiet line for a block of a type this app does not know. The three
+ * blocks that carry no markdown and no people come from
+ * `inbox-blocks-parts.tsx`.
  */
 import type { JSX } from "react";
 import type {

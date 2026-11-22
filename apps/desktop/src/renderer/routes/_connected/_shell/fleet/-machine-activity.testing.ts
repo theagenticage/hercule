@@ -4,7 +4,7 @@
  * `event.query` over them a page at a time, as the real one does.
  */
 import { HARNESSES } from "@hercule/client-core/testing";
-import type { EventWithFacts, Runner } from "@hercule/contract";
+import type { ListedEvent, Runner } from "@hercule/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -35,10 +35,10 @@ export const buildAuditEvent = (
   kind: string,
   minutesAgo: number,
   over: {
-    readonly payload?: EventWithFacts["payload"];
-    readonly actor?: EventWithFacts["actor"];
+    readonly payload?: ListedEvent["payload"];
+    readonly actor?: ListedEvent["actor"];
   } = {},
-): EventWithFacts => ({
+): ListedEvent => ({
   id,
   source: "platform",
   connectionId: null,
@@ -54,22 +54,19 @@ export const buildAuditEvent = (
   title: null,
   author: null,
   signals: [],
-  resolvedSignals: [],
-  ignoredBy: null,
-  tasks: [],
   knownBy: [],
 });
 
 /** Builds the entry for the machine going offline, `minutesAgo` before `NOW`: a problem, by the controller. */
-export const buildWentOffline = (id: number, minutesAgo: number): EventWithFacts =>
+export const buildWentOffline = (id: number, minutesAgo: number): ListedEvent =>
   buildAuditEvent(id, "runner.stateChanged", minutesAgo, { payload: { state: "offline" } });
 
 /** Builds the entry for the machine coming online, `minutesAgo` before `NOW`, by the controller. */
-export const buildCameOnline = (id: number, minutesAgo: number): EventWithFacts =>
+export const buildCameOnline = (id: number, minutesAgo: number): ListedEvent =>
   buildAuditEvent(id, "runner.stateChanged", minutesAgo, { payload: { state: "online" } });
 
 /** Builds the entry for Stop new work, `minutesAgo` before `NOW`, by the user. */
-export const buildStoppedNewWork = (id: number, minutesAgo: number): EventWithFacts =>
+export const buildStoppedNewWork = (id: number, minutesAgo: number): ListedEvent =>
   buildAuditEvent(id, "runner.drained", minutesAgo, { actor: "user" });
 
 /** Builds the entry for a session spawned for no run, `minutesAgo` before `NOW`, by the controller. */
@@ -77,7 +74,7 @@ export const buildSessionSpawned = (
   id: number,
   minutesAgo: number,
   sessionId: string,
-): EventWithFacts => buildAuditEvent(id, "session.spawned", minutesAgo, { payload: { sessionId } });
+): ListedEvent => buildAuditEvent(id, "session.spawned", minutesAgo, { payload: { sessionId } });
 
 /** What a test opens the machine's pages with. */
 export interface OpenedMachine {
@@ -85,7 +82,7 @@ export interface OpenedMachine {
   readonly calls: readonly Call[];
   readonly app: Awaited<ReturnType<typeof renderApp>>;
   /** Replaces the log the controller serves. A page that reads the log again then sees the new entries. */
-  readonly setEvents: (events: readonly EventWithFacts[]) => void;
+  readonly setEvents: (events: readonly ListedEvent[]) => void;
 }
 
 /**
@@ -96,7 +93,7 @@ export interface OpenedMachine {
  */
 export const openMachineWithEvents = async (
   path: string,
-  events: readonly EventWithFacts[],
+  events: readonly ListedEvent[],
   {
     pageSize = 100,
     overrides = {},

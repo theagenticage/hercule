@@ -7,13 +7,13 @@ import { isQualifiedId, type BoundAction, type EntitySignalLine } from "@hercule
 
 /** The asks the pane draws as sections, and how many open signals its read left out. */
 export interface PaneAsks {
-  /** Newest first: the open, unsnoozed signals whose kind asks the user for a move. */
+  /** Newest first: the open signals whose kind asks the user for a move. */
   readonly sections: readonly EntitySignalLine[];
   /**
    * How many open signals the read holds that the pane has no line for, because
-   * the read lists at most `MAX_ENTITY_SIGNALS` lines. Some of them may be
-   * snoozed or may not ask, so the pane words it as "N more", never as a
-   * promise that each is an ask.
+   * the read lists at most `MAX_ENTITY_SIGNALS` lines. Some of them may not
+   * ask, so the pane words it as "N more", never as a promise that each is an
+   * ask.
    */
   readonly hiddenOpenCount: number;
 }
@@ -34,7 +34,7 @@ export const listPaneAsks = (read: {
 }): PaneAsks => {
   const open = read.signals.filter((line) => line.status === "open");
   return {
-    sections: open.filter((line) => line.asks && !line.snoozed).toSorted(compareNewestFirst),
+    sections: open.filter((line) => line.asks).toSorted(compareNewestFirst),
     hiddenOpenCount: Math.max(0, read.openCount - open.length),
   };
 };

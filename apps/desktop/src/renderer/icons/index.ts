@@ -39,7 +39,7 @@ export { FleetIcon } from "./fleet";
 export { GlobeIcon } from "./globe";
 export { HeartIcon } from "./heart";
 export { IdIcon } from "./id";
-export { IntakeIcon } from "./intake";
+export { InboxIcon } from "./inbox";
 export { KeyIcon } from "./key";
 export { LaptopIcon } from "./laptop";
 export { LinkIcon } from "./link";

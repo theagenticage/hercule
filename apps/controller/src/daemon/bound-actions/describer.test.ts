@@ -805,8 +805,7 @@ describe("ignoreRule.create", () => {
       ),
   });
 
-  const SOURCE_NOTE =
-    " still sends them; they show in Everything. Also takes matching open signals off your list.";
+  const SOURCE_NOTE = " still sends them. Also takes matching open signals off your list.";
 
   it("names the kind, each field and its value, and the plugin that still sends them", async () => {
     const line = await run(

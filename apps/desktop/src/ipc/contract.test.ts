@@ -124,7 +124,6 @@ describe("the menu commands", () => {
     "newThread",
     "openOffice",
     "openInbox",
-    "openIntake",
     "openWorkflows",
     "openSettings",
     "send",

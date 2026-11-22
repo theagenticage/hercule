@@ -1,7 +1,7 @@
 /**
  * Prose in a session's messages, rendered as markdown: an agent's message and
  * the user's bubble, in the thread's transcript and in an assistant's
- * Conversation. Intake's open signal draws its text the same way.
+ * Conversation. The Inbox's pane draws a thing's text the same way.
  *
  * marked's lexer, in `@hercule/client-core`, parses the text into a tree of
  * plain data, and this file draws that tree as React elements. No text ever
@@ -152,8 +152,8 @@ function drawInline(
           src={inline.src}
           alt={inline.alt}
           title={inline.title}
-          // The size an HTML `<img>` asked for. `intake.css` keeps an image
-          // with a size in the line of text, because it is an icon.
+          // The size an HTML `<img>` asked for. The Inbox's blocks keep an
+          // image with a size in the line of text, because it is an icon.
           width={inline.width}
           height={inline.height}
           referrerPolicy="no-referrer"

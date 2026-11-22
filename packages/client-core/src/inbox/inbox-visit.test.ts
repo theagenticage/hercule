@@ -477,6 +477,129 @@ describe("Show", () => {
   });
 });
 
+describe("seek", () => {
+  it("reveals a thing the list holds at once, with no read", async () => {
+    const { fake, visit } = await opened(rows("a", "b", "c"));
+    await expect(visit.seek("c")).resolves.toBe("found");
+    expect(visit.getSnapshot().current).toBe("c");
+    expect(fake.count("rows")).toBe(0);
+  });
+
+  it("takes in the row the controller returns, whatever page the thing is on, with no page read", async () => {
+    const { fake, visit } = await opened(rows("a", "b"), true);
+    const found = visit.seek("e");
+    expect(fake.open("rows").held).toEqual(["e"]);
+    fake.open("rows").resolve(rows("e"));
+    await expect(found).resolves.toBe("found");
+    expect(visit.getSnapshot().current).toBe("e");
+    expect(refsOf(visit)).toContain("e");
+    expect(fake.count("next")).toBe(0);
+  });
+
+  it("reads no page for a thing the list does not hold, such as one the user dismissed", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    const found = visit.seek("z");
+    fake.open("rows").resolve([]);
+    await expect(found).resolves.toBe("absent");
+    expect(fake.count("next")).toBe(0);
+  });
+
+  it("takes in the arrivals when the thing waits behind N new", async () => {
+    const held = [row("a", "a", 5), row("b", "b", 9)];
+    const { fake, visit } = await opened(held, true);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("d", "d", 10)], { more: true });
+    expect(visit.getSnapshot().arrivals).toBe(1);
+    await expect(visit.seek("d")).resolves.toBe("found");
+    expect(visit.getSnapshot().arrivals).toBe(0);
+    expect(visit.getSnapshot().current).toBe("d");
+  });
+
+  it("waits for a Show under way, so the Show does not move the current row after the seek", async () => {
+    const held = [row("a", "a", 5), row("b", "b", 9)];
+    const { fake, visit } = await opened(held, true);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("n", "n", 10)], { more: true });
+    visit.show();
+    const found = visit.seek("b");
+    await settle();
+    await answerRefresh(fake, [...held, row("n", "n", 10)], { more: true });
+    await expect(found).resolves.toBe("found");
+    expect(visit.getSnapshot().current).toBe("b");
+  });
+
+  it("goes on after a refresh under way fails", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    visit.pushArrived();
+    const found = visit.seek("z");
+    expect(fake.count("rows")).toBe(0);
+    fake.open("refresh").reject(new Error("offline"));
+    await settle();
+    fake.open("rows").resolve([]);
+    await expect(found).resolves.toBe("absent");
+  });
+
+  it("goes on when the arrivals are gone by the time a Show under way ends", async () => {
+    const held = [row("a", "a", 5)];
+    const { fake, visit } = await opened(held, true);
+    visit.pushArrived();
+    await answerRefresh(fake, [...held, row("n", "n", 10)], { more: true });
+    visit.show();
+    const found = visit.seek("a");
+    await answerRefresh(fake, held, { more: true });
+    await expect(found).resolves.toBe("found");
+  });
+
+  it("waits for a list being opened, and looks in that list, not the one still shown", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    visit.open("list-2");
+    const found = visit.seek("a");
+    await settle();
+    await answerFirst(fake, rows("x", "a"));
+    await expect(found).resolves.toBe("found");
+    expect(visit.getSnapshot().query).toBe("list-2");
+    expect(visit.getSnapshot().current).toBe("a");
+  });
+
+  it("is cancelled when another list is opened, and selects nothing there", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    const found = visit.seek("x");
+    visit.open("list-2");
+    await expect(found).resolves.toBe("cancelled");
+    await answerFirst(fake, rows("b", "x"));
+    expect(visit.getSnapshot().current).toBe("b");
+  });
+
+  it("ends absent when the read of the thing's row fails", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    const found = visit.seek("z");
+    fake.open("rows").reject(new Error("offline"));
+    await expect(found).resolves.toBe("absent");
+  });
+
+  it("is cancelled when a later seek or close replaces it, and drops its question", async () => {
+    const { fake, visit } = await opened(rows("a"), true);
+    const first = visit.seek("z");
+    const asked = fake.open("rows");
+    const second = visit.seek("y");
+    await expect(first).resolves.toBe("cancelled");
+    expect(asked.signal.aborted).toBe(true);
+    visit.close();
+    await expect(second).resolves.toBe("cancelled");
+  });
+
+  it("keeps the returned row when a refresh replaces the arrivals before it is taken in", async () => {
+    const { fake, visit } = await opened(rows("a", "b"));
+    const found = visit.seek("c");
+    visit.pushArrived();
+    fake.open("rows").resolve(rows("c"));
+    await settle();
+    await answerRefresh(fake, rows("a", "b"));
+    await expect(found).resolves.toBe("found");
+    expect(visit.getSnapshot().current).toBe("c");
+  });
+});
+
 describe("the next page", () => {
   it("is read near the end, once, and appended without the rows already held", async () => {
     const { fake, visit } = await opened(rows("a", "b"), true);

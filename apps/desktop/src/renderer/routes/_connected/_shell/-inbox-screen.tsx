@@ -106,9 +106,12 @@ interface HandMenu {
 export function InboxScreen({
   controller,
   scope,
+  thing,
 }: {
   readonly controller: SavedController;
   readonly scope: InboxScope;
+  /** The ref of a thing to show in the pane once the list is read, from the URL's `thing`. */
+  readonly thing?: string | undefined;
 }): JSX.Element {
   const { client, live, url } = controller;
   const navigate = useNavigate();
@@ -218,6 +221,48 @@ export function InboxScreen({
     visit.reveal(ref);
     setIsPaneOpen(true);
   };
+  // A thing the address names, such as an urgent signal's notification opens,
+  // is sought in the list the address names, whatever page it is on, and then
+  // leaves the address, so Back and a reload do not seek it again. A search
+  // typed before would narrow the list, so it is cleared first, and the seek
+  // starts once the list without it is the one being opened.
+  const soughtRef = useRef<string | null>(null);
+  const seekCount = useRef(0);
+  const startSeekFromAddress = useStableCallback((ref: string) => {
+    // Counted on arrival, so a seek still running for an older address says nothing.
+    seekCount.current += 1;
+    soughtRef.current = ref;
+    setSearch(EMPTY_INBOX_SEARCH);
+    void navigate({
+      to: "/inbox",
+      search: (previous) => ({ ...previous, thing: undefined }),
+      replace: true,
+    });
+  });
+  const seekSoughtThing = useStableCallback(() => {
+    const ref = soughtRef.current;
+    if (ref === null || isSearching(searched)) return;
+    soughtRef.current = null;
+    const seek = seekCount.current;
+    void visit.seek(ref).then((result) => {
+      // A later address, or the user's own move to another list, replaced this
+      // seek, so it says nothing.
+      if (seek !== seekCount.current || result === "cancelled") return;
+      if (result === "absent") {
+        moves.say(THING_NOT_IN_LIST);
+        return;
+      }
+      visit.select({ kind: "clear" });
+      setIsPaneOpen(true);
+    });
+  });
+  useEffect(() => {
+    if (thing !== undefined) startSeekFromAddress(thing);
+  }, [thing, startSeekFromAddress]);
+  const isSearchClear = !isSearching(searched);
+  useEffect(() => {
+    seekSoughtThing();
+  }, [thing, isSearchClear, seekSoughtThing]);
   const answers = useInboxAnswers({
     client,
     scope: accountScope,
@@ -645,9 +690,6 @@ export function InboxScreen({
           ? undefined
           : `Open on ${namePlugin(paneThing.source, plugins)}`
       }
-      onOpenIntake={() => {
-        void navigate({ to: "/intake" });
-      }}
       onOpenKeys={() => {
         setIsKeysOpen((isOpen) => !isOpen);
       }}

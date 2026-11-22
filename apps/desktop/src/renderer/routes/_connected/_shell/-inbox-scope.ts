@@ -8,7 +8,12 @@ import type { InboxScope, InboxSearch } from "@hercule/client-core/inbox";
 
 /** What of the search narrows the list: its clauses and its free text, not what is half typed. */
 export type InboxNarrowing = Pick<InboxSearch, "clauses" | "text">;
-import { CORE_SAVED_QUERY_IDS, MAX_INBOX_TEXT_LENGTH, type InboxList } from "@hercule/contract";
+import {
+  CORE_SAVED_QUERY_IDS,
+  isExternalRef,
+  MAX_INBOX_TEXT_LENGTH,
+  type InboxList,
+} from "@hercule/contract";
 import type { InboxSelection } from "../../../app/queries";
 
 /** The id of the saved query the Inbox opens on: the things someone waits on the user for. */
@@ -44,6 +49,9 @@ export const isSearching = (search: InboxNarrowing): boolean =>
  * - `list`: the id of a saved query. With none of the params below, the Inbox opens on the waits list.
  * - `source`, `key` and `value`: a Browse value, together. They win over `list`.
  * - `account`: the connection the Browse value is read in, when its source has several.
+ * - `thing`: the External Ref of a thing to show in the pane once the list is read, such
+ *   as the one an urgent signal's notification opens. The screen removes it
+ *   once it has shown the thing, so Back and a reload do not show it again.
  *
  * A param may be `undefined` in a search a caller builds, which removes it from the URL.
  */
@@ -53,6 +61,7 @@ export interface InboxScopeParams {
   readonly key?: string | undefined;
   readonly value?: string | undefined;
   readonly account?: string | undefined;
+  readonly thing?: string | undefined;
 }
 
 /** Checks whether `value` is a non-empty string of at most `MAX_INBOX_TEXT_LENGTH` characters. */
@@ -77,6 +86,7 @@ export const validateInboxScopeParams = (search: Record<string, unknown>): Inbox
     key: hasValue ? (search["key"] as string) : undefined,
     value: hasValue ? (search["value"] as string) : undefined,
     account: hasValue && isBoundedText(search["account"]) ? search["account"] : undefined,
+    thing: isExternalRef(search["thing"]) ? search["thing"] : undefined,
   };
 };
 

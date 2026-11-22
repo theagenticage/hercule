@@ -52,11 +52,13 @@ const describeNotifications = (seen: Seen) =>
 
 const OUTAGE: UrgentSignal = {
   signalId: "signal-1",
+  ref: "pagerduty:incident:checkout#1",
   title: "PagerDuty",
   body: "Checkout error rate above 5%",
 };
 const BREACH: UrgentSignal = {
   signalId: "signal-2",
+  ref: "sentry:issue:acme/payments#2",
   title: "Sentry",
   body: "Unhandled error in payments",
 };
@@ -138,7 +140,7 @@ describe("UrgentSignalNotifications", () => {
     expect(describeNotifications(seen)).toEqual([["PagerDuty", "closed"]]);
   });
 
-  it("notifies again for a signal that comes back to the list, as from snooze", async () => {
+  it("notifies again for a signal that leaves the list and comes back", async () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
@@ -171,7 +173,7 @@ describe("UrgentSignalNotifications", () => {
     ]);
   });
 
-  it("shows the window and asks the page to open the signal when its notification is clicked", async () => {
+  it("shows the window and asks the page to open the signal's entity when its notification is clicked", async () => {
     const seen = await runWithNotifications(false, (notifications, seen) =>
       Effect.all([
         notifications.setSignedIn(true),
@@ -181,7 +183,7 @@ describe("UrgentSignalNotifications", () => {
       ]),
     );
     expect(seen.window.calls).toEqual([
-      'showAndSend destination.open {"kind":"signal","signalId":"signal-1"}',
+      'showAndSend destination.open {"kind":"entity","ref":"pagerduty:incident:checkout#1"}',
     ]);
   });
 

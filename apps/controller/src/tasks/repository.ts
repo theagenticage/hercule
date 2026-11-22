@@ -29,13 +29,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import {
-  BOARD_STAGES,
-  type BoardStage,
-  FINISHED_STAGES,
-  isFinishedStage,
-  MAX_TRACKING_HANDOFFS,
-} from "@hercule/contract";
+import { BOARD_STAGES, type BoardStage, FINISHED_STAGES, isFinishedStage } from "@hercule/contract";
 import type { SqlError } from "effect/sql/SqlError";
 import type {
   ExternalRef,
@@ -112,27 +106,7 @@ export interface ProvenanceInput {
   readonly mergedTaskId?: string;
 }
 
-/** One handoff of a Task: the provenance entry that names the signal and the run. */
-export interface TrackedHandoff {
-  readonly signalId: string;
-  readonly runId: string;
-  readonly at: string;
-}
-
-/**
- * One handoff entry of a non-deleted Task, found by the run it started, with
- * the Task's status and the handoff entry appended right after it.
- */
-export interface LegHandoff {
-  readonly runId: string;
-  readonly signalId: string;
-  readonly taskId: string;
-  readonly taskStatus: TaskStatus;
-  /** The Task's next handoff entry, by time then append order. Absent for the Task's newest handoff. */
-  readonly next?: TrackedHandoff;
-}
-
-/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card and Your work show. */
+/** The active Task of a ref (see `findActiveTaskForRef`), with the columns a card shows. */
 export interface ActiveTaskOnRef {
   readonly ref: ExternalRef;
   readonly id: string;
@@ -173,13 +147,6 @@ export interface LinkTimes {
   readonly linkedAt: string;
   /** Undefined for a link the user has not taken on. */
   readonly takenAt: string | undefined;
-}
-
-/** A Task that Tracking follows, with its newest handoffs, newest first. */
-export interface TrackedTask {
-  readonly id: string;
-  readonly title: string;
-  readonly handoffs: ReadonlyArray<TrackedHandoff>;
 }
 
 /**
@@ -1247,107 +1214,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the oldest handoff entry of a Task: the provenance entry that
-     * names a signal, earliest `at` first. It is none when the Task does not
-     * exist, is deleted or merged, or has no handoff entry. One lookup on
-     * `task_provenance_handoff` that reads one entry, however many the Task
-     * has, and none of the Task's other provenance.
-     */
-    readFirstHandoff: (id: string): Effect.Effect<Option.Option<TrackedHandoff>, SqlError> =>
-      Effect.map(
-        sql<{
-          readonly signal_id: Uint8Array;
-          readonly run_id: Uint8Array | null;
-          readonly at: string;
-        }>`
-          SELECT p.signal_id, p.run_id, p.at
-          FROM tasks t CROSS JOIN task_provenance p ON p.rowid = (
-            SELECT rowid FROM task_provenance
-            WHERE task_id = t.id AND signal_id IS NOT NULL
-            ORDER BY at, rowid LIMIT 1)
-          WHERE t.id = ${uuidFromString(id)} AND ${buildLiveTaskSql("t")}`,
-        (rows) => {
-          const row = rows[0];
-          // A handoff entry always names the run it started.
-          return row === undefined || row.run_id === null
-            ? Option.none()
-            : Option.some({
-                signalId: uuidToString(row.signal_id),
-                runId: uuidToString(row.run_id),
-                at: row.at,
-              });
-        },
-      ),
-
-    /**
-     * Returns, for each `{ runId, taskId }` pair, the handoff entry of the
-     * Task `taskId` that started the run `runId`, with the Task's status and the
-     * Task's next handoff entry. A pair whose Task is deleted or merged, or has no
-     * handoff entry for that run, is left out. The next handoff entry is the
-     * one that follows this one by time, then by the order it was appended
-     * (`at`, then `rowid`): the same order `readFirstHandoff` and `listTracked`
-     * use. It is looked for among all the Task's handoff entries.
-     *
-     * One statement, and its work follows the pairs, never the handoffs of
-     * their Tasks. Each pair finds its entry by the run and the Task on
-     * `task_provenance_handoff_run`, then its Task by key, then the next entry
-     * by seeking `task_provenance_handoff` (task, then time) just after the
-     * entry, which reads one entry however long the Task's history is. The
-     * pairs reach SQLite as one JSON text, so the statement does not grow
-     * with the number of pairs.
-     */
-    listLegHandoffs: (
-      pairs: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
-    ): Effect.Effect<ReadonlyArray<LegHandoff>, SqlError> =>
-      pairs.length === 0
-        ? Effect.succeed([])
-        : Effect.map(
-            sql<{
-              readonly run_id: Uint8Array;
-              readonly signal_id: Uint8Array;
-              readonly task_id: Uint8Array;
-              readonly status: TaskStatus;
-              readonly next_run_id: Uint8Array | null;
-              readonly next_signal_id: Uint8Array | null;
-              readonly next_at: string | null;
-            }>`
-              SELECT p.run_id, p.signal_id, t.id AS task_id, t.status,
-                     n.run_id AS next_run_id, n.signal_id AS next_signal_id, n.at AS next_at
-              FROM json_each(${JSON.stringify(
-                pairs.map((pair) => [
-                  pair.runId.replaceAll("-", ""),
-                  pair.taskId.replaceAll("-", ""),
-                ]),
-              )}) j
-              CROSS JOIN task_provenance p ON p.run_id = unhex(json_extract(j.value, '$[0]'))
-                                          AND p.signal_id IS NOT NULL
-                                          AND p.task_id = unhex(json_extract(j.value, '$[1]'))
-              CROSS JOIN tasks t ON t.id = p.task_id AND ${buildLiveTaskSql("t")}
-              LEFT JOIN task_provenance n ON n.rowid = (
-                SELECT s.rowid FROM task_provenance s
-                WHERE s.task_id = p.task_id AND s.signal_id IS NOT NULL
-                  AND (s.at, s.rowid) > (p.at, p.rowid)
-                ORDER BY s.at, s.rowid LIMIT 1)`,
-            (rows) =>
-              rows.map((row) => ({
-                runId: uuidToString(row.run_id),
-                signalId: uuidToString(row.signal_id),
-                taskId: uuidToString(row.task_id),
-                taskStatus: row.status,
-                // A handoff entry always names the run it started.
-                ...(row.next_run_id === null || row.next_signal_id === null || row.next_at === null
-                  ? {}
-                  : {
-                      next: {
-                        signalId: uuidToString(row.next_signal_id),
-                        runId: uuidToString(row.next_run_id),
-                        at: row.next_at,
-                      },
-                    }),
-              })),
-          ),
-
-    /**
      * Returns the live Task an id stands for (the Task with that id, or the
      * Task it was merged into) together with its card on the Work board. The
      * card is `undefined` for a Task at `done` or `dropped`, where the board
@@ -1498,84 +1364,6 @@ const make = Effect.gen(function* () {
             else refs.push(row.ref);
           }
           return links;
-        },
-      ),
-
-    /**
-     * Returns every Task that is not finished and has a handoff entry, the
-     * most recently updated Task first. A Task is finished at `done` or
-     * `dropped`; the other five stages are the board stages. Each Task holds
-     * its newest handoff entries, at most `MAX_TRACKING_HANDOFFS`, newest
-     * first: by time, then by the order they were appended, as in
-     * `readFirstHandoff` and `listLegHandoffs`. A deleted or merged Task is left out.
-     *
-     * One statement, and its work follows the unfinished Tasks, not the
-     * handoffs ever made. It walks them on the stage index (one range per
-     * stage), and for each one looks up the end of its range in
-     * `task_provenance_handoff` (task, then time), so a Task that has no
-     * handoff costs one probe, and a Task with thousands reads ten entries.
-     * The handoffs of finished Tasks are never touched. `CROSS JOIN` makes
-     * SQLite keep that order, because it never reorders one.
-     */
-    listTracked: (): Effect.Effect<ReadonlyArray<TrackedTask>, SqlError> =>
-      Effect.map(
-        sql<{
-          readonly task_id: Uint8Array;
-          readonly title: string;
-          readonly updated_at: string;
-          readonly signal_id: Uint8Array;
-          readonly run_id: Uint8Array | null;
-          readonly at: string;
-          readonly appended: number;
-        }>`
-          SELECT t.id AS task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at,
-                 p.rowid AS appended
-          FROM tasks t CROSS JOIN task_provenance p ON p.rowid IN (
-            SELECT rowid FROM task_provenance
-            WHERE task_id = t.id AND signal_id IS NOT NULL
-            ORDER BY at DESC, rowid DESC LIMIT ${MAX_TRACKING_HANDOFFS})
-          WHERE t.stage IN ${sql.in(BOARD_STAGES)} AND ${buildLiveTaskSql("t")}`,
-        (rows) => {
-          const byTask = new Map<
-            string,
-            {
-              id: string;
-              title: string;
-              updatedAt: string;
-              handoffs: Array<TrackedHandoff & { readonly appended: number }>;
-            }
-          >();
-          for (const row of rows) {
-            // A handoff entry always names the run it started.
-            if (row.run_id === null) continue;
-            const id = uuidToString(row.task_id);
-            const task = byTask.get(id);
-            const handoff = {
-              signalId: uuidToString(row.signal_id),
-              runId: uuidToString(row.run_id),
-              at: row.at,
-              appended: row.appended,
-            };
-            if (task === undefined) {
-              byTask.set(id, {
-                id,
-                title: row.title,
-                updatedAt: row.updated_at,
-                handoffs: [handoff],
-              });
-            } else {
-              task.handoffs.push(handoff);
-            }
-          }
-          return [...byTask.values()]
-            .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
-            .map(({ id, title, handoffs }) => ({
-              id,
-              title,
-              handoffs: handoffs
-                .toSorted((a, b) => b.at.localeCompare(a.at) || b.appended - a.appended)
-                .map(({ signalId, runId, at }) => ({ signalId, runId, at })),
-            }));
         },
       ),
 
@@ -2305,9 +2093,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Moves the provenance entries of the Task `sourceId` to `targetId`, whole:
-     * each keeps its own `at`, `actor` and fields. Tracking joins an entry to
-     * the run it names (`runs.task_id`), so the caller moves the runs in the
-     * same transaction.
+     * each keeps its own `at`, `actor` and fields. A handoff entry names the run
+     * it started, and that run works on the Task (`runs.task_id`), so the
+     * caller moves the runs in the same transaction to keep both on one Task.
      */
     moveProvenance: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(

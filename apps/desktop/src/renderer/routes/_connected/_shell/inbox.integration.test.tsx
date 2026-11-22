@@ -25,6 +25,7 @@ import {
   readRowTitles,
   request,
   QUERY_PATH,
+  waitForUndoLine,
 } from "./-inbox.testing";
 
 beforeEach(() => {
@@ -143,6 +144,31 @@ describe("the Inbox screen", () => {
     expect(calls.some((call) => call.path === `/api/v1/external-entities/${LOYALTY.id}`)).toBe(
       true,
     );
+  });
+
+  it("shows the thing the address names in the pane, as an urgent signal's notification opens it, then drops it from the address", async () => {
+    const { router } = await openInbox(
+      defaultInbox(),
+      {},
+      `/inbox?thing=${encodeURIComponent(LOYALTY.ref)}`,
+    );
+
+    await waitFor(() => {
+      expect(
+        within(document.getElementById("inbox-pane")!).getByRole("heading", {
+          name: new RegExp(`^${LOYALTY.title}`),
+        }),
+      ).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(router.state.location.search).not.toHaveProperty("thing");
+    });
+  });
+
+  it("says so when the thing the address names is not in the list", async () => {
+    await openInbox(defaultInbox(), {}, "/inbox?thing=acme%3Areview%3A999");
+
+    await waitForUndoLine("That thing is not in this list.");
   });
 
   it("reads each thing for the pane once while walking, and reads none again when walking back", async () => {

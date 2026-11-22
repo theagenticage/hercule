@@ -944,8 +944,7 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 
 /* ---------- Tabs ---------- */
-/* Topic tabs in a bar, such as Intake's sources: text on a tint while
-   selected, with a count beside. */
+/* Topic tabs in a bar: text on a tint while selected, with a count beside. */
 .tabs {
   display: flex;
   align-items: center;

@@ -148,6 +148,9 @@ export interface InboxVisitSnapshot<Row extends InboxVisitRow, Query> {
   readonly lastChange: InboxVisitChange | null;
 }
 
+/** How a `seek` ended: the thing is current, the list does not hold it, or the seek was replaced. */
+export type SeekResult = "found" | "absent" | "cancelled";
+
 export interface InboxVisit<Row extends InboxVisitRow, Query> {
   /**
    * Starts visiting the list of `query`, from its first page. The previous
@@ -222,6 +225,23 @@ export interface InboxVisit<Row extends InboxVisitRow, Query> {
    * row for `ref`.
    */
   readonly reveal: (ref: string) => boolean;
+  /**
+   * Looks for the thing `ref` in the list and, once found, reveals it as
+   * `reveal` does. It waits for a list that is being opened and for a
+   * refresh or a Show under way, takes in the arrivals when the thing waits
+   * behind "N new", and otherwise asks the controller for the thing's row in
+   * the list, in one read, and takes that row in as an arrival. A row the
+   * first page does not rank goes to the top of the list, as any arrival
+   * does, so the thing shows whatever page it is on, and a later read moves
+   * it to its place. Resolves:
+   *
+   * - `found` once the thing is current;
+   * - `absent` when the list does not hold it, or a read fails;
+   * - `cancelled` when a later `seek`, `open` or `close` replaces this one.
+   *
+   * A screen that must show one given thing, whatever page it is on, uses it.
+   */
+  readonly seek: (ref: string) => Promise<SeekResult>;
   /**
    * Returns what a move acts on (see `listMoveTargets`): the selection or the
    * current entry, or with `hoveredKey` that entry (the selection when it is in it).
@@ -304,6 +324,21 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
   /** The things the user linked, until the first read issued after the link applies. */
   let pendingLink: { readonly refs: readonly string[] } | null = null;
   let lastChange: InboxVisitChange | null = null;
+  /**
+   * The thing `seek` looks for:
+   *
+   * - `ref` and `finish`, what to call when the search ends;
+   * - `asked`, the read that asks the controller for the thing's row: null
+   *   until it is asked, and aborted when the search ends;
+   * - `row`, the row that read returned, added to the arrivals again if a
+   *   refresh replaced them before they were taken in.
+   */
+  let sought: {
+    readonly ref: string;
+    readonly finish: (result: SeekResult) => void;
+    asked: AbortController | null;
+    row: Row | null;
+  } | null = null;
   const listeners = new Set<() => void>();
   let snapshot = buildSnapshot(null);
 
@@ -337,15 +372,89 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     };
   }
 
-  /** Rebuilds the snapshot and tells the listeners, unless nothing the screen draws changed. */
+  /**
+   * Rebuilds the snapshot and tells the listeners, unless nothing the screen
+   * draws changed. Then moves a `seek` on, because every read that ends
+   * commits.
+   */
   function commit(): void {
     const next = buildSnapshot(snapshot);
     const isUnchanged = (Object.keys(next) as (keyof typeof next)[]).every((key) =>
       Object.is(next[key], snapshot[key]),
     );
-    if (isUnchanged) return;
-    snapshot = next;
-    for (const listener of [...listeners]) listener();
+    if (!isUnchanged) {
+      snapshot = next;
+      for (const listener of [...listeners]) listener();
+    }
+    advanceSeek();
+  }
+
+  /** Ends the search of `seek` with `result`. */
+  function endSeek(result: SeekResult): void {
+    const ending = sought;
+    sought = null;
+    ending?.asked?.abort();
+    ending?.finish(result);
+  }
+
+  /**
+   * Takes the search of `seek` one step. It waits while a list is being
+   * opened or a refresh or a Show is under way, because those move rows and
+   * the current row. Then it reveals the thing once the list holds it, takes
+   * in the arrivals when it waits among them, or asks the controller for its
+   * row.
+   */
+  function advanceSeek(): void {
+    if (sought === null) return;
+    if (opening !== null) {
+      // A list is being opened: wait for its first page, unless that read failed.
+      if (opening.read === null) endSeek("absent");
+      return;
+    }
+    if (state === null || isShowPending || refreshing !== null) return;
+    const current = sought;
+    const { ref } = current;
+    if (state.rows.some((row) => row.ref === ref)) {
+      // Taken first, so the commit the reveal makes does not seek again.
+      sought = null;
+      setState(applyReveal(state, ref));
+      readStaleRows();
+      current.finish("found");
+      return;
+    }
+    if (state.arrivals.some((row) => row.ref === ref)) {
+      takeInArrivals();
+      return;
+    }
+    if (current.row !== null) setState({ ...state, arrivals: [...state.arrivals, current.row] });
+    else if (current.asked === null) askForSoughtRow(current, state.query);
+  }
+
+  /**
+   * Asks the controller, in one read, for the row of the thing `search` looks
+   * for in the list of `query`, and adds it to the arrivals, which the next
+   * step takes in. Reads no page, so a thing the list does not hold, such as
+   * one the user dismissed, costs one read. Ends the search when the list
+   * does not hold the thing or the read fails.
+   */
+  function askForSoughtRow(search: NonNullable<typeof sought>, query: Query): void {
+    const controller = new AbortController();
+    search.asked = controller;
+    reader.readRows(query, [search.ref], controller.signal).then(
+      (reply) => {
+        const row = reply.rows.find((each) => each.ref === search.ref);
+        if (sought !== search || state === null || state.query !== query) return;
+        if (row === undefined) {
+          endSeek("absent");
+          return;
+        }
+        search.row = row;
+        advanceSeek();
+      },
+      () => {
+        if (sought === search) endSeek("absent");
+      },
+    );
   }
 
   /** Replaces the state and commits, naming the transition when rows left or came. */
@@ -466,13 +575,18 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
         if (read.controller.signal.aborted) return;
         refreshing = null;
         if (isShowPending) takeInArrivals();
+        else advanceSeek();
       },
     );
   }
 
   function takeInArrivals(): void {
     isShowPending = false;
-    if (state === null || state.arrivals.length === 0) return;
+    if (state === null || state.arrivals.length === 0) {
+      // Nothing changes, so no commit moves a waiting `seek` on.
+      advanceSeek();
+      return;
+    }
     const refs = state.arrivals.map((row) => row.ref);
     setState(takeArrivals(state), { kind: "arrived", refs });
   }
@@ -609,6 +723,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
 
   return {
     open(query) {
+      endSeek("cancelled");
       cancelAll();
       isShowPending = false;
       pendingLink = null;
@@ -619,6 +734,7 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
     close() {
       cancelAll();
       opening = null;
+      endSeek("cancelled");
     },
     pushArrived,
     tasksChanged(taskIds) {
@@ -689,6 +805,13 @@ export function createInboxVisit<Row extends InboxVisitRow, Query>(
       setState(applyReveal(state, ref));
       readStaleRows();
       return true;
+    },
+    seek(ref) {
+      endSeek("cancelled");
+      return new Promise<SeekResult>((resolve) => {
+        sought = { ref, finish: resolve, asked: null, row: null };
+        advanceSeek();
+      });
     },
     targets(hoveredKey) {
       return state === null ? null : listMoveTargets(state, hoveredKey, now());

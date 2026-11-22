@@ -1287,8 +1287,8 @@ const make = Effect.gen(function* () {
      * Wanted refs are what is described by `WANTED_REFS_SQL`, without the
      * ones this Connection's inventory already lists, places included (its
      * next scan reads those). With `includesSignalRefs`, the refs of the open
-     * signals that came through this Connection are wanted as well, snoozed
-     * ones too, even when no entity exists yet: a mention of a thing no
+     * signals that came through this Connection are wanted as well, even
+     * when no entity exists yet: a mention of a thing no
      * inventory lists then gets a card. A ref backing off after a failure waits. Order: refs
      * never tried first, then the oldest attempt, then the ref, so every
      * wanted ref gets its turn however many there are.
@@ -1429,7 +1429,7 @@ const make = Effect.gen(function* () {
           hints: entityHints,
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
           ...buildDetailSignalFields(
-            yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS, environment.now),
+            yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS),
             row.reason_templates as string | null,
             environment.askingKinds,
           ),
@@ -1735,7 +1735,7 @@ const make = Effect.gen(function* () {
       askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E | SqlError, R> =>
-      inbox.recordArrivalAfterSignal(ref, { now, askingKinds }, write),
+      inbox.recordArrivalAfterSignal(ref, { askingKinds }, now, write),
 
     /**
      * Dismisses entities: they leave the Inbox until `restore`, or until an
@@ -1754,7 +1754,7 @@ const make = Effect.gen(function* () {
      * daily sweep calls it.
      *
      * - An entity goes when it has no concern from any Connection, no link to
-     *   any Task (finished ones count), no open signal (snoozed or not),
+     *   any Task (finished ones count), no open signal,
      *   is not dismissed, is not above
      *   anything concerned or linked (any number of levels up), and has not
      *   changed for 30 days. Its claims stay: they are small and they are

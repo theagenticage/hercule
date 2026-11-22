@@ -63,9 +63,8 @@ export type FieldRow =
       readonly resolves?: OperationId;
       /**
        * The query sent to the list operation `resolves` names, when its
-       * default listing does not hold the ids this field takes. `{ view:
-       * "later" }` makes `signal unsnooze` match a tail among the snoozed
-       * signals. A value is written as the operation's query schema types
+       * default listing does not hold the ids this field takes. A value is
+       * written as the operation's query schema types
        * it: `{ closed: true }`, not `"true"`. A list of queries sends each of
        * them and matches the tail among the ids of all the answers:
        * `[{}, { closed: true }]` matches among the open and the closed
@@ -700,7 +699,7 @@ export const CLI = {
       },
       handedOff: {
         flag: "handed-off",
-        help: "true for the tasks with a handoff entry in their provenance - the tasks that work the user handed to an agent from Intake - and false for the rest.",
+        help: "true for the tasks with a handoff entry in their provenance - the tasks the user handed a signal to an agent on - and false for the rest.",
       },
       text: {
         flag: "text",
@@ -713,27 +712,6 @@ export const CLI = {
     help: "Lists every unfinished task as a card on the Work board. The cards come ordered by project, then stage, then the order the user gave them in, never by recent activity. Each card gives the task's stage and priority, its project, how many threads it has, a live session when one is working on it, the question a thread has open when it does (the only thing that means a card wants the user), and the failure the task still shows when a run of it failed. A card also gives its initiative, and the tasks that still block it (a blocker that has landed, or is done or dropped, no longer counts). The reply also counts, for each initiative, how many of its tasks are done, because done tasks have no card. At most 1000 cards come back; the reply says when there were more. Needs the session read grant and the run read grant as well as the task read grant; without all three the call fails with forbidden.",
     examples: [{ args: [] }],
     fields: {},
-  },
-  "task.queryTracking": {
-    command: "task tracking",
-    help: "Lists the work handed off from Intake that is still followed. It is every unfinished task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, its newest live run when one is going, the ids of all its live runs, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
-    examples: [{ args: [] }],
-    fields: {},
-  },
-  "task.queryLegs": {
-    command: "task legs",
-    help: "Shows, for each run you name, where the handoff that started it stands. A leg is one handoff of a signal to a task's workflow plus every run that re-ran it, however many re-runs deep. Each leg gives the task and its status, the workflow, how many times the handoff's run was re-run, the newest run of the leg, the ids of its live runs, and the task's next handoff when the user handed the task on. A run that is not the run of a handoff of a task that exists is left out. Needs the run read grant as well as the task read grant.",
-    examples: [
-      { args: ["--run", "1f3a9c2e"] },
-      { args: ["--run", "1f3a9c2e", "--run", "7b2d40aa"] },
-    ],
-    fields: {
-      runIds: {
-        flag: "run",
-        help: "A handoff's run, by its id or a tail of eight or more characters; repeat the flag for up to 50 runs. Find a task's handoff runs with `hercule task read-tracking`.",
-        resolves: "run.query",
-      },
-    },
   },
   "task.read": {
     command: "task read",
@@ -761,18 +739,6 @@ export const CLI = {
     errors: {
       invalid_state:
         "the task is done or dropped, so it has no card to show details for; reopen it with `hercule task update --stage` first",
-    },
-  },
-  "task.readTracking": {
-    command: "task read-tracking",
-    help: "Shows what Intake's Tracking pane draws for one handed-off task. It gives the first handoff (the signal, the run it started and when), the newest runs oldest first with the session of each run's last agent step, what the newest run's last agent step produced, and the action step the run ended on when it ended on one. The output is cut to a short text, or to the top-level fields of a structured output with their labels; arrays and objects are counted, not shown. Fails with not_found for a task that was never handed off. Needs the run read grant as well as the task read grant.",
-    examples: [{ args: ["1f3a9c2e"] }],
-    fields: {
-      id: {
-        positional: true,
-        help: "The task's id, or a tail of eight or more characters.",
-        resolves: "task.query",
-      },
     },
   },
   "task.create": {
@@ -1321,17 +1287,16 @@ export const CLI = {
 
   "signal.query": {
     command: "signal list",
-    help: "Lists the signals on your To do list: what asks for your move now. --view later lists the snoozed signals, soonest back first, and --view done the resolved ones, newest first; those two are read a page at a time. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
+    help: "Lists your open signals: what asks for your move now, oldest first. --view done lists the resolved ones instead, newest first, a page at a time. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
     examples: [
       { args: [] },
       { args: ["--kind", "unsure"] },
-      { args: ["--view", "later"] },
       { args: ["--view", "done", "--limit", "20"] },
     ],
     fields: {
       view: {
         flag: "view",
-        help: "to-do, the signals that ask for your move now, which is the default and is never paged; later, the snoozed ones; or done, the resolved ones.",
+        help: "to-do, the signals that ask for your move now, which is the default and is never paged; or done, the resolved ones.",
       },
       kind: {
         flag: "kind",
@@ -1342,12 +1307,6 @@ export const CLI = {
         help: "Only signals whose kind belongs to this plugin, such as github.",
       },
     },
-  },
-  "signal.queryYourWork": {
-    command: "signal your-work",
-    help: "Lists Your work: the open and in-progress tasks that belong to an open signal, snoozed or not. A task appears once, with the ids of the open signals it belongs to, newest update first. Snoozes are not judged here: the app matches the rows against its own To do list, so a snooze that runs out never leaves the two out of step. It is worked out when you ask and never stored. Needs the task read grant as well as the signal read grant.",
-    examples: [{ args: [] }],
-    fields: {},
   },
   "signal.read": {
     command: "signal read",
@@ -1363,7 +1322,7 @@ export const CLI = {
   },
   "signal.raise": {
     command: "signal raise",
-    help: "Puts a proposal, an offer, an unsure item or an FYI on the user's Intake. A proposal carries the task it proposes in --task and takes no actions; the user's Accept creates the task. An action runs one operation as the user when the user takes it: task.create, task.update, run.start, or a plugin action that may answer a signal, such as github/pr.merge. Its input is the operation's whole input as one object, ids included. Returns the signal's id.",
+    help: "Puts a proposal, an offer, an unsure item or an FYI in front of the user. A proposal carries the task it proposes in --task and takes no actions; the user's Accept creates the task. An action runs one operation as the user when the user takes it: task.create, task.update, run.start, or a plugin action that may answer a signal, such as github/pr.merge. Its input is the operation's whole input as one object, ids included. Returns the signal's id.",
     examples: [
       {
         args: [
@@ -1479,58 +1438,13 @@ export const CLI = {
   },
   "signal.markDone": {
     command: "signal done",
-    help: "Marks signals done, as you, without telling their source. Each one leaves To do with the outcome Done, nothing sent. A signal already resolved is skipped and listed in skipped. Only a kind that offers Done can be marked done; a proposal, an offer or an unsure item is answered with `hercule signal act` instead.",
+    help: "Marks signals done, as you, without telling their source. Each one is resolved with the outcome Done, nothing sent. A signal already resolved is skipped and listed in skipped. Only a kind that offers Done can be marked done; a proposal, an offer or an unsure item is answered with `hercule signal act` instead.",
     examples: [{ args: ["0b1c2d3e"] }, { args: ["0b1c2d3e", "9f8e7d6c"] }],
     fields: {
       signalIds: {
         positional: true,
         placeholder: "signal-id",
-        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to mark them done in one call.",
-        resolves: "signal.query",
-      },
-    },
-    errors: { forbidden: USER_ONLY_FORBIDDEN },
-  },
-  "signal.snooze": {
-    command: "signal snooze",
-    help: "Takes signals off To do until a time, without answering them. Each one waits in Later and comes back to To do when the time passes. Snoozing a snoozed signal replaces its time. A signal already resolved is skipped and listed in skipped.",
-    examples: [{ args: ["0b1c2d3e", "9f8e7d6c", "--until", "2026-10-13T09:00+02:00"] }],
-    fields: {
-      signalIds: {
-        positional: true,
-        placeholder: "signal-id",
-        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to snooze them in one call.",
-        resolves: "signal.query",
-      },
-      until: {
-        flag: "until",
-        help: "When the signals come back, as an ISO 8601 time with its offset or Z, such as 2026-10-13T09:00+02:00. It must be in the future.",
-      },
-    },
-  },
-  "signal.unsnooze": {
-    command: "signal unsnooze",
-    help: "Puts snoozed signals back on To do now. A signal that is not snoozed is left as it is, and one already resolved is skipped and listed in skipped.",
-    examples: [{ args: ["0b1c2d3e"] }],
-    fields: {
-      signalIds: {
-        positional: true,
-        placeholder: "signal-id",
-        help: "A signal's id, or a tail of eight or more characters of a snoozed signal. Give several to unsnooze them in one call.",
-        resolves: "signal.query",
-        resolvesQuery: { view: "later" },
-      },
-    },
-  },
-  "signal.lowerPriority": {
-    command: "signal lower-priority",
-    help: "Moves urgent signals out of Now, as you: each one goes from urgent to high. A signal that is not urgent is left as it is, and one already resolved is skipped and listed in skipped.",
-    examples: [{ args: ["0b1c2d3e"] }],
-    fields: {
-      signalIds: {
-        positional: true,
-        placeholder: "signal-id",
-        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to lower them in one call.",
+        help: "A signal's id, or a tail of eight or more characters of an open signal. Give several to mark them done in one call.",
         resolves: "signal.query",
       },
     },
@@ -1918,7 +1832,7 @@ export const CLI = {
   },
   "ignoreRule.create": {
     command: "ignore-rule create",
-    help: "Stops signals of one kind with these values from being raised. It also takes the matching open ones off your list. The events still arrive and show in Everything. Each value must be one of the kind's match fields; to stop the whole kind, switch it off with `hercule plugin update-intake` instead. Returns the rule.",
+    help: "Stops signals of one kind with these values from being raised. It also takes the matching open ones off your list. The events still arrive, and `hercule event list --intake true` lists them. Each value must be one of the kind's match fields; to stop the whole kind, switch it off with `hercule plugin update-intake` instead. Returns the rule.",
     examples: [
       {
         args: [
@@ -2439,12 +2353,11 @@ export const CLI = {
 
   "event.query": {
     command: "event list",
-    help: "Reads the event log: external events and audit entries in one format, told apart by their kind. Use it to see what the system received and what it did about it. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
+    help: "Reads the event log: external events and audit entries in one format, told apart by their kind. Use it to see what the system received and what it did about it. Each event lists its signals - the ones raised from it or citing it as evidence, with their status and outcome - and the live subscriptions that received it, so you can tell what is already known or in flight. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
     examples: [
       { args: ["--kind", "task.created"] },
       { args: ["--since", "2026-09-15T00:00:00.000Z"] },
       { args: ["--intake", "true", "--text", "dependabot"] },
-      { args: ["--intake", "true", "--handling", "raised-signal", "--handling", "evidence"] },
       { args: ["--workflow", "1f3a9c2e", "--trigger", "new_issue"] },
       { args: ["--runner", "7b41d0a5"] },
     ],
@@ -2478,10 +2391,6 @@ export const CLI = {
       source: {
         flag: "source",
         help: "Only events from this source: a plugin's id, such as github, or a core emitter, such as manual.",
-      },
-      handling: {
-        flag: "handling",
-        help: "Only events where this came of them, repeatable for any of several: raised-signal, ended-signal, evidence (listed by a core signal such as a proposal), on-task, known-work (received by a live subscription) or no-action.",
       },
       kind: {
         flag: "kind",
@@ -5769,8 +5678,8 @@ export const NOUNS = {
   },
   signal: {
     summary:
-      "Signals: what asks for the user's move on the Intake, raised by triage and by agents.",
-    flow: "hercule signal list to see To do, hercule signal read for one in full, hercule signal act to take an action, hercule signal raise to put one on the Intake, hercule signal withdraw when its question is gone.",
+      "Signals: what asks for the user's move, raised by triage, by agents and from the events of a Connection.",
+    flow: "hercule signal list to see the open signals, hercule signal read for one in full, hercule signal act to take an action, hercule signal raise to put one on To do, hercule signal withdraw when its question is gone.",
   },
   "ignore-rule": {
     summary:

@@ -347,7 +347,7 @@ const HttpUrl = Schema.String.check(
 
 /**
  * A menu item the page carries out: Sign Out, New Thread, Office, Inbox,
- * Intake, Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
+ * Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
  * faces of the sidebar, or View > Toggle Sidebar, which hides or shows the
  * sidebar.
  * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
@@ -358,7 +358,6 @@ export const MenuCommand = Schema.Literals([
   "newThread",
   "openOffice",
   "openInbox",
-  "openIntake",
   "openWorkflows",
   "openSettings",
   "send",
@@ -379,7 +378,7 @@ export type HistoryStep = Extract<MenuCommand, "undo" | "redo">;
  *
  * - `thread`: the thread of the session `sessionId`;
  * - `assistant`: the screen of the assistant `assistantId`;
- * - `signal`: Intake, with the signal `signalId` selected.
+ * - `entity`: the Inbox, with the External Entity `ref` in its pane.
  *
  * Main passes a destination back to the page as it was sent, and never acts
  * on its kind: only the page knows how to open each one.
@@ -387,7 +386,7 @@ export type HistoryStep = Extract<MenuCommand, "undo" | "redo">;
 export const Destination = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("thread"), sessionId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("assistant"), assistantId: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("signal"), signalId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("entity"), ref: Schema.String }),
 ]);
 export type Destination = typeof Destination.Type;
 
@@ -416,12 +415,13 @@ export const WaitingRequest = Schema.Struct({
 export type WaitingRequest = typeof WaitingRequest.Type;
 
 /**
- * An open signal on To do whose priority is `urgent`, one Intake shows under
- * Now, as its notification needs it: the signal's id, and the notification's
- * text, ready to show.
+ * An open signal whose priority is `urgent`, as its notification needs it:
+ * the signal's id, the ref of the External Entity it is about, whose Inbox
+ * pane a click opens, and the notification's text, ready to show.
  */
 export const UrgentSignal = Schema.Struct({
   signalId: Schema.String,
+  ref: Schema.String,
   title: Schema.String,
   body: Schema.String,
 });
@@ -686,7 +686,7 @@ export interface MainToRendererIpcChannel {
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   /**
    * Asks the renderer to carry out a menu item the user chose: Sign Out, New
-   * Thread, Office, Intake, Workflows, Settings, Send, View > Threads,
+   * Thread, Office, Inbox, Workflows, Settings, Send, View > Threads,
    * View > Hercule or View > Toggle Sidebar.
    */
   "menu.command": {

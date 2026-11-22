@@ -38,7 +38,7 @@ import {
   DISK_USAGE_CAPABILITY,
   PROBED_TOOLCHAINS,
   type ControllerInfo,
-  type EventWithFacts,
+  type ListedEvent,
   type Harness,
   type HarnessLatestRelease,
   type ProviderAccount,
@@ -989,7 +989,7 @@ const FLEET_METRICS: FleetMetricsRecords = {
  * The audit log of each machine, newest first, as `event.query { runnerId }`
  * returns it. Atlas has five days of activity; the others only joined.
  */
-const FLEET_ACTIVITY: Readonly<Record<string, ReadonlyArray<EventWithFacts>>> = {
+const FLEET_ACTIVITY: Readonly<Record<string, ReadonlyArray<ListedEvent>>> = {
   [ATLAS_ID]: buildAtlasLog({
     providerAccountId: SPECIMEN_ACCOUNTS[0]!.id,
     runId: RUN_RECORDS.waiting.run.id,
@@ -1014,7 +1014,7 @@ export interface FleetRecords {
   /** The Runner Metrics history the graphs and the forecasts are drawn from. */
   readonly metrics: FleetMetricsRecords;
   /** Each machine's audit log, newest first, by runner id. */
-  readonly activity: Readonly<Record<string, ReadonlyArray<EventWithFacts>>>;
+  readonly activity: Readonly<Record<string, ReadonlyArray<ListedEvent>>>;
   /** The runs that spawned sessions on a machine, which name the workflow in an entry's sentence. */
   readonly runs: ReadonlyArray<Run>;
   /** The capabilities each machine negotiated, by runner id, as `runner.read` gives them. */

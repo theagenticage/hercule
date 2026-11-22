@@ -103,8 +103,8 @@ export const describeUnreadable = (part: "ask" | "thing", reason: string): strin
 
 /**
  * Returns the quiet line for the open asks the pane has no section for:
- * "3 more". It does not say "asks", because some of the hidden signals may be
- * snoozed or may not ask for a move.
+ * "3 more". It does not say "asks", because some of the hidden signals may
+ * not ask for a move.
  */
 export const describeHiddenAsks = (count: number): string => `${String(count)} more`;
 

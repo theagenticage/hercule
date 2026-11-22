@@ -7,14 +7,13 @@ const line = (id: string, createdAt: string, overrides = {}) =>
   buildSignalLine(id, id, { createdAt, ...overrides });
 
 describe("listPaneAsks", () => {
-  it("lists open, asking, unsnoozed lines newest first, ties by larger id first", () => {
+  it("lists open, asking lines newest first, ties by larger id first", () => {
     const { sections } = listPaneAsks({
-      openCount: 5,
+      openCount: 4,
       signals: [
         line("a1", "2026-11-07T09:00:00.000Z"),
         line("b2", "2026-11-07T10:00:00.000Z"),
         line("a9", "2026-11-07T10:00:00.000Z"),
-        line("c1", "2026-11-07T11:00:00.000Z", { snoozed: true }),
         line("d1", "2026-11-07T12:00:00.000Z", { asks: false }),
         line("e1", "2026-11-07T13:00:00.000Z", { status: "resolved" }),
       ],

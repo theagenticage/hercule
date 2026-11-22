@@ -35,7 +35,7 @@ interface PluginManifest {
 }
 ```
 
-*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#394](https://github.com/theagenticage/hercule/issues/394) and [#389](https://github.com/theagenticage/hercule/issues/389).)* **The mark.** Intake shows the mark of the plugin a signal or an event came from.
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#394](https://github.com/theagenticage/hercule/issues/394) and [#389](https://github.com/theagenticage/hercule/issues/389).)* **The mark.** ~~Intake shows~~ The Inbox and Settings › Signals show *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted)* the mark of the plugin a signal or an event came from.
 
 - `mark.paths` holds path `d` strings only, drawn on a fixed 16×16 viewBox. There is no SVG document, no `<style>`, no other element and no colour, so a mark cannot carry script or tracking, and the apps draw it in the theme's colour. *(Amended 2026-11-10, [#1105](https://github.com/theagenticage/hercule/issues/1105).)* A mark may declare a colour, as a plugin colour (section 4.3): `hue`, or `color`, or neither. With neither, the apps still draw it in the theme's colour. A mark whose `color` is no CSS colour is dropped as a mark with bad paths is, with the reason in `markError`.
 - The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under 4 KB. A mark that fails the check is dropped, not the plugin: the plugin loads with no mark, the apps draw its initial, and Settings > Plugins says why. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* The API returns the reason with the plugin as `markError`. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* A mark has at most 16 strings; one with more is dropped the same way.
@@ -210,7 +210,7 @@ interface EventKindDeclaration {
 interface SignalKindDeclaration {
   word: string                                 // "review-requested"; identified as "github/review-requested"
   label: string                                // "Review requested"
-  description: string                          // one line for the user, shown in Settings > Intake
+  description: string                          // one line for the user, shown in Settings > Signals (renamed from Settings > Intake by #1243)
   noun: string                                 // added 2026-11-12 (#1122), required: one signal of the kind in a sentence; singular, lower case, 1 to 40 characters: "review request"
   asks: boolean                                // added 2026-11-12 (#1122), required: an open signal of this kind asks the user for a move, so its thing is one someone waits on the user for
   from: string[]                               // the event kinds the rule reads
@@ -698,16 +698,16 @@ Failure handling:
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#397](https://github.com/theagenticage/hercule/issues/397).)*
 
-Intake settings decide what a plugin's events put into Intake. Only the core reads them: a signal kind's rule runs in the core, and so do triage's query and Everything. The plugin's code never reads them. So they are core-owned data, not plugin config. They sit beside the three levels of configuration in section 8, not inside them, and a change needs no reload of the plugin and reopens no ingest handle ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.2). There is no general key-value store for plugin settings: it would have no second consumer.
+Intake settings decide what a plugin's events put into Intake. Only the core reads them: a signal kind's rule runs in the core, and so does triage's query~~ and Everything~~ *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Everything is retired)*. The plugin's code never reads them. So they are core-owned data, not plugin config. They sit beside the three levels of configuration in section 8, not inside them, and a change needs no reload of the plugin and reopens no ingest handle ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.2). There is no general key-value store for plugin settings: it would have no second consumer.
 
 **Two switches, independent of each other:**
 
-- **Available to triage**, per event kind. When it is on, triage may read every event of the kind, and Everything lists them. The plugin declares its default in the kind's `availableToTriage` (section 4.3). A kind that is off still reaches workflows and subscriptions, and its events stay in the event log.
+- **Available to triage**, per event kind. When it is on, triage may read every event of the kind~~, and Everything lists them~~. The plugin declares its default in the kind's `availableToTriage` (section 4.3). A kind that is off still reaches workflows and subscriptions, and its events stay in the event log.
 - **On or off**, per signal kind. When it is on, the kind's rule runs on its `from` events, whatever their event kind's switch says. When it is off, the kind is never raised. A signal kind declares no default: every kind is on until the user switches it off, and a kind that a plugin update adds arrives on.
 
 Example: `github.pr.checks-completed` is not available to triage, and `github/checks-failed` is on. A failed check on the user's pull request raises a signal, and triage never reads the hundreds of green check runs a day.
 
-Which events these switches make into Intake's events, the set triage reads and Everything lists, is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings).
+Which events these switches make into Intake's events, the set triage reads~~ and Everything lists~~, is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings).
 
 **Three levels.** Each level stores only the kinds where it differs from the level below:
 
@@ -897,7 +897,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 - **User control.** The user toggles delivery per channel connection. V1 routing policy is deliver-to-all-enabled. **Producer-side muting** (silence a chatty plugin's notifications) is a separate control from sink-side toggles.
 - **Sink contract grows additively.** V1 sinks implement `deliver` (returning a delivery ref) and `resolved` (edit the delivered message when the decision is taken anywhere), and report clicks to the core, which authenticates and executes them ([./12-assistants.md](./12-assistants.md) section 11.6). Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
 - **No second path.** A plugin MUST NOT deliver a user-facing notification by any route other than the `notifications` capability, even when it has a channel connection in hand. Assistants speaking unprompted in a conversation are not notifications; the no-double-fire rule and its router mechanism are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.5.
-- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Signals are not Notifications.** A review request, or a mail the user has to answer, becomes a Signal in Intake, raised by the core from the plugin's signal kinds (section 4.3). It is its own record, never a Notification, and the `notifications` capability plays no part in it ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#91-the-record)). A plugin's Notifications are messages about the plugin itself, such as Gmail's expiring token. Signals are not delivered to chat sinks in v1.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Signals are not Notifications.** A review request, or a mail the user has to answer, becomes a Signal~~ in Intake~~, raised by the core from the plugin's signal kinds (section 4.3). It is its own record, never a Notification, and the `notifications` capability plays no part in it ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#91-the-record)). A plugin's Notifications are messages about the plugin itself, such as Gmail's expiring token. Signals are not delivered to chat sinks in v1.
 
 ## 12. V1 inventory
 

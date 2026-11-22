@@ -167,14 +167,10 @@ describe("a positional whose row resolves tails", () => {
     const signals = [buildSignal("ccccccc3"), buildSignal("ddddddd4")];
     const full = "0199e0e7-7b21-7000-8000-000000000001";
     const { fetch, client } = stubClient((request) =>
-      request.method === "GET" ? { items: signals } : { snoozed: [], skipped: [] },
+      request.method === "GET" ? { items: signals } : { done: [], skipped: [] },
     );
-    const command = lookUpCommand("signal", "snooze");
-    const args = await parseArguments(
-      command,
-      ["0ccccccc3", full, "0ddddddd4", "--until", "2026-10-13T09:00+02:00"],
-      refuseStdinRead,
-    );
+    const command = lookUpCommand("signal", "done");
+    const args = await parseArguments(command, ["0ccccccc3", full, "0ddddddd4"], refuseStdinRead);
 
     await execute(client, command, args);
 
@@ -182,33 +178,10 @@ describe("a positional whose row resolves tails", () => {
       { method: "GET", path: "/api/v1/signals" },
       {
         method: "POST",
-        path: "/api/v1/signals/snooze",
-        body: {
-          signalIds: [signals[0]!.id, full, signals[1]!.id],
-          // The CLI decodes the time to UTC, as the contract does.
-          until: "2026-10-13T07:00:00.000Z",
-        },
+        path: "/api/v1/signals/mark-done",
+        body: { signalIds: [signals[0]!.id, full, signals[1]!.id] },
       },
     ]);
-  });
-
-  it("resolves an unsnooze tail among the snoozed signals", async () => {
-    const signal = buildSignal("ccccccc3");
-    const { fetch, client } = stubClient((request) =>
-      request.method === "GET" ? { items: [signal] } : { unsnoozed: [signal.id], skipped: [] },
-    );
-    const command = lookUpCommand("signal", "unsnooze");
-    const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
-
-    await execute(client, command, args);
-
-    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/signals" });
-    expect(fetch.calls[0]!.query.get("view")).toBe("later");
-    expect(fetch.calls[1]).toMatchObject({
-      method: "POST",
-      path: "/api/v1/signals/unsnooze",
-      body: { signalIds: [signal.id] },
-    });
   });
 
   it("resolves an initiative tail among the open and the closed initiatives, for every command that takes one", async () => {

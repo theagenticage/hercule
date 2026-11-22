@@ -10,7 +10,7 @@
  * for a kind it lists no ask of.
  */
 import type { HandOffUndo, InboxAsk, InboxThing, WorkflowOffer } from "@hercule/contract";
-import { nameSignalKind } from "../intake";
+import { nameSignalKind } from "../signal-kinds";
 import { formatNameList } from "../name-list";
 import { endSentence } from "../text";
 
@@ -83,8 +83,8 @@ const listKindLabels = (kinds: readonly string[]): string =>
  * Returns the line under an offer in the menu, which says what a click ends
  * and what it leaves: "Ends Review requested. Mentioned stays open."
  *
- * `openKinds` are the kinds of the signals the card holds open, snoozed ones
- * included (`InboxThing.openKinds`, or the kinds of the open signals in the
+ * `openKinds` are the kinds of the signals the card holds open
+ * (`InboxThing.openKinds`, or the kinds of the open signals in the
  * detail read of the card).
  */
 export const describeHandOffEnds = (

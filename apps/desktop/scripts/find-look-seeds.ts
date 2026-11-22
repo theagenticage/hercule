@@ -1,5 +1,5 @@
 /**
- * Finds session and workflow ids whose face looks exactly like the Bureau
+ * Finds thread and assistant ids whose face looks exactly like the Bureau
  * book's.
  *
  * The book picks a face from a thread's full title, a workflow's name or an
@@ -14,7 +14,6 @@
  * fixtures record the ids it prints:
  *
  * - the sidebar specimen's fixture, the thread ids;
- * - the Intake specimen's fixture, the workflow ids;
  * - the Android app's book fixtures (apps/android/app/src/test/kotlin/dev/
  *   hercule/android/ui/fixtures/BookFixtures.kt), the ids of the threads and
  *   assistants on the book's phone pages.
@@ -29,9 +28,8 @@ import {
 } from "../src/renderer/faces/look.ts";
 
 /**
- * A look the book draws, and the thread title, workflow name or assistant
- * name it draws it for. An assistant's look has `headwear`; a thread's or a
- * workflow's has none.
+ * A look the book draws, and the thread title or assistant name it draws it
+ * for. An assistant's look has `headwear`; a thread's has none.
  */
 interface WantedLook {
   readonly title: string;
@@ -41,9 +39,7 @@ interface WantedLook {
   readonly headwear?: Headwear;
 }
 
-// The book's CAST entries for the two threads waiting on the user, then the
-// workflows the Intake drawing hands signals to. "Fix bug" is in CAST; the
-// book hashes the other two names, the same way `buildLook` hashes a seed.
+// The book's CAST entries for the two threads waiting on the user.
 const WANTED: ReadonlyArray<WantedLook> = [
   {
     title: "Fix 3-D Secure checkout for EU cards",
@@ -52,9 +48,6 @@ const WANTED: ReadonlyArray<WantedLook> = [
     accessories: ["tache"],
   },
   { title: "Migrate ops dashboards", hue: "mint", shape: "wide", accessories: ["bowtie"] },
-  { title: "Fix bug", hue: "iris", shape: "wide", accessories: ["glasses"] },
-  { title: "Review PR", hue: "mint", shape: "wide", accessories: ["watch"] },
-  { title: "Address review", hue: "mint", shape: "round", accessories: ["bowtie"] },
   // The other threads on the book's phone pages (mobile/office.html), from CAST.
   { title: "Read the Stripe v14 changelog", hue: "sky", shape: "tall", accessories: ["glasses"] },
   // CAST gives this thread a tache and a homburg. No hashed look wears both,

@@ -10,8 +10,6 @@ import {
 import { joinClassNames } from "../../app/join-class-names";
 import { isMotionReduced } from "../../app/motion/reduced";
 import { IconPill, ToolButton } from "../desk/toolbar";
-import { ViewPill } from "../desk/view-pill";
-import type { ViewChoice } from "../view-switch";
 import {
   INBOX_PANE_ID,
   INBOX_PANE_MAX_WIDTH,
@@ -63,14 +61,6 @@ const PILL_GIVES_WAY_BELOW = 628;
 /** How long the pane takes to fade when nothing is current, in milliseconds. */
 const PANE_FADE_MS = 140;
 
-/** The two views of the pill: the Inbox itself and Intake, which the Inbox's pill opens. */
-type InboxView = "inbox" | "intake";
-
-const VIEW_CHOICES: ReadonlyArray<ViewChoice<InboxView>> = [
-  { view: "inbox", label: "Inbox" },
-  { view: "intake", label: "Intake" },
-];
-
 /**
  * Returns the widest the pane may be for a frame `frameWidth` pixels wide: at
  * most `INBOX_PANE_MAX_WIDTH`, and never so wide that the list keeps less than
@@ -86,8 +76,8 @@ function computeWidestPaneWidth(frameWidth: number, railWidth: number): number {
 
 /**
  * Renders the Inbox's page: a grid of the rail, the list and the pane, with
- * the bar over all three. The bar holds the `Inbox | Intake` pill over the
- * rail, the `search` over the list, and the offline pill and the keys button
+ * the bar over all three. The bar holds the pill that names the page over
+ * the rail, the `search` over the list, and the offline pill and the keys button
  * over the pane. Every part is a slot the caller fills, and the frame
  * reads nothing.
  *
@@ -118,8 +108,7 @@ function computeWidestPaneWidth(frameWidth: number, railWidth: number): number {
  * the hand-off menu. `onStackedChange` is called with whether the pane lies
  * over the list, when that changes, for the screen's keys and focus.
  *
- * `onOpenIntake` is called by the pill's Intake tab. `onOpenKeys` is called by
- * the keys button, whose state is `isKeysOpen`. The regions have the ids of
+ * `onOpenKeys` is called by the keys button, whose state is `isKeysOpen`. The regions have the ids of
  * `INBOX_REGION_IDS`.
  */
 export function InboxFrame({
@@ -137,7 +126,6 @@ export function InboxFrame({
   onClosePane,
   onOpenAtSource,
   openAtSourceWords,
-  onOpenIntake,
   onOpenKeys,
   isKeysOpen,
   overlays,
@@ -157,7 +145,6 @@ export function InboxFrame({
   readonly onClosePane: () => void;
   readonly onOpenAtSource?: (() => void) | undefined;
   readonly openAtSourceWords?: string | undefined;
-  readonly onOpenIntake: () => void;
   readonly onOpenKeys: () => void;
   readonly isKeysOpen: boolean;
   readonly overlays?: ReactNode;
@@ -271,16 +258,11 @@ export function InboxFrame({
       style={style}
     >
       <div className="ib-bar">
+        {/* The page's h1 is hidden and the pill only draws the name, because
+            the pill gives way on a narrow window and the h1 must stay. */}
         <h1 className="visually-hidden">Inbox</h1>
-        <div className="ib-pill">
-          <ViewPill
-            label="Inbox views"
-            choices={VIEW_CHOICES}
-            view="inbox"
-            onPick={(view) => {
-              if (view === "intake") onOpenIntake();
-            }}
-          />
+        <div className="ib-pill pill" aria-hidden="true">
+          <span className="pill-title">Inbox</span>
         </div>
         {isRailFolded && (
           <>

@@ -1533,22 +1533,14 @@ describe("hercule signal", () => {
     ).toEqual(["no results"]);
   });
 
-  it("prints when a snoozed signal comes back, and the cursor of the next page", () => {
-    const until = "2999-01-01T07:00:00.000Z";
+  it("prints the cursor of the next page", () => {
     const lines = renderHuman(
-      {
-        kind: "value",
-        value: {
-          items: [{ ...signal, snooze: { until, snoozedAt: "2026-10-10T09:00:00.000Z" } }],
-          nextCursor: "abc",
-        },
-      },
+      { kind: "value", value: { items: [signal], nextCursor: "abc" } },
       lookUpCommand("signal", "list"),
       CONTROLLER_URL,
     );
 
-    expect(lines[0]).toMatch(/ +age +back$/);
-    expect(lines[1]).toMatch(new RegExp(` +${until}$`));
+    expect(lines[0]).toMatch(/ +age$/);
     expect(lines.slice(-2)).toEqual(["", "more results: --cursor abc, or --all"]);
   });
 
@@ -1569,11 +1561,11 @@ describe("hercule signal", () => {
     ]);
     expect(
       renderHuman(
-        { kind: "value", value: { unsnoozed: [], skipped: [] } },
-        lookUpCommand("signal", "unsnooze"),
+        { kind: "value", value: { done: [], skipped: [] } },
+        lookUpCommand("signal", "done"),
         CONTROLLER_URL,
       ),
-    ).toEqual(["no signal unsnoozed"]);
+    ).toEqual(["no signal done"]);
   });
 
   it("prints a signal's fields, where it came from, its blocks as text, and its actions with what each does", () => {

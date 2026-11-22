@@ -292,7 +292,7 @@ a.table-row:is(:hover, .is-on) + .table-row::before {
 }
 
 /* Not in the book, which draws no empty list: the words sit where the first
-   group's heading would, in the muted ink of Intake's empty list. */
+   group's heading would, in the muted ink. */
 .workflow-list-empty {
   margin: 0;
   padding: 14px 8px 0;

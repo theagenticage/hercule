@@ -1000,15 +1000,11 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read, Your work and the Inbox", () => {
+  it("maps a task push to the list prefix, one detail key per id and the Inbox", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
       ["task", "b"],
-      ["tracking"],
-      ["trackingDetail", "a"],
-      ["trackingDetail", "b"],
-      ["your-work"],
       ["inbox"],
       ["inbox-count"],
       ["external-entity"],
@@ -1020,9 +1016,6 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [
       queryKeys.tasks(),
       queryKeys.task("a"),
-      queryKeys.tracking(),
-      queryKeys.trackingDetail("a"),
-      queryKeys.yourWork(),
       queryKeys.inbox(),
       queryKeys.inboxCount(),
       queryKeys.externalEntity(),
@@ -1035,9 +1028,6 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", []), [
       ["tasks"],
       ["task"],
-      ["tracking"],
-      ["trackingDetail"],
-      ["your-work"],
       ["inbox"],
       ["inbox-count"],
       ["external-entity"],

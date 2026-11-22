@@ -767,7 +767,7 @@ export const buildDescribe: Effect.Effect<
               " and ",
             ),
             buildTextPart(
-              `. ${source} still sends them; they show in Everything. Also takes matching open signals off your list.`,
+              `. ${source} still sends them. Also takes matching open signals off your list.`,
             ),
           ];
         }),

@@ -19,7 +19,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { formatAge, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/client-core";
 import type {
   DeclaredEventKind,
-  EventWithFacts,
+  ListedEvent,
   Issue,
   Trigger,
   Workflow,
@@ -2184,7 +2184,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     title: string | null,
     minute: number,
     author: string | null = null,
-  ): EventWithFacts => ({
+  ): ListedEvent => ({
     id,
     source: "github",
     connectionId: CONNECTION_ID,
@@ -2200,14 +2200,11 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     title,
     author,
     signals: [],
-    resolvedSignals: [],
-    ignoredBy: null,
-    tasks: [],
     knownBy: [],
   });
 
   /** The events `on_label` holds, oldest first: more than its row lists. */
-  const HELD_EVENTS: readonly EventWithFacts[] = [
+  const HELD_EVENTS: readonly ListedEvent[] = [
     buildHeldEvent(101, "Fix the login redirect", 1, "marta"),
     buildHeldEvent(102, null, 2),
     buildHeldEvent(103, "Retry flaky uploads", 3),
@@ -2236,7 +2233,7 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
    */
   const buildTriggerRoutes = (
     triggers: readonly Trigger[],
-    heldEvents: readonly EventWithFacts[] = HELD_EVENTS,
+    heldEvents: readonly ListedEvent[] = HELD_EVENTS,
   ): Readonly<Record<string, Handler>> => {
     const held = [...triggers];
     const replaceTrigger = (triggerId: string, change: (trigger: Trigger) => Trigger): Answer => {

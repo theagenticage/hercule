@@ -121,13 +121,11 @@ export const CONCERNED_REFS_SQL = `SELECT ref FROM external_entity_observations 
 // ---------------------------------------------------------------------------
 
 /**
- * What decides who is on the Inbox at one moment: the read clock, which says
- * which snoozes have ended, and the signal kinds that ask the user for a move.
- * The asking kinds come from `listAskingKinds`, the one place that decides
- * which kinds ask.
+ * What decides who is on the Inbox besides the stored rows: the signal kinds
+ * that ask the user for a move. The asking kinds come from `listAskingKinds`,
+ * the one place that decides which kinds ask.
  */
 export interface InboxMembership {
-  readonly now: string;
   readonly askingKinds: ReadonlyArray<string>;
 }
 
@@ -136,7 +134,6 @@ export interface InboxMembership {
  * definition of "live", "taken" and "asking", shared by the reads of the whole
  * Inbox and the read of one page's asks. As a list to put after `WITH`:
  *
- * - `read_clock`: the read clock `now`.
  * - `page_refs` (only with `onlyRefs`): the refs the read is limited to.
  * - `live_links`: the live Task links, each ref's active Task at `position =
  *   1`.
@@ -145,8 +142,8 @@ export interface InboxMembership {
  *   Work set it, on the Task they make and on a Task something else made (a
  *   hand-off, a signal, an event, a session, a workflow action). Those other
  *   ways never set it themselves.
- * - `live_signals`: the open signals that are not snoozed at `now`, each
- *   marked `asking` when its kind asks.
+ * - `live_signals`: the open signals that have a thread ref, each marked
+ *   `asking` when its kind asks.
  * - `asks`: the live signals of an asking kind that nobody took. An ask is
  *   taken when the user took the thing on after it was raised, so it stays
  *   out of the list until a newer one arrives.
@@ -161,7 +158,6 @@ const buildAskTables = (
   membership: InboxMembership,
   onlyRefs: ReadonlyArray<string> | undefined,
 ): ReadonlyArray<CompiledSql> => [
-  { sql: "read_clock(now) AS (SELECT ?)", params: [membership.now] },
   ...(onlyRefs === undefined
     ? []
     : [
@@ -178,10 +174,9 @@ const buildAskTables = (
     sql: `live_signals AS MATERIALIZED (
     SELECT s.thread_ref AS ref, s.id, s.kind, s.asker, s.created_at,
       s.kind IN (SELECT value FROM json_each(?)) AS asking
-    FROM signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id
+    FROM signals s
     WHERE s.status = 'open' AND s.thread_ref IS NOT NULL
-      AND ${onlyRefs === undefined ? "" : "s.thread_ref IN (SELECT ref FROM page_refs) AND"}
-      (z.until IS NULL OR z.until <= (SELECT now FROM read_clock)))`,
+      ${onlyRefs === undefined ? "" : "AND s.thread_ref IN (SELECT ref FROM page_refs)"})`,
     params: [JSON.stringify(membership.askingKinds)],
   },
   plain(`asks AS MATERIALIZED (

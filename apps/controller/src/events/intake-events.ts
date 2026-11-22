@@ -13,9 +13,10 @@
  * here, and handed to the query as a list of rows, one per switched-on
  * (Connection, kind) pair. The query then looks each event up in the list.
  *
- * This domain cannot import the plugins or connections domains, because they
- * import this one. It reads the `plugins` and `connections` tables directly
- * and gets a plugin's level of the settings through the `PluginIntake` port.
+ * This domain cannot import the plugins, connections or signals domains,
+ * because they import this one. It reads the `plugins`, `connections`,
+ * `signals`, `signal_events` and `ignore_rule_catches` tables directly and gets
+ * a plugin's level of the settings through the `PluginIntake` port.
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
@@ -23,7 +24,31 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import type { IntakeOverrides } from "@hercule/contract";
 import { applyIntakeOverrides, type PluginIntake } from "../intake-settings";
-import { buildHasSignalBehind } from "./event-facts";
+import { buildSignalsNamingEvent } from "./event-facts";
+
+/**
+ * Builds the condition that a signal is behind the event the outer query is
+ * reading: it raised a signal or is evidence for one (`signal_events`), it
+ * ended one on its source (the signal's resolution names it), or an Ignore
+ * Rule caught it, which stopped the signal it would have raised.
+ *
+ * Each part lists the event ids from its own table and then looks the events
+ * up, because few events have a signal behind them: walking the log and
+ * checking each event would read the whole log to find a handful.
+ *
+ * The resolution's event id is written exactly as migration 72's index
+ * `signals_resolution_event` writes it, with the same `IS NOT NULL`, or SQLite
+ * does not use the index.
+ */
+const buildHasSignalBehind = (sql: SqlClient.SqlClient): Fragment =>
+  sql.or([
+    sql`events.id IN (SELECT se.event_id FROM ${buildSignalsNamingEvent(sql)})`,
+    sql`events.id IN (
+      SELECT json_extract(s.resolution, '$.eventId') FROM signals s
+      WHERE json_extract(s.resolution, '$.eventId') IS NOT NULL
+    )`,
+    sql`events.id IN (SELECT c.event_id FROM ignore_rule_catches c)`,
+  ]);
 
 /**
  * An event kind of a plugin that is switched on for triage. `connectionHex` is

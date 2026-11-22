@@ -5,14 +5,32 @@
  * the pointer or the focus, and the reply box of an answer with a text field.
  */
 import { useLayoutEffect, useRef, useState, type JSX } from "react";
-import type { SignalAction } from "@hercule/contract";
+import type { DescribeLine, SignalAction } from "@hercule/contract";
 import { DONE_ACTION_ID } from "@hercule/contract";
 import { trimAnswerEllipsis, type SignalAnswer } from "@hercule/client-core";
 import { describeDoneEffect } from "@hercule/client-core/inbox";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { isPrimaryModifierHeld } from "../../app/primary-modifier";
-import { DescribeLineText } from "../desk/signal-answers";
 import "./inbox-answers.css";
+
+/**
+ * Renders a describe line, with the parts the core marked, such as a branch
+ * or a pull request, in bold. An action with no describe line shows its
+ * description, or nothing.
+ */
+function DescribeLineText({ action }: { readonly action: SignalAction }): JSX.Element | null {
+  const line: DescribeLine | undefined = action.describeLine;
+  if (line === undefined)
+    return action.description === undefined ? null : <>{action.description}</>;
+  return (
+    <>
+      {line.map((part, index) =>
+        // The parts hold no id and never change order.
+        part.kind === "marked" ? <b key={index}>{part.text}</b> : part.text,
+      )}
+    </>
+  );
+}
 
 /**
  * The answer the user chose on an ask and what became of it. The ask takes no

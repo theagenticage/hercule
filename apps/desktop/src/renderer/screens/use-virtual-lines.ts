@@ -1,6 +1,6 @@
 /**
- * The virtual list that Intake's list, opened Tracking and the model browser
- * draw their lines in: only the lines in view and a few past each edge are
+ * The virtual list that the Inbox's list, a machine's activity and the model
+ * browser draw their lines in: only the lines in view and a few past each edge are
  * drawn, each at its estimated place, with an empty spacer before each run of
  * lines that are not drawn (spec 17 §Rules, rule 1).
  */

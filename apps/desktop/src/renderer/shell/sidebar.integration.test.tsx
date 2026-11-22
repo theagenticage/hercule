@@ -1005,8 +1005,8 @@ describe("the sidebar's Done moves", () => {
 });
 
 describe("the sidebar's faces", () => {
-  /** Returns the face switch's segment named `name`. */
-  const getSegment = (name: "Threads" | "Hercule"): HTMLElement =>
+  /** Returns the face switch's segment whose accessible name is, or matches, `name`. */
+  const getSegment = (name: string | RegExp): HTMLElement =>
     within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", { name });
 
   /** Returns the names of the segments that are selected. */
@@ -1052,7 +1052,7 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists Overview, The office, Inbox, Intake, Workflows, Discussions and Wiki, all but Inbox and Intake with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists Overview, The office, Inbox, Workflows, Discussions and Wiki, all but Inbox with no count, in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
@@ -1062,15 +1062,7 @@ describe("the sidebar's faces", () => {
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual([
-      "Overview",
-      "The office",
-      "Inbox",
-      expect.stringMatching(/^Intake/),
-      "Workflows",
-      "Discussions",
-      "Wiki",
-    ]);
+    ).toEqual(["Overview", "The office", "Inbox", "Workflows", "Discussions", "Wiki"]);
     expect(within(work).getByRole("link", { name: "Overview" }).getAttribute("href")).toBe("/work");
     expect(within(work).getByRole("link", { name: "The office" }).getAttribute("href")).toBe(
       "/office",
@@ -1092,6 +1084,45 @@ describe("the sidebar's faces", () => {
     expect(workflows.classList.contains("is-on")).toBe(true);
   });
 
+  describe("the Hercule segment's count", () => {
+    const INBOX_COUNT_ROUTE = "GET /api/v1/external-entities/inbox/count";
+
+    it("shows the Inbox's waiting count in the plain grey of the Inbox row, and names it", async () => {
+      await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: { body: buildInboxCounts({ waiting: 7 }) } },
+      });
+      const segment = getSegment("Hercule, 7 waiting");
+      const count = segment.querySelector(".count");
+      expect(count?.textContent).toBe("7");
+      expect(count?.classList.contains("count--you")).toBe(false);
+    });
+
+    it("hides the count at 0", async () => {
+      await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: { body: buildInboxCounts({ waiting: 0 }) } },
+      });
+      const segment = getSegment("Hercule");
+      expect(segment.querySelector(".count")).toBeNull();
+      expect(segment.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("follows a live change of the Inbox's count while the Inbox is closed", async () => {
+      let waiting = 2;
+      const { live } = await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: () => ({ body: buildInboxCounts({ waiting }) }) },
+      });
+      await live.waitForFirstPushes();
+      expect(getSegment("Hercule, 2 waiting")).toBeTruthy();
+
+      waiting = 3;
+      act(() => {
+        live.pushInvalidation("signal", []);
+      });
+
+      expect(await screen.findByRole("tab", { name: "Hercule, 3 waiting" })).toBeTruthy();
+    });
+  });
+
   describe("the Inbox row", () => {
     const INBOX_COUNT_ROUTE = "GET /api/v1/external-entities/inbox/count";
 
@@ -1107,7 +1138,8 @@ describe("the sidebar's faces", () => {
           },
         },
       });
-      await userEvent.click(getSegment("Hercule"));
+      // With a count, the segment's name carries it: "Hercule, 22 waiting".
+      await userEvent.click(getSegment(/^Hercule/));
       const nav = screen.getByRole("navigation", { name: "Hercule" });
       return { ...app, link: within(nav).getByRole("link", { name: /^Inbox/ }) };
     };

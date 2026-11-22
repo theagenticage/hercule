@@ -1,6 +1,6 @@
 /**
- * Words for why a run failed. The run page, a Tracking row and the controller's
- * `task.queryTracking` all say it the same way, so the words live here, where
+ * Words for why a run failed. The run page, a card on the board and the runs
+ * of a Task's details all say it the same way, so the words live here, where
  * the controller and every client can import them.
  */
 import type { FailureReason } from "./groups/run";
