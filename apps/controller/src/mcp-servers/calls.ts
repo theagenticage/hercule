@@ -84,7 +84,6 @@ import {
   UpstreamError,
   type ExchangeBroken,
   type OpenedUpstream,
-  type SessionExpired,
   type PrepareSend,
   type ToolCallProgress,
 } from "./upstream";
@@ -104,22 +103,17 @@ export class McpCallRefused extends Schema.TaggedError<McpCallRefused>()("McpCal
 }) {}
 
 /**
- * The credentials a call was about to send with its tool request are not the
- * ones its upstream session opened with, because they were renewed meanwhile.
- * The request is not sent. Only the call's own code sees this failure: it
- * retires the session and sends on a new one opened with `credentials`.
+ * The upstream session a call took cannot carry the tool's request, and the
+ * request was not sent. Either the server expired the session (`expired`), or
+ * the credentials the request carries were renewed since the session opened
+ * and its later requests cannot carry them. Only the call's own code sees this
+ * failure: it retires the session and sends on a new one opened with
+ * `credentials`.
  */
-class SessionCredentialsChanged extends Data.TaggedError("SessionCredentialsChanged")<{
+class SessionUnusable extends Data.TaggedError("SessionUnusable")<{
   readonly credentials: UpstreamCredentials;
+  readonly expired: boolean;
 }> {}
-
-/**
- * How many times a call moves to a new upstream session because the
- * credentials were renewed between taking a session and sending the tool.
- * Past it, the credentials keep changing faster than the call can open
- * sessions, and the call is refused.
- */
-const MAX_SESSION_CHANGES_FOR_RENEWAL = 2;
 
 /** What `callTool` takes. */
 export interface McpToolCall {
@@ -188,6 +182,21 @@ interface UpstreamSlot {
  * Fails when the stored definition does not fit it.
  */
 const decodeTool = (stored: StoredMcpTool) => Schema.decodeUnknownEffect(McpSchema.Tool)(stored);
+
+/**
+ * Returns whether the slot's session can carry a request that has the
+ * credentials with `identity`. A plugin server's sessions always can: its
+ * Connection renews its token under the same sign-in. A server added by URL
+ * answers the follow-up requests of an exchange only with the token its
+ * session opened with (`ServerCredentials.readWithoutRefresh`), so its session
+ * can carry only that token: otherwise the tool's own request would carry the
+ * new token and the requests that follow it would fail after the tool ran.
+ */
+const canCarryCredentials = (
+  slot: UpstreamSlot,
+  credentials: ServerCredentials,
+  identity: string,
+): boolean => credentials.sessionSurvivesRenewal || slot.credentialsIdentity === identity;
 
 /** What a call needs to know about the server it goes to, as the database holds it now. */
 interface Destination {
@@ -279,9 +288,8 @@ const make = Effect.gen(function* () {
    * Takes hold of the session for this token and server, and starts opening
    * it when there is none. A session made for an older `revision` of the
    * server, or an older `generation` of its credentials, is replaced. So is a
-   * session opened with other credentials than the ones this call sends, when
-   * the server's sessions do not survive a renewal
-   * (`ServerCredentials.sessionSurvivesRenewal`).
+   * session that cannot carry the credentials this call sends
+   * (`canCarryCredentials`).
    * `prepareSend` prepares each request of the opening. Call `releaseSlot`
    * when the call is done with it.
    */
@@ -299,8 +307,7 @@ const make = Effect.gen(function* () {
         existing !== undefined &&
         existing.serverRevision === server.revision &&
         existing.credentialsGeneration === credentialsGeneration &&
-        (access.credentials.sessionSurvivesRenewal ||
-          existing.credentialsIdentity === credentials.identity);
+        canCarryCredentials(existing, access.credentials, credentials.identity);
       if (usable) {
         existing.users += 1;
         return existing;
@@ -624,22 +631,19 @@ const make = Effect.gen(function* () {
        * which reads the credentials and checks again at that moment.
        * `credentials` only build the address of an opening.
        *
-       * Fails with `SessionCredentialsChanged`, before the tool request is
-       * sent, when the credentials read at that moment are not the ones the
-       * session opened with and the server's sessions do not survive a renewal
-       * (the same rule `holdSlot` applies when it takes the session): the
-       * follow-up requests of the exchange can only carry the opening's
-       * credentials, so the tool must not run on this session. The session is
-       * retired.
+       * Fails with `SessionUnusable`, before the tool request is sent, when the
+       * server expired the session, or when the credentials read for the tool
+       * request are not ones the session can carry (`canCarryCredentials`).
+       * The session is retired either way.
        */
-      const attemptOnce = (credentials: UpstreamCredentials) =>
+      const attempt = (credentials: UpstreamCredentials) =>
         Effect.acquireUseRelease(
           holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
           (slot) => {
             const prepareToolSend = Effect.flatMap(prepareSend, (sent) =>
-              serverCredentials.sessionSurvivesRenewal || sent.identity === slot.credentialsIdentity
+              canCarryCredentials(slot, serverCredentials, sent.identity)
                 ? Effect.succeed(sent)
-                : Effect.fail(new SessionCredentialsChanged({ credentials: sent })),
+                : Effect.fail(new SessionUnusable({ credentials: sent, expired: false })),
             );
             return Effect.flatMap(Deferred.await(slot.opening), (opened) =>
               opened
@@ -651,11 +655,13 @@ const make = Effect.gen(function* () {
                   sentValues,
                 })
                 .pipe(
+                  Effect.catchTag("SessionExpired", () =>
+                    Effect.fail(new SessionUnusable({ credentials, expired: true })),
+                  ),
                   // Nothing else may use this session, whether or not the tool
                   // can be sent again; the next call opens a new one.
                   Effect.tapError((error) =>
-                    error._tag === "SessionExpired" ||
-                    error._tag === "SessionCredentialsChanged" ||
+                    error._tag === "SessionUnusable" ||
                     (error._tag === "ExchangeBroken" && error.sessionExpired)
                       ? Effect.sync(() => forgetSlot(slot))
                       : Effect.void,
@@ -674,48 +680,34 @@ const make = Effect.gen(function* () {
             ),
         );
 
-      let sessionChangesForRenewal = 0;
-
-      /** Sends the call once, and again on a new session when a renewal made the session's credentials outdated before the tool went out. */
-      const attempt = (
-        credentials: UpstreamCredentials,
-      ): Effect.Effect<
-        McpSchema.CallToolResult,
-        UpstreamError | McpCallRefused | ExchangeBroken | SessionExpired
-      > =>
-        attemptOnce(credentials).pipe(
-          Effect.catchTag("SessionCredentialsChanged", (changed) => {
-            if (sessionChangesForRenewal >= MAX_SESSION_CHANGES_FOR_RENEWAL) {
-              return refuse(
-                "error",
-                `The sign-in of ${name} kept changing while the call was being sent. Try the call again.`,
-              );
-            }
-            sessionChangesForRenewal += 1;
-            return attempt(changed.credentials);
-          }),
-        );
-
-      // A call replaces an upstream session the server expired once, however
-      // many times it sends again after a refresh.
+      // A call moves to a new upstream session once, however many times it
+      // sends again after a refresh.
       let replacedSession = false;
 
-      /** Sends the call, and once more on a new session when the server expired the one it used. */
-      const sendReplacingExpiredSession = (
+      /**
+       * Sends the call, and once more on a new session when the session it
+       * took could not carry the tool's request (`SessionUnusable`).
+       */
+      const sendReplacingUnusableSession = (
         credentials: UpstreamCredentials,
       ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | McpCallRefused | ExchangeBroken> =>
         attempt(credentials).pipe(
-          Effect.catchTag("SessionExpired", () => {
+          Effect.catchTag("SessionUnusable", (unusable) => {
             if (replacedSession) {
-              return Effect.fail(
-                new UpstreamError({
-                  reason: "protocol",
-                  message: "The server ended the MCP session",
-                }),
-              );
+              return unusable.expired
+                ? Effect.fail(
+                    new UpstreamError({
+                      reason: "protocol",
+                      message: "The server ended the MCP session",
+                    }),
+                  )
+                : refuse(
+                    "error",
+                    `The sign-in of ${name} kept changing while the call was being sent. Try the call again.`,
+                  );
             }
             replacedSession = true;
-            return sendReplacingExpiredSession(credentials);
+            return sendReplacingUnusableSession(unusable.credentials);
           }),
         );
 
@@ -750,7 +742,7 @@ const make = Effect.gen(function* () {
       return yield* runWithCredentials({
         credentials: serverCredentials,
         guardRefresh: admit,
-        action: sendReplacingExpiredSession,
+        action: sendReplacingUnusableSession,
       }).pipe(
         Effect.catchTags({
           UpstreamError: refuseUpstreamFailure,
