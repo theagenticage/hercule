@@ -100,7 +100,11 @@ export const writeModelFiles = (directory: string, files: ModelFiles): void => {
   }
 };
 
-/** Removes an agent folder and what is in it. Never throws: a folder left behind holds only model files. */
+/**
+ * Removes an agent folder and what is in it. Never throws. A folder left
+ * behind holds the model files and, once pi has run, the copy of Hercule's
+ * extension, the session's instructions and the files pi wrote there.
+ */
 export const removeAgentFolder = (path: string): void => {
   try {
     // A few retries cover a pi that has just been killed and is still
@@ -115,10 +119,11 @@ export const removeAgentFolder = (path: string): void => {
  * Creates a private agent folder holding `files`, readable by this user only,
  * in the machine's temporary directory, and returns its path. That is where
  * the probe keeps its scratch folders too, and it keeps the folder away from
- * the Harness Home. The folder holds no key, only the model files. Throws
- * when the folder cannot be created or the files cannot be written, after
- * removing the folder. A runner that crashes leaves its folders behind, and the
- * operating system's cleanup of the temporary directory removes them.
+ * the Harness Home. When created, the folder holds no key, only the model
+ * files. Throws when the folder cannot be created or the files cannot be
+ * written, after removing the folder. A runner that crashes leaves its folders
+ * behind, and the operating system's cleanup of the temporary directory
+ * removes them.
  */
 export const createAgentFolder = (files: ModelFiles): string => {
   const path = mkdtempSync(join(tmpdir(), "hercule-pi-agent-"));

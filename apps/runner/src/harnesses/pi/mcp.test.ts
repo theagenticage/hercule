@@ -19,9 +19,10 @@ describe("what a pi process gets for MCP", () => {
     expect(launch.env).toEqual({ [MCP_GATEWAY_URL_VARIABLE]: GATEWAY_URL });
   });
 
-  it("carries no token, and not even the name of the variable that holds it", () => {
+  it("sets only the gateway's address, and names no token variable or authorization header", () => {
     const launch = decideMcpLaunch([{ name: MCP_GATEWAY_ENTRY_NAME, url: GATEWAY_URL }]);
 
+    expect(Object.keys(launch.env)).toEqual([MCP_GATEWAY_URL_VARIABLE]);
     const everything = JSON.stringify(launch);
     expect(everything).not.toContain(SESSION_TOKEN_VARIABLE);
     expect(everything).not.toContain("Bearer");
