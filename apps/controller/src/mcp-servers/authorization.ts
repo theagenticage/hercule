@@ -179,20 +179,21 @@ export interface ResourceMetadataCandidate {
 /**
  * Lists the addresses where a server's protected resource metadata may be, in
  * the order to try them (RFC 9728 section 3.1): the well-known address with
- * the server's path after it, then the well-known address of its origin. Each
- * comes with the identifier it was built from, which the metadata's `resource`
- * must equal: the server's address for the first, and its origin for the
- * second.
+ * the server's path and query after it, then the well-known address of its
+ * origin. Each comes with the identifier it was built from, which the
+ * metadata's `resource` must equal: the server's address for the first, and
+ * its origin for the second. A server whose path is only `/` has the first
+ * address with no path, and when it has a query, the second is tried too,
+ * because the metadata of such a server may be published for its origin.
  */
 export const buildResourceMetadataCandidates = (
   server: URL,
 ): ReadonlyArray<ResourceMetadataCandidate> => {
   const wellKnown = `${server.origin}/.well-known/oauth-protected-resource`;
-  if (server.pathname === "/") return [{ url: wellKnown, resource: withoutFragment(server) }];
-  return [
-    { url: `${wellKnown}${server.pathname}`, resource: withoutFragment(server) },
-    { url: wellKnown, resource: `${server.origin}/` },
-  ];
+  const path = server.pathname === "/" ? "" : server.pathname;
+  const first = { url: `${wellKnown}${path}${server.search}`, resource: withoutFragment(server) };
+  if (path === "" && server.search === "") return [first];
+  return [first, { url: wellKnown, resource: `${server.origin}/` }];
 };
 
 /**
@@ -338,7 +339,8 @@ const decodeAuthorizationServerMetadata = Schema.decodeUnknownOption(Authorizati
  * - `AuthorizationUnreadable` when the body is not metadata, when its `issuer`
  *   is not `expectedIssuer` (RFC 8414 section 3.3: otherwise a server could
  *   serve the metadata of another server), when the issuer has a query or a
- *   fragment, or when an address in it breaks the outbound rules;
+ *   fragment, when an address in it breaks the outbound rules, or when an
+ *   endpoint is http while the issuer is https;
  * - `AuthorizationUnsupported` when it does not list `S256` among its PKCE
  *   methods, because Hercule never signs in without PKCE.
  */
@@ -359,20 +361,24 @@ export const readAuthorizationServerMetadata = (
     if (issuer.search !== "" || issuer.hash !== "") {
       return yield* failUnreadable("the authorization server's issuer holds a query or a fragment");
     }
-    const authorizationEndpoint = yield* checkOutboundUrl(
+    // An https issuer never sends the client to a plaintext endpoint: the
+    // same-host exception for http is for an http issuer (a server run on the
+    // user's own machine), and does not let a secure issuer downgrade.
+    const checkEndpoint = (raw: string, what: string) =>
+      Effect.flatMap(checkOutboundUrl(raw, server, what), (url) =>
+        issuer.protocol === "https:" && url.protocol === "http:"
+          ? failUnreadable(`the ${what} is http, but its authorization server is https`)
+          : Effect.succeed(url),
+      );
+    const authorizationEndpoint = yield* checkEndpoint(
       metadata.authorization_endpoint,
-      server,
       "authorization endpoint",
     );
-    const tokenEndpoint = yield* checkOutboundUrl(
-      metadata.token_endpoint,
-      server,
-      "token endpoint",
-    );
+    const tokenEndpoint = yield* checkEndpoint(metadata.token_endpoint, "token endpoint");
     const registrationEndpoint =
       metadata.registration_endpoint == null
         ? undefined
-        : yield* checkOutboundUrl(metadata.registration_endpoint, server, "registration endpoint");
+        : yield* checkEndpoint(metadata.registration_endpoint, "registration endpoint");
     if (!(metadata.code_challenge_methods_supported ?? []).includes("S256")) {
       return yield* failUnsupported(
         "its authorization server does not offer PKCE with S256, which Hercule requires",

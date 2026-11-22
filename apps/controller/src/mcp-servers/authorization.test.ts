@@ -77,8 +77,36 @@ describe("the addresses where metadata may be", () => {
       buildResourceMetadataCandidates(new URL("https://mcp.example.com/a/mcp?k=1#top")),
     ).toEqual([
       {
-        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp",
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?k=1",
         resource: "https://mcp.example.com/a/mcp?k=1",
+      },
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
+        resource: "https://mcp.example.com/",
+      },
+    ]);
+  });
+
+  it("keeps the query of the server in the first address, and has the origin address as the fallback", () => {
+    expect(
+      buildResourceMetadataCandidates(new URL("https://mcp.example.com/a/mcp?tenant=1")),
+    ).toEqual([
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource/a/mcp?tenant=1",
+        resource: "https://mcp.example.com/a/mcp?tenant=1",
+      },
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource",
+        resource: "https://mcp.example.com/",
+      },
+    ]);
+  });
+
+  it("tries the address with the query and then the one without, for a server with a query and no path", () => {
+    expect(buildResourceMetadataCandidates(new URL("https://mcp.example.com/?tenant=1"))).toEqual([
+      {
+        url: "https://mcp.example.com/.well-known/oauth-protected-resource?tenant=1",
+        resource: "https://mcp.example.com/?tenant=1",
       },
       {
         url: "https://mcp.example.com/.well-known/oauth-protected-resource",
@@ -313,6 +341,38 @@ describe("readAuthorizationServerMetadata", () => {
     });
   });
 
+  describe("an http endpoint", () => {
+    const HTTP_ISSUER = "http://127.0.0.1:9";
+    const httpServer = new URL("http://127.0.0.1:9/mcp");
+    const httpValid = {
+      ...valid,
+      issuer: HTTP_ISSUER,
+      authorization_endpoint: `${HTTP_ISSUER}/authorize`,
+      token_endpoint: `${HTTP_ISSUER}/token`,
+      registration_endpoint: `${HTTP_ISSUER}/register`,
+    };
+
+    it("is accepted from an http issuer on the host of an http server", async () => {
+      const read = await Effect.runPromise(
+        readAuthorizationServerMetadata(httpValid, HTTP_ISSUER, httpServer),
+      );
+      expect(read.tokenEndpoint).toBe(`${HTTP_ISSUER}/token`);
+    });
+
+    it.each(["authorization_endpoint", "token_endpoint", "registration_endpoint"])(
+      "is refused as the %s of an https issuer, even on the host of an http server",
+      async (key) => {
+        const body = { ...valid, [key]: "http://127.0.0.1:9/endpoint" };
+        expect(await fails(readAuthorizationServerMetadata(body, ISSUER, httpServer))).toMatchObject(
+          {
+            _tag: "AuthorizationUnreadable",
+            message: expect.stringContaining("but its authorization server is https"),
+          },
+        );
+      },
+    );
+  });
+
   it.each([
     ["no PKCE methods", { ...valid, code_challenge_methods_supported: undefined }],
     ["only the plain PKCE method", { ...valid, code_challenge_methods_supported: ["plain"] }],
@@ -542,6 +602,62 @@ describe("the body of an answer that discovery does not read", () => {
       expect(await waitForCancel(() => server.cancelled.get)).toBe(true);
     } finally {
       await server.stop();
+    }
+  });
+});
+
+describe("the metadata requests of discovery", () => {
+  /** Starts a server that answers every request 404, and records the path and query of each GET. */
+  const startRecordingServer = () => {
+    const requested: Array<string> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) => {
+        if (request.method === "GET") {
+          const url = new URL(request.url);
+          requested.push(`${url.pathname}${url.search}`);
+        }
+        return new Response(null, { status: request.method === "POST" ? 401 : 404 });
+      },
+    });
+    return { requested, port: server.port, stop: () => server.stop(true) };
+  };
+
+  const discoverAt = (address: string) =>
+    Effect.runPromise(
+      Effect.flip(discoverAuthorization(address)).pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+  it("asks for the metadata at the address with the query of the server, then the one without", async () => {
+    const server = startRecordingServer();
+    try {
+      await discoverAt(`http://127.0.0.1:${String(server.port)}/mcp?tenant=1`);
+
+      expect(server.requested).toEqual([
+        "/.well-known/oauth-protected-resource/mcp?tenant=1",
+        "/.well-known/oauth-protected-resource",
+      ]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("asks twice for a server with a query and no path, and once for one with neither", async () => {
+    const withQuery = startRecordingServer();
+    const bare = startRecordingServer();
+    try {
+      await discoverAt(`http://127.0.0.1:${String(withQuery.port)}/?tenant=1`);
+      await discoverAt(`http://127.0.0.1:${String(bare.port)}/`);
+
+      expect(withQuery.requested).toEqual([
+        "/.well-known/oauth-protected-resource?tenant=1",
+        "/.well-known/oauth-protected-resource",
+      ]);
+      expect(bare.requested).toEqual(["/.well-known/oauth-protected-resource"]);
+    } finally {
+      await withQuery.stop();
+      await bare.stop();
     }
   });
 });
