@@ -17,6 +17,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } f
 import { join } from "node:path";
 import { afterAll, describe, expect, it, onTestFinished } from "vitest";
 import { Effect } from "effect";
+import { MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 import type { ApprovalDecision, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
@@ -236,7 +237,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real Codex session", 
         calledSoFar.push(tool);
         expect(mcp.listCalledTools()).toEqual(calledSoFar);
         // The item names the MCP Server and the tool, as the model's tool is `<server>__<tool>`.
-        const [server, name] = tool.split("__");
+        const [server, name] = tool.split(MCP_GATEWAY_TOOL_SEPARATOR);
         expect(findCallItems(run.seen).slice(-2)).toMatchObject([
           { _tag: "item.started", detail: { name, server, kind: "mcp" } },
           {

@@ -16,37 +16,40 @@ const CHANGED_ENDING = /_[0-9a-f]{6}$/;
 const CLASHING_ONE = `${"a".repeat(80)}.1780`;
 const CLASHING_OTHER = `${"a".repeat(80)}.3667`;
 
-const nameOf = (tool: string, serverName = "sentry"): string => buildToolName({ serverName, tool });
+const buildGatewayToolName = (tool: string, serverName = "sentry"): string =>
+  buildToolName({ serverName, tool });
 
 describe("buildToolName", () => {
   it("keeps an original name of letters, digits, underscores and hyphens as it is", () => {
-    expect(nameOf("search_issues")).toBe("sentry__search_issues");
-    expect(nameOf("search-pages")).toBe("sentry__search-pages");
-    expect(nameOf("GetIssue2")).toBe("sentry__GetIssue2");
+    expect(buildGatewayToolName("search_issues")).toBe("sentry__search_issues");
+    expect(buildGatewayToolName("search-pages")).toBe("sentry__search-pages");
+    expect(buildGatewayToolName("GetIssue2")).toBe("sentry__GetIssue2");
   });
 
   it("changes a name with any other character: the character becomes an underscore and a hash follows", () => {
-    expect(nameOf("get-issue.details")).toMatch(/^sentry__get-issue_details_[0-9a-f]{6}$/);
-    expect(nameOf("a b")).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
-    expect(nameOf("")).toMatch(CHANGED_ENDING);
+    expect(buildGatewayToolName("get-issue.details")).toMatch(
+      /^sentry__get-issue_details_[0-9a-f]{6}$/,
+    );
+    expect(buildGatewayToolName("a b")).toMatch(/^sentry__a_b_[0-9a-f]{6}$/);
+    expect(buildGatewayToolName("")).toMatch(CHANGED_ENDING);
   });
 
   it("gives a changed name its hash even when no other tool would clash with it", () => {
-    expect(nameOf("a.b")).toMatch(CHANGED_ENDING);
+    expect(buildGatewayToolName("a.b")).toMatch(CHANGED_ENDING);
   });
 
   it("changes an original that ends in an underscore and six hex characters, so it never equals a changed name", () => {
     const original = "list_abc123";
-    expect(nameOf(original)).toMatch(/^sentry__list_abc123_[0-9a-f]{6}$/);
+    expect(buildGatewayToolName(original)).toMatch(/^sentry__list_abc123_[0-9a-f]{6}$/);
     // The changed name of another tool is exactly such a name, and is not this one's.
-    expect(nameOf("list.")).not.toBe(nameOf(original));
+    expect(buildGatewayToolName("list.")).not.toBe(buildGatewayToolName(original));
     // Capital letters are not the hash's alphabet, so they are not reserved.
-    expect(nameOf("list_ABCDEF")).toBe("sentry__list_ABCDEF");
+    expect(buildGatewayToolName("list_ABCDEF")).toBe("sentry__list_ABCDEF");
   });
 
   it("cuts a name that passes the limit behind mcp__tools__, keeps the hash and keeps long names apart", () => {
     const long = "a".repeat(80);
-    const names = [nameOf(`${long}_one`), nameOf(`${long}_two`)];
+    const names = [buildGatewayToolName(`${long}_one`), buildGatewayToolName(`${long}_two`)];
     expect(new Set(names).size).toBe(2);
     for (const name of names) {
       expect(name.length).toBe(MAX_NAME_LENGTH);
@@ -56,19 +59,19 @@ describe("buildToolName", () => {
 
   it("keeps a name of exactly the limit and changes one a character longer", () => {
     const room = MAX_NAME_LENGTH - "sentry__".length;
-    expect(nameOf("a".repeat(room))).toBe(`sentry__${"a".repeat(room)}`);
-    expect(nameOf("a".repeat(room + 1))).toMatch(CHANGED_ENDING);
-    expect(nameOf("a".repeat(room + 1)).length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
+    expect(buildGatewayToolName("a".repeat(room))).toBe(`sentry__${"a".repeat(room)}`);
+    expect(buildGatewayToolName("a".repeat(room + 1))).toMatch(CHANGED_ENDING);
+    expect(buildGatewayToolName("a".repeat(room + 1)).length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
   });
 
   it("fits the limit for the longest server name and the longest tool name", () => {
-    const name = nameOf("x".repeat(500), "a".repeat(16));
+    const name = buildGatewayToolName("x".repeat(500), "a".repeat(16));
     expect(name.length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
     expect(name).toMatch(CHANGED_ENDING);
   });
 
   it("gives tools that differ only in a replaced character different names", () => {
-    expect(nameOf("a.b")).not.toBe(nameOf("a b"));
+    expect(buildGatewayToolName("a.b")).not.toBe(buildGatewayToolName("a b"));
   });
 });
 
@@ -76,25 +79,25 @@ describe("the names the gateway gives, pinned", () => {
   // These strings are what harnesses hold and the Thread shows. A change of the hash function, a hash over
   // the server's name too, or a change of case would change them, and so must fail here.
   it("keeps a plain name with mixed case exactly as it is", () => {
-    expect(nameOf("SearchPages")).toBe("sentry__SearchPages");
-    expect(nameOf("Get_Issue-2")).toBe("sentry__Get_Issue-2");
+    expect(buildGatewayToolName("SearchPages")).toBe("sentry__SearchPages");
+    expect(buildGatewayToolName("Get_Issue-2")).toBe("sentry__Get_Issue-2");
   });
 
   it("gives a name with punctuation the first six hex characters of the SHA-256 of the original name, whatever the server", () => {
     // `printf 'Search.Pages' | sha256sum` starts with 873eaa.
-    expect(nameOf("Search.Pages")).toBe("sentry__Search_Pages_873eaa");
-    expect(nameOf("Search.Pages", "linear")).toBe("linear__Search_Pages_873eaa");
-    expect(nameOf("get-issue.details")).toBe("sentry__get-issue_details_437857");
+    expect(buildGatewayToolName("Search.Pages")).toBe("sentry__Search_Pages_873eaa");
+    expect(buildGatewayToolName("Search.Pages", "linear")).toBe("linear__Search_Pages_873eaa");
+    expect(buildGatewayToolName("get-issue.details")).toBe("sentry__get-issue_details_437857");
     // The hash is over the UTF-8 bytes, so a character outside ASCII is part of it.
-    expect(nameOf("h\u00e9llo w\u00f6rld")).toBe("sentry__h_llo_w_rld_a1003f");
+    expect(buildGatewayToolName("h\u00e9llo w\u00f6rld")).toBe("sentry__h_llo_w_rld_a1003f");
   });
 
   it("cuts a long name to 52 characters and ends it with the hash of the whole original name", () => {
-    expect(nameOf(`${"a".repeat(80)}_one`)).toBe(`sentry__${"a".repeat(37)}_e673ba`);
+    expect(buildGatewayToolName(`${"a".repeat(80)}_one`)).toBe(`sentry__${"a".repeat(37)}_e673ba`);
   });
 
   it("changes an original that ends like a changed name, and hashes it whole", () => {
-    expect(nameOf("list_abc123")).toBe("sentry__list_abc123_502c38");
+    expect(buildGatewayToolName("list_abc123")).toBe("sentry__list_abc123_502c38");
   });
 });
 
@@ -131,7 +134,7 @@ describe("buildToolNames", () => {
     const { named, leftOut } = buildToolNames([
       { serverName: "sentry", tools: ["echo", CLASHING_ONE, CLASHING_OTHER] },
     ]);
-    expect(nameOf(CLASHING_ONE)).toBe(nameOf(CLASHING_OTHER));
+    expect(buildGatewayToolName(CLASHING_ONE)).toBe(buildGatewayToolName(CLASHING_OTHER));
     expect(named.map((one) => one.tool)).toEqual(["echo"]);
     expect(leftOut).toEqual([
       { serverName: "sentry", tool: CLASHING_ONE },
@@ -173,19 +176,29 @@ describe("findOriginalToolName", () => {
 
   it("returns the original name of the listed tool the gateway name stands for", () => {
     for (const tool of listed) {
-      expect(findOriginalToolName("notion", listed, nameOf(tool, "notion"))).toBe(tool);
+      expect(findOriginalToolName("notion", listed, buildGatewayToolName(tool, "notion"))).toBe(
+        tool,
+      );
     }
   });
 
   it("returns undefined for a name no listed tool has, after the tool left the list", () => {
     expect(
-      findOriginalToolName("notion", ["search-pages"], nameOf("search_pages", "notion")),
+      findOriginalToolName(
+        "notion",
+        ["search-pages"],
+        buildGatewayToolName("search_pages", "notion"),
+      ),
     ).toBeUndefined();
   });
 
   it("returns undefined when two listed tools have the name, because neither is offered", () => {
     expect(
-      findOriginalToolName("sentry", [CLASHING_ONE, CLASHING_OTHER], nameOf(CLASHING_ONE)),
+      findOriginalToolName(
+        "sentry",
+        [CLASHING_ONE, CLASHING_OTHER],
+        buildGatewayToolName(CLASHING_ONE),
+      ),
     ).toBeUndefined();
   });
 

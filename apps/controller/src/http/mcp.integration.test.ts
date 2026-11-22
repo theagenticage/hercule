@@ -1400,7 +1400,7 @@ describe("names a call may use", () => {
 });
 
 describe("which client a name was offered to", () => {
-  const STATELESS_LIST = () => request("tools/list", STATELESS_META);
+  const buildStatelessToolsListRequest = () => request("tools/list", STATELESS_META);
 
   it("refuses a call in the stateless era before any list, and runs it after a list", async () => {
     const thread = await spawnThread(["mcp.use"], [servers[0]]);
@@ -1411,7 +1411,7 @@ describe("which client a name was offered to", () => {
     expect(textOf(refused)).toContain("List the tools again");
     expect(listToolPostsSince(mark)).toEqual([]);
 
-    expect((await sendMcp(thread.token, STATELESS_LIST())).status).toBe(200);
+    expect((await sendMcp(thread.token, buildStatelessToolsListRequest())).status).toBe(200);
     expect((await callEcho(thread.token, "alpha__echo", undefined)).body.result.isError).toBe(
       undefined,
     );
@@ -1431,7 +1431,7 @@ describe("which client a name was offered to", () => {
     expect(listToolPostsSince(mark)).toEqual([]);
 
     // Offered to the stateless era only: a new MCP session has its own record, and it is empty.
-    expect((await sendMcp(thread.token, STATELESS_LIST())).status).toBe(200);
+    expect((await sendMcp(thread.token, buildStatelessToolsListRequest())).status).toBe(200);
     const fresh = await initialize(thread.token);
     const refusedStateful = await callEcho(thread.token, "alpha__echo", fresh.sessionId);
     expect(refusedStateful.body.result.isError).toBe(true);

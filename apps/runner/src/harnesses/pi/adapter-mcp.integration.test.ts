@@ -24,6 +24,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, onTestFinished } from "vitest";
+import { MCP_GATEWAY_TOOL_SEPARATOR } from "@hercule/protocol";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { SEARCH_ISSUES_TOOL, startFakeMcpServer, WHOAMI_TOOL } from "../fake-mcp-server.testing";
 import { buildMcpCallScript, TOOL_SEARCH_TOOL } from "./mcp-model.testing";
@@ -52,7 +53,8 @@ const UNANSWERED_MS = 500;
 const buildExpectedToolName = (tool: string): string => `mcp__tools__${tool}`;
 
 /** Returns the word of a tool's name that a prompt searches for: the part after the server's name. */
-const readSearchWord = (tool: string): string => tool.split("__")[1]!.split("_").at(-1)!;
+const readSearchWord = (tool: string): string =>
+  tool.split(MCP_GATEWAY_TOOL_SEPARATOR)[1]!.split("_").at(-1)!;
 
 type ItemEvent = Extract<HarnessEvent, { _tag: "item.started" | "item.completed" }>;
 
@@ -177,7 +179,7 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
         await run.answer(allowed, "allow");
         expect(mcp.listCalledTools()).toEqual([WHOAMI_TOOL]);
         // The item names the MCP Server and the tool, as the model's tool is `<server>__<tool>`.
-        const [server, name] = WHOAMI_TOOL.split("__");
+        const [server, name] = WHOAMI_TOOL.split(MCP_GATEWAY_TOOL_SEPARATOR);
         expect(findMcpCallItems(run.seen).slice(-2)).toMatchObject([
           { _tag: "item.started", detail: { name, server, kind: "mcp" } },
           { _tag: "item.completed", status: "completed", detail: { name, server, kind: "mcp" } },
