@@ -108,6 +108,7 @@ import {
   type SubagentReply,
 } from "./extension";
 import {
+  buildHandledInputEvents,
   endTurn,
   normalize,
   buildNormalizingState,
@@ -642,6 +643,21 @@ const announcesAgentSettled = (frame: unknown): boolean =>
   typeof frame === "object" &&
   frame !== null &&
   (frame as { readonly type?: unknown }).type === "agent_settled";
+
+/**
+ * Checks whether pi's response to a `prompt` command says that pi handled the
+ * input itself (`disposition: "handled"`): the input was one of pi's own
+ * commands, or an extension's input hook consumed it. pi then starts no agent
+ * run. The other dispositions are `started` and `queued`.
+ */
+const announcesHandledPrompt = (response: Readonly<Record<string, unknown>>): boolean => {
+  const data = response["data"];
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { readonly disposition?: unknown }).disposition === "handled"
+  );
+};
 
 /**
  * Checks whether the runner should re-prompt the turn when pi settles. All of
@@ -2217,7 +2233,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
-        yield* Effect.tapError(
+        const response = yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
             message: buildPiPrompt(input, listSkillFolders(held.ctx)),
@@ -2250,12 +2266,23 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               root.state.turnId = undefined;
             }),
         ).pipe(Effect.mapError(buildInputFailure));
+        // pi handles a prompt itself when it is one of pi's own commands, such
+        // as `/mcp`. It then starts no agent run, so it never sends
+        // `agent_settled` to end the turn, and the turn ends after the user's
+        // message below. A steer gets no such answer: pi queues it for a run
+        // that is going.
+        const handledByPi = !steered && announcesHandledPrompt(response);
         // A successful prompt reply acknowledges delivery even when Stop
         // raced it. Abort again if that reply accepted work after the first
         // abort; never let the delayed acceptance restart the stopped turn.
-        if (held.inputGeneration !== generation && root.state.turnId === turnId && !held.stopping)
+        if (
+          !handledByPi &&
+          held.inputGeneration !== generation &&
+          root.state.turnId === turnId &&
+          !held.stopping
+        )
           yield* abortTurn(root, "interrupt");
-        for (const event of buildUserMessage({
+        const userMessage = buildUserMessage({
           sessionId,
           turnId,
           text: input.text,
@@ -2264,7 +2291,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           senderSessionId: input.senderSessionId,
           steered,
           harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
-        })) {
+        });
+        for (const event of handledByPi
+          ? buildHandledInputEvents(root.state, userMessage)
+          : userMessage) {
           emit(event);
         }
         return { turnId, delivery: steered ? "steered" : "opened" };

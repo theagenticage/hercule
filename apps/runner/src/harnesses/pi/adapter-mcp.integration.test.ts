@@ -71,6 +71,10 @@ const findMcpCallItems = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<Item
       (event.detail as { readonly kind?: string } | undefined)?.kind === "mcp",
   );
 
+/** Returns the completed items that show what a user typed. */
+const findUserMessages = (seen: ReadonlyArray<HarnessEvent>) =>
+  filterByTag(seen, "item.completed").filter((event) => event.kind === "user_message");
+
 /** The things one test shares between the sessions it starts. */
 const createFixture = () => {
   const mcp = startFakeMcpServer();
@@ -213,6 +217,34 @@ describe.skipIf(binary === undefined)("MCP tool calls in a real pi session", () 
       expect(search?.status).toBe("completed");
       expect(run.listOpened()).toHaveLength(1);
       expect(opened.request.detail).toMatchObject({ toolName: buildExpectedToolName(WHOAMI_TOOL) });
+    },
+    TEST_MS,
+  );
+
+  it(
+    "ends the turn of an input that a pi command handles, and shows what the command answered",
+    async () => {
+      const { mcp, startRun } = createFixture();
+      const run = await startRun("full-access");
+
+      // `/mcp` is pi's own command, which `builtin:mcp` registers. pi runs it and starts no agent run.
+      await run.send("/mcp");
+      await run.waitReporting("the turn of /mcp ended", () => run.countCompletedTurns() === 1);
+      await run.runTurn("/mcp reconnect tools");
+
+      expect(filterByTag(run.seen, "runtime.notice").map((notice) => notice.message)).toEqual([
+        expect.stringContaining("tools: connected") as unknown,
+        expect.stringContaining('Reconnected to MCP server "tools"') as unknown,
+      ]);
+      expect(filterByTag(run.seen, "turn.started")).toHaveLength(2);
+      // The turn is over, so the next input opens a turn of its own and is not a steer into pi's idle agent.
+      await run.callTool(WHOAMI_TOOL);
+      expect(findUserMessages(run.seen).map((item) => item.detail)).toEqual([
+        { text: "/mcp" },
+        { text: "/mcp reconnect tools" },
+        { text: `find ${readSearchWord(WHOAMI_TOOL)}` },
+      ]);
+      expect(mcp.listCalledTools()).toEqual([WHOAMI_TOOL]);
     },
     TEST_MS,
   );

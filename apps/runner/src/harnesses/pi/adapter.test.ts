@@ -663,6 +663,48 @@ describe("sending an input to a pi session", () => {
     expect(listSentCommands(run.sent, "steer")).toEqual([]);
   });
 
+  it("ends the turn of a prompt that pi handled itself, so the next input opens a turn", async () => {
+    const run = await startTestSession({
+      answers: { prompt: () => ({ success: true, data: { disposition: "handled" } }) },
+    });
+
+    const handled = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/mcp" }));
+    const next = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    expect(handled.delivery).toBe("opened");
+    expect(next.delivery).toBe("opened");
+    expect(next.turnId).not.toBe(handled.turnId);
+    expect(
+      run.seen
+        .filter((event) => "turnId" in event && event.turnId === handled.turnId)
+        .map((event) => (event._tag === "item.completed" ? event.kind : event._tag)),
+    ).toEqual(["turn.started", "item.started", "user_message", "turn.completed"]);
+    expect(filterByTag(run.seen, "turn.completed")[0]).toMatchObject({
+      turnId: handled.turnId,
+      state: "completed",
+    });
+  });
+
+  it("leaves the turn to pi when pi handled a prompt after it started a run", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/start-something" }));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+    // The run starts before pi answers the prompt.
+    run.child.push({ type: "agent_start" });
+    await waitUntil("announced the turn", () => filterByTag(run.seen, "turn.started").length === 1);
+
+    run.child.push({
+      type: "response",
+      command: "prompt",
+      id: listSentCommands(run.sent, "prompt")[0]!["id"],
+      success: true,
+      data: { disposition: "handled" },
+    });
+    await sending;
+
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
+  });
+
   it("steers the running turn instead of opening a second one", async () => {
     const run = await startBusySession();
 

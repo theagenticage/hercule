@@ -862,6 +862,24 @@ const announceTurn = (state: Normalizing): HarnessEvent => {
 };
 
 /**
+ * Builds the events of an input that pi handled itself, as a pi command
+ * (`/mcp`) or an extension's input hook: no agent run started, so pi will
+ * never send `agent_settled` to end the turn. Returns `turn.started`, then
+ * `inputEvents` (the input's own events, which belong inside the turn), then
+ * the closing events and `turn.completed` of the turn.
+ *
+ * Returns `inputEvents` alone when pi has already announced the turn: a run is
+ * in flight then, and its `agent_settled` ends the turn.
+ */
+export const buildHandledInputEvents = (
+  state: Normalizing,
+  inputEvents: ReadonlyArray<HarnessEvent>,
+): ReadonlyArray<HarnessEvent> =>
+  state.announced || state.turnId === undefined
+    ? inputEvents
+    : [announceTurn(state), ...inputEvents, ...endTurn(state)];
+
+/**
  * Returns a turn an item can go in, with the events that announce it, which is
  * none when the turn is already announced. There are three cases:
  *
