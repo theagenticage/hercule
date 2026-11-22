@@ -353,6 +353,19 @@ describe("Codex asking to run a tool of an MCP server", () => {
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
   });
 
+  it("shows a tool whose name has a hyphen, and one whose name ends in a hash, as the gateway names them", async () => {
+    // Codex puts the gateway's own tool name in `_meta.tool_name`, not the spelling it shows the model.
+    for (const tool of ["notion__search-pages", "notion__search_pages_52ac82"]) {
+      const run = await pushServerRequest(ELICITATION, {
+        ...TOOL_CALL_ELICITATION_PARAMS,
+        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: tool },
+      });
+
+      const opened = await awaitOpenedRequest(run);
+      expect(opened.request.detail).toEqual({ toolName: `mcp__tools__${tool}` });
+    }
+  });
+
   it("shows a tool of another server as server/tool, not as a gateway tool", async () => {
     // A repository's own server `tools__sentry` must not look like the gateway's Sentry tool.
     const run = await pushServerRequest(ELICITATION, {
@@ -437,6 +450,21 @@ describe("Codex asking to run a tool of an MCP server", () => {
     );
 
     expect(request.itemId).toBe("call-search");
+  });
+
+  it("files the question under the call of the tool with the hyphen, not under its sibling that reads alike", async () => {
+    const request = await askAboutCall(
+      [
+        ["call-underscore", "notion__search_pages"],
+        ["call-hyphen", "notion__search-pages"],
+      ],
+      {
+        ...TOOL_CALL_ELICITATION_PARAMS,
+        _meta: { ...TOOL_CALL_ELICITATION_PARAMS._meta, tool_name: "notion__search-pages" },
+      },
+    );
+
+    expect(request.itemId).toBe("call-hyphen");
   });
 
   it("files a question that names no tool under its turn, because no call can be matched to it", async () => {
