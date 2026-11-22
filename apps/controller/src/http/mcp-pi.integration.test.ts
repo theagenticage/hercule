@@ -171,6 +171,7 @@ const withPiHome = async (
           systemPromptFile: undefined,
         },
         extensionFile,
+        decideMcpLaunch(context.mcpServers),
       ),
     ];
     const child = spawnPi(

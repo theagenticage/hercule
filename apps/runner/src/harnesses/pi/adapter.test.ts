@@ -30,6 +30,7 @@ import {
   buildContext,
   createDriving,
   createPiHome,
+  listAgentSpawns,
   TEST_ZAI_KEY,
   PRIOR,
   buildRefusal,
@@ -219,6 +220,22 @@ describe("launching pi for a session", () => {
 
     await waitUntil("deleted the session's extension", () => !existsSync(path));
     expect(run.cleanedFiles).toEqual([path]);
+  });
+
+  it("still removes the session's folder when killing what holds its extension fails", async () => {
+    const { seam, spawns } = buildFakePiSeam();
+    const adapter = makePiAdapter({
+      ...seam,
+      killProcessesHolding: () => Effect.die(new Error("the process list could not be read")),
+    });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, buildContext(createPiHome())));
+    await waitUntil("spawned a pi", () => listAgentSpawns(spawns).length === 1);
+    const folder = agentFolderOf(listAgentSpawns(spawns)[0]!);
+    expect(existsSync(folder)).toBe(true);
+
+    listAgentSpawns(spawns)[0]!.crash();
+
+    await waitUntil("removed the session's folder", () => !existsSync(folder));
   });
 
   it("resumes a native session by its transcript file, never by its id", async () => {

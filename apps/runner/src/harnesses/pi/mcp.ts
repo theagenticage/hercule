@@ -9,7 +9,7 @@ import type { ResolvedMcpServer } from "../index";
 import { MCP_GATEWAY_URL_VARIABLE } from "./extension";
 
 /** What pi's command line and environment carry for MCP. */
-interface McpLaunch {
+export interface McpLaunch {
   /** Flags to add to pi's command line. */
   readonly argv: ReadonlyArray<string>;
   /**
