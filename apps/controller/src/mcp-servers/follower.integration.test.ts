@@ -28,7 +28,7 @@ import { Effect, Redacted, Schema } from "effect";
 import { HOST_API, registerWorkflowAction, type Plugin } from "@hercule/plugin-host";
 import { OAUTH_TOKENS } from "../connections";
 import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
-import { serializeTokens } from "../connections/oauth";
+import { serializeTokens } from "../oauth";
 import { withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { buildDeskMcpServer, buildMcpServerPlugin } from "../plugins/testing";

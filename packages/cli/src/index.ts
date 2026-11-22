@@ -33,6 +33,7 @@ import { findCommandByWords, listWordsAfter, type Command } from "./commands/tre
 import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
+import { SIGN_IN_HELP, signInMcpServer } from "./mcp-sign-in";
 import { processIo, type Io } from "./io";
 
 /** Returns what `hercule setup-url` prints, or fails with the reason there is nothing to print. */
@@ -334,11 +335,18 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
 
   if ("command" in found) {
     const tokens = rest.slice(found.taken);
+    // The one command the table-driven executor cannot run: it listens for the
+    // browser. The table still gives it its spelling and help.
+    const runsByHand = found.command.id === "mcpServer.startSignIn";
     if (wantsHelp(tokens)) {
-      for (const line of buildCommandHelp(found.command)) io.out(line);
+      for (const line of buildCommandHelp(found.command, runsByHand ? SIGN_IN_HELP : undefined)) {
+        io.out(line);
+      }
       return EXIT.ok;
     }
-    return runOperation(found.command, tokens, home, io);
+    return runsByHand
+      ? signInMcpServer(found.command, tokens, home, io)
+      : runOperation(found.command, tokens, home, io);
   }
 
   const valid = listWordsAfter(words.slice(0, found.prefix));

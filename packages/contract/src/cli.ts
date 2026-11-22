@@ -4584,7 +4584,7 @@ export const CLI = {
                 flag: "token",
                 stdin: true,
                 secret: true,
-                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
+                help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 printable characters, with no `Bearer ` in front and no spaces. Without it, the first check goes with no sign-in.",
               },
             },
           },
@@ -4687,16 +4687,39 @@ export const CLI = {
         secret: true,
         required: true,
         flag: "token",
-        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 characters of letters, digits and - . _ ~ + /, with no `Bearer ` in front and no spaces.",
+        help: "The token the server expects, sent to it as a bearer token, written alone: at least 8 printable characters, with no `Bearer ` in front and no spaces.",
       },
     },
     errors: {
       validation:
-        "the token is not a bearer token: it is shorter than 8 characters, holds characters other than letters, digits and - . _ ~ + /, or has `Bearer ` in front of it or a space in it",
+        "the token is not usable: it is shorter than 8 characters, holds a character that is not printable ASCII, or has `Bearer ` in front of it or a space in it",
       invalid_state:
         "the server is a plugin server, which is reached with its Connection: reconnect that Connection with `hercule connection set-credentials` or in Settings > Connections",
     },
   },
+  "mcpServer.startSignIn": {
+    command: "mcp-server sign-in",
+    help: "Signs a server added by address in through your browser, when the server offers it. It prints the address to open, and finishes the sign-in when your browser comes back to this computer. When it cannot come back (you work over SSH), paste the address your browser ended on. The server then lists its tools again with the new sign-in, replacing a pasted token: run `hercule mcp-server read` to see the result.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The server's id, or a tail of eight or more characters.",
+        resolves: "mcpServer.query",
+      },
+      // The command's own handler listens for the browser's return on a free
+      // port of this computer and fills this in, so it is not a flag.
+      redirectUri: { hidden: true },
+    },
+    errors: {
+      invalid_state:
+        "the server is a plugin server, which is reached with its Connection: reconnect that Connection in Settings > Connections. Or the server offers no sign-in through the browser: paste a token with `hercule mcp-server set-token`. Or the server or its authorization server could not be reached, or answered what OAuth does not allow: try again later. Or another sign-in or start for this server overtook this one while it was starting: run the command again",
+    },
+  },
+  // Takes what the browser came back with. `hercule mcp-server sign-in` calls
+  // it once it has caught the return on a free port of this computer or read
+  // the address the user pasted, so no one types it as a command.
+  "mcpServer.finishSignIn": { hidden: true },
   "skill.diff": {
     command: "skill diff",
     help: "Shows what a waiting revision changes, file by file, compared with the current revision.",

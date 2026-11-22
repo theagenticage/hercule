@@ -17,7 +17,7 @@ import {
   OAUTH_TOKENS,
   type StoredConnection,
 } from "../connections";
-import { serializeTokens } from "../connections/oauth";
+import { serializeTokens } from "../oauth";
 import { buildJsonResponse, createDeviceProvider } from "../connections/testing";
 import { nowIso } from "../db";
 import { Secrets } from "../secrets";

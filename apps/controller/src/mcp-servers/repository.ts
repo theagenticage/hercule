@@ -519,12 +519,27 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the server's `sign_in_generation`, or `none` when there is no
+     * such server. The column is read on its own and is not part of
+     * `StoredMcpServerAvailability`: it follows `tools` in the table (migration
+     * 0131), so any read that selects it walks the stored tool definitions'
+     * overflow pages, and only a sign-in or a refresh may pay for that.
+     */
+    readSignInGeneration: (id: string): Effect.Effect<Option.Option<number>, SqlError> =>
+      Effect.map(
+        sql<{ readonly sign_in_generation: number }>`
+          SELECT sign_in_generation FROM mcp_servers WHERE id = ${uuidFromString(id)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.sign_in_generation),
+      ),
+
+    /**
      * Records that a pasted token was stored for a server added by URL, and
      * prepares the server to be checked with it: `signIn` becomes `token`, the
      * failed checks end, the next check is due at `at` so it happens even when
      * the request for it is lost, and `revision` goes up, so a check that
      * started with the old sign-in cannot write its result and upstream
-     * sessions opened with it end.
+     * sessions opened with it end. `sign_in_generation` goes up too, which
+     * voids a browser sign-in that was started before.
      *
      * The server goes back to `checking` with no detail, on or off: its old
      * status describes a sign-in that no longer exists. A server that is off
@@ -534,7 +549,27 @@ const make = Effect.gen(function* () {
       Effect.asVoid(
         sql`
           UPDATE mcp_servers
-          SET sign_in = 'token', ${backToChecking(at)}
+          SET sign_in = 'token', sign_in_generation = sign_in_generation + 1,
+              ${backToChecking(at)}
+          WHERE id = ${uuidFromString(id)}
+        `,
+      ),
+
+    /**
+     * Records that an OAuth sign-in was stored for a server added by URL, and
+     * prepares the server to be checked with it exactly as `writeTokenSignIn`
+     * does for a pasted token: `signIn` becomes `oauth`, the check is due at
+     * `at`, `revision` and `sign_in_generation` go up. The server offers
+     * `oauth` as its sign-in from then on, so a refresh the provider refuses
+     * still lets the user sign in again through the browser.
+     */
+    writeOAuthSignIn: (id: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`
+          UPDATE mcp_servers
+          SET sign_in = 'oauth', sign_in_offered = 'oauth',
+              sign_in_generation = sign_in_generation + 1,
+              ${backToChecking(at)}
           WHERE id = ${uuidFromString(id)}
         `,
       ),
@@ -570,6 +605,7 @@ const make = Effect.gen(function* () {
               connection_id = ${uuidFromString(source.connectionId)},
               account_id = ${source.accountId},
               url = NULL, normalized_url = NULL, sign_in = NULL, sign_in_offered = NULL,
+              sign_in_generation = sign_in_generation + 1,
               connection_generation = ${source.connectionGeneration},
               protocol_version = NULL, ${backToChecking(source.at)}
           WHERE id = ${uuidFromString(id)}

@@ -6,8 +6,9 @@
  * Upstream MCP sessions live in memory, one per Session Token and server, and
  * the first call that needs one opens it. A session is replaced when the
  * server's `revision` or the `generation` of its credentials (for a plugin
- * server, its Connection's `credentialsGeneration`) moved since it opened. It
- * is closed once the calls that use it have ended, when the gateway says its
+ * server, its Connection's `credentialsGeneration`) moved since it opened, and
+ * a server added by URL also replaces it when a renewal gave its token another
+ * identity. It is closed once the calls that use it have ended, when the gateway says its
  * token no longer serves the server (`closeUpstreamSessionsExcept`), when
  * something else replaced it, or when a committed change took the server's
  * destination away. An opening that nothing waits for any more is cancelled
@@ -29,6 +30,7 @@
  * went out is not stopped, and carries the credentials stored then.
  */
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -66,8 +68,9 @@ import {
   type ServerUnavailableReason,
 } from "./catalogue";
 import type { StoredMcpServer, StoredMcpTool } from "./repository";
-import { mcpServerSignIns } from "./sign-ins";
+import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 import {
+  buildFailureEdit,
   buildStatusFromFailure,
   buildUpstreamFailureEdit,
   mcpServerState,
@@ -98,6 +101,19 @@ export class McpCallRefused extends Schema.TaggedError<McpCallRefused>()("McpCal
   message: Schema.String,
   controllerNotServing: Schema.optionalKey(Schema.Boolean),
 }) {}
+
+/**
+ * The upstream session a call took cannot carry the tool's request, and the
+ * request was not sent. Either the server expired the session (`expired`), or
+ * the credentials the request carries were renewed since the session opened
+ * and its later requests cannot carry them. Only the call's own code sees this
+ * failure: it retires the session and sends on a new one opened with
+ * `credentials`.
+ */
+class SessionUnusable extends Data.TaggedError("SessionUnusable")<{
+  readonly credentials: UpstreamCredentials;
+  readonly expired: boolean;
+}> {}
 
 /** What `callTool` takes. */
 export interface McpToolCall {
@@ -143,6 +159,8 @@ interface UpstreamSlot {
   readonly serverRevision: number;
   /** The server's credentials generation when the slot was made (`readCredentialsGeneration`). */
   readonly credentialsGeneration: number | undefined;
+  /** The identity of the credentials the session opened with (`UpstreamCredentials.identity`). */
+  readonly credentialsIdentity: string;
   /** Ends with the open session, or the reason it could not be opened. */
   readonly opening: Deferred.Deferred<OpenedUpstream, UpstreamError>;
   /** Completing it cancels an opening that has not ended. */
@@ -165,6 +183,21 @@ interface UpstreamSlot {
  */
 const decodeTool = (stored: StoredMcpTool) => Schema.decodeUnknownEffect(McpSchema.Tool)(stored);
 
+/**
+ * Returns whether the slot's session can carry a request that has the
+ * credentials with `identity`. A plugin server's sessions always can: its
+ * Connection renews its token under the same sign-in. A server added by URL
+ * answers the follow-up requests of an exchange only with the token its
+ * session opened with (`ServerCredentials.readWithoutRefresh`), so its session
+ * can carry only that token: otherwise the tool's own request would carry the
+ * new token and the requests that follow it would fail after the tool ran.
+ */
+const canCarryCredentials = (
+  slot: UpstreamSlot,
+  credentials: ServerCredentials,
+  identity: string,
+): boolean => credentials.sessionSurvivesRenewal || slot.credentialsIdentity === identity;
+
 /** What a call needs to know about the server it goes to, as the database holds it now. */
 interface Destination {
   readonly server: StoredMcpServer;
@@ -181,7 +214,7 @@ const make = Effect.gen(function* () {
   const catalogue = yield* mcpServerCatalogue;
   const state = yield* mcpServerState;
   const connectionTypes = yield* ConnectionTypes;
-  const signIns = yield* mcpServerSignIns;
+  const signIns = yield* McpServerSignIns;
   const promotion = yield* PromotionState;
   const recordChanges = yield* RecordChanges;
   const httpClient = yield* HttpClient.HttpClient;
@@ -254,7 +287,9 @@ const make = Effect.gen(function* () {
   /**
    * Takes hold of the session for this token and server, and starts opening
    * it when there is none. A session made for an older `revision` of the
-   * server, or an older `generation` of its credentials, is replaced.
+   * server, or an older `generation` of its credentials, is replaced. So is a
+   * session that cannot carry the credentials this call sends
+   * (`canCarryCredentials`).
    * `prepareSend` prepares each request of the opening. Call `releaseSlot`
    * when the call is done with it.
    */
@@ -271,7 +306,8 @@ const make = Effect.gen(function* () {
       const usable =
         existing !== undefined &&
         existing.serverRevision === server.revision &&
-        existing.credentialsGeneration === credentialsGeneration;
+        existing.credentialsGeneration === credentialsGeneration &&
+        canCarryCredentials(existing, access.credentials, credentials.identity);
       if (usable) {
         existing.users += 1;
         return existing;
@@ -285,6 +321,7 @@ const make = Effect.gen(function* () {
         credentialsRecordId: access.credentials.credentialsRecordId,
         serverRevision: server.revision,
         credentialsGeneration,
+        credentialsIdentity: credentials.identity,
         opening: Deferred.makeUnsafe(),
         cancelOpening: Deferred.makeUnsafe(),
         scope: Scope.makeUnsafe(),
@@ -522,12 +559,43 @@ const make = Effect.gen(function* () {
        */
       const admit = Effect.asVoid(checkBeforeSend(first));
 
-      /** Returns the refusal that a failure to give credentials means for this call. */
-      const buildUnavailableRefusal = (error: ServerCredentialsUnavailable): McpCallRefused =>
-        new McpCallRefused({
-          reason: error.status,
-          message: describeRefusal(error.status, server),
-        });
+      /**
+       * Refuses the call because the server could not give credentials. When
+       * the server needs a sign-in (the provider refused the refresh), it also
+       * writes that as the server's status, as a check does: otherwise the
+       * server stays `ready` and every later call tries the same refused
+       * refresh token. The write is against the revision the call started
+       * with, so a sign-in that landed meanwhile keeps its status. Any other
+       * failure, such as a provider that cannot be reached, is for this call
+       * only (spec 21 section 5.1).
+       */
+      const refuseUnavailable = (error: ServerCredentialsUnavailable) =>
+        Effect.andThen(
+          error.status === "needs-sign-in"
+            ? absorbFailures(
+                `Writing the status of MCP server ${server.id} after its sign-in was refused`,
+                Effect.gen(function* () {
+                  const at = yield* nowIso;
+                  yield* state.writeCheckResult(
+                    server.id,
+                    basis,
+                    buildFailureEdit(
+                      server,
+                      { status: error.status, detail: error.detail, cause: error.cause ?? null },
+                      at,
+                    ),
+                    at,
+                  );
+                }),
+              )
+            : Effect.void,
+          Effect.fail(
+            new McpCallRefused({
+              reason: error.status,
+              message: describeRefusal(error.status, server),
+            }),
+          ),
+        );
 
       /**
        * Prepares a request that starts an exchange (`prepareRequest`): the
@@ -535,9 +603,10 @@ const make = Effect.gen(function* () {
        * when a check refuses, the request is not sent and the call fails with
        * the refusal.
        */
-      const prepareSend: PrepareSend<McpCallRefused> = Effect.mapError(
+      const prepareSend: PrepareSend<McpCallRefused> = Effect.catch(
         prepareRequest(serverCredentials, admit),
-        (error) => (error instanceof McpCallRefused ? error : buildUnavailableRefusal(error)),
+        (error) =>
+          error instanceof McpCallRefused ? Effect.fail(error) : refuseUnavailable(error),
       );
 
       /**
@@ -561,31 +630,45 @@ const make = Effect.gen(function* () {
        * request that starts an exchange prepares itself with `prepareSend`,
        * which reads the credentials and checks again at that moment.
        * `credentials` only build the address of an opening.
+       *
+       * Fails with `SessionUnusable`, before the tool request is sent, when the
+       * server expired the session, or when the credentials read for the tool
+       * request are not ones the session can carry (`canCarryCredentials`).
+       * The session is retired either way.
        */
       const attempt = (credentials: UpstreamCredentials) =>
         Effect.acquireUseRelease(
           holdSlot(input.upstreamScope, first, credentials, prepareOpeningSend),
-          (slot) =>
-            Effect.flatMap(Deferred.await(slot.opening), (opened) =>
+          (slot) => {
+            const prepareToolSend = Effect.flatMap(prepareSend, (sent) =>
+              canCarryCredentials(slot, serverCredentials, sent.identity)
+                ? Effect.succeed(sent)
+                : Effect.fail(new SessionUnusable({ credentials: sent, expired: false })),
+            );
+            return Effect.flatMap(Deferred.await(slot.opening), (opened) =>
               opened
                 .callTool({
                   tool: first.tool,
                   arguments: input.arguments,
-                  prepareSend,
+                  prepareSend: prepareToolSend,
                   progress,
                   sentValues,
                 })
                 .pipe(
+                  Effect.catchTag("SessionExpired", () =>
+                    Effect.fail(new SessionUnusable({ credentials, expired: true })),
+                  ),
                   // Nothing else may use this session, whether or not the tool
                   // can be sent again; the next call opens a new one.
                   Effect.tapError((error) =>
-                    error._tag === "SessionExpired" ||
+                    error._tag === "SessionUnusable" ||
                     (error._tag === "ExchangeBroken" && error.sessionExpired)
                       ? Effect.sync(() => forgetSlot(slot))
                       : Effect.void,
                   ),
                 ),
-            ),
+            );
+          },
           // The values this session sent go on with the call, so an answer of a
           // session that replaces it is cleaned of them too.
           (slot) =>
@@ -597,26 +680,34 @@ const make = Effect.gen(function* () {
             ),
         );
 
-      // A call replaces an upstream session the server expired once, however
-      // many times it sends again after a refresh.
+      // A call moves to a new upstream session once, however many times it
+      // sends again after a refresh.
       let replacedSession = false;
 
-      /** Sends the call, and once more on a new session when the server expired the one it used. */
-      const sendReplacingExpiredSession = (
+      /**
+       * Sends the call, and once more on a new session when the session it
+       * took could not carry the tool's request (`SessionUnusable`).
+       */
+      const sendReplacingUnusableSession = (
         credentials: UpstreamCredentials,
       ): Effect.Effect<McpSchema.CallToolResult, UpstreamError | McpCallRefused | ExchangeBroken> =>
         attempt(credentials).pipe(
-          Effect.catchTag("SessionExpired", () => {
+          Effect.catchTag("SessionUnusable", (unusable) => {
             if (replacedSession) {
-              return Effect.fail(
-                new UpstreamError({
-                  reason: "protocol",
-                  message: "The server ended the MCP session",
-                }),
-              );
+              return unusable.expired
+                ? Effect.fail(
+                    new UpstreamError({
+                      reason: "protocol",
+                      message: "The server ended the MCP session",
+                    }),
+                  )
+                : refuse(
+                    "error",
+                    `The sign-in of ${name} kept changing while the call was being sent. Try the call again.`,
+                  );
             }
             replacedSession = true;
-            return sendReplacingExpiredSession(credentials);
+            return sendReplacingUnusableSession(unusable.credentials);
           }),
         );
 
@@ -651,11 +742,11 @@ const make = Effect.gen(function* () {
       return yield* runWithCredentials({
         credentials: serverCredentials,
         guardRefresh: admit,
-        action: sendReplacingExpiredSession,
+        action: sendReplacingUnusableSession,
       }).pipe(
         Effect.catchTags({
           UpstreamError: refuseUpstreamFailure,
-          ServerCredentialsUnavailable: (error) => Effect.fail(buildUnavailableRefusal(error)),
+          ServerCredentialsUnavailable: refuseUnavailable,
           ExchangeBroken: () =>
             refuse("error", describeMayHaveRun(name, "the exchange with it broke")),
         }),
@@ -701,4 +792,8 @@ export const McpServerCallsLayer: Layer.Layer<
   | Notifier
   | RecordChanges
   | Secrets
-> = Layer.effect(McpServerCalls)(make).pipe(Layer.provide(FetchHttpClient.layer));
+> = Layer.effect(McpServerCalls)(make).pipe(
+  Layer.provide(FetchHttpClient.layer),
+  // One instance for every consumer, so they share the permits of a refresh.
+  Layer.provide(McpServerSignInsLayer),
+);

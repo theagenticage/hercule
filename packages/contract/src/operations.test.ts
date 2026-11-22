@@ -20,8 +20,8 @@ describe("canCarrySecrets", () => {
     },
   );
 
-  it.each<OperationId>(["mcpServer.create", "mcpServer.setToken"])(
-    "reports %s, which takes the token of an MCP server",
+  it.each<OperationId>(["mcpServer.create", "mcpServer.setToken", "mcpServer.finishSignIn"])(
+    "reports %s, which takes the token or the sign-in code of an MCP server",
     (id) => {
       expect(canCarrySecrets(id)).toBe(true);
     },
@@ -30,6 +30,7 @@ describe("canCarrySecrets", () => {
   it.each<OperationId>([
     "mcpServer.update",
     "mcpServer.check",
+    "mcpServer.startSignIn",
     "task.delete",
     "session.input",
     "profile.update",

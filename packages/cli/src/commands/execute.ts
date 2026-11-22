@@ -258,7 +258,7 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
  * (see `validateWrittenId`). `scope` holds the command's resolved path
  * parameters, for a list that is read within one record.
  */
-const resolveTails = async (
+export const resolveTails = async (
   client: HerculeClient,
   command: Command,
   fields: ReadonlyArray<Field>,

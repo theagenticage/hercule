@@ -168,6 +168,14 @@ export {
 } from "./agent-text";
 
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export {
+  parseCallbackQuery,
+  readApprovalHost,
+  readAuthorizationState,
+  type ParsedCallback,
+  type RefusedCallback,
+} from "./sign-in-callback";
 export type {
   PromptContextBlock,
   PromptContextInput,
@@ -495,11 +503,15 @@ export {
   MAX_MCP_SERVER_NAME_LENGTH,
   McpServer,
   McpServerCreateInput,
+  McpServerFinishSignInInput,
   McpServerIds,
   McpServerLeftOutReason,
   McpServerName,
   McpServerSetTokenInput,
+  McpServerSignInRedirectUri,
+  McpServerSignInStart,
   McpServerSource,
+  McpServerStartSignInInput,
   McpServerStatus,
   McpServerTool,
   McpServerToken,

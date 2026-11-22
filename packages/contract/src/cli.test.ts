@@ -90,6 +90,7 @@ const HIDDEN = [
   "externalEntity.readCards",
   "externalEntity.undoTakeOn",
   "externalEntity.undoTakeOnTogether",
+  "mcpServer.finishSignIn",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -320,6 +321,7 @@ const COMMANDS: Record<string, string> = {
   "mcpServer.delete": "mcp-server delete",
   "mcpServer.check": "mcp-server check",
   "mcpServer.setToken": "mcp-server set-token",
+  "mcpServer.startSignIn": "mcp-server sign-in",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -561,6 +563,7 @@ const RESOLVES: Record<string, string> = {
   "mcpServer.delete id": "mcpServer.query",
   "mcpServer.check id": "mcpServer.query",
   "mcpServer.setToken id": "mcpServer.query",
+  "mcpServer.startSignIn id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",

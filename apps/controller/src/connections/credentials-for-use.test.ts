@@ -36,7 +36,8 @@ import { NotifierLayer } from "../notifications";
 import { readNotificationBodiesAbout } from "../notifications/testing";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
-import { OAUTH_TOKENS, serializeTokens, type TokenSet } from "./oauth";
+import { serializeTokens, type TokenSet } from "../oauth";
+import { OAUTH_TOKENS } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository } from "./repository";
 import { ConnectionTypes, ConnectionTypesLayer } from "./runtime";
@@ -287,6 +288,62 @@ describe("the credentials the core reads to call an outside server", () => {
 
     expect(after.credentials).toEqual({ accessToken: "refreshed-token" });
     expect(after.identity).not.toBe(before.identity);
+    expect(refreshRequests()).toHaveLength(1);
+  });
+
+  it("keeps the old refresh token when a refresh answers with a null one, and reads an expires_in sent as text", async () => {
+    await run({ tokens: STALE_TOKENS }, (id) =>
+      Effect.gen(function* () {
+        if (provider === undefined) throw new Error("run first");
+        provider.answers.token = () =>
+          buildJsonResponse({
+            access_token: "refreshed-token",
+            refresh_token: null,
+            token_type: "bearer",
+            expires_in: "3600",
+          });
+        const first = yield* readForUse(id);
+        expect(first.credentials).toEqual({ accessToken: "refreshed-token" });
+        // Had the text lifetime been read as no lifetime, the token would never go stale.
+        yield* TestClock.adjust(55 * MINUTE);
+        provider.answers.token = () =>
+          buildJsonResponse({ access_token: "second-token", token_type: "bearer" });
+        const second = yield* readForUse(id);
+        expect(second.credentials).toEqual({ accessToken: "second-token" });
+      }),
+    );
+
+    expect(refreshRequests().map((form) => form["refresh_token"])).toEqual([
+      "refresh-1",
+      "refresh-1",
+    ]);
+  });
+
+  it("does not refresh a token that lives 5 minutes while it is new, and refreshes it once half its lifetime has passed", async () => {
+    const shortLived: TokenSet = {
+      ...FRESH_TOKENS,
+      expiresAt: expiresAt(5 * MINUTE),
+      obtainedAt: expiresAt(0),
+    };
+    const { justObtained, afterTwoMinutes, requestsBeforeHalfLife, afterThreeMinutes } = await run(
+      { tokens: shortLived },
+      (id) =>
+        Effect.gen(function* () {
+          const justObtained = yield* readForUse(id);
+          yield* TestClock.adjust(2 * MINUTE);
+          const afterTwoMinutes = yield* readForUse(id);
+          const requestsBeforeHalfLife = refreshRequests().length;
+          answerRefreshWithNewToken();
+          yield* TestClock.adjust(1 * MINUTE);
+          const afterThreeMinutes = yield* readForUse(id);
+          return { justObtained, afterTwoMinutes, requestsBeforeHalfLife, afterThreeMinutes };
+        }),
+    );
+
+    expect(justObtained.credentials).toEqual({ accessToken: "stored-token" });
+    expect(afterTwoMinutes.credentials).toEqual({ accessToken: "stored-token" });
+    expect(requestsBeforeHalfLife).toBe(0);
+    expect(afterThreeMinutes.credentials).toEqual({ accessToken: "refreshed-token" });
     expect(refreshRequests()).toHaveLength(1);
   });
 

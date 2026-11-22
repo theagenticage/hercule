@@ -16,6 +16,7 @@
  * through here.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   computeCredentialsIdentity,
@@ -32,7 +33,13 @@ import {
   type UsablePlugin,
 } from "./catalogue";
 import type { McpServerUrlSource, StoredMcpServerAvailability } from "./repository";
-import { SIGN_IN_TOKEN_SECRET, type McpServerSignIns } from "./sign-ins";
+import { ProviderRefused, ProviderUnreachable } from "../oauth";
+import {
+  CannotRenew,
+  SIGN_IN_TOKEN_SECRET,
+  SignInReplaced,
+  type McpServerSignIns,
+} from "./sign-ins";
 
 /**
  * What one request to an MCP Server carries.
@@ -113,6 +120,16 @@ export interface ServerCredentials {
    * record makes the calls look at the sessions that were opened with them.
    */
   readonly credentialsRecordId: string;
+  /**
+   * Whether an upstream session goes on after the credentials it opened with
+   * were renewed. A plugin server's Connection renews its token under the
+   * same sign-in, so its sessions go on. A server added by URL answers a
+   * request that continues an exchange only with the token its session opened
+   * with (`readWithoutRefresh`), so a session is replaced when a call would
+   * send another token: otherwise the call's own request would carry the new
+   * token and the requests that follow it would fail after the tool ran.
+   */
+  readonly sessionSurvivesRenewal: boolean;
   /**
    * Returns the credentials for a request that starts an exchange, renewing
    * them first when they have expired. A renewal runs `guard` right before it
@@ -207,7 +224,11 @@ export type ServerAccess = UnusableAccess | UsableAccess;
  * refresh permit, right before a renewal calls the provider. A renewal does
  * not move the destination, so `admit` cannot see one that landed while it
  * ran. `ServerCredentials.readVersion` can: when it changed, the credentials
- * read are no longer current and are read again.
+ * read are no longer current and are read once more. That one re-read is the
+ * most, because a provider that issues tokens that are stale at once would
+ * make every read renew again, forever. A renewal that lands after the
+ * re-read is caught later: the tool's request checks that its session can
+ * carry the credentials it sends (`canCarryCredentials` in `calls.ts`).
  *
  * Fails with whatever `admit` fails with, and with
  * `ServerCredentialsUnavailable` when the server cannot give credentials.
@@ -219,13 +240,13 @@ export const prepareRequest = <Refusal>(
   admit: Effect.Effect<void, Refusal>,
 ): Effect.Effect<UpstreamCredentials, ServerCredentialsUnavailable | Refusal> =>
   Effect.gen(function* () {
-    while (true) {
+    for (let rereads = 0; ; rereads++) {
       // Read before the credentials, so that a renewal that stores new ones in
       // between shows as a different version, never as the same.
       const version = yield* credentials.readVersion;
       const prepared = yield* credentials.readForUse(admit);
       yield* admit;
-      if ((yield* credentials.readVersion) === version) return prepared;
+      if (rereads === 1 || (yield* credentials.readVersion) === version) return prepared;
     }
   });
 
@@ -340,6 +361,7 @@ const resolvePluginAccess = (
     },
     credentials: {
       credentialsRecordId: connection.id,
+      sessionSurvivesRenewal: true,
       readForUse: (guard) =>
         Effect.mapError(
           connectionTypes.readCredentialsForUse(connection.id, guard),
@@ -370,9 +392,12 @@ const resolvePluginAccess = (
 
 /**
  * Builds the access of a server added by URL: requests go to its own address,
- * with its pasted token as a bearer token when it holds one. There is nothing
- * to refresh, so a token the server refuses stays refused until the user
- * replaces it, and the server then needs sign-in.
+ * with its token as a bearer token when it holds one.
+ *
+ * - A pasted token cannot be renewed, so a token the server refuses stays
+ *   refused until the user replaces it, and the server then needs sign-in.
+ * - A sign-in through the browser holds tokens that are renewed with their
+ *   refresh token (`resolveOAuthCredentials`).
  *
  * A request that only continues an exchange, or ends an upstream session,
  * never carries a token other than the one the session was opened with
@@ -381,7 +406,7 @@ const resolvePluginAccess = (
 const resolveUrlAccess = (
   { name, id }: StoredMcpServerAvailability,
   { url, signIn }: McpServerUrlSource,
-  signIns: McpServerSignIns,
+  signIns: McpServerSignIns["Service"],
 ): UsableAccess => {
   const toUpstream = (token: string | undefined): UpstreamCredentials => {
     const credentials = token === undefined ? {} : { [SIGN_IN_TOKEN_SECRET]: token };
@@ -392,6 +417,18 @@ const resolveUrlAccess = (
       identity: computeCredentialsIdentity(credentials),
     };
   };
+  const describeRejected = (offersOAuth: boolean) =>
+    ({
+      status: "needs-sign-in",
+      detail: `${name} ${signIn === "none" ? "asks for sign-in" : "refused its sign-in"}: ${describeSignInFix("url")}`,
+      // A server signed in through the browser keeps offering the browser, also
+      // when a later 401 names no metadata.
+      signInOffered: offersOAuth || signIn === "oauth" ? "oauth" : "token",
+    }) as const;
+  const replaced = new ServerCredentialsUnavailable({
+    status: "error",
+    detail: `The sign-in of ${name} was replaced`,
+  });
   return {
     _tag: "usable",
     endpoint: {
@@ -402,34 +439,122 @@ const resolveUrlAccess = (
         return { url, headers: token === undefined ? {} : { Authorization: `Bearer ${token}` } };
       },
     },
-    credentials: {
-      credentialsRecordId: id,
-      // The guard protects a refresh, and this access never refreshes.
-      readForUse: () => Effect.map(signIns.readToken(id, signIn), toUpstream),
-      refreshAfterRejection: () =>
-        Effect.fail(
-          new ServerCredentialsCannotRefresh({
-            message: `${name} holds a sign-in that cannot be renewed`,
-          }),
-        ),
-      readWithoutRefresh: (openedWithIdentity) =>
-        Effect.flatMap(Effect.map(signIns.readToken(id, signIn), toUpstream), (stored) =>
-          stored.identity === openedWithIdentity
-            ? Effect.succeed(stored)
-            : Effect.fail(
-                new ServerCredentialsUnavailable({
-                  status: "error",
-                  detail: `The sign-in of ${name} was replaced`,
+    credentials:
+      signIn === "oauth"
+        ? {
+            credentialsRecordId: id,
+            sessionSurvivesRenewal: false,
+            ...resolveOAuthCredentials(name, id, signIns, toUpstream, replaced),
+            describeRejected,
+          }
+        : {
+            credentialsRecordId: id,
+            sessionSurvivesRenewal: false,
+            // The guard protects a refresh, and this access never refreshes.
+            readForUse: () => Effect.map(signIns.readToken(id, signIn), toUpstream),
+            refreshAfterRejection: () =>
+              Effect.fail(
+                new ServerCredentialsCannotRefresh({
+                  message: `${name} holds a sign-in that cannot be renewed`,
                 }),
               ),
+            readWithoutRefresh: (openedWithIdentity) =>
+              Effect.flatMap(Effect.map(signIns.readToken(id, signIn), toUpstream), (stored) =>
+                stored.identity === openedWithIdentity
+                  ? Effect.succeed(stored)
+                  : Effect.fail(replaced),
+              ),
+            readVersion: signIns.readVersion(id),
+            describeRejected,
+          },
+  };
+};
+
+/**
+ * Builds the credentials of a server signed in through the browser: its
+ * access token is read from the stored sign-in and renewed with its refresh
+ * token before it expires, and after the server refused it.
+ *
+ * The failures of a renewal become what the server shows, with fixed words
+ * that never hold what the provider sent:
+ *
+ * - the provider refuses the refresh, or there is no refresh token to renew
+ *   with: `needs-sign-in`, and the user signs in again;
+ * - the token endpoint cannot be reached: `unreachable`, and the check is
+ *   repeated with the backoff;
+ * - the sign-in changed while the provider was called: `unreachable` too, and
+ *   the next try reads the new sign-in.
+ *
+ * Nothing here writes the server's status: a check or a call hands the failure
+ * to the code that does.
+ */
+const resolveOAuthCredentials = (
+  name: string,
+  id: string,
+  signIns: McpServerSignIns["Service"],
+  toUpstream: (token: string | undefined) => UpstreamCredentials,
+  replaced: ServerCredentialsUnavailable,
+): Pick<
+  ServerCredentials,
+  "readForUse" | "refreshAfterRejection" | "readWithoutRefresh" | "readVersion"
+> => {
+  const signInExpired = () =>
+    new ServerCredentialsUnavailable({
+      status: "needs-sign-in",
+      detail: `${name}'s sign-in has expired: ${describeSignInFix("url")}`,
+    });
+  // A guard's own failure passes through unchanged.
+  const mapRenewalFailure = <GuardFailure>(
+    error: ProviderRefused | ProviderUnreachable | SignInReplaced | CannotRenew | GuardFailure,
+  ) => {
+    if (error instanceof ProviderRefused || error instanceof CannotRenew) return signInExpired();
+    if (error instanceof ProviderUnreachable) {
+      return new ServerCredentialsUnavailable({
+        status: "unreachable",
+        detail: `${name} could not be reached to refresh the sign-in`,
+      });
+    }
+    if (error instanceof SignInReplaced) {
+      // The user signed in again while the sign-in was refreshed. The backoff
+      // checks again soon.
+      return new ServerCredentialsUnavailable({
+        status: "unreachable",
+        detail: `The sign-in of ${name} was replaced while it was being refreshed`,
+      });
+    }
+    return error;
+  };
+  return {
+    readForUse: (guard = Effect.void) =>
+      signIns.readOAuthForUse(id, guard).pipe(
+        Effect.map((tokens) => toUpstream(tokens.accessToken)),
+        Effect.mapError(mapRenewalFailure),
+      ),
+    refreshAfterRejection: (rejectedIdentity, guard = Effect.void) =>
+      signIns
+        .renewOAuthAfterRejection(
+          id,
+          (accessToken) => toUpstream(accessToken).identity === rejectedIdentity,
+          guard,
+        )
+        .pipe(
+          Effect.map((tokens) => toUpstream(tokens.accessToken)),
+          Effect.mapError((error) =>
+            error instanceof CannotRenew
+              ? new ServerCredentialsCannotRefresh({
+                  message: `${name} holds a sign-in that cannot be renewed`,
+                })
+              : mapRenewalFailure(error),
+          ),
         ),
-      readVersion: signIns.readVersion(id),
-      describeRejected: (offersOAuth) => ({
-        status: "needs-sign-in",
-        detail: `${name} ${signIn === "none" ? "asks for sign-in" : "refused its sign-in"}: ${describeSignInFix("url")}`,
-        signInOffered: offersOAuth ? "oauth" : "token",
-      }),
-    },
+    readWithoutRefresh: (openedWithIdentity) =>
+      Effect.flatMap(signIns.readOAuth(id), (stored) =>
+        Option.isSome(stored) &&
+        toUpstream(stored.value.tokens.accessToken).identity === openedWithIdentity
+          ? Effect.succeed(toUpstream(stored.value.tokens.accessToken))
+          : Effect.fail(replaced),
+      ),
+    readVersion: signIns.readVersion(id),
   };
 };
 
@@ -447,7 +572,7 @@ const resolveUrlAccess = (
 export const resolveServerAccess = (
   view: McpServerAvailabilityView,
   connectionTypes: ConnectionTypes["Service"],
-  signIns: McpServerSignIns,
+  signIns: McpServerSignIns["Service"],
 ): ServerAccess => {
   const judged = judgeDependencies(view.dependencies);
   if (judged._tag === "unusable") return judged;

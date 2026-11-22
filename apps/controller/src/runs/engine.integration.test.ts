@@ -38,7 +38,7 @@ import {
 } from "../http/testing";
 import { withTransaction } from "../db";
 import { OAUTH_TOKENS } from "../connections";
-import { serializeTokens } from "../connections/oauth";
+import { serializeTokens } from "../oauth";
 import {
   buildActionPlugin,
   buildForgePlugin,

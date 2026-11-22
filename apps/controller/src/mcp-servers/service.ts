@@ -1,6 +1,7 @@
 /**
  * The MCP Server operations: `mcpServer.query`, `read`, `create`, `update`,
- * `delete`, `check` and `setToken` (spec 11 section 2, spec 21 section 2).
+ * `delete`, `check`, `setToken`, `startSignIn` and `finishSignIn` (spec 11
+ * section 2, spec 21 section 2).
  *
  * Every write runs in one transaction with its audit entry, stamps the
  * caller as the actor, and announces the server on the `mcpServer` live topic
@@ -11,6 +12,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
@@ -24,7 +26,10 @@ import {
   type InvalidState,
   type McpServer,
   type McpServerCreateInput,
+  type McpServerFinishSignInInput,
   type McpServerSetTokenInput,
+  type McpServerSignInStart,
+  type McpServerStartSignInInput,
   type McpServerUpdateInput,
   type NotFound,
   type Validation,
@@ -44,8 +49,14 @@ import {
 import { judgeContributionPlugin } from "./catalogue";
 import { McpServerChecks } from "./checks";
 import { McpServerListHolders } from "./list-holders";
-import { mcpServerRepository, type StoredMcpServer } from "./repository";
-import { mcpServerSignIns } from "./sign-ins";
+import {
+  mcpServerRepository,
+  type McpServerUrlSource,
+  type StoredMcpServer,
+  type StoredMcpServerAvailability,
+} from "./repository";
+import { mcpServerOAuthSignIn, type SignInTarget } from "./oauth-sign-in";
+import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 
 /** What the plugin that offers an address's server is doing, as the refusal reports it. */
 type PluginOriginState = Extract<
@@ -58,6 +69,12 @@ export type UpdateInput = McpServerUpdateInput & { readonly id: string };
 
 /** What `setToken` takes: the server and the token. */
 export type SetTokenInput = McpServerSetTokenInput & { readonly id: string };
+
+/** What `startSignIn` takes: the server and the address the browser returns to. */
+export type StartSignInInput = McpServerStartSignInInput & { readonly id: string };
+
+/** What `finishSignIn` takes: the server and what the browser came back with. */
+export type FinishSignInInput = McpServerFinishSignInInput & { readonly id: string };
 
 /** The source a `create` is given, of either kind. */
 type CreateSource = McpServerCreateInput["source"];
@@ -184,7 +201,8 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const checks = yield* McpServerChecks;
   const listHolders = yield* McpServerListHolders;
-  const signIns = yield* mcpServerSignIns;
+  const signIns = yield* McpServerSignIns;
+  const oauthSignIn = yield* mcpServerOAuthSignIn;
 
   const readOrFail = (id: string): Effect.Effect<StoredMcpServer, NotFound | SqlError> =>
     Effect.flatMap(
@@ -194,6 +212,46 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
+
+  /**
+   * Fails with the `InvalidState` that sends the user to a plugin server's
+   * Connection, because a plugin server has no sign-in of its own: its
+   * credential is its Connection's.
+   */
+  const refuseForPluginServer = (
+    connectionId: string,
+  ): Effect.Effect<never, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const connection = yield* connections.one(connectionId);
+      const reached = Option.isSome(connection)
+        ? `the Connection ${connection.value.label}`
+        : "a Connection of its plugin";
+      return yield* Effect.fail(
+        createInvalidStateError(
+          `this server is reached with ${reached}; reconnect that Connection in Settings > Connections instead`,
+        ),
+      );
+    });
+
+  /**
+   * Reads the server a browser sign-in is for, without its tool definitions.
+   * Fails with `NotFound` when there is no such server, and with
+   * `InvalidState` for a plugin server (`refuseForPluginServer`).
+   */
+  const readSignInTarget = (
+    id: string,
+  ): Effect.Effect<
+    { readonly server: StoredMcpServerAvailability; readonly source: McpServerUrlSource },
+    NotFound | InvalidState | SqlError
+  > =>
+    Effect.gen(function* () {
+      const server = (yield* servers.readMany([id], "without-tools")).get(id);
+      if (server === undefined) return yield* Effect.fail(createNotFoundError(NO_SUCH_SERVER));
+      if (server.source.kind === "plugin") {
+        return yield* refuseForPluginServer(server.source.connectionId);
+      }
+      return { server, source: server.source };
+    });
 
   /**
    * Fails with a `Conflict` when a plugin offers an MCP server on the origin
@@ -645,15 +703,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const current = yield* readOrFail(id);
             if (current.source.kind === "plugin") {
-              const connection = yield* connections.one(current.source.connectionId);
-              const reached = Option.isSome(connection)
-                ? `the Connection ${connection.value.label}`
-                : "a Connection of its plugin";
-              return yield* Effect.fail(
-                createInvalidStateError(
-                  `this server is reached with ${reached}; reconnect that Connection in Settings > Connections instead`,
-                ),
-              );
+              return yield* refuseForPluginServer(current.source.connectionId);
             }
             const at = yield* nowIso;
             yield* signIns.deleteAll(id);
@@ -672,6 +722,56 @@ const make = Effect.gen(function* () {
         if (server.enabled) yield* checks.wake;
         return toRecord(server);
       }),
+
+    /**
+     * Starts the sign-in of a server added by URL through its authorization
+     * server, and returns the address to open in a browser and when the
+     * sign-in runs out (ten minutes). It changes nothing that is stored: the
+     * attempt is kept in memory, and a newer start for the same server
+     * replaces it. `redirectUri` is where the browser returns to
+     * (`McpServerSignInRedirectUri`). Fails with `NotFound` when there is no
+     * such server, and with `InvalidState` for a plugin server (whose
+     * Connection is signed in again instead), `sign-in-unsupported` when the
+     * server offers no sign-in through the browser, and `source-unreadable`
+     * when the server or its authorization server cannot be reached.
+     */
+    startSignIn: (
+      input: StartSignInInput,
+    ): Effect.Effect<McpServerSignInStart, Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("mcpServer.startSignIn");
+        const { server, source } = yield* readSignInTarget(input.id);
+        // Read before the discovery, so a sign-in the user makes meanwhile
+        // makes this attempt void.
+        const generation = yield* servers.readSignInGeneration(input.id);
+        if (Option.isNone(generation)) {
+          return yield* Effect.fail(createNotFoundError(NO_SUCH_SERVER));
+        }
+        const target: SignInTarget = { id: server.id, name: server.name, url: source.url };
+        return yield* oauthSignIn.start(target, generation.value, input.redirectUri);
+      }),
+
+    /**
+     * Finishes the sign-in that `startSignIn` began with what the browser came
+     * back with, and returns the server in status `checking` with sign-in
+     * `oauth`. A server that is on lists its tools again with the new tokens,
+     * after the commit. The new sign-in replaces any sign-in the server held,
+     * raises its revision, and the audit entry says only that the sign-in is
+     * now OAuth. Fails with `NotFound` when there is no such server;
+     * `Validation` when the text is not a redirect answer; and `InvalidState`
+     * as `McpServerOAuthSignIn.finish` says, and for a plugin server.
+     */
+    finishSignIn: (
+      input: FinishSignInInput,
+    ): Effect.Effect<McpServer, Forbidden | Validation | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("mcpServer.finishSignIn");
+        yield* readSignInTarget(input.id);
+        yield* oauthSignIn.finish({ id: input.id }, input.callbackQuery);
+        const server = yield* readOrFail(input.id);
+        if (server.enabled) yield* checks.wake;
+        return toRecord(server);
+      }),
   };
 });
 
@@ -681,4 +781,8 @@ export class McpServerService extends Context.Service<
   Effect.Success<typeof make>
 >()("hercule/controller/mcp-servers/McpServerService") {}
 
-export const McpServerServiceLayer = Layer.effect(McpServerService)(make);
+export const McpServerServiceLayer = Layer.effect(McpServerService)(make).pipe(
+  Layer.provide(FetchHttpClient.layer),
+  // One instance for every consumer, so they share the permits of a refresh.
+  Layer.provide(McpServerSignInsLayer),
+);

@@ -278,6 +278,12 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
+      // No test signs in to an MCP server yet, so the listener is never available.
+      signInReturn: {
+        listen: () => Promise.resolve({ _tag: "unavailable" }),
+        wait: () => Promise.resolve({ _tag: "cancelled" }),
+        cancel: () => Promise.resolve(undefined),
+      },
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);

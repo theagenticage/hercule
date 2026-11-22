@@ -32,7 +32,8 @@ import {
 import type { SetUpController } from "../workflows/testing";
 import { resolveServerAccess, ServerCredentialsUnavailable } from "./access";
 import { McpCallRefused } from "./calls";
-import { mcpServerSignIns } from "./sign-ins";
+import { PromotionState } from "../promotion";
+import { McpServerSignIns, McpServerSignInsLayer } from "./sign-ins";
 import {
   eventually,
   buildMcpServerView,
@@ -81,9 +82,11 @@ const buildListPage = (
 /** Reads the sign-ins the way the controller does, over the controller's own database. */
 const readSignIns = (controller: SetUpController) =>
   Effect.runPromise(
-    mcpServerSignIns.pipe(
+    Effect.service(McpServerSignIns).pipe(
+      Effect.provide(McpServerSignInsLayer),
       Effect.provideService(Secrets, controller.harness.secrets),
       Effect.provideService(SqlClient.SqlClient, controller.harness.sql),
+      Effect.provideService(PromotionState, controller.harness.promotion),
     ),
   );
 

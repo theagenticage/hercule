@@ -138,6 +138,7 @@ import sessionMcpGateway from "./0129-session-mcp-gateway";
 import mcpServerUrlSource from "./0130-mcp-server-url-source";
 import dropIntakeIndexes from "./0131-drop-intake-indexes";
 import dropSignalSnoozes from "./0132-drop-signal-snoozes";
+import mcpServerSignInGeneration from "./0133-mcp-server-sign-in-generation";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -270,6 +271,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [130, "mcp-server-url-source", Effect.succeed(mcpServerUrlSource)],
   [131, "drop-intake-indexes", Effect.succeed(dropIntakeIndexes)],
   [132, "drop-signal-snoozes", Effect.succeed(dropSignalSnoozes)],
+  [133, "mcp-server-sign-in-generation", Effect.succeed(mcpServerSignInGeneration)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
