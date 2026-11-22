@@ -17,7 +17,7 @@
  */
 import type { AccountKind } from "@hercule/plugin-host";
 import type { RunnerFacts } from "@hercule/protocol";
-import { computeHarnessVersionVerdict } from "../harnesses";
+import { computeHarnessVersionVerdict, readHarnessFloor } from "../harnesses";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";
 import type { StoredProviderAccount } from "./repository";
 
@@ -75,6 +75,16 @@ export const decideHarnessOnRunner = (
 };
 
 /**
+ * Returns the end of an instruction to update a harness that is below the
+ * floor: ` to 1.3.0 or newer`, naming the floor, or an empty string for a
+ * harness with no pinned floor.
+ */
+export const describeFloorToUpdateTo = (harnessId: string): string => {
+  const floor = readHarnessFloor(harnessId);
+  return floor === undefined ? "" : ` to ${floor} or newer`;
+};
+
+/**
  * Returns why the harness can run on none of the runners, in words a user can
  * act on, or `null` when at least one verdict is `runnable`. `verdicts` holds
  * one `decideHarnessOnRunner` result per runner.
@@ -85,7 +95,7 @@ export const findHarnessProblem = (
 ): string | null => {
   if (verdicts.includes("runnable")) return null;
   return verdicts.includes("below-floor")
-    ? `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it`
+    ? `${harness.displayName} is older than this version of Hercule supports on every machine that has it; update it${describeFloorToUpdateTo(harness.id)}`
     : `${harness.displayName} is not installed on any connected machine; install it on a machine first`;
 };
 

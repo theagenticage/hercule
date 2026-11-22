@@ -29,6 +29,7 @@ import {
 } from "../plugins";
 import {
   computeArrivedModels,
+  describeFloorToUpdateTo,
   describeProviderAccount,
   findRunDescriptor,
   type CatalogWithFirstRead,
@@ -71,7 +72,8 @@ const MOST_ACTIONABLE_FIRST = [
  * machines, and says where to fix it. `holdsToken` tells a token from a key,
  * for a missing or an expired credential. `not-signed-in` is only reached by
  * an account that signs in on each machine, because the controller keeps the
- * credential of the others.
+ * credential of the others. `floorToUpdateTo` ends the instruction to update
+ * a harness that is too old (see `describeFloorToUpdateTo`).
  */
 const describeRunnerProblem = (
   state: (typeof MOST_ACTIONABLE_FIRST)[number],
@@ -79,6 +81,7 @@ const describeRunnerProblem = (
   harnessName: string,
   machines: ReadonlyArray<string>,
   holdsToken: boolean,
+  floorToUpdateTo: string,
 ): string => {
   switch (state) {
     case "not-signed-in":
@@ -92,7 +95,7 @@ const describeRunnerProblem = (
         ? `${accountName} has no token. Make one in Settings › Providers.`
         : `${accountName} has no key. Add one in Settings › Providers.`;
     case "harness-too-old":
-      return `${harnessName} on ${joinNames(machines)} is older than this version of Hercule supports. Update it there.`;
+      return `${harnessName} on ${joinNames(machines)} is older than this version of Hercule supports. Update it there${floorToUpdateTo}.`;
     case "harness-missing":
       return `${harnessName} is not installed on ${joinNames(machines)}. Install it there.`;
   }
@@ -212,6 +215,7 @@ const findEntryProblem = (
           harnessName,
           machines,
           secretName === "token",
+          describeFloorToUpdateTo(harnessId),
         ),
       };
     }

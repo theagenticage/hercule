@@ -255,10 +255,10 @@ describe("a Codex below the version this build supports", () => {
 
     expect(available.runnerIds).toEqual([]);
     expect(available.noRunnerMessage).toBe(
-      "Codex is older than this version of Hercule supports on every machine that has it; update it",
+      `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
     );
     expect(findRunnerRefusal(available, laptop)).toBe(
-      "Codex on laptop is older than Hercule supports; update it",
+      `Codex on laptop is older than Hercule supports; update it to ${CODEX_VERSION} or newer`,
     );
   });
 

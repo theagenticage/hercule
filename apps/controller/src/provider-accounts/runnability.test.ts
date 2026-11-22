@@ -78,8 +78,8 @@ describe("findHarnessProblem", () => {
   it("is null when any runner can run it, and otherwise says whether it is missing or old", () => {
     expect(findHarnessProblem(harness, ["missing", "runnable"])).toBeNull();
     expect(findHarnessProblem(harness, [])).toContain("Codex is not installed");
-    expect(findHarnessProblem(harness, ["missing", "below-floor"])).toContain(
-      "Codex is older than this version of Hercule supports",
+    expect(findHarnessProblem(harness, ["missing", "below-floor"])).toBe(
+      `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
     );
   });
 });

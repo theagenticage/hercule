@@ -54,13 +54,12 @@ const compareVersionParts = (left: ReadonlyArray<number>, right: ReadonlyArray<n
  * Returns how a reported version compares with the floor and the tested
  * maximum: `below-floor` when older than the floor, `above-tested-max` when
  * newer than the tested maximum, otherwise `ok`. Returns `unknown` when there
- * is no version or no limit, or when a version cannot be parsed. The tested
- * maximum is the floor when not given.
+ * is no version or no limit, or when a version cannot be parsed.
  */
 export const computeVersionVerdict = (
   harnessVersion: string | null,
   floor: string | null,
-  testedMax: string | null = floor,
+  testedMax: string | null,
 ): VersionVerdict => {
   if (harnessVersion === null || floor === null || testedMax === null) return "unknown";
   const running = parseVersionParts(harnessVersion);
@@ -85,3 +84,11 @@ export const computeHarnessVersionVerdict = (
   const limits = LIMITS.get(harnessId);
   return computeVersionVerdict(harnessVersion, limits?.floor ?? null, limits?.testedMax ?? null);
 };
+
+/**
+ * Returns the floor this build pins for a harness, the oldest version a runner
+ * may run, such as `1.3.0`. Returns `undefined` for a harness with no pinned
+ * limits.
+ */
+export const readHarnessFloor = (harnessId: string): string | undefined =>
+  LIMITS.get(harnessId)?.floor;

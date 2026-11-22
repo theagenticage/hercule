@@ -11,27 +11,27 @@ import {
   PI_TESTED_VERSION,
   PI_VERSION,
 } from "@hercule/home/version";
-import { computeHarnessVersionVerdict, computeVersionVerdict } from "./version";
+import { computeHarnessVersionVerdict, computeVersionVerdict, readHarnessFloor } from "./version";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
 describe("computeVersionVerdict", () => {
   it("returns unknown when there is no version, or no floor to compare it with", () => {
-    expect(computeVersionVerdict(null, "2.1.263")).toBe("unknown");
-    expect(computeVersionVerdict("1.2.3", null)).toBe("unknown");
-    expect(computeVersionVerdict(null, null)).toBe("unknown");
+    expect(computeVersionVerdict(null, "2.1.263", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("1.2.3", null, null)).toBe("unknown");
+    expect(computeVersionVerdict(null, null, null)).toBe("unknown");
   });
 
   it("returns below-floor for a version lower than the floor in any component", () => {
-    expect(computeVersionVerdict("2.1.262", "2.1.263")).toBe("below-floor");
-    expect(computeVersionVerdict("2.0.999", "2.1.263")).toBe("below-floor");
-    expect(computeVersionVerdict("1.9.9", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("2.1.262", "2.1.263", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("2.0.999", "2.1.263", "2.1.263")).toBe("below-floor");
+    expect(computeVersionVerdict("1.9.9", "2.1.263", "2.1.263")).toBe("below-floor");
     // Numbers rather than text, so 10 comes after 9.
-    expect(computeVersionVerdict("2.1.9", "2.1.10")).toBe("below-floor");
+    expect(computeVersionVerdict("2.1.9", "2.1.10", "2.1.10")).toBe("below-floor");
   });
 
   it("returns ok for the floor itself", () => {
-    expect(computeVersionVerdict("2.1.263", "2.1.263")).toBe("ok");
+    expect(computeVersionVerdict("2.1.263", "2.1.263", "2.1.263")).toBe("ok");
   });
 
   it("returns above-tested-max for any version newer than the tested maximum", () => {
@@ -41,10 +41,6 @@ describe("computeVersionVerdict", () => {
     expect(computeVersionVerdict("2.2.0", "2.1.263", "2.1.263")).toBe("above-tested-max");
     expect(computeVersionVerdict("3.0.0", "2.1.263", "2.1.263")).toBe("above-tested-max");
     expect(computeVersionVerdict("2.10.0", "2.9.0", "2.9.0")).toBe("above-tested-max");
-  });
-
-  it("uses the floor as the tested maximum when no tested maximum is given", () => {
-    expect(computeVersionVerdict("2.1.264", "2.1.263")).toBe("above-tested-max");
   });
 
   it("returns ok from the floor up to the tested maximum, and above-tested-max past it", () => {
@@ -57,9 +53,18 @@ describe("computeVersionVerdict", () => {
   });
 
   it("returns unknown for a version it cannot parse", () => {
-    expect(computeVersionVerdict("nightly", "2.1.263")).toBe("unknown");
-    expect(computeVersionVerdict("2.1", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("nightly", "2.1.263", "2.1.263")).toBe("unknown");
+    expect(computeVersionVerdict("2.1", "2.1.263", "2.1.263")).toBe("unknown");
     expect(computeVersionVerdict("1.4.0", "1.3.0", "latest")).toBe("unknown");
+  });
+});
+
+describe("readHarnessFloor", () => {
+  it("returns the floor of each pinned harness, and none for a harness with no pinned version", () => {
+    expect(readHarnessFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
+    expect(readHarnessFloor("codex/codex")).toBe(CODEX_VERSION);
+    expect(readHarnessFloor("pi/pi")).toBe(PI_VERSION);
+    expect(readHarnessFloor("nobody-pinned-this")).toBeUndefined();
   });
 });
 

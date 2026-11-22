@@ -31,6 +31,7 @@ import {
 import {
   decideCredentialState,
   decideHarnessOnRunner,
+  describeFloorToUpdateTo,
   describeProviderAccount,
   findCredentialProblem,
   findHarnessProblem,
@@ -296,7 +297,7 @@ const make = Effect.gen(function* () {
         case "harness-missing":
           return `${harnessName} is not installed on ${runnerName}`;
         case "harness-too-old":
-          return `${harnessName} on ${runnerName} is older than Hercule supports; update it`;
+          return `${harnessName} on ${runnerName} is older than Hercule supports; update it${describeFloorToUpdateTo(choice.harness.id)}`;
         case "not-signed-in":
           return `${accountName} is not signed in on ${runnerName}`;
         default:
